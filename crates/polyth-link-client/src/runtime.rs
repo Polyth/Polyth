@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -65,6 +66,15 @@ struct ProxyHandle {
     boot: Arc<Mutex<ProxyBootstrap>>,
     listener: OwnedLoopback,
 }
+
+const CLIENT_CONTEXT_PATH: &str = "/__polyth/client-context";
+const CLIENT_CONTEXT_STORAGE_PREFIX: &str = "/__polyth/client-context/storage/";
+// Composer drafts are small compared with file payloads but routinely exceed
+// 16 KiB. Keep them app-owned and bounded without truncating ordinary pasted
+// prompts; file bytes remain in native staging, never this store.
+const CLIENT_STORAGE_VALUE_BYTES: usize = 256 * 1024;
+const CLIENT_STORAGE_MAX_RECORDS: usize = 512;
+const CLIENT_STORAGE_MAX_BYTES: u64 = 4 * 1024 * 1024;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ExistingConnectionMode {
@@ -508,7 +518,12 @@ async fn confirm_pairing(
                     .and_then(|_| mark_metadata_connected(&data_dir, &connection_id, transport))
                     .map_err(|_| LinkError::PairingStorageFailed.code())?;
                 }
-                let proxy = start_proxy(attempt.connection.clone(), web_dist)
+                let proxy = start_proxy(
+                    attempt.connection.clone(),
+                    web_dist,
+                    data_dir.clone(),
+                    connection_id.clone(),
+                )
                     .await
                     .map_err(|_| LinkError::ProxyBootstrapInvalid.code())?;
                 let origin = proxy.origin.clone();
@@ -724,7 +739,7 @@ async fn connect_existing(
         mark_metadata_connected(&data_dir, id, transport)
             .map_err(|_| LinkError::PairingStorageFailed.code())?;
     }
-    let proxy = start_proxy(connection.clone(), web_dist)
+    let proxy = start_proxy(connection.clone(), web_dist, data_dir.clone(), id.to_string())
         .await
         .map_err(|_| LinkError::ProxyBootstrapInvalid.code())?;
     let origin = proxy.origin.clone();
@@ -835,6 +850,8 @@ async fn close_session(session: LiveSession, reason: &'static [u8]) {
 async fn start_proxy(
     connection: Connection,
     web_dist: Option<PathBuf>,
+    data_dir: PathBuf,
+    connection_scope: String,
 ) -> Result<ProxyHandle, LinkError> {
     let (listener, owned) = polyth_link_core::local_proxy::bind_owned_loopback().await?;
     let port = owned.port;
@@ -843,6 +860,7 @@ async fn start_proxy(
     let origin = format!("http://127.0.0.1:{port}");
     let mut shutdown_rx = owned.subscribe();
     let boot_handle = boot.clone();
+    let storage_lock = Arc::new(Mutex::new(()));
     tokio::spawn(async move {
         loop {
             tokio::select! {
@@ -852,8 +870,20 @@ async fn start_proxy(
                     let connection = connection.clone();
                     let web_dist = web_dist.clone();
                     let boot = boot.clone();
+                    let data_dir = data_dir.clone();
+                    let connection_scope = connection_scope.clone();
+                    let storage_lock = storage_lock.clone();
                     tokio::spawn(async move {
-                        let _ = handle_proxy_conn(stream, connection, web_dist, boot).await;
+                        let _ = handle_proxy_conn(
+                            stream,
+                            connection,
+                            web_dist,
+                            boot,
+                            data_dir,
+                            connection_scope,
+                            storage_lock,
+                        )
+                        .await;
                     });
                 }
             }
@@ -872,6 +902,9 @@ async fn handle_proxy_conn(
     connection: Connection,
     web_dist: Option<PathBuf>,
     boot: Arc<Mutex<ProxyBootstrap>>,
+    data_dir: PathBuf,
+    connection_scope: String,
+    storage_lock: Arc<Mutex<()>>,
 ) -> Result<(), LinkError> {
     let parsed = read_http_head(&mut stream, Limits::v1().http_head_bytes).await?;
     let method = parsed.method.clone().unwrap_or_else(|| "GET".into());
@@ -946,6 +979,18 @@ async fn handle_proxy_conn(
         write_http(&mut stream, 401, "authentication required").await?;
         return Err(LinkError::ProxySessionInvalid);
     }
+    if path == CLIENT_CONTEXT_PATH || path.starts_with(CLIENT_CONTEXT_STORAGE_PREFIX) {
+        return handle_client_context(
+            &mut stream,
+            parsed,
+            &method,
+            &path,
+            &data_dir,
+            &connection_scope,
+            storage_lock,
+        )
+        .await;
+    }
     let websocket_path = path == "/ws" || path.starts_with("/ws/");
     if path.starts_with("/api/") || websocket_path {
         if parsed.is_websocket_upgrade() || websocket_path {
@@ -954,6 +999,220 @@ async fn handle_proxy_conn(
         return proxy_http(stream, parsed, &connection, &method, &raw_path).await;
     }
     serve_static(&mut stream, web_dist.as_deref(), &path).await
+}
+
+async fn handle_client_context(
+    stream: &mut TcpStream,
+    parsed: polyth_link_core::http_io::ParsedHttpHead,
+    method: &str,
+    path: &str,
+    data_dir: &Path,
+    connection_scope: &str,
+    storage_lock: Arc<Mutex<()>>,
+) -> Result<(), LinkError> {
+    if path == CLIENT_CONTEXT_PATH {
+        if method != "GET" {
+            return write_http(stream, 404, "not found").await;
+        }
+        return write_json(
+            stream,
+            200,
+            &json!({ "protocolVersion": 1, "connectionScope": connection_scope }).to_string(),
+        )
+        .await;
+    }
+    let Some(key) = path.strip_prefix(CLIENT_CONTEXT_STORAGE_PREFIX) else {
+        return write_http(stream, 404, "not found").await;
+    };
+    if !client_storage_key_valid(key) {
+        return write_http(stream, 400, "invalid storage key").await;
+    }
+    let _guard = storage_lock.lock().await;
+    let root = client_storage_root(data_dir, connection_scope);
+    if ensure_client_storage_root(&root).is_err() {
+        return write_http(stream, 400, "storage unavailable").await;
+    }
+    let record = root.join(key);
+    match method {
+        "GET" => match regular_client_storage_record(&record) {
+            Ok(true) => match std::fs::read_to_string(&record) {
+                Ok(value) if value.len() <= CLIENT_STORAGE_VALUE_BYTES => {
+                    write_json(stream, 200, &json!({ "value": value }).to_string()).await
+                }
+                Ok(_) => write_http(stream, 400, "invalid storage record").await,
+                Err(_) => write_http(stream, 400, "storage unavailable").await,
+            },
+            Ok(false) => write_http(stream, 404, "not found").await,
+            Err(_) => write_http(stream, 400, "storage unavailable").await,
+        },
+        "DELETE" => match regular_client_storage_record(&record) {
+            Ok(false) => write_empty(stream, 204).await,
+            Ok(true) => match std::fs::remove_file(&record) {
+                Ok(()) => write_empty(stream, 204).await,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    write_empty(stream, 204).await
+                }
+                Err(_) => write_http(stream, 400, "storage unavailable").await,
+            }
+            Err(_) => write_http(stream, 400, "storage unavailable").await,
+        },
+        "PUT" => {
+            let value = match read_client_storage_body(stream, &parsed).await {
+                Ok(value) => value,
+                Err(error) => {
+                    let status = if error == LinkError::RequestTooLarge { 413 } else { 400 };
+                    return write_http(stream, status, "invalid storage value").await;
+                }
+            };
+            match write_client_storage_record(&root, key, &value) {
+                Ok(()) => write_empty(stream, 204).await,
+                Err(LinkError::RequestTooLarge) => write_http(stream, 413, "storage quota exceeded").await,
+                Err(_) => write_http(stream, 400, "storage unavailable").await,
+            }
+        }
+        _ => write_http(stream, 404, "not found").await,
+    }
+}
+
+fn client_storage_key_valid(key: &str) -> bool {
+    !key.is_empty()
+        && key.len() <= 128
+        && key.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn client_storage_root(data_dir: &Path, connection_scope: &str) -> PathBuf {
+    // Encode instead of interpolating the opaque endpoint ID into a path.
+    data_dir.join("client-context").join(hex::encode(connection_scope))
+}
+
+fn ensure_client_storage_root(root: &Path) -> Result<(), LinkError> {
+    let Some(parent) = root.parent() else {
+        return Err(LinkError::PairingStorageFailed);
+    };
+    ensure_private_directory(parent)?;
+    ensure_private_directory(root)
+}
+
+fn ensure_private_directory(path: &Path) -> Result<(), LinkError> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => Ok(()),
+        Ok(_) => Err(LinkError::PairingStorageFailed),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir(path).map_err(|_| LinkError::PairingStorageFailed)?;
+            let metadata = std::fs::symlink_metadata(path).map_err(|_| LinkError::PairingStorageFailed)?;
+            if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
+                Ok(())
+            } else {
+                Err(LinkError::PairingStorageFailed)
+            }
+        }
+        Err(_) => Err(LinkError::PairingStorageFailed),
+    }
+}
+
+fn regular_client_storage_record(path: &Path) -> Result<bool, LinkError> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_file() && !metadata.file_type().is_symlink() => Ok(true),
+        Ok(_) => Err(LinkError::PairingStorageFailed),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(_) => Err(LinkError::PairingStorageFailed),
+    }
+}
+
+async fn read_client_storage_body(
+    stream: &mut TcpStream,
+    parsed: &polyth_link_core::http_io::ParsedHttpHead,
+) -> Result<String, LinkError> {
+    if parsed.transfer_encoding_chunked()? {
+        return Err(LinkError::RequestHeaderInvalid);
+    }
+    let length = parsed.content_length()?.ok_or(LinkError::RequestHeaderInvalid)?;
+    if length > CLIENT_STORAGE_VALUE_BYTES as u64 || parsed.leftover.len() > length as usize {
+        return Err(LinkError::RequestTooLarge);
+    }
+    let mut value = parsed.leftover.clone();
+    value.resize(length as usize, 0);
+    if value.len() > parsed.leftover.len() {
+        stream
+            .read_exact(&mut value[parsed.leftover.len()..])
+            .await
+            .map_err(|_| LinkError::RequestHeaderInvalid)?;
+    }
+    String::from_utf8(value).map_err(|_| LinkError::RequestHeaderInvalid)
+}
+
+fn write_client_storage_record(root: &Path, key: &str, value: &str) -> Result<(), LinkError> {
+    if value.len() > CLIENT_STORAGE_VALUE_BYTES {
+        return Err(LinkError::RequestTooLarge);
+    }
+    ensure_client_storage_root(root)?;
+    let mut total = 0_u64;
+    let mut records = 0_usize;
+    for entry in std::fs::read_dir(root).map_err(|_| LinkError::PairingStorageFailed)? {
+        let entry = entry.map_err(|_| LinkError::PairingStorageFailed)?;
+        let name = entry.file_name();
+        if name
+            .to_str()
+            .is_some_and(|name| name.starts_with('.') && name.ends_with(".tmp"))
+        {
+            let metadata = std::fs::symlink_metadata(entry.path())
+                .map_err(|_| LinkError::PairingStorageFailed)?;
+            if metadata.file_type().is_dir() {
+                return Err(LinkError::PairingStorageFailed);
+            }
+            std::fs::remove_file(entry.path()).map_err(|_| LinkError::PairingStorageFailed)?;
+            continue;
+        }
+        if name.to_str().map_or(true, |name| !client_storage_key_valid(name)) {
+            continue;
+        }
+        let metadata = std::fs::symlink_metadata(entry.path()).map_err(|_| LinkError::PairingStorageFailed)?;
+        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+            return Err(LinkError::PairingStorageFailed);
+        }
+        if name != key { records += 1; total = total.saturating_add(metadata.len()); }
+    }
+    let record = root.join(key);
+    if !regular_client_storage_record(&record)? { records += 1; }
+    total = total.saturating_add(value.len() as u64);
+    if records > CLIENT_STORAGE_MAX_RECORDS || total > CLIENT_STORAGE_MAX_BYTES {
+        return Err(LinkError::RequestTooLarge);
+    }
+    let (temp, mut file) = create_client_storage_temp(root, key)?;
+    use std::io::Write;
+    if file.write_all(value.as_bytes()).and_then(|_| file.sync_all()).is_err() {
+        let _ = std::fs::remove_file(&temp);
+        return Err(LinkError::PairingStorageFailed);
+    }
+    std::fs::rename(&temp, &record).map_err(|_| LinkError::PairingStorageFailed)?;
+    #[cfg(unix)]
+    {
+        std::fs::File::open(root)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|_| LinkError::PairingStorageFailed)?;
+    }
+    Ok(())
+}
+
+fn create_client_storage_temp(root: &Path, key: &str) -> Result<(PathBuf, std::fs::File), LinkError> {
+    for _ in 0..8 {
+        let mut nonce = [0_u8; 16];
+        rand::thread_rng().fill_bytes(&mut nonce);
+        let temp = root.join(format!(".{key}.{}.tmp", hex::encode(nonce)));
+        let mut options = OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        match options.open(&temp) {
+            Ok(file) => return Ok((temp, file)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(_) => return Err(LinkError::PairingStorageFailed),
+        }
+    }
+    Err(LinkError::PairingStorageFailed)
 }
 
 fn split_path_query(raw: &str) -> (String, Option<String>) {
@@ -1216,7 +1475,26 @@ async fn serve_static(
 
 async fn write_http(stream: &mut TcpStream, status: u16, body: &str) -> Result<(), LinkError> {
     let payload = format!("{{\"error\":\"{body}\"}}");
+    write_response(stream, status, "application/json", &payload).await
+}
+
+async fn write_json(stream: &mut TcpStream, status: u16, body: &str) -> Result<(), LinkError> {
+    write_response(stream, status, "application/json", body).await
+}
+
+async fn write_empty(stream: &mut TcpStream, status: u16) -> Result<(), LinkError> {
+    write_response(stream, status, "text/plain", "").await
+}
+
+async fn write_response(
+    stream: &mut TcpStream,
+    status: u16,
+    content_type: &str,
+    body: &str,
+) -> Result<(), LinkError> {
     let reason = match status {
+        200 => "OK",
+        204 => "No Content",
         400 => "Bad Request",
         401 => "Unauthorized",
         403 => "Forbidden",
@@ -1226,15 +1504,15 @@ async fn write_http(stream: &mut TcpStream, status: u16, body: &str) -> Result<(
         _ => "Error",
     };
     let headers = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
-        payload.len()
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",
+        body.len()
     );
     stream
         .write_all(headers.as_bytes())
         .await
         .map_err(|_| LinkError::TransportProtocolError)?;
     stream
-        .write_all(payload.as_bytes())
+        .write_all(body.as_bytes())
         .await
         .map_err(|_| LinkError::TransportProtocolError)?;
     Ok(())
@@ -1545,6 +1823,60 @@ mod tests {
         assert_eq!(
             validate_connection_response(accepted(PROTOCOL_VERSION + 1)),
             Err(LinkError::TransportVersionUnsupported.code())
+        );
+    }
+
+    #[test]
+    fn local_client_storage_is_bounded_and_connection_scoped() {
+        let dir = tempdir().unwrap();
+        let a = client_storage_root(dir.path(), "connection-a");
+        let b = client_storage_root(dir.path(), "connection-b");
+        write_client_storage_record(&a, "draft.v1", "draft for a").unwrap();
+        write_client_storage_record(&b, "draft.v1", "draft for b").unwrap();
+        assert_eq!(std::fs::read_to_string(a.join("draft.v1")).unwrap(), "draft for a");
+        assert_eq!(std::fs::read_to_string(b.join("draft.v1")).unwrap(), "draft for b");
+        assert_ne!(a, b);
+        assert!(client_storage_key_valid("draft.v1_1-2"));
+        assert!(!client_storage_key_valid("../draft"));
+        assert_eq!(
+            write_client_storage_record(&a, "too-large", &"x".repeat(CLIENT_STORAGE_VALUE_BYTES + 1)),
+            Err(LinkError::RequestTooLarge)
+        );
+    }
+
+    #[test]
+    fn stale_interrupted_temp_and_repeated_writers_do_not_block_reopen() {
+        let dir = tempdir().unwrap();
+        let root = client_storage_root(dir.path(), "connection-a");
+        ensure_client_storage_root(&root).unwrap();
+        std::fs::write(root.join(".draft.v1.1234.tmp"), b"interrupted").unwrap();
+        write_client_storage_record(&root, "draft.v1", "after restart").unwrap();
+        assert!(!root.join(".draft.v1.1234.tmp").exists());
+        for value in ["first", "second", "third", "fourth"] {
+            write_client_storage_record(&root, "draft.v1", value).unwrap();
+        }
+        let value = std::fs::read_to_string(root.join("draft.v1")).unwrap();
+        assert!(["first", "second", "third", "fourth"].contains(&value.as_str()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn client_storage_refuses_symlink_roots_and_records() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let root = client_storage_root(dir.path(), "connection-a");
+        std::fs::create_dir(dir.path().join("client-context")).unwrap();
+        symlink(outside.path(), &root).unwrap();
+        assert_eq!(ensure_client_storage_root(&root), Err(LinkError::PairingStorageFailed));
+
+        let safe = client_storage_root(dir.path(), "connection-b");
+        ensure_client_storage_root(&safe).unwrap();
+        symlink(outside.path().join("missing"), safe.join("draft.v1")).unwrap();
+        assert_eq!(
+            write_client_storage_record(&safe, "draft.v1", "no escape"),
+            Err(LinkError::PairingStorageFailed)
         );
     }
 }

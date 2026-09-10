@@ -11,8 +11,8 @@ test("queue reservation survives ambiguity and blocks later FIFO entries across 
   const path = join(dir, "sessions.db");
   let store = createStore(path);
   try {
-    const first = await store.enqueue("session-a", "first", "queue");
-    const second = await store.enqueue("session-a", "second", "queue");
+    const first = (await store.enqueue("session-a", "first", "queue")).item;
+    const second = (await store.enqueue("session-a", "second", "queue")).item;
 
     const reserved = await store.reserveQueueHead({ sessionId: "session-a" });
     assert.equal(reserved.kind, "reserved");

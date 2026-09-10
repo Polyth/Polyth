@@ -205,3 +205,55 @@ test("subscribe during in-flight gap-fill is processed after it (latest wins)", 
     server.close();
   }
 });
+
+test("bounded live replay buffer closes for explicit resync instead of dropping canonical events", async () => {
+  const { sessions, nextGap } = controllableSessions();
+  const server = createServer((_req, res) => { res.statusCode = 404; res.end(); });
+  const broadcast = attachWs(server, sessions);
+  server.listen(0);
+  await once(server, "listening");
+  const port = (server.address() as { port: number }).port;
+
+  let ws: WebSocket | undefined;
+  try {
+    const c = await connect(port);
+    ws = c.ws;
+    c.ws.send(JSON.stringify({ type: "subscribe", sessionId: "s1", afterSeq: 0 }));
+    await nextGap(); // Hold durable replay while live delivery races it.
+    const closed = once(c.ws, "close");
+    for (let seq = 1; seq <= 2_049; seq += 1) broadcast.event(mkEv("s1", seq));
+    const [code, reason] = await closed as [number, Buffer];
+    assert.equal(code, 1013);
+    assert.match(String(reason), /^resync-required:/);
+  } finally {
+    ws?.terminate();
+    broadcast.close();
+    server.close();
+  }
+});
+
+test("live replay byte cap also closes for resync", async () => {
+  const { sessions, nextGap } = controllableSessions();
+  const server = createServer((_req, res) => { res.statusCode = 404; res.end(); });
+  const broadcast = attachWs(server, sessions);
+  server.listen(0);
+  await once(server, "listening");
+  const port = (server.address() as { port: number }).port;
+
+  let ws: WebSocket | undefined;
+  try {
+    const c = await connect(port);
+    ws = c.ws;
+    c.ws.send(JSON.stringify({ type: "subscribe", sessionId: "s1", afterSeq: 0 }));
+    await nextGap();
+    const closed = once(c.ws, "close");
+    broadcast.event({ ...mkEv("s1", 1), data: { payload: "x".repeat(4 * 1024 * 1024) } });
+    const [code, reason] = await closed as [number, Buffer];
+    assert.equal(code, 1013);
+    assert.match(String(reason), /^resync-required:/);
+  } finally {
+    ws?.terminate();
+    broadcast.close();
+    server.close();
+  }
+});

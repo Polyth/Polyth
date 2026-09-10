@@ -8,39 +8,29 @@
 // typed is lost when a workspace surface opens, expands, or closes.
 import type { AttachmentRef } from "@polyth/contracts";
 import { saveDraft } from "./utils.ts";
-import { seedAttachments } from "./attachments.ts";
+import { hydratePendingAttachments, seedAttachments } from "./attachments.ts";
 import { shouldApplySeed, type SeedRecord } from "./messageActions.ts";
+import { hydrateScopedDraftRecord, loadScopedDraftRecord, updateScopedDraftRecord } from "./draftRecord.ts";
 
-// localStorage: polyth.draft.seed.<sessionId> — which marker seeded the draft
-// and the untouched seed text (edited/cleared states derive from it).
-const SEED_META = "polyth.draft.seed.";
-
+// Marker provenance belongs to the same trusted namespace as the draft text.
 export function loadSeedRecord(sessionId: string): SeedRecord | null {
-  try {
-    const raw = localStorage.getItem(SEED_META + sessionId);
-    if (!raw) return null;
-    const v = JSON.parse(raw) as { key?: unknown; seedText?: unknown };
-    if (typeof v.key !== "string" || typeof v.seedText !== "string") return null;
-    return { key: v.key, seedText: v.seedText };
-  } catch {
-    return null;
-  }
+  return loadScopedDraftRecord(sessionId).seed ?? null;
 }
 
 export function saveSeedRecord(sessionId: string, record: SeedRecord): void {
-  try {
-    localStorage.setItem(SEED_META + sessionId, JSON.stringify(record));
-  } catch {
-    // best-effort, like text drafts
-  }
+  updateScopedDraftRecord(sessionId, { seed: record });
 }
 
 export function clearSeedRecord(sessionId: string): void {
-  try {
-    localStorage.removeItem(SEED_META + sessionId);
-  } catch {
-    // best-effort
-  }
+  const record = loadScopedDraftRecord(sessionId);
+  updateScopedDraftRecord(sessionId, { seed: undefined, attachments: record.attachments });
+}
+
+/** Explicit native restart hook. Call before mounting/restoring a session
+ * composer; local browser storage remains synchronous and needs no await. */
+export async function hydrateComposerDraft(sessionId: string): Promise<void> {
+  await hydrateScopedDraftRecord(sessionId);
+  await hydratePendingAttachments(sessionId);
 }
 
 /** Apply a marker-owned seed at most once: writes the draft text, the pending

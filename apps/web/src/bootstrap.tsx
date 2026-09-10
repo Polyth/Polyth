@@ -2,7 +2,9 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { api } from "@polyth/session/web-api";
 import { consumeAuthPrefetch } from "./authPrefetch.ts";
-import { init, navigateBackInApp, openNativeAppPath, reconnectSync } from "./init.ts";
+import { init, navigateBackInApp, openNativeAppPath, setSyncForeground } from "./init.ts";
+import { flushClientPersistence } from "./clientPersistence.ts";
+import { initializeClientReliabilityContext } from "./reliabilityContext.ts";
 import { exposeSlots } from "./slots.ts";
 import { exposeSurfaces } from "./surfaces.ts";
 import { exposeCapabilities } from "./capabilities.ts";
@@ -89,7 +91,7 @@ installNativeMobileIntegration({
     );
   },
   openDeepLink: openNativeAppPath,
-  reconnect: reconnectSync,
+  setForeground: setSyncForeground,
   setKeyboardInset: setNativeKeyboardInset,
 });
 // Palette commands + keyboard shortcuts: one install, synced with the
@@ -118,7 +120,12 @@ function Root() {
     // main.tsx started this fetch before the app graph downloaded; falling
     // back to a fresh call covers re-mounts (locale switches remount Root).
     void (consumeAuthPrefetch() ?? api.authStatus())
-      .then((s) => { if (!cancelled) setPhase(s.required && !s.authorized ? "locked" : "ready"); })
+      .then(async (s) => {
+        // Account restoration above must finish before the trusted native
+        // connection namespace selects its app-owned persistence backend.
+        if (!s.required || s.authorized) await initializeClientReliabilityContext();
+        if (!cancelled) setPhase(s.required && !s.authorized ? "locked" : "ready");
+      })
       // Status unreachable → proceed; init()'s own error banner reports it.
       .catch(() => { if (!cancelled) setPhase("ready"); });
     // Mid-session 401 (session revoked / password newly set) re-locks the UI.
@@ -130,13 +137,27 @@ function Root() {
     };
   }, []);
 
+  useEffect(() => {
+    const flush = () => { void flushClientPersistence().catch((error) => {
+      console.warn("[polyth] client recovery metadata was not fully persisted", error);
+    }); };
+    window.addEventListener("pagehide", flush);
+    return () => window.removeEventListener("pagehide", flush);
+  }, []);
+
   useEffect(() => { if (phase === "ready") bootOnce(); }, [phase]);
 
   if (phase === "checking") return null;
   if (phase === "locked") {
     // After a mid-session revoke the store/WS state is stale — reload for a
     // clean slate; on the initial lock just proceed into the normal boot.
-    return <LockScreen key={locale} onUnlocked={() => { if (booted) location.reload(); else setPhase("ready"); }} />;
+    return <LockScreen key={locale} onUnlocked={() => {
+      if (booted) {
+        location.reload();
+        return;
+      }
+      void initializeClientReliabilityContext().then(() => setPhase("ready"));
+    }} />;
   }
   return <App key={locale} />;
 }

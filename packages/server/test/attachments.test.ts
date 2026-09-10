@@ -175,6 +175,13 @@ function fakeRuntime(fileSupport: "native" | "emulated" = "native") {
 }
 
 const flush = () => new Promise((r) => setTimeout(r, 20));
+const waitFor = async (condition: () => boolean): Promise<void> => {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("condition was not reached");
+};
 
 function makeService(
   fake: ReturnType<typeof fakeRuntime>,
@@ -281,7 +288,7 @@ test("queued attachments survive dispatch; steer with attachments falls back to 
   assert.deepEqual(reasons, ["steer-attachments"]);
 
   fake.emit(id, { type: "turn/stopped", reason: "completed" });
-  await flush();
+  await waitFor(() => fake.started.length === 2);
   assert.equal(fake.started.length, 2);
   assert.equal(fake.started[1]?.attachments?.[0]?.path, "docs/notes.md");
   const ums = (await store.events(id)).filter((e) => e.type === "user/message");

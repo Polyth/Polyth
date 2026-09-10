@@ -232,12 +232,23 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
     private var attempts: [String: PairingSecretRecord] = [:]
     private var clientHandle: UInt64 = 0
     private let lastConnectionKey = "polyth-link.last-connection-id"
+    private let proxyRecoveryAttemptsKey = "polyth-link.proxy-recovery-attempts"
+    private let maximumAutomaticProxyRecoveries = 2
+    private var recoveryGeneration: UInt64 = 0
+    private var recoveryInFlight = false
+    private var recoveryScheduled = false
 
     override public func load() {
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(restoreLoopbackTransport),
             name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(suspendLoopbackTransport),
+            name: UIApplication.didEnterBackgroundNotification,
             object: nil
         )
     }
@@ -414,6 +425,7 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
 
     private func rememberTransport(_ connectionID: String) {
         UserDefaults.standard.set(connectionID, forKey: lastConnectionKey)
+        UserDefaults.standard.set(0, forKey: proxyRecoveryAttemptsKey)
     }
 
     private func forgetTransport(_ connectionID: String) {
@@ -422,34 +434,84 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    @objc private func suspendLoopbackTransport() {
+        recoveryGeneration &+= 1
+        recoveryInFlight = false
+        recoveryScheduled = false
+        // The renderer closes its WebSocket and cancels retry timers. Leave the
+        // native link to normal OS suspension so foreground status can tell a
+        // healthy suspended proxy from one that actually died.
+    }
+
     @objc private func restoreLoopbackTransport() {
         guard loopbackContent(),
               let connectionID = UserDefaults.standard.string(forKey: lastConnectionKey),
-              !connectionID.isEmpty else { return }
+              !connectionID.isEmpty,
+              !recoveryScheduled,
+              !recoveryInFlight else { return }
+        recoveryScheduled = true
+        recoveryInFlight = true
+        recoveryGeneration &+= 1
+        let generation = recoveryGeneration
         controlQueue.async {
             do {
                 let status = try self.object(self.invoke("status", ["connectionId": connectionID]))
-                if status["state"] as? String == "connected" { return }
+                if status["state"] as? String == "connected" {
+                    DispatchQueue.main.async {
+                        guard self.recoveryGeneration == generation else { return }
+                        UserDefaults.standard.set(0, forKey: self.proxyRecoveryAttemptsKey)
+                        self.recoveryInFlight = false
+                    }
+                    return
+                }
+                let attempts = UserDefaults.standard.integer(forKey: self.proxyRecoveryAttemptsKey)
+                guard attempts < self.maximumAutomaticProxyRecoveries else {
+                    self.showRecoveryHub(generation)
+                    return
+                }
+                UserDefaults.standard.set(attempts + 1, forKey: self.proxyRecoveryAttemptsKey)
                 guard var secret = try self.keychain.load(connectionID) else {
                     throw PolythLinkFailure(code: "host-identity-unavailable")
                 }
                 defer { secret.resetBytes(in: 0..<secret.count) }
                 let result = try self.object(self.invoke("connect", ["connectionId": connectionID], secret: secret))
                 guard let bootstrap = (result["bootstrapUrl"] as? String) ?? (result["bootstrap"] as? String),
-                      let url = URL(string: bootstrap) else {
+                      let url = self.bootstrapWithCurrentPath(bootstrap) else {
                     throw PolythLinkFailure(code: "proxy-bootstrap-invalid")
                 }
                 DispatchQueue.main.async {
-                    if self.loopbackContent() { self.webView?.load(URLRequest(url: url)) }
+                    guard self.recoveryGeneration == generation, self.loopbackContent() else { return }
+                    self.recoveryInFlight = false
+                    self.webView?.load(URLRequest(url: url))
                 }
             } catch {
-                DispatchQueue.main.async {
-                    if self.loopbackContent(), let bundled = URL(string: "capacitor://localhost") {
-                        self.webView?.load(URLRequest(url: bundled))
-                    }
-                }
+                self.showRecoveryHub(generation)
             }
         }
+    }
+
+    private func showRecoveryHub(_ generation: UInt64) {
+        DispatchQueue.main.async {
+            guard self.recoveryGeneration == generation else { return }
+            self.recoveryInFlight = false
+            if self.loopbackContent(), let bundled = URL(string: "capacitor://localhost/?connectionError=proxy-recovery-failed") {
+                self.webView?.load(URLRequest(url: bundled))
+            }
+        }
+    }
+
+    private func bootstrapWithCurrentPath(_ bootstrap: String) -> URL? {
+        guard var components = URLComponents(string: bootstrap),
+              let current = webView?.url,
+              current.scheme?.lowercased() == "http",
+              current.host == "127.0.0.1" else { return URL(string: bootstrap) }
+        var path = current.path
+        guard path.hasPrefix("/"), !path.hasPrefix("//"), !path.contains("\\"), !path.contains("\r"), !path.contains("\n") else {
+            return URL(string: bootstrap)
+        }
+        if let query = current.query, !query.isEmpty { path += "?" + query }
+        components.queryItems = (components.queryItems ?? []) + [URLQueryItem(name: "next", value: path)]
+        return components.url
     }
 
     private func presentPairingScanner(_ call: CAPPluginCall) {

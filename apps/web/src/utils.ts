@@ -5,6 +5,9 @@ import type { AssistantMsg, RenderMessage, TaskActivityMsg, ToolMsg, UserMsg } f
 import { tr } from "./i18n/index.ts";
 import { isNativeMobile } from "@polyth/mobile/runtime";
 import { writeNativeClipboard } from "@polyth/mobile/native";
+import { acknowledgeDraftRevision, loadScopedDraftRecord, recordLocalDraftEdit, scopedDraftCacheKey } from "./draftRecord.ts";
+import { clientPersistenceScope } from "./reliabilityContext.ts";
+import type { PersistenceScope } from "./clientPersistence.ts";
 
 /** Text of the first user message in a session's event log, if any. */
 export function firstUserText(events: readonly SessionEvent[] | undefined): string | undefined {
@@ -362,26 +365,18 @@ export function groupActivity(messages: RenderMessage[]): Array<RenderMessage | 
   return out;
 }
 
-// ---- per-session composer drafts (localStorage: polyth.draft.<sessionId>) ----
-
-const DRAFT = "polyth.draft.";
+// ---- per-session composer drafts ------------------------------------------------
+// Scope is trusted connection + authenticated account + Space + active project
+// + session. Legacy unscoped keys are intentionally left untouched: no caller
+// can prove which server/account owned them.
 
 export function loadDraft(sessionId: string): string {
-  try {
-    return localStorage.getItem(DRAFT + sessionId) ?? "";
-  } catch {
-    return "";
-  }
+  return loadScopedDraftRecord(sessionId).text;
 }
 
 /** Empty text removes the key, so a sent message leaves no stale draft behind. */
 export function saveDraft(sessionId: string, text: string): void {
-  try {
-    if (text) localStorage.setItem(DRAFT + sessionId, text);
-    else localStorage.removeItem(DRAFT + sessionId);
-  } catch {
-    // private mode / quota — drafts are best-effort
-  }
+  recordLocalDraftEdit(sessionId, text);
 }
 
 // ---- server-side draft sync (debounced, fire-and-forget) -------------------
@@ -391,28 +386,40 @@ const serverDraftTimers = new Map<string, ReturnType<typeof setTimeout>>();
 /** Debounced server sync: 800ms after the last local edit, push the draft to
  *  the server so other clients see it. Fire-and-forget — localStorage is the
  *  fast local truth; the server projection catches up. */
-export function syncDraftToServer(sessionId: string, text: string): void {
-  const existing = serverDraftTimers.get(sessionId);
+export function syncDraftToServer(sessionId: string, text: string, scopeOverride?: PersistenceScope): void {
+  const capturedScope = scopeOverride ?? clientPersistenceScope({ sessionId });
+  const key = scopedDraftCacheKey(sessionId, capturedScope);
+  const existing = serverDraftTimers.get(key);
   if (existing) clearTimeout(existing);
-  serverDraftTimers.set(sessionId, setTimeout(() => {
-    serverDraftTimers.delete(sessionId);
-    // Dynamic import to avoid circular deps; api is a singleton.
-    import("@polyth/session/web-api").then(({ api }) =>
-      api.saveDraft(sessionId, text).catch(() => { /* best-effort */ }),
-    );
+  serverDraftTimers.set(key, setTimeout(() => {
+    serverDraftTimers.delete(key);
+    void sendDraftRevision(sessionId, text, capturedScope);
   }, 800));
 }
 
 /** Flush any pending server draft sync for a session (e.g. before session switch). */
 export function flushDraftToServer(sessionId: string): void {
-  const t = serverDraftTimers.get(sessionId);
+  const capturedScope = clientPersistenceScope({ sessionId });
+  const key = scopedDraftCacheKey(sessionId, capturedScope);
+  const t = serverDraftTimers.get(key);
   if (!t) return;
   clearTimeout(t);
-  serverDraftTimers.delete(sessionId);
-  const text = loadDraft(sessionId);
-  import("@polyth/session/web-api").then(({ api }) =>
-    api.saveDraft(sessionId, text).catch(() => { /* best-effort */ }),
-  );
+  serverDraftTimers.delete(key);
+  void sendDraftRevision(sessionId, loadDraft(sessionId), capturedScope);
+}
+
+async function sendDraftRevision(sessionId: string, text: string, capturedScope: PersistenceScope): Promise<void> {
+  if (scopedDraftCacheKey(sessionId) !== scopedDraftCacheKey(sessionId, capturedScope)) return;
+  const record = loadScopedDraftRecord(sessionId, capturedScope);
+  // A newer edit replaced this timer's payload before it fired.
+  if (record.text !== text || !record.dirty) return;
+  try {
+    const { api } = await import("@polyth/session/web-api");
+    const result = await api.saveDraft(sessionId, text, record.serverUpdatedAt ?? null);
+    acknowledgeDraftRevision(sessionId, record.revision, result.draftUpdatedAt, capturedScope);
+  } catch {
+    // Keep dirty local text and any server conflict for explicit recovery.
+  }
 }
 
 function copyTextFallback(text: string): boolean {

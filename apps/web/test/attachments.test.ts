@@ -12,10 +12,13 @@ const mem = new Map<string, string>();
 };
 
 const {
-  addAttachment, attachBrowserContext, attachText, clearAttachments, isLargeTextPaste, MAX_PENDING_ATTACHMENTS, newAttachmentId, pendingAttachments,
+  addAttachment, attachBrowserContext, attachNativeStagedUpload, attachText, clearAttachments, isLargeTextPaste, MAX_PENDING_ATTACHMENTS, newAttachmentId, pendingAttachments,
   removeAttachment, seedAttachments, takeAttachments,
 } = await import("../src/attachments.ts");
 const { buildModel } = await import("../src/reduce.ts");
+const { nativeStagedAttachments, removeNativeStagedAttachment } = await import("../src/draftRecord.ts");
+const { setClientReliabilityContext, setClientReliabilityProject } = await import("../src/reliabilityContext.ts");
+const { setActiveBrowserAccount } = await import("../src/accountStorage.ts");
 
 const ref = (over: Partial<AttachmentRef> = {}): AttachmentRef => ({
   id: crypto.randomUUID(), name: "a.txt", mime: "text/plain", size: 4, kind: "file", path: "a.txt", ...over,
@@ -64,6 +67,137 @@ test("attachText uploads as pasted-context.txt for the given project/session", a
   }
 });
 
+test("lost upload responses reuse one stable destination and native staging cleans only after stat proof", async () => {
+  setClientReliabilityContext({ connectionScope: "connection-files", spaceId: "default" });
+  setClientReliabilityProject("project-files");
+  const previousFetch = globalThis.fetch;
+  const paths: string[] = [];
+  let uploads = 0;
+  let statCalls = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost");
+    const body = init?.body && typeof init.body === "string"
+      ? JSON.parse(init.body) as { path?: string }
+      : {};
+    if (url.pathname === "/api/files/upload") {
+      uploads += 1;
+      paths.push(String(body.path));
+      throw new TypeError("response lost");
+    }
+    if (url.pathname === "/api/files/stat") {
+      statCalls += 1;
+      const path = url.searchParams.get("path") ?? "";
+      paths.push(path);
+      if (statCalls === 1) {
+        return new Response(JSON.stringify({ error: "not-found", message: "missing" }), { status: 404 });
+      }
+      return new Response(JSON.stringify({ path, kind: "file", size: 0, mime: "text/plain" }), { status: 200 });
+    }
+    return new Response("{}", { status: 200 });
+  }) as typeof fetch;
+  let removed = 0;
+  try {
+    const result = await attachNativeStagedUpload("project-files", "session-files", {
+      id: "d2719d26-743e-4f7f-8cb0-55c3e5ad5d7b",
+      stagingPath: "polyth-staging/d2719d26-743e-4f7f-8cb0-55c3e5ad5d7b-hostile.txt",
+      name: "../ hostile.txt",
+      mimeType: "text/plain",
+      size: 0,
+      lastModified: 1,
+    }, {
+      read: async () => new File([], "hostile.txt", { type: "text/plain" }),
+      remove: async () => { removed += 1; },
+    });
+    assert.equal(result.ok, true);
+    assert.equal(uploads, 1, "response loss never generated a second upload");
+    assert.ok(paths.every((path) => !path.includes("..") && path.includes("d2719d26-743e-4f7f-8cb0-55c3e5ad5d7b")));
+    assert.equal(nativeStagedAttachments("session-files").length, 0);
+    assert.equal(removed, 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("a disappeared native staged source stays recoverable metadata", async () => {
+  setClientReliabilityContext({ connectionScope: "connection-files", spaceId: "default" });
+  setClientReliabilityProject("project-files");
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(
+    JSON.stringify({ error: "not-found", message: "missing" }),
+    { status: 404 },
+  )) as typeof fetch;
+  try {
+    const result = await attachNativeStagedUpload("project-files", "session-missing", {
+      id: "f2719d26-743e-4f7f-8cb0-55c3e5ad5d7b",
+      stagingPath: "polyth-staging/f2719d26-743e-4f7f-8cb0-55c3e5ad5d7b-missing.bin",
+      name: "missing.bin",
+      mimeType: "application/octet-stream",
+      size: 1,
+      lastModified: 1,
+    }, {
+      read: async () => { throw new Error("staged source disappeared"); },
+      remove: async () => { throw new Error("must not clean unconfirmed source"); },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(nativeStagedAttachments("session-missing").length, 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("server/account switch during upload retains the staged file only in its original scope", async () => {
+  setClientReliabilityContext({ connectionScope: "connection-upload-a", spaceId: "default" });
+  setClientReliabilityProject("project-files");
+  setActiveBrowserAccount("usr_user1");
+  const previousFetch = globalThis.fetch;
+  let releaseUpload: (() => void) | undefined;
+  let uploadStarted: (() => void) | undefined;
+  const started = new Promise<void>((resolve) => { uploadStarted = resolve; });
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), "http://localhost");
+    if (url.pathname === "/api/files/stat") {
+      return new Response(JSON.stringify({ error: "not-found", message: "missing" }), { status: 404 });
+    }
+    if (url.pathname === "/api/files/upload") {
+      uploadStarted?.();
+      await new Promise<void>((resolve) => { releaseUpload = resolve; });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }
+    return new Response("{}", { status: 200 });
+  }) as typeof fetch;
+  let removed = 0;
+  const source = {
+    id: "a2719d26-743e-4f7f-8cb0-55c3e5ad5d7b",
+    stagingPath: "polyth-staging/a2719d26-743e-4f7f-8cb0-55c3e5ad5d7b-file.txt",
+    name: "file.txt",
+    mimeType: "text/plain",
+    size: 1,
+    lastModified: 1,
+  };
+  try {
+    const attaching = attachNativeStagedUpload("project-files", "session-switch", source, {
+      read: async () => new File(["x"], "file.txt", { type: "text/plain" }),
+      remove: async () => { removed += 1; },
+    });
+    await started;
+    setClientReliabilityContext({ connectionScope: "connection-upload-b", spaceId: "default" });
+    setActiveBrowserAccount("usr_user2");
+    releaseUpload?.();
+    const result = await attaching;
+    assert.equal(result.ok, false);
+    assert.match(result.reason ?? "", /context changed/i);
+    assert.equal(removed, 0);
+    assert.deepEqual(nativeStagedAttachments("session-switch"), []);
+
+    setClientReliabilityContext({ connectionScope: "connection-upload-a", spaceId: "default" });
+    setActiveBrowserAccount("usr_user1");
+    assert.equal(nativeStagedAttachments("session-switch")[0]?.id, source.id);
+    removeNativeStagedAttachment("session-switch", source.id);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
 test("pending attachments: add, dedupe, remove, take clears", () => {
   const sid = "sess-a";
   const a = ref({ id: "x1" });
@@ -81,18 +215,17 @@ test("pending attachments: add, dedupe, remove, take clears", () => {
   assert.equal(pendingAttachments(sid).length, 0);
 });
 
-test("pills persist per session (draft round-trip) and cap at the limit", () => {
+test("pills persist in the one scoped versioned draft record and cap at the limit", () => {
   const sid = "sess-b";
   addAttachment(sid, ref({ id: "p1" }));
-  // persisted under the draft key…
-  const stored = JSON.parse(mem.get(`polyth.draft.att.${sid}`) ?? "[]") as AttachmentRef[];
-  assert.equal(stored[0]?.id, "p1");
-  // …and a fresh session key loads what localStorage already holds
-  mem.set("polyth.draft.att.sess-c", JSON.stringify([ref({ id: "seeded" })]));
-  assert.equal(pendingAttachments("sess-c")[0]?.id, "seeded");
+  const persisted = [...mem.entries()].find(([key, value]) => key.startsWith("polyth.client.v1.") && value.includes('"p1"'));
+  assert.ok(persisted, "attachment belongs to a versioned scoped draft record");
+  assert.equal((JSON.parse(persisted![1]) as { v?: unknown; attachments?: AttachmentRef[] }).v, 1);
+  assert.equal((JSON.parse(persisted![1]) as { attachments?: AttachmentRef[] }).attachments?.[0]?.id, "p1");
+  assert.equal([...mem.keys()].some((key) => key.startsWith("polyth.draft.att.")), false);
 
   clearAttachments(sid);
-  assert.equal(mem.has(`polyth.draft.att.${sid}`), false);
+  assert.equal([...mem.values()].some((value) => value.includes('"p1"')), false);
 
   for (let i = 0; i < MAX_PENDING_ATTACHMENTS + 3; i++) {
     addAttachment("sess-cap", ref({ id: `c${i}`, path: `f${i}.txt` }));
@@ -100,10 +233,11 @@ test("pills persist per session (draft round-trip) and cap at the limit", () => 
   assert.equal(pendingAttachments("sess-cap").length, MAX_PENDING_ATTACHMENTS);
 });
 
-test("no-session pills stay in memory only", () => {
+test("no-session pills persist in the active project scoped draft record", () => {
   addAttachment(null, ref({ id: "hero" }));
   assert.equal(pendingAttachments(null).length, 1);
-  assert.ok(![...mem.keys()].some((k) => k === "polyth.draft.att."));
+  assert.ok([...mem.entries()].some(([key, value]) => key.startsWith("polyth.client.v1.") && value.includes('"hero"')));
+  assert.ok(![...mem.keys()].some((k) => k.startsWith("polyth.draft.att.")));
   assert.equal(takeAttachments(null)[0]?.id, "hero");
 });
 

@@ -5,6 +5,7 @@ import { consumeNativePendingUrl, nativeNavigationAvailable } from "./nativeNavi
 
 const HOSTS_KEY = "polyth.mobile.hosts.v1";
 const PENDING_DEEP_LINK_KEY = "polyth.mobile.pending-deep-link.v1";
+const PROXY_RECOVERY_ERROR = "proxy-recovery-failed";
 const MAX_RECENT_HOSTS = 5;
 
 export interface MobileHost {
@@ -238,6 +239,13 @@ function isBundledOrigin(): boolean {
     && (location.protocol === "capacitor:" || location.protocol === "https:");
 }
 
+function bundledRecoveryError(): string | undefined {
+  if (!isBundledOrigin()) return undefined;
+  return new URLSearchParams(location.search).get("connectionError") === PROXY_RECOVERY_ERROR
+    ? "Could not restore the secure local connection. Choose a Polyth server to try again."
+    : undefined;
+}
+
 function bundledMobileOrigin(): string {
   return Capacitor.getPlatform() === "ios" ? "capacitor://localhost" : "https://localhost";
 }
@@ -293,10 +301,12 @@ export async function prepareMobileLaunch(): Promise<MobileLaunch> {
     };
   }
 
+  const recoveryError = bundledRecoveryError();
   return {
     kind: "connect",
     recent: hosts.recent,
     ...(hosts.active ? { preferred: hosts.active } : {}),
+    ...(recoveryError ? { error: recoveryError } : {}),
     ...(deepLinkPath ? { deepLinkPath } : {}),
   };
 }

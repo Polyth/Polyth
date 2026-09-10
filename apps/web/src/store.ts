@@ -49,6 +49,9 @@ import {
   type ProjectRegistryState,
 } from "./projectRegistry.ts";
 import { setWorkspaceMode, setWorkspaceModeProject } from "./widgets/workspaceMode.ts";
+import { clientAccountPersistenceScope, clientPersistenceScope, setClientReliabilityProject, setClientReliabilitySpace } from "./reliabilityContext.ts";
+import { hydrateClientRecord, readClientRecord, removeClientRecord, writeClientRecord, type PersistenceScope } from "./clientPersistence.ts";
+import { hydrateScopedDraftRecord, loadScopedDraftRecord, scopedDraftCacheKey, updateScopedDraftRecord } from "./draftRecord.ts";
 
 // UX-PANE-MODEL: Files, Git, Terminal, and Preview are workspace PANE
 // surfaces, not primary views — they open beside (or over) a still-mounted
@@ -97,23 +100,104 @@ export interface SessionSpawn {
 // A new chat is intentionally not a session yet, so keep its work locally
 // rather than creating a visible empty session. One shelf per project lets the
 // user return via New session after visiting another surface.
-const NEW_SESSION_DRAFT = "polyth.new-session-draft.";
+const NEW_SESSION_DRAFT = "new-session-draft";
+const RESTORED_NAVIGATION = "restored-navigation";
+interface StoredNewSessionIntent {
+  v: 1;
+  projectId: string;
+  title?: string;
+  worktreePath?: string;
+}
 
-function loadNewSessionDraft(projectId: string): NewSessionIntent | null {
+export interface RestoredClientNavigation {
+  v: 1;
+  spaceId: string;
+  projectId: string;
+  sessionId?: string;
+}
+
+function persistClientNavigation(projectId: string | null, sessionId: string | null): void {
+  const targetScope = clientAccountPersistenceScope();
+  if (!projectId) {
+    removeClientRecord(RESTORED_NAVIGATION, targetScope);
+    return;
+  }
+  const project = state.projectRegistry.projects.find((candidate) => candidate.id === projectId);
+  const record: RestoredClientNavigation = {
+    v: 1,
+    spaceId: project?.spaceId ?? "default",
+    projectId,
+    ...(sessionId ? { sessionId } : {}),
+  };
+  writeClientRecord(RESTORED_NAVIGATION, targetScope, JSON.stringify(record));
+}
+
+export async function hydrateClientNavigation(): Promise<RestoredClientNavigation | null> {
   try {
-    const value = JSON.parse(localStorage.getItem(NEW_SESSION_DRAFT + projectId) ?? "null") as unknown;
-    if (!value || typeof value !== "object") return null;
-    const draft = value as Partial<NewSessionIntent>;
-    return draft.projectId === projectId && typeof draft.draft === "string"
-      ? { projectId, draft: draft.draft, ...(typeof draft.title === "string" ? { title: draft.title } : {}), ...(typeof draft.worktreePath === "string" ? { worktreePath: draft.worktreePath } : {}) }
+    const targetScope = clientAccountPersistenceScope();
+    const raw = await hydrateClientRecord(RESTORED_NAVIGATION, targetScope);
+    const value = JSON.parse(raw ?? "null") as Partial<RestoredClientNavigation> | null;
+    return value?.v === 1
+      && typeof value.spaceId === "string" && !!value.spaceId
+      && typeof value.projectId === "string" && !!value.projectId
+      && (value.sessionId === undefined || (typeof value.sessionId === "string" && !!value.sessionId))
+      ? value as RestoredClientNavigation
       : null;
   } catch {
     return null;
   }
 }
 
+const newSessionPersistenceScope = (projectId: string, capturedScope?: PersistenceScope): PersistenceScope =>
+  capturedScope ?? clientPersistenceScope({ projectId });
+
+function loadNewSessionDraft(projectId: string, capturedScope?: PersistenceScope): NewSessionIntent | null {
+  const targetScope = newSessionPersistenceScope(projectId, capturedScope);
+  try {
+    const value = JSON.parse(readClientRecord(NEW_SESSION_DRAFT, targetScope) ?? "null") as unknown;
+    if (!value || typeof value !== "object") return null;
+    const stored = value as Partial<StoredNewSessionIntent & NewSessionIntent>;
+    if (stored.v === 1 && stored.projectId === projectId) {
+      return { projectId, draft: loadScopedDraftRecord(null, targetScope).text, ...(typeof stored.title === "string" ? { title: stored.title } : {}), ...(typeof stored.worktreePath === "string" ? { worktreePath: stored.worktreePath } : {}) };
+    }
+    // Legacy local-only configuration remains recoverable; it is never copied
+    // automatically because old ownership cannot be proven.
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function saveNewSessionDraft(intent: NewSessionIntent): void {
-  try { localStorage.setItem(NEW_SESSION_DRAFT + intent.projectId, JSON.stringify(intent)); } catch { /* best-effort */ }
+  const targetScope = newSessionPersistenceScope(intent.projectId);
+  updateScopedDraftRecord(null, { text: intent.draft }, targetScope);
+  const stored: StoredNewSessionIntent = {
+    v: 1, projectId: intent.projectId,
+    ...(intent.title ? { title: intent.title } : {}),
+    ...(intent.worktreePath ? { worktreePath: intent.worktreePath } : {}),
+  };
+  writeClientRecord(NEW_SESSION_DRAFT, targetScope, JSON.stringify(stored));
+}
+
+/** Explicit native restart hook. Must run before `startNewSession(projectId)`
+ * when restoring a native renderer, otherwise no synchronous source exists. */
+export async function hydrateNewSessionDraft(projectId: string): Promise<NewSessionIntent | null> {
+  const targetScope = newSessionPersistenceScope(projectId);
+  const [raw, draftRecord] = await Promise.all([
+    hydrateClientRecord(NEW_SESSION_DRAFT, targetScope),
+    hydrateScopedDraftRecord(null, targetScope),
+  ]);
+  if (!raw) return draftRecord.text || draftRecord.attachments.length > 0 || (draftRecord.nativeStaged?.length ?? 0) > 0
+    ? { projectId, draft: draftRecord.text }
+    : null;
+  try {
+    const value = JSON.parse(raw) as Partial<StoredNewSessionIntent>;
+    return value.v === 1 && value.projectId === projectId
+      ? { projectId, draft: draftRecord.text, ...(typeof value.title === "string" ? { title: value.title } : {}), ...(typeof value.worktreePath === "string" ? { worktreePath: value.worktreePath } : {}) }
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Save text typed into the invisible new-session shelf without rerendering the composer. */
@@ -124,8 +208,18 @@ export function saveNewSessionDraftText(projectId: string, draft: string): void 
   saveNewSessionDraft({ projectId, draft, ...(current?.title ? { title: current.title } : {}), ...(current?.worktreePath ? { worktreePath: current.worktreePath } : {}) });
 }
 
-export function clearNewSessionDraft(projectId: string): void {
-  try { localStorage.removeItem(NEW_SESSION_DRAFT + projectId); } catch { /* best-effort */ }
+export function clearNewSessionDraft(projectId: string, capturedScope?: PersistenceScope): void {
+  const targetScope = newSessionPersistenceScope(projectId, capturedScope);
+  updateScopedDraftRecord(null, {
+    text: "",
+    attachments: [],
+    nativeStaged: [],
+    seed: undefined,
+    dirty: false,
+    serverUpdatedAt: undefined,
+    conflict: undefined,
+  }, targetScope);
+  removeClientRecord(NEW_SESSION_DRAFT, targetScope);
 }
 
 type RuntimeFeaturesState = Omit<RuntimeFeaturesDto, "remote" | "materializeAvailable"> & {
@@ -323,7 +417,12 @@ export function beginProjectListRequest(): ProjectListTicket {
 
 export function publishProjectList(ticket: ProjectListTicket, projects: Project[]): ListPublishOutcome {
   const result = publishListSuccess(state.projectRegistry, ticket.requestId, ticket.mutationVersion, projects);
-  if (result.outcome === "published") set({ projectRegistry: result.state });
+  if (result.outcome === "published") {
+    const active = result.state.projects.find((project) => project.id === state.activeProjectId);
+    setClientReliabilitySpace(active?.spaceId ?? "default");
+    setClientReliabilityProject(state.activeProjectId);
+    set({ projectRegistry: result.state });
+  }
   return result.outcome;
 }
 
@@ -333,6 +432,10 @@ export function failProjectList(ticket: ProjectListTicket, error: string): void 
 
 /** Rename (and other in-place mutations): upsert the server-returned project. */
 export function applyProjectUpsert(project: Project): void {
+  if (project.id === state.activeProjectId) {
+    setClientReliabilitySpace(project.spaceId ?? "default");
+    setClientReliabilityProject(project.id);
+  }
   set({ projectRegistry: upsertProject(state.projectRegistry, project) });
 }
 
@@ -341,9 +444,12 @@ export function applyProjectUpsert(project: Project): void {
  *  picker can observe the commit before it closes. Stale session/branch/editor
  *  state from another project is cleared here; no session is created. */
 export function applyProjectAdded(project: Project): void {
+  setClientReliabilitySpace(project.spaceId ?? "default");
+  setClientReliabilityProject(project.id);
   localStorage.setItem("polyth.activeProjectId", project.id);
   const projectRegistry = upsertProject(state.projectRegistry, project);
   if (state.activeProjectId === project.id) {
+    persistClientNavigation(project.id, state.activeSessionId);
     set({ projectRegistry });
     return;
   }
@@ -357,6 +463,7 @@ export function applyProjectAdded(project: Project): void {
     editorLocation: null,
     gitDiffPath: null,
   });
+  persistClientNavigation(project.id, null);
   setWorkspaceModeProject(project.id);
 }
 
@@ -364,8 +471,12 @@ export function applyProjectAdded(project: Project): void {
 export function applyProjectRemoved(id: string): void {
   const projectRegistry = removeProject(state.projectRegistry, id);
   const activeProjectId = replacementActiveId(projectRegistry.projects, state.activeProjectId);
+  const active = projectRegistry.projects.find((project) => project.id === activeProjectId);
+  setClientReliabilitySpace(active?.spaceId ?? "default");
+  setClientReliabilityProject(activeProjectId);
   localStorage.setItem("polyth.activeProjectId", activeProjectId ?? "");
   if (activeProjectId === state.activeProjectId) {
+    persistClientNavigation(activeProjectId, state.activeSessionId);
     set({ projectRegistry });
     return;
   }
@@ -379,6 +490,7 @@ export function applyProjectRemoved(id: string): void {
     editorLocation: null,
     gitDiffPath: null,
   });
+  persistClientNavigation(activeProjectId, null);
   setWorkspaceModeProject(activeProjectId);
 }
 
@@ -426,9 +538,15 @@ function paneSurfaceOf(id: string | null) {
 }
 
 export function activateProject(id: string | null): void {
+  const project = state.projectRegistry.projects.find((candidate) => candidate.id === id);
+  setClientReliabilitySpace(project?.spaceId ?? "default");
+  setClientReliabilityProject(id);
   localStorage.setItem("polyth.activeProjectId", id ?? "");
   // Re-activating the current project must not drop the session or branch (UX-04).
-  if (id === state.activeProjectId) return;
+  if (id === state.activeProjectId) {
+    persistClientNavigation(id, state.activeSessionId);
+    return;
+  }
   // Workspace-pane state is project-scoped: only this project's pinned
   // surface is restored. Dynamic/fullscreen windows are transient, and an
   // unavailable persisted surface must not restore as visibly open.
@@ -460,6 +578,7 @@ export function activateProject(id: string | null): void {
     paneFullscreen: false,
     ...(restored !== null && restoredResource !== undefined ? applyPaneResource(restored, restoredResource) : {}),
   });
+  persistClientNavigation(id, null);
   setWorkspaceModeProject(id);
   setWorkbenchProject(id);
 }
@@ -777,6 +896,7 @@ export function activateSession(id: string | null): void {
     activeSessionId: id,
     ...(id !== null ? { newSessionIntent: null } : {}),
   });
+  persistClientNavigation(state.activeProjectId, id);
 }
 
 /** Enter the unsaved new-chat surface. The session is deliberately absent
@@ -786,7 +906,8 @@ export function startNewSession(
   options: Omit<NewSessionIntent, "projectId" | "draft"> & { draft?: string } = {},
 ): void {
   if (state.activeProjectId !== projectId) activateProject(projectId);
-  const saved = options.draft === undefined && !options.title && !options.worktreePath
+  const restoring = options.draft === undefined && !options.title && !options.worktreePath;
+  const saved = restoring
     ? loadNewSessionDraft(projectId)
     : null;
   const intent: NewSessionIntent = {
@@ -795,14 +916,38 @@ export function startNewSession(
     ...(options.title ?? saved?.title ? { title: options.title ?? saved?.title } : {}),
     ...(options.worktreePath ?? saved?.worktreePath ? { worktreePath: options.worktreePath ?? saved?.worktreePath } : {}),
   };
-  saveNewSessionDraft(intent);
+  // Native records live behind an async loopback adapter. Enter the surface
+  // immediately, but do not write an empty placeholder over a not-yet-read
+  // process-restart draft. A concurrent keystroke increments the persistence
+  // generation and therefore wins the hydration race.
+  const restoreKey = scopedDraftCacheKey(null);
+  const restore = restoring && !saved ? hydrateNewSessionDraft(projectId) : null;
+  if (!restore) saveNewSessionDraft(intent);
   localStorage.setItem("polyth.activeSessionId", "");
   set({
     activeSessionId: null,
     openingSessionId: null,
     newSessionIntent: intent,
   });
+  persistClientNavigation(projectId, null);
   showSessionChat();
+  if (restore) void restore.then((persisted) => {
+    if (scopedDraftCacheKey(null) !== restoreKey
+      || state.activeProjectId !== projectId
+      || state.activeSessionId !== null
+      || state.newSessionIntent !== intent) return;
+    const current = loadScopedDraftRecord(null);
+    const next: NewSessionIntent = {
+      projectId,
+      draft: current.updatedAt > 0 ? current.text : persisted?.draft ?? "",
+      ...(persisted?.title ? { title: persisted.title } : {}),
+      ...(persisted?.worktreePath ? { worktreePath: persisted.worktreePath } : {}),
+    };
+    saveNewSessionDraft(next);
+    set({ newSessionIntent: next });
+  }).catch(() => {
+    // Keep the in-memory draft usable. Persistence errors surface on flush.
+  });
 }
 
 let nextSessionSpawnRequestId = 0;

@@ -122,6 +122,25 @@ test("rename validates and appends session/metadata-changed before projection", 
   await assert.rejects(() => sessions.rename!("nope", "x"), /not found/);
 });
 
+test("draft CAS preserves the authoritative projection on a stale writer", async () => {
+  const { sessions, store } = makeService();
+  try {
+    const { id } = await sessions.create({ projectId: "p1", title: "Draft" });
+    const first = await sessions.saveDraft!(id, "first", null);
+    assert.ok(first.draftUpdatedAt > 0);
+    await assert.rejects(
+      () => sessions.saveDraft!(id, "stale", null),
+      (error: Error & { code?: string }) => error.code === "draft-conflict",
+    );
+    assert.equal((await store.projection(id))?.draft, "first");
+    const cleared = await sessions.saveDraft!(id, "", first.draftUpdatedAt);
+    assert.ok(cleared.draftUpdatedAt > first.draftUpdatedAt);
+    assert.equal((await store.projection(id))?.draft, undefined);
+  } finally {
+    await store.close();
+  }
+});
+
 test("auto title persists OpenCode's generated title after its source prompt", async () => {
   const generatedTitle = "Stabilize intermittent login test";
   const { sessions, store } = makeService({ generatedTitle });

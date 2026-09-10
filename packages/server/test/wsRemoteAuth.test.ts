@@ -63,6 +63,17 @@ function connect(port: number, headers?: Record<string, string>): Promise<{
 test("paired core.sessions.read cannot subscribe to browser frames or send dictation audio", async () => {
   const server = createServer((_req, res) => { res.statusCode = 404; res.end(); });
   const dictation = {
+    decodeAudioFrame: (value: ArrayBuffer | ArrayBufferView) =>
+      String(Buffer.from(value as ArrayBuffer)).includes('"type":"dictation/audio"')
+        ? {
+            format: "pcm_s16le" as const,
+            dictationId: "d1",
+            seq: 1,
+            sampleRate: 16_000,
+            channels: 1,
+            payload: new Uint8Array(),
+          }
+        : null,
     get: () => ({ id: "d1" }),
     push: async () => ({ ack: 1, duplicate: false }),
   };

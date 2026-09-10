@@ -4,11 +4,20 @@
 import { useCallback, useSyncExternalStore } from "react";
 import type { AttachmentRef, BrowserContext } from "@polyth/contracts";
 import { browserContextMime } from "@polyth/contracts";
-import { api } from "@polyth/session/web-api";
+import { api, errorCodeOf } from "@polyth/session/web-api";
 import { tr } from "./i18n/index.ts";
+import { flushClientPersistence } from "./clientPersistence.ts";
+import {
+  hydrateScopedDraftRecord,
+  loadScopedDraftRecord,
+  registerNativeStagedAttachment,
+  removeNativeStagedAttachment,
+  scopedDraftCacheKey,
+  type NativeStagedAttachment,
+  updateScopedDraftRecord,
+} from "./draftRecord.ts";
 
 export const MAX_PENDING_ATTACHMENTS = 16;
-const DRAFT_ATT = "polyth.draft.att.";
 const EMPTY: AttachmentRef[] = [];
 
 /** Browser-compatible UUID for attachment references. Some embedded WebViews
@@ -32,54 +41,58 @@ export function newAttachmentId(): string {
 
 interface Entry { refs: AttachmentRef[]; listeners: Set<() => void> }
 const entries = new Map<string, Entry>();
+const MAX_ATTACHMENT_ENTRIES = 64;
 
-const keyOf = (sessionId: string | null | undefined): string => sessionId ?? "";
+const keyOf = (sessionId: string | null | undefined): string => scopedDraftCacheKey(sessionId);
 
-function loadPersisted(key: string): AttachmentRef[] {
-  if (!key) return [];
-  try {
-    const raw = localStorage.getItem(DRAFT_ATT + key);
-    const v = raw ? (JSON.parse(raw) as unknown) : null;
-    return Array.isArray(v) ? (v as AttachmentRef[]) : [];
-  } catch {
-    return [];
-  }
+function loadPersisted(sessionId: string | null | undefined): AttachmentRef[] {
+  return loadScopedDraftRecord(sessionId).attachments;
 }
 
-function persist(key: string, refs: AttachmentRef[]): void {
-  if (!key) return; // hero composer pills are in-memory only
-  try {
-    if (refs.length > 0) localStorage.setItem(DRAFT_ATT + key, JSON.stringify(refs));
-    else localStorage.removeItem(DRAFT_ATT + key);
-  } catch {
-    // private mode / quota — best-effort like text drafts
-  }
+function persist(sessionId: string | null | undefined, refs: AttachmentRef[]): void {
+  updateScopedDraftRecord(sessionId, { attachments: refs });
 }
 
-function entry(key: string): Entry {
+function entry(key: string, sessionId: string | null | undefined): Entry {
   let e = entries.get(key);
   if (!e) {
-    e = { refs: loadPersisted(key), listeners: new Set() };
-    entries.set(key, e);
+    e = { refs: loadPersisted(sessionId), listeners: new Set() };
   }
+  // Map iteration order is the LRU order. Subscribers pin their entry so a
+  // mounted composer never observes an eviction during a context switch.
+  entries.delete(key);
+  entries.set(key, e);
+  trimEntries(key);
   return e;
 }
 
-function set(key: string, refs: AttachmentRef[]): void {
-  const e = entry(key);
+function trimEntries(protectedKey?: string): void {
+  while (entries.size > MAX_ATTACHMENT_ENTRIES) {
+    const stale = [...entries].find(([entryKey, value]) => entryKey !== protectedKey && value.listeners.size === 0)?.[0];
+    if (!stale) return;
+    entries.delete(stale);
+  }
+}
+
+/** Test-only boundedness observation; no draft metadata is exposed. */
+export const pendingAttachmentEntryCountForTest = (): number => entries.size;
+
+function set(sessionId: string | null | undefined, refs: AttachmentRef[]): void {
+  const key = keyOf(sessionId);
+  const e = entry(key, sessionId);
   e.refs = refs;
-  persist(key, refs);
+  persist(sessionId, refs);
   for (const l of [...e.listeners]) l();
 }
 
 export function pendingAttachments(sessionId: string | null | undefined): AttachmentRef[] {
-  const e = entry(keyOf(sessionId));
+  const e = entry(keyOf(sessionId), sessionId);
   return e.refs.length > 0 ? e.refs : EMPTY;
 }
 
 export function addAttachment(sessionId: string | null | undefined, ref: AttachmentRef): boolean {
   const key = keyOf(sessionId);
-  const cur = entry(key).refs;
+  const cur = entry(key, sessionId).refs;
   if (cur.length >= MAX_PENDING_ATTACHMENTS) return false;
   // dedupe: same file/range, same link, or same browser context id is a no-op
   const dup = cur.some((r) => {
@@ -91,15 +104,15 @@ export function addAttachment(sessionId: string | null | undefined, ref: Attachm
     return r.path === ref.path && JSON.stringify(r.range ?? null) === JSON.stringify(ref.range ?? null);
   });
   if (dup) return true;
-  set(key, [...cur, ref]);
+  set(sessionId, [...cur, ref]);
   return true;
 }
 
 export function removeAttachment(sessionId: string | null | undefined, id: string): void {
   const key = keyOf(sessionId);
-  const refs = entry(key).refs;
+  const refs = entry(key, sessionId).refs;
   const removed = refs.find((r) => r.id === id);
-  set(key, refs.filter((r) => r.id !== id));
+  set(sessionId, refs.filter((r) => r.id !== id));
   discardBrowserArtifacts(removed);
 }
 
@@ -114,31 +127,40 @@ export function discardBrowserArtifacts(ref: AttachmentRef | undefined): void {
 }
 
 export function clearAttachments(sessionId: string | null | undefined): void {
-  set(keyOf(sessionId), []);
+  set(sessionId, []);
 }
 
 /** Replace a session's pending pills wholesale (marker-owned composer seeds:
  *  rewind/fork drafts restore the excluded prompt's exact attachments). */
 export function seedAttachments(sessionId: string | null | undefined, refs: AttachmentRef[]): void {
-  set(keyOf(sessionId), refs);
+  set(sessionId, refs);
+}
+
+/** Native process-restart hook: hydrate metadata only, never attachment bytes. */
+export async function hydratePendingAttachments(sessionId: string | null): Promise<AttachmentRef[]> {
+  const refs = (await hydrateScopedDraftRecord(sessionId)).attachments;
+  const e = entry(keyOf(sessionId), sessionId);
+  e.refs = refs;
+  for (const listener of [...e.listeners]) listener();
+  return refs;
 }
 
 /** Read-and-clear for send: the returned refs go on the wire, the pills go away. */
 export function takeAttachments(sessionId: string | null | undefined): AttachmentRef[] {
   const key = keyOf(sessionId);
-  const refs = entry(key).refs;
-  if (refs.length > 0) set(key, []);
+  const refs = entry(key, sessionId).refs;
+  if (refs.length > 0) set(sessionId, []);
   return refs;
 }
 
 export function usePendingAttachments(sessionId: string | null | undefined): AttachmentRef[] {
   const key = keyOf(sessionId);
   const subscribe = useCallback((listener: () => void) => {
-    const e = entry(key);
+    const e = entry(key, sessionId);
     e.listeners.add(listener);
-    return () => e.listeners.delete(listener);
-  }, [key]);
-  const snapshot = useCallback(() => pendingAttachments(key || null), [key]);
+    return () => { e.listeners.delete(listener); trimEntries(); };
+  }, [key, sessionId]);
+  const snapshot = useCallback(() => pendingAttachments(sessionId), [key, sessionId]);
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
@@ -155,6 +177,8 @@ export async function attachProjectFile(
   sessionId: string | null | undefined,
   path: string,
   range?: [number, number],
+  refId = newAttachmentId(),
+  expectedScopeKey = scopedDraftCacheKey(sessionId),
 ): Promise<AttachResult> {
   // Resolve against the session's worktree so the pill points at the same
   // bytes the agent sees (UX-FIXTURE-VISUAL P0).
@@ -170,7 +194,7 @@ export async function attachProjectFile(
   }
   const mime = st.mime || "application/octet-stream";
   const ref: AttachmentRef = {
-    id: newAttachmentId(),
+    id: refId,
     name: range ? `${basename(path)} (${range[0]}–${range[1]})` : basename(path),
     mime,
     size: st.size,
@@ -179,6 +203,9 @@ export async function attachProjectFile(
     url: api.filesRawUrl(projectId, path, sid),
     ...(range ? { range } : {}),
   };
+  if (scopedDraftCacheKey(sessionId) !== expectedScopeKey) {
+    return { ok: false, reason: "Attachment context changed before completion; the result was not added to another draft." };
+  }
   if (!addAttachment(sessionId, ref)) {
     return {
       ok: false,
@@ -196,14 +223,126 @@ export async function attachUpload(
   sessionId: string | null | undefined,
   file: File,
 ): Promise<AttachResult> {
-  const safeName = (file.name || "pasted").replace(/[^\w.-]+/g, "_").slice(0, 80) || "pasted";
-  const rel = `_inbox/${Date.now().toString(36)}-${safeName}`;
+  const expectedScopeKey = scopedDraftCacheKey(sessionId);
+  const safeName = (file.name || "pasted").replace(/[^\w.-]+/g, "_").replace(/^\.+/, "").slice(0, 80) || "pasted";
+  const id = newAttachmentId();
+  const rel = `_inbox/${id}-${safeName}`;
   try {
     await api.filesUpload(projectId, rel, new Uint8Array(await file.arrayBuffer()), sessionId ?? undefined);
   } catch (err) {
-    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+    // A lost upload response is not permission to choose a new destination.
+    // A read-only stat can prove the stable destination already arrived.
+    try {
+      const existing = await api.filesStat(projectId, rel, sessionId ?? undefined);
+      if (existing.kind === "file" && existing.size === file.size) {
+        return attachProjectFile(projectId, sessionId, rel, undefined, id, expectedScopeKey);
+      }
+      return { ok: false, reason: `${safeName} has a conflicting server copy; it was not uploaded again.` };
+    } catch {
+      return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+    }
   }
-  return attachProjectFile(projectId, sessionId, rel);
+  return attachProjectFile(projectId, sessionId, rel, undefined, id, expectedScopeKey);
+}
+
+export type NativeStagedSource = Omit<NativeStagedAttachment, "destination">;
+
+/** Recoverable native upload. The scoped draft stores only metadata; bytes
+ * stay in app-owned staging and are read under the native bridge's hard cap.
+ * Every retry first proves destination absence or reuses an exact-size copy. */
+export async function attachNativeStagedUpload(
+  projectId: string,
+  sessionId: string | null | undefined,
+  source: NativeStagedSource,
+  native: {
+    read(metadata: NativeStagedSource): Promise<File>;
+    remove(metadata: Pick<NativeStagedSource, "stagingPath">): Promise<void>;
+  },
+): Promise<AttachResult> {
+  const scopeKey = scopedDraftCacheKey(sessionId);
+  let staged: NativeStagedAttachment;
+  try {
+    staged = registerNativeStagedAttachment(sessionId, source);
+    // Process death after this point must leave enough metadata to resume the
+    // exact destination without re-picking or generating another upload ID.
+    await flushClientPersistence();
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  }
+  const stillCurrent = () => scopedDraftCacheKey(sessionId) === scopeKey;
+  const finish = async (): Promise<AttachResult> => {
+    if (!stillCurrent()) return { ok: false, reason: "Attachment context changed; the staged copy was retained." };
+    const attached = await attachProjectFile(projectId, sessionId, staged.destination, undefined, staged.id, scopeKey);
+    if (!attached.ok) return attached;
+    removeNativeStagedAttachment(sessionId, staged.id);
+    // Persist the attachment pill + staged-metadata removal before deleting
+    // the only app-owned byte copy. Per-record write ordering keeps this final.
+    await flushClientPersistence();
+    await native.remove(staged);
+    return attached;
+  };
+
+  try {
+    const existing = await api.filesStat(projectId, staged.destination, sessionId ?? undefined);
+    if (existing.kind !== "file" || existing.size !== staged.size) {
+      return { ok: false, reason: `${staged.name} has a conflicting server copy; the staged file was retained.` };
+    }
+    return await finish();
+  } catch (error) {
+    if (errorCodeOf(error) !== "not-found") {
+      return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  if (!stillCurrent()) return { ok: false, reason: "Attachment context changed; the staged copy was retained." };
+  let file: File;
+  try {
+    file = await native.read(source);
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  }
+  try {
+    await api.filesUpload(projectId, staged.destination, new Uint8Array(await file.arrayBuffer()), sessionId ?? undefined);
+  } catch (uploadError) {
+    // Response loss is resolved only by authoritative stat. If absent or the
+    // server is unreachable, retain the same metadata/path for restart retry.
+    try {
+      const existing = await api.filesStat(projectId, staged.destination, sessionId ?? undefined);
+      if (existing.kind === "file" && existing.size === staged.size) return await finish();
+      return { ok: false, reason: `${staged.name} has a conflicting server copy; the staged file was retained.` };
+    } catch {
+      return { ok: false, reason: uploadError instanceof Error ? uploadError.message : String(uploadError) };
+    }
+  }
+  return await finish();
+}
+
+const nativeRecoveryInFlight = new Map<string, Promise<AttachResult[]>>();
+
+/** Process-restart hook. Sequential reads keep the bounded compatibility
+ * allocation to one file, and the same stable destination is reused. */
+export function recoverNativeStagedUploads(
+  projectId: string,
+  sessionId: string | null | undefined,
+  native: Parameters<typeof attachNativeStagedUpload>[3],
+): Promise<AttachResult[]> {
+  const key = scopedDraftCacheKey(sessionId);
+  const current = nativeRecoveryInFlight.get(key);
+  if (current) return current;
+  const run = (async () => {
+    const staged = loadScopedDraftRecord(sessionId).nativeStaged ?? [];
+    const results: AttachResult[] = [];
+    for (const source of staged) {
+      if (scopedDraftCacheKey(sessionId) !== key) {
+        results.push({ ok: false, reason: "Attachment context changed; remaining staged files were retained." });
+        break;
+      }
+      results.push(await attachNativeStagedUpload(projectId, sessionId, source, native));
+    }
+    return results;
+  })().finally(() => nativeRecoveryInFlight.delete(key));
+  nativeRecoveryInFlight.set(key, run);
+  return run;
 }
 
 export function isLargeTextPaste(text: string): boolean {

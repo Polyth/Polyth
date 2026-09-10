@@ -100,8 +100,18 @@ export function orgRoutes(deps: {
         json(400, { error: "invalid-input", message: "text must be a string" });
         return true;
       }
-      await sessions.saveDraft(m[1]!, b.text);
-      json(200, { ok: true });
+      const expected = b.expectedDraftUpdatedAt as unknown;
+      if (expected !== undefined && expected !== null
+        && (typeof expected !== "number" || !Number.isSafeInteger(expected) || expected < 0)) {
+        json(400, { error: "invalid-input", message: "expectedDraftUpdatedAt must be a timestamp or null" });
+        return true;
+      }
+      const saved = await sessions.saveDraft(
+        m[1]!,
+        b.text,
+        expected,
+      );
+      json(200, saved);
       return true;
     }
 

@@ -1,6 +1,8 @@
+import { scopedDraftCacheKey } from "./draftRecord.ts";
+
 export interface FailedSend {
   sessionId: string;
-  kind: "unavailable";
+  kind: "unavailable" | "unknown";
 }
 
 const failures = new Map<string, FailedSend>();
@@ -21,24 +23,36 @@ export function isUnavailableSendError(error: unknown): boolean {
   return /\b503\b|\bunavailable\b/i.test(message);
 }
 
-export function reportSendFailure(sessionId: string, error: unknown): FailedSend | null {
+export function reportSendFailure(sessionId: string, error: unknown, capturedScopeKey = scopedDraftCacheKey(sessionId)): FailedSend | null {
+  const status = typeof (error as { status?: unknown })?.status === "number"
+    ? (error as { status: number }).status
+    : 0;
+  const code = typeof (error as { code?: unknown })?.code === "string"
+    ? (error as { code: string }).code
+    : "";
+  if (code === "outcome-unknown" || status === 0 || status >= 500) {
+    const failure: FailedSend = { sessionId, kind: "unknown" };
+    failures.set(capturedScopeKey, failure);
+    publish();
+    return failure;
+  }
   if (!isUnavailableSendError(error)) {
-    clearSendFailure(sessionId);
+    clearSendFailure(sessionId, capturedScopeKey);
     return null;
   }
   const failure: FailedSend = { sessionId, kind: "unavailable" };
-  failures.set(sessionId, failure);
+  failures.set(capturedScopeKey, failure);
   publish();
   return failure;
 }
 
-export function clearSendFailure(sessionId: string): void {
-  if (!failures.delete(sessionId)) return;
+export function clearSendFailure(sessionId: string, capturedScopeKey = scopedDraftCacheKey(sessionId)): void {
+  if (!failures.delete(capturedScopeKey)) return;
   publish();
 }
 
 export function getSendFailure(sessionId: string | null): FailedSend | null {
-  return sessionId ? failures.get(sessionId) ?? null : null;
+  return sessionId ? failures.get(scopedDraftCacheKey(sessionId)) ?? null : null;
 }
 
 export function subscribeSendFailures(listener: () => void): () => void {

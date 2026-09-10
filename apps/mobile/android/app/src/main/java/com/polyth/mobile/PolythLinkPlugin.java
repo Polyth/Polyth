@@ -22,6 +22,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.security.MessageDigest;
@@ -31,6 +32,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
@@ -42,6 +45,8 @@ public final class PolythLinkPlugin extends Plugin {
     private static final String PREFS = "polyth_link_secure";
     private static final String STATE_PREFS = "polyth_link_state";
     private static final String LAST_CONNECTION = "last_connection_id";
+    private static final String PROXY_RECOVERY_ATTEMPTS = "proxy_recovery_attempts";
+    private static final int MAX_AUTOMATIC_PROXY_RECOVERIES = 2;
     private static final String KEY_PREFIX = "polyth-link-";
     private static final int SECRET_LENGTH = 32;
 
@@ -49,6 +54,9 @@ public final class PolythLinkPlugin extends Plugin {
     private final ExecutorService controlExecutor = Executors.newSingleThreadExecutor();
     private final ConcurrentHashMap<String, PairingSecretRecord> attempts = new ConcurrentHashMap<>();
     private volatile long clientHandle;
+    private final AtomicBoolean recoveryInFlight = new AtomicBoolean(false);
+    private final AtomicBoolean recoveryScheduled = new AtomicBoolean(false);
+    private final AtomicLong recoveryGeneration = new AtomicLong();
 
     private static final class LinkFailure extends Exception {
         final String code;
@@ -185,7 +193,19 @@ public final class PolythLinkPlugin extends Plugin {
     @Override
     protected void handleOnResume() {
         super.handleOnResume();
-        restoreLoopbackTransport();
+        if (recoveryScheduled.compareAndSet(false, true)) restoreLoopbackTransport();
+    }
+
+    @Override
+    protected void handleOnPause() {
+        super.handleOnPause();
+        recoveryGeneration.incrementAndGet();
+        recoveryInFlight.set(false);
+        recoveryScheduled.set(false);
+        // The renderer closes its WebSocket and cancels retry timers. Do not
+        // manufacture a disconnect here: the OS may suspend the native link,
+        // and foreground status must distinguish a healthy suspended proxy
+        // from one that actually died.
     }
 
     @Override
@@ -351,7 +371,8 @@ public final class PolythLinkPlugin extends Plugin {
     }
 
     private void rememberTransport(String connectionId) {
-        statePrefs.edit().putString(LAST_CONNECTION, connectionId).apply();
+        statePrefs.edit().putString(LAST_CONNECTION, connectionId)
+            .putInt(PROXY_RECOVERY_ATTEMPTS, 0).apply();
     }
 
     private void forgetTransport(String connectionId) {
@@ -364,24 +385,65 @@ public final class PolythLinkPlugin extends Plugin {
         if (!loopbackContent()) return;
         String connectionId = statePrefs.getString(LAST_CONNECTION, null);
         if (connectionId == null || connectionId.isEmpty()) return;
+        if (!recoveryInFlight.compareAndSet(false, true)) return;
+        long generation = recoveryGeneration.incrementAndGet();
         controlExecutor.execute(() -> {
             try {
                 JSONObject status = invokeObject("status", new JSObject().put("connectionId", connectionId), null);
-                if ("connected".equals(status.optString("state", ""))) return;
+                if ("connected".equals(status.optString("state", ""))) {
+                    statePrefs.edit().putInt(PROXY_RECOVERY_ATTEMPTS, 0).apply();
+                    return;
+                }
+                int attempts = statePrefs.getInt(PROXY_RECOVERY_ATTEMPTS, 0);
+                if (attempts >= MAX_AUTOMATIC_PROXY_RECOVERIES) {
+                    showRecoveryHub(generation);
+                    return;
+                }
+                statePrefs.edit().putInt(PROXY_RECOVERY_ATTEMPTS, attempts + 1).apply();
                 byte[] secret = secureStore.load(connectionId);
                 if (secret == null) throw new LinkFailure("host-identity-unavailable");
                 JSONObject result = invokeObject("connect", new JSObject().put("connectionId", connectionId), secret);
                 String bootstrap = result.optString("bootstrapUrl", result.optString("bootstrap", ""));
                 if (bootstrap.isEmpty()) throw new LinkFailure("proxy-bootstrap-invalid");
+                String target = bootstrapWithCurrentPath(bootstrap);
                 getActivity().runOnUiThread(() -> {
-                    if (loopbackContent()) getBridge().getWebView().loadUrl(bootstrap);
+                    if (recoveryCurrent(generation)) getBridge().getWebView().loadUrl(target);
                 });
             } catch (Exception error) {
-                getActivity().runOnUiThread(() -> {
-                    if (loopbackContent()) getBridge().getWebView().loadUrl("https://localhost");
-                });
+                showRecoveryHub(generation);
+            } finally {
+                if (recoveryGeneration.get() == generation) recoveryInFlight.set(false);
             }
         });
+    }
+
+    private boolean recoveryCurrent(long generation) {
+        return recoveryGeneration.get() == generation && loopbackContent();
+    }
+
+    private void showRecoveryHub(long generation) {
+        getActivity().runOnUiThread(() -> {
+            if (recoveryCurrent(generation)) {
+                getBridge().getWebView().loadUrl("https://localhost/?connectionError=proxy-recovery-failed");
+            }
+        });
+    }
+
+    private String bootstrapWithCurrentPath(String bootstrap) {
+        try {
+            URI current = URI.create(getBridge().getWebView().getUrl());
+            String path = current.getPath();
+            if (path == null || !path.startsWith("/") || path.startsWith("//") || path.contains("\\") || path.contains("\r") || path.contains("\n")) {
+                return bootstrap;
+            }
+            if (current.getQuery() != null && !current.getQuery().isEmpty()) path += "?" + current.getQuery();
+            URI target = URI.create(bootstrap);
+            if (target.getRawFragment() != null) return bootstrap;
+            String separator = target.getRawQuery() == null ? "?" : "&";
+            return bootstrap + separator + "next=" + URLEncoder.encode(path, StandardCharsets.UTF_8.name());
+        } catch (Exception ignored) {
+            return bootstrap;
+        }
     }
 
     @PluginMethod

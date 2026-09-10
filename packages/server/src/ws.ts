@@ -62,6 +62,8 @@ interface Sub {
   pendingSubscribe: { sessionId: string | null; afterSeq: number; projectId: string | null } | null;
   snapshotScope: string | null;
   liveBuffer: SessionEvent[];
+  liveBufferBytes: number;
+  liveBufferSeq: Set<number>;
   windowStart: number;
   windowCount: number;
   browserSessionId: string | null;
@@ -83,6 +85,22 @@ const MAX_MESSAGES_PER_SECOND = 20;
 const MAX_AUDIO_PER_SECOND = 100;
 const FRAME_HIGH_WATER = 1_000_000;
 const GAP_FILL_CHUNK = 500;
+/** A replay read can race a busy producer. Bound that race per client; a
+ * canonical event is never silently discarded -- overflow closes for replay. */
+const LIVE_BUFFER_MAX_EVENTS = 2_048;
+const LIVE_BUFFER_MAX_BYTES = 4 * 1024 * 1024;
+const RESYNC_CLOSE_CODE = 1013;
+const RESYNC_CLOSE_REASON = "resync-required: slow reader";
+const MAX_CANONICAL_FRAME_BYTES = 8 * 1024 * 1024;
+
+/** Test-only transport observation remains optional; production uses ws's
+ * bufferedAmount directly. Canonical frame size is capped separately so one
+ * pathological durable event cannot allocate an unbounded outbound frame. */
+export interface WsGatewayOptions {
+  frameHighWater?: number;
+  bufferedAmount?: (ws: WebSocket) => number;
+  maxCanonicalFrameBytes?: number;
+}
 
 export interface WsGateway extends Broadcaster {
   attach(server: Server, auth?: WsAuthorize | WsAttachAuth): void;
@@ -95,6 +113,7 @@ export function createWsGateway(
   dictation?: DictationForWs,
   spaces?: SpaceGateway,
   chatWorkspace?: ChatWorkspaceFrameBus,
+  options?: WsGatewayOptions,
 ): WsGateway {
   const wss = new WebSocketServer({ noServer: true });
   const clients = new Map<WebSocket, Sub>();
@@ -104,9 +123,77 @@ export function createWsGateway(
   const upgradeReleases: Array<() => void> = [];
   let closed = false;
 
-  const send = (ws: WebSocket, msg: unknown) => {
-    if (closed || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify(msg));
+  const closeForResync = (ws: WebSocket) => {
+    clients.delete(ws);
+    try { ws.close(RESYNC_CLOSE_CODE, RESYNC_CLOSE_REASON); } catch { /* already closing */ }
+  };
+
+  const closeOversizedFrame = (ws: WebSocket) => {
+    clients.delete(ws);
+    // A record above this protocol ceiling cannot be replayed over this
+    // gateway. Do not auto-resync it forever; surface a terminal size failure
+    // for an explicit user/server recovery path instead.
+    const highWater = options?.frameHighWater ?? FRAME_HIGH_WATER;
+    if (ws.readyState === WebSocket.OPEN && (options?.bufferedAmount?.(ws) ?? ws.bufferedAmount) <= highWater) {
+      try {
+        ws.send(JSON.stringify({
+          type: "error",
+          code: "canonical-frame-too-large",
+          message: "durable event exceeds WebSocket frame limit; explicit recovery required",
+        }));
+      } catch { /* close reason remains the durable signal */ }
+    }
+    try { ws.close(1009, "resync-required: canonical frame too large"); } catch { /* already closing */ }
+  };
+
+  /** Canonical state must be replayable, never best-effort. Once a reader is
+   * behind the general high-water mark, force it to reconnect from its cursor. */
+  const send = (ws: WebSocket, msg: unknown, visual = false): boolean => {
+    if (closed || ws.readyState !== WebSocket.OPEN) return false;
+    if (!visual) {
+      // Check before serializing the next canonical frame: a slow reader must
+      // not force allocation of another potentially large JSON payload.
+      if ((options?.bufferedAmount?.(ws) ?? ws.bufferedAmount) > (options?.frameHighWater ?? FRAME_HIGH_WATER)) {
+        closeForResync(ws);
+        return false;
+      }
+    }
+    const payload = JSON.stringify(msg);
+    if (!visual) {
+      if (Buffer.byteLength(payload) > (options?.maxCanonicalFrameBytes ?? MAX_CANONICAL_FRAME_BYTES)) {
+        closeOversizedFrame(ws);
+        return false;
+      }
+    }
+    try {
+      ws.send(payload);
+      return true;
+    } catch {
+      closeForResync(ws);
+      return false;
+    }
+  };
+
+  const clearLiveBuffer = (sub: Sub): void => {
+    sub.liveBuffer = [];
+    sub.liveBufferBytes = 0;
+    sub.liveBufferSeq.clear();
+  };
+
+  const liveEventBytes = (ev: SessionEvent): number => Buffer.byteLength(JSON.stringify({ type: "event", event: ev }));
+
+  const bufferLiveEvent = (ws: WebSocket, sub: Sub, ev: SessionEvent): boolean => {
+    if (sub.liveBufferSeq.has(ev.seq)) return true;
+    const bytes = liveEventBytes(ev);
+    if (sub.liveBuffer.length >= LIVE_BUFFER_MAX_EVENTS || sub.liveBufferBytes + bytes > LIVE_BUFFER_MAX_BYTES) {
+      clearLiveBuffer(sub);
+      closeForResync(ws);
+      return false;
+    }
+    sub.liveBuffer.push(ev);
+    sub.liveBufferBytes += bytes;
+    sub.liveBufferSeq.add(ev.seq);
+    return true;
   };
 
   const spaceOf = (sessionId: string): (() => string | undefined) => {
@@ -170,7 +257,7 @@ export function createWsGateway(
     sub.pendingChatFrame = null;
     if (frame.popupId) sub.chatPopupRevisions.set(frame.popupId, frame.revision);
     else sub.chatAfterRevision = frame.revision;
-    send(ws, chatFrameMsg(frame));
+    send(ws, chatFrameMsg(frame), true);
   };
 
   const chatEventMsg = (event: ChatWorkspaceTabEvent, includeClipboardText: boolean) => ({
@@ -215,7 +302,7 @@ export function createWsGateway(
     }
     sub.pendingFrame = null;
     sub.browserAfterRevision = frame.revision;
-    send(ws, frameMsg(frame));
+    send(ws, frameMsg(frame), true);
   };
 
   const flusher = setInterval(() => {
@@ -287,7 +374,7 @@ export function createWsGateway(
       spaceId: socketSpaceId,
       sessions: socketSessions,
       sessionId: null, afterSeq: 0, caughtUp: true,
-      busy: false, pendingSubscribe: null, snapshotScope: null, liveBuffer: [],
+      busy: false, pendingSubscribe: null, snapshotScope: null, liveBuffer: [], liveBufferBytes: 0, liveBufferSeq: new Set(),
       windowStart: Date.now(), windowCount: 0,
       browserSessionId: null, browserAfterRevision: 0, pendingFrame: null,
       chatTabId: null, chatAfterRevision: 0, chatPopupRevisions: new Map(), chatVisible: true, pendingChatFrame: null,
@@ -437,19 +524,19 @@ export function createWsGateway(
         subscriptions: while (sub.pendingSubscribe) {
           if (closed) {
             sub.pendingSubscribe = null;
-            sub.liveBuffer = [];
+            clearLiveBuffer(sub);
             break;
           }
           if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) {
             sub.pendingSubscribe = null;
-            sub.liveBuffer = [];
+            clearLiveBuffer(sub);
             break;
           }
           const cur = sub.pendingSubscribe;
           sub.pendingSubscribe = null;
           sub.sessionId = cur.sessionId;
           sub.afterSeq = cur.afterSeq;
-          sub.liveBuffer = [];
+          clearLiveBuffer(sub);
           if (sub.sessionId) {
             sub.caughtUp = false;
             try {
@@ -457,32 +544,47 @@ export function createWsGateway(
               if (closed) return;
               if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) {
                 sub.caughtUp = true;
-                sub.liveBuffer = [];
+                clearLiveBuffer(sub);
                 sub.pendingSubscribe = null;
                 break subscriptions;
               }
+              let gapCursor = sub.afterSeq;
               for (let i = 0; i < gap.length; i += GAP_FILL_CHUNK) {
                 if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) break subscriptions;
-                send(ws, { type: "events", events: gap.slice(i, i + GAP_FILL_CHUNK) });
+                const chunk = gap.slice(i, i + GAP_FILL_CHUNK);
+                if (chunk.some((event, index) => event.sessionId !== sub.sessionId
+                  || event.seq !== gapCursor + index + 1)) {
+                  closeForResync(ws);
+                  break subscriptions;
+                }
+                if (!send(ws, { type: "events", events: chunk })) break subscriptions;
+                gapCursor = chunk.at(-1)?.seq ?? gapCursor;
               }
-              sub.afterSeq = gap.length ? gap[gap.length - 1]!.seq : sub.afterSeq;
+              sub.afterSeq = gapCursor;
             } catch (err) {
               if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) {
                 sub.caughtUp = true;
-                sub.liveBuffer = [];
+                clearLiveBuffer(sub);
                 sub.pendingSubscribe = null;
                 break subscriptions;
               }
               send(ws, { type: "error", code: "gap-fill", message: String(err) });
+              clearLiveBuffer(sub);
+              closeForResync(ws);
+              break subscriptions;
             }
             sub.caughtUp = true;
-            const buffered = sub.liveBuffer;
-            sub.liveBuffer = [];
+            const buffered = sub.liveBuffer.slice();
+            clearLiveBuffer(sub);
             for (const ev of buffered) {
               if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) break subscriptions;
               if (ev.seq <= sub.afterSeq) continue;
+              if (ev.sessionId !== sub.sessionId || ev.seq !== sub.afterSeq + 1) {
+                closeForResync(ws);
+                break subscriptions;
+              }
+              if (!send(ws, { type: "event", event: ev })) break subscriptions;
               sub.afterSeq = ev.seq;
-              send(ws, { type: "event", event: ev });
             }
           } else {
             sub.caughtUp = true;
@@ -547,11 +649,15 @@ export function createWsGateway(
         if (!inSpace(sub, owner)) continue;
         if (sub.sessionId && ev.sessionId !== sub.sessionId) continue;
         if (!sub.caughtUp) {
-          sub.liveBuffer.push(ev);
+          bufferLiveEvent(ws, sub, ev);
           continue;
         }
         if (sub.sessionId && ev.seq <= sub.afterSeq) continue;
-        send(ws, { type: "event", event: ev });
+        if (sub.sessionId && ev.seq !== sub.afterSeq + 1) {
+          closeForResync(ws);
+          continue;
+        }
+        if (send(ws, { type: "event", event: ev }) && sub.sessionId) sub.afterSeq = ev.seq;
       }
     },
     projection(p: SessionProjection) {
