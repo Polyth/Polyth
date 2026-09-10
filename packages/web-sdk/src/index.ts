@@ -105,6 +105,8 @@ export interface SurfaceComponentProps {
   active?: boolean;
 }
 
+export type WorkspacePaneDock = "side" | "bottom";
+
 export interface SurfacePresentation {
   kind: "workspace";
   defaultRatio: number;
@@ -118,7 +120,10 @@ export interface SurfacePresentation {
    *  pane a full-width strip under the workspace, so Chat's composer sits
    *  directly above it, with a horizontal resize on the top edge. Only the
    *  pinned window mode is affected — dynamic and fullscreen are unchanged. */
-  dock?: "side" | "bottom";
+  dock?: WorkspacePaneDock;
+  /** Edges supported by the pinned window. When omitted, the package exposes
+   *  only its default `dock` edge (or the classic side edge). */
+  dockOptions?: readonly WorkspacePaneDock[];
 }
 
 // ---- Workbench -----------------------------------------------------------------

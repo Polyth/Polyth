@@ -9790,12 +9790,35 @@ html[data-package-window-resizing="true"] { user-select: none; cursor: grabbing;
 html[data-package-window-resizing="true"] .rail-workspace { transition: none; }
 
 .app-shell:has(.rail-pinned-narrow) {
+  --workspace-pinned-narrow-row-size: clamp(200px, 42%, 100%);
   display: grid; grid-template-columns: max-content minmax(0, 1fr);
-  grid-template-rows: minmax(240px, 1fr) minmax(200px, 42%);
+  grid-template-rows: minmax(240px, 1fr) var(--workspace-pinned-narrow-row-size);
 }
 .app-shell:has(.rail-pinned-narrow) > .sidebar { grid-column: 1; grid-row: 1 / 3; }
 .app-shell:has(.rail-pinned-narrow) > .workspace { grid-column: 2; grid-row: 1; }
-.railbar-pinned-narrow { position: relative; inset: auto; grid-column: 2; grid-row: 2; width: 100%; min-width: 0; }
+.app-shell:has(.rail-pinned-narrow) > .railbar {
+  position: relative; inset: auto; z-index: var(--z-shell);
+  grid-column: 2; grid-row: 1 / 3;
+  width: 100%; min-width: 0; height: 100%; margin: 0;
+  border: 0; border-radius: 0; box-shadow: none; overflow: visible;
+  background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none;
+  pointer-events: none;
+}
+.app-shell:has(.rail-pinned-narrow) > .railbar > .rail-pinned-narrow {
+  position: absolute;
+  inset-block-end: 0;
+  inset-inline-start: 0;
+  inset-inline-end: var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-4)));
+  width: auto; height: var(--workspace-pinned-narrow-row-size); margin: 0;
+  pointer-events: auto;
+}
+.app-shell:has(.rail-pinned-narrow) > .railbar > .rail-icon-col.plugin-strip {
+  position: absolute; inset-block: 0; inset-inline-end: 0;
+  width: var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-4)));
+  height: 100%; flex: none;
+  border-top: 0; border-inline-start: 1px solid var(--surface-divider);
+  pointer-events: auto;
+}
 .rail-pinned-narrow { flex: 1 1 auto; width: 100%; min-width: 0; height: 100%; border-radius: var(--radius-surface) 0 0 0; }
 
 /* UX-PANE-MODEL: deliberate bottom dock (presentation.dock === "bottom"). The
@@ -9805,23 +9828,43 @@ html[data-package-window-resizing="true"] .rail-workspace { transition: none; }
    edge: --workspace-dock-h is written only once the user drags, so the
    stylesheet proportion applies until then and no measurement loop can form. */
 .app-shell:has(.rail-dock-bottom) {
+  --workspace-dock-row-size: clamp(160px, var(--workspace-dock-h, 46%), 78%);
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
-  grid-template-rows: minmax(240px, 1fr) clamp(160px, var(--workspace-dock-h, 46%), 78%);
+  grid-template-rows: minmax(240px, 1fr) var(--workspace-dock-row-size);
 }
 .app-shell:has(.rail-dock-bottom) > .sidebar { grid-column: 1; grid-row: 1 / 3; }
 .app-shell:has(.rail-dock-bottom) > .workspace { grid-column: 2; grid-row: 1; }
-/* Return the rail host to the grid (the wide-desktop `.railbar` rule floats it
-   against the viewport edge) and drop its floating chrome — the pane below
-   owns the visible top edge. */
+/* Keep the rail host spanning both rows. Only the package pane is placed in
+   the bottom row; the launcher/menu strip remains pinned to the right edge. */
 .app-shell:has(.rail-dock-bottom) > .railbar {
-  position: relative; inset: auto; z-index: auto;
-  grid-column: 2; grid-row: 2;
-  width: 100%; min-width: 0; margin: 0;
+  position: relative; inset: auto; z-index: var(--z-shell);
+  grid-column: 2; grid-row: 1 / 3;
+  width: 100%; min-width: 0; height: 100%; margin: 0;
   border: 0; border-radius: 0; box-shadow: none; overflow: visible;
+  background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none;
+  pointer-events: none;
 }
-.app-shell:has(.rail-dock-bottom) > .railbar > .rail-icon-col {
-  border-top: 1px solid var(--surface-divider);
+.app-shell:has(.rail-dock-bottom) > .railbar > .rail-dock-bottom {
+  position: absolute;
+  inset-block-end: 0;
+  inset-inline-start: 0;
+  inset-inline-end: var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-4)));
+  width: auto;
+  height: var(--workspace-dock-row-size);
+  margin: 0;
+  pointer-events: auto;
+}
+.app-shell:has(.rail-dock-bottom) > .railbar > .rail-icon-col.plugin-strip {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-4)));
+  height: 100%;
+  flex: none;
+  border-top: 0;
+  border-inline-start: 1px solid var(--surface-divider);
+  pointer-events: auto;
 }
 .rail-dock-bottom {
   border-top: 1px solid var(--surface-divider);

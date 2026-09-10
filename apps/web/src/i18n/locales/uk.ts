@@ -314,6 +314,8 @@ export const uk: AppMessages = {
   "contextrail.collapse": "Згорнути",
   "contextrail.collapseValue": "Згорнути {value}",
   "contextrail.dockBesideChat": "Закріпити поруч із чатом",
+  "contextrail.dockBelowChat": "Закріпити під чатом",
+  "contextrail.unpinWindow": "Відкріпити вікно",
   "contextrail.expand": "Розгорнути",
   "contextrail.expandValue": "Розгорнути {value}",
   "contextrail.message": "×",

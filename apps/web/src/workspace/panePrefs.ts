@@ -1,6 +1,6 @@
 // UX-PANE-MODEL: versioned, project-scoped workspace-pane persistence —
-// which workspace surface is open, its window mode, the preferred (not
-// geometry-clamped) dimensions per surface, and the last
+// which workspace surface is open, its window mode, the selected pinned edge,
+// the preferred (not geometry-clamped) dimensions per surface, and the last
 // provider resource per surface. Pure parse/serialize helpers are DOM-free so
 // node --test covers clamping, migration, and project isolation directly.
 //
@@ -65,6 +65,8 @@ export interface WorkspacePanePrefs {
   heights: Record<string, number>;
   /** Last provider resource per surface id (e.g. "file:src/app.ts"). */
   lastResource: Record<string, string>;
+  /** User-selected pinned edge per surface; absent entries use package default. */
+  dockEdges?: Record<string, "side" | "bottom">;
 }
 
 export const emptyWorkspacePanePrefs: WorkspacePanePrefs = {
@@ -135,6 +137,13 @@ export function parseWorkspacePanePrefs(raw: string | null): WorkspacePanePrefs 
         if (id && typeof r === "string" && r) lastResource[id] = r;
       }
     }
+    const dockEdges: Record<string, "side" | "bottom"> = {};
+    if (typeof data.dockEdges === "object" && data.dockEdges !== null) {
+      for (const [id, edge] of Object.entries(data.dockEdges).slice(0, MAX_ENTRIES)) {
+        if (!id || (edge !== "side" && edge !== "bottom")) continue;
+        dockEdges[id] = edge;
+      }
+    }
     const mode: PaneMode = data.version === 1
       ? (data.expanded === true ? "fullscreen" : "dynamic")
       : data.mode === "pinned" || data.mode === "fullscreen" ? data.mode : "dynamic";
@@ -147,6 +156,7 @@ export function parseWorkspacePanePrefs(raw: string | null): WorkspacePanePrefs 
       widths,
       heights,
       lastResource,
+      ...(Object.keys(dockEdges).length > 0 ? { dockEdges } : {}),
     };
   } catch {
     return emptyWorkspacePanePrefs;
@@ -209,6 +219,12 @@ export function setPersistedPaneMode(projectId: string, state: PaneWindowState):
   const prefs = read(projectId);
   if (prefs.mode === state.mode && prefs.previousMode === state.previousMode) return;
   write(projectId, { ...prefs, ...state });
+}
+
+export function setPaneDockEdge(projectId: string, surfaceId: string, edge: "side" | "bottom"): void {
+  const prefs = read(projectId);
+  if (prefs.dockEdges?.[surfaceId] === edge) return;
+  write(projectId, { ...prefs, dockEdges: { ...prefs.dockEdges, [surfaceId]: edge } });
 }
 
 /** Persist a PREFERRED width — callers must pass the user's chosen width, not

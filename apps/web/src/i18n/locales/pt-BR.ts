@@ -314,6 +314,8 @@ export const ptBR: AppMessages = {
   "contextrail.collapse": "Colapso",
   "contextrail.collapseValue": "Colapso {value}",
   "contextrail.dockBesideChat": "Cais ao lado do Chat",
+  "contextrail.dockBelowChat": "Encaixar abaixo do Chat",
+  "contextrail.unpinWindow": "Desencaixar janela",
   "contextrail.expand": "Expandir",
   "contextrail.expandValue": "Expandir {value}",
   "contextrail.message": "×",
