@@ -111,8 +111,9 @@ export class MarketUniverseService {
   }
 
   async screen(query: MarketScreenerQuery = {}): Promise<MarketScreenerPage> {
+    const normalized = normalizeScreenerQuery(query);
     const snapshot = await this.cache.get("us-common-stocks", POLICY, this.load);
-    const page = screenMarketUniverse(snapshot.value, query);
+    const page = screenMarketUniverse(snapshot.value, normalized);
     return {
       ...page,
       generatedAt: new Date(snapshot.updatedAt).toISOString(),
