@@ -11,6 +11,8 @@ const quote = (source: string) => ({
   freshness: "delayed" as const,
 });
 
+const notFound = (message: string): Error => Object.assign(new Error(message), { code: "not-found" });
+
 test("provider registry falls back and records health", async () => {
   const registry = new ProviderRegistry();
   registry.register({ id: "primary", quote: async () => { throw new Error("down"); } });
@@ -24,6 +26,31 @@ test("provider registry falls back and records health", async () => {
   assert.equal(health[0]?.failures, 1);
   assert.equal(health[0]?.capabilities[0]?.failures, 1);
   assert.equal(health[1]?.successes, 1);
+});
+
+test("provider data misses fall through without poisoning health", async () => {
+  const registry = new ProviderRegistry();
+  registry.register({ id: "primary", quote: async () => { throw notFound("unsupported symbol"); } });
+  registry.register({ id: "fallback", quote: async () => quote("fallback") });
+
+  const result = await registry.run("quote", (provider) => provider.quote!("^VIX", new AbortController().signal));
+  assert.equal(result.providerId, "fallback");
+  const primary = registry.healthSnapshot()[0];
+  assert.equal(primary?.failures, 0);
+  assert.equal(primary?.capabilities[0]?.failures, 0);
+  assert.equal(primary?.circuitOpenUntil, undefined);
+});
+
+test("all provider data misses preserve not-found semantics", async () => {
+  const registry = new ProviderRegistry();
+  registry.register({ id: "a", quote: async () => { throw notFound("unsupported"); } });
+  registry.register({ id: "b", quote: async () => { throw notFound("unknown symbol"); } });
+
+  await assert.rejects(
+    registry.run("quote", (provider) => provider.quote!("^VIX", new AbortController().signal)),
+    (cause: unknown) => (cause as { code?: string }).code === "not-found",
+  );
+  assert.deepEqual(registry.healthSnapshot().map((item) => item.failures), [0, 0]);
 });
 
 test("provider registry runs aggregate capabilities concurrently and keeps partial success", async () => {
