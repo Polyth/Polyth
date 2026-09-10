@@ -41,12 +41,14 @@ const invalid = (message: string): never => {
   throw Object.assign(new Error(message), { code: "invalid-input" });
 };
 
+export const calendarSymbolSupported = (symbol: string): boolean => US_SYMBOL.test(symbol.trim().toUpperCase());
+
 export function normalizeCalendarSymbols(symbols: readonly string[]): string[] {
   if (symbols.length < 1 || symbols.length > 100) invalid("earnings calendar requires 1-100 symbols");
-  const normalized = [...new Set(symbols.map((symbol) => symbol.trim().toUpperCase()).filter(Boolean))];
-  if (normalized.length < 1 || normalized.some((symbol) => !US_SYMBOL.test(symbol))) {
-    invalid("earnings calendar supports US symbols only");
-  }
+  const normalized = [...new Set(symbols
+    .map((symbol) => symbol.trim().toUpperCase())
+    .filter((symbol) => symbol && US_SYMBOL.test(symbol)))];
+  if (normalized.length < 1) invalid("earnings calendar has no supported US symbols");
   return normalized.sort((left, right) => left.localeCompare(right));
 }
 
