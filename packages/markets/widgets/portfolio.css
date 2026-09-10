@@ -1,0 +1,279 @@
+.markets-portfolio {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  color: var(--text);
+  font-size: var(--font-body);
+}
+
+.markets-portfolio-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.markets-portfolio-toolbar > div:first-child {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.markets-portfolio-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.markets-portfolio-toolbar > div:first-child > span,
+.markets-portfolio-add label > span {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.markets-portfolio-toolbar button,
+.markets-portfolio-add button,
+.markets-portfolio-remove {
+  min-height: max(var(--hit-min), var(--control-h-sm));
+  padding: 0 var(--control-pad-x-sm);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-label);
+  cursor: pointer;
+}
+
+.markets-portfolio-toolbar button:hover:not(:disabled),
+.markets-portfolio-add button:hover:not(:disabled),
+.markets-portfolio-remove:hover:not(:disabled) {
+  background: var(--surface-overlay-hover);
+  color: var(--text);
+}
+
+.markets-portfolio-toolbar button:disabled,
+.markets-portfolio-add button:disabled,
+.markets-portfolio-remove:disabled {
+  opacity: .5;
+  cursor: default;
+}
+
+.markets-portfolio-toolbar button:focus-visible,
+.markets-portfolio-add button:focus-visible,
+.markets-portfolio-remove:focus-visible,
+.markets-portfolio-table th button:focus-visible,
+.markets-portfolio-add input:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.markets-portfolio-add {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) minmax(90px, 0.7fr) minmax(100px, 0.8fr) auto;
+  align-items: end;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--hair);
+}
+
+.markets-portfolio-add label {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-1);
+}
+
+.markets-portfolio-add input {
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--control-h-sm);
+  padding: 0 var(--control-pad-x-sm);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
+  outline: none;
+  background: var(--input-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-input);
+}
+
+.markets-portfolio-add label:first-child input {
+  font-family: var(--mono);
+  text-transform: uppercase;
+}
+
+.markets-portfolio-status {
+  padding: var(--space-2) var(--space-3) 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.markets-portfolio-notice {
+  margin: var(--space-2) var(--space-3) 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--amber-wash);
+  color: var(--amber-on-wash);
+  font-size: var(--font-meta);
+}
+
+.markets-portfolio-body {
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+  padding: var(--space-3);
+}
+
+.markets-portfolio-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.markets-portfolio-summary > div {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--surface-overlay);
+}
+
+.markets-portfolio-summary span,
+.markets-portfolio-summary small {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.markets-portfolio-summary strong {
+  font-family: var(--mono);
+  font-size: var(--font-heading);
+  font-variant-numeric: tabular-nums;
+}
+
+.markets-portfolio-table-wrap {
+  overflow: auto;
+  min-height: 180px;
+}
+
+.markets-portfolio-table {
+  width: 100%;
+  min-width: 820px;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.markets-portfolio-table th,
+.markets-portfolio-table td {
+  padding: var(--space-3) var(--space-2);
+  border-bottom: 1px solid var(--hair);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.markets-portfolio-table thead th {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 500;
+}
+
+.markets-portfolio-table th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg);
+  text-align: left;
+}
+
+.markets-portfolio-table tbody th > button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-family: var(--mono);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.markets-portfolio-table tbody th small {
+  margin-left: var(--space-1);
+  color: var(--amber-on-wash);
+}
+
+.markets-portfolio-table td {
+  font-family: var(--mono);
+  font-size: var(--font-label);
+}
+
+.markets-portfolio-table td.positive {
+  color: var(--green-on-wash);
+}
+
+.markets-portfolio-table td.negative {
+  color: var(--red);
+}
+
+.markets-portfolio-remove {
+  min-width: max(var(--hit-min), var(--control-h-sm));
+  padding: 0;
+  border-color: transparent;
+}
+
+.markets-portfolio-empty {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+@container (max-width: 680px) {
+  .markets-portfolio-toolbar {
+    align-items: flex-start;
+  }
+
+  .markets-portfolio-toolbar-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .markets-portfolio-add {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .markets-portfolio-add button {
+    grid-column: 1 / -1;
+  }
+
+  .markets-portfolio-body {
+    padding-inline: var(--space-2);
+  }
+}
+
+@container (max-width: 440px) {
+  .markets-portfolio-toolbar {
+    flex-direction: column;
+  }
+
+  .markets-portfolio-toolbar > div:first-child > span {
+    max-width: 100%;
+  }
+
+  .markets-portfolio-toolbar-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .markets-portfolio-add {
+    grid-template-columns: 1fr;
+  }
+
+  .markets-portfolio-add button {
+    grid-column: auto;
+  }
+}

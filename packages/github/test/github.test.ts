@@ -538,3 +538,15 @@ test("addLabels enforces the risk/confidence policy before any gh call", async (
   assert.ok(good.ok);
   assert.equal(calls, 1);
 });
+
+
+test("shared search and state filters reach gh as literal arguments", async () => {
+  const calls: string[][] = [];
+  const svc = createGithubService({ exec: async (_bin, args) => { calls.push(args); return { stdout: "[]", stderr: "" }; } });
+  await svc.issues("/repo", 30, { state: "closed", search: "--label=bug $(no-shell)" });
+  await svc.prs("/repo", 30, { state: "merged", search: "fix pipeline" });
+  assert.ok(calls[0]?.includes("--state=closed"));
+  assert.ok(calls[0]?.includes("--search=--label=bug $(no-shell)"));
+  assert.ok(calls[1]?.includes("--state=merged"));
+  assert.ok(calls[1]?.includes("--search=fix pipeline"));
+});

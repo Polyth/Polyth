@@ -1,48 +1,99 @@
-import { Icon } from "./icons.tsx";
-import type { JSX } from "react";
+import { createElement, type JSX } from "react";
 import type { WidgetDef } from "./widgets/catalog.ts";
-
-/**
- * Canonical icon vocabulary for every built-in item that can appear in the
- * workspace rail. Keeping this mapping in one place makes accidental reuse
- * visible and gives capability-only launchers the same icon as their surface.
- */
-export const RAIL_ICONS = {
-  session: Icon.chat,
-  files: Icon.files,
-  git: Icon.tree,
-  terminal: Icon.term,
-  browser: Icon.globe,
-  goals: Icon.target,
-  multirun: Icon.compare,
-  workflow: Icon.hierarchy,
-  fusion: Icon.fuse,
-  walkthrough: Icon.select,
-  schedule: Icon.clock,
-  usage: Icon.usage,
-  github: Icon.github,
-  knowledge: Icon.book,
-  context: Icon.context,
-  voice: Icon.mic,
-  "models-agents": Icon.gear,
-  events: Icon.events,
-  diagnostics: Icon.shield,
-  tracks: Icon.plan,
-  "notification-centre": Icon.bell,
-} as const;
+import type { LucideIcon } from "./components/ui/icons.ts";
+import {
+  BellIcon,
+  BrainIcon,
+  BranchIcon,
+  ChartIcon,
+  ChatIcon,
+  CombineIcon,
+  CompassIcon,
+  CpuIcon,
+  DatabaseIcon,
+  DocsIcon,
+  FolderIcon,
+  GithubIcon,
+  GitlabIcon,
+  GlobeIcon,
+  HistoryIcon,
+  LayersIcon,
+  MicIcon,
+  PackageIcon,
+  QrCodeIcon,
+  RouteIcon,
+  ScheduleIcon,
+  SessionIcon,
+  ShieldIcon,
+  TargetIcon,
+  TasksIcon,
+  TerminalIcon,
+  UsageIcon,
+  WorkflowIcon,
+} from "./components/ui/icons.ts";
 
 export type RailIcon = () => JSX.Element;
 
-/** Extensions without an icon get a neutral plugin glyph, not Context's
- * semantic gauge. Extension authors should still provide a distinct icon. */
+const glyph = (Glyph: LucideIcon): RailIcon => () => createElement(Glyph, {
+  size: 15,
+  strokeWidth: 1.8,
+  "aria-hidden": true,
+});
+
+const AgentGlyph = glyph(SessionIcon);
+const EffortGlyph = glyph(BrainIcon);
+const WidgetFallbackGlyph = glyph(PackageIcon);
+
+/** Canonical monochrome icon vocabulary for built-in capabilities and package
+ * surfaces. Related sub-surfaces intentionally share their package identity. */
+export const RAIL_ICONS: Readonly<Record<string, RailIcon>> = {
+  session: glyph(ChatIcon),
+  files: glyph(FolderIcon),
+  git: glyph(BranchIcon),
+  terminal: glyph(TerminalIcon),
+  browser: glyph(GlobeIcon),
+  goals: glyph(TargetIcon),
+  multirun: glyph(LayersIcon),
+  workflow: glyph(WorkflowIcon),
+  fusion: glyph(CombineIcon),
+  walkthrough: glyph(RouteIcon),
+  schedule: glyph(ScheduleIcon),
+  usage: glyph(UsageIcon),
+  github: glyph(GithubIcon),
+  knowledge: glyph(DocsIcon),
+  context: glyph(DatabaseIcon),
+  voice: glyph(MicIcon),
+  "models-agents": glyph(CpuIcon),
+  events: glyph(HistoryIcon),
+  diagnostics: glyph(ShieldIcon),
+  tracks: glyph(TasksIcon),
+  "notification-centre": glyph(BellIcon),
+  gitlab: glyph(GitlabIcon),
+  "chat-workspace": glyph(ChatIcon),
+  markets: glyph(ChartIcon),
+  "markets.overview": glyph(ChartIcon),
+  "markets.technicals": glyph(ChartIcon),
+  "markets.calendar": glyph(ChartIcon),
+  "markets.screener": glyph(ChartIcon),
+  "markets.heatmap": glyph(ChartIcon),
+  "markets.compare": glyph(ChartIcon),
+  "markets.portfolio": glyph(ChartIcon),
+  "markets.earnings": glyph(ChartIcon),
+  "markets.filings": glyph(ChartIcon),
+  "polyth-link": glyph(QrCodeIcon),
+  "task-trackers": glyph(TasksIcon),
+  "personal-coach": glyph(CompassIcon),
+};
+
+/** Extensions without an icon get a neutral monochrome package glyph. */
 export function railIconFor(id: string): RailIcon {
-  return RAIL_ICONS[id as keyof typeof RAIL_ICONS] ?? Icon.puzzle;
+  return RAIL_ICONS[id] ?? WidgetFallbackGlyph;
 }
 
 /** Widget pickers use the same domain mark as panels and launchers. */
 export function widgetIconFor(widget: Pick<WidgetDef, "id" | "pluginId" | "capabilities">): RailIcon {
-  if (widget.id === "composer.agent") return Icon.session;
-  if (widget.id === "composer.effort") return Icon.brain;
+  if (widget.id === "composer.agent") return AgentGlyph;
+  if (widget.id === "composer.effort") return EffortGlyph;
   const candidates = [...(widget.capabilities ?? []), widget.id, widget.pluginId, widget.id.split(".")[0] ?? ""];
-  return candidates.map((id) => RAIL_ICONS[id as keyof typeof RAIL_ICONS]).find(Boolean) ?? Icon.widgets;
+  return candidates.map((id) => RAIL_ICONS[id]).find(Boolean) ?? WidgetFallbackGlyph;
 }

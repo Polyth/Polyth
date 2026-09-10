@@ -185,6 +185,30 @@ test("A1 A2 → B1 → A retains one canonical session, cwd and confirmed contex
   await f.close();
 });
 
+test("a submit-time harness intent switches once before admitting that message", async () => {
+  const f = fixture();
+  const { id } = await f.sessions.create({ projectId: "p" });
+  await f.sessions.send(id, { text: "first" });
+  f.engines.at(-1)!.complete();
+  await f.idle(id);
+
+  await f.sessions.send(id, {
+    text: "run on B",
+    harness: { mode: "pinned", harnessId: "fake-b" },
+  });
+
+  assert.equal(f.engines.at(-1)!.harnessId, "fake-b");
+  assert.equal(f.engines.at(-1)!.requests.at(-1)?.text.endsWith("run on B"), true);
+  const events = await f.store.events(id);
+  const switched = events.filter((event) => event.type === "harness/switched");
+  assert.equal(switched.length, 1);
+  assert.ok(switched[0]!.seq < events.findLast((event) => event.type === "user/message")!.seq);
+  assert.equal((await f.store.projection(id))?.resolvedHarnessId, "fake-b");
+  f.engines.at(-1)!.complete();
+  await f.idle(id);
+  await f.close();
+});
+
 test("active switch waits for completion; queued admission uses the new harness", async () => {
   const f = fixture(); const { id } = await f.sessions.create({ projectId: "p" });
   await f.sessions.send(id, { text: "working" });
@@ -331,6 +355,109 @@ test("crash after target creation before atomic route publication resumes its ex
   await f.sessions.send(id, { text: "One prompt" });
   assert.equal((await f.store.events(id)).filter((e) => e.type === "user/message").length, 1);
   f.engines.at(-1)!.complete(); await f.idle(id); await f.close(); await rm(dir, { recursive: true, force: true });
+});
+
+test("legacy authority-only release resumes after an idle session open advanced its generation", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "harness-legacy-release-"));
+  const f = fixture(join(dir, "events.db"));
+  const { id } = await f.sessions.create({ projectId: "p" });
+  const originalTransition = f.store.transitionRuntimeEpoch;
+  f.store.transitionRuntimeEpoch = async () => {
+    throw Object.assign(new Error("simulated old publication failure"), { code: "epoch-proof-required" });
+  };
+  await assert.rejects(
+    f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" }),
+    { code: "epoch-proof-required" },
+  );
+
+  const failed = (await f.store.projection(id))!;
+  assert.equal(failed.harnessTransition?.phase, "failed");
+  const released = failed.harnessTransition!.released;
+  const { backendSessionId: _legacyMissingField, ...legacyAuthorityProof } = released;
+  await f.store.upsertProjection({
+    ...failed,
+    status: "epoch-pending",
+    runtimeBinding: {
+      ...failed.runtimeBinding!,
+      generation: released.generation + 1,
+    },
+    harnessTransition: {
+      ...failed.harnessTransition!,
+      released: legacyAuthorityProof,
+    } as unknown as NonNullable<typeof failed.harnessTransition>,
+  });
+  await f.store.append(id, "harness/execution-released", {
+    transitionId: failed.harnessTransition!.id,
+    ...legacyAuthorityProof,
+  }, { ignorable: true });
+  f.store.transitionRuntimeEpoch = originalTransition;
+  await f.restart();
+
+  const enginesBeforeOpen = f.engines.length;
+  await f.sessions.events(id, 0);
+  assert.equal(
+    f.engines.length,
+    enginesBeforeOpen,
+    "opening a released transition must not reattach its source runtime",
+  );
+
+  const interruptedTransition = f.store.transitionRuntimeEpoch;
+  f.store.transitionRuntimeEpoch = async () => {
+    throw new Error("simulated crash after legacy proof upgrade");
+  };
+  await assert.rejects(
+    f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" }),
+    /simulated crash after legacy proof upgrade/,
+  );
+  const upgraded = (await f.store.projection(id))!;
+  assert.equal(upgraded.harnessTransition?.released.backendSessionId, released.backendSessionId);
+  assert.equal(upgraded.runtimeBinding?.generation, released.generation);
+  f.store.transitionRuntimeEpoch = interruptedTransition;
+  await f.restart();
+
+  const result = await f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" });
+  assert.equal(result.resolvedHarnessId, "fake-b");
+  assert.equal(result.harnessTransition, undefined);
+  assert.equal(f.nativeCreates.length, 2, "the confirmed target create must not be replayed");
+  assert.ok((await f.store.events(id)).some((event) =>
+    event.type === "harness/execution-released"
+    && event.data.recoveredLegacyProof === true
+    && event.data.backendSessionId === released.backendSessionId));
+  await f.close();
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("a missing session id without canonical legacy release evidence stays blocked", async () => {
+  const f = fixture();
+  const { id } = await f.sessions.create({ projectId: "p" });
+  const originalTransition = f.store.transitionRuntimeEpoch;
+  f.store.transitionRuntimeEpoch = async () => {
+    throw new Error("simulated publication failure");
+  };
+  await assert.rejects(
+    f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" }),
+    /simulated publication failure/,
+  );
+
+  const failed = (await f.store.projection(id))!;
+  const released = failed.harnessTransition!.released;
+  const { backendSessionId: _missingWithoutEvidence, ...malformedRelease } = released;
+  await f.store.upsertProjection({
+    ...failed,
+    harnessTransition: {
+      ...failed.harnessTransition!,
+      released: malformedRelease,
+    } as unknown as NonNullable<typeof failed.harnessTransition>,
+  });
+  f.store.transitionRuntimeEpoch = originalTransition;
+
+  const creates = f.nativeCreates.length;
+  await assert.rejects(
+    f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" }),
+    { code: "stale-evidence" },
+  );
+  assert.equal(f.nativeCreates.length, creates);
+  await f.close();
 });
 
 test("a failed target can be replaced after release without restoring old authority", async () => {

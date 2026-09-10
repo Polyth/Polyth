@@ -17,6 +17,7 @@
       "description": "Claude Code through its Agent SDK",
       "core": false,
       "enabled": true,
+      "icon": "assist",
       "hasSettings": false
     }
   },

@@ -19,14 +19,42 @@ test("composer and above-composer widgets sit directly on the workspace", () => 
   assert.doesNotMatch(css, /\.focus-conversation\s*\{[^}]*background:/s);
 });
 
-test("the conversation fills behind the glass composer without hiding its tail", () => {
+test("the conversation keeps the complete glass dock in flow and fresh-turn space inside the timeline", () => {
   const surface = read("../src/components/workspace/builtinSurfaces.tsx");
   const css = read("../src/styles.css");
 
-  assert.match(surface, /className="conversation-composer-dock"[\s\S]*slot="session\.composer\.before"[\s\S]*slot="session\.footer"[\s\S]*<Composer \/>/);
-  assert.match(surface, /new ResizeObserver\(publishHeight\)/);
-  assert.match(css, /\.conversation-composer-dock\s*\{[^}]*position:\s*absolute;[^}]*inset:\s*auto 0 0;/s);
-  assert.match(css, /\.focus-conversation:has\(> \.conversation-composer-dock\) \.timeline\s*\{[^}]*padding-bottom:\s*calc\(var\(--conversation-dock-height\)/s);
+  assert.match(surface, /className="conversation-composer-dock"[\s\S]*slot="session\.composer\.before"[\s\S]*slot="session\.footer"[\s\S]*spawning && <SessionSpawnStatus \/>[\s\S]*<Composer \/>/);
+  assert.doesNotMatch(surface, /composerDock|publishHeight|ResizeObserver/);
+  assert.match(css, /\.conversation-composer-dock\s*\{[^}]*position:\s*relative;[^}]*flex:\s*none;/s);
+  assert.doesNotMatch(css, /--conversation-dock-height|margin-block-end:\s*var\(--conversation-dock-height\)/);
+  assert.match(css, /padding-bottom:\s*calc\(var\(--conversation-group-gap\) \+ var\(--timeline-turn-sheet-space, 0px\)\)/);
+});
+
+test("new timeline surfaces animate without moving the measured row", () => {
+  const css = read("../src/styles.css");
+
+  assert.match(css, /\.timeline > \.timeline-row-enter:not\(\.activity-group\) > \*/);
+  assert.match(css, /animation:\s*timeline-surface-in var\(--motion-surface\) var\(--motion-ease\) both/);
+  assert.doesNotMatch(css, /\.timeline > \.timeline-row-enter,\s*\n/);
+});
+
+test("spawning is an above-composer activity status and never replaces the composer", () => {
+  const surface = read("../src/components/workspace/builtinSurfaces.tsx");
+  const composer = read("../src/components/Composer.tsx");
+
+  assert.match(surface, /function SessionSpawnStatus\(\)[\s\S]*spawningAgent[\s\S]*<AgentStatusDock/);
+  assert.match(surface, /ProviderLogo providerID=\{harnessId\}[\s\S]*model=\{harnessLabel\}/);
+  assert.doesNotMatch(composer, /if \(creatingSession\)\s*\{\s*return/);
+  assert.match(composer, /aria-busy=\{creatingSession \|\| undefined\}/);
+  assert.match(composer, /!session && !creatingSession && <SessionContextBar/);
+});
+
+test("agent status docks center their content with token spacing", () => {
+  const css = read("../src/styles.css");
+
+  assert.match(css, /\.agent-status-dock\s*\{[^}]*align-items:\s*center;[^}]*padding:\s*var\(--space-3\) var\(--space-4\)/s);
+  assert.match(css, /\.agent-status-dock-icon\s*\{[^}]*place-items:\s*center;[^}]*width:\s*var\(--icon-xl\)/s);
+  assert.doesNotMatch(css, /\.agent-status-dock-icon\s*\{[^}]*margin-block-start:/s);
 });
 
 test("composer radius uses the shared corner setting", () => {
@@ -47,6 +75,17 @@ test("conversation rows omit role chrome, keep assistant prose flat, and accent 
   assert.match(css, /\.msg\.assistant\s*\{\s*align-items:\s*flex-start;/);
   assert.match(css, /\.msg\.user \.bubble\s*\{[^}]*background:\s*var\(--bubble-user-bg\)/s);
   assert.match(css, /\.msg\.assistant > \.bubble\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent/s);
+});
+
+test("conversation code surfaces follow the configured glass material", () => {
+  const css = read("../src/styles.css");
+
+  assert.match(css, /\.msg \.bubble :is\(code, pre\)\s*\{[^}]*background:\s*var\(--material-glass-medium\)/s);
+  assert.match(
+    css,
+    /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\)[\s\S]*?\.msg \.bubble :is\(code, pre\)[\s\S]*?backdrop-filter:\s*blur\(var\(--material-glass-blur\)\)/s,
+  );
+  assert.match(css, /\.msg \.bubble pre code\s*\{[^}]*background:\s*transparent/s);
 });
 
 test("message actions use one lightweight copy control and local hover zones", () => {

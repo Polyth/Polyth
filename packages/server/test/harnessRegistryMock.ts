@@ -7,6 +7,20 @@ export function mockHarnessRegistry(...providers: HarnessProvider[]): HarnessReg
     providers: list,
     get: (id) => providers.find((provider) => provider.descriptor.id === id),
     probe: async () => [],
+    roster: async () => providers.map((provider) => ({
+      identity: {
+        id: provider.descriptor.id,
+        name: provider.descriptor.name,
+        integration: provider.descriptor.integration,
+      },
+      policy: {
+        enabled: true,
+        priority: provider.descriptor.priority,
+        autoSelect: provider.descriptor.autoSelect !== false,
+      },
+    })),
+    snapshots: async () => [],
+    invalidate: () => {},
     resolve: async (_context, selection) => {
       const id = selection.mode === "pinned" ? selection.harnessId : providers[0]?.descriptor.id;
       const provider = providers.find((row) => row.descriptor.id === id);

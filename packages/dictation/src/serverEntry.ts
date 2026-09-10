@@ -469,7 +469,11 @@ export function voiceRoutes(deps: {
 }
 
 export const DICTATION_REMOTE_ACCESS = {
-  ...localOnlyRemoteAccess(["dictation"]),
+  // The paired-device surface intentionally exposes only the rules below,
+  // but every exposed rule still has to belong to a declared route scope.
+  // Voice provider availability lives under /api/voice while the streaming
+  // session/token lifecycle lives under /api/dictation.
+  ...localOnlyRemoteAccess(["dictation", "voice"]),
   http: [
     { methods: ["GET"] as const, path: "/api/dictation/capability", capability: "dictation.use", mutation: false },
     { methods: ["POST"] as const, path: "/api/dictation/sessions", capability: "dictation.use", mutation: true, maxBodyBytes: 16 * 1024 },
@@ -628,10 +632,11 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         localModelInstalled: (id) => !!installedLocalModel(id),
         localRuntimeInstalled: () => !!installedLocalRuntime(),
         summarize: async (text) => {
-          const runtime = await host.runtimes.forProject("__default__");
+          const model = host.smallModel();
+          const runtime = await host.runtimes.forProject("__default__", undefined, model?.harnessId);
           return host.oneShot(runtime, {
             cwd: process.cwd(),
-            ...(host.smallModel() ? { model: host.smallModel()! } : {}),
+            ...(model ? { model } : {}),
             prompt: [
               "Summarize the following assistant reply for text-to-speech playback.",
               "Keep it under 3 sentences, plain prose, no markdown, no preamble.",

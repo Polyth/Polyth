@@ -95,6 +95,31 @@ test("ModuleView owns pin/fullscreen/close controls and preserves the full long 
   }
 });
 
+test("ModuleView renders the package-declared dock actions", async () => {
+  const calls: string[] = [];
+  const { container, unmount } = await mount(ModuleView, {
+    id: "terminal", title: "Terminal",
+    dockActions: [
+      { edge: "bottom", label: "Dock below Chat", selected: true, onClick: () => calls.push("bottom") },
+      { edge: "side", label: "Dock beside Chat", selected: false, onClick: () => calls.push("side") },
+    ],
+    onTogglePin: () => calls.push("generic-pin"),
+    onClose: () => calls.push("close"),
+  });
+  try {
+    const buttons = [...container.querySelectorAll<HTMLButtonElement>(".module-view-head button")];
+    assert.deepEqual(buttons.map((button) => button.getAttribute("aria-label")), [
+      "Dock below Chat", "Dock beside Chat", "Close panel",
+    ]);
+    assert.equal(buttons[0]?.getAttribute("aria-pressed"), "true");
+    assert.equal(buttons[1]?.getAttribute("aria-pressed"), "false");
+    buttons.forEach((button) => button.click());
+    assert.deepEqual(calls, ["bottom", "side", "close"]);
+  } finally {
+    await unmount();
+  }
+});
+
 test("WorkspaceHost wraps every non-session surface in ModuleView, and never the session", async () => {
   const offs: Array<() => void> = [];
   setActiveView("session");

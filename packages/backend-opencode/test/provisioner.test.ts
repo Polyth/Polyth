@@ -130,7 +130,7 @@ test("OpenCode writes Polyth-owned skills with valid V1 identifiers in Space sto
   assert.equal(existsSync(join(cwd, ".opencode", "skills", "user-skill", "SKILL.md")), true);
   assert.equal(existsSync(join(cwd, ".opencode", "skills", "polyth--example-feature-docs")), false);
   const overlay = peekOpenCodeLaunchOverlay({ cwd, spaceId: space.spaceId, projectId: "p" });
-  const parsed = JSON.parse(overlay!.configContent) as { skills?: { paths?: string[] } };
+  const parsed = JSON.parse(readFileSync(overlay!.configPath!, "utf8")) as { skills?: { paths?: string[] } };
   const skillRoot = parsed.skills?.paths?.[0];
   assert.ok(skillRoot);
   assert.equal(existsSync(join(skillRoot, skillId, ".polyth-owned")), true);
@@ -176,7 +176,7 @@ test("OpenCode skills stay inside Space storage and do not leak across Spaces", 
     { mcpSecrets: () => ({}) },
   );
   const overlayA = peekOpenCodeLaunchOverlay({ cwd, spaceId: "a", projectId: "p" });
-  const rootA = (JSON.parse(overlayA!.configContent) as { skills?: { paths?: string[] } }).skills?.paths?.[0];
+  const rootA = (JSON.parse(readFileSync(overlayA!.configPath!, "utf8")) as { skills?: { paths?: string[] } }).skills?.paths?.[0];
   assert.ok(rootA);
   assert.equal(existsSync(join(rootA, "polyth-example-feature-docs", ".polyth-owned")), true);
   assert.equal(existsSync(join(spaceB.storageDir, "runtime", "opencode")), false);

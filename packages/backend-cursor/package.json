@@ -17,6 +17,7 @@
       "description": "Cursor through shared ACP",
       "core": false,
       "enabled": true,
+      "icon": "pointer",
       "hasSettings": false
     }
   }

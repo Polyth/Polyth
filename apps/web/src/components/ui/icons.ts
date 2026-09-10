@@ -94,6 +94,8 @@ export {
   Lock as LockIcon,
   Unlock as UnlockIcon,
   PanelLeft as SidebarIcon,
+  PanelRight as DockSideIcon,
+  PanelBottom as DockBottomIcon,
   Maximize2 as ExpandIcon,
   Minimize2 as CollapseIcon,
   ZoomIn as ZoomInIcon,
@@ -128,6 +130,30 @@ export {
   Server as ServerIcon,
   Database as DatabaseIcon,
   Loader as LoaderIcon,
+  // package identity glyphs; all monochrome Lucide SVGs
+  ArrowLeftRight as HandoffIcon,
+  BrainCircuit as BrainIcon,
+  ChartLine as ChartIcon,
+  ChartPie as UsageIcon,
+  Code as CodeIcon,
+  Combine as CombineIcon,
+  Command as CommandIcon,
+  Compass as CompassIcon,
+  Cpu as CpuIcon,
+  FileInput as FileInputIcon,
+  FlaskConical as FlaskIcon,
+  // lucide-react does not export these brand marks. Keep semantic aliases backed
+  // by the closest distinct git workflow glyphs that the package does export.
+  GitFork as GithubIcon,
+  GitMerge as GitlabIcon,
+  History as HistoryIcon,
+  Keyboard as KeyboardIcon,
+  ListChecks as TasksIcon,
+  MousePointer as PointerIcon,
+  Network as NetworkIcon,
+  Palette as PaletteIcon,
+  QrCode as QrCodeIcon,
+  Route as RouteIcon,
 } from "lucide-react";
 
 export type { LucideIcon } from "lucide-react";

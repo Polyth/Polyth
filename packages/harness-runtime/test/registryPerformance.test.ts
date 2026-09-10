@@ -43,6 +43,19 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+test("picker roster is process-free and still applies Space policy", async () => {
+  const counters = { probes: 0, discovers: 0 };
+  const registry = createHarnessRegistry();
+  registry.register(provider(counters));
+  registry.configurePolicy(async () => ({ fast: { enabled: false, priority: 7 } }));
+
+  assert.deepEqual(await registry.roster(context), [{
+    identity: { id: "fast", name: "Fast", integration: "test" },
+    policy: { enabled: false, priority: 7, autoSelect: true },
+  }]);
+  assert.deepEqual(counters, { probes: 0, discovers: 0 });
+});
+
 test("resolve reuses a fresh detailed snapshot without probe/discover", async () => {
   const counters = { probes: 0, discovers: 0 };
   const registry = createHarnessRegistry();

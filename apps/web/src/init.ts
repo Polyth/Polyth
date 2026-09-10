@@ -1301,6 +1301,8 @@ export interface SendOptions {
   command?: { id: string; args?: string };
   /** Captured reliability namespace for async create-then-send flows. */
   reliabilityScope?: PersistenceScope;
+  /** Browser-staged harness route, committed only with this submission. */
+  harness?: HarnessSelection;
 }
 
 /** Returns true when the server accepted the message (callers that persist
@@ -1322,6 +1324,8 @@ export async function sendMessage(text: string, model?: JsonObject, agent?: stri
       text, model, agent, ...(autoTitle ? { autoTitle: true } : {}),
       ...(opts?.command ? { command: opts.command } : {}),
       ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
+      ...(opts?.harness ? { harness: opts.harness } : {}),
+      ...(opts?.delivery ? { delivery: opts.delivery } : {}),
       ...(opts?.dismissPending ? { dismissPending: true } : {}),
       // Explicit null must reach the wire (it clears the stored profile);
       // only an omitted field means "inherit".

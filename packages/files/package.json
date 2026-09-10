@@ -16,6 +16,7 @@
       "description": "Workspace file access and attachments.",
       "core": true,
       "enabled": true,
+      "icon": "files",
       "hasSettings": false
     }
   },

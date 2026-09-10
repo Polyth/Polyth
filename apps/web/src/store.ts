@@ -95,6 +95,8 @@ export interface SessionSpawn {
   requestId: number;
   projectId: string;
   sessionId: string | null;
+  harnessId?: string;
+  harnessName?: string;
 }
 
 // A new chat is intentionally not a session yet, so keep its work locally
@@ -952,9 +954,20 @@ export function startNewSession(
 
 let nextSessionSpawnRequestId = 0;
 
-export function beginSessionSpawn(projectId: string): number {
+export function beginSessionSpawn(
+  projectId: string,
+  harness?: Pick<SessionSpawn, "harnessId" | "harnessName">,
+): number {
   const requestId = ++nextSessionSpawnRequestId;
-  set({ sessionSpawn: { requestId, projectId, sessionId: null } });
+  set({
+    sessionSpawn: {
+      requestId,
+      projectId,
+      sessionId: null,
+      ...(harness?.harnessId ? { harnessId: harness.harnessId } : {}),
+      ...(harness?.harnessName ? { harnessName: harness.harnessName } : {}),
+    },
+  });
   return requestId;
 }
 

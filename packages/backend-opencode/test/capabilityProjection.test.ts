@@ -43,7 +43,7 @@ const applier = (behavior: string[]): BackendConfigApplier => ({
 
 const secrets = { mcpSecrets: () => ({}) };
 
-test("OpenCode prompt-projects canonical instructions, skills and context without vendor text config", async (t) => {
+test("OpenCode projects instructions/context as text and discovers skills natively", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "polyth-opencode-capability-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const context = contextAt(root);
@@ -72,22 +72,23 @@ test("OpenCode prompt-projects canonical instructions, skills and context withou
   assert.equal(result.records.find((row) => row.capabilityId === "fixture.global")?.status, "pending");
   assert.equal(result.records.find((row) => row.capabilityId === "fixture.project-instruction")?.status, "pending");
   assert.equal(result.records.find((row) => row.capabilityId === "fixture.skill")?.status, "pending");
-  assert.equal(result.records.find((row) => row.capabilityId === "fixture.skill")?.mode, "prompt");
+  assert.equal(result.records.find((row) => row.capabilityId === "fixture.skill")?.mode, "filesystem");
   assert.equal(result.records.find((row) => row.capabilityId === "fixture.project-context")?.status, "pending");
   assert.equal(result.records.find((row) => row.capabilityId === "fixture.session-instruction")?.status, "unsupported");
 
   const overlay = peekOpenCodeLaunchOverlay(context);
   assert.ok(overlay);
   assert.equal(overlay.configContent, "");
-  assert.deepEqual(overlay.capabilityIds, [], "prompt capabilities are not spawn receipts");
+  assert.deepEqual(overlay.capabilityIds, ["fixture.skill"]);
+  assert.ok(overlay.configPath);
   assert.ok(overlay.prompt);
   assert.deepEqual(
     new Set(overlay.prompt.capabilityIds),
-    new Set(["fixture.global", "fixture.project-instruction", "fixture.skill", "fixture.project-context"]),
+    new Set(["fixture.global", "fixture.project-instruction", "fixture.project-context"]),
   );
   assert.match(overlay.prompt.text, /Global behavior/);
   assert.match(overlay.prompt.text, /Project instruction/);
-  assert.match(overlay.prompt.text, /## Skill: Review[\s\S]*Check invariants before changing code\./);
+  assert.doesNotMatch(overlay.prompt.text, /Check invariants before changing code/);
   assert.match(overlay.prompt.text, /## Context: Project facts[\s\S]*Project context/);
   assert.doesNotMatch(overlay.prompt.text, /Session only/);
 });
@@ -180,8 +181,8 @@ test("OpenCode portable text scope is explicit: project and wider are prompt-pro
       instructions: "Review",
     });
     const skillItem = planHarnessCapabilities("opencode", [skill], support, context).items[0];
-    assert.equal(skillItem?.mode, "prompt");
-    assert.equal(skillItem?.mutability, "immediate");
+    assert.equal(skillItem?.mode, "filesystem");
+    assert.equal(skillItem?.mutability, "requires-restart");
 
     const session = descriptor({ id: "fixture.context-session", kind: "context", scope: "session", title: "session", text: "session" });
     assert.equal(planHarnessCapabilities("opencode", [session], support, context).items[0]?.mode, "unsupported");

@@ -10,7 +10,7 @@ export default defineWebPackage((host) => () => {
       packageId: "dictation",
       label: "Voice",
       group: "Workspace",
-      icon: "🎤",
+      icon: "mic",
       order: 30,
       component: VoicePage,
     }),

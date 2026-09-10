@@ -12,6 +12,9 @@ export interface SharedRuntimeOccupancy {
   /** False when the owner is no longer accepting execution accounting. */
   beginExecution(sessionId: string): boolean;
   endExecution(sessionId: string): void;
+  /** Atomically own/release a temporary binding for a utility execution. */
+  beginTransientExecution(sessionId: string): boolean;
+  endTransientExecution(sessionId: string): void;
 }
 
 export interface KeyedRuntimeRecord<T> {
@@ -90,6 +93,16 @@ export function createSharedRuntimeOccupancy(key: string, accepting = true): Sha
     },
     endExecution(sessionId) {
       executions.delete(sessionId);
+    },
+    beginTransientExecution(sessionId) {
+      if (!open) return false;
+      bindings.add(sessionId);
+      executions.add(sessionId);
+      return true;
+    },
+    endTransientExecution(sessionId) {
+      executions.delete(sessionId);
+      bindings.delete(sessionId);
     },
     setAccepting(value) {
       open = value;

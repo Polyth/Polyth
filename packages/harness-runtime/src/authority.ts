@@ -1,24 +1,206 @@
-import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import { accessSync, constants, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Duplex } from "node:stream";
 import type { ExecutionReleaseProof, MutationOutcome, RuntimeSessionBinding } from "@polyth/contracts";
-type Proof = {
+export type ProcessAuthorityProof = {
     authorityId: string;
     generation: number;
 };
-type State = Proof & {
+type State = ProcessAuthorityProof & {
     pid?: number;
     startTime?: string;
     receiptFile?: string;
     released?: boolean;
-    releasedAuthorities: Proof[];
+    releasedAuthorities: ProcessAuthorityProof[];
     receipts: Record<string, string>;
+    containment?: ProcessContainment;
 };
+
+export type ProcessContainment = {
+    kind: "systemd-user-scope";
+    unit: string;
+    bootId: string;
+};
+
+export interface ProcessContainmentController {
+    create(proof: ProcessAuthorityProof): ProcessContainment;
+    launch(
+        containment: ProcessContainment,
+        command: string,
+        args: readonly string[],
+    ): { command: string; args: string[] };
+    release(containment: ProcessContainment): Promise<boolean>;
+}
+
+export interface ProcessAuthorityOptions {
+    /** Test/embedding seam. `false` preserves the receipt-only legacy mode. */
+    containment?: ProcessContainmentController | false;
+}
+
 const unknown = (message: string) => Object.assign(new Error(message), { code: "outcome-unknown" });
 const unavailable = (message: string) => Object.assign(new Error(message), { code: "unavailable" });
+const SYSTEMD_SCOPE_RE = /^polyth-runtime-[a-f0-9]{24}-[1-9][0-9]*\.scope$/;
+const BOOT_ID_RE = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
+const systemdScopeUnit = (proof: ProcessAuthorityProof): string | undefined => {
+    if (
+        typeof proof.authorityId !== "string"
+        || !Number.isSafeInteger(proof.generation)
+        || proof.generation <= 0
+    ) {
+        return undefined;
+    }
+    const authority = createHash("sha256").update(proof.authorityId).digest("hex").slice(0, 24);
+    return `polyth-runtime-${authority}-${proof.generation}.scope`;
+};
+const currentBootId = () => {
+    try {
+        return readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+    }
+    catch {
+        return "";
+    }
+};
+const executableOnPath = (name: string) => {
+    for (const directory of (process.env.PATH ?? "").split(delimiter)) {
+        if (!directory)
+            continue;
+        const candidate = join(directory, name);
+        try {
+            accessSync(candidate, constants.X_OK);
+            return candidate;
+        }
+        catch { /* continue */ }
+    }
+    return undefined;
+};
+const command = (
+    executable: string,
+    args: readonly string[],
+    timeoutMs = 2_000,
+): Promise<{ code: number | null; stdout: string }> => new Promise((resolveCommand, rejectCommand) => {
+    const child = spawn(executable, [...args], { stdio: ["ignore", "pipe", "ignore"] });
+    let stdout = "";
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (error?: Error, code: number | null = null) => {
+        if (settled)
+            return;
+        settled = true;
+        if (timer)
+            clearTimeout(timer);
+        if (error)
+            rejectCommand(error);
+        else
+            resolveCommand({ code, stdout });
+    };
+    child.stdout?.on("data", chunk => {
+        if (stdout.length < 16_384)
+            stdout += String(chunk).slice(0, 16_384 - stdout.length);
+    });
+    child.once("error", error => finish(error));
+    child.once("exit", code => finish(undefined, code));
+    timer = setTimeout(() => {
+        child.kill("SIGKILL");
+        finish(new Error(`process containment command timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+});
+
+let detectedContainment: ProcessContainmentController | null | undefined;
+const systemdContainment = (): ProcessContainmentController | undefined => {
+    if (detectedContainment !== undefined)
+        return detectedContainment ?? undefined;
+    const systemdRun = executableOnPath("systemd-run");
+    const systemctl = executableOnPath("systemctl");
+    if (!systemdRun || !systemctl) {
+        detectedContainment = null;
+        return undefined;
+    }
+    const probe = spawnSync(systemctl, ["--user", "show-environment"], {
+        stdio: "ignore",
+        timeout: 1_000,
+    });
+    if (probe.status !== 0) {
+        detectedContainment = null;
+        return undefined;
+    }
+    if (!BOOT_ID_RE.test(currentBootId())) {
+        detectedContainment = null;
+        return undefined;
+    }
+    const inspect = async (unit: string) => {
+        const result = await command(systemctl, [
+            "--user",
+            "show",
+            unit,
+            "--property=LoadState",
+            "--property=ActiveState",
+        ], 1_000);
+        if (result.code !== 0)
+            return undefined;
+        return Object.fromEntries(result.stdout.trim().split("\n").map(line => {
+            const equals = line.indexOf("=");
+            return equals < 0 ? [line, ""] : [line.slice(0, equals), line.slice(equals + 1)];
+        }));
+    };
+    detectedContainment = {
+        create(proof) {
+            const unit = systemdScopeUnit(proof);
+            if (!unit)
+                throw unavailable("Process authority cannot form a containment identity");
+            return {
+                kind: "systemd-user-scope",
+                unit,
+                bootId: currentBootId(),
+            };
+        },
+        launch(containment, executable, args) {
+            return {
+                command: systemdRun,
+                args: [
+                    "--user",
+                    "--scope",
+                    `--unit=${containment.unit}`,
+                    "--quiet",
+                    "--collect",
+                    executable,
+                    ...args,
+                ],
+            };
+        },
+        async release(containment) {
+            if (!SYSTEMD_SCOPE_RE.test(containment.unit))
+                return false;
+            let state = await inspect(containment.unit);
+            if (!state)
+                return false;
+            if (state.LoadState === "not-found"
+                || state.ActiveState === "inactive"
+                || state.ActiveState === "failed")
+                return true;
+            await command(systemctl, [
+                "--user",
+                "kill",
+                "--kill-who=all",
+                "--signal=SIGKILL",
+                containment.unit,
+            ]).catch(() => undefined);
+            const deadline = Date.now() + 5_000;
+            while (Date.now() < deadline) {
+                state = await inspect(containment.unit);
+                if (state && (state.LoadState === "not-found"
+                    || state.ActiveState === "inactive"
+                    || state.ActiveState === "failed"))
+                    return true;
+                await new Promise(resolveWait => setTimeout(resolveWait, 20));
+            }
+            return false;
+        },
+    };
+    return detectedContainment;
+};
 const supervisorExecutable = () => {
     const target = `linux-${process.arch}`;
     const resources = process.env.POLYTH_RESOURCES_DIR;
@@ -73,7 +255,7 @@ const confirmed = (state: State) => {
     if (!state.receiptFile)
         return false;
     try {
-        const proof = JSON.parse(readFileSync(state.receiptFile, "utf8")) as Proof;
+        const proof = JSON.parse(readFileSync(state.receiptFile, "utf8")) as ProcessAuthorityProof;
         return proof.authorityId === state.authorityId && proof.generation === state.generation;
     }
     catch (error) {
@@ -84,20 +266,71 @@ const confirmed = (state: State) => {
         throw error;
     }
 };
-async function release(state: State) {
+const writeReleaseReceipt = (state: State, stateFile?: string) => {
+    if (!state.receiptFile)
+        throw unknown("Process containment released without a durable receipt path");
+    if (
+        stateFile
+        && state.receiptFile !== `${stateFile}.${state.authorityId}.${state.generation}.released`
+    ) {
+        throw unknown("Process containment receipt path does not match its authority");
+    }
+    const temp = `${state.receiptFile}.${randomUUID()}.tmp`;
+    writeFileSync(temp, JSON.stringify({
+        authorityId: state.authorityId,
+        generation: state.generation,
+    }), { mode: 0o600 });
+    renameSync(temp, state.receiptFile);
+};
+const recoverContained = async (
+    state: State,
+    controller: ProcessContainmentController | undefined,
+    stateFile?: string,
+) => {
+    const containment = state.containment;
+    const expectedUnit = systemdScopeUnit(state);
+    if (!containment)
+        return false;
+    if (containment.kind !== "systemd-user-scope"
+        || !SYSTEMD_SCOPE_RE.test(containment.unit)
+        || containment.unit !== expectedUnit
+        || typeof containment.bootId !== "string"
+        || !BOOT_ID_RE.test(containment.bootId))
+        return false;
+    const bootId = currentBootId();
+    if (BOOT_ID_RE.test(bootId) && bootId !== containment.bootId) {
+        writeReleaseReceipt(state, stateFile);
+        return true;
+    }
+    if (!controller || !await controller.release(containment))
+        return false;
+    writeReleaseReceipt(state, stateFile);
+    return true;
+};
+async function release(
+    state: State,
+    controller: ProcessContainmentController | undefined,
+    stateFile?: string,
+) {
     if (!state.pid || state.released || confirmed(state))
         return;
-    if (!state.receiptFile || !state.startTime || identity(state.pid) !== state.startTime)
+    if (!state.receiptFile || !state.startTime || identity(state.pid) !== state.startTime) {
+        if (await recoverContained(state, controller, stateFile))
+            return;
         throw unknown("Previous executor has no verified release receipt");
+    }
     let signalled = false;
     for (let i = 0; i < 250; i++) {
         if (confirmed(state))
             return;
         const ready = confirmed({ ...state, receiptFile: state.receiptFile + ".ready" });
-        if (identity(state.pid) !== state.startTime)
+        if (identity(state.pid) !== state.startTime) {
+            if (await recoverContained(state, controller, stateFile))
+                return;
             throw unknown(ready
                 ? "Executor exited without a release receipt"
                 : "Polyth runtime supervisor exited before ready");
+        }
         if (!signalled && ready) {
             try {
                 process.kill(state.pid, "SIGTERM");
@@ -112,6 +345,8 @@ async function release(state: State) {
         }
         await new Promise(r => setTimeout(r, 20));
     }
+    if (await recoverContained(state, controller, stateFile))
+        return;
     throw unknown("Executor descendants have not confirmed shutdown");
 }
 
@@ -158,7 +393,7 @@ export async function releaseProcessExecution(
         // session before crashing. Provider state keys are exact to the
         // canonical session/workspace, so no unrelated authority is touched.
         if (!state.released) {
-            await release(state);
+            await release(state, systemdContainment(), file);
             state.released = true;
             const temp = `${file}.${randomUUID()}.tmp`;
             writeFileSync(temp, JSON.stringify(state), { mode: 0o600 });
@@ -183,7 +418,12 @@ export async function releaseProcessExecution(
 }
 /** Shared lifecycle only, not another execution API. Both SDK custom spawns
  * and stdio transports use the same durable, Linux-owned process authority. */
-export async function createProcessAuthority(file?: string, stable = false, proof?: Proof) {
+export async function createProcessAuthority(
+    file?: string,
+    stable = false,
+    proof?: ProcessAuthorityProof,
+    options: ProcessAuthorityOptions = {},
+) {
     if (process.platform !== "linux")
         throw Object.assign(new Error("Execution supervision currently requires Linux"), { code: "unsupported" });
     let prior: State | undefined;
@@ -197,9 +437,14 @@ export async function createProcessAuthority(file?: string, stable = false, proo
             }).code !== "ENOENT")
                 throw error;
         }
+    const controller = options.containment === false
+        ? undefined
+        : options.containment ?? systemdContainment();
     if (prior)
-        await release(prior);
+        await release(prior, controller, file);
     const state: State = { authorityId: stable && prior ? prior.authorityId : randomUUID(), generation: (prior?.generation ?? 0) + 1, ...proof, receipts: prior?.receipts ?? {}, releasedAuthorities: [...(prior?.releasedAuthorities ?? []), ...(prior ? [{ authorityId: prior.authorityId, generation: prior.generation }] : [])] };
+    if (controller)
+        state.containment = controller.create(state);
     state.receiptFile = file ? `${file}.${state.authorityId}.${state.generation}.released` : join(tmpdir(), `polyth-authority-${state.authorityId}.released`);
     mkdirSync(dirname(state.receiptFile), { recursive: true });
     let child: ChildProcess | undefined;
@@ -216,7 +461,11 @@ export async function createProcessAuthority(file?: string, stable = false, proo
             // SDK cancellation may kill the native process, but must not SIGKILL the
             // supervisor before it has proved descendants stopped. close() owns it.
             const { signal: _signal, shell: _shell, ...spawnOptions } = options;
-            child = spawn(binary, [state.receiptFile!, proof, command, ...args], { ...spawnOptions, shell: false, detached: true, stdio: ["pipe", "pipe", "pipe", "pipe"] });
+            const supervisorArgs = [state.receiptFile!, proof, command, ...args];
+            const launch = state.containment && controller
+                ? controller.launch(state.containment, binary, supervisorArgs)
+                : { command: binary, args: supervisorArgs };
+            child = spawn(launch.command, launch.args, { ...spawnOptions, shell: false, detached: true, stdio: ["pipe", "pipe", "pipe", "pipe"] });
             const gate = child.stdio[3] as Duplex;
             const failGate = (): void => {
                 // The proof gate is part of ownership publication. If it
@@ -239,6 +488,6 @@ export async function createProcessAuthority(file?: string, stable = false, proo
             return child;
         },
         async receipt(operationId: string, nativeId: string) { state.receipts[operationId] = nativeId; persist(); },
-        async close() { await release(state); state.released = true; persist(); },
+        async close() { await release(state, controller, file); state.released = true; persist(); },
     };
 }

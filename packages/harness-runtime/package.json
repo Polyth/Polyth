@@ -21,6 +21,7 @@
       "description": "Choose the execution engine for a canonical session",
       "core": true,
       "enabled": true,
+      "icon": "cpu",
       "hasSettings": true,
       "settingsGroup": "Engineering"
     },

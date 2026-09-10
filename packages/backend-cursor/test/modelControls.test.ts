@@ -4,11 +4,15 @@
 // faked — the tests pin the contract, not the local sign-in state.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readdir, readFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import type { HarnessProbe } from "@polyth/contracts";
 import { acpModelDescriptors, parseSessionConfig } from "@polyth/backend-acp";
+import registerCursorPackage from "../src/serverEntry.ts";
+import { createHarnessRegistry } from "@polyth/harness-runtime";
+import { serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { discoverAcpModels, invalidateAcpDiscovery } from "../../backend-acp/src/discovery.ts";
 import { createAcpRuntime } from "../../backend-acp/src/index.ts";
 import { fakeRpc } from "../../harness-runtime/test/rpcPeer.ts";
@@ -176,4 +180,70 @@ test("the Cursor profile never reaches for the flag that the CLI ignores", async
         // into the prompt would be a fake control.
         assert.doesNotMatch(body, /acp["'\s,\]]+.*--model|\/model /);
     }
+});
+
+test("Cursor discovery uses the direct catalog and preserves per-model reasoning", { skip: process.platform !== "linux" }, async (t) => {
+    invalidateAcpDiscovery();
+    const dir = await mkdtemp(join(tmpdir(), "polyth-cursor-discovery-"));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    const log = join(dir, "calls.log");
+    const agent = join(dir, "agent");
+    await writeFile(agent, `#!${process.execPath}
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ startup: args }) + "\\n");
+if (args[0] === "--version") { process.stdout.write("2026.09.02\\n"); process.exit(0); }
+require("node:readline").createInterface({ input: process.stdin }).on("line", line => {
+  const request = JSON.parse(line);
+    fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ method: request.method, params: request.params }) + "\\n");
+    let result = {};
+    if (request.method === "initialize") result = { protocolVersion: 1 };
+    if (request.method === "cursor/list_available_models") result = { models: [
+      { value: "fast", name: "Fast", configOptions: [] },
+      { value: "deep", name: "Deep", configOptions: [{ id: "reasoning", category: "thought_level", type: "select", currentValue: "medium", options: [
+        { value: "low", name: "Low" }, { value: "medium", name: "Medium" }, { value: "high", name: "High" },
+      ] }] },
+    ] };
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) + "\\n");
+});
+`, { mode: 0o755 });
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${dir}:${previousPath ?? ""}`;
+    t.after(() => { if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath; });
+
+    const registry = createHarnessRegistry();
+    const host = {
+        services: { require<T>(key: { id: string }): T {
+            assert.equal(key.id, serverServiceKey("harnesses").id);
+            return registry as T;
+        } },
+    } as unknown as ServerPackageHost;
+    const pkg = registerCursorPackage(host);
+    pkg.onEnable?.();
+    t.after(() => pkg.onDisable?.());
+    const provider = registry.get("cursor");
+    assert.ok(provider);
+    const discoveryContext = { spaceId: "s", projectId: "p", cwd: dir };
+    const first = await provider.discover!(discoveryContext);
+    assert.equal(first.state, "ready", first.state === "degraded" ? first.message : undefined);
+    assert.deepEqual(first.state === "ready" ? first.catalog.models.map((model) => model.modelID) : [], [
+        "fast", "deep",
+    ]);
+    assert.deepEqual(first.state === "ready" ? first.catalog.models.map((model) => model.variants) : [], [
+        undefined, ["low", "medium", "high"],
+    ]);
+    const before = (await readFile(log, "utf8")).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    await provider.discover!(discoveryContext);
+    const after = (await readFile(log, "utf8")).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    assert.deepEqual(after.filter((entry) => entry.method).map((entry) => entry.method), ["initialize", "cursor/list_available_models"]);
+    assert.equal(after.find((entry) => entry.method === "initialize")?.params?.clientCapabilities?._meta?.parameterizedModelPicker, true);
+    assert.equal(after.filter((entry) => entry.startup?.[0] === "acp").length, 1);
+    assert.equal(after.length - before.length, 0, "the warm discovery reuses both catalog and adjacent availability probe");
+    await registry.snapshots(discoveryContext, { harnessId: "cursor", force: true });
+    await registry.snapshots(discoveryContext, { harnessId: "cursor", detail: true });
+    const refreshed = (await readFile(log, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    assert.equal(refreshed.filter((entry) => entry.startup?.[0] === "acp").length, 2,
+        "explicit refresh bypasses the provider's internal discovery cache");
+    assert.deepEqual(refreshed.filter((entry) => entry.method).map((entry) => entry.method),
+        ["initialize", "cursor/list_available_models", "initialize", "cursor/list_available_models"]);
 });

@@ -17,7 +17,7 @@
       "core": false,
       "enabled": true,
       "settingsGroup": "Customize",
-      "icon": "🧩",
+      "icon": "plugin",
       "hasSettings": true
     }
   },

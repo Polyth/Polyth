@@ -1,4 +1,11 @@
-export { createProcessAuthority, releaseProcessExecution } from "./authority.ts";
+export {
+    createProcessAuthority,
+    releaseProcessExecution,
+    type ProcessAuthorityOptions,
+    type ProcessAuthorityProof,
+    type ProcessContainment,
+    type ProcessContainmentController,
+} from "./authority.ts";
 export { createStdioRpc, type RpcPeer } from "./rpc.ts";
 export {
   acknowledgeCapabilityApplication,
@@ -57,6 +64,7 @@ import type {
     HarnessProbe,
     HarnessProvider,
     HarnessRegistry,
+    HarnessRosterItem,
     HarnessSelection,
     HarnessSnapshot,
     RuntimeSessionBinding,
@@ -149,6 +157,21 @@ export function createHarnessRegistry() {
             return providers.get(id);
         },
         probe: (context: HarnessContext) => Promise.all(list().map((provider) => probeOne(provider, context))),
+        async roster(context: HarnessContext): Promise<HarnessRosterItem[]> {
+            const preferences = await policy(context);
+            return list().map((provider) => ({
+                identity: {
+                    id: provider.descriptor.id,
+                    name: provider.descriptor.name,
+                    integration: provider.descriptor.integration,
+                },
+                policy: {
+                    enabled: preferences[provider.descriptor.id]?.enabled ?? true,
+                    priority: preferences[provider.descriptor.id]?.priority ?? provider.descriptor.priority,
+                    autoSelect: provider.descriptor.autoSelect !== false,
+                },
+            }));
+        },
         async snapshots(context: HarnessContext, options: { harnessId?: string; force?: boolean; detail?: boolean } = {}) {
             const preferences = await policy(context);
             const selected = options.harnessId
@@ -162,8 +185,10 @@ export function createHarnessRegistry() {
                 // A forced probe can reflect an auth/config/runtime change.
                 // Keep the old catalog only as presentation fallback while
                 // making the next detail caller revalidate it.
-                if (options.force)
+                if (options.force) {
                     entry.detailedAt = undefined;
+                    provider.invalidateDiscovery?.(context);
+                }
                 const now = Date.now();
                 const summaryFresh = entry.current
                     && now - entry.current.context.fetchedAt < SNAPSHOT_TTL_MS;
@@ -501,9 +526,11 @@ export function createHarnessPool(options: {
             const context = await options.context(projectId, cwd);
             return options.registry.snapshots(context, snapshotOptions);
         },
-        async forProject(projectId: string, cwd?: string) {
+        async forProject(projectId: string, cwd?: string, targetHarnessId?: string) {
             const context = await options.context(projectId, cwd);
-            return get(context, await options.registry.resolve(context, { mode: "auto" }));
+            return get(context, await options.registry.resolve(context, targetHarnessId
+                ? { mode: "pinned", harnessId: targetHarnessId }
+                : { mode: "auto" }));
         },
         async forSession(projection: SessionProjection, cwd: string, targetHarnessId?: string) {
             const context = { ...await options.context(projection.projectId, cwd, projection.id), model: projection.model };

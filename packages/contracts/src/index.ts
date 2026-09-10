@@ -1072,6 +1072,10 @@ export interface UserTurnInput {
   attachments?: AttachmentRef[];
   model?: ModelRef;
   agent?: string;
+  /** Optional submit-time route intent. When it differs from the canonical
+   * session route, the server completes the safe harness switch before this
+   * turn is admitted. Absence preserves the current route. */
+  harness?: HarnessSelection;
   /** Active-turn delivery admission; defaults to "normal". */
   delivery?: DeliveryMode;
   /** Atomically reject open questions / deny open permissions of this session before admission. */
@@ -2785,6 +2789,15 @@ export interface HarnessDescriptor {
   installCommand?: string;
   signInCommand?: string;
 }
+/** Stable, process-free presentation metadata for the harness picker. */
+export interface HarnessRosterItem {
+  identity: Pick<HarnessDescriptor, "id" | "name" | "integration">;
+  policy: {
+    enabled: boolean;
+    priority: number;
+    autoSelect: boolean;
+  };
+}
 export type HarnessAvailabilityState =
   | "not-installed"
   | "starting"
@@ -2957,6 +2970,15 @@ export interface HarnessCapabilitySupport {
   kinds: { [K in AgentCapabilityKind]?: AgentCapabilitySupport };
 }
 
+/** Evidence supplied by a harness for a capability projection. The source is
+ * a short, sanitized description of the observation; it must not contain
+ * prompts, credentials or tool output. */
+export type HarnessCapabilityEvidenceStage = "staged" | "discovered" | "connected" | "invocable";
+export interface HarnessCapabilityEvidence {
+  stage: HarnessCapabilityEvidenceStage;
+  source: string;
+}
+
 /** Fields shared by every capability descriptor. `spaceId`/`projectId` filter
  * resolution when a contribution is not deployment-wide. */
 export interface AgentCapabilityBase {
@@ -3026,6 +3048,8 @@ export interface HarnessCapabilityRecord {
   mutability?: CapabilityMutability;
   /** Sanitized reason. Must never contain secret values or full prompts. */
   reason?: string;
+  /** Optional positive observation of the capability projection. */
+  evidence?: HarnessCapabilityEvidence;
 }
 
 export interface HarnessProvisioningPlan {
@@ -3063,15 +3087,17 @@ export interface HarnessProvisioningTarget {
   generation?: number;
 }
 
-/** Native admission acknowledgement. `applied` requires evidence the current
- * target is using the revision; `unverifiable` means the native create API
- * accepted the payload without authoritative readback. */
+/** Native admission acknowledgement. `applied` requires capability-specific
+ * evidence that the current target is using the revision; `unverifiable` means
+ * the native create API accepted the payload without sufficient observation. */
 export interface HarnessCapabilityApplicationReceipt {
   target: HarnessProvisioningTarget;
   desiredRevision: string;
   capabilityIds: string[];
   outcome: Extract<CapabilityProvisionStatus, "applied" | "unverifiable" | "failed">;
   reason?: string;
+  /** Optional positive observation of the capability projection. */
+  evidence?: HarnessCapabilityEvidence;
 }
 
 /** Durable negative intent for a retired native MCP name. Canonical deletion
@@ -3128,6 +3154,9 @@ export interface HarnessProvider {
    * session merely to answer this call. Expensive discovery is requested only
    * for a selected detail surface. */
   discover?(context: HarnessContext): Promise<HarnessDiscovery>;
+  /** Explicit metadata refresh. Drop only this context's cached discovery;
+   * never modify native configuration or execution state. */
+  invalidateDiscovery?(context: HarnessContext): void;
   /** Applies one descriptor-declared, UI-safe native control. Providers retain
    * authority over validation and native config ownership. */
   applyControl?(context: HarnessContext, controlId: string, value: JsonValue): Promise<void>;
@@ -3146,6 +3175,9 @@ export interface HarnessRegistry {
   get(id: string): HarnessProvider | undefined;
   probe(context: HarnessContext): Promise<HarnessProbe[]>;
   resolve(context: HarnessContext, selection: HarnessSelection, stickyId?: string): Promise<HarnessProvider>;
+  /** Process-free picker metadata. Availability remains owned by snapshots;
+   * this roster exists so labels and logos never wait for native probes. */
+  roster(context: HarnessContext): Promise<HarnessRosterItem[]>;
   snapshots(context: HarnessContext, options?: { harnessId?: string; force?: boolean; detail?: boolean }): Promise<HarnessSnapshot[]>;
   invalidate(context?: Partial<Pick<HarnessContext, "spaceId" | "projectId" | "cwd" | "remote">> & { harnessId?: string }): void;
 }
@@ -3880,7 +3912,8 @@ export const UI_SLOTS = [
   "app.nav", "app.header.actions", "app.window.controls", "session.header.actions", "session.list.badges",
   "sidebar.footer",
   "composer.leading", "composer.execution", "composer.trailing", "modelPicker.header", "contextRail.tabs",
-  "settings.pages", "settings.footer", "commandPalette.commands",
+  "settings.pages", "settings.footer", "settings.integrations", "commandPalette.commands",
+  "git.repository.identity", "git.change-request.create", "project.repository.options",
   // Widget definitions enter through the catalog/settings seams. The six
   // workspace slots are first-class placement targets alongside panel and
   // toolbar slots, rather than a canvas-only parallel vocabulary.

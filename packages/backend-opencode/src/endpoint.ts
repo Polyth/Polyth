@@ -27,6 +27,7 @@ import {
   type OpenCodeBrowserToolConfig,
 } from "./browserTool.ts";
 import { applyOpenCodeLaunchOverlay, peekOpenCodeLaunchOverlay } from "./provisioner.ts";
+import { verifyOpenCodeCapabilities } from "./capabilityDelivery.ts";
 import {
   createDurableOwnedRuntimeState,
   ownedRuntimeIdentityKey,
@@ -648,10 +649,27 @@ const startLocalChildOnce = async (
         desiredRevision: overlay?.desiredRevision ?? "",
         capabilityIds: overlay?.capabilityIds ?? [],
         outcome: "unverifiable",
+        evidence: { stage: "staged", source: "opencode:launch" },
         reason: overlay
           ? "OpenCode process started with the private launch overlay"
           : "OpenCode process started",
       });
+      if (overlay) {
+        await verifyOpenCodeCapabilities(overlay, {
+          harnessId: "opencode", spaceId: options.spaceId ?? "", projectId: options.projectId,
+          cwd: resolve(options.cwd), authorityId: incarnation.authorityId, generation: incarnation.generation,
+        }, async (path) => {
+          const url = new URL(path, `http://${hostname === "0.0.0.0" ? "127.0.0.1" : hostname}:${actualPort}`);
+          url.searchParams.set("directory", resolve(options.cwd));
+          const headers: Record<string, string> = {};
+          if (env.OPENCODE_SERVER_PASSWORD) {
+            headers.Authorization = `Basic ${Buffer.from(`${env.OPENCODE_SERVER_USERNAME || "opencode"}:${env.OPENCODE_SERVER_PASSWORD}`).toString("base64")}`;
+          }
+          const response = await fetch(url, { headers, signal: AbortSignal.timeout(5_000) });
+          if (!response.ok) throw new Error("OpenCode capability readback unavailable");
+          return response.json();
+        });
+      }
     }
     return { child, port: actualPort, hostname, ...(authority ? { authority } : {}) };
   } catch (error) {
@@ -793,9 +811,12 @@ export const createOwnedLocalEndpointLease = async (
               } catch {
                 // Missing record is already clean.
               }
-              if (shouldRemove) await rm(pidFile, { force: true });
               if (started.authority) await started.authority.close();
               else await terminateChild(started.child, options.gracefulStopMs ?? 3_000);
+              // Keep the exact process identity until the containment/release
+              // boundary has proved empty. An interrupted shutdown must leave
+              // enough evidence for the next Polyth owner to recover safely.
+              if (shouldRemove) await rm(pidFile, { force: true });
             },
           };
         } catch (error) {

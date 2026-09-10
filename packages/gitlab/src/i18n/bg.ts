@@ -1,0 +1,2 @@
+import type { GitlabMessageKey } from "./en.ts";
+export const bg: Partial<Record<GitlabMessageKey, string>> = { title: "GitLab", connected: "{count} акаунта", notConnected: "Няма връзка", description: "Проблеми, merge заявки и конвейери", check: "Проверка", remove: "Премахване", instance: "GitLab инстанция", username: "Потребителско име", authentication: "Удостоверяване", addAccount: "Добавяне на акаунт", connect: "Свързване", manage: "Управление на акаунти…" };

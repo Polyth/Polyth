@@ -17,7 +17,9 @@ test("desktop bundles every discovered server package with its manifest descript
   }));
 
   assert.deepEqual(
-    desktopServerPackages.map(({ id, descriptor }) => ({ id, descriptor })),
+    desktopServerPackages
+      .map(({ id, descriptor }) => ({ id, descriptor }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
     expected.filter((item): item is NonNullable<typeof item> => item !== null),
   );
   assert.ok(desktopServerPackages.every(({ factory }) => typeof factory === "function"));

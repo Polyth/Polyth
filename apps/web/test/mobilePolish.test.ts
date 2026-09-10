@@ -9,7 +9,7 @@ import { readWebStylesSync } from "./webStyles.ts";
 register("./tsxHooks.mjs", import.meta.url);
 
 const { summarizeUnifiedDiff } = await import("../../../packages/git/widgets/PendingChangesBar.tsx");
-const { reviewMessageTone, stripCursorMarkers } = await import("../../../packages/github/widgets/PullRequestView.tsx");
+const { reviewMessageTone, stripCursorMarkers } = await import("../../../packages/code-hosting/widgets/ChangeRequestView.tsx");
 const { shellCardCopyText } = await import("../src/components/Timeline.tsx");
 const { modelModalities } = await import("@polyth/models/model-presentation");
 const { parseMarkdown } = await import("../src/markdown/parse.ts");
@@ -181,8 +181,8 @@ test("the phone session island combines recents, tasks, and requests", () => {
 
 test("source-control surfaces keep responsive and accessible audit contracts", () => {
   const git = read("../../../packages/git/widgets/GitView.tsx");
-  const github = read("../../../packages/github/widgets/GithubView.tsx");
-  const pullRequest = read("../../../packages/github/widgets/PullRequestView.tsx");
+  const github = read("../../../packages/code-hosting/widgets/CodeHostingView.tsx");
+  const pullRequest = read("../../../packages/code-hosting/widgets/ChangeRequestView.tsx");
   const pending = read("../../../packages/git/widgets/PendingChangesBar.tsx");
   const css = readWebStylesSync();
 

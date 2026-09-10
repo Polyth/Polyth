@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { test } from "node:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createStdioRpc } from "../src/rpc.ts";
-import { createProcessAuthority, releaseProcessExecution } from "../src/authority.ts";
+import {
+    createProcessAuthority,
+    releaseProcessExecution,
+    type ProcessContainmentController,
+} from "../src/authority.ts";
 const script = `const {spawn}=require('node:child_process');const {createInterface}=require('node:readline');const child=spawn(process.execPath,['-e','process.on("SIGTERM",()=>{});setInterval(()=>{},1000)'],{stdio:'ignore',detached:true});createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);if(m.method==='hang')return;if(m.method==='malformed'){process.stdout.write('null\\n');return;}process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{child:child.pid}})+'\\n');});`;
 const waitFor = async <T>(read: () => Promise<T>, timeoutMs = 2_000): Promise<T> => {
     const deadline = Date.now() + timeoutMs;
@@ -222,7 +227,7 @@ test("owner crash closes the lease and reaps detached tools before a replacement
     await next.close();
     await rm(dir, { recursive: true, force: true });
 });
-test("a missing supervisor receipt never authorizes replacement even after its process exits", { skip: process.platform !== "linux" }, async () => {
+test("a systemd scope reclaims the owned tree when the supervisor receipt is lost", { skip: process.platform !== "linux" }, async (t) => {
     const dir = await mkdtemp(join(tmpdir(), "rpc-proof-"));
     const file = join(dir, "state.json");
     const authority = await createProcessAuthority(file, false, { authorityId: "runtime-incarnation", generation: 17 });
@@ -230,11 +235,25 @@ test("a missing supervisor receipt never authorizes replacement even after its p
     child.stderr!.resume();
     const nativePid = Number(String((await once(child.stdout!, "data"))[0]).trim());
     try {
+        const before = JSON.parse(await readFile(file, "utf8")) as {
+            containment?: { kind?: string };
+            receiptFile: string;
+        };
+        if (before.containment?.kind !== "systemd-user-scope") {
+            t.skip("systemd user scopes are unavailable");
+            await authority.close();
+            return;
+        }
         child.kill("SIGKILL");
         await once(child, "exit");
-        const state = JSON.parse(await readFile(file, "utf8")) as { receiptFile: string };
-        await assert.rejects(readFile(state.receiptFile, "utf8"), { code: "ENOENT" });
-        await assert.rejects(createProcessAuthority(file), { code: "outcome-unknown" });
+        await assert.rejects(readFile(before.receiptFile, "utf8"), { code: "ENOENT" });
+        const next = await createProcessAuthority(file);
+        await assertGone(nativePid);
+        assert.deepEqual(JSON.parse(await readFile(before.receiptFile, "utf8")), {
+            authorityId: authority.authorityId,
+            generation: authority.generation,
+        });
+        await next.close();
     }
     finally {
         try {
@@ -243,6 +262,85 @@ test("a missing supervisor receipt never authorizes replacement even after its p
         catch (e) {
             if ((e as NodeJS.ErrnoException).code !== "ESRCH")
                 throw e;
+        }
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test("a durable containment receipt permits recovery without trusting a reused PID", { skip: process.platform !== "linux" }, async () => {
+    const dir = await mkdtemp(join(tmpdir(), "rpc-contained-recovery-"));
+    const file = join(dir, "state.json");
+    const receiptFile = `${file}.old-authority.7.released`;
+    const bootId = (await readFile("/proc/sys/kernel/random/boot_id", "utf8")).trim();
+    const released: string[] = [];
+    const authorityHash = createHash("sha256").update("old-authority").digest("hex").slice(0, 24);
+    const containment: ProcessContainmentController = {
+        create(proof) {
+            const proofHash = createHash("sha256").update(proof.authorityId).digest("hex").slice(0, 24);
+            return {
+                kind: "systemd-user-scope",
+                unit: `polyth-runtime-${proofHash}-${proof.generation}.scope`,
+                bootId,
+            };
+        },
+        launch(_scope, command, args) {
+            return { command, args: [...args] };
+        },
+        async release(scope) {
+            released.push(scope.unit);
+            return true;
+        },
+    };
+    await writeFile(file, JSON.stringify({
+        authorityId: "old-authority",
+        generation: 7,
+        pid: process.pid,
+        startTime: "not-this-process",
+        receiptFile,
+        receipts: {},
+        releasedAuthorities: [],
+        containment: containment.create({ authorityId: "old-authority", generation: 7 }),
+    }));
+    try {
+        const next = await createProcessAuthority(file, false, undefined, { containment });
+        assert.deepEqual(released, [`polyth-runtime-${authorityHash}-7.scope`]);
+        assert.deepEqual(JSON.parse(await readFile(receiptFile, "utf8")), {
+            authorityId: "old-authority",
+            generation: 7,
+        });
+        assert.equal(next.generation, 8);
+        await next.close();
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test("legacy authorities still block replacement when no containment can prove release", { skip: process.platform !== "linux" }, async () => {
+    const dir = await mkdtemp(join(tmpdir(), "rpc-legacy-proof-"));
+    const file = join(dir, "state.json");
+    const authority = await createProcessAuthority(
+        file,
+        false,
+        { authorityId: "runtime-incarnation", generation: 17 },
+        { containment: false },
+    );
+    const child = authority.spawn(process.execPath, ["-e", "console.log(process.pid);setInterval(()=>{},1000)"], { cwd: dir });
+    child.stderr!.resume();
+    const nativePid = Number(String((await once(child.stdout!, "data"))[0]).trim());
+    try {
+        child.kill("SIGKILL");
+        await once(child, "exit");
+        const state = JSON.parse(await readFile(file, "utf8")) as { receiptFile: string };
+        await assert.rejects(readFile(state.receiptFile, "utf8"), { code: "ENOENT" });
+        await assert.rejects(
+            createProcessAuthority(file, false, undefined, { containment: false }),
+            { code: "outcome-unknown" },
+        );
+    } finally {
+        try {
+            process.kill(nativePid, "SIGKILL");
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
         }
         await rm(dir, { recursive: true, force: true });
     }

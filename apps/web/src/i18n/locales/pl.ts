@@ -314,6 +314,8 @@ export const pl: AppMessages = {
   "contextrail.collapse": "Zawalić się",
   "contextrail.collapseValue": "Zwiń {value}",
   "contextrail.dockBesideChat": "Dok obok czatu",
+  "contextrail.dockBelowChat": "Dokuj pod czatem",
+  "contextrail.unpinWindow": "Odepnij okno",
   "contextrail.expand": "Zwiększać",
   "contextrail.expandValue": "Rozwiń {value}",
   "contextrail.message": "×",

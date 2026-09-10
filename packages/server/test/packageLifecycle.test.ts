@@ -68,6 +68,9 @@ test("startEnabled starts every enabled package", async () => {
 test("startEnabled continues after an enabled package fails", async () => {
   const lifecycle = createPackageLifecycle(createRouteRegistry());
   const calls: string[] = [];
+  const warnings: unknown[][] = [];
+  const original = console.warn;
+  console.warn = (...args: unknown[]) => { warnings.push(args); };
   lifecycle.register("broken", {
     onEnable: () => {
       calls.push("broken");
@@ -83,9 +86,15 @@ test("startEnabled continues after an enabled package fails", async () => {
     isEnabled: () => true,
   } as unknown as PackageRegistry;
 
-  await lifecycle.startEnabled(registry);
-
-  assert.deepEqual(calls, ["broken", "healthy"]);
+  try {
+    await lifecycle.startEnabled(registry);
+    assert.deepEqual(calls, ["broken", "healthy"]);
+    assert.equal(warnings.length, 1);
+    assert.match(String(warnings[0]?.[0]), /package "broken" failed to start/);
+    assert.match(String(warnings[0]?.[1]), /boot failed/);
+  } finally {
+    console.warn = original;
+  }
 });
 
 test("stopIngress detaches owners without disabling packages", async () => {

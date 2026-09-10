@@ -118,6 +118,34 @@ test("cold discovery probes dependent thinking controls per model", async () => 
     ]);
 });
 
+test("cold discovery probes models whose thinking levels appear only once selected", async () => {
+    invalidateAcpDiscovery();
+    // A fresh session that advertises no thought_level proves nothing about the
+    // models it is not currently on: this agent adds the control on selection.
+    const modelOnlySession = {
+        ...configOptionsSession,
+        configOptions: configOptionsSession.configOptions.filter((option) => option.category !== "thought_level"),
+    };
+    const result = await discoverAcpModels({
+        harnessId: "acp",
+        version: "late-thought-level",
+        authFingerprint: "true",
+        probe: {
+            async open() {
+                return {
+                    result: modelOnlySession,
+                    async setConfigOption(_id: string, value: string) { return sessionConfigAt(value, "medium"); },
+                    close: async () => {},
+                };
+            },
+        },
+    });
+    assert.deepEqual(result.state === "ready" ? result.models.map((model) => model.variants) : [], [
+        undefined,
+        ["low", "medium", "high"],
+    ]);
+});
+
 test("the legacy models block becomes the same canonical catalog", async () => {
     const { rt } = await startedRuntime(legacySession);
     assert.deepEqual((await rt.models!()).map((model) => model.modelID), ["legacy-a", "legacy-b"]);
@@ -721,6 +749,31 @@ test("cold discovery is bounded and late probes are closed", async () => {
     assert.equal(result.state, "degraded");
     await new Promise((resolve) => setTimeout(resolve, 30));
     assert.equal(closes, 1);
+});
+
+test("scoped refresh fences a pending ACP discovery without evicting another Space", async () => {
+    invalidateAcpDiscovery();
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    let opens = 0;
+    const options = {
+        harnessId: "acp", version: "refresh", authFingerprint: "true", cacheIdentity: "space-a/project",
+        probe: { async open() {
+            const id = String(++opens);
+            if (id === "1") await gate;
+            return { result: { models: { currentModelId: id, availableModels: [{ modelId: id, name: id }] } }, close: async () => {} };
+        } },
+    };
+    const stale = discoverAcpModels(options);
+    const foreign = { ...options, cacheIdentity: "space-b/project" };
+    const foreignResult = await discoverAcpModels(foreign);
+    invalidateAcpDiscovery(options);
+    const fresh = await discoverAcpModels(options);
+    finish();
+    await stale;
+    assert.deepEqual(await discoverAcpModels(options), fresh);
+    assert.deepEqual(await discoverAcpModels(foreign), foreignResult);
+    assert.equal(opens, 3);
 });
 
 test("model capability probing is bounded and closes a late session", async () => {

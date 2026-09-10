@@ -19,7 +19,7 @@ import { diffStat } from "../../../apps/web/src/utils.ts";
 import { setPaneLastResource } from "../../../apps/web/src/workspace/panePrefs.ts";
 import CopyButton from "../../../apps/web/src/components/CopyButton.tsx";
 import EmptyState from "../../../apps/web/src/components/EmptyState.tsx";
-import PrCreatePanel from "../../github/widgets/PrCreatePanel.tsx";
+import type { WebPackageHost } from "@polyth/web-sdk";
 import { summarizeUnifiedDiff, totalDiffStats, type DiffLineStats } from "./PendingChangesBar.tsx";
 import {
   AddIcon,
@@ -276,7 +276,8 @@ function ConflictAgentBanner({
   );
 }
 
-export default function GitView() {
+export default function GitView({ host }: { host?: WebPackageHost } = {}) {
+  const Slot = host?.ui.Slot;
   const projectId = useStore((state) => state.activeProjectId);
   const sessionId = useStore((state) => state.activeSessionId);
   const settings = useStore((state) => state.settings);
@@ -310,6 +311,8 @@ export default function GitView() {
   const [showBranchForm, setShowBranchForm] = useState(false);
   const [showTreeForm, setShowTreeForm] = useState(false);
   const [showPrForm, setShowPrForm] = useState(false);
+  const [selectedChangeProvider, setSelectedChangeProvider] = useState<string | null>(null);
+  useEffect(() => { setSelectedChangeProvider(null); }, [projectId]);
   const [busy, setBusy] = useState(false);
   const [busyRemote, setBusyRemote] = useState<RemoteStep | null>(null);
   const [remoteStatus, setRemoteStatus] = useState<{ step: RemoteStep; error?: string } | null>(null);
@@ -667,6 +670,7 @@ export default function GitView() {
         <div className="source-control-title">
           {/* Title + close come from the shared ContextRail / ModuleView header. */}
           <span className="source-branch"><Icon.branch /> <span className="mono">{status?.branch || tr("gitview.detachedHead")}</span></span>
+          {Slot && <Slot slot="git.repository.identity" context={{ projectId, sessionId }} />}
           {status && (status.ahead > 0 || status.behind > 0) && (
             <span className="git-ahead-behind">
               {status.ahead > 0 && <span className="ahead">↑ {status.ahead}</span>}
@@ -767,7 +771,7 @@ export default function GitView() {
         onChange={(value) => selectTab(value as GitTab)}
       />
 
-      {showPrForm && <PrCreatePanel projectId={projectId} sessionId={sessionId} onClose={() => setShowPrForm(false)} />}
+      {showPrForm && Slot && <Slot slot="git.change-request.create" context={{ projectId, sessionId, selectedProvider: selectedChangeProvider, onSelectProvider: setSelectedChangeProvider, onClose: () => { setShowPrForm(false); setSelectedChangeProvider(null); } }} />}
 
       {showBranchForm && (
         <div className="source-inline-form">
@@ -972,6 +976,7 @@ export default function GitView() {
                   setGenerating(true);
                   void api.gitCommitMessage(projectId, sessionId ?? undefined)
                     .then((result) => { if (result.message) setCommitMsg(result.message); })
+                    .catch((error) => setUiError(friendlyError(tr("gitview.generate"), error)))
                     .finally(() => setGenerating(false));
                 }}>{tr("gitview.generate")}</Button>
                 <Button size="sm" variant="primary" busy={busy && !!commitMsg.trim()} disabled={!commitMsg.trim() || busy} onClick={() => void run(commitStaged)}>{tr("gitview.commit")}</Button>

@@ -17,7 +17,7 @@
       "core": true,
       "enabled": true,
       "settingsGroup": "Workspace",
-      "icon": "⌨",
+      "icon": "keyboard",
       "hasSettings": true
     }
   },

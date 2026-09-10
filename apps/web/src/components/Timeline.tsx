@@ -62,6 +62,11 @@ import {
 } from "../promptRail.ts";
 import { captureTimelineAnchor, loadTimelineAnchor, restoreScrollDelta, saveTimelineAnchor, type TimelineAnchor } from "../timelineAnchor.ts";
 import { publishPromptVisibility } from "../promptVisibility.ts";
+import {
+  TIMELINE_TAIL_EPSILON,
+  requiredTurnSheetPadding,
+  timelineFollowState,
+} from "../timelineFollow.ts";
 import AttachmentPills from "./AttachmentPills.tsx";
 import CopyButton from "./CopyButton.tsx";
 import SelectionMenu from "./SelectionMenu.tsx";
@@ -90,6 +95,8 @@ import Picker from "./Picker.tsx";
 import type { PickerItem } from "../picker.ts";
 import { Button, Menu, Notice, RunSummary, type RunSummaryState } from "./ui/index.ts";
 import type { TurnLimitState } from "../reduce.ts";
+
+const EMPTY_SESSION_EVENTS: SessionEvent[] = [];
 
 /** One announcement per copy/mutation outcome; text is the accessible record,
  *  checkmarks only supplement it. Screen readers ignore repeats, so identical
@@ -1601,7 +1608,11 @@ export default function Timeline({
   const atBottom = useRef(true);
   const prefs = useUiSettings();
   const sessionId = useStore((s) => s.activeSessionId);
-  const sessionEvents = useStore((s) => s.activeSessionId ? s.events[s.activeSessionId] ?? [] : []);
+  const sessionEvents = useStore((s) => s.activeSessionId
+    ? s.events[s.activeSessionId] ?? EMPTY_SESSION_EVENTS
+    : EMPTY_SESSION_EVENTS);
+  const latestUserMessage = [...model.messages].reverse()
+    .find((message) => message.kind === "user" && !message.undone);
   useSlotVersion();
   // L13 windowing: only the last `limit` rows render (see timelineWindow.ts).
   const initialLimit = initialTimelineWindow(
@@ -1624,17 +1635,38 @@ export default function Timeline({
   const anchor = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
   const pendingJump = useRef<string | null>(null);
   const pendingJumpFocus = useRef(false);
-  // Smooth tail-follow state (refs, not state: rAF bookkeeping must never
-  // re-render). instantFollow marks the first follow after open/switch so it
-  // lands in one step instead of gliding through the restored history.
-  const chaseRaf = useRef(0);
-  const chasing = useRef(false);
+  // Reader intent is separate from proximity. In particular, one slow wheel
+  // tick upward must stay detached even while it is only a pixel from the end.
+  const readerDetached = useRef(false);
+  const lastScrollTop = useRef(0);
   const touchY = useRef<number | null>(null);
+  const scrollbarPointer = useRef(false);
+  const readerIntent = useRef<{
+    direction: "toward-history" | "toward-tail";
+    until: number;
+  } | null>(null);
   const expectedScrollTop = useRef<number | null>(null);
-  const instantFollow = useRef(true);
+  // A newly appended user prompt owns a fresh-sheet tail. Presentation-only
+  // padding lets that prompt sit at the reading top and yields, pixel for
+  // pixel, as the agent's response and action rows grow into the sheet.
+  const turnSheetPromptId = useRef<string | null>(null);
+  const turnSheetPadding = useRef(0);
+  const observedPrompt = useRef({
+    sessionId,
+    seq: latestUserMessage?.eventSeq ?? 0,
+  });
   // Latest-reveal state (§2.4): true while the reader holds a position away
   // from the tail, mounting the reserved Jump to latest region.
   const [showJump, setShowJump] = useState(false);
+  useEffect(() => {
+    const releaseScrollbar = () => { scrollbarPointer.current = false; };
+    window.addEventListener("pointerup", releaseScrollbar);
+    window.addEventListener("pointercancel", releaseScrollbar);
+    return () => {
+      window.removeEventListener("pointerup", releaseScrollbar);
+      window.removeEventListener("pointercancel", releaseScrollbar);
+    };
+  }, []);
   // UX-PANE-MODEL stable anchor: session switches adjust during render so the
   // outgoing anchor is captured from the STILL-CURRENT DOM (before commit) and
   // the incoming one is ready before the first paint of the new session.
@@ -1649,10 +1681,14 @@ export default function Timeline({
     }
     setAnchorSession(sessionId);
     setLimit(initialLimit);
-    instantFollow.current = true; // next tail follow lands instantly, no glide
     const stored = sessionId !== null ? loadTimelineAnchor(sessionId) : null;
     restoreRef.current = stored !== null && !stored.atBottom ? stored : null;
     atBottom.current = stored?.atBottom ?? true;
+    readerDetached.current = stored !== null && !stored.atBottom;
+    readerIntent.current = null;
+    scrollbarPointer.current = false;
+    expectedScrollTop.current = null;
+    lastScrollTop.current = el?.scrollTop ?? 0;
     setShowJump(stored !== null && !stored.atBottom);
   }
 
@@ -1674,66 +1710,183 @@ export default function Timeline({
     };
   }, [sessionId, hasMessages]);
 
-  // Tail follow (§2.4): at/near the tail the timeline follows growth; a reader
-  // who scrolled up keeps the chosen position and sees the reveal control.
-  // The follow EASES instead of teleporting (exponential rAF chase, re-targeted
-  // per commit), so appended rows visibly push older messages up. Any reader
-  // scroll hands control back immediately.
-  const chaseTail = useCallback(() => {
-    cancelAnimationFrame(chaseRaf.current);
-    chasing.current = true;
-    const step = () => {
-      const el = ref.current;
-      if (!el || !atBottom.current) { chasing.current = false; return; }
-      const gap = el.scrollHeight - el.clientHeight - el.scrollTop;
-      if (Math.abs(gap) < 1) {
-        expectedScrollTop.current = el.scrollHeight - el.clientHeight;
-        el.scrollTop = expectedScrollTop.current;
-        chasing.current = false;
-        return;
-      }
-      expectedScrollTop.current = el.scrollTop + gap * 0.3;
-      el.scrollTop = expectedScrollTop.current;
-      chaseRaf.current = requestAnimationFrame(step);
-    };
-    chaseRaf.current = requestAnimationFrame(step);
-  }, []);
-  useEffect(() => () => cancelAnimationFrame(chaseRaf.current), []);
-  useEffect(() => {
+  const scrollToTail = useCallback(() => {
     const el = ref.current;
     if (!el) return;
-    const first = instantFollow.current;
-    instantFollow.current = false;
+    const target = Math.max(0, el.scrollHeight - el.clientHeight);
+    if (Math.abs(el.scrollTop - target) >= 0.5) {
+      expectedScrollTop.current = target;
+      el.scrollTop = target;
+    } else {
+      // A no-op assignment emits no scroll event; never leave a stale
+      // programmatic target that could swallow the reader's next End/drag.
+      expectedScrollTop.current = null;
+    }
+    // A no-op assignment emits no scroll event, so keep the direction sample
+    // current here as well as in onScroll.
+    lastScrollTop.current = el.scrollTop;
+  }, []);
+
+  const setTurnSheetPadding = useCallback((value: number) => {
+    const el = ref.current;
+    if (!el || Math.abs(turnSheetPadding.current - value) < 0.5) return;
+    turnSheetPadding.current = value;
+    if (value > 0) el.style.setProperty("--timeline-turn-sheet-space", `${value}px`);
+    else el.style.removeProperty("--timeline-turn-sheet-space");
+  }, []);
+
+  const syncTurnSheet = useCallback((alignPrompt = false) => {
+    const el = ref.current;
+    const promptId = turnSheetPromptId.current;
+    if (!el || !promptId) return;
+    const prompt = [...el.querySelectorAll<HTMLElement>(".msg.user")]
+      .find((row) => row.dataset.msgId === promptId);
+    if (!prompt) {
+      turnSheetPromptId.current = null;
+      setTurnSheetPadding(0);
+      return;
+    }
+    const port = el.getBoundingClientRect();
+    const row = prompt.getBoundingClientRect();
+    const paddingTop = Number.parseFloat(getComputedStyle(el).paddingTop) || 0;
+    const promptContentTop = el.scrollTop + row.top - port.top;
+    const desiredScrollTop = Math.max(0, promptContentTop - paddingTop);
+    const padding = requiredTurnSheetPadding({
+      scrollHeight: el.scrollHeight,
+      currentPadding: turnSheetPadding.current,
+      clientHeight: el.clientHeight,
+      desiredScrollTop,
+    });
+    setTurnSheetPadding(padding);
+    if (alignPrompt) {
+      if (Math.abs(el.scrollTop - desiredScrollTop) >= 0.5) {
+        expectedScrollTop.current = desiredScrollTop;
+        el.scrollTop = desiredScrollTop;
+      } else {
+        expectedScrollTop.current = null;
+      }
+      lastScrollTop.current = el.scrollTop;
+    }
+  }, [setTurnSheetPadding]);
+
+  // Session changes restore their saved anchor. A later, monotonically newer
+  // user event in the SAME session starts a fresh sheet and deliberately takes
+  // focus away from whatever older reading position was held.
+  useLayoutEffect(() => {
+    const latestSeq = latestUserMessage?.eventSeq ?? 0;
+    if (observedPrompt.current.sessionId !== sessionId) {
+      observedPrompt.current = { sessionId, seq: latestSeq };
+      turnSheetPromptId.current = null;
+      setTurnSheetPadding(0);
+      return;
+    }
+    if (!latestUserMessage || latestSeq <= observedPrompt.current.seq) return;
+    observedPrompt.current = { sessionId, seq: latestSeq };
+    turnSheetPromptId.current = latestUserMessage.id;
+    readerIntent.current = null;
+    scrollbarPointer.current = false;
+    readerDetached.current = false;
+    atBottom.current = true;
+    setShowJump(false);
+    syncTurnSheet(true);
+  }, [sessionId, latestUserMessage?.id, latestUserMessage?.eventSeq, setTurnSheetPadding, syncTurnSheet]);
+
+  // Model commits cover durable/streamed rows. Resize observation additionally
+  // covers local disclosure animation and smoothed text renders, so an open
+  // live action cannot grow underneath the composer/status dock.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    syncTurnSheet();
     if (atBottom.current) {
       setShowJump(false);
-      if (first) {
-        // Session open/switch: land at the tail in one step, never glide.
-        cancelAnimationFrame(chaseRaf.current);
-        chasing.current = false;
-        expectedScrollTop.current = Math.max(0, el.scrollHeight - el.clientHeight);
-        el.scrollTop = expectedScrollTop.current;
-      } else {
-        chaseTail();
-      }
-    } else {
-      setShowJump(el.scrollHeight - el.scrollTop - el.clientHeight >= 80);
+      scrollToTail();
     }
-  }, [model.version, chaseTail]);
+  }, [model.version, scrollToTail, syncTurnSheet]);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const refresh = () => {
+      syncTurnSheet();
+      if (atBottom.current) scrollToTail();
+    };
+    const resize = typeof ResizeObserver === "function" ? new ResizeObserver(refresh) : null;
+    const observed = new Set<Element>();
+    const observeRows = () => {
+      const current = new Set<Element>([el, ...el.children]);
+      for (const node of observed) {
+        if (current.has(node)) continue;
+        resize?.unobserve(node);
+        observed.delete(node);
+      }
+      for (const node of current) {
+        if (observed.has(node)) continue;
+        resize?.observe(node);
+        observed.add(node);
+      }
+    };
+    observeRows();
+    const mutations = typeof MutationObserver === "function"
+      ? new MutationObserver(() => { observeRows(); refresh(); })
+      : null;
+    mutations?.observe(el, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ["class", "open", "aria-expanded"],
+    });
+    return () => {
+      resize?.disconnect();
+      mutations?.disconnect();
+    };
+  }, [sessionId, scrollToTail, syncTurnSheet]);
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noteReaderIntent = (direction: "toward-history" | "toward-tail") => {
+    // One physical gesture can deliver several scroll events (wheel momentum,
+    // touch inertia, scrollbar drag). Keep its direction briefly, but never
+    // infer intent from geometry alone: reflow emits the same scroll event.
+    readerIntent.current = { direction, until: Date.now() + 700 };
+  };
+
+  const stopFollowing = () => {
+    const el = ref.current;
+    if (!el || el.scrollHeight - el.clientHeight <= TIMELINE_TAIL_EPSILON) return;
+    noteReaderIntent("toward-history");
+    expectedScrollTop.current = null;
+    readerDetached.current = true;
+    atBottom.current = false;
+    setShowJump(true);
+  };
+
   const onScroll = () => {
     const el = ref.current;
     if (!el) return;
-    if (expectedScrollTop.current !== null && Math.abs(el.scrollTop - expectedScrollTop.current) < 1) {
-      expectedScrollTop.current = null;
-    } else {
-      expectedScrollTop.current = null;
-      chasing.current = false;
-      cancelAnimationFrame(chaseRaf.current);
-      const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-      atBottom.current = near;
-      setShowJump(!near);
+    const delta = el.scrollTop - lastScrollTop.current;
+    if (scrollbarPointer.current && delta < -0.25) stopFollowing();
+    else if (scrollbarPointer.current && delta > 0.25) noteReaderIntent("toward-tail");
+    const lease = readerIntent.current;
+    const intent = lease !== null && lease.until >= Date.now() ? lease.direction : null;
+    if (lease !== null && intent === null) readerIntent.current = null;
+    const programmatic = intent === null && expectedScrollTop.current !== null
+      && Math.abs(el.scrollTop - expectedScrollTop.current) < 1;
+    expectedScrollTop.current = null;
+    if (!programmatic) {
+      const distanceFromEnd = Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight);
+      const next = timelineFollowState({
+        scrollTop: el.scrollTop,
+        previousScrollTop: lastScrollTop.current,
+        distanceFromEnd,
+        readerDetached: readerDetached.current,
+        readerIntent: intent,
+      });
+      readerDetached.current = next.readerDetached;
+      atBottom.current = next.following;
+      setShowJump(next.showJump);
     }
+    lastScrollTop.current = el.scrollTop;
     // Scroll-up lazy loading: nearing the top with every cached row already
     // rendered pulls the next page of older history from the server.
     if (el.scrollTop < 160 && canLoadOlder && start === 0 && !olderBusy) void loadOlder();
@@ -1744,14 +1897,6 @@ export default function Timeline({
       const now = ref.current;
       if (now) saveTimelineAnchor(sessionId, captureTimelineAnchor(now, atBottom.current));
     }, 200);
-  };
-
-  const stopFollowing = () => {
-    chasing.current = false;
-    cancelAnimationFrame(chaseRaf.current);
-    expectedScrollTop.current = null;
-    atBottom.current = false;
-    setShowJump(true);
   };
 
   // Debounce safety: reload and unmount flush the stable anchor immediately.
@@ -2029,13 +2174,17 @@ export default function Timeline({
           return; // retry after the window grows
         }
       }
-      if (rows.length > 0) restoreRef.current = null; // anchor row is gone
+      // Initial hydration is a newest-first window. An older saved anchor can
+      // be absent until background backfill lands, so retain it while the
+      // server still advertises earlier canonical events.
+      if (rows.length > 0 && !canLoadOlder) restoreRef.current = null;
       return;
     }
     restoreRef.current = null;
     el.scrollTop += restoreScrollDelta(el, node, a);
   });
   const jump = (id: string, opts?: { focus?: boolean }) => {
+    stopFollowing();
     const index = rows.findIndex((r) => r.kind !== "activity" && r.id === id);
     const next = limitToInclude(rows.length, limit, index);
     if (next !== limit) {
@@ -2058,8 +2207,12 @@ export default function Timeline({
   const jumpToLatest = () => {
     const el = ref.current;
     if (!el) return;
+    readerIntent.current = null;
+    scrollbarPointer.current = false;
+    readerDetached.current = false;
     atBottom.current = true;
-    el.scrollTop = el.scrollHeight;
+    syncTurnSheet();
+    scrollToTail();
     setShowJump(false);
     const msgs = el.querySelectorAll<HTMLElement>(":scope > .msg");
     const target = msgs[msgs.length - 1] ?? el;
@@ -2177,15 +2330,59 @@ export default function Timeline({
         ref={ref}
         onScroll={onScroll}
         onWheelCapture={(event) => {
+          // Trackpad pinch zoom and a predominantly horizontal gesture are
+          // viewport/content actions, not a request to leave tail follow.
+          if (event.ctrlKey || Math.abs(event.deltaY) < Math.abs(event.deltaX)) return;
           if (event.deltaY < 0) stopFollowing();
+          else if (event.deltaY > 0) noteReaderIntent("toward-tail");
         }}
+        onKeyDownCapture={(event) => {
+          const target = event.target as HTMLElement;
+          if (target.matches("input, textarea, select, [contenteditable=true]")) return;
+          const towardHistory = event.key === "ArrowUp"
+            || event.key === "PageUp"
+            || event.key === "Home"
+            || ((event.key === " " || event.key === "Spacebar") && event.shiftKey)
+            || (event.metaKey && event.key === "ArrowUp");
+          const towardTail = event.key === "ArrowDown"
+            || event.key === "PageDown"
+            || event.key === "End"
+            || ((event.key === " " || event.key === "Spacebar") && !event.shiftKey)
+            || (event.metaKey && event.key === "ArrowDown");
+          if (towardHistory) stopFollowing();
+          else if (towardTail) noteReaderIntent("toward-tail");
+        }}
+        onPointerDownCapture={(event) => {
+          const el = event.currentTarget;
+          const rect = el.getBoundingClientRect();
+          const direction = getComputedStyle(el).direction;
+          const gutter = Math.max(12, el.offsetWidth - el.clientWidth);
+          const inScrollbar = direction === "rtl"
+            ? event.clientX <= rect.left + gutter
+            : event.clientX >= rect.right - gutter;
+          scrollbarPointer.current = event.button === 1
+            || (event.button === 0 && inScrollbar && el.scrollHeight > el.clientHeight);
+        }}
+        onPointerUpCapture={() => { scrollbarPointer.current = false; }}
+        onPointerCancelCapture={() => { scrollbarPointer.current = false; }}
         onTouchStartCapture={(event) => { touchY.current = event.touches[0]?.clientY ?? null; }}
         onTouchMoveCapture={(event) => {
           const y = event.touches[0]?.clientY;
-          if (touchY.current !== null && y !== undefined && y > touchY.current) stopFollowing();
-          touchY.current = y ?? null;
+          if (touchY.current !== null && y !== undefined) {
+            const deltaY = y - touchY.current;
+            // Ignore tap jitter, but accumulate it against the last accepted
+            // sample so a slow deliberate drag still wins after a few pixels.
+            if (deltaY > 2) {
+              stopFollowing();
+              touchY.current = y;
+            } else if (deltaY < -2) {
+              noteReaderIntent("toward-tail");
+              touchY.current = y;
+            }
+          }
         }}
         onTouchEndCapture={() => { touchY.current = null; }}
+        onTouchCancelCapture={() => { touchY.current = null; }}
       >
         <SlotHost slot="session.timeline.before" context={slotSummary} customizable />
         {model.messages.length === 0 && !model.workflowRun && (

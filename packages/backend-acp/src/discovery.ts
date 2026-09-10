@@ -1,7 +1,6 @@
 // Cold model discovery for an ACP agent, so the composer can offer models
-// before a Polyth session exists. ACP publishes the catalog on a session, not
-// on the connection, so discovery opens a throwaway session, reads what the
-// agent advertised, and terminates the process.
+// before a Polyth session exists. A profile may use a read-only connection
+// extension; generic ACP agents fall back to metadata from a throwaway session.
 //
 // That is a process spawn, so it is cached and deduped per (harness, command
 // version, auth state). An agent that needs a native sign-in reports
@@ -10,9 +9,10 @@ import type { HarnessAvailabilityState, ModelDescriptor } from "@polyth/contract
 import { acpModelDescriptors, parseSessionConfig } from "./sessionConfig.ts";
 
 export interface AcpDiscoveryProbe {
-  /** Opens a connection, runs `session/new`, returns its raw result. */
+  /** Opens a connection and returns either direct descriptors or raw session metadata. */
   open(signal?: AbortSignal): Promise<{
     result: unknown;
+    models?: ModelDescriptor[];
     setConfigOption?(configId: string, value: string): Promise<unknown>;
     close(): Promise<void>;
   }>;
@@ -46,7 +46,13 @@ const cache = new Map<string, CacheEntry>();
 const DEFAULT_TTL_MS = 5 * 60_000;
 /** A refused sign-in is remembered longer: retrying cannot fix it. */
 const AUTH_TTL_MS = 60_000;
-const DEFAULT_TIMEOUT_MS = 10_000;
+/** A timeout or spawn failure is usually transient (cold agent, slow network).
+ * Remember it briefly so the picker retries on the next open instead of being
+ * stuck on the error for the full catalog TTL. */
+const DEGRADED_TTL_MS = 20_000;
+/** A cold `agent acp` plus a network round trip to list models can take well
+ * over ten seconds on the first call; only give up once it is clearly stuck. */
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 const cacheKey = (options: AcpDiscoveryOptions): string =>
   JSON.stringify([options.harnessId, options.version, options.authFingerprint, options.cacheIdentity ?? ""]);
@@ -63,8 +69,12 @@ const discoverDescriptors = async (
   opened: Awaited<ReturnType<AcpDiscoveryProbe["open"]>>,
   harnessId: string,
 ): Promise<ModelDescriptor[]> => {
+  if (opened.models) return opened.models;
   const initial = parseSessionConfig(opened.result);
   const models = acpModelDescriptors(initial, harnessId).map(withoutVariants);
+  // The fresh session's controls say nothing about the other models: selecting
+  // one may add a thought-level select that was absent here, so every model is
+  // probed. The timeout above, not a guess, bounds the cost.
   if (!initial.model || !opened.setConfigOption) return models;
   for (const model of models) {
     try {
@@ -82,10 +92,12 @@ const discoverDescriptors = async (
   return models;
 };
 
-export function invalidateAcpDiscovery(options?: Pick<AcpDiscoveryOptions, "harnessId">): void {
+export function invalidateAcpDiscovery(options?: Pick<AcpDiscoveryOptions, "harnessId" | "cacheIdentity">): void {
   if (!options) { cache.clear(); return; }
   for (const key of [...cache.keys()]) {
-    if ((JSON.parse(key) as string[])[0] === options.harnessId) cache.delete(key);
+    const [harnessId, , , identity] = JSON.parse(key) as string[];
+    if (harnessId === options.harnessId
+        && (options.cacheIdentity === undefined || identity === options.cacheIdentity)) cache.delete(key);
   }
 }
 
@@ -139,13 +151,15 @@ export function discoverAcpModels(options: AcpDiscoveryOptions): Promise<AcpDisc
   })();
   cache.set(key, { expiresAt: entry?.expiresAt ?? 0, pending });
   return pending.then((value) => {
-    cache.set(key, {
-      value,
-      expiresAt: now() + (options.ttlMs ?? (value.state === "auth-required" ? AUTH_TTL_MS : DEFAULT_TTL_MS)),
-    });
+    const ttl = value.state === "ready" ? DEFAULT_TTL_MS
+      : value.state === "auth-required" ? AUTH_TTL_MS
+      : DEGRADED_TTL_MS;
+    if (cache.get(key)?.pending === pending) {
+      cache.set(key, { value, expiresAt: now() + (options.ttlMs ?? ttl) });
+    }
     return value;
   }, (error) => {
-    cache.delete(key);
+    if (cache.get(key)?.pending === pending) cache.delete(key);
     throw error;
   });
 }

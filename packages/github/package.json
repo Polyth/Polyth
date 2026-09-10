@@ -18,12 +18,13 @@
       "core": false,
       "enabled": true,
       "settingsGroup": "Engineering",
-      "icon": "⎇",
+      "icon": "github",
       "hasSettings": false
     }
   },
   "dependencies": {
     "@polyth/contracts": "0.1.0",
+    "@polyth/code-hosting": "0.1.0",
     "@polyth/git": "0.1.0",
     "@polyth/plugins": "0.1.0",
     "@polyth/session": "0.1.0",

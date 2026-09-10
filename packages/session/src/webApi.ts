@@ -74,6 +74,7 @@ import type {
   IsolationStatusDto,
 } from "@polyth/contracts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import type { ChangeRequest, ChangeRequestComment, ChangeRequestDetail, ChangeRequestFile, HostingIssue, HostingIssueComment, HostingIssueDetail, HostingRepository, HostingResult, HostingStatus } from "@polyth/code-hosting/types";
 
 export type { AuthAttemptDto, ProviderAuthCapabilitiesDto, ProviderAuthView };
 
@@ -473,28 +474,17 @@ export interface KnowledgeItemDto extends Omit<KnowledgeListItemDto, "snippet" |
 }
 
 // ---- github types ----------------------------------------------------------
-export interface GithubRepoDto {
-  name: string; owner: string; url: string; description: string;
-  defaultBranch: string; isPrivate: boolean;
-}
-export interface GithubIssueDto {
-  number: number; title: string; state: string; author: string; updatedAt: string; url: string; body?: string;
-}
-export interface GithubIssueDetailDto extends GithubIssueDto { body: string; createdAt: string }
-export interface GithubIssueCommentDto {
-  id: string; author: string; body: string; createdAt: string; url: string;
-}
-export interface GithubPrDto extends GithubIssueDto { isDraft: boolean; headRefName: string }
+export type GithubRepoDto = HostingRepository;
+export type GithubIssueDto = HostingIssue;
+export type GithubIssueDetailDto = HostingIssueDetail;
+export type GithubIssueCommentDto = HostingIssueComment;
+export type GithubPrDto = ChangeRequest;
 export interface CurrentPrSummaryDto {
   number: number; title: string; url: string;
   changedFiles: number; additions: number; deletions: number;
 }
-export interface GithubStatusDto {
-  installed: boolean; authenticated: boolean;
-  user: { login: string; avatarUrl: string } | null;
-  repo: GithubRepoDto | null; reason?: string;
-}
-export type GhListResult<T> = { ok: true; data: T } | { ok: false; reason: string };
+export type GithubStatusDto = HostingStatus;
+export type GhListResult<T> = HostingResult<T>;
 
 // ---- voice engines (F8) -------------------------------------------------------
 export interface VoiceSettingsDto {
@@ -511,13 +501,8 @@ export interface AssistSuggestionDto { suggestion: string; atSeq: number }
 export interface TaskBriefDto { brief: string }
 
 // ---- PR detail + checks (WP11) ----------------------------------------------
-export interface PrDetailDto {
-  number: number; title: string; state: string; isDraft: boolean; author: string;
-  url: string; body: string; baseRefName: string; headRefName: string; headRefOid: string;
-  additions: number; deletions: number; changedFiles: number; mergeable: string;
-  createdAt: string; updatedAt: string;
-}
-export interface PrFileDto { path: string; additions: number; deletions: number }
+export type PrDetailDto = ChangeRequestDetail;
+export type PrFileDto = ChangeRequestFile;
 export type CheckStatusDto =
   | "queued" | "in_progress" | "success" | "failure" | "cancelled"
   | "skipped" | "neutral" | "timed_out" | "action_required";
@@ -530,10 +515,7 @@ export interface ChecksSummaryDto {
   counts: Partial<Record<CheckStatusDto, number>>;
   groups: Array<{ id: string; label: string; checks: PrCheckDto[] }>;
 }
-export interface PrCommentDto {
-  id: string; author: string; body: string; createdAt: string; url: string;
-  path?: string; line?: number; outdated?: boolean; kind: "issue" | "review"; reviewState?: string;
-}
+export type PrCommentDto = ChangeRequestComment;
 
 // ---- generated walkthrough + review (WP11) -----------------------------------
 export type WalkthroughSourceDto =
@@ -662,7 +644,7 @@ export const api = {
 
   // agentProfileId: string selects a profile, null explicitly clears the
   // session's stored profile, omitted inherits it (UX-COMPOSER-DISC).
-  sendMessage: (id: string, body: { text: string; clientOperationId?: string; command?: { id: string; args?: string }; autoTitle?: boolean; attachments?: AttachmentRef[]; model?: JsonObject; agent?: string; delivery?: string; dismissPending?: boolean; agentProfileId?: string | null }) =>
+  sendMessage: (id: string, body: { text: string; clientOperationId?: string; command?: { id: string; args?: string }; autoTitle?: boolean; attachments?: AttachmentRef[]; model?: JsonObject; agent?: string; harness?: HarnessSelection; delivery?: string; dismissPending?: boolean; agentProfileId?: string | null }) =>
     jfetch<SendResult>(`/api/sessions/${id}/message`, json("POST", body)),
   runtimeFeatures: (id: string) =>
     jfetch<RuntimeFeaturesDto>(`/api/harnesses/sessions/${encodeURIComponent(id)}/features`),
@@ -988,9 +970,7 @@ export const api = {
   gitCommit: (projectId: string, message: string, sessionId?: string) =>
     jfetch<{ sha: string }>(`/api/git/commit`, json("POST", { projectId, message, ...(sessionId ? { sessionId } : {}) })),
   gitCommitMessage: (projectId: string, sessionId?: string) =>
-    jfetch<{ message: string }>(`/api/git/commit-message`, json("POST", { projectId, ...(sessionId ? { sessionId } : {}) })).catch(
-      (): { message: "" } => ({ message: "" }),
-    ),
+    jfetch<{ message: string }>(`/api/git/commit-message`, json("POST", { projectId, ...(sessionId ? { sessionId } : {}) })),
   gitBranches: (projectId: string, sessionId?: string) =>
     jfetch<GitBranches>(`/api/git/branches?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`),
   gitBranch: (projectId: string, name: string, from?: string, sessionId?: string) =>
@@ -1293,8 +1273,8 @@ export const api = {
     jfetch<TrackDto>(`/api/tracks/${encodeURIComponent(id)}/complete-step`, { method: "POST" }),
 
   // ---- github (gh CLI; fail-soft) --------------------------------------------
-  githubStatus: (projectId: string) =>
-    jfetch<GithubStatusDto>(`/api/github/status?projectId=${encodeURIComponent(projectId)}`).catch(
+  githubStatus: (projectId: string, passive = false) =>
+    jfetch<GithubStatusDto>(`/api/github/status?projectId=${encodeURIComponent(projectId)}${passive ? "&passive=true" : ""}`).catch(
       (): GithubStatusDto => ({
         installed: false,
         authenticated: false,

@@ -16,6 +16,7 @@
       "description": "Text and code editing runtime for the workbench.",
       "core": true,
       "enabled": true,
+      "icon": "edit",
       "hasSettings": false
     }
   },

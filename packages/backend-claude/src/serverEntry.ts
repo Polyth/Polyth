@@ -81,7 +81,12 @@ export default function registerPackage(host: ServerPackageHost) {
                 return { kind: "rejected", code: "unsupported", message: "Local Linux Space context required" };
             return releaseProcessExecution(stateFile(context), binding, operationId);
         },
-        provisioner: createClaudeProvisioner(),
+        provisioner: createClaudeProvisioner({
+            storageRoot(context) {
+                if (!context.space || context.space.spaceId !== context.spaceId) return undefined;
+                return host.spaceStorage(context.space).packageDir(host.pluginId);
+            },
+        }),
     };
     let registration: ReturnType<HarnessRegistry["register"]> | undefined;
     return { remoteAccess: localOnlyRemoteAccess(["backend-claude"]), onEnable() { registration = registry.register(provider); }, onDisable() { registration?.dispose(); } };

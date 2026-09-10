@@ -127,25 +127,28 @@ test("right-rail utilities use distinct semantic icons", async () => {
   assert.match(usage, /id: "usage"/);
 });
 
-test("every built-in rail item has a unique rendered icon", async () => {
-  const [mappingSource, iconsSource] = await Promise.all([
-    readFile(new URL("../src/railIcons.ts", import.meta.url), "utf8"),
-    readFile(new URL("../src/icons.tsx", import.meta.url), "utf8"),
-  ]);
-  const entries = [...mappingSource.matchAll(/^\s{2}(?:"([^"]+)"|([\w-]+)): Icon\.(\w+),$/gm)]
-    .map((match) => ({ item: match[1] ?? match[2]!, icon: match[3]! }));
-  assert.deepEqual(entries.map((entry) => entry.item), [
+test("rail icon module initializes every configured glyph", async () => {
+  const { RAIL_ICONS } = await import("../src/railIcons.ts");
+  for (const [id, renderIcon] of Object.entries(RAIL_ICONS)) {
+    const element = renderIcon();
+    assert.ok(element.type, `${id} must resolve to an exported icon component`);
+  }
+});
+
+test("every primary built-in rail item has a unique Lucide icon", async () => {
+  const mappingSource = await readFile(new URL("../src/railIcons.ts", import.meta.url), "utf8");
+  const items = [
     "session", "files", "git", "terminal", "browser", "goals", "multirun",
     "workflow", "fusion", "walkthrough", "schedule", "usage", "github",
     "knowledge", "context", "voice", "models-agents", "events", "diagnostics",
     "tracks", "notification-centre",
-  ]);
-  assert.equal(new Set(entries.map((entry) => entry.icon)).size, entries.length);
-
-  const markup = entries.map((entry) => {
-    const match = iconsSource.match(new RegExp(`^\\s{2}${entry.icon}: \\(\\) => (.+),$`, "m"));
-    assert.ok(match, `missing Icon.${entry.icon}`);
+  ];
+  const icons = items.map((item) => {
+    const escaped = item.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = mappingSource.match(new RegExp(`(?:"${escaped}"|${escaped}): glyph\\((\\w+)\\)`));
+    assert.ok(match, `missing rail icon for ${item}`);
     return match[1]!;
   });
-  assert.equal(new Set(markup).size, markup.length, "rail icons must render different SVG markup");
+  assert.equal(new Set(icons).size, icons.length, "primary rail items must use distinct Lucide glyphs");
+  assert.ok(mappingSource.includes("strokeWidth: 1.8"), "rail icons share the same monochrome stroke treatment");
 });

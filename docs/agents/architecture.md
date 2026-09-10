@@ -26,7 +26,7 @@ This path explains why an attachment defect can be picker, upload, canonical DTO
 | `tunnel` / `pairing-qr` / Link crates | Remote access product / ticket encoding / protocol-native layers | Link architecture and current remote policy |
 | Feature packages | Package-owned services, routes, content, settings, widgets | manifest, serverEntry/webEntry, own tests |
 
-Feature group navigation: files/editor/git; models/opencode/commands; goals/multirun/fusion/walkthrough/workflow; knowledge/schedule/usage; browser/dictation/terminal/ssh; github/home-assistant/task-trackers/custom-action; chat-workspace/handoff; permissions/secure-safe. This grouping describes intent, not complete integration/readiness or a list of packages guaranteed present forever. `inventory` reads actual manifests.
+Feature group navigation: files/editor/git; models/opencode/commands; goals/multirun/fusion/walkthrough/workflow; knowledge/schedule/usage; browser/dictation/terminal/ssh; code-hosting/github/gitlab ([hosting architecture](../architecture/gitlab-support.md)); home-assistant/task-trackers/custom-action; chat-workspace/handoff; permissions/secure-safe. This grouping describes intent, not complete integration/readiness or a list of packages guaranteed present forever. `inventory` reads actual manifests.
 
 ## Integration contracts to protect
 

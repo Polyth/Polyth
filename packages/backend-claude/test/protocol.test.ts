@@ -81,7 +81,9 @@ test("Claude query keeps the overlay when native initialization fails", async ()
 
 test("Claude captures R1 before blocked initialization and preserves staged R2 on success", async () => {
     const { claudeOverlays } = await import("../src/provisioner.ts");
-    claudeOverlays.set(context, { append: "R1" }, "claude", {
+    claudeOverlays.set(context, { append: "R1", verification: {
+        promptIds: ["cap-r1"], skills: [], mcpServers: [], tools: [],
+    } }, "claude", {
         desiredRevision: "R1",
         capabilityIds: ["cap-r1"],
     });
@@ -117,14 +119,16 @@ test("Claude captures R1 before blocked initialization and preserves staged R2 o
     try {
         const creating = rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create-r1");
         assert.deepEqual(launches, [{ desiredRevision: "R1", outcome: "captured", sessionId: "canonical" }]);
-        claudeOverlays.set(context, { append: "R2" }, "claude", {
+        claudeOverlays.set(context, { append: "R2", verification: {
+            promptIds: ["cap-r2"], skills: [], mcpServers: [], tools: [],
+        } }, "claude", {
             desiredRevision: "R2",
             capabilityIds: ["cap-r2"],
         });
         resolveInitialization();
         assert.equal((await creating).kind, "confirmed");
         assert.equal(claudeOverlays.peek(context, "claude")?.desiredRevision, "R2");
-        assert.deepEqual(receipts, [{ desiredRevision: "R1", outcome: "applied" }]);
+        assert.deepEqual(receipts, [{ desiredRevision: "R1", outcome: "unverifiable" }]);
     } finally {
         disposeReceipt();
         disposeLaunch();
@@ -199,6 +203,106 @@ test("Claude query receives overlay systemPrompt append and mcpServers", async (
     assert.deepEqual(options.mcpServers, { ping: { command: "node", args: ["x"] } });
     assert.deepEqual(options.disallowedTools, ["Agent", "Task", "AskUserQuestion"]);
     await rt.dispose();
+});
+
+test("Claude verifies native skills and MCP servers without claiming listed tools are invocable", async () => {
+    const { claudeOverlays } = await import("../src/provisioner.ts");
+    claudeOverlays.set(context, {
+        plugins: [{ type: "local", path: "/private/revision/plugin" }],
+        skills: ["polyth-space:review-safe"],
+        mcpServers: {
+            connected: { command: "helper" },
+            "polyth-agent-tools": { command: "bridge" },
+        },
+        verification: {
+            promptIds: ["instruction"],
+            skills: [{ capabilityId: "skill", canonicalName: "polyth-space:review-safe" }],
+            mcpServers: [
+                { capabilityId: "mcp", name: "connected", enabled: true },
+                { capabilityId: "retired", name: "removed", enabled: false },
+            ],
+            tools: [{ capabilityId: "tool", name: "fixture_read" }],
+        },
+    }, "claude", {
+        desiredRevision: "verified",
+        capabilityIds: ["instruction", "skill", "mcp", "retired", "tool"],
+    });
+    let options: any;
+    const sdk = { query(args: any) {
+        options = args.options;
+        return {
+            async *[Symbol.asyncIterator]() {},
+            initializationResult: async () => ({ plugins_applied: true }),
+            supportedCommands: async () => [{ name: "polyth-space:review-safe", description: "review", argumentHint: "" }],
+            mcpServerStatus: async () => [
+                { name: "connected", status: "connected", tools: [] },
+                { name: "polyth-agent-tools", status: "connected", tools: [{ name: "fixture_read" }] },
+            ],
+            supportedModels: async () => [], setModel: async () => {}, interrupt: async () => {}, close() {},
+        } as any;
+    }, getSessionInfo: async () => undefined };
+    const authority = { authorityId: "owned", generation: 3, receipts: {}, releasedAuthorities: [], spawn() { throw new Error("no"); }, receipt: async () => {}, close: async () => {} } as Awaited<ReturnType<typeof createProcessAuthority>>;
+    const receipts: any[] = [];
+    const disposeReceipt = setCapabilityReceiptSink((receipt) => receipts.push(receipt));
+    const rt = await createClaudeRuntime(context, sdk, authority);
+    try {
+        assert.equal((await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create-verified")).kind, "confirmed");
+        assert.deepEqual(options.plugins, [{ type: "local", path: "/private/revision/plugin" }]);
+        assert.equal(options.pluginDelivery, "initialize");
+        assert.deepEqual(options.skills, ["polyth-space:review-safe"]);
+        const byId = new Map(receipts.map((receipt) => [receipt.capabilityIds[0], receipt]));
+        assert.deepEqual([byId.get("skill")?.outcome, byId.get("skill")?.evidence?.stage], ["applied", "discovered"]);
+        assert.deepEqual([byId.get("mcp")?.outcome, byId.get("mcp")?.evidence?.stage], ["applied", "connected"]);
+        assert.deepEqual([byId.get("retired")?.outcome, byId.get("retired")?.evidence?.stage], ["applied", "discovered"]);
+        assert.deepEqual([byId.get("tool")?.outcome, byId.get("tool")?.evidence?.stage], ["unverifiable", "discovered"]);
+        assert.deepEqual([byId.get("instruction")?.outcome, byId.get("instruction")?.evidence?.stage], ["unverifiable", "staged"]);
+    } finally {
+        disposeReceipt();
+        claudeOverlays.delete(context, "claude");
+        await rt.dispose();
+    }
+});
+
+test("Claude does not apply launch-only plugins, pending MCP, or foreign-server tool names", async () => {
+    const { claudeOverlays } = await import("../src/provisioner.ts");
+    claudeOverlays.set(context, {
+        plugins: [{ type: "local", path: "/private/revision/plugin" }],
+        skills: ["polyth-space:review-safe"],
+        mcpServers: { pending: { command: "helper" }, "polyth-agent-tools": { command: "bridge" } },
+        verification: {
+            promptIds: [],
+            skills: [{ capabilityId: "skill", canonicalName: "polyth-space:review-safe" }],
+            mcpServers: [{ capabilityId: "mcp", name: "pending", enabled: true }],
+            tools: [{ capabilityId: "tool", name: "fixture_read" }],
+        },
+    }, "claude", { desiredRevision: "not-applied", capabilityIds: ["skill", "mcp", "tool"] });
+    const sdk = { query() {
+        return {
+            async *[Symbol.asyncIterator]() {},
+            initializationResult: async () => ({ plugins_applied: false }),
+            supportedCommands: async () => [{ name: "polyth-space:review-safe" }],
+            mcpServerStatus: async () => [
+                { name: "pending", status: "pending" },
+                { name: "foreign-user-server", status: "connected", tools: [{ name: "fixture_read" }] },
+            ],
+            supportedModels: async () => [], setModel: async () => {}, interrupt: async () => {}, close() {},
+        } as any;
+    }, getSessionInfo: async () => undefined };
+    const authority = { authorityId: "owned", generation: 1, receipts: {}, releasedAuthorities: [], spawn() { throw new Error("no"); }, receipt: async () => {}, close: async () => {} } as Awaited<ReturnType<typeof createProcessAuthority>>;
+    const receipts: any[] = [];
+    const disposeReceipt = setCapabilityReceiptSink((receipt) => receipts.push(receipt));
+    const rt = await createClaudeRuntime(context, sdk, authority);
+    try {
+        await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create-unverified");
+        const byId = new Map(receipts.map((receipt) => [receipt.capabilityIds[0], receipt]));
+        assert.equal(byId.get("skill")?.outcome, "failed");
+        assert.equal(byId.get("mcp")?.outcome, "unverifiable");
+        assert.equal(byId.get("tool")?.outcome, "failed");
+    } finally {
+        disposeReceipt();
+        claudeOverlays.delete(context, "claude");
+        await rt.dispose();
+    }
 });
 
 test("Claude maps cumulative usage to deltas, deduplicates results, discovers commands, and sends image blocks", async () => {

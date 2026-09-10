@@ -14,7 +14,9 @@ export interface AgentStatusDockProps {
   label: string;
   /** Localized accessible name for the added/removed line counts. */
   diffLabel?: string;
-  onClick: () => void;
+  /** Opens active-run details when present. Without it the dock is a passive,
+   * live status surface (used while a new agent is being spawned). */
+  onClick?: () => void;
 }
 
 export default function AgentStatusDock({
@@ -30,19 +32,17 @@ export default function AgentStatusDock({
   diffLabel,
   onClick,
 }: AgentStatusDockProps) {
-  return (
-    <button
-      type="button"
-      className="ui-glass-dock ui-glass-dock--strong agent-status-dock"
-      aria-label={label}
-      aria-busy="true"
-      onClick={onClick}
-    >
+  const content = (
+    <>
       <span className="agent-status-dock-icon" aria-hidden="true">{icon}<i /></span>
       <span className="agent-status-dock-content">
         <span className="agent-status-dock-primary">
           <strong>{model}</strong>
-          <span className="agent-status-dock-state" title={status} role="status" aria-live="polite">{status}</span>
+          <span
+            className="agent-status-dock-state"
+            title={status}
+            {...(onClick ? { role: "status", "aria-live": "polite" as const } : {})}
+          >{status}</span>
         </span>
         <span className="agent-status-dock-secondary">
           {files && <span>{files}</span>}
@@ -56,6 +56,30 @@ export default function AgentStatusDock({
         </span>
       </span>
       {elapsed && <time className="agent-status-dock-time" aria-hidden="true">{elapsed}</time>}
+    </>
+  );
+  if (!onClick) {
+    return (
+      <div
+        className="ui-glass-dock ui-glass-dock--strong agent-status-dock agent-status-dock--status"
+        role="status"
+        aria-live="polite"
+        aria-label={label}
+        aria-busy="true"
+      >
+        {content}
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="ui-glass-dock ui-glass-dock--strong agent-status-dock"
+      aria-label={label}
+      aria-busy="true"
+      onClick={onClick}
+    >
+      {content}
     </button>
   );
 }

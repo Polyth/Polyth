@@ -317,6 +317,8 @@ export const en = {
   "contextrail.collapse": "Collapse",
   "contextrail.collapseValue": "Collapse {value}",
   "contextrail.dockBesideChat": "Dock beside Chat",
+  "contextrail.dockBelowChat": "Dock below Chat",
+  "contextrail.unpinWindow": "Unpin window",
   "contextrail.expand": "Expand",
   "contextrail.expandValue": "Expand {value}",
   "contextrail.message": "×",

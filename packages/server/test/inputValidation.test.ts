@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
-import type { Project, ProjectService } from "@polyth/contracts";
+import type { Project, ProjectService, SessionService, UserTurnInput } from "@polyth/contracts";
 import { createGoalService } from "@polyth/goals";
 import { createHttpServer, type RouteHandler } from "../src/http.ts";
 import { goalRoutes } from "../../goals/src/serverEntry.ts";
@@ -114,6 +114,56 @@ test("malformed and non-object JSON are typed 400 responses", async () => {
     }
   } finally {
     app.server.close();
+  }
+});
+
+test("browser message submissions validate and forward the staged harness route", async () => {
+  let received: UserTurnInput | undefined;
+  const sessions = {
+    list: async () => [],
+    sync: async () => [],
+    send: async (_sessionId: string, input: UserTurnInput) => {
+      received = input;
+      return { turnId: "turn-1" };
+    },
+  } as unknown as SessionService;
+  const scoped = await testTenancy({ sessions: () => sessions });
+  scoped.sessionOwners.own("s1", scoped.defaultContext.spaceId);
+  const server = createHttpServer({
+    sessions,
+    spaces: scoped.gateway,
+    runtimes: {} as never,
+    capabilities: () => [],
+    webDist: mkdtempSync(join(tmpdir(), "polyth-message-route-")),
+    version: "test",
+  });
+  server.listen(0);
+  await once(server, "listening");
+  const port = (server.address() as { port: number }).port;
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    const accepted = await fetch(`${base}/api/sessions/s1/message`, {
+      method: "POST",
+      body: JSON.stringify({
+        text: "run there",
+        harness: { mode: "pinned", harnessId: "codex" },
+      }),
+    });
+    assert.equal(accepted.status, 200);
+    assert.deepEqual(received?.harness, { mode: "pinned", harnessId: "codex" });
+
+    received = undefined;
+    const invalid = await fetch(`${base}/api/sessions/s1/message`, {
+      method: "POST",
+      body: JSON.stringify({
+        text: "must not run",
+        harness: { mode: "pinned", harnessId: "../escape" },
+      }),
+    });
+    assert.equal(invalid.status, 400);
+    assert.equal(received, undefined);
+  } finally {
+    server.close();
   }
 });
 

@@ -86,6 +86,11 @@ export default function ProjectFolderDialog({
   const listRef = useRef<HTMLDivElement>(null);
   const pathInputRef = useRef<HTMLInputElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
+  const configurators = useRef(new Map<string, (projectId: string) => Promise<void>>());
+  const onConfigure = useCallback((id: string, callback?: (projectId: string) => Promise<void>) => {
+    if (callback) configurators.current.set(id, callback);
+    else configurators.current.delete(id);
+  }, []);
   const busyRef = useRef(false);
   busyRef.current = busy;
   /** Exit intent: cancellation restores the invoker/fallback; success hands
@@ -177,6 +182,7 @@ export default function ProjectFolderDialog({
       if (occurrences !== 1 || s.activeProjectId !== project.id) {
         throw new Error(tr("projectfolderdialog.theProjectDidnTActivatePleaseTry"));
       }
+      for (const configure of configurators.current.values()) await configure(project.id);
       outcomeRef.current = "success";
       successFeedback();
       announce(tr("projectfolderdialog.openedValue", { value: project.name || project.path }));
@@ -456,6 +462,7 @@ export default function ProjectFolderDialog({
                 // clear a *different* source that armed itself in between.
                 disarm: (id: string) => setArmedSource((cur) => (cur && cur.id === id ? null : cur)),
                 onProjectOpened: completeExternally,
+                onConfigure,
               }}
             />
           </div>

@@ -1,4 +1,4 @@
-import type { ComponentType, ReactNode } from "react";
+import type { ButtonHTMLAttributes, ChangeEvent, ComponentType, InputHTMLAttributes, KeyboardEvent, ReactNode } from "react";
 import type {
   DraftExecutionConfig,
   JsonObject,
@@ -105,6 +105,8 @@ export interface SurfaceComponentProps {
   active?: boolean;
 }
 
+export type WorkspacePaneDock = "side" | "bottom";
+
 export interface SurfacePresentation {
   kind: "workspace";
   defaultRatio: number;
@@ -118,7 +120,10 @@ export interface SurfacePresentation {
    *  pane a full-width strip under the workspace, so Chat's composer sits
    *  directly above it, with a horizontal resize on the top edge. Only the
    *  pinned window mode is affected — dynamic and fullscreen are unchanged. */
-  dock?: "side" | "bottom";
+  dock?: WorkspacePaneDock;
+  /** Edges supported by the pinned window. When omitted, the package exposes
+   *  only its default `dock` edge (or the classic side edge). */
+  dockOptions?: readonly WorkspacePaneDock[];
 }
 
 // ---- Workbench -----------------------------------------------------------------
@@ -432,6 +437,21 @@ export interface HandoffTargetRegistration {
   send(input: HandoffTargetInput): Promise<void>;
 }
 
+/**
+ * Shared host primitives exposed to feature packages. Individual components
+ * retain their concrete props in the shell; packages pass their known props
+ * through this bounded component handle.
+ */
+export type WebUiComponent<Props extends object = Record<string, unknown>> = ComponentType<Props>;
+export interface WebButtonProps extends Pick<ButtonHTMLAttributes<HTMLButtonElement>, "type"> { children?: ReactNode; className?: string; size?: "sm" | "md" | "lg"; variant?: "primary" | "ghost" | "quiet" | "danger"; busy?: boolean; disabled?: boolean; title?: string; iconStart?: () => ReactNode; onClick?: () => void; "aria-pressed"?: boolean; }
+export interface WebInputProps extends Pick<InputHTMLAttributes<HTMLInputElement>, "autoComplete" | "required" | "type"> { value?: string; placeholder?: string; className?: string; disabled?: boolean; "aria-label"?: string; onChange?: (event: ChangeEvent<HTMLInputElement>) => void; onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void; }
+export interface WebEmptyStateProps { title: string; description?: string; actionLabel?: string; onAction?: () => void; }
+
+export interface ConversationSeed {
+  title?: string;
+  draft?: string;
+}
+
 export interface WebPackageHost {
   slots: {
     register(registration: SlotRegistration): Unregister;
@@ -473,6 +493,13 @@ export interface WebPackageHost {
   };
   sessions: {
     upsert(session: SessionProjection): void;
+  };
+  /** Canonical composer/session handoff. Package UI never reaches into the
+   * shell store or composer event bus directly. */
+  conversation: {
+    insert(text: string): void;
+    startNewSession(projectId: string, seed?: ConversationSeed): void;
+    openSession(sessionId: string): Promise<void>;
   };
   navigation: {
     setActiveView(view: string): void;
@@ -518,6 +545,26 @@ export interface WebPackageHost {
     icons: Readonly<Record<string, () => ReactNode>>;
     Dialog: ComponentType<WebDialogProps>;
     Slot: ComponentType<{ slot: UiSlot; context?: Record<string, unknown>; customizable?: boolean }>;
+    components: Readonly<{
+      Button: WebUiComponent<WebButtonProps>;
+      IconButton: WebUiComponent<Record<string, unknown>>;
+      Menu: WebUiComponent<Record<string, unknown>>;
+      Tabs: WebUiComponent<Record<string, unknown>>;
+      TextInput: WebUiComponent<WebInputProps>;
+      Textarea: WebUiComponent<Record<string, unknown>>;
+      Checkbox: WebUiComponent<Record<string, unknown>>;
+      Select: WebUiComponent<Record<string, unknown>>;
+      EmptyState: WebUiComponent<WebEmptyStateProps>;
+      MarkdownDoc: WebUiComponent<Record<string, unknown>>;
+    }>;
+    syntax: {
+      highlight(code: string, language: string): string;
+      languageForPath(path: string): string;
+    };
+    locale: {
+      get(): string;
+      translate(key: string, values?: Record<string, string | number>): string;
+    };
   };
   errors: {
     friendly(action: string, cause: unknown): string;

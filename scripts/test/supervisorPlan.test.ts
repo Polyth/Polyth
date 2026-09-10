@@ -104,6 +104,10 @@ test("arguments default to a read-only filesystem watch", () => {
   assert.equal(parsed.help, false);
 });
 
+test("default shutdown grace covers HTTP drain and authority receipt cleanup", () => {
+  assert.ok(DEFAULT_OPTIONS.graceMs >= 13_000);
+});
+
 test("arguments are parsed and validated", () => {
   const parsed = parseSupervisorArgs([
     "--watch=both",

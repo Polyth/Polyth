@@ -1,0 +1,25 @@
+{
+  "name": "@polyth/code-hosting",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/types.ts",
+    "./types": "./src/types.ts",
+    "./checks": "./src/checks.ts",
+    "./conflicts": "./src/conflicts.ts",
+    "./remotes": "./src/remotes.ts",
+    "./routes": "./src/routes.ts",
+    "./widgets": "./src/widgets/index.tsx",
+    "./widgets/styles.css": "./widgets/styles.css"
+  },
+  "dependencies": {
+    "@polyth/contracts": "0.1.0",
+    "@polyth/web-sdk": "0.1.0",
+    "@polyth/session": "0.1.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/git": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

@@ -6,6 +6,7 @@ import { maybeAutoShowPackageTour, openPackageTour } from "../../packages/onboar
 import { canonicalTourPackageId } from "../../packages/onboarding/pageMap.ts";
 import { getPackageOnboarding, subscribePackageOnboardings } from "../../packages/onboarding/registry.ts";
 import { EmptyState, PageHead } from "./parts.tsx";
+import { PackageGlyph } from "./packageIcons.tsx";
 import { tr, type TranslationKey } from "../../i18n/index.ts";
 import { Button, Switch } from "../ui/index.ts";
 
@@ -156,7 +157,7 @@ export default function PackagesPage() {
             <div className="package-grid">
               {grouped.optional.map((descriptor) => (
                 <article className={`package-tile ${descriptor.enabled ? "enabled" : "disabled"}`} key={descriptor.id}>
-                  <span className="package-icon" aria-hidden="true">{descriptor.icon ?? "◇"}</span>
+                  <span className="package-icon" aria-hidden="true"><PackageGlyph icon={descriptor.icon} /></span>
                   <div className="package-copy">
                     <strong>{packageName(descriptor)}</strong>
                     <p>{packageDescription(descriptor)}</p>
@@ -185,7 +186,7 @@ export default function PackagesPage() {
             <div className="package-grid">
               {grouped.core.map((descriptor) => (
                 <article className="package-tile package-tile-core enabled" key={descriptor.id}>
-                  <span className="package-icon" aria-hidden="true">{descriptor.icon ?? "◆"}</span>
+                  <span className="package-icon" aria-hidden="true"><PackageGlyph icon={descriptor.icon} /></span>
                   <div className="package-copy">
                     <strong>{packageName(descriptor)}</strong>
                     <p>{packageDescription(descriptor)}</p>

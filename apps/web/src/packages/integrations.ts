@@ -11,7 +11,7 @@ export function installIntegrationsPackage(): () => void {
       packageId: "integrations",
       label: tr("packages.integrations.integrations"),
       group: "Workspace",
-      icon: "🔗",
+      icon: "link",
       order: 40,
       component: IntegrationsPage,
     }),

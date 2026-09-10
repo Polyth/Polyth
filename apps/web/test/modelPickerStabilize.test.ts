@@ -152,6 +152,36 @@ test("model picker keeps catalog in the shell and details in a sibling panel", a
   assert.match(source, /className="model-picker-shell"/);
 });
 
+test("model picker loads details only after a row interaction", async () => {
+  const { act, createElement } = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { default: ModelPicker } = await import("../../../packages/models/widgets/ModelPicker.tsx");
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  let picks = 0;
+  try {
+    await act(async () => {
+      root.render(createElement(ModelPicker, {
+        models: [{ providerID: "openai", modelID: "gpt-test", name: "GPT Test" }],
+        onPick: () => { picks += 1; },
+      }));
+    });
+    assert.equal(document.body.querySelector(".model-hover-details"), null, "details card is absent before opening");
+    await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
+    assert.equal(document.body.querySelector(".model-hover-details"), null, "opening the picker does not preload a card");
+    const row = document.body.querySelector<HTMLElement>(".model-picker-row");
+    assert.ok(row, "catalog row renders");
+    await act(async () => { row!.dispatchEvent(new window.MouseEvent("mouseover", { bubbles: true })); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 25)); });
+    assert.match(document.body.querySelector(".model-hover-details")?.textContent ?? "", /GPT Test/);
+    assert.equal(picks, 0, "hovering for details does not choose a model");
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
 test("model picker shell keeps fixed geometry while details open beside it", async () => {
   const { act, createElement } = await import("react");
   const { createRoot } = await import("react-dom/client");

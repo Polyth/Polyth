@@ -38,7 +38,13 @@ export const DEFAULT_OPTIONS: SupervisorOptions = {
   gitIntervalMs: 10_000,
   pull: false,
   restart: "auto",
-  graceMs: 10_000,
+  // The server's bounded shutdown can spend up to 8s draining HTTP before it
+  // closes harness runtimes, whose Linux authority waits up to 5s for a
+  // descendant-empty release receipt. Ten seconds could therefore SIGKILL a
+  // healthy shutdown between `.ready` and `.released`, permanently fencing
+  // that session on the next boot. This cap affects only a wedged shutdown;
+  // normal exits still return immediately.
+  graceMs: 30_000,
   initialBuild: true,
   maxCrashes: 5,
 };

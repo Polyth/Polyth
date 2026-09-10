@@ -80,7 +80,7 @@ export default defineWebPackage((host) => () => {
       packageId: "chat-workspace",
       label: "Chat Workspace",
       group: "Workspace",
-      icon: "💬",
+      icon: "chat",
       order: 25,
       component: () => createElement(ChatWorkspaceSettingsPage, { host }),
       settingsItems: [

@@ -59,6 +59,42 @@ test("shell previews remove setup noise without losing the useful command", () =
   );
 });
 
+test("shell-backed repository inspection is presented by semantic action", () => {
+  const searchTool = tool({
+    input: { command: "/bin/bash -lc 'rg -n -C 12 -S \"harnessTransition\" packages/server/test/harnessSwitch.test.ts'" },
+  });
+  const search = executionPresentation(searchTool);
+  assert.equal(search.kind, "search");
+  assert.equal(search.label, "Search");
+  assert.equal(search.preview, 'rg -n -C 12 -S "harnessTransition" packages/server/test/harnessSwitch.test.ts');
+
+  const readTool = tool({
+    input: { command: "/bin/bash -lc \"sed -n '1,185p' packages/server/test/harnessSwitch.test.ts\"" },
+  });
+  const read = executionPresentation(readTool);
+  assert.equal(read.kind, "read");
+  assert.equal(read.label, "Read");
+  assert.equal(read.preview, "sed -n '1,185p' packages/server/test/harnessSwitch.test.ts");
+
+  assert.equal(executionPresentation(tool({ input: { command: "sed -i 's/a/b/' file.ts" } })).kind, "shell");
+  assert.equal(executionGroupLabel([searchTool, readTool]), "Repository inspection");
+
+  const compound = executionPresentation(tool({
+    input: { command: "/bin/bash -lc \"printf '%s\\\\n' '--- files ---'; rg --files -g '!!!node_modules!!!' | sed -n '1,20p'\"" },
+  }));
+  assert.equal(compound.kind, "search");
+  assert.equal(compound.label, "Search");
+  assert.equal(compound.preview, "rg --files -g '!!!node_modules!!!' | sed -n '1,20p'");
+
+  const inventory = executionPresentation(tool({
+    input: { command: "/bin/bash -lc \"printf '%s\\\\n' '--- repo top ---'; find ../polyth -maxdepth 2 -type d -print | sort\"" },
+  }));
+  assert.equal(inventory.kind, "search");
+  assert.equal(inventory.label, "Search");
+  assert.equal(inventory.preview, "find ../polyth -maxdepth 2 -type d -print | sort");
+  assert.equal(executionPresentation(tool({ input: { command: "find . -exec rm {} \\;" } })).kind, "shell");
+});
+
 test("file, URL, edit, search, MCP, and subagent previews are semantic", () => {
   assert.equal(
     middleTruncatePath("apps/web/src/components/workspace/very/deep/Composer.tsx", 38),

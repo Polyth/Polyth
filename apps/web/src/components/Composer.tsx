@@ -91,6 +91,7 @@ import {
 import {
   loadComposerConfig, saveComposerConfig, consumeComposerConfig,
   withAutoThinking, withExplicitAgent, withExplicitThinking, withModelForNextTurn,
+  withHarnessForNextTurn,
   type ComposerConfig,
 } from "../composerConfig.ts";
 import { shouldHandlePromptHistoryKey } from "../composer/history.ts";
@@ -111,6 +112,7 @@ import { useSpaces } from "../spaces.ts";
 import { isManagedIsolationBranch } from "@polyth/contracts";
 import type {
   DraftExecutionConfig,
+  HarnessSelection,
   ModelDescriptor,
   ModelRef,
   QueueItemDto,
@@ -483,6 +485,7 @@ export default function Composer({
   const settings = useStore((s) => s.settings);
   const sessionDefaults = useSessionDefaults();
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
+  const [cfg, setCfg] = useState<ComposerConfig>(() => loadComposerConfig(session?.id ?? null));
   const draftProfile = !session && draftExecution.profileId
     ? profiles.find((profile) => profile.id === draftExecution.profileId)
     : undefined;
@@ -495,12 +498,19 @@ export default function Composer({
         ? activeProject.defaults.harness.harnessId
         : undefined
     : undefined;
+  const pendingSessionHarnessId = session && cfg.harness?.mode === "pinned"
+    ? cfg.harness.harnessId
+    : undefined;
+  const prospectiveHarnessId = pendingSessionHarnessId ?? selectedDraftHarness;
   const routeCatalog = useRuntimeCatalog(session, globalModels, globalAgents, {
     spaceId,
     projectId: activeProjectId ?? undefined,
-    harnessId: selectedDraftHarness,
+    harnessId: prospectiveHarnessId,
   });
-  const catalogHarnessId = session?.resolvedHarnessId ?? routeCatalog.harnessId ?? selectedDraftHarness;
+  const catalogHarnessId = pendingSessionHarnessId
+    ?? session?.resolvedHarnessId
+    ?? routeCatalog.harnessId
+    ?? selectedDraftHarness;
   const effectiveDraftHarness = session ? undefined : catalogHarnessId;
   const models = catalogHarnessId
     ? routeCatalog.models.filter((item) => !item.harnessId || item.harnessId === catalogHarnessId)
@@ -653,7 +663,6 @@ export default function Composer({
   // agent) per canonical session, persisted with the draft. Selections flow
   // through composerConfig transitions so profile and explicit overrides
   // clear each other.
-  const [cfg, setCfg] = useState<ComposerConfig>(() => loadComposerConfig(session?.id ?? null));
   const effectiveProfileId = cfg.profile.kind === "id"
     ? cfg.profile.id
     : cfg.profile.kind === "none"
@@ -1188,9 +1197,11 @@ export default function Composer({
       const selectedProfile = selectedProfileId
         ? profiles.find((profile) => profile.id === selectedProfileId)
         : undefined;
-      const selected = cfgSent.model ?? session?.model ?? (selectedProfile
-        ? { providerID: selectedProfile.providerID, modelID: selectedProfile.modelID }
-        : preferredModel);
+      const selected = cfgSent.model
+        ?? (cfgSent.harness ? undefined : session?.model)
+        ?? (selectedProfile
+          ? { providerID: selectedProfile.providerID, modelID: selectedProfile.modelID }
+          : preferredModel);
       const descriptor = selected && chatModels.find((candidate) => modelIdentityMatches(candidate, selected));
       const thinking = resolveComposerThinking({
         ...(descriptor ? { descriptor } : {}),
@@ -1209,6 +1220,7 @@ export default function Composer({
       const ok = await sendMessage(current.text, selectedModel, cfgSent.agent, {
         targetSessionId: target,
         delivery: "steer",
+        ...(cfgSent.harness ? { harness: cfgSent.harness } : {}),
         ...(current.attachments?.length ? { attachments: current.attachments } : {}),
         dismissPending: true,
         ...(profile !== undefined ? { agentProfileId: profile } : {}),
@@ -1327,9 +1339,11 @@ export default function Composer({
       : selectedProfile
         ? selectedProfile.id
         : undefined;
-    const selected = cfgSent.model ?? session?.model ?? (selectedProfile
-      ? { providerID: selectedProfile.providerID, modelID: selectedProfile.modelID }
-      : preferredModel);
+    const selected = cfgSent.model
+      ?? (cfgSent.harness ? undefined : session?.model)
+      ?? (selectedProfile
+        ? { providerID: selectedProfile.providerID, modelID: selectedProfile.modelID }
+        : preferredModel);
     const selectedDescriptor = selected
       ? chatModels.find((candidate) => modelIdentityMatches(candidate, selected))
       : undefined;
@@ -1357,6 +1371,9 @@ export default function Composer({
         : draftExecution.harnessSelectionExplicit
           ? draftExecution.harnessSelection
           : activeProject?.defaults?.harness ?? undefined;
+    // New-session creation already commits its harness before the first turn.
+    // Only an existing session needs the staged submit-time route.
+    const submittedHarness = target ? cfgSent.harness : undefined;
     type StagedDraft = { revision: number; scopeKey: string; scope: PersistenceScope };
     const reliabilityScopeAtSend = clientPersistenceScope(activeProjectId ? { projectId: activeProjectId } : {});
     const stageTargetDraft = (targetSessionId: string, capturedScope: PersistenceScope): StagedDraft => {
@@ -1395,6 +1412,7 @@ export default function Composer({
           cfgSent.agent,
           {
             targetSessionId,
+            ...(submittedHarness ? { harness: submittedHarness } : {}),
             ...(selectedNativeCommand ? { command: selectedNativeCommand } : {}),
             ...(atts.length > 0 ? { attachments: atts } : {}),
             ...(delivery ? { delivery } : {}),
@@ -1448,7 +1466,13 @@ export default function Composer({
       setSendPending(true);
       void deliver(target).finally(() => setSendPending(false));
     } else if (activeProjectId) {
-      const spawnRequestId = beginSessionSpawn(activeProjectId);
+      const spawnHarnessId = creationHarness?.mode === "pinned"
+        ? creationHarness.harnessId
+        : catalogHarnessId ?? modelHarnessId;
+      const spawnRequestId = beginSessionSpawn(activeProjectId, {
+        ...(spawnHarnessId ? { harnessId: spawnHarnessId } : {}),
+        ...(routeCatalog.harnessName ? { harnessName: routeCatalog.harnessName } : {}),
+      });
       void (async () => {
         const scopeStillCurrent = () => scopedDraftCacheKey(null) === scopedDraftCacheKey(null, reliabilityScopeAtSend)
           && getState().activeProjectId === activeProjectId;
@@ -1558,6 +1582,7 @@ export default function Composer({
     session?.model, session?.status, session?.runtimeControl, preferredModel,
     sessionDefaults.defaultThinking, chatModels, creatingSession, newSessionTarget,
     newSessionAutoApprove, newSessionGoal, newSessionIntent, commandCatalog,
+    catalogHarnessId, routeCatalog.harnessName,
     draftExecution, profiles, activeProject?.defaults?.harness,
   ]);
 
@@ -1746,7 +1771,9 @@ export default function Composer({
 
   // ---- execution configuration projections ------------------------------------
   const agentValue = cfg.agent ?? "";
-  const recommendedModel = session?.model
+  const recommendedModel = pendingSessionHarnessId
+    ? chatModels[0]
+    : session?.model
     ? { ...session.model, ...(session.resolvedHarnessId ? { harnessId: session.resolvedHarnessId } : {}) }
     : preferredModel && chatModels.some((candidate) => modelIdentityMatches(candidate, preferredModel))
       ? preferredModel
@@ -1772,6 +1799,16 @@ export default function Composer({
         setUiError(friendlyError(tr("composer.couldnTRememberTheProjectModel"), error));
       });
     }
+  };
+  const pickComposerHarness = (selection: HarnessSelection) => {
+    if (!session) return;
+    // A native command belongs to the currently catalogued runtime and must
+    // never survive a staged route change into another harness.
+    selectedCommandRef.current = undefined;
+    updateCfg(withHarnessForNextTurn(cfg, selection, {
+      harnessId: session.resolvedHarnessId,
+      profileId: session.agentProfileId,
+    }, profiles));
   };
   const chatAgents = agents.filter((agent) =>
     roleKind(agent, rolePrefs) === "main" && agent.name.toLowerCase() !== "compaction");
@@ -1991,6 +2028,8 @@ export default function Composer({
     harnessSelection: session?.harness,
     resolvedHarnessId: session?.resolvedHarnessId ?? effectiveDraftHarness,
     harnessTransition: session?.harnessTransition,
+    pendingHarnessSelection: session ? cfg.harness : undefined,
+    onSelectHarness: session ? pickComposerHarness : undefined,
     projectHarnessDefault: activeProject?.defaults?.harness,
     executionAgentControl: agentControl,
     executionEffortControl: effortControl,
@@ -2114,35 +2153,16 @@ export default function Composer({
     ? ` composer-mobile ${expanded ? "composer-expanded" : "composer-collapsed"}${inputFocused ? " composer-input-active" : ""}${hasDraft ? " composer-has-draft" : ""}`
     : "";
 
-  // Creating a canonical session can cold-start OpenCode. Replace the empty
-  // new-chat composer immediately, rather than leaving a sent prompt looking
-  // like it disappeared until the server responds.
-  if (creatingSession) {
-    return (
-      <div
-        ref={rootRef}
-        className={`composer ${widgetMode ? "composer-widget" : "composer-chat"} composer-simple${widgetMode ? "" : " composer-focus-light"}${stateClass}`}
-        aria-busy="true"
-      >
-        <GlassDock className="composer-card">
-          <div className="session-loading" role="status">
-            <span className="ui-spinner ui-spinner--sm" aria-hidden="true" />
-            <span>{tr("workspace.builtinsurfaces.spawningAgent")}</span>
-          </div>
-        </GlassDock>
-      </div>
-    );
-  }
-
   return (
     <div
       ref={rootRef}
       className={`composer ${widgetMode ? "composer-widget" : "composer-chat"} composer-simple${widgetMode ? "" : " composer-focus-light"}${stateClass}`}
+      aria-busy={creatingSession || undefined}
     >
       {/* The project/worktree pickers only make sense before a session exists:
           in an open session the location is fixed, and picking here silently
           switched project or spawned a new session instead of retargeting. */}
-      {!session && <SessionContextBar {...contextBar} />}
+      {!session && !creatingSession && <SessionContextBar {...contextBar} />}
       {/* Widget-areas (WA4): the project/branch meta row is a widget area. */}
       <SlotHost slot="composer.meta" context={slotContext} customizable />
       {failedSend && (

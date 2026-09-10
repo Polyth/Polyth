@@ -1,0 +1,274 @@
+.markets-overview {
+  container-type: inline-size;
+  display: flex;
+  min-height: 0;
+  height: 100%;
+  flex-direction: column;
+  overflow: auto;
+  color: var(--text);
+}
+
+.markets-overview-header,
+.markets-overview-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.markets-overview-header {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--hair);
+}
+
+.markets-overview-header > div:first-child,
+.markets-overview-section-title > div {
+  min-width: 0;
+}
+
+.markets-overview-header strong,
+.markets-overview-section-title strong {
+  display: block;
+  font-size: var(--font-heading);
+}
+
+.markets-overview-header span,
+.markets-overview-section-title span,
+.markets-overview-metric small,
+.markets-overview-errors {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.markets-overview-header > div:first-child > span {
+  display: block;
+  margin-top: var(--space-1);
+}
+
+.markets-overview-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--space-1);
+}
+
+.markets-overview-actions button,
+.markets-overview-market-grid button,
+.markets-overview-crypto-table button {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.markets-overview-actions button {
+  min-height: max(var(--hit-min), var(--control-h-sm));
+  padding: 0 var(--control-pad-x-sm);
+  border-radius: var(--radius-control);
+  color: var(--text-dim);
+  font-size: var(--font-label);
+}
+
+.markets-overview-actions button:hover:not(:disabled),
+.markets-overview-market-grid button:hover,
+.markets-overview-crypto-table button:hover {
+  background: var(--surface-overlay-hover);
+}
+
+.markets-overview-actions button:focus-visible,
+.markets-overview-market-grid button:focus-visible,
+.markets-overview-crypto-table button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.markets-overview-actions button:disabled {
+  cursor: default;
+  opacity: .55;
+}
+
+.markets-overview-section {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--hair);
+}
+
+.markets-overview-section-title {
+  margin-bottom: var(--space-2);
+}
+
+.markets-overview-section-title strong {
+  font-size: var(--font-label);
+}
+
+.markets-overview-macro-grid,
+.markets-overview-market-grid {
+  display: grid;
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-card);
+  background: var(--hair);
+}
+
+.markets-overview-macro-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.markets-overview-market-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.markets-overview-metric,
+.markets-overview-market-grid button {
+  min-width: 0;
+  padding: var(--space-3);
+  background: var(--surface);
+}
+
+.markets-overview-metric > span,
+.markets-overview-metric > strong,
+.markets-overview-metric > small,
+.markets-overview-market-grid button > span,
+.markets-overview-market-grid button > strong,
+.markets-overview-market-grid button > small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.markets-overview-metric > span,
+.markets-overview-market-grid button > span {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.markets-overview-metric > strong,
+.markets-overview-market-grid button > strong {
+  margin-top: var(--space-1);
+  font-family: var(--mono);
+  font-size: var(--font-label);
+  font-variant-numeric: tabular-nums;
+}
+
+.markets-overview-metric > small,
+.markets-overview-market-grid button > small {
+  margin-top: var(--space-1);
+}
+
+.markets-overview-market-grid button {
+  text-align: left;
+}
+
+.markets-overview-crypto-table {
+  overflow: hidden;
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-card);
+}
+
+.markets-overview-crypto-table button {
+  display: grid;
+  grid-template-columns: minmax(90px, 1.1fr) minmax(90px, 1fr) minmax(64px, .6fr);
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: max(var(--hit-min), 42px);
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--hair);
+  text-align: left;
+}
+
+.markets-overview-crypto-table button:last-of-type {
+  border-bottom: 0;
+}
+
+.markets-overview-crypto-table button > span:nth-child(2),
+.markets-overview-crypto-table button > span:nth-child(3) {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.markets-overview-crypto-table button > span:first-child strong,
+.markets-overview-crypto-table button > span:first-child small {
+  display: block;
+}
+
+.markets-overview-crypto-table button > span:first-child small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.markets-overview .positive {
+  color: var(--green-on-wash);
+}
+
+.markets-overview .negative {
+  color: var(--red);
+}
+
+.markets-overview-status,
+.markets-overview-notice,
+.markets-overview-errors,
+.markets-overview-empty {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-meta);
+}
+
+.markets-overview-status {
+  background: var(--accent-wash);
+  color: var(--text-dim);
+}
+
+.markets-overview-notice {
+  margin-bottom: var(--space-2);
+  border-radius: var(--radius-control);
+  background: var(--amber-wash);
+  color: var(--amber-on-wash);
+}
+
+.markets-overview-errors {
+  margin-top: var(--space-2);
+}
+
+.markets-overview-empty {
+  grid-column: 1 / -1;
+  background: var(--surface);
+  color: var(--muted);
+}
+
+@container (max-width: 680px) {
+  .markets-overview-header,
+  .markets-overview-section {
+    padding-inline: var(--space-3);
+  }
+
+  .markets-overview-macro-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (max-width: 440px) {
+  .markets-overview-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .markets-overview-actions {
+    width: 100%;
+  }
+
+  .markets-overview-actions button {
+    flex: 1;
+  }
+
+  .markets-overview-market-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .markets-overview-crypto-table button {
+    grid-template-columns: minmax(76px, 1fr) minmax(86px, 1fr) minmax(54px, .7fr);
+    padding-inline: var(--space-2);
+  }
+}

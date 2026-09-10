@@ -16,6 +16,7 @@
       "description": "Tool permission review and policy enforcement.",
       "core": true,
       "enabled": true,
+      "icon": "shield",
       "hasSettings": false
     }
   },

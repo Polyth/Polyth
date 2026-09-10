@@ -27,7 +27,7 @@ flowchart TD
   SNAP --> DB
 ```
 
-The new registry selects factories. It does not replace `AgentRuntime`, reconciliation, endpoint identity, the durable operation journal, or the existing runtime epoch transaction. Providers register through package discovery and the existing service registry. The desktop's generated-style package inventory mirrors server discovery.
+The new registry selects factories. It does not replace `AgentRuntime`, reconciliation, endpoint identity, the durable operation journal, or the existing runtime epoch transaction. Providers register through package discovery and the existing service registry. The desktop's generated-style package inventory mirrors server discovery. A local provider daemon launched by Polyth is an implementation detail inside that ownership boundary; it is never an ambient service that Polyth merely hopes to find again.
 
 `backend-opencode` registers the existing managed OpenCode pool. Its existing composition-root wiring still owns configuration restart barriers and shared-project runtime management; this was preserved deliberately. No central session or importer switch statement dispatches on Claude, Codex, Cursor, fx, or other vendor names.
 
@@ -61,11 +61,15 @@ A crash after target creation but before publication resumes the recorded receip
 
 ### Local execution ownership
 
-All four implemented runtime families use the same Linux process authority. A small bundled Polyth supervisor installs `PR_SET_CHILD_SUBREAPER`; a separate owner pipe gates native launch until Polyth persists the authority ledger. Closing that pipe on a Polyth crash triggers shutdown. The supervisor kills and reaps its descendants, including detached/double-forked tools, and writes an exact release receipt only after the descendant set is empty.
+All four implemented runtime families use the same Linux process authority. A small bundled Polyth supervisor installs `PR_SET_CHILD_SUBREAPER`; a separate owner pipe gates native launch until Polyth persists the authority ledger. Closing that pipe on a Polyth crash triggers shutdown. The supervisor kills and reaps its descendants, including detached/double-forked tools, and writes an exact release receipt only after the descendant set is empty. Where a user systemd manager is available, Polyth launches that supervisor in a generation-specific transient scope. The scope is the kernel-backed fallback owner if the supervisor itself disappears: Polyth kills that exact scope, waits until systemd proves it empty, and only then persists a replacement release receipt.
 
-PID start-time checks prevent signalling a reused PID. Killing the supervisor before it writes a release receipt leaves execution outcome unknown and blocks replacement. OpenCode's native endpoint incarnation is also recorded in this ledger, allowing old release evidence to survive a server restart.
+PID start-time checks prevent signalling a reused PID. A host boot-ID change also proves that a scope from the previous boot cannot still execute. Without a valid receipt, scope-empty proof or boot change, killing the supervisor still leaves execution outcome unknown and blocks replacement. OpenCode's native endpoint incarnation and containment identity are recorded in this ledger, allowing old release evidence to survive a server restart.
 
-This proof covers owned local process descendants. Borrowed endpoints, SSH execution and non-Linux switching do not gain a fictional shutdown guarantee. Existing OpenCode operation on those platforms remains available, but cross-harness switching requires a supported release proof. The bundled supervisor is Linux-specific; no equivalent release proof is claimed on macOS or Windows.
+For owned OpenCode, transport recovery first rebuilds the connection and protocol against the current endpoint. If the readiness path proves the endpoint unresponsive, Polyth stops the old owned boundary instead of retrying the failed provider mutation, starts a new generation, and emits `endpoint-replaced`. The session service enumerates every canonical session wired to that physical runtime, reconciles it, creates a fresh native session where required, fences unresolved old-generation operations and restores only confirmed canonical Polyth history. One failing session cannot authorize or suppress recovery for a different project/runtime key.
+
+This proof covers owned local process descendants. Borrowed endpoints, SSH execution and non-Linux switching do not gain a fictional shutdown guarantee. Existing OpenCode operation on those platforms remains available, but cross-harness switching requires a supported release proof. The bundled supervisor is Linux-specific; the transient-scope fallback additionally requires a working user systemd manager. A legacy authority ledger created without containment remains blocked after a lost supervisor receipt until an external execution boundary (for example, a host reboot) proves it empty.
+
+The accepted [owned-runtime recovery ADR](./owned-runtime-recovery.md) records the alternatives, trust boundary, compatibility path and rollout limits for this containment model.
 
 ## Exactly what continuity transfers
 
@@ -120,18 +124,60 @@ Capabilities below describe the Polyth adapters, not everything each native prod
 | OpenCode | Existing HTTP/SSE adapter. [Official docs](https://opencode.ai/docs/) | Registered behind the registry; existing native capability negotiation retained. Local descendant supervision added. Native source reads the managed project runtime's inventory. It does not scan arbitrary external OpenCode databases. Live turns and switching passed. |
 | Codex | `codex app-server`; installed CLI 0.153.4 and its generated protocol schemas. [App Server](https://developers.openai.com/codex/app-server) | Native thread/turn receipts, streaming text, shell/edit outcomes, permissions, model catalog, verified native resume and native MCP. No attachment translation, steering, questions, subagent UI, compaction API, usage/cost reporting or fork. Source imports CLI-origin threads in the same cwd; partial/paginated history is rejected instead of truncated silently. Live turns and switching passed. |
 | Claude Code | Public Agent SDK, pinned optional dependency 0.3.263; native CLI 2.1.261 in verification. [TypeScript SDK](https://code.claude.com/docs/en/agent-sdk/typescript), [sessions](https://code.claude.com/docs/en/agent-sdk/sessions) | SDK query, documented custom spawn hook, native auth/model catalog, text and tool outcomes, permission bridge and native MCP. Final-message delivery, not token streaming. Generation-only continuity; no general native-resume claim, attachments, steering, questions, subagents, usage/cost, compaction or fork. No source inventory shipped. Live turns and switching passed. |
-| Generic ACP | Explicit protocol v1 negotiation. [ACP v1 prompt turn](https://agentclientprotocol.com/protocol/v1/prompt-turn) | Shared transport, lifecycle, text streaming and permission choices. Admission requires native evidence; cancellation has no acknowledgement and remains unknown until terminal evidence/release. No v2 guessing, native load/resume, model selection, attachments, source reader, usage/cost, fork, compaction or MCP configuration. Protocol tests passed. |
+| Generic ACP | Explicit protocol v1 negotiation. [ACP v1 prompt turn](https://agentclientprotocol.com/protocol/v1/prompt-turn) | Shared transport, lifecycle, text streaming and permission choices. Admission requires native evidence; cancellation has no acknowledgement and remains unknown until terminal evidence/release. No v2 guessing, native load/resume, model selection, attachments, source reader, usage/cost, fork or compaction. MCP configuration is passed for supported transports; connection/invocation remains unverifiable without a profile-specific readback. Protocol tests passed. |
 | Cursor | `agent acp`. [Official ACP interface](https://cursor.com/docs/cli/acp) | Thin shared-ACP profile. Installed version 2026.09.02-c22c1a3 detected. Authentication status is unknown; manual selection only, excluded from Auto. Native ACP v1 handshake and owned shutdown passed; no paid ACP turn was run. |
 | fx | `fx acp`. [Official ACP interface](https://fx.sh/docs/using-fx/acp) | Thin shared-ACP profile and native sign-in hint. Not installed in the verification environment; no live execution claim. Authentication unknown; excluded from Auto. |
 | Grok Build | Official announcement describes ACP and headless CLI integration. [xAI announcement](https://x.ai/news/grok-build-cli) | Researched, not implemented. Exact stable ACP invocation/auth contracts were not verified sufficiently to ship a profile. |
 | Pi | Native `pi --mode rpc`. [Official RPC docs](https://pi.dev/docs/latest/rpc) | Researched, not implemented. A future package can reuse process ownership while translating its native RPC into `AgentRuntime`. |
 | OMP / oh-my-pi | Native `omp --mode rpc`, with its own RPC framing/version. [Repository RPC docs](https://github.com/can1357/oh-my-pi/blob/main/docs/rpc.md) | Researched, not implemented. Do not assume Pi-compatible framing or force it through ACP. |
 
-The composer has one model trigger. Its picker hosts the harness choices as tabs above the model catalog; changing tabs keeps the canonical session and changes the catalog/runtime route. Active-turn timing choices and transition controls retain the safe switch algorithm above, while the separate idle harness trigger is gone. On phones the same sheet also owns role, thinking, and profile controls.
+The composer has one model trigger. Its picker hosts the harness choices as tabs above the model catalog. Changing a tab is a browser-local next-turn choice: it updates the preview catalog from cached or summary metadata, but it does not start a native runtime, create a native session, or publish a switch. The submitted message carries that route intent; only then does the server run the safe switch algorithm above and publish its transition and timeline evidence. Process-free roster metadata lets the picker render harness labels and logos before availability probes finish. Post-submit transition controls remain available for recovery and escalation, while the separate idle harness trigger is gone. On phones the same sheet also owns role, thinking, and profile controls.
 
 Settings provide enabled/priority preferences, detection refresh, official setup links, available verified install/sign-in commands and diagnostics. Commands are shown for explicit “Run command” confirmation and then run in the existing terminal UI. Detection refreshes after terminal exit/window focus. Missing or broken optional providers do not stop server boot. Cursor/fx remain deliberately outside Auto until native authentication can be verified.
 
 ## Verification
+
+### Portable capability evidence
+
+The provisioning controller retains canonical scope and generation leases. Skills
+are revisioned private artifacts for Codex, Claude and OpenCode; generic ACP uses
+explicit prompt fallback. MCP configuration acceptance alone is `unverifiable`.
+Receipts carry an optional `evidence` with `stage` and a provider-owned `source`:
+`staged`, `discovered`, `connected`, or `invocable`. Skill discovery must match the
+expected private artifact. MCP connection does not establish tool invocation;
+production provisioning never calls arbitrary user tools as a probe. Old native
+success records without sufficient evidence are downgraded when read.
+
+OpenCode uses a private file through `OPENCODE_CONFIG`, because 1.18.29 does not
+discover `skills.paths` from the inline overlay. It reads `/skill` and `/mcp` on
+the captured runtime generation. An existing custom `OPENCODE_CONFIG` is rejected
+when private skills are staged: relocating its relative plugins/file references
+would change user configuration semantics. User repository files are not edited.
+See the [native config source](https://opencode.ai/docs/config/#custom-path).
+
+Model-free process conformance is opt-in via `POLYTH_NATIVE_CAPABILITY_TESTS=1` in
+the backend native capability tests. It uses temporary storage and fixture MCP
+servers. Protocol fakes and successful native lists are not paid model-turn
+evidence; unavailable native invocation APIs remain explicitly unverified.
+
+```sh
+POLYTH_NATIVE_CAPABILITY_TESTS=1 node --experimental-strip-types --test packages/backend-{codex,claude,opencode}/test/nativeCapabilities.test.ts
+```
+
+The model-free checks on 2026-09-10 passed with Codex 0.153.4, Claude Code
+2.1.265 / SDK 0.3.263, and OpenCode 1.18.29. All three discovered isolated private
+skills, removed them on replacement, and connected the fixture MCP server.
+Codex additionally invoked the deterministic fixture through
+`mcpServer/tool/call`; Claude and OpenCode did not prove native invocation.
+
+On the changes rebased onto `ab1370f7`, the combined contracts/runtime/backend/
+capability/switch suites passed 709 tests with 4 opt-in skips; the separate native
+run passed 5/5. `npm run build:web` passed. Contracts, Codex, Claude and ACP
+typechecks passed. OpenCode/server typecheck diagnostics matched an untouched
+`ab1370f7` checkout: `backend-opencode/src/serverEntry.ts:69`,
+`server/src/runtimeCatalog.ts:149`, and `server/src/smallModel.ts:114–115`.
+
+### Historical native journey
 
 The isolated native journey used canonical session `5d599e70-665c-4919-8ef7-4de67493e813` and cwd `/tmp/polyth-harness-workspace`:
 

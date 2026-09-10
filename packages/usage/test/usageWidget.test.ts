@@ -8,6 +8,13 @@ import { emptyModel } from "../../../apps/web/src/reduce.ts";
 register("./tsxHooks.mjs", import.meta.url);
 
 const { SessionUsageStats } = await import("../widgets/usagePlugin.tsx");
+const { formatQuotaReset } = await import("../widgets/usage/UsageDashboard.tsx");
+
+test("quota reset labels interpolate the formatted reset time", () => {
+  const label = formatQuotaReset(Date.UTC(2027, 0, 1));
+  assert.match(label, /^Resets /);
+  assert.doesNotMatch(label, /\{value\}/);
+});
 
 test("session usage renderer shows context percentage and all default metrics", () => {
   const model = emptyModel();

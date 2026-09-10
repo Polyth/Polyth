@@ -1,0 +1,98 @@
+.markets-overview-widget {
+  display: flex;
+  min-height: 0;
+  height: 100%;
+  flex-direction: column;
+}
+
+.markets-overview-widget-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: max(var(--hit-min), var(--control-h-sm));
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.markets-overview-widget-title span {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.markets-overview-widget-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  min-height: 0;
+  overflow: auto;
+  border-top: 1px solid var(--hair);
+  background: var(--hair);
+}
+
+.markets-overview-widget-grid button {
+  display: grid;
+  min-width: 0;
+  padding: var(--space-2);
+  border: 0;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.markets-overview-widget-title:hover:not(:disabled),
+.markets-overview-widget-grid button:hover:not(:disabled) {
+  background: var(--surface-overlay-hover);
+}
+
+.markets-overview-widget-title:focus-visible,
+.markets-overview-widget-grid button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.markets-overview-widget-title:disabled,
+.markets-overview-widget-grid button:disabled {
+  cursor: default;
+}
+
+.markets-overview-widget-grid button > span,
+.markets-overview-widget-grid button > strong,
+.markets-overview-widget-grid button > small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.markets-overview-widget-grid button > span {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.markets-overview-widget-grid button > strong {
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: var(--font-label);
+  font-variant-numeric: tabular-nums;
+}
+
+.markets-overview-widget-grid button > small {
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.markets-overview-widget .positive {
+  color: var(--green-on-wash);
+}
+
+.markets-overview-widget .negative {
+  color: var(--red);
+}

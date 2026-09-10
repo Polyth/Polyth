@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { createCodexRuntime } from "../src/index.ts";
+import { codexOverlays, createCodexProvisioner } from "../src/provisioner.ts";
 import { fakeRpc } from "../../harness-runtime/test/rpcPeer.ts";
-import type { RuntimeEvent } from "@polyth/contracts";
+import type { HarnessContext, HarnessProvisioningPlan, RuntimeEvent, SpaceContext } from "@polyth/contracts";
 import { setCapabilityLaunchSink, setCapabilityReceiptSink } from "@polyth/harness-runtime";
 const context = { spaceId: "s", projectId: "p", cwd: "/tmp", sessionId: "canonical" };
 const binding = { canonicalSessionId: "canonical", backendSessionId: "native", authorityId: "authority", generation: 1, continuity: "verified" as const, location: { directory: "/tmp" } };
@@ -80,6 +84,190 @@ test("Codex thread/start receives developerInstructions and config.mcp_servers f
     assert.equal(started.approvalPolicy, "on-request");
     assert.equal(started.sandbox, "workspace-write");
     await rt.dispose();
+});
+
+test("Codex verifies native skills and MCP with split evidence before claiming application", async () => {
+    const storageDir = mkdtempSync(join(tmpdir(), "polyth-codex-protocol-"));
+    const cwd = mkdtempSync(join(tmpdir(), "polyth-codex-workspace-"));
+    const space: SpaceContext = {
+        spaceId: "space",
+        spaceSlug: "space",
+        userId: "user",
+        role: "owner",
+        deployment: "local-trusted",
+        storageDir,
+    };
+    mkdirSync(storageDir, { recursive: true });
+    const nativeContext: HarnessContext = {
+        spaceId: space.spaceId,
+        projectId: "project",
+        sessionId: "canonical-native",
+        cwd,
+        space,
+    };
+    const plan: HarnessProvisioningPlan = {
+        harnessId: "codex",
+        desiredRevision: "bundle-r1",
+        items: [{
+            capability: {
+                id: "example.instructions",
+                kind: "instruction",
+                owner: "example",
+                scope: "session",
+                revision: "instruction-r1",
+                text: "Be brief.",
+            },
+            mode: "config",
+            mutability: "session-create",
+        }, {
+            capability: {
+                id: "example.docs",
+                kind: "skill",
+                owner: "example",
+                scope: "session",
+                revision: "skill-r1",
+                name: "docs",
+                title: "Docs",
+                description: "Write docs",
+                instructions: "Use sources.",
+            },
+            mode: "native",
+            mutability: "session-create",
+        }, {
+            capability: {
+                id: "polyth.agent-tools",
+                kind: "mcp-server",
+                owner: "polyth",
+                scope: "session",
+                revision: "mcp-r1",
+                name: "polyth-agent-tools",
+                enabled: true,
+                transport: { kind: "stdio", command: "node", args: ["bridge.mjs"], envKeys: [] },
+            },
+            mode: "config",
+            mutability: "session-create",
+        }, {
+            capability: {
+                id: "example.lookup",
+                kind: "tool",
+                owner: "example",
+                scope: "session",
+                revision: "tool-r1",
+                name: "lookup",
+                description: "Look up a value",
+                inputSchema: { type: "object" },
+                trust: "pure",
+                mutating: false,
+            },
+            mode: "mcp",
+            mutability: "session-create",
+        }],
+    };
+    await createCodexProvisioner().apply(nativeContext, plan, { mcpSecrets: () => ({}) });
+    const overlay = codexOverlays.peek(nativeContext, "codex")!.value;
+    const expectedSkill = overlay.nativeSkills!.skills[0]!;
+    const f = fakeRpc();
+    f.handle(async (method, params) => {
+        if (method === "skills/extraRoots/set") return {};
+        if (method === "skills/list") return {
+            data: [{ cwd, skills: [{ name: "docs", path: expectedSkill.path, enabled: true }], errors: [] }],
+        };
+        if (method === "thread/start") return { thread: { id: "native" } };
+        if (method === "mcpServerStatus/list") return {
+            data: [{
+                name: "polyth-agent-tools",
+                runtimeStatus: "connected",
+                tools: { lookup: { name: "lookup" } },
+            }],
+            nextCursor: null,
+        };
+        return {};
+    });
+    const receipts: Array<{
+        ids: string[];
+        outcome: string;
+        stage?: string;
+    }> = [];
+    const disposeReceipt = setCapabilityReceiptSink((receipt) => receipts.push({
+        ids: receipt.capabilityIds,
+        outcome: receipt.outcome,
+        stage: receipt.evidence?.stage,
+    }));
+    const rt = await createCodexRuntime(nativeContext, f.rpc);
+    try {
+        assert.equal((await rt.createSessionOperation!({
+            projectId: "project",
+            sessionId: "canonical-native",
+            title: "x",
+            cwd,
+        }, "create-native")).kind, "confirmed");
+        assert.deepEqual(f.calls.map((call) => call.method), [
+            "skills/extraRoots/set",
+            "skills/list",
+            "thread/start",
+            "mcpServerStatus/list",
+        ]);
+        assert.deepEqual(f.calls[0]?.params, { extraRoots: [overlay.nativeSkills!.root] });
+        assert.deepEqual(f.calls[1]?.params, { cwds: [cwd], forceReload: true });
+        assert.deepEqual(receipts, [{
+            ids: ["example.instructions"], outcome: "unverifiable", stage: "staged",
+        }, {
+            ids: ["example.docs"], outcome: "applied", stage: "discovered",
+        }, {
+            ids: ["polyth.agent-tools"], outcome: "applied", stage: "connected",
+        }, {
+            ids: ["example.lookup"], outcome: "unverifiable", stage: "discovered",
+        }]);
+    } finally {
+        disposeReceipt();
+        codexOverlays.delete(nativeContext, "codex");
+        await rt.dispose();
+    }
+});
+
+test("Codex fails errored native skills and does not call MCP discovery connected", async () => {
+    const scopedContext = { ...context, sessionId: "negative-native" };
+    codexOverlays.set(scopedContext, {
+        nativeSkills: {
+            root: "/private/revision/skills",
+            skills: [{ capabilityId: "example.docs", name: "docs", path: "/private/revision/skills/docs/SKILL.md" }],
+        },
+        nativeMcp: [{ capabilityId: "example.mcp", name: "example", tools: [] }],
+        stagedCapabilityIds: [],
+    }, "codex", { desiredRevision: "negative-r1", capabilityIds: ["example.docs", "example.mcp"] });
+    const f = fakeRpc();
+    f.handle(async (method) => {
+        if (method === "skills/extraRoots/set") return {};
+        if (method === "skills/list") return {
+            data: [{
+                cwd: "/tmp",
+                skills: [{ name: "docs", path: "/private/revision/skills/docs/SKILL.md", enabled: true }],
+                errors: [{ path: "/private/revision/skills/docs/SKILL.md", message: "invalid" }],
+            }],
+        };
+        if (method === "thread/start") return { thread: { id: "native" } };
+        if (method === "mcpServerStatus/list") return {
+            data: [{ name: "example", runtimeStatus: "starting", tools: {} }],
+            nextCursor: null,
+        };
+        return {};
+    });
+    const receipts: Array<{ id?: string; outcome: string; stage?: string }> = [];
+    const disposeReceipt = setCapabilityReceiptSink((receipt) => receipts.push({
+        id: receipt.capabilityIds[0], outcome: receipt.outcome, stage: receipt.evidence?.stage,
+    }));
+    const rt = await createCodexRuntime(scopedContext, f.rpc);
+    try {
+        assert.equal((await rt.createSessionOperation!({ projectId: "p", sessionId: "negative-native", title: "x", cwd: "/tmp" }, "create-negative")).kind, "confirmed");
+        assert.deepEqual(receipts, [
+            { id: "example.docs", outcome: "failed", stage: "discovered" },
+            { id: "example.mcp", outcome: "unverifiable", stage: "discovered" },
+        ]);
+    } finally {
+        disposeReceipt();
+        codexOverlays.delete(scopedContext, "codex");
+        await rt.dispose();
+    }
 });
 
 test("Codex captures R1 before blocked thread/start and preserves staged R2 on success", async () => {

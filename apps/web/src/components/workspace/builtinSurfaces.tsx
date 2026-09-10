@@ -37,8 +37,9 @@ import {
   type StarterContext,
 } from "../../starters.ts";
 import { tr } from "../../i18n/index.ts";
-import { Button } from "../ui/index.ts";
+import { AgentStatusDock, Button } from "../ui/index.ts";
 import { resolveSessionStatus } from "../../sessionStatus.ts";
+import ProviderLogo from "../../../../../packages/models/widgets/ProviderLogo.tsx";
 
 const NOOP_STARTER = (_prompt: string, _id?: string): void => {};
 
@@ -219,6 +220,32 @@ function SessionLoading() {
   );
 }
 
+/** First-send runtime startup belongs in the same above-composer activity
+ * zone as an active run. The composer stays mounted and usable for the next
+ * draft; the transient status never impersonates the input itself. */
+function SessionSpawnStatus() {
+  const spawn = useStore((state) => state.sessionSpawn);
+  const status = tr("workspace.builtinsurfaces.spawningAgent");
+  const harnessId = spawn?.harnessId;
+  const harnessName = spawn?.harnessName?.trim() || harnessId
+    ?.split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) => part[0]!.toUpperCase() + part.slice(1))
+    .join(" ")
+    || tr("timeline.agent");
+  const harnessLabel = `${harnessName} harness`;
+  return (
+    <AgentStatusDock
+      icon={harnessId
+        ? <ProviderLogo providerID={harnessId} providerName={harnessName} size="regular" />
+        : <Icon.session />}
+      model={harnessLabel}
+      status={status}
+      label={`${harnessLabel}: ${status}`}
+    />
+  );
+}
+
 /** Archived sessions are read-only: one explicit, atomic restore-and-continue
  *  action replaces the composer (UX-FIXTURE-VISUAL P1). */
 function ArchivedComposerGuard({ sessionId }: { sessionId: string }) {
@@ -258,45 +285,6 @@ function SessionSurface() {
     [gitStatus, model],
   );
   const [latestRevealAnchor, setLatestRevealAnchor] = useState<HTMLDivElement | null>(null);
-  const [composerDock, setComposerDock] = useState<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const conversation = composerDock?.parentElement;
-    if (!composerDock || !conversation) return;
-    let raf = 0;
-    const publishHeight = () => {
-      const timeline = conversation.querySelector<HTMLElement>(".timeline");
-      const followTail = timeline
-        ? timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight < 80
-        : false;
-      // getBoundingClientRect (not offsetHeight) so sub-pixel growth and late
-      // async widgets — usage panel, pending-changes list, question card — are
-      // all reflected in the timeline's bottom padding.
-      const height = Math.ceil(composerDock.getBoundingClientRect().height);
-      conversation.style.setProperty("--conversation-dock-height", `${height}px`);
-      if (timeline && followTail) timeline.scrollTop = timeline.scrollHeight;
-    };
-    const schedule = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(publishHeight);
-    };
-    publishHeight();
-    // ResizeObserver catches the dock's own box growing/shrinking; a
-    // MutationObserver catches children mounting or unmounting (widgets toggled
-    // by git status) whose height only settles a frame later.
-    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(publishHeight) : null;
-    observer?.observe(composerDock);
-    const mutations = typeof MutationObserver === "function" ? new MutationObserver(schedule) : null;
-    mutations?.observe(composerDock, { childList: true, subtree: true });
-    window.addEventListener("resize", schedule);
-    return () => {
-      cancelAnimationFrame(raf);
-      observer?.disconnect();
-      mutations?.disconnect();
-      window.removeEventListener("resize", schedule);
-      conversation.style.removeProperty("--conversation-dock-height");
-    };
-  }, [composerDock]);
 
   if (workspaceMode !== "chat") return <WidgetCanvas />;
 
@@ -335,10 +323,11 @@ function SessionSurface() {
             <SlotHost slot="session.footer" context={{ projectId, sessionId, editing: false }} customizable />
             <ArchivedComposerGuard sessionId={sessionId} />
           </>
-        : <div ref={setComposerDock} className="conversation-composer-dock">
+        : <div className="conversation-composer-dock">
             <SlotHost slot="session.composer.before" context={{ projectId, sessionId, editing: false }} customizable />
             <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />
             <SlotHost slot="session.footer" context={{ projectId, sessionId, editing: false }} customizable />
+            {spawning && <SessionSpawnStatus />}
             <Composer />
           </div>}
     </div>

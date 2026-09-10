@@ -6,7 +6,8 @@
     ".": "./src/index.ts",
     "./i18n": "./src/i18n/index.ts",
     "./widgets": "./widgets/index.tsx",
-    "./i18n/*": "./src/i18n/*.ts"
+    "./i18n/*": "./src/i18n/*.ts",
+    "./diff": "./widgets/prDiff.ts"
   },
   "polyth": {
     "serverEntry": "./src/serverEntry.ts",
@@ -17,7 +18,7 @@
       "core": false,
       "enabled": true,
       "settingsGroup": "Engineering",
-      "icon": "⎇",
+      "icon": "git",
       "hasSettings": true
     }
   },

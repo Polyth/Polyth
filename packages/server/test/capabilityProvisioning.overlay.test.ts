@@ -331,6 +331,7 @@ test("restart acknowledgement is target-specific", async () => {
     desiredRevision: a.desiredRevision,
     capabilityIds: a.records.filter((row) => row.kind === "mcp-server").map((row) => row.capabilityId),
     outcome: "applied",
+    evidence: { stage: "connected", source: "test:simulated-native-connection" },
   });
   await mcp.update(space, mcp.list(space)[0]!.id, { enabled: true }, mcp.list(space)[0]!.revision);
   await controller.reconcile(harness, ctxA);
@@ -344,6 +345,7 @@ test("restart acknowledgement is target-specific", async () => {
     desiredRevision: controller.status(ctxA, "opencode")[0]!.desiredRevision,
     capabilityIds: [pendingA.capabilityId],
     outcome: "applied",
+    evidence: { stage: "connected", source: "test:simulated-native-connection" },
   });
   assert.equal(controller.status(ctxA, "opencode")[0]!.records.find((row) => row.capabilityId === pendingA.capabilityId)!.status, "applied");
   const stillB = controller.status(ctxB, "opencode")[0]!.records.find((row) => row.capabilityId === pendingB.capabilityId)!;
@@ -375,6 +377,7 @@ test("stale generation receipt cannot overwrite current application state", asyn
     desiredRevision: first.desiredRevision,
     capabilityIds: [id],
     outcome: "applied",
+    evidence: { stage: "connected", source: "test:simulated-native-connection" },
   });
   await mcp.update(space, mcp.list(space)[0]!.id, { enabled: true }, mcp.list(space)[0]!.revision);
   const next = await controller.reconcile(harness, ctx);
@@ -383,6 +386,7 @@ test("stale generation receipt cannot overwrite current application state", asyn
     desiredRevision: next.desiredRevision,
     capabilityIds: [id],
     outcome: "applied",
+    evidence: { stage: "connected", source: "test:simulated-native-connection" },
   });
   const applied = controller.status(ctx, "opencode")[0]!;
   assert.equal(applied.target?.generation, 3);
@@ -391,6 +395,7 @@ test("stale generation receipt cannot overwrite current application state", asyn
     desiredRevision: first.desiredRevision,
     capabilityIds: [id],
     outcome: "applied",
+    evidence: { stage: "connected", source: "test:simulated-native-connection" },
   });
   const after = controller.status(ctx, "opencode")[0]!;
   assert.equal(after.target?.generation, 3);
@@ -436,6 +441,7 @@ test("receipt materializes authority identity onto the stored target", async () 
     desiredRevision: staged.desiredRevision,
     capabilityIds: staged.records.filter((row) => row.kind === "mcp-server").map((row) => row.capabilityId),
     outcome: "applied",
+    evidence: { stage: "connected", source: "test fixture observed native MCP configuration" },
   });
   const stored = controller.status(ctx, "opencode")[0]!.target!;
   assert.equal(stored.authorityId, "auth-9");
@@ -472,7 +478,7 @@ test("disabling a package removes only Polyth-owned skill directories", async ()
   const first = await controller.reconcile(harness, ctx);
   const skillId = polythSkillId("example-feature", "docs");
   const overlay = peekOpenCodeLaunchOverlay({ cwd, spaceId: space.spaceId, projectId: "p" });
-  const skillRoot = (JSON.parse(overlay!.configContent) as { skills?: { paths?: string[] } }).skills?.paths?.[0];
+  const skillRoot = (JSON.parse(readFileSync(overlay!.configPath!, "utf8")) as { skills?: { paths?: string[] } }).skills?.paths?.[0];
   assert.ok(skillRoot);
   mkdirSync(join(skillRoot, "user-notes"), { recursive: true });
   writeFileSync(join(skillRoot, "user-notes", "SKILL.md"), "mine\n");
@@ -485,6 +491,7 @@ test("disabling a package removes only Polyth-owned skill directories", async ()
     desiredRevision: first.desiredRevision,
     capabilityIds: first.records.filter((row) => row.kind !== "instruction").map((row) => row.capabilityId),
     outcome: "applied",
+    evidence: { stage: "discovered", source: "test:simulated-native-connection" },
   });
   contribution.dispose();
   const second = await controller.reconcile(harness, ctx);
@@ -541,8 +548,8 @@ test("OpenCode secrets and skills stay isolated across projects in one Space", a
   await controller.reconcile(harness, { spaceId: space.spaceId, projectId: "pb", cwd: cwdB, space });
   const overlayA = peekOpenCodeLaunchOverlay({ cwd: cwdA, spaceId: space.spaceId, projectId: "pa" });
   const overlayB = peekOpenCodeLaunchOverlay({ cwd: cwdB, spaceId: space.spaceId, projectId: "pb" });
-  const rootA = (JSON.parse(overlayA!.configContent) as { skills?: { paths?: string[] } }).skills?.paths?.[0];
-  const rootB = (JSON.parse(overlayB!.configContent) as { skills?: { paths?: string[] } }).skills?.paths?.[0];
+  const rootA = (JSON.parse(readFileSync(overlayA!.configPath!, "utf8")) as { skills?: { paths?: string[] } }).skills?.paths?.[0];
+  const rootB = (JSON.parse(readFileSync(overlayB!.configPath!, "utf8")) as { skills?: { paths?: string[] } }).skills?.paths?.[0];
   assert.ok(rootA && rootB);
   assert.notEqual(rootA, rootB);
   assert.equal(existsSync(join(rootA, "polyth-example-feature-docs", ".polyth-owned")), true);
@@ -607,11 +614,7 @@ test("harness switch releases Claude volatile state and keeps canonical MCP", as
   const token = env && "env" in env ? env.env?.POLYTH_AGENT_TOOLS_TOKEN : undefined;
   assert.ok(token);
   const skillRecord = first.records.find((row) => row.capabilityId === "example-feature.docs")!;
-  assert.equal(skillRecord.status, "unsupported");
-  assert.equal(
-    skillRecord.reason,
-    "Claude Agent SDK supports skills, but Polyth does not yet provide a safe private portable skill-source projection for this adapter",
-  );
+  assert.equal(skillRecord.status, "pending");
   controller.release(ctx, "claude");
   assert.equal(claudeOverlays.peek(ctx, "claude"), undefined);
   assert.equal(controller.status(ctx, "claude")[0]?.records.length, 0);

@@ -1253,7 +1253,10 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
    clearance between the last surface and the composer boundary. */
 .timeline {
   flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto;
-  scroll-behavior: auto; /* chaseTail rAF loop needs instant scrollTop; html's smooth breaks it */
+  scroll-behavior: auto;
+  /* Browser anchoring and Polyth's explicit fresh-turn/follow contract must not
+     compete when an activity disclosure changes height. */
+  overflow-anchor: none;
   padding-block: var(--gutter) calc(var(--conversation-message-gap) + var(--conversation-group-gap));
   padding-inline: max(var(--conversation-inset), calc((100% - var(--chat-measure)) / 2));
   display: flex; flex-direction: column; gap: var(--conversation-message-gap);
@@ -1265,18 +1268,21 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
    "inconsistent paddings" between timeline rows. Rows are content-sized. */
 .timeline > * { flex-shrink: 0; }
 
-/* Only the newest visible row enters. Session switches remount history, so an
-   unconditional row selector would replay every message and execution line.
-   Late blocks inside that newest row keep the same bottom-up entrance. */
+/* Only the newest visible row enters. Animate its visual children, never the
+   measured row itself: prompt alignment and scroll anchoring must see stable
+   geometry while the surface settles. Session switches therefore do not
+   replay history, while late activity items still arrive with quiet depth. */
 @media (prefers-reduced-motion: no-preference) {
-  .timeline > .timeline-row-enter,
-  .activity-group-items > .timeline-row-enter,
-  .timeline > .timeline-row-enter > :is(.reasoning, .task-list, .agent-reply-header, .assistant-gallery-shortcut) {
-    animation: msg-in var(--motion-surface) var(--motion-ease);
+  .timeline > .timeline-row-enter:not(.activity-group) > *,
+  .timeline > .activity-group.timeline-row-enter > .ui-run-summary,
+  .activity-group-items > .timeline-row-enter > * {
+    transform-origin: 50% 0;
+    animation: timeline-surface-in var(--motion-surface) var(--motion-ease) both;
   }
-  @keyframes msg-in {
-    from { opacity: 0; transform: translateY(14px); }
-    to { opacity: 1; transform: none; }
+  @keyframes timeline-surface-in {
+    0% { opacity: 0; transform: translate3d(0, 7px, 0) scale(.994); filter: blur(2px); }
+    62% { opacity: 1; filter: blur(0); }
+    100% { opacity: 1; transform: none; filter: none; }
   }
 }
 
@@ -1311,6 +1317,18 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   width: 100%; max-inline-size: 100%; align-self: stretch;
   padding: 0; border: 0; border-radius: 0; background: transparent;
   color: var(--text); font-size: var(--font-response); line-height: var(--font-response-lh); box-shadow: none;
+}
+/* Markdown code stays part of the conversation material. Keep an opaque
+   fallback for unsupported/low-resource clients; the glass pass below applies
+   the user's transparency preference when the surface can use it. */
+.msg .bubble :is(code, pre) {
+  background: var(--material-glass-medium);
+  border-color: var(--material-glass-border);
+  background-clip: padding-box;
+}
+.msg .bubble pre code {
+  background: transparent;
+  border-color: transparent;
 }
 /* Markdown headings inside chat prose follow the shared type roles: one
    heading step, then bold body/label text — no bespoke pixel ladder. */
@@ -1836,10 +1854,11 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-/* The composer dock floats absolutely at the bottom; lift the card clear of it
-   so its actions never sit under the composer. */
+/* Question cards and the composer are normal-flow siblings; neither can cover
+   the other's actions while their async contents resize. Keep only the quiet
+   token gap that was previously added on top of the measured dock height. */
 .focus-conversation:has(> .conversation-composer-dock) > .question-cards {
-  margin-bottom: calc(var(--conversation-dock-height) + var(--space-4));
+  margin-block-end: var(--space-4);
 }
 .question-card {
   container-type: inline-size;
@@ -2798,7 +2817,15 @@ html[data-density="compact"] .set-row { padding: 6px 0; }
 .settings-nav-item { text-align: left; border: none; border-radius: calc(var(--radius-control) - 2px); padding: 6px 10px; font-size: var(--font-body); color: var(--muted); }
 .settings-nav-item:hover { color: var(--text); background: var(--elevated); }
 .settings-nav-item.active { background: var(--accent-wash); color: var(--text); }
-.settings-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.settings-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  /* Keep the focused page on the active theme surface instead of letting the
+     shell's neutral glass material wash the whole right side into gray. */
+  background: var(--bg);
+}
 .settings-pane-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 18px 10px; border-bottom: 1px solid var(--border-soft);
@@ -3859,7 +3886,7 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 /* Project/session drawer: fixed, above the workspace, never consumes
      layout width. Closed = fully translated out, hidden, inert (JS). */
   .sidebar {
-    position: fixed; top: 0; bottom: 0; left: 0; z-index: 120;
+    position: fixed; top: 0; bottom: 0; left: 0; z-index: var(--z-overlay);
     width: min(320px, calc(100vw - 24px)); min-width: 0; height: auto;
     padding-bottom: var(--safe-bottom);
     overscroll-behavior: contain;
@@ -4807,13 +4834,15 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 
 /* Focus is a conversation, not a dashboard. */
 .focus-conversation {
-  --conversation-dock-height: calc(var(--composer-height) + var(--space-5));
   position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column;
 }
 .conversation-composer-dock {
-  position: absolute; inset: auto 0 0; z-index: var(--z-shell); pointer-events: none;
+  position: relative; z-index: var(--z-shell); flex: none; min-width: 0; pointer-events: none;
 }
 .conversation-composer-dock > * { pointer-events: auto; }
+/* The dock is a normal-flow flex sibling of the timeline. Its real height —
+   including async status/widgets and safe-area changes — therefore reduces
+   the scrollport before paint, with no observer/measurement race. */
 .focus-customize {
   position: absolute; top: 16px; right: 22px; z-index: 8; height: 34px; display: flex; align-items: center; gap: 7px;
   padding: 0 12px; border-color: var(--border-soft); background: var(--elevated); color: var(--text-dim); box-shadow: 0 4px 18px -14px rgba(0,0,0,.25);
@@ -9792,12 +9821,35 @@ html[data-package-window-resizing="true"] { user-select: none; cursor: grabbing;
 html[data-package-window-resizing="true"] .rail-workspace { transition: none; }
 
 .app-shell:has(.rail-pinned-narrow) {
+  --workspace-pinned-narrow-row-size: clamp(200px, 42%, 100%);
   display: grid; grid-template-columns: max-content minmax(0, 1fr);
-  grid-template-rows: minmax(240px, 1fr) minmax(200px, 42%);
+  grid-template-rows: minmax(240px, 1fr) var(--workspace-pinned-narrow-row-size);
 }
 .app-shell:has(.rail-pinned-narrow) > .sidebar { grid-column: 1; grid-row: 1 / 3; }
 .app-shell:has(.rail-pinned-narrow) > .workspace { grid-column: 2; grid-row: 1; }
-.railbar-pinned-narrow { position: relative; inset: auto; grid-column: 2; grid-row: 2; width: 100%; min-width: 0; }
+.app-shell:has(.rail-pinned-narrow) > .railbar {
+  position: relative; inset: auto; z-index: var(--z-shell);
+  grid-column: 2; grid-row: 1 / 3;
+  width: 100%; min-width: 0; height: 100%; margin: 0;
+  border: 0; border-radius: 0; box-shadow: none; overflow: visible;
+  background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none;
+  pointer-events: none;
+}
+.app-shell:has(.rail-pinned-narrow) > .railbar > .rail-pinned-narrow {
+  position: absolute;
+  inset-block-end: 0;
+  inset-inline-start: 0;
+  inset-inline-end: var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-4)));
+  width: auto; height: var(--workspace-pinned-narrow-row-size); margin: 0;
+  pointer-events: auto;
+}
+.app-shell:has(.rail-pinned-narrow) > .railbar > .rail-icon-col.plugin-strip {
+  position: absolute; inset-block: 0; inset-inline-end: 0;
+  width: var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-4)));
+  height: 100%; flex: none;
+  border-top: 0; border-inline-start: 1px solid var(--surface-divider);
+  pointer-events: auto;
+}
 .rail-pinned-narrow { flex: 1 1 auto; width: 100%; min-width: 0; height: 100%; border-radius: var(--radius-surface) 0 0 0; }
 
 /* UX-PANE-MODEL: deliberate bottom dock (presentation.dock === "bottom"). The
@@ -9807,23 +9859,43 @@ html[data-package-window-resizing="true"] .rail-workspace { transition: none; }
    edge: --workspace-dock-h is written only once the user drags, so the
    stylesheet proportion applies until then and no measurement loop can form. */
 .app-shell:has(.rail-dock-bottom) {
+  --workspace-dock-row-size: clamp(160px, var(--workspace-dock-h, 46%), 78%);
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
-  grid-template-rows: minmax(240px, 1fr) clamp(160px, var(--workspace-dock-h, 46%), 78%);
+  grid-template-rows: minmax(240px, 1fr) var(--workspace-dock-row-size);
 }
 .app-shell:has(.rail-dock-bottom) > .sidebar { grid-column: 1; grid-row: 1 / 3; }
 .app-shell:has(.rail-dock-bottom) > .workspace { grid-column: 2; grid-row: 1; }
-/* Return the rail host to the grid (the wide-desktop `.railbar` rule floats it
-   against the viewport edge) and drop its floating chrome — the pane below
-   owns the visible top edge. */
+/* Keep the rail host spanning both rows. Only the package pane is placed in
+   the bottom row; the launcher/menu strip remains pinned to the right edge. */
 .app-shell:has(.rail-dock-bottom) > .railbar {
-  position: relative; inset: auto; z-index: auto;
-  grid-column: 2; grid-row: 2;
-  width: 100%; min-width: 0; margin: 0;
+  position: relative; inset: auto; z-index: var(--z-shell);
+  grid-column: 2; grid-row: 1 / 3;
+  width: 100%; min-width: 0; height: 100%; margin: 0;
   border: 0; border-radius: 0; box-shadow: none; overflow: visible;
+  background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none;
+  pointer-events: none;
 }
-.app-shell:has(.rail-dock-bottom) > .railbar > .rail-icon-col {
-  border-top: 1px solid var(--surface-divider);
+.app-shell:has(.rail-dock-bottom) > .railbar > .rail-dock-bottom {
+  position: absolute;
+  inset-block-end: 0;
+  inset-inline-start: 0;
+  inset-inline-end: var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-4)));
+  width: auto;
+  height: var(--workspace-dock-row-size);
+  margin: 0;
+  pointer-events: auto;
+}
+.app-shell:has(.rail-dock-bottom) > .railbar > .rail-icon-col.plugin-strip {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-4)));
+  height: 100%;
+  flex: none;
+  border-top: 0;
+  border-inline-start: 1px solid var(--surface-divider);
+  pointer-events: auto;
 }
 .rail-dock-bottom {
   border-top: 1px solid var(--surface-divider);
@@ -11889,9 +11961,9 @@ html[data-font] body :is(
   margin-inline: auto;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: start;
+  align-items: center;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-4);
   color: var(--text-dim);
   text-align: start;
   cursor: pointer;
@@ -11903,9 +11975,10 @@ html[data-font] body :is(
   animation: agent-dock-breathe 2.4s var(--motion-ease) infinite;
 }
 @keyframes agent-dock-breathe { 50% { opacity: .42; } }
-.agent-status-dock:hover { background: var(--elevated); color: var(--text); }
+.agent-status-dock:not(.agent-status-dock--status):hover { background: var(--elevated); color: var(--text); }
 .agent-status-dock:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
-.agent-status-dock-icon { position: relative; display: grid; place-items: center; width: var(--icon-xl); height: var(--icon-xl); margin-block-start: var(--space-1); }
+.agent-status-dock--status { cursor: default; }
+.agent-status-dock-icon { position: relative; display: grid; place-items: center; width: var(--icon-xl); height: var(--icon-xl); }
 .agent-status-dock-icon > i { position: absolute; inset-inline-end: 0; inset-block-end: 0; width: var(--space-2); height: var(--space-2); border: 2px solid var(--surface); border-radius: 50%; background: var(--green); animation: status-pulse 1.8s ease-in-out infinite; }
 .agent-status-dock-content { min-width: 0; display: grid; gap: var(--space-1); }
 .agent-status-dock-primary { min-width: 0; display: flex; align-items: center; gap: var(--space-2); }
@@ -11913,7 +11986,7 @@ html[data-font] body :is(
 .agent-status-dock-state { min-width: 0; overflow: hidden; color: var(--text-dim); font-size: var(--font-label); text-overflow: ellipsis; white-space: nowrap; }
 .agent-status-dock-secondary { min-width: 0; display: flex; align-items: center; gap: var(--space-2); overflow: hidden; color: var(--muted); font-size: var(--font-response-meta); }
 .agent-status-dock-diff { display: inline-flex; align-items: center; gap: var(--space-2); white-space: nowrap; }
-.agent-status-dock-time { color: var(--muted); font-size: var(--font-response-meta); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.agent-status-dock-time { align-self: center; color: var(--muted); font-size: var(--font-response-meta); font-variant-numeric: tabular-nums; white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .agent-status-dock::after { animation: none; } }
 
 .msg.assistant > .bubble {
@@ -12123,17 +12196,12 @@ html[data-font] body :is(
   .activity-group .task-activity-mark { width: var(--icon-md); flex-basis: var(--icon-md); }
 }
 
-/* Keep this after responsive timeline shorthands: the floating dock may grow
-   when a pending widget appears, and its full height must remain scrollable. */
+/* Keep this after responsive timeline shorthands. The dock's height is already
+   reserved outside the scrollport; this padding is only the normal breathing
+   room plus the fresh-turn sheet that shrinks as live content arrives. */
 .focus-conversation:has(> .conversation-composer-dock) .timeline {
-  padding-bottom: calc(var(--conversation-dock-height) + var(--conversation-group-gap));
-  scroll-padding-bottom: var(--conversation-dock-height);
-}
-/* When a question card is up it is lifted to sit just above the dock (see the
-   .question-cards margin-bottom rule), so it — not the timeline — owns the
-   clearance. The timeline then only needs to clear the card itself. */
-.focus-conversation:has(> .conversation-composer-dock):has(> .question-cards) .timeline {
-  padding-bottom: var(--conversation-group-gap);
+  padding-bottom: calc(var(--conversation-group-gap) + var(--timeline-turn-sheet-space, 0px));
+  scroll-padding-bottom: var(--conversation-group-gap);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -12310,13 +12378,22 @@ body:not([data-glass="off"]) :is(
       .composer-effort-tooltip,
       .turn-rate-limit .turn-rate-limit-action,
       .turn-rate-limit .turn-rate-limit-model .picker-chip,
-      .jump-latest
+      .jump-latest,
+      .msg .bubble :is(code, pre)
     ) {
       background: radial-gradient(140% 140% at 50% 50%,
         color-mix(in srgb, var(--material-glass) var(--material-glass-fill), transparent) 0%,
         color-mix(in srgb, var(--material-glass) var(--material-glass-edge), transparent) 100%);
       -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
       backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
+    }
+    /* The block owns the translucent surface; its nested code element keeps
+       the inherited monospace treatment without painting a second rectangle. */
+    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .msg .bubble pre code {
+      background: transparent;
+      border-color: transparent;
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
     }
     body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) :is(
       .composer-card,

@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -14,8 +15,10 @@ import { Icon } from "../../../../apps/web/src/icons.tsx";
 import { useStore } from "../../../../apps/web/src/store.ts";
 import {
   moveUsageBlock,
+  orderPinnedUsageBlocks,
   orderUsageBlocks,
   setProviderHidden,
+  setProviderPinned,
   setUsageDashboardPrefs,
   useUsagePrefs,
 } from "../usagePrefs.ts";
@@ -27,7 +30,9 @@ import {
   ChevronRightIcon,
   EmptyState,
   IconButton,
+  PinIcon,
   RefreshIcon,
+  TabPanel,
   Tabs,
 } from "../../../../apps/web/src/components/ui/index.ts";
 import {
@@ -71,24 +76,36 @@ function SortableBlocks({
   order,
   onChange,
   className,
+  pinnedIds = [],
 }: {
   blocks: SortableBlock[];
   order: string[];
   onChange: (order: string[]) => void;
   className: string;
+  pinnedIds?: readonly string[];
 }) {
   const [dragged, setDragged] = useState<string | null>(null);
   const touchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchPending = useRef<{ id: string; x: number; y: number; pointerId: number } | null>(null);
-  const sorted = orderUsageBlocks(blocks, order, (block) => block.id);
+  const sorted = pinnedIds.length > 0
+    ? orderPinnedUsageBlocks(blocks, order, pinnedIds, (block) => block.id)
+    : orderUsageBlocks(blocks, order, (block) => block.id);
   const ids = sorted.map((block) => block.id);
-  const move = (id: string, to: string | number) => onChange(moveUsageBlock(ids, id, to));
+  const move = (id: string, to: string | number) => {
+    const next = moveUsageBlock(ids, id, to);
+    onChange(pinnedIds.length > 0
+      ? orderPinnedUsageBlocks(next, next, pinnedIds, (item) => item)
+      : next);
+  };
   const clearTouch = () => {
     if (touchTimer.current) clearTimeout(touchTimer.current);
     touchTimer.current = null;
     touchPending.current = null;
     setDragged(null);
   };
+  useEffect(() => () => {
+    if (touchTimer.current) clearTimeout(touchTimer.current);
+  }, []);
   const onPointerDown = (event: PointerEvent<HTMLDivElement>, id: string) => {
     if (event.pointerType !== "touch" || (event.target as Element).closest("button,a,input,select,textarea")) return;
     touchPending.current = { id, x: event.clientX, y: event.clientY, pointerId: event.pointerId };
@@ -121,8 +138,9 @@ function SortableBlocks({
           tabIndex={0}
           role="group"
           aria-label={block.label}
-          aria-roledescription="sortable dashboard block"
+          aria-roledescription={tr("usage.usagedashboard.sortableDashboardBlock")}
           onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+            if ((event.target as Element).closest("button,a,input,select,textarea")) return;
             if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
             event.preventDefault();
             move(block.id, event.key === "ArrowUp" ? -1 : 1);
@@ -178,6 +196,11 @@ const formatChartMoney = (value: number): string => {
     maximumFractionDigits: fractionDigits,
   }).format(value);
 };
+
+export const formatQuotaReset = (resetsAt: number): string =>
+  tr("usage.usagedashboard.resetsValue", {
+    value: new Date(resetsAt).toLocaleString(getLocale()),
+  });
 
 const aggregateSeries = (series: readonly UsageChartSeries[], points: number): number[] =>
   Array.from({ length: points }, (_, point) =>
@@ -825,6 +848,7 @@ function UsageActionStrip({
 function ProviderDetails({
   providers,
   hiddenProviders,
+  pinnedProviders,
   order,
   onOrderChange,
   onAddProvider,
@@ -833,6 +857,7 @@ function ProviderDetails({
 }: {
   providers: UsageProviderSummary[];
   hiddenProviders: string[];
+  pinnedProviders: string[];
   order: string[];
   onOrderChange: (order: string[]) => void;
   onAddProvider: () => void;
@@ -841,18 +866,20 @@ function ProviderDetails({
 }) {
   return (
     <div className="usage-provider-view" data-settings-item="usage.providers">
-      <SortableBlocks
+      {providers.length > 0 ? <SortableBlocks
         className="usage-provider-detail-grid"
         order={order}
+        pinnedIds={pinnedProviders}
         onChange={onOrderChange}
         blocks={[...providers.map((provider, index) => {
           const preferenceId = providerPreferenceId(provider);
           const hidden = hiddenProviders.includes(preferenceId);
+          const pinned = pinnedProviders.includes(preferenceId);
           return {
             id: provider.id,
             label: provider.label,
             content: (
-            <article className="usage-provider-detail-card" key={provider.id} style={cssVar("--provider-accent", seriesAccent(index))}>
+            <article className={`usage-provider-detail-card${pinned ? " pinned" : ""}`} key={provider.id} style={cssVar("--provider-accent", seriesAccent(index))}>
               <header>
                 <ProviderLogo
                   providerID={provider.id}
@@ -864,6 +891,16 @@ function ProviderDetails({
                   <p title={provider.snapshot?.accountLabel ?? provider.id}>{provider.snapshot?.accountLabel ?? provider.id}</p>
                 </div>
                 <ProviderStatus provider={provider} />
+                <IconButton
+                  icon={PinIcon}
+                  size="sm"
+                  className="usage-provider-pin"
+                  pressed={pinned}
+                  label={pinned
+                    ? tr("usage.usagedashboard.unpinValue", { value: provider.label })
+                    : tr("usage.usagedashboard.pinValueToTop", { value: provider.label })}
+                  onClick={() => setProviderPinned(preferenceId, !pinned)}
+                />
               </header>
               {provider.stale && provider.snapshot?.error?.message && (
                 <div className="usage-provider-error" role="status">
@@ -895,7 +932,7 @@ function ProviderDetails({
                       >
                         <i className={used >= .8 ? "warning" : ""} style={{ width: `${used * 100}%` }} />
                       </span>
-                      <p>{quota.resetsAt ? tr("usage.usagedashboard.resetsValue", { date: new Date(quota.resetsAt).toLocaleString(getLocale()) }) : tr("usage.usagedashboard.liveQuotaUsage")}</p>
+                      <p>{quota.resetsAt !== undefined ? formatQuotaReset(quota.resetsAt) : tr("usage.usagedashboard.liveQuotaUsage")}</p>
                     </div>
                   );
                 })}
@@ -942,8 +979,7 @@ function ProviderDetails({
             </section>
           ),
         }]}
-      />
-      {providers.length === 0 && (
+      /> : (
         <EmptyState
           variant="panel"
           title={tr("usage.usagedashboard.connectYourFirstProvider")}
@@ -957,6 +993,7 @@ function ProviderDetails({
 }
 
 export function UsageDashboard(): ReactNode {
+  const viewTabsId = useId();
   const sessions = useStore((state) => state.sessions);
   const projectId = useStore((state) => state.activeProjectId);
   const projectSessions = sessions.filter((session) => session.projectId === projectId);
@@ -989,6 +1026,12 @@ export function UsageDashboard(): ReactNode {
   const visibleProviders = data.providers.filter(
     (provider) => !prefs.hiddenProviders.includes(providerPreferenceId(provider)),
   );
+  const orderedVisibleProviders = orderPinnedUsageBlocks(
+    visibleProviders,
+    prefs.dashboard.providerOrder,
+    prefs.pinnedProviders,
+    (provider) => providerPreferenceId(provider),
+  );
   const visibleProviderIds = new Set(visibleProviders.map((provider) => provider.id));
   const hiddenCount = data.providers.length - visibleProviders.length;
   const allProvidersHidden = data.providers.length > 0 && visibleProviders.length === 0;
@@ -1011,7 +1054,7 @@ export function UsageDashboard(): ReactNode {
     { id: "spend", label: tr("usage.usagedashboard.spend"), className: "usage-block-stat", content: <StatCard label={tr("usage.usagedashboard.spend")} value={formatMoney(data.totals.cost)} trend={data.trends.cost} icon="usage" tone="var(--accent)" detail={tr("usage.usagedashboard.valuePerSession2", { value: formatMoney(averageSessionCost) })} series={costSeries} /> },
     { id: "tokens", label: tr("usage.usagedashboard.tokens"), className: "usage-block-stat", content: <StatCard label={tr("usage.usagedashboard.tokens")} value={fmtTokens(data.totals.tokens)} trend={data.trends.tokens} icon="context" tone="var(--purple)" detail={data.models.length === 1 ? tr("usage.usagedashboard.oneModel") : tr("usage.usagedashboard.valueModels", { count: data.models.length })} series={tokenSeries} /> },
     { id: "sessions", label: tr("usage.usagedashboard.sessions"), className: "usage-block-stat", content: <StatCard label={tr("usage.usagedashboard.sessions")} value={data.totals.sessions.toLocaleString(getLocale())} trend={data.trends.sessions} icon="events" tone="var(--blue)" detail={visibleProviders.length === 1 ? tr("usage.usagedashboard.oneProviderShown") : tr("usage.usagedashboard.valueProvidersShown", { count: visibleProviders.length })} series={sessionSeries} /> },
-    { id: "cache", label: "Cache hit", className: "usage-block-stat", content: <StatCard label="Cache hit" value={`${Math.round(data.totals.cacheHitPercent)}%`} trend={null} icon="compare" tone="var(--green)" detail={`${fmtTokens(data.totals.cacheRead)} cached`} series={[]} /> },
+    { id: "cache", label: tr("usage.usagedashboard.cacheHit"), className: "usage-block-stat", content: <StatCard label={tr("usage.usagedashboard.cacheHit")} value={`${Math.round(data.totals.cacheHitPercent)}%`} trend={null} icon="compare" tone="var(--green)" detail={tr("usage.usagedashboard.valueCached", { value: fmtTokens(data.totals.cacheRead) })} series={[]} /> },
     {
       id: "cohorts",
       label: tr("usage.usagedashboard.sessionCohortsByLatestTurn"),
@@ -1040,7 +1083,7 @@ export function UsageDashboard(): ReactNode {
       id: "provider-activity",
       label: tr("usage.usagedashboard.providerActivity"),
       className: "usage-block-full",
-      content: <ProviderTable providers={visibleProviders} allProvidersHidden={allProvidersHidden} />,
+      content: <ProviderTable providers={orderedVisibleProviders} allProvidersHidden={allProvidersHidden} />,
     },
     {
       id: "actions",
@@ -1054,6 +1097,7 @@ export function UsageDashboard(): ReactNode {
     <div
       className={`usage-dashboard usage-layout-${layout}`}
       data-settings-item="usage.dashboard"
+      data-layout={layout}
       aria-busy={quotaBusy}
       ref={dashboardRef}
     >
@@ -1061,6 +1105,7 @@ export function UsageDashboard(): ReactNode {
         <Tabs
           className="usage-view-tabs"
           size="sm"
+          idBase={viewTabsId}
           label={tr("usage.usagedashboard.usageView")}
           value={view}
           tabs={[
@@ -1109,15 +1154,17 @@ export function UsageDashboard(): ReactNode {
         </div>
       )}
 
-      {view === "overview" ? (
-        <div className="usage-dashboard-content">
+      <TabPanel idBase={viewTabsId} tabId="overview" active={view === "overview"}>
+        <div className="usage-dashboard-content" data-usage-view="overview">
           <SortableBlocks className="usage-overview-blocks" blocks={overviewBlocks} order={prefs.dashboard.overviewOrder} onChange={(overviewOrder) => setUsageDashboardPrefs({ overviewOrder })} />
         </div>
-      ) : (
-        <div className="usage-dashboard-content">
+      </TabPanel>
+      <TabPanel idBase={viewTabsId} tabId="providers" active={view === "providers"}>
+        <div className="usage-dashboard-content" data-usage-view="providers">
           <ProviderDetails
             providers={data.providers}
             hiddenProviders={prefs.hiddenProviders}
+            pinnedProviders={prefs.pinnedProviders}
             order={prefs.dashboard.providerOrder}
             onOrderChange={(providerOrder) => setUsageDashboardPrefs({ providerOrder })}
             onAddProvider={addProvider}
@@ -1125,7 +1172,7 @@ export function UsageDashboard(): ReactNode {
             quotaBusy={quotaBusy}
           />
         </div>
-      )}
+      </TabPanel>
     </div>
   );
 }

@@ -230,25 +230,25 @@ const cloneError = (message: string) => Object.assign(new Error(message), { code
 export function normalizeRepositoryUrl(value: string): string {
   const repository = value.trim();
   if (!repository || repository.length > 2_048 || /[\s\0\p{Cc}]/u.test(repository)) {
-    throw Object.assign(new Error("repository must be a valid GitHub or GitLab URL"), { code: "invalid-input" });
+    throw Object.assign(new Error("repository must be a valid Git repository URL"), { code: "invalid-input" });
   }
-  const scp = repository.match(/^git@(github\.com|gitlab\.com):(.+)$/i);
+  const scp = repository.match(/^git@([a-z0-9](?:[a-z0-9.-]*[a-z0-9])?):(.+)$/i);
   if (scp) {
     if (!validRepositoryPath(scp[2]!)) throw Object.assign(new Error("repository path is invalid"), { code: "invalid-input" });
     return repository;
   }
   let parsed: URL;
   try { parsed = new URL(repository); } catch {
-    throw Object.assign(new Error("repository must be a valid GitHub or GitLab URL"), { code: "invalid-input" });
+    throw Object.assign(new Error("repository must be a valid Git repository URL"), { code: "invalid-input" });
   }
   if (!(parsed.protocol === "http:" || parsed.protocol === "https:" || parsed.protocol === "ssh:")
-    || !/^(github\.com|gitlab\.com)$/i.test(parsed.hostname)
+    || !parsed.hostname
     || parsed.password
     || parsed.search
     || parsed.hash
     || (parsed.protocol !== "ssh:" && parsed.username)
     || !validRepositoryPath(parsed.pathname.slice(1))) {
-    throw Object.assign(new Error("repository must be a GitHub or GitLab HTTP(S)/SSH URL without credentials"), { code: "invalid-input" });
+    throw Object.assign(new Error("repository must be an HTTP(S)/SSH Git URL without credentials"), { code: "invalid-input" });
   }
   return repository;
 }

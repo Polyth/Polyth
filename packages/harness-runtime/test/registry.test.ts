@@ -38,6 +38,15 @@ test("factory fallback is before native creation only; persisted routes remain e
     assert.notEqual(one, two);
     await pool.dispose();
 });
+test("project utility runtimes honor an explicit harness", async () => {
+    const r = createHarnessRegistry();
+    r.register(provider("auto", 0));
+    r.register(provider("selected", 1));
+    const pool = createHarnessPool({ registry: r, legacyHarnessId: "auto", context: async (projectId, cwd) => ({ ...context, projectId, cwd: cwd! }) });
+    assert.equal((await pool.forProject("p", "/tmp")).harnessId, "auto");
+    assert.equal((await pool.forProject("p", "/tmp", "selected")).harnessId, "selected");
+    await pool.dispose();
+});
 test("beforeCreate runs once inside the coalesced creation flight", async () => {
     const r = createHarnessRegistry();
     const seen: string[] = [];

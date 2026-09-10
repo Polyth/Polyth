@@ -88,6 +88,16 @@ function stripEnvironmentPrefix(segment: string): string {
     .trim();
 }
 
+function unwrapShellLauncher(command: string): string {
+  const match = command.match(/^(?:\/(?:usr\/)?bin\/)?(?:(?:ba|da|z|k)?sh|fish)\s+(?:-[A-Za-z]*c[A-Za-z]*|--command)\s+([\s\S]+)$/i);
+  if (!match) return command;
+  const body = match[1]!.trim();
+  const quote = body[0];
+  return (quote === "'" || quote === '"') && body.at(-1) === quote
+    ? body.slice(1, -1).trim()
+    : body.replace(/^["']/, "").trim();
+}
+
 function compactCommandPaths(command: string): string {
   return command.replace(/(?:"[^"\n]*[\\/][^"\n]*"|'[^'\n]*[\\/][^'\n]*'|[^\s"'`;|&]+[\\/][^\s"'`;|&]+)/g, (token) => {
     const quote = token[0] === '"' || token[0] === "'" ? token[0] : "";
@@ -99,7 +109,11 @@ function compactCommandPaths(command: string): string {
 }
 
 export function cleanShellCommand(command: string): string {
-  const segments = shellSegments(command);
+  // Native runtimes commonly wrap the complete compound command in `sh -c`.
+  // Unwrap before splitting so a leading formatter (`printf`) does not hide
+  // the repository operation that follows it.
+  const launched = unwrapShellLauncher(command.trim());
+  const segments = shellSegments(launched);
   let operative = "";
   for (const candidate of segments) {
     if (/^(?:cd|pushd|popd)\b/i.test(candidate)) continue;
@@ -107,8 +121,8 @@ export function cleanShellCommand(command: string): string {
     const stripped = stripEnvironmentPrefix(candidate);
     if (stripped) operative = stripped;
   }
-  const cleaned = operative || stripEnvironmentPrefix(segments.at(-1) ?? command.trim()) || command.trim();
-  return compactCommandPaths(cleaned.replace(/\s+/g, " "));
+  const cleaned = operative || stripEnvironmentPrefix(segments.at(-1) ?? launched) || launched;
+  return compactCommandPaths(unwrapShellLauncher(cleaned).replace(/\s+/g, " "));
 }
 
 export function middleTruncatePath(path: string, max = 58): string {
@@ -208,7 +222,24 @@ function displayIntegration(tool: string): string {
 
 export function classifyTool(tool: string, input: JsonObject): ExecutionKind {
   const value = tool.toLowerCase();
-  if (/^(bash|shell|shell_command|run_shell|exec|terminal)$/.test(value)) return "shell";
+  const shell = /^(bash|shell|shell_command|run_shell|exec|terminal)$/.test(value);
+  const command = firstString(input, ["command", "cmd"]);
+  // Some native runtimes expose repository work through one command transport.
+  // Keep that transport in history, but present the operation's semantic intent.
+  if (shell && command) {
+    const operation = cleanShellCommand(command);
+    const executable = operation.match(/^\s*(?:command\s+)?([^\s]+)/)?.[1]
+      ?.replace(/^["']|["']$/g, "")
+      .split(/[\\/]/).at(-1)?.toLowerCase();
+    if (executable && /^(rg|ripgrep|grep|egrep|fgrep|fd)$/.test(executable)) return "search";
+    if (executable === "find"
+      && !/(?:^|\s)-(?:delete|exec(?:dir)?|ok(?:dir)?|fprint(?:0)?|fls|fprintf)(?:\s|$)/.test(operation)) return "search";
+    if (executable === "sed" && /(?:^|\s)-(?:[A-Za-z]*n[A-Za-z]*)(?:\s|$)/.test(operation)
+      && !/(?:^|\s)(?:-[A-Za-z]*i[A-Za-z]*|--in-place)(?:[=\s]|$)/.test(operation)) return "read";
+    if (executable && /^(cat|head|tail|less|more|bat|nl)$/.test(executable)) return "read";
+    if (/^(?:npm|pnpm|yarn|node)\s+(?:run\s+)?(?:test|check|lint|build)\b/.test(operation)) return "test";
+  }
+  if (shell) return "shell";
   if (/(^|[_:/-])(subagent|agent|task)([_:/-]|$)/.test(value) || value === "task") return "subagent";
   if (/mcp|github|linear|slack|notion|figma/.test(value)) return "mcp";
   if (/polyth_browser|^browser(?:[_:/-]|$)/.test(value)) return "browser";
@@ -222,7 +253,6 @@ export function classifyTool(tool: string, input: JsonObject): ExecutionKind {
   if (/read|view|file/.test(value)) return "read";
   if (/test|check|lint|build/.test(value)) return "test";
   if (/^git(?:[_:/-]|$)/.test(value)) return "git";
-  const command = firstString(input, ["command", "cmd"]);
   if (command && /^(?:npm|pnpm|yarn|node)\s+(?:run\s+)?(?:test|check|lint|build)\b/.test(cleanShellCommand(command))) return "test";
   return "tool";
 }
@@ -272,6 +302,8 @@ export function executionPresentation(message: Pick<ToolMsg, "tool" | "input" | 
 
   if (kind === "shell" || (kind === "test" && command)) {
     preview = endTruncate(cleanShellCommand(command ?? title ?? tool));
+  } else if (kind === "read" && command) {
+    preview = endTruncate(cleanShellCommand(command));
   } else if (kind === "read") {
     const offset = typeof input.offset === "number" ? input.offset : undefined;
     const limit = typeof input.limit === "number" ? input.limit : undefined;
@@ -287,6 +319,8 @@ export function executionPresentation(message: Pick<ToolMsg, "tool" | "input" | 
     const from = firstString(input, ["from", "source", "oldPath", "old_path"]);
     const to = firstString(input, ["to", "destination", "newPath", "new_path", "path"]);
     preview = from && to ? `${middleTruncatePath(from, 28)} → ${middleTruncatePath(to, 28)}` : compactPath ?? description ?? "";
+  } else if (kind === "search" && command) {
+    preview = endTruncate(cleanShellCommand(command));
   } else if (kind === "search") {
     const count = resultCount(output);
     preview = `${query ? `"${endTruncate(query, 46)}"` : description ?? title ?? "Workspace"}${count !== undefined ? ` · ${count} ${count === 1 ? "match" : "matches"}` : ""}`;

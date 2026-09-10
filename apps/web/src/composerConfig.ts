@@ -4,7 +4,7 @@
 // Explicit overrides clear presets so the visible Preset value never claims an
 // unmodified bundle. The record survives reload and never crosses sessions or
 // accounts; it is consumed after a send only when it still equals what was sent.
-import type { ModelRef } from "@polyth/contracts";
+import type { HarnessSelection, ModelRef } from "@polyth/contracts";
 import {
   accountStorageGet,
   accountStorageRemove,
@@ -23,6 +23,9 @@ export type ProfileChoice =
 
 export interface ComposerConfig {
   profile: ProfileChoice;
+  /** Browser-staged route for an existing session. It crosses the server
+   * boundary only with the next submitted message. */
+  harness?: HarnessSelection;
   model?: ComposerModelRef;
   agent?: string;
   /** A null value is an explicit Auto choice; undefined inherits defaults. */
@@ -38,6 +41,7 @@ export function emptyComposerConfig(): ComposerConfig {
 
 export function isDefaultComposerConfig(cfg: ComposerConfig): boolean {
   return cfg.profile.kind === "inherit"
+    && cfg.harness === undefined
     && cfg.model === undefined
     && cfg.agent === undefined
     && cfg.thinking === undefined;
@@ -47,12 +51,19 @@ export function parseComposerConfig(raw: string | null): ComposerConfig {
   if (!raw) return emptyComposerConfig();
   try {
     const v = JSON.parse(raw) as {
-      v?: unknown; profile?: unknown; model?: unknown; agent?: unknown; thinking?: unknown;
+      v?: unknown; profile?: unknown; harness?: unknown; model?: unknown; agent?: unknown; thinking?: unknown;
     };
     if (v.v !== 1) return emptyComposerConfig();
     const cfg = emptyComposerConfig();
     if (v.profile === "none") cfg.profile = { kind: "none" };
     else if (typeof v.profile === "string" && v.profile) cfg.profile = { kind: "id", id: v.profile };
+    const harness = v.harness as { mode?: unknown; harnessId?: unknown } | undefined;
+    if (harness?.mode === "auto") cfg.harness = { mode: "auto" };
+    else if (harness?.mode === "pinned"
+      && typeof harness.harnessId === "string"
+      && /^[a-z][a-z0-9-]*$/.test(harness.harnessId)) {
+      cfg.harness = { mode: "pinned", harnessId: harness.harnessId };
+    }
     const m = v.model as { harnessId?: unknown; providerID?: unknown; modelID?: unknown } | undefined;
     if (m && typeof m.providerID === "string" && typeof m.modelID === "string") {
       cfg.model = {
@@ -74,6 +85,7 @@ export function serializeComposerConfig(cfg: ComposerConfig): string {
   return JSON.stringify({
     v: 1,
     profile: cfg.profile.kind === "id" ? cfg.profile.id : cfg.profile.kind === "none" ? "none" : null,
+    ...(cfg.harness ? { harness: cfg.harness } : {}),
     ...(cfg.model ? { model: {
       providerID: cfg.model.providerID,
       modelID: cfg.model.modelID,
@@ -98,8 +110,10 @@ export function saveComposerConfig(sessionId: string | null | undefined, cfg: Co
 
 /** Selecting a preset clears explicit model and agent overrides. */
 export function withProfile(cfg: ComposerConfig, id: string): ComposerConfig {
-  void cfg;
-  return { profile: { kind: "id", id } };
+  return {
+    profile: { kind: "id", id },
+    ...(cfg.harness ? { harness: cfg.harness } : {}),
+  };
 }
 
 /** Explicit None clears only the preset selection; overrides survive. */
@@ -112,11 +126,18 @@ export function withProfileNone(cfg: ComposerConfig): ComposerConfig {
 export function withExplicitModel(cfg: ComposerConfig, model: ComposerModelRef | undefined): ComposerConfig {
   if (!model) {
     const next: ComposerConfig = { profile: cfg.profile };
+    if (cfg.harness !== undefined) next.harness = cfg.harness;
     if (cfg.agent !== undefined) next.agent = cfg.agent;
     if (cfg.thinking !== undefined) next.thinking = cfg.thinking;
     return next;
   }
-  const next: ComposerConfig = { profile: cfg.profile.kind === "id" ? { kind: "none" } : cfg.profile, model };
+  const next: ComposerConfig = {
+    profile: cfg.profile.kind === "id" ? { kind: "none" } : cfg.profile,
+    ...(model.harnessId
+      ? { harness: { mode: "pinned" as const, harnessId: model.harnessId } }
+      : cfg.harness ? { harness: cfg.harness } : {}),
+    model,
+  };
   if (cfg.agent !== undefined) next.agent = cfg.agent;
   if (cfg.thinking !== undefined) next.thinking = cfg.thinking;
   return next;
@@ -128,11 +149,45 @@ export function withModelForNextTurn(cfg: ComposerConfig, model: ComposerModelRe
   return withExplicitThinking(withExplicitModel(cfg, model), undefined);
 }
 
+/** Stage a session route without carrying runtime-owned choices across the
+ * harness boundary. A mismatched inherited profile becomes an explicit clear
+ * so submit cannot silently reselect the old route. */
+export function withHarnessForNextTurn(
+  cfg: ComposerConfig,
+  selection: HarnessSelection,
+  current: { harnessId?: string; profileId?: string },
+  profiles: readonly { id: string; harnessId?: string | null }[],
+): ComposerConfig {
+  const targetHarnessId = selection.mode === "pinned" ? selection.harnessId : undefined;
+  const routeAlreadyActive = targetHarnessId !== undefined && targetHarnessId === current.harnessId;
+  const compatibleModel = cfg.model && targetHarnessId
+    && (cfg.model.harnessId ?? current.harnessId ?? "opencode") === targetHarnessId
+    ? cfg.model
+    : undefined;
+  const profileId = cfg.profile.kind === "id"
+    ? cfg.profile.id
+    : cfg.profile.kind === "inherit"
+      ? current.profileId
+      : undefined;
+  const compatibleProfile = !profileId || Boolean(targetHarnessId
+    && profiles.some((profile) => profile.id === profileId
+      && (profile.harnessId ?? "opencode") === targetHarnessId));
+  return {
+    // Explicit None reaches submit as a canonical clear. Falling back to
+    // inherit here would immediately reselect the old harness-only profile.
+    profile: compatibleProfile ? cfg.profile : { kind: "none" },
+    ...(!routeAlreadyActive ? { harness: selection } : {}),
+    ...(compatibleModel ? { model: compatibleModel } : {}),
+    ...(compatibleModel && cfg.thinking !== undefined ? { thinking: cfg.thinking } : {}),
+  };
+}
+
 /** An explicit agent clears the selected preset, mirroring the model rule. */
 export function withExplicitAgent(cfg: ComposerConfig, agent: string | undefined): ComposerConfig {
   const next: ComposerConfig = {
     profile: agent && cfg.profile.kind === "id" ? { kind: "none" } : cfg.profile,
   };
+  if (cfg.harness !== undefined) next.harness = cfg.harness;
   if (cfg.model !== undefined) next.model = cfg.model;
   if (agent) next.agent = agent;
   if (cfg.thinking !== undefined) next.thinking = cfg.thinking;
@@ -145,6 +200,7 @@ export function withExplicitThinking(cfg: ComposerConfig, thinking: string | und
   const next: ComposerConfig = {
     profile: thinking && cfg.profile.kind === "id" ? { kind: "none" } : cfg.profile,
   };
+  if (cfg.harness !== undefined) next.harness = cfg.harness;
   if (cfg.model !== undefined) next.model = cfg.model;
   if (cfg.agent !== undefined) next.agent = cfg.agent;
   if (thinking) next.thinking = thinking;
@@ -173,5 +229,12 @@ export function wireProfileId(cfg: ComposerConfig): string | null | undefined {
 export function consumeComposerConfig(sessionId: string | null | undefined, sent: ComposerConfig): void {
   const key = keyOf(sessionId);
   const current = parseComposerConfig(accountStorageGet(key));
-  if (configEquals(current, sent)) accountStorageRemove(key);
+  // Projection broadcasts can commit the staged harness while the message
+  // request is still in flight. The route-sync effect then removes only that
+  // already-applied field; it must not make the remaining sent configuration
+  // look like a newer user edit.
+  const { harness: _appliedHarness, ...sentAfterRouteCommit } = sent;
+  if (configEquals(current, sent) || configEquals(current, sentAfterRouteCommit)) {
+    accountStorageRemove(key);
+  }
 }

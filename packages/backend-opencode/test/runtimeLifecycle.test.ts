@@ -1128,6 +1128,73 @@ test("attached runtimes notify consumers after endpoint generation replacement",
   }
 });
 
+test("an unresponsive owned runtime is killed, replaced, and announces the recovery generation", async () => {
+  let starts = 0;
+  let protocolBuilds = 0;
+  const stopped: string[] = [];
+  const lease = await createOwnedSshEndpointLease({
+    location: { directory: "/srv/project" },
+    async start(instanceToken) {
+      starts += 1;
+      return {
+        url: `http://127.0.0.1:${46_700 + starts}`,
+        instanceIdentity: instanceToken,
+        async stop() { stopped.push(instanceToken); },
+      };
+    },
+  });
+  const lifecycle = await createRuntimeLifecycle({
+    lease,
+    createTransport: () => noOpTransport(),
+    createProtocol: (_transport, endpoint) => {
+      protocolBuilds += 1;
+      if (protocolBuilds === 2) {
+        throw Object.assign(new Error("readiness probe timed out"), { code: "unavailable" });
+      }
+      return protocolFor(endpoint, { submit: 0 });
+    },
+  });
+  const facade: AgentRuntime = {
+    capabilities: async () => ({
+      streaming: true,
+      permissions: true,
+      questions: true,
+      compaction: false,
+      subagents: false,
+    }),
+    models: async () => [],
+    agents: async () => [],
+    ensureSession: async () => "backend-a",
+    sessions: async () => [],
+    history: async () => [],
+    startTurn: async () => {},
+    abort: async () => {},
+    replyPermission: async () => {},
+    replyQuestion: async () => {},
+    onEvent: () => ({ dispose() {} }),
+    dispose: async () => {},
+  };
+  const managed = attachRuntimeLifecycle(facade, lifecycle);
+  const notifications: Array<{ type: string; generation?: number; reason?: string }> = [];
+  const subscription = managed.onLifecycle!((notification) => notifications.push(notification));
+  try {
+    const initial = await lifecycle.endpoint();
+    const recovered = await lifecycle.refresh("disconnect");
+    assert.equal(starts, 2);
+    assert.equal(stopped.length, 1);
+    assert.equal(recovered.generation, initial.generation + 1);
+    assert.deepEqual(notifications, [{
+      type: "endpoint-replaced",
+      authorityId: recovered.authorityId,
+      generation: recovered.generation,
+      reason: "disconnect",
+    }]);
+  } finally {
+    subscription.dispose();
+    await lifecycle.dispose();
+  }
+});
+
 test("runtime rejects stale generation bindings before protocol I/O", async () => {
   let starts = 0;
   const calls = { submit: 0 };

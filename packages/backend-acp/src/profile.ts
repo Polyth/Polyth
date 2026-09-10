@@ -1,39 +1,85 @@
 import { createHash } from "node:crypto";
-import type { HarnessContext, HarnessRegistry, ModelDescriptor } from "@polyth/contracts";
-import { acknowledgeCapabilityApplication, releaseProcessExecution } from "@polyth/harness-runtime";
+import type { HarnessContext, HarnessProbe, HarnessRegistry, ModelDescriptor } from "@polyth/contracts";
+import { acknowledgeCapabilityApplication, releaseProcessExecution, type RpcPeer } from "@polyth/harness-runtime";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { ACP_STATIC_FEATURES, connectAcp, createAcpRuntime, type AcpProfile } from "./index.ts";
-import { discoverAcpModels } from "./discovery.ts";
+import { discoverAcpModels, invalidateAcpDiscovery } from "./discovery.ts";
 import { acpOverlays, createAcpProvisioner } from "./provisioner.ts";
 import { configureAcpCapabilityDelivery } from "./capabilityDelivery.ts";
-export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile) {
+
+type AcpClientRequestResult =
+    | { handled: false }
+    | { handled: true; result: unknown };
+type RegisteredAcpProfile = AcpProfile & {
+    clientRequest?(
+        method: string,
+        params: unknown,
+    ): AcpClientRequestResult | Promise<AcpClientRequestResult>;
+};
+
+export function configureAcpClientRequestHandling(
+    rpc: RpcPeer,
+    handler: RegisteredAcpProfile["clientRequest"],
+) {
+    if (!handler) return;
+    const onRequest = rpc.onRequest.bind(rpc);
+    rpc.onRequest = (fallback) => onRequest(async (method, params) => {
+        const handled = await handler(method, params);
+        return handled.handled ? handled.result : fallback(method, params);
+    });
+}
+
+export function registerAcpProfile(host: ServerPackageHost, profile: RegisteredAcpProfile) {
     const registry = host.services.require(serverServiceKey<HarnessRegistry>("harnesses"));
     let registration: ReturnType<HarnessRegistry["register"]> | undefined;
-    const catalogs = new Map<string, ModelDescriptor[]>();
+    const catalogs = new Map<string, { models?: ModelDescriptor[] }>();
     const contextKey = (context: HarnessContext) => JSON.stringify([context.spaceId, context.projectId, context.cwd]);
-    /** ACP exposes its model catalog only while opening a native session. */
+    const probes = new Map<string, { promise: Promise<HarnessProbe>; settledAt?: number }>();
+    const probeProfile = (context: HarnessContext): Promise<HarnessProbe> => {
+        const key = contextKey(context);
+        const existing = probes.get(key);
+        if (existing && (existing.settledAt === undefined || Date.now() - existing.settledAt < 2_000)) {
+            return existing.promise;
+        }
+        let promise: Promise<HarnessProbe>;
+        promise = profile.probe(context).then((value) => {
+            const current = probes.get(key);
+            if (current?.promise === promise) current.settledAt = Date.now();
+            return value;
+        }, (error) => {
+            if (probes.get(key)?.promise === promise) probes.delete(key);
+            throw error;
+        });
+        probes.set(key, { promise });
+        return promise;
+    };
+    /** Read catalog metadata without creating a canonical Polyth session. */
     const discoveryProbe = (context: HarnessContext) => ({
         async open(signal?: AbortSignal) {
             const connection = await connectAcp(profile, context, undefined, signal);
             const abort = () => { void connection.rpc.close().catch(() => {}); };
             signal?.addEventListener("abort", abort, { once: true });
+            const close = async () => {
+                signal?.removeEventListener("abort", abort);
+                await connection.rpc.close();
+            };
             try {
+                // Profiles may expose a connection-level catalog. Older ACP
+                // runtimes still fall back to metadata from a throwaway session.
+                const models = await profile.discoverModels?.(connection, context);
+                if (models) return { result: {}, models, close };
                 const result = await connection.rpc.request("session/new", { cwd: context.cwd, mcpServers: [] });
                 return {
                     result,
-                    setConfigOption: (configId: string, value: string) => connection.rpc.request("session/set_config_option", {
+                    setConfigOption: profile.probeModelControls === false ? undefined : (configId: string, value: string) => connection.rpc.request("session/set_config_option", {
                         sessionId: (result as { sessionId: string }).sessionId,
                         configId,
                         value,
                     }),
-                    close: async () => {
-                        signal?.removeEventListener("abort", abort);
-                        await connection.rpc.close();
-                    },
+                    close,
                 };
             } catch (error) {
-                signal?.removeEventListener("abort", abort);
-                await connection.rpc.close();
+                await close();
                 throw error;
             }
         },
@@ -48,7 +94,12 @@ export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile)
             registration = registry.register({
                 descriptor: profile.descriptor,
                 staticFeatures: ACP_STATIC_FEATURES,
-                probe: profile.probe,
+                probe: probeProfile,
+                invalidateDiscovery(context) {
+                    invalidateAcpDiscovery({ harnessId: profile.descriptor.id, cacheIdentity: contextKey(context) });
+                    catalogs.delete(contextKey(context));
+                    probes.delete(contextKey(context));
+                },
                 // Stage HTTP entries, then require the actual initialize
                 // advertisement before sending any native session request.
                 provisioner: createAcpProvisioner(profile.descriptor.id, true),
@@ -56,7 +107,10 @@ export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile)
                     if (context.remote || process.platform !== "linux") {
                         throw Object.assign(new Error("Local Linux runtimes are supported"), { code: "unsupported" });
                     }
-                    const availability = await profile.probe(context);
+                    const key = contextKey(context);
+                    const catalogEntry = catalogs.get(key) ?? {};
+                    catalogs.set(key, catalogEntry);
+                    const availability = await probeProfile(context);
                     if (!availability.installed) {
                         return { state: "not-installed" as const, message: availability.message ?? "The agent is not installed" };
                     }
@@ -80,7 +134,7 @@ export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile)
                                 : discovery.reason,
                         };
                     }
-                    catalogs.set(contextKey(context), discovery.models);
+                    if (catalogs.get(key) === catalogEntry) catalogEntry.models = discovery.models;
                     return {
                         state: "ready" as const,
                         catalog: { models: discovery.models, agents: [] },
@@ -91,6 +145,7 @@ export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile)
                         throw Object.assign(new Error("Local Linux Space context required"), { code: "unsupported" });
                     const connection = await connectAcp(profile, context, stateFile(context));
                     try {
+                        configureAcpClientRequestHandling(connection.rpc, profile.clientRequest);
                         configureAcpCapabilityDelivery(connection.rpc, context, profile.descriptor.id, connection.agentCapabilities, {
                             peek: (ctx, id) => acpOverlays.peek(ctx, id),
                             acknowledge: acknowledgeCapabilityApplication,
@@ -101,7 +156,7 @@ export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile)
                             profile.descriptor.id,
                             connection.agentCapabilities,
                             profile.descriptor.name,
-                            { models: catalogs.get(contextKey(context)) },
+                            { models: catalogs.get(contextKey(context))?.models },
                         );
                     } catch (error) {
                         await connection.rpc.close().catch(() => {});
@@ -115,6 +170,6 @@ export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile)
                 },
             });
         },
-        onDisable() { registration?.dispose(); catalogs.clear(); },
+        onDisable() { registration?.dispose(); catalogs.clear(); probes.clear(); },
     };
 }

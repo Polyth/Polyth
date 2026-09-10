@@ -25,11 +25,11 @@ import SessionsPage from "./settings/SessionsPage.tsx";
 import AccessPage from "./settings/AccessPage.tsx";
 import PackagesPage from "./settings/PackagesPage.tsx";
 import WidgetsPage from "./settings/WidgetsPage.tsx";
+import { PackageGlyph } from "./settings/packageIcons.tsx";
 import PackageTourOverlay from "./PackageTourOverlay.tsx";
 import { maybeAutoShowPackageTour } from "../packages/onboarding/controller.ts";
 import { settingsPageToPackageId } from "../packages/onboarding/pageMap.ts";
 import { useModalSurface } from "./a11y/Dialog.tsx";
-import { Icon } from "../icons.tsx";
 import { tr } from "../i18n/index.ts";
 import { tapFeedback } from "../haptics.ts";
 import { isEdgeBackSwipe, type GesturePoint } from "../mobileGestures.ts";
@@ -72,8 +72,8 @@ const BUILTIN: PageDef[] = [
   { id: "projects", label: tr("settingsview.projects"), group: "Engineering", render: () => <ProjectsPage /> },
   { id: "profiles", label: "Profiles", group: "Engineering", render: () => <ProfilesPage /> },
   { id: "behavior", label: tr("settingsview.behavior"), group: "Engineering", render: () => <BehaviorPage /> },
-  { id: "widgets", label: tr("settingsview.widgetsLayout"), group: "Customize", icon: "◇", render: () => <WidgetsPage /> },
-  { id: "packages", label: tr("settingsview.packages"), group: "Customize", icon: "📦", render: () => <PackagesPage /> },
+  { id: "widgets", label: tr("settingsview.widgetsLayout"), group: "Customize", icon: "package", render: () => <WidgetsPage /> },
+  { id: "packages", label: tr("settingsview.packages"), group: "Customize", icon: "package", render: () => <PackagesPage /> },
   { id: "access", label: tr("settingsview.access"), group: "System", nav: false, render: () => <AccessPage /> },
   { id: "about", label: tr("settingsview.about"), group: "System", nav: false, render: () => <AboutPage /> },
 ];
@@ -85,36 +85,39 @@ const GROUP_LABELS: Record<PageDef["group"], string> = {
   System: tr("settingsview.system"),
 };
 
-const SETTINGS_ICON_BY_PAGE: Record<string, keyof typeof Icon> = {
-  general: "gear",
+const SETTINGS_ICON_BY_PAGE: Readonly<Record<string, string>> = {
+  general: "settings",
   appearance: "palette",
   chat: "chat",
   notifications: "bell",
-  sessions: "session",
+  sessions: "layers",
   shortcuts: "keyboard",
   projects: "files",
-  profiles: "session",
-  behavior: "pencil",
-  widgets: "widgets",
+  profiles: "user",
+  behavior: "brain",
+  widgets: "package",
   packages: "package",
-  desktop: "sliders",
+  desktop: "settings",
   voice: "mic",
   usage: "usage",
-  git: "branch",
-  models: "context",
-  agents: "session",
-  mcp: "plug",
-  commands: "term",
-  skills: "puzzle",
+  git: "git",
+  models: "database",
+  agents: "cpu",
+  mcp: "server",
+  commands: "command",
+  skills: "assist",
   integrations: "link",
-  plugins: "puzzle",
-  "secure-safe": "shield",
+  plugins: "plugin",
+  "secure-safe": "lock",
   "home-assistant": "home",
+  ssh: "server",
+  tunnel: "qr",
+  "chat-workspace": "chat",
+  "personal-coach": "compass",
 };
 
-function SettingsNavIcon({ pageId }: { pageId: string }) {
-  const Glyph = Icon[SETTINGS_ICON_BY_PAGE[pageId] ?? "puzzle"];
-  return <Glyph />;
+function SettingsNavIcon({ pageId, icon }: { pageId: string; icon?: string }) {
+  return <PackageGlyph icon={icon ?? SETTINGS_ICON_BY_PAGE[pageId] ?? "package"} size={16} strokeWidth={1.8} />;
 }
 
 export default function SettingsView({ onClose = () => setOverlay(null) }: { onClose?: () => void }) {
@@ -394,7 +397,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
                       if (mobile) setMobileStage("page");
                     }}
                   >
-                    <span className="settings-nav-icon" aria-hidden="true"><SettingsNavIcon pageId={p.id} /></span>
+                    <span className="settings-nav-icon" aria-hidden="true"><SettingsNavIcon pageId={p.id} icon={p.icon} /></span>
                     {p.label}
                   </button>
                 </Fragment>

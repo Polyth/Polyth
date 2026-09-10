@@ -533,6 +533,8 @@ export default function VoicePage() {
   const [runtime, setRuntime] = useState<LocalRuntimeView | null>(null);
   const [ttsTestMsg, setTtsTestMsg] = useState("");
   const [ttsTestFailed, setTtsTestFailed] = useState(false);
+  const [backendError, setBackendError] = useState("");
+  const [backendBusy, setBackendBusy] = useState(false);
 
   const refreshCapability = () => void api.dictationCapability().then(setStreaming).catch(() => setStreaming(null));
   const refreshProviders = async () => {
@@ -545,11 +547,30 @@ export default function VoicePage() {
     setRuntime(result.runtime ?? null);
   };
 
+  const refreshBackend = async () => {
+    setBackendBusy(true);
+    setBackendError("");
+    try {
+      const [settings] = await Promise.all([
+        api.voiceSettings(),
+        refreshProviders(),
+        refreshModels(),
+      ]);
+      setServer(settings as ServerVoiceSettings);
+      refreshCapability();
+    } catch (error) {
+      setServer(null);
+      setProviders([]);
+      setModels([]);
+      setRuntime(null);
+      setBackendError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBackendBusy(false);
+    }
+  };
+
   useEffect(() => {
-    refreshCapability();
-    void api.voiceSettings().then((value) => setServer(value as ServerVoiceSettings)).catch(() => setServer(null));
-    void refreshProviders().catch(() => setProviders([]));
-    void refreshModels().catch(() => { setModels([]); setRuntime(null); });
+    void refreshBackend();
   }, []);
 
   const downloading = useMemo(
@@ -588,6 +609,17 @@ export default function VoicePage() {
       {!support.stt && !support.tts && !streaming?.available && (
         <EmptyState title={tr("settings.voicepage.speechIsNotSupportedInThisBrowser")} body={tr("settings.voicepage.dictationNeedsTheWebSpeechApiChrome")} />
       )}
+      {backendError && (
+        <div className="mcp-form-row voice-backend-error" role="alert">
+          <span className="form-error">
+            {tr("voice.serverTranscriptionUnavailable")}: {backendError}
+          </span>
+          <span className="header-spacer" />
+          <Button size="sm" busy={backendBusy} onClick={() => void refreshBackend()}>
+            {tr("voice.tryAgain")}
+          </Button>
+        </div>
+      )}
       <Row label={tr("settings.voicepage.dictation")} hint={support.stt || streaming?.available ? tr("settings.voicepage.showsTheMicButtonInTheComposer") : streaming?.reason ?? tr("settings.voicepage.notSupportedInThisBrowser")} itemId="voice.dictation">
         <Toggle on={prefs.dictation} onChange={(dictation) => setVoicePrefs({ dictation })} label={tr("settings.voicepage.dictation")} />
       </Row>
@@ -604,9 +636,6 @@ export default function VoicePage() {
         />
       )}
 
-      <Row label={tr("settings.voicepage.readRepliesAloud")} hint={tr("settings.voicepage.speaksEachCompletedAssistantReplyInThe")}>
-        <Toggle on={prefs.tts} onChange={(tts) => setVoicePrefs({ tts })} label={tr("settings.voicepage.readRepliesAloud")} />
-      </Row>
       <Row
         label={tr("settings.voicepage.readAloudEngine")}
         hint={server?.ttsConfigured

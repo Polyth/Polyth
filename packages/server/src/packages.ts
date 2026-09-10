@@ -13,18 +13,18 @@ export interface PackageRegistry {
 /** Shell-owned package descriptors only. Feature descriptors are discovered
  * from each package's polyth.descriptor manifest block at boot. */
 export const BUILTIN_PACKAGES = [
-  { id: "session", name: "Session Runtime", description: "Durable session events and projections.", core: true, enabled: true, hasSettings: false },
-  { id: "projects", name: "Projects", description: "Project and workspace management.", core: true, enabled: true, settingsGroup: "Engineering", hasSettings: true },
-  { id: "behavior", name: "Behavior", description: "Agent behavior instructions.", core: true, enabled: true, settingsGroup: "Engineering", hasSettings: true },
-  { id: "notifications", name: "Notifications", description: "Session alerts and notification preferences.", core: true, enabled: true, settingsGroup: "Workspace", hasSettings: true },
-  { id: "appearance", name: "Appearance", description: "Theme and display preferences.", core: true, enabled: true, settingsGroup: "Workspace", hasSettings: true },
-  { id: "general", name: "General", description: "General application preferences.", core: true, enabled: true, settingsGroup: "Workspace", hasSettings: true },
-  { id: "chat", name: "Chat", description: "Conversation and composer preferences.", core: true, enabled: true, settingsGroup: "Workspace", hasSettings: true },
-  { id: "sessions", name: "Sessions", description: "Session defaults and retention preferences.", core: true, enabled: true, settingsGroup: "Workspace", hasSettings: true },
-  { id: "access", name: "Access", description: "Application access and authentication.", core: true, enabled: true, settingsGroup: "System", hasSettings: true },
-  { id: "about", name: "About", description: "Application version and system information.", core: true, enabled: true, settingsGroup: "System", hasSettings: true },
-  { id: "mcp", name: "MCP", description: "Model Context Protocol server configuration.", core: false, enabled: true, settingsGroup: "Engineering", icon: "🔌", hasSettings: false },
-  { id: "integrations", name: "Integrations", description: "External service integrations.", core: false, enabled: true, settingsGroup: "Workspace", icon: "🔗", hasSettings: true },
+  { id: "session", name: "Session Runtime", description: "Durable session events and projections.", core: true, enabled: true, icon: "history", hasSettings: false },
+  { id: "projects", name: "Projects", description: "Project and workspace management.", core: true, enabled: true, settingsGroup: "Engineering", icon: "files", hasSettings: true },
+  { id: "behavior", name: "Behavior", description: "Agent behavior instructions.", core: true, enabled: true, settingsGroup: "Engineering", icon: "brain", hasSettings: true },
+  { id: "notifications", name: "Notifications", description: "Session alerts and notification preferences.", core: true, enabled: true, settingsGroup: "Workspace", icon: "bell", hasSettings: true },
+  { id: "appearance", name: "Appearance", description: "Theme and display preferences.", core: true, enabled: true, settingsGroup: "Workspace", icon: "palette", hasSettings: true },
+  { id: "general", name: "General", description: "General application preferences.", core: true, enabled: true, settingsGroup: "Workspace", icon: "settings", hasSettings: true },
+  { id: "chat", name: "Chat", description: "Conversation and composer preferences.", core: true, enabled: true, settingsGroup: "Workspace", icon: "chat", hasSettings: true },
+  { id: "sessions", name: "Sessions", description: "Session defaults and retention preferences.", core: true, enabled: true, settingsGroup: "Workspace", icon: "layers", hasSettings: true },
+  { id: "access", name: "Access", description: "Application access and authentication.", core: true, enabled: true, settingsGroup: "System", icon: "key", hasSettings: true },
+  { id: "about", name: "About", description: "Application version and system information.", core: true, enabled: true, settingsGroup: "System", icon: "info", hasSettings: true },
+  { id: "mcp", name: "MCP", description: "Model Context Protocol server configuration.", core: false, enabled: true, settingsGroup: "Engineering", icon: "server", hasSettings: false },
+  { id: "integrations", name: "Integrations", description: "External service integrations.", core: false, enabled: true, settingsGroup: "Workspace", icon: "link", hasSettings: true },
 ] as const satisfies readonly PackageDescriptorDto[];
 
 type EnabledState = Record<string, boolean>;

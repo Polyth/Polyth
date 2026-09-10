@@ -45,7 +45,7 @@ export type VoiceEngine = "browser" | "server";
 export interface VoicePrefs {
   /** Show the mic button and allow dictation. */
   dictation: boolean;
-  /** Read completed assistant replies aloud. */
+  /** @deprecated Automatic playback is disabled; retained for preference migration. */
   tts: boolean;
   /** BCP-47 recognition + speech language, e.g. "en-US". */
   lang: string;
@@ -159,6 +159,18 @@ export function speakableText(markdown: string, maxChars = 2000): string {
     .replace(/\s+/g, " ")
     .trim();
   return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
+}
+
+/** Resolve only the assistant event whose action the user pressed. Keeping
+ * this selection exact prevents a delayed click from reading a newer reply. */
+export function assistantReplyTextAt(
+  events: readonly { seq: number; type: string; data: unknown }[],
+  eventSeq: number,
+): string {
+  const event = events.find((candidate) =>
+    candidate.seq === eventSeq && candidate.type === "assistant/message");
+  if (!event || !event.data || typeof event.data !== "object" || Array.isArray(event.data)) return "";
+  return speakableText(String((event.data as { text?: unknown }).text ?? ""));
 }
 
 interface SpeechWindowLike {
