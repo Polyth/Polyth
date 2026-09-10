@@ -32,10 +32,11 @@ test("earnings calendar normalizes symbol sets into one stable cache key", async
   assert.deepEqual(requested, ["MSFT", "NVDA"]);
 });
 
-test("calendar symbol validation is bounded and US-only", () => {
+test("calendar symbol validation is bounded and tolerates mixed watchlists", () => {
   assert.deepEqual(normalizeCalendarSymbols([" nvda ", "MSFT", "NVDA"]), ["MSFT", "NVDA"]);
+  assert.deepEqual(normalizeCalendarSymbols(["NVDA", "BMW.DE", "BTC/USDT", "^GSPC"]), ["NVDA"]);
   assert.throws(() => normalizeCalendarSymbols([]), /1-100 symbols/);
-  assert.throws(() => normalizeCalendarSymbols(["BMW.DE"]), /US symbols only/);
+  assert.throws(() => normalizeCalendarSymbols(["BMW.DE", "BTC\/USDT"]), /no supported US symbols/);
 });
 
 test("TradingView earnings calendar uses one batch request and preserves missing symbols", async () => {
