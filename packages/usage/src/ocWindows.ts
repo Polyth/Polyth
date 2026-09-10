@@ -1,7 +1,7 @@
 import type { QuotaWindow } from "@polyth/contracts";
 import { numberValue, objectValue, timestampValue } from "./opencodeAuth.ts";
 
-export interface polythWindow extends Record<string, unknown> {
+export interface ProviderUsageWindow extends Record<string, unknown> {
   usedPercent?: number | null;
   windowSeconds?: number | null;
   resetAt?: number | string | null;
@@ -11,9 +11,9 @@ export interface polythWindow extends Record<string, unknown> {
   unit?: QuotaWindow["unit"];
 }
 
-export interface polythUsage {
-  windows?: Record<string, polythWindow>;
-  models?: Record<string, { windows?: Record<string, polythWindow> }>;
+export interface ProviderUsage {
+  windows?: Record<string, ProviderUsageWindow>;
+  models?: Record<string, { windows?: Record<string, ProviderUsageWindow> }>;
 }
 
 const titleWords = (value: string): string =>
@@ -53,7 +53,7 @@ const moneyFromLabel = (label: string): { used: number; limit: number } | null =
 const mapOne = (
   id: string,
   label: string,
-  value: polythWindow,
+  value: ProviderUsageWindow,
 ): QuotaWindow | null => {
   const explicitUsed = numberValue(value.used);
   const explicitLimit = numberValue(value.limit);
@@ -107,13 +107,13 @@ const mapOne = (
   };
 };
 
-export const mappolythUsage = (usage: unknown): QuotaWindow[] => {
+export const mapProviderUsage = (usage: unknown): QuotaWindow[] => {
   const root = objectValue(usage);
   if (!root) return [];
   const out: QuotaWindow[] = [];
   const windows = objectValue(root.windows) ?? {};
   for (const [key, raw] of Object.entries(windows)) {
-    const value = objectValue(raw) as polythWindow | null;
+    const value = objectValue(raw) as ProviderUsageWindow | null;
     if (!value) continue;
     const mapped = mapOne(key, windowLabel(key), value);
     if (mapped) out.push(mapped);
@@ -123,7 +123,7 @@ export const mappolythUsage = (usage: unknown): QuotaWindow[] => {
     const model = objectValue(rawModel);
     const scopedWindows = objectValue(model?.windows) ?? {};
     for (const [key, raw] of Object.entries(scopedWindows)) {
-      const value = objectValue(raw) as polythWindow | null;
+      const value = objectValue(raw) as ProviderUsageWindow | null;
       if (!value) continue;
       const id = `${modelId(name)}/${key}`;
       const mapped = mapOne(id, `${titleWords(name)} ${windowLabel(key)}`, value);
@@ -133,4 +133,4 @@ export const mappolythUsage = (usage: unknown): QuotaWindow[] => {
   return out;
 };
 
-export const ocWindow = (input: polythWindow): polythWindow => input;
+export const usageWindow = (input: ProviderUsageWindow): ProviderUsageWindow => input;
