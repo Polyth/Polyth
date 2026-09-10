@@ -11,12 +11,22 @@ import {
 } from "@polyth/plugins";
 import { registerCoachCapabilities, type CoachCapabilitySet } from "./capabilities.ts";
 import type { CoachProposal, CoachStore } from "./index.ts";
+import {
+  registerCoachOnboardingCapabilities,
+  type CoachOnboardingCapabilitySet,
+  type CoachScheduleService,
+} from "./onboarding.ts";
 import { personalCoachProposalRoutes } from "./proposalRoutes.ts";
 import { personalCoachRoutes } from "./routes.ts";
 import { createPersonalCoachService, type PersonalCoachService } from "./service.ts";
 import { personalCoachSessionRoute } from "./sessionRoute.ts";
 
 export type { PersonalCoachService } from "./service.ts";
+
+interface CoachCapabilityBundle {
+  ids: string[];
+  dispose(): Promise<void>;
+}
 
 function proposalSummary(proposal: CoachProposal): string {
   const value = proposal.type === "plan-change" ? proposal.payload.summary : proposal.payload.title;
@@ -31,7 +41,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   host.services.provide(serverServiceKey<PersonalCoachService>("personal-coach"), service);
 
   let routes: RouteHandler | null = null;
-  const capabilities = new Map<string, CoachCapabilitySet>();
+  const capabilities = new Map<string, CoachCapabilityBundle>();
 
   const ensureCapabilities = (
     space: Pick<SpaceContext, "spaceId">,
@@ -42,7 +52,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     const registry = host.services.require(
       serverServiceKey<AgentCapabilityContributionRegistry>("harness.capabilities"),
     );
-    capabilities.set(projectId, registerCoachCapabilities({
+    const main: CoachCapabilitySet = registerCoachCapabilities({
       registry,
       space,
       projectId,
@@ -60,7 +70,21 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           { ignorable: true, producerPlugin: "personal-coach" },
         );
       },
-    }));
+    });
+    const onboarding: CoachOnboardingCapabilitySet = registerCoachOnboardingCapabilities({
+      registry,
+      space,
+      projectId,
+      store,
+      schedule: () => host.services.get(serverServiceKey<CoachScheduleService>("schedule")),
+    });
+    capabilities.set(projectId, {
+      ids: [...main.ids, ...onboarding.ids],
+      async dispose() {
+        await onboarding.dispose();
+        await main.dispose();
+      },
+    });
   };
 
   const restoreCapabilities = async (): Promise<void> => {

@@ -36,6 +36,7 @@ export function buildCoachContext(
       initiative: home.profile.initiative,
       challengeAssumptions: home.profile.challengeAssumptions,
       timeZone: home.profile.timeZone,
+      onboardingState: home.profile.onboardingState,
     },
     activeGoals: store.listGoals("active").slice(0, 6).map((goal) => ({
       id: goal.id,
@@ -120,6 +121,7 @@ export function buildCoachContext(
     schema: state.schema,
     generatedAt: state.generatedAt,
     date: state.date,
+    onboardingState: state.preferences.onboardingState,
     activeGoalCount: state.activeGoals.length,
     todayCommitmentCount: state.today.commitments.length,
     omitted: true,
