@@ -18,6 +18,8 @@ const badRequest = (json: (status: number, value: unknown) => void, message: str
   return true;
 };
 
+const isInvalidInput = (cause: unknown): boolean => (cause as { code?: string })?.code === "invalid-input";
+
 export function marketsRoutes(
   host: Pick<ServerPackageHost, "spaceStorage">,
   markets: MarketsService,
@@ -35,7 +37,7 @@ export function marketsRoutes(
         try {
           json(200, await saveWatchlists(storage, await body()));
         } catch (cause) {
-          if ((cause as { code?: string }).code === "invalid-input") return badRequest(json, errorMessage(cause));
+          if (isInvalidInput(cause)) return badRequest(json, errorMessage(cause));
           throw cause;
         }
         return true;
@@ -103,6 +105,21 @@ export function marketsRoutes(
       const range = url.searchParams.get("range") ?? "1M";
       if (!symbol.trim()) return badRequest(json, "symbol is required");
       json(200, await markets.context(symbol, range as MarketRange));
+      return true;
+    }
+
+    if (path === "/api/markets/compare") {
+      const requested = url.searchParams.get("symbols") ?? "";
+      const symbols = [...new Set(requested.split(",").map((symbol) => symbol.trim()).filter(Boolean))];
+      const range = url.searchParams.get("range") ?? "1M";
+      if (symbols.length < 2) return badRequest(json, "comparison requires at least 2 symbols");
+      if (symbols.length > 8) return badRequest(json, "comparison supports at most 8 symbols");
+      try {
+        json(200, await markets.compare(symbols, range as MarketRange));
+      } catch (cause) {
+        if (isInvalidInput(cause)) return badRequest(json, errorMessage(cause));
+        throw cause;
+      }
       return true;
     }
 

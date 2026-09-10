@@ -33,6 +33,8 @@ export type {
   MarketCacheState,
   MarketCandle,
   MarketCandleSeries,
+  MarketComparison,
+  MarketComparisonItem,
   MarketDataFreshness,
   MarketDataResult,
   MarketFundamentals,

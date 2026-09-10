@@ -1,6 +1,7 @@
 import { createApiTransport } from "@polyth/web-sdk";
 import type {
   MarketCandleSeries,
+  MarketComparison,
   MarketDataResult,
   MarketFundamentals,
   MarketNewsItem,
@@ -37,6 +38,9 @@ export const marketsApi = {
   },
   context(symbol: string, range: MarketRange, signal?: AbortSignal): Promise<MarketResearchContext> {
     return transport.get(`/api/markets/context?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(range)}`, { signal });
+  },
+  compare(symbols: readonly string[], range: MarketRange, signal?: AbortSignal): Promise<MarketComparison> {
+    return transport.get(`/api/markets/compare?symbols=${encodeURIComponent(symbols.join(","))}&range=${encodeURIComponent(range)}`, { signal });
   },
   watchlists(signal?: AbortSignal): Promise<MarketWatchlists> {
     return transport.get("/api/markets/watchlists", { signal });

@@ -97,7 +97,7 @@ test("quote route rejects empty and oversized batches", async () => {
   assert.equal((await invoke(`/api/markets/quote?symbols=${symbols}`)).status, 400);
 });
 
-test("market read routes expose search, candles, fundamentals, news, context, and health", async () => {
+test("market read routes expose search, candles, fundamentals, news, context, compare, and health", async () => {
   assert.equal((await invoke("/api/markets/search?q=nvidia")).status, 200);
   assert.equal((await invoke("/api/markets/candles?symbol=NVDA&range=1Y")).status, 200);
   assert.equal((await invoke("/api/markets/fundamentals?symbol=NVDA")).status, 200);
@@ -105,7 +105,20 @@ test("market read routes expose search, candles, fundamentals, news, context, an
   const context = await invoke("/api/markets/context?symbol=NVDA&range=1M");
   assert.equal(context.status, 200);
   assert.equal((context.body as { performance: { changePercent: number } }).performance.changePercent, 100);
+  const comparison = await invoke("/api/markets/compare?symbols=NVDA,AAPL,NVDA&range=1M");
+  assert.equal(comparison.status, 200);
+  const comparisonBody = comparison.body as { range: string; items: Array<{ symbol: string; performance?: { changePercent: number } }> };
+  assert.equal(comparisonBody.range, "1M");
+  assert.deepEqual(comparisonBody.items.map((item) => item.symbol), ["NVDA", "AAPL"]);
+  assert.equal(comparisonBody.items[0]?.performance?.changePercent, 100);
   const health = await invoke("/api/markets/providers");
   assert.equal(health.status, 200);
   assert.deepEqual((health.body as { providers: Array<{ providerId: string }> }).providers.map((item) => item.providerId), ["fixture"]);
+});
+
+test("compare route enforces symbol and range bounds", async () => {
+  assert.equal((await invoke("/api/markets/compare?symbols=NVDA")).status, 400);
+  assert.equal((await invoke("/api/markets/compare?symbols=NVDA,AAPL&range=NOPE")).status, 400);
+  const symbols = Array.from({ length: 9 }, (_, index) => `S${index}`).join(",");
+  assert.equal((await invoke(`/api/markets/compare?symbols=${symbols}`)).status, 400);
 });

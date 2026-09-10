@@ -103,6 +103,20 @@ export interface MarketResearchContext {
   errors: string[];
 }
 
+export interface MarketComparisonItem {
+  symbol: string;
+  quote?: MarketQuote;
+  fundamentals?: MarketFundamentals;
+  performance?: MarketPerformance;
+  errors: string[];
+}
+
+export interface MarketComparison {
+  range: MarketRange;
+  generatedAt: string;
+  items: MarketComparisonItem[];
+}
+
 export interface MarketDataResult<T> {
   data: T;
   cache: MarketCacheState;

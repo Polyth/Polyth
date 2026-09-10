@@ -3,9 +3,12 @@ import { ProviderRegistry, type MarketProvider } from "./providers.ts";
 import { dedupeMarketNews } from "./providers/news.ts";
 import type {
   MarketCandleSeries,
+  MarketComparison,
+  MarketComparisonItem,
   MarketDataResult,
   MarketFundamentals,
   MarketNewsItem,
+  MarketPerformance,
   MarketQuote,
   MarketRange,
   MarketResearchContext,
@@ -92,26 +95,13 @@ export class MarketsService {
     ]);
     const [quoteResult, fundamentalsResult, candlesResult, newsResult] = settled;
     const errors: string[] = [];
-    const collectError = (label: string, result: PromiseSettledResult<unknown>) => {
-      if (result.status === "rejected") errors.push(`${label}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
-    };
-    collectError("quote", quoteResult);
-    collectError("fundamentals", fundamentalsResult);
-    collectError("candles", candlesResult);
-    collectError("news", newsResult);
+    collectError(errors, "quote", quoteResult);
+    collectError(errors, "fundamentals", fundamentalsResult);
+    collectError(errors, "candles", candlesResult);
+    collectError(errors, "news", newsResult);
 
-    const candles = candlesResult.status === "fulfilled" ? candlesResult.value.data : undefined;
-    const firstClose = candles?.candles[0]?.close;
-    const lastClose = candles?.candles.at(-1)?.close;
-    const performance = candles && firstClose !== undefined && lastClose !== undefined && firstClose !== 0
-      ? {
-          range: normalizedRange,
-          firstClose,
-          lastClose,
-          changePercent: ((lastClose - firstClose) / firstClose) * 100,
-          source: candles.source,
-          freshness: candles.freshness,
-        }
+    const performance = candlesResult.status === "fulfilled"
+      ? performanceFromSeries(candlesResult.value.data)
       : undefined;
 
     return {
@@ -122,6 +112,43 @@ export class MarketsService {
       ...(performance ? { performance } : {}),
       news: newsResult.status === "fulfilled" ? newsResult.value.data.slice(0, 12) : [],
       errors,
+    };
+  }
+
+  async compare(symbols: readonly string[], range: MarketRange = "1M"): Promise<MarketComparison> {
+    const normalizedRange = normalizeRange(range);
+    const normalizedSymbols = [...new Set(symbols.map(normalizeSymbol))];
+    if (normalizedSymbols.length === 0 || normalizedSymbols.length > 8) {
+      throw Object.assign(new Error("market comparison requires 1 to 8 symbols"), { code: "invalid-input" });
+    }
+
+    const items = await Promise.all(normalizedSymbols.map(async (symbol): Promise<MarketComparisonItem> => {
+      const [quoteResult, fundamentalsResult, candlesResult] = await Promise.allSettled([
+        this.quote(symbol),
+        this.fundamentals(symbol),
+        this.candles(symbol, normalizedRange),
+      ]);
+      const errors: string[] = [];
+      collectError(errors, "quote", quoteResult);
+      collectError(errors, "fundamentals", fundamentalsResult);
+      collectError(errors, "candles", candlesResult);
+      const performance = candlesResult.status === "fulfilled"
+        ? performanceFromSeries(candlesResult.value.data)
+        : undefined;
+
+      return {
+        symbol,
+        ...(quoteResult.status === "fulfilled" ? { quote: quoteResult.value.data } : {}),
+        ...(fundamentalsResult.status === "fulfilled" ? { fundamentals: fundamentalsResult.value.data } : {}),
+        ...(performance ? { performance } : {}),
+        errors,
+      };
+    }));
+
+    return {
+      range: normalizedRange,
+      generatedAt: new Date(this.now()).toISOString(),
+      items,
     };
   }
 
@@ -166,6 +193,26 @@ export class MarketsService {
       revalidating: result.revalidating,
     };
   }
+}
+
+function collectError(errors: string[], label: string, result: PromiseSettledResult<unknown>): void {
+  if (result.status === "rejected") {
+    errors.push(`${label}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
+  }
+}
+
+function performanceFromSeries(series: MarketCandleSeries): MarketPerformance | undefined {
+  const firstClose = series.candles[0]?.close;
+  const lastClose = series.candles.at(-1)?.close;
+  if (firstClose === undefined || lastClose === undefined || firstClose === 0) return undefined;
+  return {
+    range: series.range,
+    firstClose,
+    lastClose,
+    changePercent: ((lastClose - firstClose) / firstClose) * 100,
+    source: series.source,
+    freshness: series.freshness,
+  };
 }
 
 export function createMarketsService(options: MarketsServiceOptions = {}): MarketsService {
