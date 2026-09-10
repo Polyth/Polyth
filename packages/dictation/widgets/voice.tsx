@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   VOICE_PREFS_KEY,
+  assistantReplyTextAt,
   mergeTranscript,
   parseVoicePrefs,
   providerCapabilities,
@@ -21,13 +22,13 @@ import {
 import { defineWidgetPlugin } from "../../../apps/web/src/widgets/catalog.ts";
 import type { WebPackageHost } from "@polyth/web-sdk";
 import { requestComposerInsert } from "../../../apps/web/src/composerInsert.ts";
-import { getState, openSettingsPage, subscribeStore } from "../../../apps/web/src/store.ts";
+import { getState, openSettingsPage } from "../../../apps/web/src/store.ts";
 import { api } from "@polyth/session/web-api";
 import { startStreamingDictation, type StreamingDictation } from "./dictationClient.ts";
 import { canStartDirectProvider, startDirectProvider } from "./directProviders.ts";
 import { announce } from "../../../apps/web/src/components/a11y/live.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
-import { Button, IconButton, MicIcon } from "@polyth/web/ui";
+import { Button, IconButton, MicIcon, PlayIcon, StopIcon } from "@polyth/web/ui";
 
 const read = (): string | null => {
   try { return localStorage.getItem(VOICE_PREFS_KEY); } catch { return null; }
@@ -57,18 +58,59 @@ export function useVoicePrefs(): VoicePrefs {
 
 let audioCtx: AudioContext | null = null;
 let serverSource: AudioBufferSourceNode | null = null;
+let speechGeneration = 0;
+
+export interface SpeechPlayback {
+  key: string | null;
+  phase: "idle" | "loading" | "playing" | "error";
+  error?: string;
+}
+
+let speechPlayback: SpeechPlayback = { key: null, phase: "idle" };
+const speechListeners = new Set<() => void>();
+
+function setSpeechPlayback(next: SpeechPlayback): void {
+  speechPlayback = next;
+  for (const listener of [...speechListeners]) listener();
+}
+
+export function getSpeechPlayback(): SpeechPlayback {
+  return speechPlayback;
+}
+
+export function useSpeechPlayback(): SpeechPlayback {
+  return useSyncExternalStore(
+    (listener) => {
+      speechListeners.add(listener);
+      return () => { speechListeners.delete(listener); };
+    },
+    getSpeechPlayback,
+  );
+}
 
 function stopServerAudio(): void {
+  if (serverSource) serverSource.onended = null;
   try { serverSource?.stop(); } catch { /* already stopped */ }
   serverSource = null;
 }
 
-async function speakServer(text: string): Promise<void> {
-  const clip = await api.ttsSpeak(text);
+function stopPlaybackTransport(): void {
+  if (typeof window !== "undefined") window.speechSynthesis?.cancel();
   stopServerAudio();
+}
+
+const speechError = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : String(error ?? "Speech playback failed");
+  return message.length > 160 ? `${message.slice(0, 157)}…` : message;
+};
+
+async function speakServer(text: string, key: string, generation: number): Promise<void> {
+  const clip = await api.ttsSpeak(text);
+  if (speechGeneration !== generation) return;
   audioCtx ??= new AudioContext();
   if (audioCtx.state === "suspended") await audioCtx.resume();
   const buffer = await audioCtx.decodeAudioData(clip);
+  if (speechGeneration !== generation) return;
   const source = audioCtx.createBufferSource();
   source.buffer = buffer;
   source.playbackRate.value = voicePrefs.rate * voicePrefs.pitch;
@@ -77,13 +119,17 @@ async function speakServer(text: string): Promise<void> {
   source.connect(gain);
   gain.connect(audioCtx.destination);
   serverSource = source;
+  source.onended = () => {
+    if (serverSource === source) serverSource = null;
+    if (speechGeneration === generation) setSpeechPlayback({ key: null, phase: "idle" });
+  };
   source.start();
+  setSpeechPlayback({ key, phase: "playing" });
 }
 
-function speakBrowser(text: string): void {
+function speakBrowser(text: string, key: string, generation: number): boolean {
   const synth = typeof window !== "undefined" ? window.speechSynthesis : undefined;
-  if (!synth) return;
-  synth.cancel();
+  if (!synth || typeof SpeechSynthesisUtterance === "undefined") return false;
   const u = new SpeechSynthesisUtterance(text);
   u.lang = voicePrefs.lang === "auto" ? navigator.language : voicePrefs.lang;
   u.rate = voicePrefs.rate;
@@ -93,28 +139,73 @@ function speakBrowser(text: string): void {
     const v = synth.getVoices().find((x) => x.name === voicePrefs.voice);
     if (v) u.voice = v;
   }
+  u.onend = () => {
+    if (speechGeneration === generation) setSpeechPlayback({ key: null, phase: "idle" });
+  };
+  u.onerror = (event) => {
+    if (speechGeneration === generation) {
+      setSpeechPlayback({ key, phase: "error", error: speechError(event.error) });
+    }
+  };
   synth.speak(u);
+  setSpeechPlayback({ key, phase: "playing" });
+  return true;
 }
 
-export function speak(text: string): void {
-  if (!text.trim()) return;
-  if (voicePrefs.ttsEngine === "server") void speakServer(text).catch(() => speakBrowser(text));
-  else speakBrowser(text);
-}
-
-export function speakReply(text: string): void {
-  if (!voicePrefs.summarize || text.length < 400) {
-    speak(text);
-    return;
+async function playSpeech(text: string, key: string, generation: number): Promise<void> {
+  if (speechGeneration !== generation) return;
+  if (voicePrefs.ttsEngine === "server") {
+    try {
+      await speakServer(text, key, generation);
+      return;
+    } catch (error) {
+      if (speechGeneration !== generation) return;
+      if (speakBrowser(text, key, generation)) return;
+      setSpeechPlayback({ key, phase: "error", error: speechError(error) });
+      return;
+    }
   }
-  void api.ttsSummarize(text)
-    .then((r) => speak(r.text || text))
-    .catch(() => speak(text));
+  if (!speakBrowser(text, key, generation)) {
+    setSpeechPlayback({ key, phase: "error", error: "Speech synthesis is unavailable" });
+  }
+}
+
+function beginSpeech(key: string): number {
+  const generation = ++speechGeneration;
+  stopPlaybackTransport();
+  setSpeechPlayback({ key, phase: "loading" });
+  return generation;
+}
+
+export function speak(text: string, key = "voice.sample"): void {
+  const value = text.trim();
+  if (!value) return;
+  const generation = beginSpeech(key);
+  void playSpeech(value, key, generation);
+}
+
+export function speakReply(text: string, key = "voice.reply"): void {
+  const value = text.trim();
+  if (!value) return;
+  const generation = beginSpeech(key);
+  void (async () => {
+    let prepared = value;
+    if (voicePrefs.summarize && value.length >= 400) {
+      try {
+        const result = await api.ttsSummarize(value);
+        prepared = result.text.trim() || value;
+      } catch {
+        prepared = value;
+      }
+    }
+    await playSpeech(prepared, key, generation);
+  })();
 }
 
 export function stopSpeaking(): void {
-  if (typeof window !== "undefined") window.speechSynthesis?.cancel();
-  stopServerAudio();
+  speechGeneration++;
+  stopPlaybackTransport();
+  setSpeechPlayback({ key: null, phase: "idle" });
 }
 
 export function readLastReply(): void {
@@ -123,10 +214,57 @@ export function readLastReply(): void {
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i]!;
     if (e.type === "assistant/message") {
-      speakReply(speakableText(String((e.data as { text?: unknown }).text ?? "")));
+      speakReply(
+        speakableText(String((e.data as { text?: unknown }).text ?? "")),
+        `${s.activeSessionId}:${e.seq}`,
+      );
       return;
     }
   }
+}
+
+export function replyTextAt(sessionId: string, eventSeq: number): string {
+  return assistantReplyTextAt(getState().events[sessionId] ?? [], eventSeq);
+}
+
+function ReadReplyAction({ context }: { context: Record<string, unknown> }) {
+  const playback = useSpeechPlayback();
+  const sessionId = typeof context.sessionId === "string" ? context.sessionId : "";
+  const eventSeq = typeof context.eventSeq === "number" ? context.eventSeq : -1;
+  const assistant = context.kind === "assistant" && sessionId !== "" && eventSeq >= 0;
+  const key = `${sessionId}:${eventSeq}`;
+  const active = assistant && playback.key === key
+    && (playback.phase === "loading" || playback.phase === "playing");
+
+  useEffect(() => {
+    if (assistant && playback.key === key && playback.phase === "error" && playback.error) {
+      announce(playback.error);
+    }
+  }, [assistant, key, playback]);
+
+  if (!assistant) return null;
+  const label = active ? tr("common.stop") : tr("settings.voicepage.readRepliesAloud");
+  return <IconButton
+    className="voice-read-reply"
+    icon={active ? StopIcon : PlayIcon}
+    size="sm"
+    variant="ghost"
+    label={label}
+    pressed={active || undefined}
+    aria-busy={playback.key === key && playback.phase === "loading" ? true : undefined}
+    onClick={() => {
+      if (active) {
+        stopSpeaking();
+        return;
+      }
+      const text = replyTextAt(sessionId, eventSeq);
+      if (!text) {
+        announce(tr("settings.voicepage.readRepliesAloud"));
+        return;
+      }
+      speakReply(text, key);
+    }}
+  />;
 }
 
 const basename = (path: string | null | undefined): string =>
@@ -559,34 +697,15 @@ const VOICE_WIDGET_PLUGIN = defineWidgetPlugin({
 export function installVoice(host: WebPackageHost): () => void {
   uninstallVoice?.();
   const unregisterWidget = host.widgets.registerPlugin(VOICE_WIDGET_PLUGIN);
-
-  const spoken = new Map<string, number>();
-  const check = () => {
-    const s = getState();
-    const id = s.activeSessionId;
-    if (!id) return;
-    const events = s.events[id] ?? [];
-    const last = events.length > 0 ? events[events.length - 1]!.seq : 0;
-    if (!spoken.has(id)) {
-      spoken.set(id, last);
-      return;
-    }
-    const from = spoken.get(id)!;
-    if (last <= from) return;
-    spoken.set(id, last);
-    if (!voicePrefs.tts) return;
-    for (let i = events.length - 1; i >= 0; i--) {
-      const e = events[i]!;
-      if (e.seq <= from) break;
-      if (e.type === "assistant/message") {
-        speakReply(speakableText(String((e.data as { text?: unknown }).text ?? "")));
-        break;
-      }
-    }
-  };
-  const unsubscribeStore = subscribeStore(check);
+  const unregisterReadReply = host.slots.register({
+    slot: "session.message.actions",
+    id: "dictation.read-reply",
+    order: 25,
+    render: (context) => <ReadReplyAction context={context} />,
+  });
   const current = () => {
-    unsubscribeStore();
+    stopSpeaking();
+    unregisterReadReply();
     unregisterWidget();
     if (uninstallVoice === current) uninstallVoice = null;
   };

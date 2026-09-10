@@ -56,6 +56,11 @@ body[data-dictate="false"] .mic-control .mic-btn {
   font-size: var(--font-meta);
 }
 
+.pkg-dictation .voice-backend-error {
+  align-items: center;
+  margin-block: var(--space-3);
+}
+
 @keyframes dictation-pulse {
   50% { opacity: .65; }
 }
