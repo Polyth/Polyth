@@ -17,6 +17,10 @@ type State = ProcessAuthorityProof & {
     releasedAuthorities: ProcessAuthorityProof[];
     receipts: Record<string, string>;
     containment?: ProcessContainment;
+    /** Boot first observed while a legacy, uncontained executor lacked release
+     * proof. A later boot is the external boundary that proves it cannot still
+     * execute; the observing boot itself is never sufficient. */
+    legacyRecoveryBootId?: string;
 };
 
 export type ProcessContainment = {
@@ -282,11 +286,33 @@ const writeReleaseReceipt = (state: State, stateFile?: string) => {
     }), { mode: 0o600 });
     renameSync(temp, state.receiptFile);
 };
+const observeLegacyRecoveryBoot = (state: State, stateFile?: string) => {
+    if (!stateFile || state.containment || state.legacyRecoveryBootId)
+        return;
+    const bootId = currentBootId();
+    if (!BOOT_ID_RE.test(bootId))
+        return;
+    state.legacyRecoveryBootId = bootId;
+    const temp = `${stateFile}.${randomUUID()}.tmp`;
+    writeFileSync(temp, JSON.stringify(state), { mode: 0o600 });
+    renameSync(temp, stateFile);
+};
 const recoverContained = async (
     state: State,
     controller: ProcessContainmentController | undefined,
     stateFile?: string,
 ) => {
+    const bootId = currentBootId();
+    if (
+        !state.containment
+        && typeof state.legacyRecoveryBootId === "string"
+        && BOOT_ID_RE.test(state.legacyRecoveryBootId)
+        && BOOT_ID_RE.test(bootId)
+        && bootId !== state.legacyRecoveryBootId
+    ) {
+        writeReleaseReceipt(state, stateFile);
+        return true;
+    }
     const containment = state.containment;
     const expectedUnit = systemdScopeUnit(state);
     if (!containment)
@@ -297,7 +323,6 @@ const recoverContained = async (
         || typeof containment.bootId !== "string"
         || !BOOT_ID_RE.test(containment.bootId))
         return false;
-    const bootId = currentBootId();
     if (BOOT_ID_RE.test(bootId) && bootId !== containment.bootId) {
         writeReleaseReceipt(state, stateFile);
         return true;
@@ -409,6 +434,8 @@ export async function releaseProcessExecution(
         };
     }
     catch (error) {
+        if ((error as { code?: string }).code === "outcome-unknown")
+            observeLegacyRecoveryBoot(state, file);
         return {
             kind: "unknown",
             operationId,
@@ -441,7 +468,14 @@ export async function createProcessAuthority(
         ? undefined
         : options.containment ?? systemdContainment();
     if (prior)
-        await release(prior, controller, file);
+        try {
+            await release(prior, controller, file);
+        }
+        catch (error) {
+            if ((error as { code?: string }).code === "outcome-unknown")
+                observeLegacyRecoveryBoot(prior, file);
+            throw error;
+        }
     const state: State = { authorityId: stable && prior ? prior.authorityId : randomUUID(), generation: (prior?.generation ?? 0) + 1, ...proof, receipts: prior?.receipts ?? {}, releasedAuthorities: [...(prior?.releasedAuthorities ?? []), ...(prior ? [{ authorityId: prior.authorityId, generation: prior.generation }] : [])] };
     if (controller)
         state.containment = controller.create(state);
