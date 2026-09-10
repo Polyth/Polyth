@@ -3360,6 +3360,10 @@ export function createSessionService(deps: {
   const runtimeFor = (projection: SessionProjection, cwd: string, targetHarnessId?: string): Promise<AgentRuntime> =>
     runtimes.forSession ? runtimes.forSession(projection, cwd, targetHarnessId) : runtimes.forProject(projection.projectId, cwd);
 
+  const sourceExecutionReleased = (projection: SessionProjection | undefined): boolean =>
+    projection?.harnessTransition?.phase === "released"
+    || projection?.harnessTransition?.phase === "failed";
+
   const runtimeAttachedForRelease = async (
     sessionId: string,
     projection: SessionProjection,
@@ -3410,11 +3414,23 @@ export function createSessionService(deps: {
     proj: SessionProjection,
     admittedPreparedOperationId?: string,
   ): Promise<AgentRuntime> => {
+    const currentProjection = await store.projection(sessionId);
+    if (sourceExecutionReleased(currentProjection)) {
+      throw Object.assign(new Error("source runtime was already released for a harness switch"), {
+        code: "conflict",
+      });
+    }
+    proj = currentProjection ?? proj;
     let rt = sessionRuntime.get(sessionId);
     if (!rt) {
       const project = await projects.get(proj.projectId);
       const cwd = proj.worktreePath ?? project?.path ?? process.cwd();
       rt = await runtimeFor(proj, cwd);
+      if (sourceExecutionReleased(await store.projection(sessionId))) {
+        throw Object.assign(new Error("source runtime was already released for a harness switch"), {
+          code: "conflict",
+        });
+      }
       const endpoint = await (rt as ReliabilityRuntime).endpoint?.();
       if (endpoint) rememberEndpoint(rt, endpoint);
       const failed = materializationFailures.get(sessionId);
@@ -5500,6 +5516,61 @@ export function createSessionService(deps: {
       }
       projection = (await store.projection(sessionId))!;
     }
+    const persisted = transition.released as Partial<ExecutionReleaseProof> | undefined;
+    if (!persisted) {
+      throw Object.assign(new Error("harness release proof is missing"), { code: "stale-evidence" });
+    }
+    if (!persisted.backendSessionId) {
+      // Before execution releases became session-scoped, a confirmed switch
+      // killed the complete owned generation and persisted only its authority
+      // and generation. Those records remain stronger than an idle-session
+      // proof, but opening the session after an upgrade could reattach the old
+      // native id and advance only the projection's generation. Recover the
+      // exact pre-upgrade binding from the canonical release event; never
+      // accept a merely malformed transition object as authority evidence.
+      const releaseEvent = (await store.events(sessionId)).findLast((event) => {
+        if (event.type !== "harness/execution-released") return false;
+        const data = event.data as {
+          authorityId?: unknown;
+          generation?: unknown;
+          backendSessionId?: unknown;
+        };
+        return data.authorityId === persisted.authorityId
+          && data.generation === persisted.generation
+          && data.backendSessionId === undefined;
+      });
+      if (
+        !releaseEvent
+        || !projection.backendSessionId
+        || projection.backendSessionId !== oldBinding.backendSessionId
+        || typeof persisted.authorityId !== "string"
+        || persisted.authorityId !== oldBinding.authorityId
+        || typeof persisted.generation !== "number"
+        || !Number.isSafeInteger(persisted.generation)
+        || persisted.generation < 0
+        || persisted.generation > oldBinding.generation
+      ) {
+        throw Object.assign(new Error("legacy harness release proof does not match the persisted execution"), {
+          code: "stale-evidence",
+        });
+      }
+      const released: ExecutionReleaseProof = {
+        authorityId: persisted.authorityId,
+        generation: persisted.generation,
+        backendSessionId: oldBinding.backendSessionId,
+      };
+      oldBinding = { ...oldBinding, generation: released.generation };
+      transition = { ...transition, released };
+      await commitHarnessIntent(sessionId, {
+        runtimeBinding: oldBinding,
+        harnessTransition: transition,
+      }, "harness/execution-released", {
+        transitionId: transition.id,
+        ...released,
+        recoveredLegacyProof: true,
+      });
+      projection = (await store.projection(sessionId))!;
+    }
     if (deps.isShuttingDown?.()) return (await store.projection(sessionId))!;
     let stage: "starting-target" | "creating-native-session" | "publishing-route" = "starting-target";
     try {
@@ -7421,7 +7492,8 @@ export function createSessionService(deps: {
         : page?.prefetch === false;
       if (interactiveRead && !sessionRuntime.has(sessionId)) {
         const projection = await store.projection(sessionId);
-        if (projection && (projection.backendSessionId || projection.status === "unknown")) {
+        if (projection && !sourceExecutionReleased(projection)
+          && (projection.backendSessionId || projection.status === "unknown")) {
           try {
             await ensureWired(sessionId, projection);
           } catch (error) {
@@ -7449,7 +7521,7 @@ export function createSessionService(deps: {
       // Passive pointer prefetches never enter this path.
       if (interactiveRead) {
         const proj = await store.projection(sessionId);
-        if (proj?.backendSessionId) {
+        if (proj?.backendSessionId && !sourceExecutionReleased(proj)) {
           // Indexed existence checks; scanning the whole log to answer two
           // booleans made every session open O(events).
           let imported: boolean;
