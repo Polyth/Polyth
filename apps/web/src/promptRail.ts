@@ -1,8 +1,8 @@
 // Pure geometry for the prompt navigator tick tape (Timeline right rail).
-// Mirrors the polyth PromptNavigatorRail mechanics: a bounded tape of at
-// most MAX_TICKS thin ticks at a fixed pitch, widths that grow for the active
-// turn and swell in a proximity wave around the cursor, and a window that
-// keeps the active tick visible when there are more prompts than ticks.
+// Implements a bounded tape of at most MAX_TICKS thin ticks at a fixed pitch,
+// widths that grow for the active turn and swell in a proximity wave around
+// the cursor, plus a window that keeps the active tick visible when there are
+// more prompts than ticks.
 
 export const RAIL_MAX_TICKS = 30;
 export const RAIL_TICK_PITCH = 8;
@@ -53,7 +53,7 @@ export function cursorTickIndex(offsetY: number, visibleCount: number, pitch: nu
 export function activePromptIndex(tops: Array<number | null>, readingLine: number): number {
   let active = -1;
   let firstRendered = -1;
-  for (let i = 0; i < tops.length; i++) {
+  for (let i = 0; i < tops.length; i += 1) {
     const top = tops[i];
     if (top === null || top === undefined) continue;
     if (firstRendered < 0) firstRendered = i;
