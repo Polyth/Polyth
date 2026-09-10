@@ -90,8 +90,8 @@ test("catalog definitions provide plugin default zones and sizes", () => {
 
 test("package-required widgets repair hidden persistence and reject hide mutations", () => {
   const definition = {
-    id: "workflow.composer-action",
-    pluginId: "workflow",
+    id: "sample.required-composer",
+    pluginId: "sample",
     kind: "mini-widget" as const,
     defaultSlot: "composer.trailing" as const,
     defaultVisible: true,

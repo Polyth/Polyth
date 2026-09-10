@@ -144,11 +144,12 @@ test("thinking, tasks, and every execution share the compact activity-card treat
   assert.match(timeline, /className=\{`reasoning\$\{entering \? " timeline-row-enter" : ""\}\$\{open \? " open" : ""\}`\}>/);
   // The thought header names the work in progress instead of a fixed "Thinking"
   // label: the first line of reasoning when there is one, otherwise run state.
-  assert.match(timeline, /<strong>\{head \|\| \(active \? tr\("timeline\.workingThroughTheRequest"\) : tr\("timeline\.activityDetail"\)\)\}<\/strong>/);
+  assert.match(timeline, /<strong className="reasoning-preview">\{head \|\| \(active \? tr\("timeline\.workingThroughTheRequest"\) : tr\("timeline\.activityDetail"\)\)\}<\/strong>/);
   assert.match(execution, /<div className=\{`tool-card execution-row/);
   assert.match(css, /\.reasoning,\s*\.task-list\s*\{[^}]*border:\s*0;/s);
   assert.match(css, /\.tool-card\.execution-row\s*\{[^}]*border:\s*0;/s);
   assert.match(css, /\.task-list\s*\{[^}]*margin:\s*var\(--space-1\) 0 0;/s);
+  assert.match(css, /\.reasoning-preview\s*\{[^}]*flex:\s*1 1 auto;[^}]*overflow:\s*hidden;[^}]*-webkit-mask-image:\s*linear-gradient\(to right, #000 90%, transparent 100%\);/s);
 });
 
 test("task plans collapse like other agent actions", () => {

@@ -23,7 +23,6 @@ import {
   QrCodeIcon,
   RouteIcon,
   ScheduleIcon,
-  SessionIcon,
   ShieldIcon,
   TargetIcon,
   TasksIcon,
@@ -40,7 +39,6 @@ const glyph = (Glyph: LucideIcon): RailIcon => () => createElement(Glyph, {
   "aria-hidden": true,
 });
 
-const AgentGlyph = glyph(SessionIcon);
 const EffortGlyph = glyph(BrainIcon);
 const WidgetFallbackGlyph = glyph(PackageIcon);
 
@@ -92,7 +90,6 @@ export function railIconFor(id: string): RailIcon {
 
 /** Widget pickers use the same domain mark as panels and launchers. */
 export function widgetIconFor(widget: Pick<WidgetDef, "id" | "pluginId" | "capabilities">): RailIcon {
-  if (widget.id === "composer.agent") return AgentGlyph;
   if (widget.id === "composer.effort") return EffortGlyph;
   const candidates = [...(widget.capabilities ?? []), widget.id, widget.pluginId, widget.id.split(".")[0] ?? ""];
   return candidates.map((id) => RAIL_ICONS[id]).find(Boolean) ?? WidgetFallbackGlyph;

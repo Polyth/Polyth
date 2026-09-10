@@ -1654,8 +1654,8 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   .composer .composer-actions { flex: none; margin-inline-start: auto; }
 }
 
-/* Quiet config chip primitive shared by the model trigger (packages/models),
-   the agent picker, and the effort menu. Borderless at rest, surfaced on
+/* Quiet config chip primitive shared by the model trigger (packages/models)
+   and the effort menu. Borderless at rest, surfaced on
    hover/open; the text always truncates instead of pushing Send around. */
 .config-chip {
   display: inline-flex; align-items: center; gap: 5px; min-width: 0;
@@ -1673,18 +1673,6 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .config-chip-caret { display: inline-flex; color: var(--faint); flex: none; }
 .config-chip-caret svg { width: 12px; height: 12px; }
 .config-chip:hover .config-chip-caret, .config-chip[aria-expanded="true"] .config-chip-caret { color: var(--muted); }
-/* Agent picker chip: the generic Picker trigger restyled to the same quiet
-   geometry. The uppercase label key is dropped — the agent name is the label. */
-.composer-agent-chip .picker-chip {
-  height: 30px; min-height: 0; max-width: 150px; padding: 0 8px;
-  border-color: transparent; border-radius: var(--radius-control);
-  background: transparent; color: var(--text-dim); font-size: 12px; font-weight: 550;
-}
-.composer-agent-chip .picker-chip:hover,
-.composer-agent-chip .picker-chip[aria-expanded="true"] { background: var(--surface-overlay); color: var(--text); }
-.composer-agent-chip .chip-k { display: none; }
-.composer-agent-chip .picker-chip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.composer-agent-chip .picker-caret { color: var(--faint); font-size: var(--font-meta); }
 .composer-effort-control {
   --composer-effort-width: 112px;
   min-width: 0;
@@ -1787,13 +1775,6 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   .composer-widget .composer-config::-webkit-scrollbar { display: none; }
   .composer-widget .composer-config > * { flex: none; }
   .composer-widget .model-picker-trigger { max-width: 180px; }
-  .composer-widget .composer-agent-chip .picker-chip { max-width: 140px; }
-}
-.agent-type-badge {
-  min-height: 25px; display: inline-flex; align-items: center; justify-content: center;
-  padding: 2px 9px; border: 1px solid var(--border-soft); border-radius: var(--radius-round);
-  background: transparent; color: var(--muted);
-  font-size: var(--font-meta); font-weight: 620; line-height: 1; text-transform: capitalize;
 }
 
 /* model / agent pills (native selects dressed as pills) */
@@ -2773,15 +2754,6 @@ html[data-density="compact"] .set-row { padding: 6px 0; }
   flex: none; max-width: 45%;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: var(--font-meta);
-}
-/* P2-W3A agent rows: name above, full purpose below (§agent picker). */
-.composer-agent-chip .picker-item {
-  display: grid; grid-template-columns: 14px minmax(0, 1fr);
-  align-items: baseline; column-gap: 6px; row-gap: 1px; padding-block: 6px;
-}
-.composer-agent-chip .picker-item .palette-label { grid-column: 2; font-weight: 560; }
-.composer-agent-chip .picker-item .palette-meta {
-  grid-column: 2; max-width: none; white-space: normal; line-height: 1.35;
 }
 /* UX-FILES-TIMELINE-03 finding 7: PaneHost wraps every kept-alive resource in
    .pane-body — it must complete the fill chain so .editor-body/.editor-edit
@@ -7670,7 +7642,6 @@ display: none;
     max-width: 28vw;
     font-size: 12px;
   }
-  .composer-mobile .composer-agent-chip .picker-chip { max-width: 20vw; }
   .composer-mobile .composer-card textarea {
     min-height: 26px;
     /* §20: grows with the text, then scrolls internally. The font-scaled token
@@ -10295,7 +10266,6 @@ color: var(--text);
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
   .composer-mobile .composer-card,
   .composer-mobile .composer-card:focus-within { box-shadow: none; }
-  .composer-mobile .agent-type-badge { min-height: var(--tap); padding-inline: 12px; font-size: 12px; }
 }
 @media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
   body[data-keyboard="open"] .app.mode-chat.view-session .workspace { padding-bottom: 0; }
@@ -10950,6 +10920,7 @@ html[data-font] body :is(
 /* Collapsed preview: one line that dissolves toward its end instead of a
    hard ellipsis cut. Type matches .execution-main .tool-preview. */
 .reasoning-preview {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   color: var(--muted);
