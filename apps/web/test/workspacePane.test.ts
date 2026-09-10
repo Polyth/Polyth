@@ -6,7 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   CHAT_FLOOR, clampDockWidth, contextSurfacesOf, decideDock, isWorkspaceSurface,
-  paneDockEdge, preferredOrDefaultWidth, workspaceSurfacesOf,
+  paneDockEdge, paneDockOptions, preferredOrDefaultWidth, workspaceSurfacesOf,
   type DockGeometry, type RailSurface, type WorkspacePanePresentation,
 } from "../src/surfaces.ts";
 import {
@@ -92,6 +92,17 @@ test("paneDockEdge: optional dock defaults to side, only explicit bottom flips",
   assert.equal(paneDockEdge(pres({ dock: "bottom" })), "bottom");
 });
 
+test("paneDockOptions: package-declared edges control the pinned-window actions", () => {
+  assert.deepEqual(paneDockOptions(pres()), ["side"]);
+  assert.deepEqual(paneDockOptions(pres({ dock: "bottom" })), ["bottom"]);
+  assert.deepEqual(
+    paneDockOptions(pres({ dock: "bottom", dockOptions: ["bottom", "side", "bottom"] })),
+    ["bottom", "side"],
+  );
+  assert.equal(paneDockEdge(pres({ dock: "bottom", dockOptions: ["bottom", "side"] }), "side"), "side");
+  assert.equal(paneDockEdge(pres({ dock: "bottom", dockOptions: ["bottom"] }), "side"), "bottom");
+});
+
 // ---- project-scoped persistence ----------------------------------------------
 
 test("panePrefs: round-trip keeps surface, mode, dimensions, and resources", () => {
@@ -118,12 +129,14 @@ test("panePrefs: garbage, wrong version, and absurd widths fall back safely", ()
     widths: { files: 12, git: 99999, term: Number.NaN, ok: 431.7 },
     heights: { tiny: 119, ok: 320.4 },
     lastResource: { files: "", git: "changes:x.ts", weird: 7 },
+    dockEdges: { files: "bottom", invalid: "diagonal" },
   }));
   assert.equal(p.openSurface, null); // empty string is not a surface
   assert.equal(p.mode, "dynamic");
   assert.deepEqual(p.widths, { ok: 432 }); // sanity bounds + rounding
   assert.deepEqual(p.heights, { ok: 320 });
   assert.deepEqual(p.lastResource, { git: "changes:x.ts" });
+  assert.deepEqual(p.dockEdges, { files: "bottom" });
 });
 
 test("panePrefs: v1 expanded migrates directly to fullscreen with dynamic restore", () => {
@@ -157,7 +170,7 @@ test("panePrefs: browser store isolates projects and resets mode on close", asyn
   });
   const {
     getWorkspacePanePrefs, resetWorkspacePanePrefsCache, setPersistedPaneMode,
-    setPaneDynamicHeight, setPaneOpenSurface, setPanePreferredWidth,
+    setPaneDockEdge, setPaneDynamicHeight, setPaneOpenSurface, setPanePreferredWidth,
   } = await import("../src/workspace/panePrefs.ts");
   resetWorkspacePanePrefsCache();
 
@@ -165,11 +178,13 @@ test("panePrefs: browser store isolates projects and resets mode on close", asyn
   setPersistedPaneMode("p1", { mode: "fullscreen", previousMode: "pinned" });
   setPanePreferredWidth("p1", "files", 520);
   setPaneDynamicHeight("p1", "files", 360);
+  setPaneDockEdge("p1", "files", "side");
   // Project B stays untouched — one project's layout never replicates.
   assert.deepEqual(getWorkspacePanePrefs("p2"), emptyWorkspacePanePrefs);
   assert.equal(getWorkspacePanePrefs("p1").openSurface, "files");
   assert.equal(getWorkspacePanePrefs("p1").mode, "fullscreen");
   assert.equal(getWorkspacePanePrefs("p1").widths.files, 520);
+  assert.equal(getWorkspacePanePrefs("p1").dockEdges?.files, "side");
 
   // Closing the pane resets mode so the next open starts dynamic.
   setPaneOpenSurface("p1", null);
@@ -181,6 +196,7 @@ test("panePrefs: browser store isolates projects and resets mode on close", asyn
   // The record round-trips through storage, not just the in-memory cache.
   resetWorkspacePanePrefsCache();
   assert.equal(getWorkspacePanePrefs("p1").widths.files, 520);
+  assert.equal(getWorkspacePanePrefs("p1").dockEdges?.files, "side");
 });
 
 // ---- tab availability reconciliation -------------------------------------------

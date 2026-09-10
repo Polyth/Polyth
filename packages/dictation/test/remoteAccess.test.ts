@@ -9,6 +9,13 @@ const allowed = (method: string, path: string): boolean =>
     (rule.methods as readonly string[]).includes(method) && matchRemotePath(rule.path, path));
 
 test("paired dictation policy exposes session use but not voice/model/runtime administration", () => {
+  assert.deepEqual(DICTATION_REMOTE_ACCESS.routeScopes, ["dictation", "voice"]);
+  for (const rule of DICTATION_REMOTE_ACCESS.http) {
+    assert.ok(
+      (DICTATION_REMOTE_ACCESS.routeScopes as readonly string[]).includes(rule.path.split("/")[2]!),
+      `${rule.path} must belong to a declared route scope`,
+    );
+  }
   assert.equal(allowed("GET", "/api/dictation/capability"), true);
   assert.equal(allowed("POST", "/api/dictation/sessions"), true);
   assert.equal(allowed("GET", "/api/dictation/sessions/session-1"), true);

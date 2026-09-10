@@ -58,3 +58,14 @@ test("compact package windows are fullscreen-only", async () => {
   assert.match(source, /onToggleFullscreen=\{isWorkspacePane && !compact \? togglePaneFullscreen : undefined\}/);
   assert.match(source, /if \(compact\) closeWorkspacePane\(\);\s*else handlePaneEscape\(\);/);
 });
+
+test("bottom package docks expose edges and keep the launcher strip on the right", async () => {
+  const [terminal, css] = await Promise.all([
+    readFile(new URL("../../../packages/terminal/widgets/index.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/styles.css", import.meta.url), "utf8"),
+  ]);
+  assert.match(terminal, /dockOptions:\s*\["bottom",\s*"side"\]/);
+  assert.match(css, /\.app-shell:has\(\.rail-dock-bottom\) > \.railbar \{[\s\S]*grid-row: 1 \/ 3;/);
+  assert.match(css, /\.app-shell:has\(\.rail-dock-bottom\) > \.railbar > \.rail-dock-bottom \{[\s\S]*inset-inline-end: var\(--rail-strip-width-right/);
+  assert.match(css, /\.app-shell:has\(\.rail-dock-bottom\) > \.railbar > \.rail-icon-col\.plugin-strip \{[\s\S]*position: absolute;[\s\S]*inset-inline-end: 0;/);
+});

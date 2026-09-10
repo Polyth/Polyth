@@ -1987,30 +1987,11 @@ export default function Composer({
     ? ` composer-mobile ${expanded ? "composer-expanded" : "composer-collapsed"}${inputFocused ? " composer-input-active" : ""}${hasDraft ? " composer-has-draft" : ""}`
     : "";
 
-  // Creating a canonical session can cold-start OpenCode. Replace the empty
-  // new-chat composer immediately, rather than leaving a sent prompt looking
-  // like it disappeared until the server responds.
-  if (creatingSession) {
-    return (
-      <div
-        ref={rootRef}
-        className={`composer ${widgetMode ? "composer-widget" : "composer-chat"} composer-simple${widgetMode ? "" : " composer-focus-light"}${stateClass}`}
-        aria-busy="true"
-      >
-        <GlassDock className="composer-card">
-          <div className="session-loading" role="status">
-            <span className="ui-spinner ui-spinner--sm" aria-hidden="true" />
-            <span>{tr("workspace.builtinsurfaces.spawningAgent")}</span>
-          </div>
-        </GlassDock>
-      </div>
-    );
-  }
-
   return (
     <div
       ref={rootRef}
       className={`composer ${widgetMode ? "composer-widget" : "composer-chat"} composer-simple${widgetMode ? "" : " composer-focus-light"}${stateClass}`}
+      aria-busy={creatingSession || undefined}
     >
       {/* The project/worktree pickers only make sense before a session exists:
           in an open session the location is fixed, and picking here silently

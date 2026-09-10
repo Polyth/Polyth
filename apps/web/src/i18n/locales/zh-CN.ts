@@ -314,6 +314,8 @@ export const zhCN: AppMessages = {
   "contextrail.collapse": "坍塌",
   "contextrail.collapseValue": "折叠{value}",
   "contextrail.dockBesideChat": "聊天旁边的码头",
+  "contextrail.dockBelowChat": "停靠在聊天下方",
+  "contextrail.unpinWindow": "取消固定窗口",
   "contextrail.expand": "扩张",
   "contextrail.expandValue": "展开{value}",
   "contextrail.message": "×",

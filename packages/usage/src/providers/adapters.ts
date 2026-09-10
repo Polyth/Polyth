@@ -219,13 +219,10 @@ const createCommandCode = (runtime: QuotaRuntime): DiscoverableProvider => {
   });
 };
 
-const createCopilot = (
-  runtime: QuotaRuntime,
-  addon: boolean,
-): DiscoverableProvider => {
+const createCopilot = (runtime: QuotaRuntime): DiscoverableProvider => {
   const token = () => authSecret(runtime, ["github-copilot", "copilot"], ["access", "token"]);
-  const id = addon ? "github-copilot-addon" : "github-copilot";
-  const name = addon ? "GitHub Copilot Add-on" : "GitHub Copilot";
+  const id = "github-copilot";
+  const name = "GitHub Copilot";
   return createProvider(runtime, id, name, () => Boolean(token()), async (signal) => {
     const payload = await safeJson(runtime, name, "https://api.github.com/copilot_internal/user", {
       method: "GET",
@@ -243,7 +240,6 @@ const createCopilot = (
     for (const [label, field] of [
       ["chat", "chat"], ["completions", "completions"], ["premium", "premium_interactions"],
     ] as const) {
-      if (addon && label !== "premium") continue;
       const value = objectValue(snapshots?.[field]);
       const entitlement = numberValue(value?.entitlement);
       const remaining = numberValue(value?.remaining);
@@ -969,8 +965,7 @@ export const createStandardProviders = (runtime: QuotaRuntime): DiscoverableProv
   createCrof(runtime),
   createDeepSeek(runtime),
   createGoogle(runtime),
-  createCopilot(runtime, false),
-  createCopilot(runtime, true),
+  createCopilot(runtime),
   createKimi(runtime),
   createNanoGpt(runtime),
   createOpenRouter(runtime),

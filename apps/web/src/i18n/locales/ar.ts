@@ -314,6 +314,8 @@ export const ar: AppMessages = {
   "contextrail.collapse": "ينهار",
   "contextrail.collapseValue": "انهيار {value}",
   "contextrail.dockBesideChat": "رصيف بجانب الدردشة",
+  "contextrail.dockBelowChat": "إرساء أسفل الدردشة",
+  "contextrail.unpinWindow": "إلغاء تثبيت النافذة",
   "contextrail.expand": "يوسع",
   "contextrail.expandValue": "توسيع {value}",
   "contextrail.message": "×",

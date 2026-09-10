@@ -202,3 +202,14 @@ test("dashboard keeps OpenCode variants distinct with accurate labels", () => {
     ],
   );
 });
+
+test("dashboard presents legacy Copilot add-on telemetry as GitHub Copilot", () => {
+  const dashboard = buildUsageDashboardData([], [{
+    ...anthropicQuota,
+    providerId: "github-copilot-addon",
+  }], 7, now);
+
+  assert.deepEqual(dashboard.providers.map(({ id, label }) => ({ id, label })), [
+    { id: "github-copilot", label: "GitHub Copilot" },
+  ]);
+});

@@ -6081,9 +6081,12 @@ export function createSessionService(deps: {
       // A blocked barrier means the old runtime outcome is still uncertain. Do
       // not resend that turn, but never make the user's new message disappear:
       // durable queueing is the safe send path until reconciliation recovers.
+      // The web composer may label the same follow-up as steer or interrupt
+      // while its last projection still says working, so this fallback must be
+      // based on the authoritative barrier rather than the requested delivery
+      // mode.
       if (
         deps.queue
-        && (delivery === "normal" || delivery === "queue")
         && !recoverEpoch
         && !replaceUnknown
         && admissionBarrier?.state === "blocked"
@@ -6091,8 +6094,8 @@ export function createSessionService(deps: {
         return enqueueMessage(
           sessionId,
           input.text,
-          "queue",
-          delivery === "normal" ? "reconciliation-blocked" : undefined,
+          delivery === "normal" ? "queue" : delivery,
+          "reconciliation-blocked",
           input.attachments,
         );
       }
@@ -6152,6 +6155,18 @@ export function createSessionService(deps: {
         });
       }
       const readyReconciliation = await durable.reconciliation(sessionId);
+      // Reconciliation can become blocked after runtime wiring/recovery but
+      // before final admission. Preserve the new message at this second gate
+      // as well; it has not been delivered to the runtime yet.
+      if (deps.queue && readyReconciliation?.state === "blocked") {
+        return enqueueMessage(
+          sessionId,
+          input.text,
+          delivery === "normal" ? "queue" : delivery,
+          "reconciliation-blocked",
+          input.attachments,
+        );
+      }
       if (readyReconciliation?.state === "reconciling"
         || readyReconciliation?.state === "blocked"
         || (readyReconciliation?.state === "unknown" && !stoppedTurnRecorded)) {

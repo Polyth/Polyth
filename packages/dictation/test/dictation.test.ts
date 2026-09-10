@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  assistantReplyTextAt,
   defaultVoicePrefs,
   mergeTranscript,
   parseVoicePrefs,
@@ -42,6 +43,17 @@ test("speakableText strips markdown syntax and truncates", () => {
   assert.ok(spoken.includes("npm test"));
   assert.ok(spoken.includes("code block omitted"));
   assert.equal(speakableText("word ".repeat(1000), 50).length, 51); // 50 + ellipsis
+});
+
+test("read-aloud selects the exact assistant reply requested by its message action", () => {
+  const events = [
+    { seq: 1, type: "user/message", data: { text: "do not read me" } },
+    { seq: 2, type: "assistant/message", data: { text: "**First** reply" } },
+    { seq: 3, type: "assistant/message", data: { text: "Newest reply" } },
+  ];
+  assert.equal(assistantReplyTextAt(events, 2), "First reply");
+  assert.equal(assistantReplyTextAt(events, 1), "");
+  assert.equal(assistantReplyTextAt(events, 99), "");
 });
 
 test("speech feature detection is safe outside the browser", () => {

@@ -20,6 +20,14 @@ import { createServer } from "node:http";
 import { readFileSync, writeFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
+if (args[0] === "--version") {
+  process.stdout.write("1.18.18-msgact-fake\n");
+  process.exit(0);
+}
+if (args[0] === "db" && args[1] === "path") {
+  process.stdout.write(`${process.env.OPENCODE_DB ?? ""}\n`);
+  process.exit(process.env.OPENCODE_DB ? 0 : 2);
+}
 const argOf = (flag, dflt) => {
   const i = args.indexOf(flag);
   return i >= 0 && args[i + 1] !== undefined ? args[i + 1] : dflt;
@@ -27,11 +35,13 @@ const argOf = (flag, dflt) => {
 const hostname = argOf("--hostname", "127.0.0.1");
 const port = Number(argOf("--port", "0"));
 const turnDelayMs = Number(process.env.MSGACT_TURN_DELAY_MS) || 40;
+const streamStepMs = Number(process.env.MSGACT_STREAM_STEP_MS) || 150;
 
 // ---- seeded state -----------------------------------------------------------
 
 /** id → { id, title, parentID?, forkBehavior?, messages: [wire message] } */
 const sessions = new Map();
+const createdTurnBehaviors = new Map();
 const state = { prompts: [], forks: [], deleted: [] };
 let counter = 0;
 
@@ -47,6 +57,9 @@ const catalog = process.env.MSGACT_OC_CATALOG
 const seedPath = process.env.MSGACT_OC_SEED;
 if (seedPath) {
   const seed = JSON.parse(readFileSync(seedPath, "utf8"));
+  for (const [title, behavior] of Object.entries(seed.createdTurnBehaviors ?? {})) {
+    if (typeof behavior === "string") createdTurnBehaviors.set(title, behavior);
+  }
   for (const s of seed.sessions ?? []) {
     sessions.set(s.id, {
       id: s.id,
@@ -120,6 +133,7 @@ const runTurn = (sess, promptText) => {
             sessionID: sess.id,
             type: "text",
             text,
+            revision: i,
             time: done ? { start: started, end: Date.now() } : { start: started },
           },
         });
@@ -140,7 +154,7 @@ const runTurn = (sess, promptText) => {
           persistState();
           emit("session.idle", { sessionID: sess.id });
         }
-      }, 150 * i);
+      }, streamStepMs * i);
     }
     return;
   }
@@ -162,7 +176,7 @@ const runTurn = (sess, promptText) => {
         emit("message.part.updated", {
           part: {
             id: reasonId, messageID: asId, sessionID: sess.id,
-            type: "reasoning", text: reasoning,
+            type: "reasoning", text: reasoning, revision: i,
             time: i === 5 ? { start: started, end: Date.now() } : { start: started },
           },
         });
@@ -188,7 +202,7 @@ const runTurn = (sess, promptText) => {
         const done = i === 4;
         emit("message.part.updated", {
           part: {
-            id: textId, messageID: asId, sessionID: sess.id, type: "text", text,
+            id: textId, messageID: asId, sessionID: sess.id, type: "text", text, revision: i,
             time: done ? { start: started, end: Date.now() } : { start: started },
           },
         });
@@ -322,7 +336,13 @@ const server = createServer((req, res) => {
     if (method === "POST" && path === "/session") {
       const body = await readBody(req);
       const id = `oc_new_${++counter}`;
-      sessions.set(id, { id, title: String(body.title ?? id), messages: [] });
+      const title = String(body.title ?? id);
+      sessions.set(id, {
+        id,
+        title,
+        turnBehavior: createdTurnBehaviors.get(title),
+        messages: [],
+      });
       persistState();
       return json(res, 200, { id });
     }
