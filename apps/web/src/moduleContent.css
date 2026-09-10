@@ -102,3 +102,129 @@
     --module-content-gap: var(--space-3);
   }
 }
+
+/* Phone modules are navigation destinations, not tiny desktop windows.
+   ModuleView adds this class from the single responsive-shell authority so
+   every package inherits the same chrome, hit geometry and overflow contract. */
+.module-view--phone .module-view-head {
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: calc(var(--tap) + var(--space-2));
+  gap: var(--space-1);
+  padding-inline:
+    max(var(--screen-gutter), var(--safe-left, 0px))
+    max(var(--screen-gutter), var(--safe-right, 0px));
+  border-bottom: 1px solid var(--material-glass-border);
+  background: var(--material-glass-chrome);
+  box-shadow: var(--material-glass-highlight);
+  -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
+  backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
+}
+.module-view--phone .module-view-heading {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.module-view--phone .module-view-title {
+  overflow: hidden;
+  font-size: var(--font-label);
+  font-weight: 650;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The shell already explains where the user is. Keep phone chrome to one
+   readable title row; long package descriptions remain available elsewhere. */
+.module-view--phone .module-view-desc { display: none; }
+.module-view--phone .header-spacer { display: none; }
+.module-view--phone .module-view-icon {
+  flex: none;
+  order: -1;
+}
+.module-view--phone .module-view-actions {
+  flex: 0 1 auto;
+  max-width: min(42vw, 168px);
+  margin-inline-start: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+}
+.module-view--phone .module-view-actions::-webkit-scrollbar { display: none; }
+.module-view--phone .module-view-back {
+  order: -2;
+  flex: 0 0 var(--tap);
+  width: var(--tap);
+  min-width: var(--tap);
+  height: var(--tap);
+  min-height: var(--tap);
+  margin-inline-end: var(--space-1);
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+}
+.module-view--phone .module-view-back .ui-icon {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+}
+.module-view--phone .module-view-body,
+.module-view--phone .module-view-content {
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+}
+.module-view--phone .module-view-body {
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+.module-view--phone .module-view-content--page {
+  --module-content-inline: var(--screen-gutter);
+  --module-content-block: var(--space-3);
+  --module-content-gap: var(--space-3);
+}
+.module-view--phone .module-view-content--panel {
+  --module-content-inline: var(--space-3);
+  --module-content-block: var(--space-3);
+  --module-content-gap: var(--space-3);
+}
+
+/* Mobile controls keep their visual density, but the interactive box follows
+   the platform-sized 44px floor. Text inputs also retain the no-zoom floor. */
+.module-view--phone :where(
+  button,
+  summary,
+  [role="button"],
+  [role="menuitem"],
+  [role="tab"],
+  [role="option"],
+  [role="switch"]
+) {
+  min-height: var(--tap);
+}
+.module-view--phone :where(.ui-icon-btn, button[aria-label]:empty) {
+  min-width: var(--tap);
+}
+.module-view--phone :where(
+  input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea
+) {
+  min-height: var(--tap);
+  font-size: max(16px, var(--font-input));
+}
+.module-view--phone :where(.ui-tabs, .ui-scroll-tabs, [role="tablist"]) {
+  max-width: 100%;
+  overscroll-behavior-inline: contain;
+}
+.module-view--phone :where(.ui-scroll-tabs, [role="tablist"]) {
+  scrollbar-width: none;
+}
+.module-view--phone :where(.ui-scroll-tabs, [role="tablist"])::-webkit-scrollbar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .module-view--phone .module-view-head {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
