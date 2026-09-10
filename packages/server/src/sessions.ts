@@ -1713,7 +1713,11 @@ export function createSessionService(deps: {
       endpoint.control.kind === "owned"
       && (runtime.resetSessionOperation || runtime.resetSession)
     ) {
-      void recoverOwnedEpochIfPending(sessionId);
+      // Recovery acquires the session lock itself. Callers such as
+      // reconcileSession and ensureWired often already hold it.
+      queueMicrotask(() => {
+        void recoverOwnedEpochIfPending(sessionId);
+      });
     }
     return true;
   };

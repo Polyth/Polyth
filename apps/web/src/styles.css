@@ -3651,9 +3651,10 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 
 /* ---- WP6: pane tabs, context menu, previews, conflict banner ------------- */
 .pane-tabs {
-  display: flex; align-items: stretch; gap: 2px; flex-shrink: 0;
+  display: flex; align-items: stretch; gap: 0; flex-shrink: 0;
+  min-height: var(--control-h-sm);
   border-bottom: 1px solid var(--hair-strong);
-  background: var(--panel); padding: 0 4px;
+  background: var(--panel); padding: 0 var(--space-1);
 }
 /* Scroll behavior and edge-fade affordance come from the shared
    .ui-scroll-tabs primitive (P1-W2 section); strips opt in via the class. */
@@ -3662,8 +3663,10 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
   border-radius: var(--radius-control); overflow: hidden;
 }
 .pane-tab {
-  display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px;
-  font-size: 12px; color: var(--muted); cursor: pointer; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: var(--space-1);
+  min-height: var(--control-h-sm); padding: 0 var(--space-2);
+  font: 500 var(--font-technical)/var(--font-technical-lh) var(--mono);
+  color: var(--muted); cursor: pointer; white-space: nowrap;
   border: 0; border-bottom: 2px solid transparent; background: none; max-width: 220px;
 }
 .pane-tab.active { color: inherit; border-bottom-color: var(--accent); background: var(--accent-wash); }

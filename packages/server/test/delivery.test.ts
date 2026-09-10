@@ -337,6 +337,104 @@ for (const notification of ["stream-connected", "stream-disconnected", "endpoint
   });
 }
 
+test("owned epoch recovery after lifecycle reconcile does not deadlock the session lock", async (t) => {
+  const listeners = new Set<(sessionId: string, ev: RuntimeEvent) => void>();
+  const lifecycleListeners = new Set<(notification: RuntimeLifecycleNotification) => void>();
+  const startedTexts: string[] = [];
+  let authorityId = "owned:initial";
+  let resetOperationId: string | undefined;
+  const emit = (sessionId: string, ev: RuntimeEvent) => {
+    for (const listener of listeners) listener(sessionId, ev);
+  };
+  const rt: AgentRuntime = {
+    capabilities: async () => ({
+      streaming: true, permissions: true, questions: true, compaction: false, subagents: false,
+    }),
+    models: async () => [],
+    agents: async () => [],
+    ensureSession: async (input) => input.backendSessionId ?? `backend-${input.sessionId}`,
+    resetSessionOperation: async (_input, operationId) => {
+      resetOperationId = operationId;
+      return {
+        kind: "confirmed" as const,
+        value: { backendSessionId: "backend-after-epoch" },
+        receipt: "backend-after-epoch",
+      };
+    },
+    sessions: async () => [],
+    history: async () => [],
+    startTurn: async (req) => {
+      startedTexts.push(req.text);
+      emit(req.sessionId, { type: "turn/started", turnId: `t${startedTexts.length}` });
+    },
+    abort: async () => undefined,
+    replyPermission: async () => undefined,
+    replyQuestion: async () => undefined,
+    endpoint: async () => ({
+      authorityId,
+      continuity: "verified" as const,
+      generation: 1,
+      url: "http://fake.invalid",
+      location: { directory: "/fake" },
+      control: { kind: "owned" as const, instanceToken: authorityId },
+      config: { kind: "read-only" as const },
+      authentication: { kind: "none" as const },
+    }),
+    protocol: async () => "legacy" as const,
+    reconcile: async (binding) => ({
+      authorityId: binding.authorityId,
+      generation: binding.generation,
+      location: binding.location,
+      backendSessionId: binding.backendSessionId!,
+      reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+      state: resetOperationId
+        ? { value: "idle" as const, causalOperationId: resetOperationId }
+        : {
+            value: "idle" as const,
+            comparison: { domain: "owned-delivery", order: 1 },
+          },
+      completeness: {
+        events: "partial" as const,
+        permissions: "partial" as const,
+        questions: "partial" as const,
+      },
+      permissions: [],
+      questions: [],
+      events: [],
+    }),
+    onEvent(cb) {
+      listeners.add(cb);
+      return { dispose: () => listeners.delete(cb) };
+    },
+    onLifecycle(listener) {
+      lifecycleListeners.add(listener);
+      return { dispose: () => lifecycleListeners.delete(listener) };
+    },
+    dispose: async () => undefined,
+  };
+  const { sessions, store } = makeService({ rt, emit, startedTexts } as ReturnType<typeof fakeRuntime>);
+  t.after(() => store.close());
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await sessions.send(id, { text: "first" });
+  await flush();
+  await sessions.send(id, { text: "second", delivery: "queue" });
+  emit(id, { type: "turn/stopped", reason: "completed" });
+  authorityId = "owned:replacement";
+  for (const listener of lifecycleListeners) {
+    listener({ type: "stream-connected" });
+  }
+  for (let attempt = 0; attempt < 100 && startedTexts.length < 2; attempt++) await flush();
+  assert.equal(startedTexts[0], "first");
+  assert.match(startedTexts[1] ?? "", /second/);
+  assert.match(startedTexts[1] ?? "", /<polyth-runtime-epoch-recovery/);
+  assert.equal((await store.projection(id))?.status, "idle");
+  assert.equal((await store.projection(id))?.runtimeBinding?.epoch, 1);
+  assert.equal(
+    (await store.events(id)).filter((event) => event.type === "runtime/epoch-replaced").length,
+    1,
+  );
+});
+
 test("steer persists user intent before I/O and records confirmed delivery afterward", async () => {
   const fake = fakeRuntime({ steering: true });
   const { sessions, store } = makeService(fake);

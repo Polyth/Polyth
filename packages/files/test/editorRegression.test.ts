@@ -22,3 +22,11 @@ test("file tabs are the only file title and close chrome", () => {
   assert.doesNotMatch(filePane, /className="editor-head"/);
   assert.doesNotMatch(filePane, /editor\.filepane\.closeFile/);
 });
+
+test("Files uses the canonical compact type and spacing rhythm", () => {
+  assert.match(styles, /\.editor-view\s*\{[^}]*font-family:\s*var\(--ui-font-family\)/s);
+  assert.match(styles, /\.editor-toolbar\s*\{[^}]*min-height:\s*var\(--control-h-sm\)[^}]*padding:\s*0 var\(--space-2\)/s);
+  assert.match(styles, /\.ft-row\s*\{[^}]*min-height:\s*max\(var\(--control-h-sm\), var\(--hit-min\)\)[^}]*font:\s*400 var\(--font-technical\)\/var\(--font-technical-lh\) var\(--mono\)/s);
+  assert.match(styles, /\.ft-at\s*\{[^}]*opacity:\s*0[^}]*pointer-events:\s*none/s);
+  assert.match(styles, /\.ft-row:focus-within \.ft-at/);
+});

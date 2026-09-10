@@ -114,7 +114,7 @@ test("file tree renders an ARIA tree with disclosure, indentation, and namespace
       "code",
       "index.ts maps to the code family",
     );
-    const indentOf = (el: HTMLElement) => parseInt(el.style.paddingLeft || "0", 10);
+    const indentOf = (el: HTMLElement) => parseInt(el.style.paddingInlineStart || "0", 10);
     assert.ok(indentOf(child!) > indentOf(dir), "child indents deeper than its parent");
 
     // Selecting a file uses the NAMESPACED class — never the `.sel` widget class.
