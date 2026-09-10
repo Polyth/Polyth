@@ -3,7 +3,7 @@ import { test } from "node:test";
 import {
   discoverQuotaProviders,
   listConfiguredQuotaProviders,
-  mappolythUsage,
+  mapProviderUsage,
   redactSecrets,
   type QuotaDiscoveryOptions,
   type QuotaProvider,
@@ -33,7 +33,7 @@ test("discovery finds nothing when auth and managed credentials are absent", () 
   assert.deepEqual(discoverQuotaProviders(opts), []);
 });
 
-test("registry exposes every polyth dispatcher provider and skips unconfigured entries", () => {
+test("registry exposes every dispatcher provider and skips unconfigured entries", () => {
   const auth = {
     anthropic: { access: "claude-access" },
     openai: { access: "codex-access" },
@@ -302,7 +302,7 @@ test("OpenCode Go uses the auth.json API key and deletes the obsolete credential
 });
 
 test("window mapping handles model scope and currency labels without fake percentages", () => {
-  const windows = mappolythUsage({
+  const windows = mapProviderUsage({
     windows: {
       balance: { valueLabel: "$12.50" },
       spend: { used: 2, limit: 10, valueLabel: "$2 / $10" },
