@@ -83,7 +83,7 @@ export function parseOpenCodePluginJson(text: string): OpenCodePluginPreviewDto 
   try {
     parsed = JSON.parse(source);
   } catch (error) {
-    // polyth also accepts a package spec without JSON quoting.
+    // A bare package spec is also accepted without JSON quoting.
     const spec = validSpec(source);
     if (spec && !/^(?:\{|\[)/.test(source)) {
       return { entries: [{ spec }], errors: [], ignoredKeys: [] };
