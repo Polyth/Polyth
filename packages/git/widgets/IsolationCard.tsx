@@ -326,7 +326,6 @@ export function IsolationCard() {
             <Menu
               label={tr("common.more")}
               align="end"
-              className="isolation-card-overflow"
               entries={[{
                 id: "discard",
                 label: tr("isolation.discardWorkspace"),
@@ -337,11 +336,9 @@ export function IsolationCard() {
             >
               {(trigger) => (
                 <Button
-                  ref={trigger.ref}
-                  onClick={trigger.onClick}
-                  aria-haspopup={trigger["aria-haspopup"]}
-                  aria-expanded={trigger["aria-expanded"]}
+                  {...trigger}
                   size="sm"
+                  className="isolation-card-overflow"
                   disabled={busy !== null || working}
                   aria-label={tr("common.more")}
                 >
