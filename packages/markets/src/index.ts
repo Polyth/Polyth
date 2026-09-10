@@ -1,5 +1,15 @@
 export { SwrCache, type SwrCachePolicy, type SwrCacheResult } from "./cache.ts";
 export {
+  MarketCalendarService,
+  calendarSymbolSupported,
+  normalizeCalendarSymbols,
+  type MarketEconomicCalendarLoader,
+  type MarketEconomicEvent,
+  type MarketEconomicImpact,
+  type MarketEarningsCalendarEntry,
+  type MarketEarningsCalendarLoader,
+} from "./calendar.ts";
+export {
   buildMarketHeatmap,
   normalizeHeatmapQuery,
   type MarketHeatmapCell,
@@ -37,6 +47,10 @@ export {
   type BinanceProviderOptions,
 } from "./providers/binance.ts";
 export {
+  createForexFactoryEconomicCalendarLoader,
+  type EconomicCalendarOptions,
+} from "./providers/economicCalendar.ts";
+export {
   createFredProvider,
   parseFredCsv,
   type FredProviderOptions,
@@ -51,6 +65,10 @@ export {
 } from "./providers/news.ts";
 export { createSecProvider, type SecProviderOptions } from "./providers/sec.ts";
 export { createStooqProvider, stooqSymbol, type StooqProviderOptions } from "./providers/stooq.ts";
+export {
+  createTradingViewEarningsCalendarLoader,
+  type TradingViewCalendarOptions,
+} from "./providers/tradingviewCalendar.ts";
 export { createTradingViewProvider, type TradingViewProviderOptions } from "./providers/tradingview.ts";
 export {
   createTradingViewUniverseLoader,

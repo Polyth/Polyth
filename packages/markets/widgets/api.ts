@@ -1,4 +1,5 @@
 import { createApiTransport } from "@polyth/web-sdk";
+import type { MarketEconomicEvent, MarketEarningsCalendarEntry } from "../src/calendar.ts";
 import type {
   MarketCandleSeries,
   MarketComparison,
@@ -63,6 +64,12 @@ export const marketsApi = {
   },
   crypto(signal?: AbortSignal): Promise<MarketDataResult<MarketQuote[]>> {
     return transport.get("/api/markets/crypto", { signal });
+  },
+  economicCalendar(signal?: AbortSignal): Promise<MarketDataResult<MarketEconomicEvent[]>> {
+    return transport.get("/api/markets/calendar/economic", { signal });
+  },
+  earningsCalendar(symbols: readonly string[], signal?: AbortSignal): Promise<MarketDataResult<MarketEarningsCalendarEntry[]>> {
+    return transport.get(`/api/markets/calendar/earnings?symbols=${encodeURIComponent(symbols.join(","))}`, { signal });
   },
   screener(query: MarketScreenerQuery, signal?: AbortSignal): Promise<MarketScreenerPage> {
     const params = new URLSearchParams();
