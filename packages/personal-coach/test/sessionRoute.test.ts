@@ -11,6 +11,8 @@ import type {
   SpaceContext,
   SpaceStorage,
 } from "@polyth/contracts";
+import { createCoachStore } from "../src/index.ts";
+import type { PersonalCoachService } from "../src/service.ts";
 import { personalCoachSessionRoute } from "../src/sessionRoute.ts";
 
 const ctx: SpaceContext = {
@@ -41,10 +43,13 @@ async function invoke(route: RouteHandler, input: Record<string, unknown> = {}) 
   return { handled, status, value };
 }
 
-test("Coach session uses the package workspace but exposes only sessionId", async () => {
+test("Coach session prepares scoped capabilities and injects bounded package context", async () => {
   const root = mkdtempSync(join(tmpdir(), "polyth-coach-session-"));
+  const coachStore = createCoachStore(join(root, "coach.db"));
+  coachStore.createGoal({ title: "Ship Coach", priority: 3 });
   let createdProjectId = "";
-  let appendedSessionId = "";
+  let preparedProjectId = "";
+  let appended: { sessionId: string; type: string; data: Record<string, unknown> } | undefined;
   const anchor: Project = {
     id: "__polyth_pkg_anchor",
     path: join(root, "packages", "personal-coach", "workspace"),
@@ -65,6 +70,7 @@ test("Coach session uses the package workspace but exposes only sessionId", asyn
   const sessions = {
     async create(input: { projectId: string; title?: string }) {
       createdProjectId = input.projectId;
+      assert.equal(preparedProjectId, input.projectId, "capabilities must be registered before session materialization");
       assert.equal(input.title, "Coach · Today");
       return { id: "coach-session" };
     },
@@ -75,6 +81,11 @@ test("Coach session uses the package workspace but exposes only sessionId", asyn
     packageDir(packageId) { return join(root, "packages", packageId); },
     path(relative) { return join(root, relative); },
   };
+  const coach = {
+    forSpace: () => coachStore,
+    forWorkspaceProject: async () => coachStore,
+    close: () => {},
+  } satisfies PersonalCoachService;
 
   const route = personalCoachSessionRoute({
     pluginId: "personal-coach",
@@ -82,13 +93,17 @@ test("Coach session uses the package workspace but exposes only sessionId", asyn
     spaceStorage: () => storage,
     forSpace: () => ({ projects, sessions }),
     events: {
-      async append(sessionId, type, data, options) {
-        appendedSessionId = sessionId;
-        assert.equal(type, "personal-coach/session-created");
-        assert.deepEqual(data, { packageId: "personal-coach" });
-        assert.equal(options?.producerPlugin, "personal-coach");
+      async append(sessionId, type, data) {
+        appended = { sessionId, type, data };
         return {} as never;
       },
+    },
+  }, {
+    coach,
+    ensureCapabilities: (space, projectId, store) => {
+      assert.equal(space.spaceId, ctx.spaceId);
+      assert.equal(store, coachStore);
+      preparedProjectId = projectId;
     },
   });
 
@@ -97,16 +112,22 @@ test("Coach session uses the package workspace but exposes only sessionId", asyn
   assert.equal(response.status, 200);
   assert.deepEqual(response.value, { sessionId: "coach-session" });
   assert.equal(createdProjectId, anchor.id);
-  assert.equal(appendedSessionId, "coach-session");
+  assert.equal(appended?.sessionId, "coach-session");
+  assert.equal(appended?.type, "package/context");
+  assert.equal(appended?.data.packageId, "personal-coach");
+  const snapshot = JSON.parse(String(appended?.data.text)) as { activeGoals: Array<{ title: string }> };
+  assert.equal(snapshot.activeGoals[0]?.title, "Ship Coach");
+  coachStore.close();
 });
 
 test("Coach session title is bounded before session creation", async () => {
   let created = false;
   const root = mkdtempSync(join(tmpdir(), "polyth-coach-session-"));
+  const store = createCoachStore(join(root, "coach.db"));
   const projects = {
     async ensurePackageWorkspace() {
       return {
-        id: "anchor",
+        id: "__polyth_pkg_anchor",
         path: join(root, "packages", "personal-coach", "workspace"),
         name: "workspace",
         spaceId: ctx.spaceId,
@@ -122,12 +143,20 @@ test("Coach session title is bounded before session creation", async () => {
     packageDir(packageId) { return join(root, "packages", packageId); },
     path(relative) { return join(root, relative); },
   };
+  const coach = {
+    forSpace: () => store,
+    forWorkspaceProject: async () => store,
+    close: () => {},
+  } satisfies PersonalCoachService;
   const route = personalCoachSessionRoute({
     pluginId: "personal-coach",
     projects,
     spaceStorage: () => storage,
     forSpace: () => ({ projects, sessions }),
     events: { append: async () => ({} as never) },
+  }, {
+    coach,
+    ensureCapabilities: () => {},
   });
 
   await assert.rejects(
@@ -135,4 +164,5 @@ test("Coach session title is bounded before session creation", async () => {
     (cause: Error & { code?: string }) => cause.code === "invalid-input",
   );
   assert.equal(created, false);
+  store.close();
 });

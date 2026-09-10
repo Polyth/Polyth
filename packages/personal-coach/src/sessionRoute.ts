@@ -1,5 +1,8 @@
-import type { RouteHandler } from "@polyth/contracts";
+import type { RouteHandler, SpaceContext } from "@polyth/contracts";
 import { packageWorkspace, type ServerPackageHost } from "@polyth/plugins";
+import type { CoachStore } from "./index.ts";
+import { buildCoachContext } from "./context.ts";
+import type { PersonalCoachService } from "./service.ts";
 
 const sessionTitle = (value: unknown): string => {
   if (value === undefined || value === null || value === "") return "Coach · Today";
@@ -13,6 +16,11 @@ const sessionTitle = (value: unknown): string => {
   return title;
 };
 
+export interface CoachSessionDeps {
+  coach: PersonalCoachService;
+  ensureCapabilities(space: Pick<SpaceContext, "spaceId">, projectId: string, store: CoachStore): void;
+}
+
 /**
  * Materialize an ordinary Polyth session on the package-owned runtime anchor.
  * The internal project id never crosses the package API boundary.
@@ -20,18 +28,28 @@ const sessionTitle = (value: unknown): string => {
 export function personalCoachSessionRoute(
   host: Pick<ServerPackageHost,
     "pluginId" | "projects" | "spaceStorage" | "forSpace" | "events">,
+  deps: CoachSessionDeps,
 ): RouteHandler {
   return async (request) => {
     if (request.path !== "/api/personal-coach/session" || request.method !== "POST") return false;
     const input = await request.body();
     const workspace = await packageWorkspace(host, request.space);
+    const store = deps.coach.forSpace(request.space);
+
+    // Register project-scoped capabilities before SessionService materializes a
+    // backend runtime so the first turn sees the same tool/instruction set as
+    // later turns.
+    deps.ensureCapabilities(request.space, workspace.projectId, store);
+
     const scoped = host.forSpace(request.space);
     const session = await scoped.sessions.create({
       projectId: workspace.projectId,
       title: sessionTitle(input.title),
     });
-    await host.events.append(session.id, "personal-coach/session-created", {
+    await host.events.append(session.id, "package/context", {
       packageId: host.pluginId,
+      title: "Personal Coach state",
+      text: buildCoachContext(store),
     }, { ignorable: true, producerPlugin: host.pluginId });
     request.json(200, { sessionId: session.id });
     return true;
