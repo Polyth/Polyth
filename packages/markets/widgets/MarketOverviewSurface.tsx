@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { MarketDataResult, MarketMacroSnapshot, MarketQuote } from "../src/types.ts";
 import { marketsApi } from "./api.ts";
 import type { MarketHandoffOption } from "./MarketsSurface.tsx";
-import { untrustedMarketDataBlock } from "./untrusted.ts";
+import { buildOverviewHandoffText } from "./overviewContext.ts";
 
 const CRYPTO_REFRESH_MS = 15_000;
 const MARKET_LABELS: Record<string, string> = {
@@ -37,27 +37,6 @@ const change = (value?: number): string => value === undefined
 
 const macroValue = (value: number, unit: "percent" | "percentage-point"): string =>
   unit === "percentage-point" ? `${value >= 0 ? "+" : ""}${value.toFixed(2)} pp` : `${value.toFixed(2)}%`;
-
-export function buildOverviewHandoffText(
-  macro: MarketMacroSnapshot | null,
-  crypto: MarketDataResult<MarketQuote[]> | null,
-): string {
-  const evidence = {
-    macroGeneratedAt: macro?.generatedAt,
-    cryptoCachedAt: crypto?.cachedAt,
-    macroIndicators: macro?.indicators ?? [],
-    majorMarkets: macro?.markets ?? [],
-    crypto: crypto?.data ?? [],
-    partialErrors: macro?.errors ?? [],
-  };
-  return [
-    "Analyze the current macro and crypto market snapshot. Identify what is materially notable, cross-asset tensions, risk-on/risk-off signals, and what deserves follow-up research. Do not invent causal explanations from price moves alone.",
-    "",
-    ...untrustedMarketDataBlock("macro and crypto snapshot", [JSON.stringify(evidence, null, 2)]),
-    "",
-    "Treat all values as observational market data. Verify time-sensitive conclusions against current primary sources before relying on them.",
-  ].join("\n");
-}
 
 export default function MarketOverviewSurface({
   active = true,
