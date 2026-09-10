@@ -11,6 +11,9 @@ const MARKET_LABELS: Record<string, string> = {
 };
 
 const price = (quote: MarketQuote): string => {
+  if (quote.assetType === "index") {
+    return quote.price.toLocaleString(undefined, { maximumFractionDigits: quote.price < 1 ? 4 : 2 });
+  }
   try {
     return quote.currency
       ? new Intl.NumberFormat(undefined, {
