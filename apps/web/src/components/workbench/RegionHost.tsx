@@ -201,6 +201,7 @@ export default function RegionHost({ region, layout, surfaces, compact, dragging
     >
       <ModuleView
         id={`region:${region}`}
+        surfaceId={surface.id}
         title={surface.title}
         {...(surface.description ? { description: surface.description } : {})}
         icon={surface.icon ? surface.icon() : undefined}
