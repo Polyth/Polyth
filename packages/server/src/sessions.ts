@@ -6705,16 +6705,25 @@ export function createSessionService(deps: {
       return deps.queue.queueList(sessionId);
     },
     async queueEditStart(sessionId, queueId) {
-      if (!deps.queue) throw Object.assign(new Error("delivery queue unavailable"), { code: "unsupported" });
-      const item = (await deps.queue.queueList(sessionId)).find((candidate) => candidate.id === queueId);
-      if (!item) throw Object.assign(new Error("queued message has already started"), { code: "conflict" });
-      if (queueEditHeld(sessionId, queueId)) {
-        throw Object.assign(new Error("queued message is already being edited"), { code: "conflict" });
-      }
-      const holds = queueEditHolds.get(sessionId) ?? new Map<string, number>();
-      holds.set(queueId, Date.now() + QUEUE_EDIT_HOLD_MS);
-      queueEditHolds.set(sessionId, holds);
-      return item;
+      return withSessionLock(sessionId, async () => {
+        if (!deps.queue) throw Object.assign(new Error("delivery queue unavailable"), { code: "unsupported" });
+        const item = (await deps.queue.queueList(sessionId)).find((candidate) => candidate.id === queueId);
+        if (!item) throw Object.assign(new Error("queued message has already started"), { code: "conflict" });
+        for (const operation of await durable.operations(sessionId)) {
+          if (!isRuntimeOperationBlocking(operation)) continue;
+          const reservation = await durable.queueReservation(operation.operationId);
+          if (reservation?.queueItem.id === queueId) {
+            throw Object.assign(new Error("queued message admission is already reserved"), { code: "conflict" });
+          }
+        }
+        if (queueEditHeld(sessionId, queueId)) {
+          throw Object.assign(new Error("queued message is already being edited"), { code: "conflict" });
+        }
+        const holds = queueEditHolds.get(sessionId) ?? new Map<string, number>();
+        holds.set(queueId, Date.now() + QUEUE_EDIT_HOLD_MS);
+        queueEditHolds.set(sessionId, holds);
+        return item;
+      });
     },
     async queueEdit(sessionId, queueId, text) {
       if (!deps.queue) throw Object.assign(new Error("delivery queue unavailable"), { code: "unsupported" });
@@ -6735,7 +6744,10 @@ export function createSessionService(deps: {
       if (!nextText) throw Object.assign(new Error("queued message text is required"), { code: "invalid-input" });
       const item = (await deps.queue.queueList(sessionId)).find((candidate) => candidate.id === queueId);
       if (!item) throw Object.assign(new Error("queue item not found"), { code: "not-found" });
-      await deps.queue.queueRemove(sessionId, queueId);
+      const removed = await deps.queue.queueRemove(sessionId, queueId);
+      if (!removed) {
+        throw Object.assign(new Error("queued message has already started"), { code: "conflict" });
+      }
       await appendAndBroadcast(sessionId, "queue/removed", { queueId }, { ignorable: true });
       releaseQueueEditHold(sessionId, queueId);
       return service.send(sessionId, {

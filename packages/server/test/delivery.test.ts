@@ -337,6 +337,26 @@ for (const notification of ["stream-connected", "stream-disconnected", "endpoint
   });
 }
 
+test("an already reserved queue row cannot be copied through the composer edit/steer path", async (t) => {
+  const fake = fakeRuntime();
+  const { sessions, store } = makeService(fake);
+  t.after(() => store.close());
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await flush();
+  const item = await store.enqueue(id, "reserved", "queue");
+  const reservation = await store.reserveQueueHead({ sessionId: id });
+  assert.equal(reservation.kind, "reserved");
+  await assert.rejects(sessions.queueEditStart!(id, item.id), { code: "conflict" });
+  await assert.rejects(sessions.queueSendNow!(id, item.id, item.text), { code: "conflict" });
+  assert.equal((await store.events(id)).some((event) => event.type === "queue/removed"), false);
+  if (reservation.kind !== "reserved") return;
+  await store.claimOperation(reservation.reservation.operation.operationId);
+  await store.settleOperation(reservation.reservation.operation.operationId, { kind: "unknown" });
+  await assert.rejects(sessions.queueEditStart!(id, item.id), { code: "conflict" });
+  assert.equal((await store.queueList(id)).length, 1);
+  assert.deepEqual(fake.startedTexts, []);
+});
+
 test("steer persists user intent before I/O and records confirmed delivery afterward", async () => {
   const fake = fakeRuntime({ steering: true });
   const { sessions, store } = makeService(fake);
