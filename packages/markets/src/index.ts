@@ -18,6 +18,7 @@ export {
 export {
   ProviderRegistry,
   type MarketProvider,
+  type ProviderCapabilityHealth,
   type ProviderHealth,
   type ProviderRegistryOptions,
 } from "./providers.ts";
