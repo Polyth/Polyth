@@ -36,6 +36,7 @@ export function createTradingViewEarningsCalendarLoader(
     const json = await fetchJson(fetchImpl, "https://scanner.tradingview.com/america/scan", {
       method: "POST",
       headers,
+      signal: AbortSignal.timeout(5_000),
       body: JSON.stringify({ symbols: { tickers }, columns: COLUMNS }),
     }, "tradingview earnings calendar");
     const rows = valueAt(json, "data");
