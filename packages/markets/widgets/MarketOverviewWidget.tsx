@@ -38,17 +38,18 @@ export function MarketOverviewWidget({
   const active = !context.editing;
   const [macro, setMacro] = useState<MarketMacroSnapshot | null>(null);
   const [crypto, setCrypto] = useState<MarketDataResult<MarketQuote[]> | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [macroLoading, setMacroLoading] = useState(false);
+  const [cryptoLoading, setCryptoLoading] = useState(false);
 
   useEffect(() => {
     if (!active) return;
     const controller = new AbortController();
-    setLoading(true);
+    setMacroLoading(true);
     void marketsApi.macro(controller.signal)
       .then(setMacro)
       .catch(() => undefined)
       .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
+        if (!controller.signal.aborted) setMacroLoading(false);
       });
     return () => controller.abort();
   }, [active]);
@@ -62,6 +63,7 @@ export function MarketOverviewWidget({
       if (disposed || running || document.visibilityState === "hidden") return;
       running = true;
       controller = new AbortController();
+      setCryptoLoading(true);
       try {
         const result = await marketsApi.crypto(controller.signal);
         if (!disposed) setCrypto(result);
@@ -69,6 +71,7 @@ export function MarketOverviewWidget({
         // Keep the last good crypto board; the full overview exposes details.
       } finally {
         running = false;
+        if (!disposed) setCryptoLoading(false);
       }
     };
     void load();
@@ -87,7 +90,7 @@ export function MarketOverviewWidget({
 
   const markets = macro?.markets ?? [];
   const coins = (crypto?.data ?? []).slice(0, 3);
-  if (loading && markets.length === 0 && coins.length === 0) {
+  if ((macroLoading || cryptoLoading) && markets.length === 0 && coins.length === 0) {
     return <div className="markets-widget-empty">Loading market overview…</div>;
   }
 
