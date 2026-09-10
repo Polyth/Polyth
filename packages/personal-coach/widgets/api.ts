@@ -58,6 +58,17 @@ export interface CoachInsightDto {
   status: "candidate" | "accepted" | "rejected" | "expired";
 }
 
+export interface CoachProposalDto {
+  id: string;
+  type: "goal" | "commitment" | "routine" | "plan-change";
+  payload: Record<string, unknown>;
+  reason?: string;
+  status: "pending" | "accepted" | "rejected" | "expired";
+  sourceSessionId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface CoachHomeDto {
   revision: number;
   date: string;
@@ -83,10 +94,14 @@ export interface CoachApi {
   skipCommitment(id: string, reason?: string): Promise<CoachCommitmentDto>;
   recordCheckIn(input: { energy: number; focus: number; note?: string }): Promise<CoachCheckInDto>;
   createSession(title?: string): Promise<{ sessionId: string }>;
+  proposal(id: string): Promise<CoachProposalDto>;
+  acceptProposal(id: string): Promise<CoachProposalDto>;
+  rejectProposal(id: string): Promise<CoachProposalDto>;
 }
 
 export function createCoachApi(): CoachApi {
   const api = createApiTransport();
+  const proposalPath = (id: string) => `/api/personal-coach/proposals/${encodeURIComponent(id)}`;
   return {
     home: () => api.get<CoachHomeDto>("/api/personal-coach/home"),
     completeCommitment: (id) => api.post<CoachCommitmentDto>(
@@ -102,5 +117,8 @@ export function createCoachApi(): CoachApi {
       "/api/personal-coach/session",
       title ? { title } : {},
     ),
+    proposal: (id) => api.get<CoachProposalDto>(proposalPath(id)),
+    acceptProposal: (id) => api.post<CoachProposalDto>(`${proposalPath(id)}/accept`, {}),
+    rejectProposal: (id) => api.post<CoachProposalDto>(`${proposalPath(id)}/reject`, {}),
   };
 }

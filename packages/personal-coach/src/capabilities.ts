@@ -5,7 +5,7 @@ import type {
   SpaceContext,
   ToolExecutionContext,
 } from "@polyth/contracts";
-import type { CoachStore } from "./index.ts";
+import type { CoachProposal, CoachStore } from "./index.ts";
 import { buildCoachContext } from "./context.ts";
 
 const BEHAVIOR = `You are operating inside Polyth Personal Coach. Help the user decide, commit, act, reflect, and adapt with as little management overhead as possible.
@@ -56,6 +56,7 @@ export function registerCoachCapabilities(input: {
   space: Pick<SpaceContext, "spaceId">;
   projectId: string;
   store: CoachStore;
+  onProposalCreated?: (proposal: CoachProposal, ctx: ToolExecutionContext) => void | Promise<void>;
 }): CoachCapabilitySet {
   const { registry, space, projectId, store } = input;
   const suffix = projectId.replace(/[^a-z0-9]/gi, "").toLowerCase().slice(-16) || "workspace";
@@ -72,6 +73,11 @@ export function registerCoachCapabilities(input: {
     if (ctx.projectId !== projectId || (ctx.spaceId && ctx.spaceId !== space.spaceId)) {
       throw Object.assign(new Error("Coach tool target mismatch"), { code: "forbidden" });
     }
+  };
+
+  const proposalOutput = async (proposal: CoachProposal, ctx: ToolExecutionContext) => {
+    await input.onProposalCreated?.(proposal, ctx);
+    return jsonOutput(proposal, { entityId: proposal.id });
   };
 
   register({
@@ -255,7 +261,7 @@ export function registerCoachCapabilities(input: {
       reason: text("Why this proposal is useful now"),
     }, ["title"]),
     true,
-    (value, ctx) => {
+    async (value, ctx) => {
       const payload: JsonObject = { title: String(value.title ?? "") };
       const desiredOutcome = optionalString(value.desiredOutcome);
       const why = optionalString(value.why);
@@ -271,7 +277,7 @@ export function registerCoachCapabilities(input: {
         ...(optionalString(value.reason) ? { reason: optionalString(value.reason)! } : {}),
         ...(ctx.sessionId ? { sourceSessionId: ctx.sessionId } : {}),
       });
-      return jsonOutput(proposal, { entityId: proposal.id });
+      return proposalOutput(proposal, ctx);
     },
   );
 
@@ -287,7 +293,7 @@ export function registerCoachCapabilities(input: {
       reason: text("Why this commitment is appropriate"),
     }, ["title"]),
     true,
-    (value, ctx) => {
+    async (value, ctx) => {
       const payload: JsonObject = { title: String(value.title ?? "") };
       const goalId = optionalString(value.goalId);
       const plannedFor = optionalNumber(value.plannedFor);
@@ -303,7 +309,7 @@ export function registerCoachCapabilities(input: {
         ...(optionalString(value.reason) ? { reason: optionalString(value.reason)! } : {}),
         ...(ctx.sessionId ? { sourceSessionId: ctx.sessionId } : {}),
       });
-      return jsonOutput(proposal, { entityId: proposal.id });
+      return proposalOutput(proposal, ctx);
     },
   );
 
@@ -316,7 +322,7 @@ export function registerCoachCapabilities(input: {
       reason: text("Evidence/reason for suggesting the change"),
     }, ["summary", "changes"]),
     true,
-    (value, ctx) => {
+    async (value, ctx) => {
       const changes = value.changes;
       if (!changes || typeof changes !== "object" || Array.isArray(changes)) {
         throw Object.assign(new Error("changes must be an object"), { code: "invalid-input" });
@@ -330,7 +336,7 @@ export function registerCoachCapabilities(input: {
         ...(optionalString(value.reason) ? { reason: optionalString(value.reason)! } : {}),
         ...(ctx.sessionId ? { sourceSessionId: ctx.sessionId } : {}),
       });
-      return jsonOutput(proposal, { entityId: proposal.id });
+      return proposalOutput(proposal, ctx);
     },
   );
 

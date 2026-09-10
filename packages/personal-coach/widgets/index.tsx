@@ -1,5 +1,7 @@
 import "./styles.css";
+import "./proposal.css";
 import { createElement } from "react";
+import type { SessionEvent } from "@polyth/contracts";
 import { defineWebPackage, friendlyError } from "@polyth/web-sdk";
 import { openSession } from "../../../apps/web/src/init.ts";
 import { createCoachApi } from "./api.ts";
@@ -10,11 +12,13 @@ import CoachView, {
   NextActionWidget,
   TodayWidget,
 } from "./CoachView.tsx";
+import ProposalCard from "./ProposalCard.tsx";
 import { createCoachClient } from "./store.ts";
 
 export default defineWebPackage((host) => () => {
+  const api = createCoachApi();
   const client = createCoachClient({
-    api: createCoachApi(),
+    api,
     openSession,
     friendlyError,
   });
@@ -118,6 +122,18 @@ export default defineWebPackage((host) => () => {
           render: () => createElement(CheckInWidget, { client }),
         },
       ],
+    }),
+    host.slots.register({
+      id: "personal-coach.proposal-card",
+      slot: "session.timeline.event",
+      order: 30,
+      meta: { eventTypes: ["coach/proposal-created"] },
+      render: (props) => createElement(ProposalCard, {
+        event: props.event as SessionEvent,
+        api,
+        client,
+        friendlyError,
+      }),
     }),
   ];
 

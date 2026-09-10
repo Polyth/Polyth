@@ -44,8 +44,17 @@ test("read context is bounded valid JSON and proposals do not silently mutate go
   for (let i = 0; i < 10; i++) {
     store.recordReflection({ text: `Reflection ${i}: ${"x".repeat(7_000)}` });
   }
+  const emitted: Array<{ id: string; sessionId: string }> = [];
   const registry = createCapabilityContributionRegistry();
-  const set = registerCoachCapabilities({ registry, space: { spaceId: "space-a" }, projectId, store });
+  const set = registerCoachCapabilities({
+    registry,
+    space: { spaceId: "space-a" },
+    projectId,
+    store,
+    onProposalCreated: (proposal, ctx) => {
+      emitted.push({ id: proposal.id, sessionId: ctx.sessionId });
+    },
+  });
   const read = registry.resolve(context).find((item) => item.kind === "tool" && item.name === "coach_read_context")!;
   const readResult = await registry.executor(read.id)!({}, { sessionId: "s1", ...context });
   assert.ok(readResult.output.length <= COACH_CONTEXT_MAX_CHARS);
@@ -58,11 +67,12 @@ test("read context is bounded valid JSON and proposals do not silently mutate go
     desiredOutcome: "Observable outcome",
     priority: 2,
   }, { sessionId: "s1", ...context });
-  const proposal = JSON.parse(result.output) as { status: string; type: string };
+  const proposal = JSON.parse(result.output) as { id: string; status: string; type: string };
   assert.equal(proposal.status, "pending");
   assert.equal(proposal.type, "goal");
   assert.equal(store.listGoals().length, beforeGoals, "proposal must not create a goal");
   assert.equal(store.listProposals("pending").length, 1);
+  assert.deepEqual(emitted, [{ id: proposal.id, sessionId: "s1" }]);
 
   await set.dispose();
   store.close();

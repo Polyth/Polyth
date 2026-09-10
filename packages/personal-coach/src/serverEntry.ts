@@ -10,12 +10,18 @@ import {
   type ServerPackageHost,
 } from "@polyth/plugins";
 import { registerCoachCapabilities, type CoachCapabilitySet } from "./capabilities.ts";
-import type { CoachStore } from "./index.ts";
+import type { CoachProposal, CoachStore } from "./index.ts";
+import { personalCoachProposalRoutes } from "./proposalRoutes.ts";
 import { personalCoachRoutes } from "./routes.ts";
 import { createPersonalCoachService, type PersonalCoachService } from "./service.ts";
 import { personalCoachSessionRoute } from "./sessionRoute.ts";
 
 export type { PersonalCoachService } from "./service.ts";
+
+function proposalSummary(proposal: CoachProposal): string {
+  const value = proposal.type === "plan-change" ? proposal.payload.summary : proposal.payload.title;
+  return typeof value === "string" && value.trim() ? value.trim() : "Coach proposal";
+}
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   const service = createPersonalCoachService({
@@ -36,7 +42,25 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     const registry = host.services.require(
       serverServiceKey<AgentCapabilityContributionRegistry>("harness.capabilities"),
     );
-    capabilities.set(projectId, registerCoachCapabilities({ registry, space, projectId, store }));
+    capabilities.set(projectId, registerCoachCapabilities({
+      registry,
+      space,
+      projectId,
+      store,
+      onProposalCreated: async (proposal, ctx) => {
+        if (!ctx.sessionId) return;
+        await host.events.append(
+          ctx.sessionId,
+          "coach/proposal-created",
+          {
+            proposalId: proposal.id,
+            proposalType: proposal.type,
+            summary: proposalSummary(proposal),
+          },
+          { ignorable: true, producerPlugin: "personal-coach" },
+        );
+      },
+    }));
   };
 
   const restoreCapabilities = async (): Promise<void> => {
@@ -64,6 +88,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     async onEnable() {
       const handlers = [
         personalCoachSessionRoute(host, { coach: service, ensureCapabilities }),
+        personalCoachProposalRoutes(service),
         personalCoachRoutes(service),
       ];
       routes = async (request) => {

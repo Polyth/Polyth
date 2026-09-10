@@ -1,0 +1,109 @@
+import { useEffect, useState } from "react";
+import type { SessionEvent } from "@polyth/contracts";
+import Button from "../../../apps/web/src/components/ui/Button.tsx";
+import type { CoachApi, CoachProposalDto } from "./api.ts";
+import type { CoachClient } from "./store.ts";
+
+interface ProposalEventData {
+  proposalId?: unknown;
+  proposalType?: unknown;
+  summary?: unknown;
+}
+
+const typeLabel = (type: string): string =>
+  type === "goal" ? "Goal"
+    : type === "commitment" ? "Commitment"
+      : type === "routine" ? "Routine"
+        : "Plan change";
+
+export function proposalStatusLabel(status: CoachProposalDto["status"]): string {
+  if (status === "accepted") return "Accepted";
+  if (status === "rejected") return "Ignored";
+  if (status === "expired") return "Expired";
+  return "Needs review";
+}
+
+function detail(proposal: CoachProposalDto): string | undefined {
+  if (proposal.reason) return proposal.reason;
+  if (proposal.type === "goal" && typeof proposal.payload.desiredOutcome === "string") {
+    return proposal.payload.desiredOutcome;
+  }
+  return undefined;
+}
+
+export default function ProposalCard({
+  event,
+  api,
+  client,
+  friendlyError,
+}: {
+  event: SessionEvent;
+  api: CoachApi;
+  client: CoachClient;
+  friendlyError(action: string, cause: unknown): string;
+}) {
+  const data = event.data as ProposalEventData;
+  const proposalId = typeof data.proposalId === "string" ? data.proposalId : "";
+  const eventType = typeof data.proposalType === "string" ? data.proposalType : "plan-change";
+  const eventSummary = typeof data.summary === "string" && data.summary.trim()
+    ? data.summary.trim()
+    : "Coach proposal";
+  const [proposal, setProposal] = useState<CoachProposalDto | null>(null);
+  const [busy, setBusy] = useState<"accept" | "reject" | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!proposalId) return;
+    let live = true;
+    void api.proposal(proposalId)
+      .then((value) => { if (live) setProposal(value); })
+      .catch((cause) => { if (live) setError(friendlyError("Load Coach proposal", cause)); });
+    return () => { live = false; };
+  }, [api, friendlyError, proposalId]);
+
+  if (!proposalId) return null;
+  const type = proposal?.type ?? eventType;
+  const summaryValue = proposal?.payload[type === "plan-change" ? "summary" : "title"];
+  const summary = typeof summaryValue === "string" && summaryValue.trim() ? summaryValue.trim() : eventSummary;
+  const status = proposal?.status ?? "pending";
+
+  const act = async (action: "accept" | "reject") => {
+    if (busy || !proposal) return;
+    setBusy(action);
+    setError("");
+    try {
+      const next = action === "accept"
+        ? await api.acceptProposal(proposal.id)
+        : await api.rejectProposal(proposal.id);
+      setProposal(next);
+      if (action === "accept") await client.refresh();
+    } catch (cause) {
+      setError(friendlyError(action === "accept" ? "Accept Coach proposal" : "Ignore Coach proposal", cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <article className="coach-proposal-card" aria-label={`${typeLabel(type)} proposal`}>
+      <div className="coach-proposal-head">
+        <span className="coach-proposal-kind">{typeLabel(type)}</span>
+        <span className={`coach-proposal-status is-${status}`} role="status">{proposalStatusLabel(status)}</span>
+      </div>
+      <strong className="coach-proposal-title">{summary}</strong>
+      {proposal && detail(proposal) && <p className="coach-proposal-detail">{detail(proposal)}</p>}
+      {error && <p className="coach-proposal-error" role="alert">{error}</p>}
+      {!proposal && !error && <span className="coach-proposal-loading" role="status">Loading proposal…</span>}
+      {proposal?.status === "pending" && (
+        <div className="coach-proposal-actions">
+          <Button size="sm" variant="primary" busy={busy === "accept"} disabled={busy !== null} onClick={() => void act("accept")}>
+            Accept
+          </Button>
+          <Button size="sm" variant="ghost" busy={busy === "reject"} disabled={busy !== null} onClick={() => void act("reject")}>
+            Ignore
+          </Button>
+        </div>
+      )}
+    </article>
+  );
+}
