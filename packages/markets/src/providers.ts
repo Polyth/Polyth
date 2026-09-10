@@ -3,6 +3,7 @@ import type {
   MarketEarningsSurprise,
   MarketFiling,
   MarketFundamentals,
+  MarketMacroIndicator,
   MarketNewsItem,
   MarketProviderCapability,
   MarketQuote,
@@ -19,6 +20,8 @@ export interface MarketProvider {
   news?(symbol: string, signal: AbortSignal): Promise<MarketNewsItem[]>;
   filings?(symbol: string, signal: AbortSignal): Promise<MarketFiling[]>;
   earnings?(symbol: string, signal: AbortSignal): Promise<MarketEarningsSurprise[]>;
+  crypto?(signal: AbortSignal): Promise<MarketQuote[]>;
+  macro?(signal: AbortSignal): Promise<MarketMacroIndicator[]>;
 }
 
 export interface ProviderCapabilityHealth {
@@ -60,6 +63,8 @@ const CAPABILITIES: readonly MarketProviderCapability[] = [
   "news",
   "filings",
   "earnings",
+  "crypto",
+  "macro",
 ];
 
 const supports = (provider: MarketProvider, capability: MarketProviderCapability): boolean =>

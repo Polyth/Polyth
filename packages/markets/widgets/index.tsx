@@ -6,6 +6,8 @@ import "./compare.css";
 import "./portfolio.css";
 import "./earnings.css";
 import "./filings.css";
+import "./overview.css";
+import "./overviewWidget.css";
 import "./surfaceFrame.css";
 import "./portfolioWidget.css";
 import { createElement, useEffect, useState, type ReactNode } from "react";
@@ -14,12 +16,14 @@ import MarketsSurface, { type MarketHandoffOption } from "./MarketsSurface.tsx";
 import MarketCompareSurface from "./MarketCompareSurface.tsx";
 import MarketEarningsSurface from "./MarketEarningsSurface.tsx";
 import MarketFilingsSurface from "./MarketFilingsSurface.tsx";
+import MarketOverviewSurface from "./MarketOverviewSurface.tsx";
+import { MarketOverviewWidget } from "./MarketOverviewWidget.tsx";
 import MarketPortfolioSurface from "./MarketPortfolioSurface.tsx";
 import { MarketPortfolioWidget } from "./MarketPortfolioWidget.tsx";
 import { MarketAssetWidget, MarketNewsWidget, MarketWatchlistWidget } from "./MarketWidgets.tsx";
 import { selectMarketSymbol } from "./selection.ts";
 
-type MarketSurfaceId = "markets" | "markets.compare" | "markets.portfolio" | "markets.earnings" | "markets.filings";
+type MarketSurfaceId = "markets.overview" | "markets" | "markets.compare" | "markets.portfolio" | "markets.earnings" | "markets.filings";
 
 function MarketSurfaceFrame({
   host,
@@ -31,6 +35,7 @@ function MarketSurfaceFrame({
   children: ReactNode;
 }) {
   const links: Array<{ id: MarketSurfaceId; label: string }> = [
+    { id: "markets.overview", label: "Overview" },
     { id: "markets", label: "Research" },
     { id: "markets.compare", label: "Compare" },
     { id: "markets.portfolio", label: "Portfolio" },
@@ -77,6 +82,19 @@ function useMarketHandoffOptions(host: WebPackageHost): MarketHandoffOption[] {
           }),
         }))
     : [];
+}
+
+function HostedOverviewSurface({ host, active }: { host: WebPackageHost; active?: boolean }) {
+  const handoffOptions = useMarketHandoffOptions(host);
+  return (
+    <MarketSurfaceFrame host={host} activeId="markets.overview">
+      <MarketOverviewSurface
+        active={active}
+        handoffOptions={handoffOptions}
+        onOpen={(symbol) => openMarketSymbol(host, symbol)}
+      />
+    </MarketSurfaceFrame>
+  );
 }
 
 function HostedMarketsSurface({ host, active }: { host: WebPackageHost; active?: boolean }) {
@@ -142,9 +160,34 @@ function HostedFilingsSurface({ host, active }: { host: WebPackageHost; active?:
 
 export default defineWebPackage((host) => () => {
   const openSymbol = (symbol: string) => openMarketSymbol(host, symbol);
+  const openOverview = () => host.navigation.openWorkspacePane("markets.overview");
   const openPortfolio = () => host.navigation.openWorkspacePane("markets.portfolio");
 
   const off = [
+    host.surfaces.register({
+      id: "markets.overview",
+      title: "Market overview",
+      description: "Macro regime, major market indices, and liquid crypto in one glance.",
+      capabilityId: "markets.overview",
+      order: 51,
+      component: (props) => createElement(HostedOverviewSurface, { host, active: props?.active }),
+      presentation: {
+        kind: "workspace",
+        defaultRatio: 0.68,
+        minWidth: 340,
+        minHeight: 300,
+        preferredMaxWidth: 1_100,
+        keepAlive: true,
+        escape: "close",
+      },
+      placement: {
+        preferredRegion: "primary",
+        allowedRegions: ["primary", "end", "bottom"],
+        minInlineSize: 340,
+        minBlockSize: 280,
+        keepAlive: true,
+      },
+    }),
     host.surfaces.register({
       id: "markets",
       title: "Markets",
@@ -270,6 +313,27 @@ export default defineWebPackage((host) => () => {
       name: "Markets",
       widgets: [
         {
+          id: "markets.overview",
+          title: "Market overview",
+          description: "Major markets and liquid crypto with lightweight visible-only refresh.",
+          kind: "widget",
+          defaultSlot: "workspace.right",
+          supportedSlots: ["workspace.main", "workspace.right", "workspace.bottom", "workspace.floating"],
+          recommendedSize: { w: 5, h: 6 },
+          minSize: { w: 4, h: 4 },
+          maxSize: { w: 8, h: 10 },
+          audience: "simple",
+          scope: "workspace",
+          resizable: true,
+          duplicatable: false,
+          floating: true,
+          recommended: true,
+          defaultVisible: false,
+          render: (context) => (
+            <MarketOverviewWidget context={context} onOpenOverview={openOverview} onOpenSymbol={openSymbol} />
+          ),
+        },
+        {
           id: "markets.asset",
           title: "Market asset",
           description: "Live-ish price and daily move for one market symbol.",
@@ -368,11 +432,21 @@ export default defineWebPackage((host) => () => {
       order: 30,
       defaultLayout: {
         surfaces: [
-          { surface: "markets", region: "primary", active: true },
+          { surface: "markets.overview", region: "primary", active: true },
           { surface: "session", region: "end" },
         ],
       },
       presentation: { text: "data" },
+    }),
+    host.capabilities.register({
+      id: "markets.overview",
+      label: "Market overview",
+      plainDescription: "View macro indicators, major U.S. markets, and liquid crypto in one place.",
+      keywords: ["market", "overview", "macro", "crypto", "bitcoin", "rates", "inflation", "vix"],
+      standardTier: "more",
+      standardRank: 21,
+      open: openOverview,
+      available: () => true,
     }),
     host.capabilities.register({
       id: "markets",

@@ -19,11 +19,13 @@ const fetchFrom = (handler: (url: string, init?: RequestInit) => Response): Fetc
 test("default providers preserve fallback priority by capability", () => {
   const service = new MarketsService();
   registerDefaultMarketProviders(service, { fetch: fetchFrom(() => json({})) });
-  assert.deepEqual(service.providers.providerIds("quote"), ["nasdaq", "yahoo", "stooq"]);
-  assert.deepEqual(service.providers.providerIds("candles"), ["nasdaq", "yahoo", "stooq"]);
+  assert.deepEqual(service.providers.providerIds("quote"), ["binance", "nasdaq", "yahoo", "stooq"]);
+  assert.deepEqual(service.providers.providerIds("candles"), ["binance", "nasdaq", "yahoo", "stooq"]);
   assert.deepEqual(service.providers.providerIds("search"), ["tradingview", "yahoo"]);
   assert.deepEqual(service.providers.providerIds("fundamentals"), ["tradingview"]);
   assert.deepEqual(service.providers.providerIds("news"), ["yahoo-news", "google-news"]);
+  assert.deepEqual(service.providers.providerIds("crypto"), ["binance"]);
+  assert.deepEqual(service.providers.providerIds("macro"), ["fred"]);
 });
 
 test("nasdaq adapter normalizes quote data", async () => {

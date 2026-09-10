@@ -6,6 +6,7 @@ import type {
   MarketEarningsSurprise,
   MarketFiling,
   MarketFundamentals,
+  MarketMacroSnapshot,
   MarketNewsItem,
   MarketQuote,
   MarketRange,
@@ -54,6 +55,12 @@ export const marketsApi = {
       limit: String(limit),
     });
     return transport.get(`/api/markets/filings?${params}`, { signal });
+  },
+  macro(signal?: AbortSignal): Promise<MarketMacroSnapshot> {
+    return transport.get("/api/markets/macro", { signal });
+  },
+  crypto(signal?: AbortSignal): Promise<MarketDataResult<MarketQuote[]>> {
+    return transport.get("/api/markets/crypto", { signal });
   },
   context(symbol: string, range: MarketRange, signal?: AbortSignal): Promise<MarketResearchContext> {
     return transport.get(`/api/markets/context?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(range)}`, { signal });
