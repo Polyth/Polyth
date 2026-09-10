@@ -69,6 +69,36 @@ export interface CoachProposalDto {
   updatedAt: number;
 }
 
+export interface CoachProposalApplicationDto {
+  type: "goal" | "commitment" | "routine" | "plan";
+  id: string;
+  appliedAt: number;
+}
+
+export interface CoachProposalDecisionDto {
+  proposal: CoachProposalDto;
+  application?: CoachProposalApplicationDto;
+}
+
+export interface CoachPlanDto {
+  id: string;
+  goalId?: string;
+  title: string;
+  currentRevision: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CoachPlanDetailDto extends CoachPlanDto {
+  revisions: Array<{
+    revision: number;
+    summary: string;
+    patch: Record<string, unknown>;
+    sourceProposalId?: string;
+    createdAt: number;
+  }>;
+}
+
 export interface CoachHomeDto {
   revision: number;
   date: string;
@@ -95,8 +125,10 @@ export interface CoachApi {
   recordCheckIn(input: { energy: number; focus: number; note?: string }): Promise<CoachCheckInDto>;
   createSession(title?: string): Promise<{ sessionId: string }>;
   proposal(id: string): Promise<CoachProposalDto>;
-  acceptProposal(id: string): Promise<CoachProposalDto>;
-  rejectProposal(id: string): Promise<CoachProposalDto>;
+  acceptProposal(id: string): Promise<CoachProposalDecisionDto>;
+  rejectProposal(id: string): Promise<CoachProposalDecisionDto>;
+  plans(): Promise<CoachPlanDto[]>;
+  plan(id: string): Promise<CoachPlanDetailDto>;
 }
 
 export function createCoachApi(): CoachApi {
@@ -118,7 +150,9 @@ export function createCoachApi(): CoachApi {
       title ? { title } : {},
     ),
     proposal: (id) => api.get<CoachProposalDto>(proposalPath(id)),
-    acceptProposal: (id) => api.post<CoachProposalDto>(`${proposalPath(id)}/accept`, {}),
-    rejectProposal: (id) => api.post<CoachProposalDto>(`${proposalPath(id)}/reject`, {}),
+    acceptProposal: (id) => api.post<CoachProposalDecisionDto>(`${proposalPath(id)}/accept`, {}),
+    rejectProposal: (id) => api.post<CoachProposalDecisionDto>(`${proposalPath(id)}/reject`, {}),
+    plans: async () => (await api.get<{ plans: CoachPlanDto[] }>("/api/personal-coach/plans")).plans,
+    plan: (id) => api.get<CoachPlanDetailDto>(`/api/personal-coach/plans/${encodeURIComponent(id)}`),
   };
 }

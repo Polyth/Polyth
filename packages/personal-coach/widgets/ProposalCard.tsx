@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { SessionEvent } from "@polyth/contracts";
 import Button from "../../../apps/web/src/components/ui/Button.tsx";
-import type { CoachApi, CoachProposalDto } from "./api.ts";
+import type { CoachApi, CoachProposalApplicationDto, CoachProposalDto } from "./api.ts";
 import type { CoachClient } from "./store.ts";
 
 interface ProposalEventData {
@@ -17,7 +17,7 @@ const typeLabel = (type: string): string =>
         : "Plan change";
 
 export function proposalStatusLabel(status: CoachProposalDto["status"]): string {
-  if (status === "accepted") return "Accepted";
+  if (status === "accepted") return "Applied";
   if (status === "rejected") return "Ignored";
   if (status === "expired") return "Expired";
   return "Needs review";
@@ -29,6 +29,14 @@ function detail(proposal: CoachProposalDto): string | undefined {
     return proposal.payload.desiredOutcome;
   }
   return undefined;
+}
+
+function applicationLabel(application: CoachProposalApplicationDto | null): string | undefined {
+  if (!application) return undefined;
+  const noun = application.type === "plan"
+    ? "plan"
+    : application.type;
+  return `Applied to ${noun}`;
 }
 
 export default function ProposalCard({
@@ -49,6 +57,7 @@ export default function ProposalCard({
     ? data.summary.trim()
     : "Coach proposal";
   const [proposal, setProposal] = useState<CoachProposalDto | null>(null);
+  const [application, setApplication] = useState<CoachProposalApplicationDto | null>(null);
   const [busy, setBusy] = useState<"accept" | "reject" | null>(null);
   const [error, setError] = useState("");
 
@@ -66,19 +75,21 @@ export default function ProposalCard({
   const summaryValue = proposal?.payload[type === "plan-change" ? "summary" : "title"];
   const summary = typeof summaryValue === "string" && summaryValue.trim() ? summaryValue.trim() : eventSummary;
   const status = proposal?.status ?? "pending";
+  const applied = applicationLabel(application);
 
   const act = async (action: "accept" | "reject") => {
     if (busy || !proposal) return;
     setBusy(action);
     setError("");
     try {
-      const next = action === "accept"
+      const decision = action === "accept"
         ? await api.acceptProposal(proposal.id)
         : await api.rejectProposal(proposal.id);
-      setProposal(next);
+      setProposal(decision.proposal);
+      setApplication(decision.application ?? null);
       if (action === "accept") await client.refresh();
     } catch (cause) {
-      setError(friendlyError(action === "accept" ? "Accept Coach proposal" : "Ignore Coach proposal", cause));
+      setError(friendlyError(action === "accept" ? "Apply Coach proposal" : "Ignore Coach proposal", cause));
     } finally {
       setBusy(null);
     }
@@ -92,12 +103,13 @@ export default function ProposalCard({
       </div>
       <strong className="coach-proposal-title">{summary}</strong>
       {proposal && detail(proposal) && <p className="coach-proposal-detail">{detail(proposal)}</p>}
+      {applied && <span className="coach-proposal-loading">{applied}</span>}
       {error && <p className="coach-proposal-error" role="alert">{error}</p>}
       {!proposal && !error && <span className="coach-proposal-loading" role="status">Loading proposal…</span>}
       {proposal?.status === "pending" && (
         <div className="coach-proposal-actions">
           <Button size="sm" variant="primary" busy={busy === "accept"} disabled={busy !== null} onClick={() => void act("accept")}>
-            Accept
+            Apply
           </Button>
           <Button size="sm" variant="ghost" busy={busy === "reject"} disabled={busy !== null} onClick={() => void act("reject")}>
             Ignore
