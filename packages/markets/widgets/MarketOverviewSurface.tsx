@@ -19,7 +19,7 @@ const number = (value: number, digits = 2): string => new Intl.NumberFormat(unde
 }).format(value);
 
 const price = (quote: MarketQuote): string => {
-  if (!quote.currency) return number(quote.price, quote.price < 1 ? 4 : 2);
+  if (quote.assetType === "index" || !quote.currency) return number(quote.price, quote.price < 1 ? 4 : 2);
   try {
     return new Intl.NumberFormat(undefined, {
       style: "currency",
