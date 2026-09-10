@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { createStore, deriveMessages, effectiveHistory, rewindDraft } from "@polyth/session";
 import type {
   AgentRuntime, JsonObject, ModelMessage, ModelRef, Project, ProjectService, RuntimeBranchRequest,
-  RuntimeEndpoint, RuntimeEvent, RuntimeSessionBinding, RuntimeSnapshot,
+  RuntimeEndpoint, RuntimeEvent, RuntimeLifecycleNotification, RuntimeSessionBinding, RuntimeSnapshot,
 } from "@polyth/contracts";
 import { createSessionService, type Broadcaster } from "../src/sessions.ts";
 import type { PermissionService } from "@polyth/permissions";
@@ -130,6 +130,7 @@ function makeService(fake: ReturnType<typeof fakeRuntime>, opts: {
       output: string; exitCode: number | null; timedOut: boolean; truncated: boolean;
     }>;
   };
+  onRestart?: (listener: (runtime: AgentRuntime) => void | Promise<void>) => { dispose(): void };
 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "polyth-delivery-"));
   const store = createStore(join(dir, "s.db"));
@@ -149,7 +150,10 @@ function makeService(fake: ReturnType<typeof fakeRuntime>, opts: {
   const broadcast: Broadcaster = { event: () => {}, projection: () => {} };
   const sessions = createSessionService({
     store, projects, permissions, broadcast, queue: store,
-    runtimes: { forProject: async () => fake.rt },
+    runtimes: {
+      forProject: async () => fake.rt,
+      ...(opts.onRestart ? { onRestart: opts.onRestart } : {}),
+    },
     ...(opts.shell ? { shell: opts.shell } : {}),
   });
   return { sessions, store };
@@ -289,6 +293,49 @@ test("follow-ups queue while the active turn is still awaiting runtime admission
   await flush();
   assert.deepEqual(fake.startedTexts, ["first", "normal follow-up", "explicitly queued"]);
 });
+
+for (const notification of ["stream-connected", "stream-disconnected", "endpoint-replaced", "restart"] as const) {
+  test(`queue drains after ${notification} reconciliation without re-entering the session lock`, async (t) => {
+    const fake = fakeRuntime();
+    let lifecycle: ((notification: RuntimeLifecycleNotification) => void) | undefined;
+    let restart: ((runtime: AgentRuntime) => void | Promise<void>) | undefined;
+    fake.rt.onLifecycle = (listener) => {
+      lifecycle = listener;
+      return { dispose() {} };
+    };
+    const { sessions, store } = makeService(fake, {
+      onRestart(listener) {
+        restart = listener;
+        return { dispose() {} };
+      },
+    });
+    t.after(() => store.close());
+    const { id } = await sessions.create({ projectId: "p1", title: "T" });
+    await sessions.send(id, { text: "first" });
+    await flush();
+    await sessions.send(id, { text: "second", delivery: "queue" });
+    await sessions.send(id, { text: "third", delivery: "queue" });
+    // ACP emits a lifecycle notification immediately after completion. Both
+    // callbacks are serialized before the stop handler's queued dispatch.
+    fake.emit(id, { type: "turn/stopped", reason: "completed" });
+    let restarted = false;
+    if (notification === "restart") {
+      void Promise.resolve(restart!(fake.rt)).then(() => { restarted = true; });
+    } else {
+      lifecycle!(notification === "endpoint-replaced"
+        ? { type: notification, authorityId: "fake-runtime", generation: 1, reason: "connect" }
+        : { type: notification });
+    }
+    for (let attempt = 0; attempt < 50 && fake.startedTexts.length < 2; attempt++) await flush();
+    assert.deepEqual(fake.startedTexts, ["first", "second"]);
+    fake.emit(id, { type: "turn/stopped", reason: "completed" });
+    for (let attempt = 0; attempt < 50 && fake.startedTexts.length < 3; attempt++) await flush();
+    assert.deepEqual(fake.startedTexts, ["first", "second", "third"]);
+    await flush();
+    assert.equal((await store.queueList(id)).length, 0);
+    if (notification === "restart") assert.equal(restarted, true);
+  });
+}
 
 test("steer persists user intent before I/O and records confirmed delivery afterward", async () => {
   const fake = fakeRuntime({ steering: true });

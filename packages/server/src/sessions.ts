@@ -2085,12 +2085,15 @@ export function createSessionService(deps: {
       const projection = await store.projection(sessionId);
       if (projection) {
         reconciliations.push((async () => {
-          await withSessionLock(sessionId, async () => {
+          const reconciled = await withSessionLock(sessionId, async () => {
             if (sessionRuntime.get(sessionId) !== runtime
               || sessionWireGeneration.get(sessionId) !== wireGeneration) return;
             await reconcileSession(sessionId, projection, runtime, "runtime-generation-replaced");
-            await recoverOwnedEpochIfPending(sessionId);
+            return true;
           });
+          // Recovery acquires the session lock itself. Awaiting it inside
+          // this critical section deadlocks every subsequent queued turn.
+          if (reconciled) await recoverOwnedEpochIfPending(sessionId);
         })());
       }
     }
@@ -3333,13 +3336,15 @@ export function createSessionService(deps: {
           if (wired !== rt) continue;
           const wireGeneration = sessionWireGeneration.get(sid);
           void (async () => {
-            await withSessionLock(sid, async () => {
+            const reconciled = await withSessionLock(sid, async () => {
               if (sessionRuntime.get(sid) !== rt || sessionWireGeneration.get(sid) !== wireGeneration) return;
               const projection = await store.projection(sid);
               if (!projection) return;
               await reconcileSession(sid, projection, rt, notification.type);
-              await recoverOwnedEpochIfPending(sid);
+              return true;
             });
+            // Do not re-enter the non-reentrant session lock during recovery.
+            if (reconciled) await recoverOwnedEpochIfPending(sid);
           })().catch((err) => {
             console.error(`[polyth] runtime lifecycle reconciliation failed for ${sid}`, err);
           });
