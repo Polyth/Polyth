@@ -8,6 +8,7 @@ import {
 } from "@polyth/plugins";
 import { createCoachStore, type CoachStore } from "./index.ts";
 import { personalCoachRoutes } from "./routes.ts";
+import { personalCoachSessionRoute } from "./sessionRoute.ts";
 
 export interface PersonalCoachService {
   forSpace(space: SpaceContext): CoachStore;
@@ -44,9 +45,19 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     remoteAccess: localOnlyRemoteAccess(["personal-coach"]),
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
-      routes ??= personalCoachRoutes(service);
+      const handlers = [
+        personalCoachSessionRoute(host),
+        personalCoachRoutes(service),
+      ];
+      routes = async (request) => {
+        for (const handler of handlers) {
+          if (await handler(request)) return true;
+        }
+        return false;
+      };
     },
     onDisable() {
+      routes = null;
       service.close();
     },
   };
