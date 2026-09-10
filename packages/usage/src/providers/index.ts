@@ -38,4 +38,4 @@ export const discoverQuotaProviders = (opts: QuotaDiscoveryOptions = {}): QuotaP
   });
 
 export type { QuotaDiscoveryOptions, QuotaDiscoveryPaths } from "../opencodeAuth.ts";
-export { mappolythUsage } from "../ocWindows.ts";
+export { mapProviderUsage } from "../ocWindows.ts";
