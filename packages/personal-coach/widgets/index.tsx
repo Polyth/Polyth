@@ -2,7 +2,7 @@ import "./styles.css";
 import "./proposal.css";
 import { createElement } from "react";
 import type { SessionEvent } from "@polyth/contracts";
-import { defineWebPackage, friendlyError } from "@polyth/web-sdk";
+import { defineWebPackage } from "@polyth/web-sdk";
 import { openSession } from "../../../apps/web/src/init.ts";
 import { createCoachApi } from "./api.ts";
 import CoachView, {
@@ -12,15 +12,17 @@ import CoachView, {
   NextActionWidget,
   TodayWidget,
 } from "./CoachView.tsx";
+import CoachSettingsPage from "./CoachSettingsPage.tsx";
 import ProposalCard from "./ProposalCard.tsx";
 import { createCoachClient } from "./store.ts";
 
 export default defineWebPackage((host) => () => {
   const api = createCoachApi();
+  const errorText = host.errors.friendly;
   const client = createCoachClient({
     api,
     openSession,
-    friendlyError,
+    friendlyError: errorText,
   });
 
   const onFocus = () => { void client.refresh(); };
@@ -54,6 +56,23 @@ export default defineWebPackage((host) => () => {
       standardRank: 16,
       open: () => host.navigation.openWorkspacePane("personal-coach"),
       available: () => true,
+    }),
+    host.settings.registerPage({
+      id: "personal-coach",
+      packageId: "personal-coach",
+      label: "Personal Coach",
+      group: "Workspace",
+      icon: "◎",
+      order: 34,
+      component: () => createElement(CoachSettingsPage, { api, client, friendlyError: errorText }),
+      settingsItems: [{
+        id: "personal-coach-behavior",
+        pageId: "personal-coach",
+        label: "Coach behavior",
+        description: "Style, initiative, assumption challenges, and time zone.",
+        keywords: ["coach", "tone", "initiative", "timezone", "style"],
+        focusTarget: "personal-coach-behavior",
+      }],
     }),
     host.widgets.registerPlugin({
       id: "personal-coach",
@@ -132,7 +151,7 @@ export default defineWebPackage((host) => () => {
         event: props.event as SessionEvent,
         api,
         client,
-        friendlyError,
+        friendlyError: errorText,
       }),
     }),
   ];

@@ -9,6 +9,16 @@ export interface CoachProfileDto {
   updatedAt: number;
 }
 
+export interface CoachSettingsDto {
+  revision: number;
+  profile: CoachProfileDto;
+}
+
+export type CoachSettingsPatch = Partial<Pick<
+  CoachProfileDto,
+  "tone" | "initiative" | "timeZone" | "challengeAssumptions"
+>>;
+
 export interface CoachGoalDto {
   id: string;
   areaId?: string;
@@ -120,6 +130,8 @@ export interface CoachHomeDto {
 
 export interface CoachApi {
   home(): Promise<CoachHomeDto>;
+  settings(): Promise<CoachSettingsDto>;
+  updateSettings(patch: CoachSettingsPatch): Promise<CoachProfileDto>;
   completeCommitment(id: string): Promise<CoachCommitmentDto>;
   skipCommitment(id: string, reason?: string): Promise<CoachCommitmentDto>;
   recordCheckIn(input: { energy: number; focus: number; note?: string }): Promise<CoachCheckInDto>;
@@ -136,6 +148,8 @@ export function createCoachApi(): CoachApi {
   const proposalPath = (id: string) => `/api/personal-coach/proposals/${encodeURIComponent(id)}`;
   return {
     home: () => api.get<CoachHomeDto>("/api/personal-coach/home"),
+    settings: () => api.get<CoachSettingsDto>("/api/personal-coach/settings"),
+    updateSettings: (patch) => api.put<CoachProfileDto>("/api/personal-coach/settings", patch),
     completeCommitment: (id) => api.post<CoachCommitmentDto>(
       `/api/personal-coach/commitments/${encodeURIComponent(id)}/complete`,
       {},
