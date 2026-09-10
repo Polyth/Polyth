@@ -15,7 +15,7 @@
       "core": false,
       "enabled": true,
       "settingsGroup": "Workspace",
-      "icon": "↗",
+      "icon": "chart",
       "hasSettings": false
     }
   },

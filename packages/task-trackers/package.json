@@ -15,7 +15,7 @@
       "core": false,
       "enabled": true,
       "settingsGroup": "Engineering",
-      "icon": "▦",
+      "icon": "tasks",
       "hasSettings": false
     }
   },

@@ -10,6 +10,7 @@ export default defineWebPackage((host) => () => {
     packageId: "harness-runtime",
     label: "MCP",
     group: "Engineering",
+    icon: "server",
     order: 20,
     component: McpPage,
   });

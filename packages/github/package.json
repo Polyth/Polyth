@@ -18,7 +18,7 @@
       "core": false,
       "enabled": true,
       "settingsGroup": "Engineering",
-      "icon": "\u2387",
+      "icon": "github",
       "hasSettings": false
     }
   },

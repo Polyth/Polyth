@@ -64,7 +64,7 @@ export default defineWebPackage((host) => () => {
       packageId: "tunnel",
       label: "Polyth Link",
       group: "System",
-      icon: "🔗",
+      icon: "qr",
       order: 42,
       component: LinkPage,
     }),

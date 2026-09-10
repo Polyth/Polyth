@@ -22,6 +22,7 @@
       "description": "Managed OpenCode HTTP and SSE runtime",
       "core": true,
       "enabled": true,
+      "icon": "terminal",
       "hasSettings": false
     }
   }

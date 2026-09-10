@@ -13,6 +13,7 @@
       "description": "OpenCode-native roles and runtime configuration surfaces.",
       "core": true,
       "enabled": true,
+      "icon": "braces",
       "hasSettings": false
     }
   },

@@ -20,7 +20,7 @@ export default defineWebPackage((host) => () => {
   };
   refreshActive();
   const off = [
-    host.settings.registerPage({ id: "git", packageId: "git", label: "Git", group: "Engineering", icon: "⎇", order: 30, component: GitSettings }),
+    host.settings.registerPage({ id: "git", packageId: "git", label: "Git", group: "Engineering", icon: "git", order: 30, component: GitSettings }),
     host.slots.register({ slot: "project.create.options", id: "git-clone-project", order: 20, render: (props) => createElement(GitProjectSource, { ...props, host }) }),
     host.slots.register({ slot: "session.timeline.after", id: "git-isolation-card", order: 20, render: () => createElement(IsolationCard) }),
     host.slots.register({ slot: "session.header.actions", id: "git-isolation-badge", order: 15, render: () => createElement(IsolationBadge) }),

@@ -5,7 +5,7 @@ import { USAGE_WIDGET_PLUGIN } from "./usagePlugin.tsx";
 
 export default defineWebPackage((host) => () => {
   const off = [
-    host.settings.registerPage({ id: "usage", packageId: "usage", label: "Usage", group: "Workspace", icon: "📊", order: 50, component: UsageDashboard }),
+    host.settings.registerPage({ id: "usage", packageId: "usage", label: "Usage", group: "Workspace", icon: "usage", order: 50, component: UsageDashboard }),
     host.surfaces.register({
       id: "usage",
       title: "Usage",

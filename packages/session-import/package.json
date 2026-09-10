@@ -18,6 +18,7 @@
       "description": "Import a native conversation as a canonical Snapshot",
       "core": false,
       "enabled": true,
+      "icon": "import",
       "hasSettings": false
     },
     "webEntry": "./widgets/index.tsx"

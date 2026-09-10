@@ -3,7 +3,7 @@ import PluginsPage, { OpenCodePluginsSection } from "./PluginsPage.tsx";
 import "./styles.css";
 export default defineWebPackage((host) => () => {
   const off = [
-    host.settings.registerPage({ id: "plugins", packageId: "plugins", label: "Packages & Plugins", group: "Customize", icon: "🧩", order: 20, component: PluginsPage }),
+    host.settings.registerPage({ id: "plugins", packageId: "plugins", label: "Packages & Plugins", group: "Customize", icon: "plugin", order: 20, component: PluginsPage }),
     host.slots.register({
       id: "opencode.plugins",
       slot: "settings.harness.detail",

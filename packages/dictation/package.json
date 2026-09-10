@@ -21,7 +21,7 @@
       "core": false,
       "enabled": true,
       "settingsGroup": "Workspace",
-      "icon": "🎤",
+      "icon": "mic",
       "hasSettings": true
     }
   },

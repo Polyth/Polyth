@@ -11,7 +11,7 @@ export default defineWebPackage((host) => () => {
       packageId: "secure-safe",
       label: "Secure Safe",
       group: "Engineering",
-      icon: "🔐",
+      icon: "lock",
       order: 50,
       component: SecureSafePage,
     }),

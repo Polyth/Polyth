@@ -130,6 +130,28 @@ export {
   Server as ServerIcon,
   Database as DatabaseIcon,
   Loader as LoaderIcon,
+  // package identity glyphs; all monochrome Lucide SVGs
+  ArrowLeftRight as HandoffIcon,
+  BrainCircuit as BrainIcon,
+  ChartLine as ChartIcon,
+  ChartPie as UsageIcon,
+  Code as CodeIcon,
+  Combine as CombineIcon,
+  Command as CommandIcon,
+  Compass as CompassIcon,
+  Cpu as CpuIcon,
+  FileInput as FileInputIcon,
+  FlaskConical as FlaskIcon,
+  Github as GithubIcon,
+  Gitlab as GitlabIcon,
+  History as HistoryIcon,
+  Keyboard as KeyboardIcon,
+  ListChecks as TasksIcon,
+  MousePointer as PointerIcon,
+  Network as NetworkIcon,
+  Palette as PaletteIcon,
+  QrCode as QrCodeIcon,
+  Route as RouteIcon,
 } from "lucide-react";
 
 export type { LucideIcon } from "lucide-react";

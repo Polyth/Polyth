@@ -4,7 +4,7 @@ import { HomeAssistantSettings, HOME_ASSISTANT_WIDGET_PLUGIN } from "./homeAssis
 
 export default defineWebPackage((host) => () => {
   const off = [
-    host.settings.registerPage({ id: "home-assistant", packageId: "home-assistant", label: "Home Assistant", group: "Customize", icon: "🏠", order: 60, component: HomeAssistantSettings }),
+    host.settings.registerPage({ id: "home-assistant", packageId: "home-assistant", label: "Home Assistant", group: "Customize", icon: "home", order: 60, component: HomeAssistantSettings }),
     host.widgets.registerPlugin(HOME_ASSISTANT_WIDGET_PLUGIN),
   ];
   return () => off.toReversed().forEach((dispose) => dispose());

@@ -16,6 +16,7 @@
       "description": "fx through shared ACP",
       "core": false,
       "enabled": true,
+      "icon": "command",
       "hasSettings": false
     }
   }

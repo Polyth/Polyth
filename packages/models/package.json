@@ -24,6 +24,7 @@
       "core": true,
       "enabled": true,
       "settingsGroup": "Engineering",
+      "icon": "database",
       "hasSettings": false
     }
   },

@@ -16,7 +16,7 @@ export default defineWebPackage((host) => () => {
       packageId: "hotkeys",
       label: "Shortcuts",
       group: "Customize",
-      icon: "⌨",
+      icon: "keyboard",
       order: 40,
       component: ShortcutsPage,
     }),

@@ -115,6 +115,13 @@ test("every server feature package owns its discoverable descriptor", async () =
     discovered.map((pkg) => pkg.descriptor.id),
     expected,
   );
+  const semanticIconKey = /^[a-z][a-z0-9-]*$/;
+  for (const pkg of discovered) {
+    assert.match(pkg.descriptor.icon ?? "", semanticIconKey, `${pkg.id} must own a semantic package icon key`);
+  }
+  for (const descriptor of BUILTIN_PACKAGES) {
+    assert.match(descriptor.icon ?? "", semanticIconKey, `${descriptor.id} must own a semantic package icon key`);
+  }
   const shellDescriptorIds = new Set(BUILTIN_PACKAGES.map((descriptor) => descriptor.id));
   assert.deepEqual(
     expected.filter((id) => shellDescriptorIds.has(id)),
