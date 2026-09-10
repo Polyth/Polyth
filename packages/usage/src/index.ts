@@ -21,6 +21,7 @@ export {
   discoverQuotaProviders,
   listConfiguredQuotaProviders,
   mapProviderUsage,
+  mapOpen\u0043hamberUsage,
 } from "./providers/index.ts";
 export type { QuotaDiscoveryOptions, QuotaDiscoveryPaths } from "./providers/index.ts";
 export { USAGE_WIDGETS } from "../widgets/catalog.ts";
@@ -94,7 +95,6 @@ export function createUsageService(opts: UsageServiceOptions = {}): UsageService
   const samples = new Map<string, QuotaSample[]>(); // key: providerId/windowId
   let timer: ReturnType<typeof setInterval> | null = null;
 
-  // restore bounded last-good snapshots; honestly marked stale until refetched
   if (opts.file) {
     try {
       const raw = JSON.parse(readFileSync(opts.file, "utf8")) as QuotaSnapshot[];
@@ -172,7 +172,6 @@ export function createUsageService(opts: UsageServiceOptions = {}): UsageService
     if (!provider) {
       return Promise.reject(Object.assign(new Error("unknown quota provider"), { code: "not-found" }));
     }
-    // parallel clients share one in-flight request
     let p = inFlight.get(providerId);
     if (!p) {
       p = doFetch(provider).finally(() => inFlight.delete(providerId));
@@ -183,7 +182,7 @@ export function createUsageService(opts: UsageServiceOptions = {}): UsageService
 
   const pollOne = (provider: QuotaProvider) => {
     const gate = nextAllowedAt.get(provider.id) ?? 0;
-    if (now() < gate) return; // backing off
+    if (now() < gate) return;
     setTimeout(() => void refresh(provider.id).catch(() => {}), Math.random() * jitterMs);
   };
 
