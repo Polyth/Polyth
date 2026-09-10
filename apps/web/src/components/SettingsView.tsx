@@ -10,7 +10,7 @@ import {
 import { consumePendingSettingsPage, setOverlay } from "../store.ts";
 import { listSlots } from "../slots.ts";
 import { isPackageEnabled, subscribePackages } from "../packages/registry.ts";
-import SlotHost, { useSlotVersion } from "./slots/SlotHost.tsx";
+import SlotHost, { useSlotVersion } from "./slots/SlotHost.ts";
 import { usePrefs } from "../prefs.ts";
 import {
   registerSettingsItems, searchSettingsItems,
