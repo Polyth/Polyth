@@ -3,10 +3,12 @@ import "./integration.css";
 import "./widgetStyles.css";
 import "./news.css";
 import "./compare.css";
+import "./portfolio.css";
 import { createElement, useEffect, useState } from "react";
 import { defineWebPackage, type WebPackageHost } from "@polyth/web-sdk";
 import MarketsSurface, { type MarketHandoffOption } from "./MarketsSurface.tsx";
 import MarketCompareSurface from "./MarketCompareSurface.tsx";
+import MarketPortfolioSurface from "./MarketPortfolioSurface.tsx";
 import { MarketAssetWidget, MarketNewsWidget, MarketWatchlistWidget } from "./MarketWidgets.tsx";
 import { selectMarketSymbol } from "./selection.ts";
 
@@ -68,6 +70,30 @@ export default defineWebPackage((host) => () => {
       capabilityId: "markets.compare",
       order: 53,
       component: (props) => createElement(MarketCompareSurface, { active: props?.active, onOpen: openSymbol }),
+      presentation: {
+        kind: "workspace",
+        defaultRatio: 0.68,
+        minWidth: 360,
+        minHeight: 300,
+        preferredMaxWidth: 1_180,
+        keepAlive: true,
+        escape: "close",
+      },
+      placement: {
+        preferredRegion: "primary",
+        allowedRegions: ["primary", "end", "bottom"],
+        minInlineSize: 360,
+        minBlockSize: 280,
+        keepAlive: true,
+      },
+    }),
+    host.surfaces.register({
+      id: "markets.portfolio",
+      title: "Portfolio",
+      description: "Track holdings and build per-space market context without mixing currencies.",
+      capabilityId: "markets.portfolio",
+      order: 54,
+      component: (props) => createElement(MarketPortfolioSurface, { active: props?.active, onOpen: openSymbol }),
       presentation: {
         kind: "workspace",
         defaultRatio: 0.68,
@@ -191,6 +217,16 @@ export default defineWebPackage((host) => () => {
       standardTier: "more",
       standardRank: 23,
       open: () => host.navigation.openWorkspacePane("markets.compare"),
+      available: () => true,
+    }),
+    host.capabilities.register({
+      id: "markets.portfolio",
+      label: "Portfolio",
+      plainDescription: "Track holdings, current value, daily move, and unrealized gain by quote currency.",
+      keywords: ["market", "portfolio", "holdings", "investing", "positions", "pnl"],
+      standardTier: "more",
+      standardRank: 24,
+      open: () => host.navigation.openWorkspacePane("markets.portfolio"),
       available: () => true,
     }),
   ];

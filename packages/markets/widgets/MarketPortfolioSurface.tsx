@@ -1,0 +1,219 @@
+import { useCallback, useEffect, useState } from "react";
+import type { MarketPortfolio, MarketPortfolioSnapshot } from "../src/portfolio.ts";
+import { marketsApi } from "./api.ts";
+
+const money = (value?: number, currency?: string): string => {
+  if (value === undefined) return "—";
+  if (!currency || currency === "UNKNOWN") return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  try {
+    return new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: 2 }).format(value);
+  } catch {
+    return `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${currency}`;
+  }
+};
+
+const number = (value?: number): string => value === undefined
+  ? "—"
+  : new Intl.NumberFormat(undefined, { maximumFractionDigits: 6 }).format(value);
+
+const errorMessage = (cause: unknown): string => cause instanceof Error ? cause.message : String(cause);
+const aborted = (cause: unknown): boolean => cause instanceof DOMException && cause.name === "AbortError";
+
+export default function MarketPortfolioSurface({
+  active = true,
+  onOpen,
+}: {
+  active?: boolean;
+  onOpen?: (symbol: string) => void;
+}) {
+  const [portfolio, setPortfolio] = useState<MarketPortfolio | null>(null);
+  const [snapshot, setSnapshot] = useState<MarketPortfolioSnapshot | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [symbol, setSymbol] = useState("");
+  const [quantity, setQuantity] = useState("");
+  const [averageCost, setAverageCost] = useState("");
+
+  const reload = useCallback(async (signal?: AbortSignal) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [document, nextSnapshot] = await Promise.all([
+        marketsApi.portfolio(signal),
+        marketsApi.portfolioSnapshot(signal),
+      ]);
+      setPortfolio(document);
+      setSnapshot(nextSnapshot);
+    } catch (cause) {
+      if (!aborted(cause)) setError(errorMessage(cause));
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!active) return;
+    const controller = new AbortController();
+    void reload(controller.signal);
+    return () => controller.abort();
+  }, [active, reload]);
+
+  const save = async (next: MarketPortfolio) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const saved = await marketsApi.savePortfolio(next);
+      setPortfolio(saved);
+      setSnapshot(await marketsApi.portfolioSnapshot());
+    } catch (cause) {
+      setError(errorMessage(cause));
+      throw cause;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addOrUpdate = async () => {
+    if (!portfolio) return;
+    const normalized = symbol.trim().toUpperCase();
+    const parsedQuantity = Number(quantity);
+    const parsedCost = averageCost.trim() ? Number(averageCost) : undefined;
+    if (!normalized || !Number.isFinite(parsedQuantity) || parsedQuantity <= 0 || (parsedCost !== undefined && (!Number.isFinite(parsedCost) || parsedCost < 0))) {
+      setError("Enter a symbol, positive quantity, and optional non-negative average cost.");
+      return;
+    }
+    const holding = {
+      symbol: normalized,
+      quantity: parsedQuantity,
+      ...(parsedCost === undefined ? {} : { averageCost: parsedCost }),
+    };
+    const existing = portfolio.holdings.findIndex((item) => item.symbol === normalized);
+    const holdings = existing === -1
+      ? [...portfolio.holdings, holding]
+      : portfolio.holdings.map((item, index) => index === existing ? holding : item);
+    try {
+      await save({ ...portfolio, holdings });
+      setSymbol("");
+      setQuantity("");
+      setAverageCost("");
+    } catch {
+      // Error is already surfaced by save().
+    }
+  };
+
+  const remove = async (holdingSymbol: string) => {
+    if (!portfolio) return;
+    try {
+      await save({
+        ...portfolio,
+        holdings: portfolio.holdings.filter((holding) => holding.symbol !== holdingSymbol),
+      });
+    } catch {
+      // Error is already surfaced by save().
+    }
+  };
+
+  return (
+    <div className="markets-portfolio" aria-busy={loading || saving}>
+      <div className="markets-portfolio-toolbar">
+        <div>
+          <strong>Portfolio</strong>
+          <span>Average cost is interpreted in each asset's quote currency.</span>
+        </div>
+        <button type="button" disabled={loading || saving} onClick={() => void reload()}>
+          Refresh
+        </button>
+      </div>
+
+      <form
+        className="markets-portfolio-add"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void addOrUpdate();
+        }}
+      >
+        <label>
+          <span>Symbol</span>
+          <input value={symbol} onChange={(event) => setSymbol(event.target.value)} placeholder="AAPL" autoComplete="off" />
+        </label>
+        <label>
+          <span>Quantity</span>
+          <input value={quantity} onChange={(event) => setQuantity(event.target.value)} placeholder="10" inputMode="decimal" />
+        </label>
+        <label>
+          <span>Avg cost</span>
+          <input value={averageCost} onChange={(event) => setAverageCost(event.target.value)} placeholder="Optional" inputMode="decimal" />
+        </label>
+        <button type="submit" disabled={!portfolio || saving}>Add / update</button>
+      </form>
+
+      {error && <div className="markets-portfolio-notice" role="status">{error}</div>}
+
+      <div className="markets-portfolio-body">
+        {snapshot?.currencies.length ? (
+          <div className="markets-portfolio-summary" aria-label="Portfolio totals by currency">
+            {snapshot.currencies.map((summary) => (
+              <div key={summary.currency}>
+                <span>{summary.currency}</span>
+                <strong>{money(summary.marketValue, summary.currency)}</strong>
+                <small>
+                  Day {money(summary.dailyChange, summary.currency)}
+                  {summary.unrealizedGain !== undefined ? ` · P/L ${money(summary.unrealizedGain, summary.currency)}` : " · P/L —"}
+                </small>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="markets-portfolio-table-wrap">
+          <table className="markets-portfolio-table">
+            <thead>
+              <tr>
+                <th scope="col">Asset</th>
+                <th scope="col">Qty</th>
+                <th scope="col">Price</th>
+                <th scope="col">Value</th>
+                <th scope="col">Avg cost</th>
+                <th scope="col">P/L</th>
+                <th scope="col">Day</th>
+                <th scope="col"><span className="sr-only">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {(snapshot?.positions ?? []).map((position) => {
+                const currency = position.currency;
+                return (
+                  <tr key={position.holding.symbol} title={position.error}>
+                    <th scope="row">
+                      <button type="button" onClick={() => onOpen?.(position.holding.symbol)}>{position.holding.symbol}</button>
+                      {position.error && <small aria-label="Quote unavailable">!</small>}
+                    </th>
+                    <td>{number(position.holding.quantity)}</td>
+                    <td>{money(position.quote?.price, currency)}</td>
+                    <td>{money(position.marketValue, currency)}</td>
+                    <td>{money(position.holding.averageCost, currency)}</td>
+                    <td className={position.unrealizedGain === undefined ? undefined : position.unrealizedGain >= 0 ? "positive" : "negative"}>
+                      {money(position.unrealizedGain, currency)}
+                    </td>
+                    <td className={position.dailyChange === undefined ? undefined : position.dailyChange >= 0 ? "positive" : "negative"}>
+                      {money(position.dailyChange, currency)}
+                    </td>
+                    <td>
+                      <button className="markets-portfolio-remove" type="button" disabled={saving} onClick={() => void remove(position.holding.symbol)} aria-label={`Remove ${position.holding.symbol}`}>
+                        ×
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {!loading && (portfolio?.holdings.length ?? 0) === 0 && (
+            <div className="markets-portfolio-empty">Add a holding to build portfolio context.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
