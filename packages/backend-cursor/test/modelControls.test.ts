@@ -238,7 +238,7 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
     assert.deepEqual(after.filter((entry) => entry.method).map((entry) => entry.method), ["initialize", "cursor/list_available_models"]);
     assert.equal(after.find((entry) => entry.method === "initialize")?.params?.clientCapabilities?._meta?.parameterizedModelPicker, true);
     assert.equal(after.filter((entry) => entry.startup?.[0] === "acp").length, 1);
-    assert.equal(after.length - before.length, 1); // only the second probe's --version startup is new
+    assert.equal(after.length - before.length, 0, "the warm discovery reuses both catalog and adjacent availability probe");
     await registry.snapshots(discoveryContext, { harnessId: "cursor", force: true });
     await registry.snapshots(discoveryContext, { harnessId: "cursor", detail: true });
     const refreshed = (await readFile(log, "utf8")).trim().split("\n").map((line) => JSON.parse(line));

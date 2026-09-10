@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { HarnessContext, HarnessRegistry, ModelDescriptor } from "@polyth/contracts";
+import type { HarnessContext, HarnessProbe, HarnessRegistry, ModelDescriptor } from "@polyth/contracts";
 import { acknowledgeCapabilityApplication, releaseProcessExecution } from "@polyth/harness-runtime";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { ACP_STATIC_FEATURES, connectAcp, createAcpRuntime, type AcpProfile } from "./index.ts";
@@ -11,7 +11,26 @@ export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile)
     let registration: ReturnType<HarnessRegistry["register"]> | undefined;
     const catalogs = new Map<string, { models?: ModelDescriptor[] }>();
     const contextKey = (context: HarnessContext) => JSON.stringify([context.spaceId, context.projectId, context.cwd]);
-    /** ACP exposes its model catalog only while opening a native session. */
+    const probes = new Map<string, { promise: Promise<HarnessProbe>; settledAt?: number }>();
+    const probeProfile = (context: HarnessContext): Promise<HarnessProbe> => {
+        const key = contextKey(context);
+        const existing = probes.get(key);
+        if (existing && (existing.settledAt === undefined || Date.now() - existing.settledAt < 2_000)) {
+            return existing.promise;
+        }
+        let promise: Promise<HarnessProbe>;
+        promise = profile.probe(context).then((value) => {
+            const current = probes.get(key);
+            if (current?.promise === promise) current.settledAt = Date.now();
+            return value;
+        }, (error) => {
+            if (probes.get(key)?.promise === promise) probes.delete(key);
+            throw error;
+        });
+        probes.set(key, { promise });
+        return promise;
+    };
+    /** Read catalog metadata without creating a canonical Polyth session. */
     const discoveryProbe = (context: HarnessContext) => ({
         async open(signal?: AbortSignal) {
             const connection = await connectAcp(profile, context, undefined, signal);
@@ -52,10 +71,11 @@ export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile)
             registration = registry.register({
                 descriptor: profile.descriptor,
                 staticFeatures: ACP_STATIC_FEATURES,
-                probe: profile.probe,
+                probe: probeProfile,
                 invalidateDiscovery(context) {
                     invalidateAcpDiscovery({ harnessId: profile.descriptor.id, cacheIdentity: contextKey(context) });
                     catalogs.delete(contextKey(context));
+                    probes.delete(contextKey(context));
                 },
                 // Stage HTTP entries, then require the actual initialize
                 // advertisement before sending any native session request.
@@ -67,7 +87,7 @@ export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile)
                     const key = contextKey(context);
                     const catalogEntry = catalogs.get(key) ?? {};
                     catalogs.set(key, catalogEntry);
-                    const availability = await profile.probe(context);
+                    const availability = await probeProfile(context);
                     if (!availability.installed) {
                         return { state: "not-installed" as const, message: availability.message ?? "The agent is not installed" };
                     }
@@ -126,6 +146,6 @@ export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile)
                 },
             });
         },
-        onDisable() { registration?.dispose(); catalogs.clear(); },
+        onDisable() { registration?.dispose(); catalogs.clear(); probes.clear(); },
     };
 }
