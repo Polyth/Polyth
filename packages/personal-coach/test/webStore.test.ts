@@ -32,10 +32,47 @@ const home = (): CoachHomeDto => ({
 function fakeApi(overrides: Partial<CoachApi> = {}): CoachApi {
   return {
     home: async () => home(),
+    settings: async () => ({ revision: 1, profile: home().profile }),
+    updateSettings: async (patch) => ({ ...home().profile, ...patch }),
     completeCommitment: async (id) => ({ id, title: "Done", status: "done" }),
     skipCommitment: async (id) => ({ id, title: "Skipped", status: "skipped" }),
     recordCheckIn: async ({ energy, focus }) => ({ id: "check", energy, focus, createdAt: 1 }),
     createSession: async () => ({ sessionId: "coach-session" }),
+    insight: async (id) => ({
+      id,
+      statement: "Possible pattern",
+      confidence: "low",
+      evidence: [{ eventSeq: 1 }],
+      status: "candidate",
+      createdAt: 1,
+      updatedAt: 1,
+    }),
+    setInsightStatus: async (id, action) => ({
+      id,
+      statement: "Possible pattern",
+      confidence: "low",
+      evidence: [{ eventSeq: 1 }],
+      status: action === "accept" ? "accepted" : action === "reject" ? "rejected" : "expired",
+      createdAt: 1,
+      updatedAt: 2,
+    }),
+    proposal: async (id) => ({
+      id,
+      type: "goal",
+      payload: { title: "Proposal" },
+      status: "pending",
+      createdAt: 1,
+      updatedAt: 1,
+    }),
+    acceptProposal: async (id) => ({
+      proposal: { id, type: "goal", payload: { title: "Proposal" }, status: "accepted", createdAt: 1, updatedAt: 2 },
+      application: { type: "goal", id: "g2", appliedAt: 2 },
+    }),
+    rejectProposal: async (id) => ({
+      proposal: { id, type: "goal", payload: { title: "Proposal" }, status: "rejected", createdAt: 1, updatedAt: 2 },
+    }),
+    plans: async () => [],
+    plan: async (id) => ({ id, title: "Plan", currentRevision: 1, createdAt: 1, updatedAt: 1, revisions: [] }),
     ...overrides,
   };
 }
@@ -99,8 +136,10 @@ test("check-in updates the shared projection without a Home round trip", async (
 
 test("Talk creates one Coach session then hands it to canonical session navigation", async () => {
   const opened: string[] = [];
-  const c = client(fakeApi(), opened);
-  await c.talk();
+  let title: string | undefined;
+  const c = client(fakeApi({ createSession: async (value) => { title = value; return { sessionId: "coach-session" }; } }), opened);
+  await c.talk("Coach · Weekly review");
+  assert.equal(title, "Coach · Weekly review");
   assert.deepEqual(opened, ["coach-session"]);
   assert.equal(c.getSnapshot().busy.has("talk"), false);
 });

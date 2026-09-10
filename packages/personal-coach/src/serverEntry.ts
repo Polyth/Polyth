@@ -12,6 +12,11 @@ import {
 import { registerCoachCapabilities, type CoachCapabilitySet } from "./capabilities.ts";
 import type { CoachProposal, CoachStore } from "./index.ts";
 import {
+  registerCoachInsightCapabilities,
+  type CoachInsightCapabilitySet,
+} from "./insights.ts";
+import { personalCoachInsightRoutes } from "./insightRoutes.ts";
+import {
   registerCoachOnboardingCapabilities,
   type CoachOnboardingCapabilitySet,
   type CoachScheduleService,
@@ -78,9 +83,30 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       store,
       schedule: () => host.services.get(serverServiceKey<CoachScheduleService>("schedule")),
     });
+    const insights: CoachInsightCapabilitySet = registerCoachInsightCapabilities({
+      registry,
+      space,
+      projectId,
+      store,
+      onInsightCreated: async (insight, ctx) => {
+        if (!ctx.sessionId) return;
+        await host.events.append(
+          ctx.sessionId,
+          "coach/insight-created",
+          {
+            insightId: insight.id,
+            statement: insight.statement,
+            confidence: insight.confidence,
+            evidenceCount: insight.evidence.length,
+          },
+          { ignorable: true, producerPlugin: "personal-coach" },
+        );
+      },
+    });
     capabilities.set(projectId, {
-      ids: [...main.ids, ...onboarding.ids],
+      ids: [...main.ids, ...onboarding.ids, ...insights.ids],
       async dispose() {
+        await insights.dispose();
         await onboarding.dispose();
         await main.dispose();
       },
@@ -93,6 +119,13 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         .map((projection) => projection.projectId)
         .filter((projectId) => projectId.startsWith("__polyth_pkg_")),
     );
+    // Scheduled Coach work may outlive every visible Coach session. Schedule is
+    // provided during package registration, so its durable target inventory is
+    // another recovery root; ownership is still verified below by workspace path.
+    const schedule = host.services.get(serverServiceKey<CoachScheduleService>("schedule"));
+    for (const task of schedule?.list() ?? []) {
+      if (task.projectId.startsWith("__polyth_pkg_")) projectIds.add(task.projectId);
+    }
     for (const projectId of projectIds) {
       const project = await host.projects.get(projectId);
       if (!project?.spaceId) continue;
@@ -113,6 +146,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       const handlers = [
         personalCoachSessionRoute(host, { coach: service, ensureCapabilities }),
         personalCoachProposalRoutes(service),
+        personalCoachInsightRoutes(service),
         personalCoachRoutes(service),
       ];
       routes = async (request) => {

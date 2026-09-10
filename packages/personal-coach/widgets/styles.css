@@ -19,7 +19,7 @@
   display: grid;
   place-items: center;
   color: var(--muted);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-meta);
 }
 
 .personal-coach-root .coach-inline-error {
@@ -27,7 +27,7 @@
   border: 1px solid var(--red);
   border-radius: var(--radius-card);
   color: var(--red);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-meta);
 }
 
 .personal-coach-root .coach-focus-section,
@@ -40,7 +40,7 @@
 .personal-coach-root .coach-widget-label,
 .personal-coach-root .coach-kicker {
   color: var(--muted);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-meta);
   font-weight: 650;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -76,7 +76,7 @@
 .personal-coach-root .coach-meta,
 .personal-coach-root .coach-quiet {
   color: var(--muted);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-meta);
 }
 
 .personal-coach-root .coach-attention,
@@ -92,8 +92,31 @@
 .personal-coach-root .coach-attention span,
 .personal-coach-root .coach-insight p {
   color: var(--text-dim);
-  font-size: var(--font-size-sm);
-  line-height: 1.45;
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.personal-coach-root .coach-review-due {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+}
+
+.personal-coach-root .coach-review-due > div {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.personal-coach-root .coach-review-due span {
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
 }
 
 .personal-coach-root .coach-section-head,
@@ -175,7 +198,7 @@
   align-items: center;
   gap: var(--space-2);
   color: var(--text-dim);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-meta);
 }
 
 .personal-coach-root .coach-checkin input[type="range"] {
@@ -228,7 +251,8 @@
 }
 
 @container (max-width: 420px) {
-  .personal-coach-root .coach-commitment {
+  .personal-coach-root .coach-commitment,
+  .personal-coach-root .coach-review-due {
     align-items: flex-start;
     flex-direction: column;
   }

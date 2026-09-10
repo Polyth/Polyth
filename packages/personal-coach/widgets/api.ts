@@ -65,7 +65,10 @@ export interface CoachInsightDto {
   id: string;
   statement: string;
   confidence: "low" | "medium" | "high";
+  evidence: Array<{ eventSeq: number }>;
   status: "candidate" | "accepted" | "rejected" | "expired";
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface CoachProposalDto {
@@ -136,6 +139,8 @@ export interface CoachApi {
   skipCommitment(id: string, reason?: string): Promise<CoachCommitmentDto>;
   recordCheckIn(input: { energy: number; focus: number; note?: string }): Promise<CoachCheckInDto>;
   createSession(title?: string): Promise<{ sessionId: string }>;
+  insight(id: string): Promise<CoachInsightDto>;
+  setInsightStatus(id: string, action: "accept" | "reject" | "forget"): Promise<CoachInsightDto>;
   proposal(id: string): Promise<CoachProposalDto>;
   acceptProposal(id: string): Promise<CoachProposalDecisionDto>;
   rejectProposal(id: string): Promise<CoachProposalDecisionDto>;
@@ -145,6 +150,7 @@ export interface CoachApi {
 
 export function createCoachApi(): CoachApi {
   const api = createApiTransport();
+  const insightPath = (id: string) => `/api/personal-coach/insights/${encodeURIComponent(id)}`;
   const proposalPath = (id: string) => `/api/personal-coach/proposals/${encodeURIComponent(id)}`;
   return {
     home: () => api.get<CoachHomeDto>("/api/personal-coach/home"),
@@ -163,6 +169,8 @@ export function createCoachApi(): CoachApi {
       "/api/personal-coach/session",
       title ? { title } : {},
     ),
+    insight: (id) => api.get<CoachInsightDto>(insightPath(id)),
+    setInsightStatus: (id, action) => api.post<CoachInsightDto>(`${insightPath(id)}/${action}`, {}),
     proposal: (id) => api.get<CoachProposalDto>(proposalPath(id)),
     acceptProposal: (id) => api.post<CoachProposalDecisionDto>(`${proposalPath(id)}/accept`, {}),
     rejectProposal: (id) => api.post<CoachProposalDecisionDto>(`${proposalPath(id)}/reject`, {}),

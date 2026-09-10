@@ -31,6 +31,7 @@ export function buildCoachContext(
     schema: "polyth.personal-coach.context.v1",
     generatedAt: opts.now ?? Date.now(),
     date: home.date,
+    reviewDue: home.reviewDue,
     preferences: {
       tone: home.profile.tone,
       initiative: home.profile.initiative,
@@ -103,6 +104,7 @@ export function buildCoachContext(
     schema: state.schema,
     generatedAt: state.generatedAt,
     date: state.date,
+    reviewDue: state.reviewDue,
     preferences: state.preferences,
     activeGoals: state.activeGoals.slice(0, 3).map((goal) => ({
       id: goal.id,
@@ -121,6 +123,7 @@ export function buildCoachContext(
     schema: state.schema,
     generatedAt: state.generatedAt,
     date: state.date,
+    reviewDue: state.reviewDue,
     onboardingState: state.preferences.onboardingState,
     activeGoalCount: state.activeGoals.length,
     todayCommitmentCount: state.today.commitments.length,

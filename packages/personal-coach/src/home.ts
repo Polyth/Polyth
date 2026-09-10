@@ -29,7 +29,7 @@ export interface CoachHomeProjection {
   lastCheckIn?: CoachCheckIn;
   insight?: CoachInsight;
   attention?: CoachAttention;
-  reviewDue: false;
+  reviewDue: boolean;
 }
 
 interface LocalDate {
@@ -177,6 +177,14 @@ export function buildCoachHome(
       ? { kind: "overloaded", count: todayAll.length }
       : undefined;
 
+  // A weekly Reflection is the canonical review record in v1. Avoid a second
+  // table until reviews need fields that a dated reflection cannot represent.
+  const lastWeeklyReview = store.listReflections(50).find((item) => item.kind === "weekly");
+  const reviewAnchor = lastWeeklyReview?.createdAt ?? profile.updatedAt;
+  const reviewDue = profile.onboardingState === "complete"
+    && reviewAnchor > 0
+    && todayDate.ordinal - localDateAt(reviewAnchor, timeZone).ordinal >= 7;
+
   return {
     revision: store.revision(),
     date: todayDate.key,
@@ -193,6 +201,6 @@ export function buildCoachHome(
     ...(lastCheckIn ? { lastCheckIn } : {}),
     ...(insight ? { insight } : {}),
     ...(attention ? { attention } : {}),
-    reviewDue: false,
+    reviewDue,
   };
 }

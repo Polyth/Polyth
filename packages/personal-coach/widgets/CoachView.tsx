@@ -131,6 +131,26 @@ function Attention({ home }: { home: CoachHomeDto }) {
   );
 }
 
+function ReviewDue({ client }: { client: CoachClient }) {
+  const snapshot = useCoach(client);
+  return (
+    <div className="coach-review-due" role="status">
+      <div>
+        <strong>Weekly review</strong>
+        <span>Enough time has passed to check what changed and adjust only what needs it.</span>
+      </div>
+      <Button
+        size="sm"
+        variant="ghost"
+        busy={snapshot.busy.has("talk")}
+        onClick={() => void client.talk("Coach · Weekly review")}
+      >
+        Review
+      </Button>
+    </div>
+  );
+}
+
 function EmptyCoach({ client }: { client: CoachClient }) {
   const { busy } = useCoach(client);
   return (
@@ -149,7 +169,8 @@ function hasUsefulState(home: CoachHomeDto): boolean {
     || home.today.commitments.length > 0
     || home.today.overdueCount > 0
     || home.today.dueRoutines.length > 0
-    || Boolean(home.nextAction);
+    || Boolean(home.nextAction)
+    || home.reviewDue;
 }
 
 export default function CoachView({ client }: { client: CoachClient }) {
@@ -184,6 +205,7 @@ export default function CoachView({ client }: { client: CoachClient }) {
       </section>
 
       <Attention home={home} />
+      {home.reviewDue && <ReviewDue client={client} />}
 
       {home.today.commitments.length > 0 && (
         <section className="coach-section" aria-labelledby="coach-commitments-heading">
@@ -252,7 +274,21 @@ export function TodayWidget({ client }: { client: CoachClient }) {
   const home = snapshot.home;
   const focus = home.today.mainFocus ?? home.nextAction;
   if (!focus && home.today.dueRoutines.length === 0) {
-    return <WidgetShell label="Today"><div className="coach-widget-empty"><strong>Nothing urgent.</strong><Button size="sm" variant="ghost" onClick={() => void client.talk()}>Plan</Button></div></WidgetShell>;
+    return (
+      <WidgetShell label="Today">
+        <div className="coach-widget-empty">
+          <strong>{home.reviewDue ? "Weekly review is due." : "Nothing urgent."}</strong>
+          <Button
+            size="sm"
+            variant="ghost"
+            busy={snapshot.busy.has("talk")}
+            onClick={() => void client.talk(home.reviewDue ? "Coach · Weekly review" : undefined)}
+          >
+            {home.reviewDue ? "Review" : "Plan"}
+          </Button>
+        </div>
+      </WidgetShell>
+    );
   }
   return (
     <WidgetShell label="Today">
@@ -260,6 +296,7 @@ export function TodayWidget({ client }: { client: CoachClient }) {
       {focus && <><strong className="coach-widget-focus">{focus.title}</strong><span className="coach-meta">{formatEstimate(focus.estimateMinutes) ?? formatWhen(focus.dueAt ?? focus.plannedFor) ?? "Main focus"}</span></>}
       <div className="coach-widget-actions">
         {focus && <Button size="sm" busy={snapshot.busy.has(`commitment:${focus.id}`)} onClick={() => void client.complete(focus.id)}>Done</Button>}
+        {home.reviewDue && <Button size="sm" variant="ghost" busy={snapshot.busy.has("talk")} onClick={() => void client.talk("Coach · Weekly review")}>Review</Button>}
         <Button size="sm" variant="ghost" busy={snapshot.busy.has("talk")} onClick={() => void client.talk()}>Talk</Button>
       </div>
     </WidgetShell>

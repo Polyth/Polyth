@@ -13,6 +13,7 @@ import CoachView, {
   TodayWidget,
 } from "./CoachView.tsx";
 import CoachSettingsPage from "./CoachSettingsPage.tsx";
+import InsightCard from "./InsightCard.tsx";
 import ProposalCard from "./ProposalCard.tsx";
 import { createCoachClient } from "./store.ts";
 
@@ -148,6 +149,18 @@ export default defineWebPackage((host) => () => {
       order: 30,
       meta: { eventTypes: ["coach/proposal-created"] },
       render: (props) => createElement(ProposalCard, {
+        event: props.event as SessionEvent,
+        api,
+        client,
+        friendlyError: errorText,
+      }),
+    }),
+    host.slots.register({
+      id: "personal-coach.insight-card",
+      slot: "session.timeline.event",
+      order: 31,
+      meta: { eventTypes: ["coach/insight-created"] },
+      render: (props) => createElement(InsightCard, {
         event: props.event as SessionEvent,
         api,
         client,

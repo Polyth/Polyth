@@ -16,7 +16,7 @@ export interface CoachClient {
   complete(id: string): Promise<void>;
   skip(id: string): Promise<void>;
   checkIn(energy: number, focus: number): Promise<void>;
-  talk(): Promise<void>;
+  talk(title?: string): Promise<void>;
 }
 
 function withoutCommitment(home: CoachHomeDto, id: string): CoachHomeDto {
@@ -128,11 +128,11 @@ export function createCoachClient(input: {
         setBusy("checkin", false);
       }
     },
-    async talk() {
+    async talk(title) {
       if (snapshot.busy.has("talk")) return;
       setBusy("talk", true);
       try {
-        const { sessionId } = await input.api.createSession();
+        const { sessionId } = await input.api.createSession(title);
         await input.openSession(sessionId);
       } catch (cause) {
         fail("Open Coach chat", cause);
