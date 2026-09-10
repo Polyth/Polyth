@@ -3,6 +3,8 @@ import { join } from "node:path";
 import type {
   AgentDescriptor,
   AgentProfile,
+  AgentRuntime,
+  HarnessRegistry,
   ModelDescriptor,
   ModelDiscoveryState,
   Project,
@@ -282,9 +284,62 @@ export function runtimeCatalogRoutes(host: ServerPackageHost): RouteHandler {
     const project = await scoped.projects.get(session.projectId);
     if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
     if (session.harnessTransition) throw Object.assign(new Error("Harness switch in progress"), { code: "conflict" });
-    const runtime = host.runtimes.forSession
-      ? await host.runtimes.forSession(session, session.worktreePath ?? project.path)
-      : await host.runtimes.forProject(project.id, session.worktreePath ?? project.path);
+    const cwd = session.worktreePath ?? project.path;
+    let runtime: AgentRuntime;
+    try {
+      runtime = host.runtimes.forSession
+        ? await host.runtimes.forSession(session, cwd)
+        : await host.runtimes.forProject(project.id, cwd);
+    } catch (runtimeError) {
+      // Model metadata is read-only presentation state. A prior executor whose
+      // release is still unverified must keep turn admission fenced, but it
+      // must not also erase a catalog that the provider can discover through
+      // its process-independent/throwaway metadata path. This is especially
+      // important after a server restart: materializing the persisted ACP leg
+      // can correctly fail closed while transient discovery can still
+      // enumerate the models needed to choose the next action.
+      const harnessId = session.resolvedHarnessId
+        ?? (session.harness?.mode === "pinned" ? session.harness.harnessId : undefined);
+      const registry = host.services.get(serverServiceKey<HarnessRegistry>("harnesses"));
+      if (!harnessId || !registry) throw runtimeError;
+      const [snapshot] = await registry.snapshots({
+        space: request.space,
+        spaceId: request.space.spaceId,
+        projectId: project.id,
+        cwd,
+        model: session.model,
+        remote: Boolean(project.remote),
+      }, { harnessId, detail: true });
+      if (!snapshot) throw runtimeError;
+      const models = (snapshot.catalog?.models ?? []).map((model) => ({
+        ...model,
+        harnessId: model.harnessId ?? harnessId,
+      }));
+      const agents = (snapshot.catalog?.agents ?? snapshot.catalog?.roles ?? []).map((agent) => ({
+        ...agent,
+        harnessId: agent.harnessId ?? harnessId,
+      }));
+      const unavailable = snapshot.availability.state !== "ready"
+        && snapshot.availability.state !== "unknown";
+      const reason = snapshot.message?.trim()
+        || (runtimeError as { message?: string })?.message?.trim()
+        || "runtime model discovery failed";
+      const discovery: ModelDiscoveryState = models.length > 0
+        ? { state: "available" }
+        : unavailable
+          ? { state: "unavailable", reason }
+          : { state: "empty" };
+      request.json(200, {
+        models,
+        agents,
+        capabilities: snapshot.capabilities
+          ?? registry.get(harnessId)?.staticFeatures,
+        discovery,
+        nativeDefault: !unavailable && models.length === 0,
+        harnessId,
+      });
+      return true;
+    }
     const [modelResult, rawAgents, capabilities] = await Promise.all([
       runtime.models().then(
         (value) => ({ ok: true as const, value }),
