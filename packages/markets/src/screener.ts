@@ -111,11 +111,15 @@ export function screenMarketUniverse(rows: readonly MarketUniverseRow[], query: 
 
 export class MarketUniverseService {
   private readonly cache: SwrCache<MarketUniverseRow[]>;
+  private readonly load: MarketUniverseLoader;
+  private readonly now: () => number;
 
   constructor(
-    private readonly load: MarketUniverseLoader,
-    private readonly now: () => number = Date.now,
+    load: MarketUniverseLoader,
+    now: () => number = Date.now,
   ) {
+    this.load = load;
+    this.now = now;
     this.cache = new SwrCache(this.now);
   }
 
