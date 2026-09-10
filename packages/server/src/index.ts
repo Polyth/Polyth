@@ -68,7 +68,12 @@ import { spaceRoutes } from "./routes/spaces.ts";
 import { createSpaceStorage, spaceStorageDir } from "@polyth/tenancy";
 import { projectRoutes } from "./routes/projects.ts";
 import { createPackageRegistry } from "./packages.ts";
-import { createSessionService, type Broadcaster, type RuntimePool } from "./sessions.ts";
+import {
+  createSessionService,
+  type Broadcaster,
+  type RuntimeEpochSessionService,
+  type RuntimePool,
+} from "./sessions.ts";
 import { resolveSessionRuntimeBinding } from "./sessionRuntime.ts";
 import { createRuntimeCatalog } from "./runtimeCatalog.ts";
 import { createHttpHandler, createInternalControlServer, createPublicHttpServer, createTunnelIngress, type RouteHandler } from "./http.ts";
@@ -1684,10 +1689,12 @@ export async function boot(opts: BootOptions = {}) {
       console.warn("[polyth] MCP seed from backend config skipped", err);
     }
   }
+  let requestAgentToolPermission:
+    RuntimeEpochSessionService["requestAgentToolPermission"] | undefined;
   const agentTools = createAgentToolBridge({
     executor: (id) => capabilityContributions.executor(id),
     contribution: (id) => capabilityContributions.contribution(id),
-    authorize: (tool, grant) => {
+    authorize: async (tool, grant) => {
       const ownerAllowed = (() => {
         if (tool.owner === "polyth") return true;
         try {
@@ -1723,7 +1730,21 @@ export async function boot(opts: BootOptions = {}) {
       const verdict = permissions?.evaluate("package-tool", [tool.id], grant.projectId, grant.sessionId) ?? "ask";
       if (verdict === "allow") return "allow";
       if (verdict === "deny") return "deny";
-      return "permission-required";
+      if (!requestAgentToolPermission) return "permission-required";
+      try {
+        return await requestAgentToolPermission({
+          spaceId: grant.spaceId,
+          projectId: grant.projectId,
+          cwd: grant.cwd,
+          ...(grant.harnessId ? { harnessId: grant.harnessId } : {}),
+          ...(grant.sessionId ? { sessionId: grant.sessionId } : {}),
+          toolId: tool.id,
+          toolName: tool.name,
+          owner: tool.owner,
+        });
+      } catch {
+        return "deny";
+      }
     },
   });
   capabilityController = createCapabilityProvisioningController({
@@ -1781,6 +1802,7 @@ export async function boot(opts: BootOptions = {}) {
   // Infrastructure seams consumed by discovered packages.
   provideService("secure-safe", secureSafe);
   provideService("plugins.config", configApplier);
+  provideService("models.visibility", visibility);
   provideService("models.invalidate-catalog", () => { runtimeCatalog.invalidateModels(); });
   // The probe stays bound here so no feature package ever imports
   // backend-opencode; routes consuming it never learn OpenCode specifics.
@@ -2223,6 +2245,7 @@ export async function boot(opts: BootOptions = {}) {
       onUsage: (sessionId, tokens) => goalService()?.recordUsage(sessionId, { ...tokens, cacheRead: 0, cacheWrite: 0 }),
     },
   });
+  requestAgentToolPermission = sessions.requestAgentToolPermission.bind(sessions);
   sessionsImpl = sessions;
   reconcileRuntimeForConfigRestart = (sessionId, runtime, expected) =>
     sessions.reconcileForRuntimeRestart(sessionId, runtime, expected);

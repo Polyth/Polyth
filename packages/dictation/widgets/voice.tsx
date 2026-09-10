@@ -22,7 +22,7 @@ import {
 import { defineWidgetPlugin } from "../../../apps/web/src/widgets/catalog.ts";
 import type { WebPackageHost } from "@polyth/web-sdk";
 import { requestComposerInsert } from "../../../apps/web/src/composerInsert.ts";
-import { getState, openSettingsPage } from "../../../apps/web/src/store.ts";
+import { getState } from "../../../apps/web/src/store.ts";
 import { api } from "@polyth/session/web-api";
 import { startStreamingDictation, type StreamingDictation } from "./dictationClient.ts";
 import { canStartDirectProvider, startDirectProvider } from "./directProviders.ts";
@@ -484,14 +484,13 @@ function MicButton() {
   }, [prefs.dictation, selectionReady, directCloud, provider, transport, processingPolicy]);
 
   const providerOrBrowserAvailable = Boolean(capability?.available) || (browserFallback && support.stt);
-  const availability: { available: boolean; reason?: string; settings?: boolean } =
-    !prefs.dictation ? { available: false, reason: tr("voice.dictationOff"), settings: true }
+  const availability: { available: boolean; reason?: string } =
+    !prefs.dictation ? { available: false, reason: tr("voice.dictationOff") }
     : !selectionReady || capability === null ? { available: false, reason: tr("voice.checkingMicrophone") }
-    : !providerOrBrowserAvailable
-      ? {
+      : !providerOrBrowserAvailable
+        ? {
           available: false,
           reason: capability?.reason ?? tr("voice.serverTranscriptionUnavailable"),
-          settings: true,
         }
       : { available: true };
 
@@ -703,8 +702,6 @@ function MicButton() {
   };
 
   const busy = phase === "starting" || phase === "transcribing";
-  const showSettings = error !== null || (!availability.available && availability.settings === true);
-
   return (
     <span className={`mic-control mic-${error ? "failed" : phase}`}>
       <IconButton
@@ -725,10 +722,6 @@ function MicButton() {
       {error !== null && (
         <Button size="sm" className="mic-retry" onClick={start}>
           {tr("voice.tryAgain")}</Button>
-      )}
-      {showSettings && (
-        <Button size="sm" className="mic-settings" onClick={() => openSettingsPage("voice")}>
-          {tr("voice.voiceSettings")}</Button>
       )}
     </span>
   );

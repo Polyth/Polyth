@@ -11,10 +11,18 @@ const requests: string[] = [];
 const pending = new Map<string, (value: unknown) => void>();
 let cheapSnapshots: unknown[] = [];
 let forcedSnapshots: Promise<unknown[]> | undefined;
+const roster = [
+  { identity: { id: "codex", name: "Codex" }, policy: { enabled: true, priority: 10, autoSelect: true } },
+  { identity: { id: "cursor", name: "Cursor" }, policy: { enabled: true, priority: 20, autoSelect: false } },
+  { identity: { id: "fx", name: "fx" }, policy: { enabled: false, priority: 30, autoSelect: false } },
+];
 globalThis.fetch = async (input) => {
   const path = String(input);
   requests.push(path);
   const url = new URL(path, "http://test");
+  if (url.pathname === "/api/harnesses/roster") {
+    return new Response(JSON.stringify(roster), { status: 200 });
+  }
   if (!url.searchParams.has("harnessId")) return new Response(JSON.stringify(
     url.searchParams.has("force") && forcedSnapshots ? await forcedSnapshots : cheapSnapshots,
   ), { status: 200 });
@@ -24,13 +32,20 @@ globalThis.fetch = async (input) => {
 };
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { invalidateRuntimeCatalogs, peekHarnessSnapshots, readHarnessSnapshots, useRuntimeCatalog } = await import("../widgets/runtimeCatalog.ts");
+const {
+  invalidateRuntimeCatalogs,
+  peekHarnessSnapshots,
+  preloadRuntimeCatalogs,
+  readHarnessSnapshots,
+  useRuntimeCatalog,
+} = await import("../widgets/runtimeCatalog.ts");
 const models: ModelDescriptor[] = [];
 const agents: AgentDescriptor[] = [];
-const snapshot = (harnessId: string, modelID: string) => [{
+const snapshot = (harnessId: string, modelID: string, projectId = "p", spaceId = "space-a", cwd = `/${projectId}`) => [{
   identity: { id: harnessId, name: harnessId },
   availability: { state: "ready", installed: true, healthy: true, authenticated: true },
   catalog: { models: [{ harnessId, providerID: "native", modelID, name: modelID }] },
+  context: { projectId, spaceId, cwd, revision: "1", fetchedAt: 1 },
 }];
 
 test("mounted draft A/B/A rejects stale publishes and reuses the pending catalog across remounts", async () => {
@@ -39,8 +54,8 @@ test("mounted draft A/B/A rejects stale publishes and reuses the pending catalog
   pending.clear();
   cheapSnapshots = [];
   let catalog: ReturnType<typeof useRuntimeCatalog> | undefined;
-  function Harness({ harnessId, spaceId = "space-a" }: { harnessId: string; spaceId?: string }) {
-    catalog = useRuntimeCatalog(null, models, agents, { projectId: "p", harnessId, spaceId });
+  function Harness({ harnessId, spaceId = "space-a", cwd = "/p" }: { harnessId: string; spaceId?: string; cwd?: string }) {
+    catalog = useRuntimeCatalog(null, models, agents, { projectId: "p", harnessId, spaceId, cwd });
     return null;
   }
   const container = document.createElement("div");
@@ -48,7 +63,10 @@ test("mounted draft A/B/A rejects stale publishes and reuses the pending catalog
   let root = createRoot(container);
   try {
     await act(async () => { root.render(createElement(Harness, { harnessId: "cursor" })); });
-    assert.equal(catalog?.ready, true, "a staged route is immediately usable with its native default");
+    assert.equal(catalog?.ready, false, "the route changes immediately while its catalog is still loading");
+    assert.deepEqual(catalog?.discovery, { state: "pending" });
+    assert.equal(requests.some((path) => path.includes("harnessId=cursor") && path.includes("detail=1")), true,
+      "the selected route starts read-only catalog discovery");
     await act(async () => { root.render(createElement(Harness, { harnessId: "codex" })); });
     await act(async () => { pending.get("cursor")!(snapshot("cursor", "cursor-choice")); });
     assert.equal(catalog?.harnessId, "codex");
@@ -58,8 +76,9 @@ test("mounted draft A/B/A rejects stale publishes and reuses the pending catalog
     await act(async () => { root.render(createElement(Harness, { harnessId: "cursor" })); });
     assert.equal(catalog?.models[0]?.modelID, "cursor-choice");
     assert.equal(requests.filter((path) => path.includes("harnessId=cursor")).length, 1);
-    assert.equal(requests.some((path) => path.includes("detail=1")), false,
-      "picker previews must never start detailed native discovery");
+    assert.equal(requests.every((path) => path.includes("/api/harnesses/snapshots")
+      || path.includes("/api/harnesses/roster")), true,
+      "catalog preview must not commit a session route");
     await act(async () => { root.unmount(); });
     root = createRoot(container);
     await act(async () => { root.render(createElement(Harness, { harnessId: "cursor" })); });
@@ -68,12 +87,22 @@ test("mounted draft A/B/A rejects stale publishes and reuses the pending catalog
     await act(async () => { root.render(createElement(Harness, { harnessId: "cursor", spaceId: "space-b" })); });
     assert.equal(catalog?.models.length, 0, "another Space never sees the cached catalog");
     assert.equal(requests.filter((path) => path.includes("harnessId=cursor")).length, 2);
-    await act(async () => { pending.get("cursor")!(snapshot("cursor", "space-b-choice")); });
+    await act(async () => { pending.get("cursor")!(snapshot("cursor", "space-b-choice", "p", "space-b")); });
     assert.equal(catalog?.models[0]?.modelID, "space-b-choice");
+    await act(async () => { root.render(createElement(Harness, { harnessId: "cursor", spaceId: "space-b", cwd: "/p-renamed" })); });
+    assert.equal(catalog?.models.length, 0, "a changed cwd never reuses the prior project-path catalog");
+    assert.equal(requests.filter((path) => path.includes("harnessId=cursor")).length, 3);
+    await act(async () => { pending.get("cursor")!(snapshot("cursor", "renamed-choice", "p", "space-b", "/p-renamed")); });
+    assert.equal(catalog?.models[0]?.modelID, "renamed-choice");
     await act(async () => { invalidateRuntimeCatalogs(); });
-    assert.equal(requests.filter((path) => path.includes("harnessId=cursor")).length, 3, "auth/settings invalidation rediscovers");
+    assert.equal(requests.filter((path) => path.includes("harnessId=cursor")).length, 4, "auth/settings invalidation rediscovers");
     await act(async () => {
-      pending.get("cursor")!([{ identity: { id: "cursor", name: "Cursor" }, availability: { state: "auth-required" }, message: "Sign in again" }]);
+      pending.get("cursor")!([{
+        identity: { id: "cursor", name: "Cursor" },
+        availability: { state: "auth-required" },
+        message: "Sign in again",
+        context: { projectId: "p", spaceId: "space-b", cwd: "/p-renamed", revision: "2", fetchedAt: 2 },
+      }]);
     });
     assert.equal(catalog?.models.length, 0);
     assert.deepEqual(catalog?.discovery, { state: "unavailable", reason: "Sign in again" });
@@ -83,34 +112,45 @@ test("mounted draft A/B/A rejects stale publishes and reuses the pending catalog
   }
 });
 
-test("preview catalogs load only the selected summary and stay warm without native detail discovery", async (t) => {
+test("shell bootstrap preloads enabled catalogs, scopes returned data, and keeps it warm", async (t) => {
   invalidateRuntimeCatalogs();
   requests.length = 0;
   pending.clear();
   cheapSnapshots = [];
   let catalog: ReturnType<typeof useRuntimeCatalog> | undefined;
   function Harness({ models, harnessId = "codex" }: { models: ModelDescriptor[]; harnessId?: string }) {
-    catalog = useRuntimeCatalog(null, models, [], { projectId: "warm", harnessId });
+    catalog = useRuntimeCatalog(null, models, [], { projectId: "warm", harnessId, cwd: "/warm" });
     return null;
   }
+  const warming = preloadRuntimeCatalogs();
+  for (let attempt = 0; attempt < 20 && (!pending.has("codex") || !pending.has("cursor")); attempt++) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  assert.equal(requests.some((path) => path.includes("harnessId=codex") && path.includes("detail=1")), true);
+  assert.equal(requests.some((path) => path.includes("harnessId=cursor") && path.includes("detail=1")), true,
+    "alternate model metadata warms before the picker is mounted");
+  assert.equal(requests.some((path) => path.includes("projectId=")), false,
+    "bootstrap discovery starts before project restoration");
+  assert.equal(requests.some((path) => path.includes("harnessId=fx")), false,
+    "disabled harnesses do not consume discovery resources");
+  pending.get("codex")!(snapshot("codex", "luna", "warm"));
+  pending.get("cursor")!(snapshot("cursor", "cursor-a", "warm"));
+  await warming;
+  const requestCountAfterWarm = requests.length;
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   try {
     await act(async () => { root.render(createElement(Harness, { models: [] })); });
-    assert.equal(requests.some((path) => path.includes("harnessId=codex")), true);
-    assert.equal(requests.some((path) => path.includes("harnessId=cursor")), false,
-      "an alternate harness must not be speculatively connected or discovered");
-    assert.equal(requests.some((path) => path.includes("detail=1")), false);
-    await act(async () => { pending.get("codex")!([{ identity: { id: "codex", name: "Codex" }, availability: { state: "ready" }, catalog: { models: [] } }]); });
-    assert.equal(catalog?.ready, true, "Codex is usable while Cursor is still loading");
+    assert.equal(catalog?.models[0]?.modelID, "luna", "the returned project/Space scope is reusable immediately");
     const cursorRequests = () => requests.filter((path) => path.includes("harnessId=cursor")).length;
-    assert.equal(cursorRequests(), 0);
-    await act(async () => { root.render(createElement(Harness, { models: [], harnessId: "cursor" })); });
-    assert.equal(catalog?.ready, true, "the tab changes synchronously before its summary arrives");
     assert.equal(cursorRequests(), 1);
-    await act(async () => { pending.get("cursor")!(snapshot("cursor", "cursor-a")); });
-    assert.equal(catalog?.models[0]?.modelID, "cursor-a");
+    await act(async () => { root.render(createElement(Harness, { models: [], harnessId: "cursor" })); });
+    assert.equal(catalog?.harnessId, "cursor");
+    assert.equal(catalog?.models[0]?.modelID, "cursor-a", "the preloaded tab paints its models synchronously");
+    assert.equal(catalog?.ready, true);
+    assert.equal(cursorRequests(), 1);
+    assert.equal(requests.length, requestCountAfterWarm, "mount and tab switch add no catalog requests");
     const now = Date.now();
     t.mock.method(Date, "now", () => now + 24 * 60 * 60_000);
     await act(async () => { root.render(createElement(Harness, { models: [{ harnessId: "other", providerID: "p", modelID: "m", name: "changed" }], harnessId: "cursor" })); });
@@ -120,6 +160,91 @@ test("preview catalogs load only the selected summary and stay warm without nati
     await act(async () => { root.unmount(); });
     container.remove();
     cheapSnapshots = [];
+  }
+});
+
+test("a failed shell preload is evicted so restored context can discover models", async () => {
+  invalidateRuntimeCatalogs();
+  requests.length = 0;
+  pending.clear();
+  cheapSnapshots = [];
+  const warming = preloadRuntimeCatalogs();
+  for (let attempt = 0; attempt < 20 && (!pending.has("codex") || !pending.has("cursor")); attempt++) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  pending.get("codex")!([{
+    identity: { id: "codex", name: "Codex" },
+    availability: { state: "degraded" },
+    message: "Previous executor has no verified release receipt",
+    context: { projectId: "restored", spaceId: "space-a", cwd: "/restored", revision: "1", fetchedAt: 1 },
+  }]);
+  pending.get("cursor")!(snapshot("cursor", "cursor-a", "restored"));
+  await warming;
+
+  let catalog: ReturnType<typeof useRuntimeCatalog> | undefined;
+  function Harness() {
+    catalog = useRuntimeCatalog(null, models, agents, {
+      projectId: "restored",
+      harnessId: "codex",
+      spaceId: "space-a",
+      cwd: "/restored",
+    });
+    return null;
+  }
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(Harness)); });
+    assert.deepEqual(catalog?.discovery, { state: "pending" });
+    assert.equal(requests.filter((path) => path.includes("harnessId=codex")).length, 2,
+      "the failed bootstrap value must not poison the page cache");
+    await act(async () => { pending.get("codex")!(snapshot("codex", "recovered", "restored")); });
+    assert.equal(catalog?.models[0]?.modelID, "recovered");
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("an invalidated bootstrap flight cannot alias stale models into the restored context", async () => {
+  invalidateRuntimeCatalogs();
+  requests.length = 0;
+  pending.clear();
+  cheapSnapshots = [];
+  const staleWarm = preloadRuntimeCatalogs();
+  for (let attempt = 0; attempt < 20 && (!pending.has("codex") || !pending.has("cursor")); attempt++) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  invalidateRuntimeCatalogs();
+  pending.get("codex")!(snapshot("codex", "stale", "restored"));
+  pending.get("cursor")!(snapshot("cursor", "stale-cursor", "restored"));
+  await staleWarm;
+
+  let catalog: ReturnType<typeof useRuntimeCatalog> | undefined;
+  function Harness() {
+    catalog = useRuntimeCatalog(null, models, agents, {
+      projectId: "restored",
+      harnessId: "codex",
+      spaceId: "space-a",
+      cwd: "/restored",
+    });
+    return null;
+  }
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(Harness)); });
+    assert.equal(catalog?.models.length, 0);
+    assert.deepEqual(catalog?.discovery, { state: "pending" });
+    assert.equal(requests.filter((path) => path.includes("harnessId=codex")).length, 2,
+      "the restored revision must perform a fresh discovery");
+    await act(async () => { pending.get("codex")!(snapshot("codex", "fresh", "restored")); });
+    assert.equal(catalog?.models[0]?.modelID, "fresh");
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
   }
 });
 

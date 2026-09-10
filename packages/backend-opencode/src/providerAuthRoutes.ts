@@ -63,8 +63,10 @@ export function providerAuthRoutes(deps: {
     }
   };
 
-  return async ({ path, method, json, body, space }) => {
+  return async (request) => {
+    const { path } = request;
     if (!path.startsWith("/api/providers")) return false;
+    const { method, json, body, space } = request;
     const runtime = () => deps.runtime(space);
 
     if (path === "/api/providers/available" && method === "GET") {

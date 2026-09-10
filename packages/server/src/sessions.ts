@@ -192,6 +192,20 @@ export interface RuntimeEpochTransitionOptions {
 }
 
 export interface RuntimeEpochSessionService extends RestartSafetySessionService {
+  /** Authorize one package-contributed MCP tool against the canonical session
+   * that currently owns execution. Project-scoped native runtimes do not put a
+   * session id in their MCP configuration, so the owner is resolved from live
+   * Polyth occupancy and ambiguous/idle calls fail closed. */
+  requestAgentToolPermission(input: {
+    spaceId: string;
+    projectId: string;
+    cwd: string;
+    harnessId?: string;
+    sessionId?: string;
+    toolId: string;
+    toolName: string;
+    owner: string;
+  }): Promise<"allow" | "deny" | "permission-required">;
   /** Complete the durable runtime epoch after Phase 4 has protocol-confirmed a
    * fresh session-reset. This never creates or hydrates a backend session. */
   transitionRuntimeEpoch(
@@ -533,6 +547,10 @@ export function createSessionService(deps: {
     return dependents;
   };
   const lastTurnId = new Map<string, string>();           // sessionId -> active turnId
+  const pendingAgentToolPermissions = new Map<string, {
+    sessionId: string;
+    resolve(decision: "allow" | "deny"): void;
+  }>();
   // sessions whose turn admission is in flight (startTurn sent, turn/started
   // not yet observed) — a concurrent send must treat these as active
   const admitting = new Set<string>();
@@ -1733,7 +1751,11 @@ export function createSessionService(deps: {
       endpoint.control.kind === "owned"
       && (runtime.resetSessionOperation || runtime.resetSession)
     ) {
-      void recoverOwnedEpochIfPending(sessionId);
+      // Recovery acquires the session lock itself. Callers such as
+      // reconcileSession and ensureWired often already hold it.
+      queueMicrotask(() => {
+        void recoverOwnedEpochIfPending(sessionId);
+      });
     }
     return true;
   };
@@ -2105,12 +2127,15 @@ export function createSessionService(deps: {
       const projection = await store.projection(sessionId);
       if (projection) {
         reconciliations.push((async () => {
-          await withSessionLock(sessionId, async () => {
+          const reconciled = await withSessionLock(sessionId, async () => {
             if (sessionRuntime.get(sessionId) !== runtime
               || sessionWireGeneration.get(sessionId) !== wireGeneration) return;
             await reconcileSession(sessionId, projection, runtime, "runtime-generation-replaced");
-            await recoverOwnedEpochIfPendingUnderLock(sessionId);
+            return true;
           });
+          // Recovery acquires the session lock itself. Awaiting it inside
+          // this critical section deadlocks every subsequent queued turn.
+          if (reconciled) await recoverOwnedEpochIfPending(sessionId);
         })());
       }
     }
@@ -3353,13 +3378,15 @@ export function createSessionService(deps: {
           if (wired !== rt) continue;
           const wireGeneration = sessionWireGeneration.get(sid);
           void (async () => {
-            await withSessionLock(sid, async () => {
+            const reconciled = await withSessionLock(sid, async () => {
               if (sessionRuntime.get(sid) !== rt || sessionWireGeneration.get(sid) !== wireGeneration) return;
               const projection = await store.projection(sid);
               if (!projection) return;
               await reconcileSession(sid, projection, rt, notification.type);
-              await recoverOwnedEpochIfPendingUnderLock(sid);
+              return true;
             });
+            // Do not re-enter the non-reentrant session lock during recovery.
+            if (reconciled) await recoverOwnedEpochIfPending(sid);
           })().catch((err) => {
             console.error(`[polyth] runtime lifecycle reconciliation failed for ${sid}`, err);
           });
@@ -3658,6 +3685,32 @@ export function createSessionService(deps: {
 
   const turnActive = (sessionId: string): boolean =>
     lastTurnId.has(sessionId) || admitting.has(sessionId);
+
+  const activeAgentToolSession = async (input: {
+    spaceId: string;
+    projectId: string;
+    cwd: string;
+    harnessId?: string;
+    sessionId?: string;
+  }): Promise<SessionProjection | undefined> => {
+    const candidates: SessionProjection[] = [];
+    const ids = input.sessionId
+      ? [input.sessionId]
+      : [...new Set([...lastTurnId.keys(), ...admitting])];
+    for (const sessionId of ids) {
+      if (!turnActive(sessionId)) continue;
+      const projection = await store.projection(sessionId);
+      if (!projection
+        || projection.projectId !== input.projectId
+        || projection.spaceId !== input.spaceId) continue;
+      if (input.harnessId && projection.resolvedHarnessId !== input.harnessId) continue;
+      const facts = await workspaceFacts(projection);
+      if (![facts.effectiveCwd, facts.runtimeCwd]
+        .some((path) => path && resolve(path) === resolve(input.cwd))) continue;
+      candidates.push(projection);
+    }
+    return candidates.length === 1 ? candidates[0] : undefined;
+  };
 
   /** Unresolved question/permission/secret requests derived from durable events. */
   const openRequestCount = (events: SessionEvent[]): number => {
@@ -3989,7 +4042,14 @@ export function createSessionService(deps: {
     const shellRequest = (original.data as { permission?: string }).permission === "shell"
       ? original
       : undefined;
-    const rt = shellRequest ? undefined : await ensureWired(sessionId, proj);
+    const isAgentToolRequest = (original.data as { permission?: string }).permission === "package-tool";
+    const pendingAgentToolRequest = isAgentToolRequest
+      ? pendingAgentToolPermissions.get(requestId)
+      : undefined;
+    const agentToolRequest = pendingAgentToolRequest?.sessionId === sessionId
+      ? pendingAgentToolRequest
+      : undefined;
+    const rt = shellRequest || isAgentToolRequest ? undefined : await ensureWired(sessionId, proj);
     const expected: JsonObject = { reply, ...(scope ? { scope } : {}), ...(auto ? { auto: true } : {}) };
     const choice = await broadcastTail(sessionId, () => durable.chooseResponseIntent({
       kind: "permission",
@@ -4017,6 +4077,13 @@ export function createSessionService(deps: {
           () => ({}),
           completion,
         )
+      : isAgentToolRequest
+        ? await runResponseOperation<Record<string, never>, void>(
+            operation,
+            async () => {},
+            () => ({}),
+            completion,
+          )
       : await runResponseOperation<Record<string, never>, void>(
           operation,
           (operationId) => rt!.replyPermissionOperation
@@ -4034,17 +4101,27 @@ export function createSessionService(deps: {
       }
       throw outcomeError(outcome);
     }
+    const permissionData = original.data as { permission?: string; patterns?: string[] };
     if (reply === "always") {
-      const data = original.data as { permission?: string; patterns?: string[] };
-      for (const pattern of data.patterns?.length ? data.patterns : ["*"]) {
+      for (const pattern of permissionData.patterns?.length ? permissionData.patterns : ["*"]) {
         if (scope === "session") {
-          permissions.addRule({ permission: data.permission ?? "*", pattern, action: "allow", scope: "session", sessionId });
+          permissions.addRule({ permission: permissionData.permission ?? "*", pattern, action: "allow", scope: "session", sessionId });
         } else if (scope === "project") {
-          permissions.addRule({ permission: data.permission ?? "*", pattern, action: "allow", scope: "project", projectId: proj.projectId });
+          permissions.addRule({ permission: permissionData.permission ?? "*", pattern, action: "allow", scope: "project", projectId: proj.projectId });
         } else {
-          permissions.addRule({ permission: data.permission ?? "*", pattern, action: "allow", scope: "user" });
+          permissions.addRule({ permission: permissionData.permission ?? "*", pattern, action: "allow", scope: "user" });
         }
       }
+    }
+    if (agentToolRequest) {
+      pendingAgentToolPermissions.delete(requestId);
+      const denied = permissions.evaluate(
+        permissionData.permission ?? "package-tool",
+        permissionData.patterns ?? ["*"],
+        proj.projectId,
+        sessionId,
+      ) === "deny";
+      agentToolRequest.resolve(reply === "reject" || denied ? "deny" : "allow");
     }
     await settleAfterLastRequest(sessionId);
     await closeParentRequestMirror(sessionId, requestId, "permission", {
@@ -5770,6 +5847,66 @@ export function createSessionService(deps: {
         ? { state: "confirmed", mutationKind: "queue-admission", updatedAt: admitted.time }
         : { state: "absent" };
     },
+
+    async requestAgentToolPermission(input) {
+      const projection = await activeAgentToolSession(input);
+      if (!projection) return "permission-required";
+      const automatic = await automaticPermissionResolution(
+        projection.id,
+        "package-tool",
+        [input.toolId],
+      );
+      if (automatic) return automatic.reply === "reject" ? "deny" : "allow";
+
+      const requestId = `pkg_${randomUUID()}`;
+      return new Promise<"allow" | "deny">((resolveDecision) => {
+        pendingAgentToolPermissions.set(requestId, {
+          sessionId: projection.id,
+          resolve: resolveDecision,
+        });
+        void withSessionLock(projection.id, async () => {
+          // Policy can change while this request waits behind another session
+          // transition. Re-evaluate before publishing a human-needed prompt.
+          const resolution = await automaticPermissionResolution(
+            projection.id,
+            "package-tool",
+            [input.toolId],
+          );
+          if (resolution) {
+            pendingAgentToolPermissions.delete(requestId);
+            resolveDecision(resolution.reply === "reject" ? "deny" : "allow");
+            return;
+          }
+          const event = await appendAndBroadcast(projection.id, "permission/requested", {
+            requestId,
+            permission: "package-tool",
+            patterns: [input.toolId],
+            tool: input.toolName,
+            preview: buildPermissionPreview({
+              permission: "package-tool",
+              patterns: [input.toolId],
+              tool: input.toolName,
+            }) as unknown as JsonObject,
+            allowedScopes: [...PERMISSION_ALLOWED_SCOPES],
+          }, { ignorable: true, producerPlugin: input.owner });
+          const current = await store.projection(projection.id);
+          if (current?.status !== "unknown") {
+            await updateProjection(projection.id, { status: "waiting" });
+          }
+          deps.notify?.attention(projection.id, "permission", requestId);
+          if (projection.parentId) {
+            await appendAndBroadcast(projection.parentId, "permission/requested", {
+              ...event.data,
+              sourceSessionId: projection.id,
+            }, { ignorable: true });
+            await updateProjection(projection.parentId, { status: "waiting" });
+          }
+        }).catch(() => {
+          if (!pendingAgentToolPermissions.delete(requestId)) return;
+          resolveDecision("deny");
+        });
+      });
+    },
     async switchHarness(sessionId, selection, timing = "after-turn") {
       return withSessionLock(sessionId, async () => {
         let projection = await store.projection(sessionId);
@@ -6221,6 +6358,28 @@ export function createSessionService(deps: {
         if (prepared) input.attachments = prepared;
         else delete input.attachments;
       }
+      // ACP may claim a submit before its first update confirms admission, so
+      // the durable operation can be executing while the projection (and the
+      // composer) still looks idle. A second user intent is distinct work:
+      // preserve it behind that mutation instead of returning a misleading
+      // conflict and dropping the follow-up.
+      const queueBehindBlockingOperation = (
+        operation: DurableOperation,
+      ): Promise<SendResult> => {
+        if (!deps.queue) {
+          throw Object.assign(
+            new Error(`cannot send while operation ${operation.operationId} is ${operation.state}`),
+            { code: "conflict" },
+          );
+        }
+        return enqueueMessage(
+          sessionId,
+          input.text,
+          delivery === "steer" || delivery === "interrupt" ? delivery : "queue",
+          "mutation-active",
+          input.attachments,
+        );
+      };
       if (input.harness) {
         const selection = input.harness;
         const switchHarness = service.switchHarness;
@@ -6389,10 +6548,7 @@ export function createSessionService(deps: {
         }
         const existingOperation = await sendAdmissionBlocking(sessionId);
         if (existingOperation) {
-          throw Object.assign(
-            new Error(`cannot send while operation ${existingOperation.operationId} is ${existingOperation.state}`),
-            { code: "conflict" },
-          );
+          return queueBehindBlockingOperation(existingOperation);
         }
         try {
           rt = await ensureWired(sessionId, proj);
@@ -6438,10 +6594,7 @@ export function createSessionService(deps: {
       }
       const readyOperation = await sendAdmissionBlocking(sessionId);
       if (readyOperation) {
-        throw Object.assign(
-          new Error(`cannot send while operation ${readyOperation.operationId} is ${readyOperation.state}`),
-          { code: "conflict" },
-        );
+        return queueBehindBlockingOperation(readyOperation);
       }
 
       // A replacement send after rewind must not continue in the backend's
@@ -6766,16 +6919,25 @@ export function createSessionService(deps: {
       return deps.queue.queueList(sessionId);
     },
     async queueEditStart(sessionId, queueId) {
-      if (!deps.queue) throw Object.assign(new Error("delivery queue unavailable"), { code: "unsupported" });
-      const item = (await deps.queue.queueList(sessionId)).find((candidate) => candidate.id === queueId);
-      if (!item) throw Object.assign(new Error("queued message has already started"), { code: "conflict" });
-      if (queueEditHeld(sessionId, queueId)) {
-        throw Object.assign(new Error("queued message is already being edited"), { code: "conflict" });
-      }
-      const holds = queueEditHolds.get(sessionId) ?? new Map<string, number>();
-      holds.set(queueId, Date.now() + QUEUE_EDIT_HOLD_MS);
-      queueEditHolds.set(sessionId, holds);
-      return item;
+      return withSessionLock(sessionId, async () => {
+        if (!deps.queue) throw Object.assign(new Error("delivery queue unavailable"), { code: "unsupported" });
+        const item = (await deps.queue.queueList(sessionId)).find((candidate) => candidate.id === queueId);
+        if (!item) throw Object.assign(new Error("queued message has already started"), { code: "conflict" });
+        for (const operation of await durable.operations(sessionId)) {
+          if (!isRuntimeOperationBlocking(operation)) continue;
+          const reservation = await durable.queueReservation(operation.operationId);
+          if (reservation?.queueItem.id === queueId) {
+            throw Object.assign(new Error("queued message admission is already reserved"), { code: "conflict" });
+          }
+        }
+        if (queueEditHeld(sessionId, queueId)) {
+          throw Object.assign(new Error("queued message is already being edited"), { code: "conflict" });
+        }
+        const holds = queueEditHolds.get(sessionId) ?? new Map<string, number>();
+        holds.set(queueId, Date.now() + QUEUE_EDIT_HOLD_MS);
+        queueEditHolds.set(sessionId, holds);
+        return item;
+      });
     },
     async queueEdit(sessionId, queueId, text) {
       if (!deps.queue) throw Object.assign(new Error("delivery queue unavailable"), { code: "unsupported" });
@@ -6796,7 +6958,10 @@ export function createSessionService(deps: {
       if (!nextText) throw Object.assign(new Error("queued message text is required"), { code: "invalid-input" });
       const item = (await deps.queue.queueList(sessionId)).find((candidate) => candidate.id === queueId);
       if (!item) throw Object.assign(new Error("queue item not found"), { code: "not-found" });
-      await deps.queue.queueRemove(sessionId, queueId);
+      const removed = await deps.queue.queueRemove(sessionId, queueId);
+      if (!removed) {
+        throw Object.assign(new Error("queued message has already started"), { code: "conflict" });
+      }
       await appendAndBroadcast(sessionId, "queue/removed", { queueId }, { ignorable: true });
       releaseQueueEditHold(sessionId, queueId);
       return service.send(sessionId, {

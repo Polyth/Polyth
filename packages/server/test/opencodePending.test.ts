@@ -394,3 +394,16 @@ test("OpenCode pending restart routes are local-trusted only", async () => {
   assert.equal(localGet.status(), 200);
 });
 
+test("OpenCode pending routes decline SPA requests before resolving Space", async () => {
+  const pending = createOpenCodePendingService({ restart: async () => 0 });
+  const route = opencodePendingRoutes(pending);
+  const request = {
+    path: "/",
+    method: "GET",
+    get space(): never {
+      throw Object.assign(new Error("authentication required"), { code: "unauthorized" });
+    },
+  } as unknown as RouteRequest;
+
+  assert.equal(await route(request), false);
+});

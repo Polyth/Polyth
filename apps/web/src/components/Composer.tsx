@@ -90,14 +90,12 @@ import {
 } from "../composer/discovery.ts";
 import {
   loadComposerConfig, saveComposerConfig, consumeComposerConfig,
-  withAutoThinking, withExplicitAgent, withExplicitThinking, withModelForNextTurn,
+  withAutoThinking, withExplicitThinking, withModelForNextTurn,
   withHarnessForNextTurn,
   type ComposerConfig,
 } from "../composerConfig.ts";
 import { shouldHandlePromptHistoryKey } from "../composer/history.ts";
 import { usePromptHistory } from "../composer/usePromptHistory.ts";
-import type { PickerItem } from "../picker.ts";
-import Picker from "./Picker.tsx";
 import AdaptiveTextInput, { type TextInputHandle } from "./input/AdaptiveTextInput.tsx";
 import ComposerAddMenu from "./ComposerAddMenu.tsx";
 import EffortMenu from "./EffortMenu.tsx";
@@ -120,7 +118,6 @@ import type {
   RuntimeCommandDescriptor,
   SessionProjection,
 } from "@polyth/contracts";
-import { agentPickerDefaultLabel } from "../composerDefaults.ts";
 import { friendlyError, matchesSendShortcut, modKeyLabel, parseModelRef } from "../settings.ts";
 import { Icon } from "../icons.tsx";
 import ModelPicker from "@polyth/models/model-picker";
@@ -130,7 +127,6 @@ import { resolveProjectModelDefault, useSessionDefaults } from "../sessionDefaul
 import { contextTokensUsed } from "../reduce.ts";
 import { effectiveAttachmentSupport, attachmentModality } from "@polyth/contracts";
 import { getModelThinking, resolveComposerThinking, setModelThinking } from "../thinkingPrefs.ts";
-import { roleKind, useRolePrefs } from "../rolePrefs.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import {
   clearDraftExecutionConfig,
@@ -442,11 +438,6 @@ function useComposerLocation(session: SessionProjection | null): {
   };
 }
 
-function agentBadgeLabel(agent?: string): string {
-  const label = (agent || tr("composer.build")).replace(/[-_]+/g, " ").trim();
-  return label ? label[0]!.toUpperCase() + label.slice(1) : tr("composer.build");
-}
-
 type QueueEdit = {
   id: string;
   sessionId: string;
@@ -481,7 +472,6 @@ export default function Composer({
   const globalAgents = useStore((s) => s.agents);
   const activeProject = useStore((s) =>
     s.projectRegistry.projects.find((candidate) => candidate.id === s.activeProjectId));
-  const rolePrefs = useRolePrefs();
   const settings = useStore((s) => s.settings);
   const sessionDefaults = useSessionDefaults();
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
@@ -505,6 +495,7 @@ export default function Composer({
   const routeCatalog = useRuntimeCatalog(session, globalModels, globalAgents, {
     spaceId,
     projectId: activeProjectId ?? undefined,
+    cwd: activeProject?.path,
     harnessId: prospectiveHarnessId,
   });
   const catalogHarnessId = pendingSessionHarnessId
@@ -515,9 +506,6 @@ export default function Composer({
   const models = catalogHarnessId
     ? routeCatalog.models.filter((item) => !item.harnessId || item.harnessId === catalogHarnessId)
     : routeCatalog.models;
-  const agents = catalogHarnessId
-    ? routeCatalog.agents.filter((item) => !item.harnessId || item.harnessId === catalogHarnessId)
-    : routeCatalog.agents;
   // The four honest states, so "still discovering" and "this engine is not
   // signed in" never render as "this engine has no models".
   const modelCatalog: CatalogState<ModelDescriptor> = harnessModelCatalog({
@@ -1770,7 +1758,6 @@ export default function Composer({
   };
 
   // ---- execution configuration projections ------------------------------------
-  const agentValue = cfg.agent ?? "";
   const recommendedModel = pendingSessionHarnessId
     ? chatModels[0]
     : session?.model
@@ -1810,53 +1797,6 @@ export default function Composer({
       profileId: session.agentProfileId,
     }, profiles));
   };
-  const chatAgents = agents.filter((agent) =>
-    roleKind(agent, rolePrefs) === "main" && agent.name.toLowerCase() !== "compaction");
-  const defaultAgentLabel = agentBadgeLabel(
-    agentPickerDefaultLabel(session?.agent, chatAgents).replace(/^Default:\s*/, ""),
-  );
-  const agentChangeEffect = "Applies to the next message in this session. No new session is created; current work and history stay here.";
-  // Agent rows carry the backend-reported purpose so choosing between modes
-  // is informed, not a guess from a one-word name.
-  const agentItems: PickerItem[] = [
-    {
-      id: "",
-      label: defaultAgentLabel,
-      detail: `${tr("composer.letPolythUseYourCurrentWorkspaceDefault")}. ${agentChangeEffect}`,
-      group: "",
-    },
-    ...chatAgents
-      // The default row already resolves to this agent; showing it twice is a dupe.
-      .filter((a) => agentBadgeLabel(a.name) !== defaultAgentLabel)
-      .map((a) => ({
-      id: a.name,
-      label: agentBadgeLabel(a.name),
-      detail: a.description ? `${a.description} — ${agentChangeEffect}` : agentChangeEffect,
-      group: "",
-    })),
-  ];
-  const pickAgent = (id: string) => {
-    updateCfg(withExplicitAgent(cfg, id || undefined));
-    if (!session && activeProjectId && !id) {
-      updateDraftExecutionConfig(activeProjectId, { agent: undefined });
-    } else if (!session && activeProjectId) {
-      const descriptor = routeCatalog.agents.find((candidate) => candidate.name === id
-        && (!effectiveDraftHarness || !candidate.harnessId || candidate.harnessId === effectiveDraftHarness));
-      if (descriptor?.harnessId) updateDraftExecutionConfig(activeProjectId, {
-        harnessSelection: { mode: "pinned", harnessId: descriptor.harnessId },
-        harnessSelectionExplicit: true,
-        agent: { harnessId: descriptor.harnessId, agent: id },
-      });
-    }
-  };
-  const activeAgent = cfg.agent
-    ?? session?.agent
-    ?? sessionDefaults.defaultAgent
-    ?? chatAgents[0]?.name
-    ?? "build";
-  const activeAgentLabel = agentItems.find((item) => item.id === agentValue)?.label
-    ?? agentBadgeLabel(activeAgent);
-
   const selectedModel = (() => {
     const nextTurn = cfg.model ?? session?.model ?? (effectiveProfile
       ? { providerID: effectiveProfile.providerID, modelID: effectiveProfile.modelID }
@@ -1996,7 +1936,7 @@ export default function Composer({
   };
   const thinkingVariants = selectedModel?.variants ?? [];
   // On phones the model picker also owns the execution settings header, so
-  // each role/thinking/profile control still has one rendered owner.
+  // the thinking control still has one rendered owner.
   const effortControl = !noModels && modelSupportsThinking(selectedModel) ? (
     <EffortMenu
       variants={thinkingVariants}
@@ -2005,20 +1945,6 @@ export default function Composer({
       onCommit={preserveKeyboard}
     />
   ) : null;
-  const agentControl = chatAgents.length > 0 ? (
-    <Picker
-      className="composer-agent-chip"
-      label={tr("composer.agent")}
-      mobileSheet
-      direction="up"
-      items={agentItems}
-      value={agentValue}
-      searchable={false}
-      onPick={pickAgent}
-      placeholder={activeAgentLabel}
-      ariaLabel={tr("composer.selectAgentModeCurrentValue", { value: activeAgentLabel })}
-    />
-  ) : <span className="agent-type-badge">{activeAgentLabel}</span>;
   const phoneLayout = isPhone;
   const executionPickerContext = {
     spaceId,
@@ -2031,7 +1957,6 @@ export default function Composer({
     pendingHarnessSelection: session ? cfg.harness : undefined,
     onSelectHarness: session ? pickComposerHarness : undefined,
     projectHarnessDefault: activeProject?.defaults?.harness,
-    executionAgentControl: agentControl,
     executionEffortControl: effortControl,
     phoneLayout,
   };
@@ -2103,7 +2028,7 @@ export default function Composer({
     requestComposerReplace(rewrite.original);
   }, [promptRewrite, text]);
   // Composer controls are ordinary mini-widgets: one placement/visibility
-  // system owns next action, Workflow, effort, and agent.
+  // system owns next action, Workflow, and effort.
   const slotContext = {
     ...executionPickerContext,
     variant,
@@ -2117,10 +2042,9 @@ export default function Composer({
     workflowDraftText: text,
     workflowAttachmentCount: attachments.length,
     consumeWorkflowDraft,
-    // The phone model sheet owns effort and agent. Keep the ordinary
-    // composer widget contexts empty so neither control renders twice.
+    // The phone model sheet owns effort. Keep the ordinary composer widget
+    // context empty so it does not render twice.
     composerEffortControl: phoneLayout ? null : effortControl,
-    composerAgentControl: phoneLayout ? null : agentControl,
     canGenerateNextAction,
     canRevertSuggestion,
     suggestionBusy,

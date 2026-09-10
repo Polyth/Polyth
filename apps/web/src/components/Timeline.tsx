@@ -282,7 +282,7 @@ function Thinking({ m, live, entering = false }: { m: AssistantMsg; live: boolea
       >
         {mark}
         <span className="reasoning-main">
-          <strong>{head || (active ? tr("timeline.workingThroughTheRequest") : tr("timeline.activityDetail"))}</strong>
+          <strong className="reasoning-preview">{head || (active ? tr("timeline.workingThroughTheRequest") : tr("timeline.activityDetail"))}</strong>
         </span>
         <span className="reasoning-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
       </button>

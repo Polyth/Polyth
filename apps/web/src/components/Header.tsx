@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type DragEvent } from "react";
 import { formatCombo } from "@polyth/hotkeys";
 import {
   closeWorkspacePane, getState, setActiveView, useStore,
@@ -287,6 +287,53 @@ function useResizeFocusHandoff(mode: ShellMode) {
   }, [mode]);
 }
 
+/** Publish the real header clusters so the chat-aligned session rail can use
+ *  the space between them without covering configured actions at narrow wide
+ *  widths or when the persistent sidebar is collapsed. */
+function useHeaderOccupancy(active: boolean) {
+  const headerRef = useRef<HTMLElement>(null);
+  const leadingRef = useRef<HTMLDivElement>(null);
+  const trailingRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const header = headerRef.current;
+    if (!header) return;
+    const clear = () => {
+      header.style.removeProperty("--header-leading-inline-end");
+      header.style.removeProperty("--header-trailing-inline-size");
+    };
+    if (!active) {
+      clear();
+      return clear;
+    }
+    const publish = () => {
+      const box = header.getBoundingClientRect();
+      const leading = leadingRef.current?.getBoundingClientRect();
+      const trailing = trailingRef.current?.getBoundingClientRect();
+      header.style.setProperty(
+        "--header-leading-inline-end",
+        `${Math.max(0, Math.ceil((leading?.right ?? box.left) - box.left))}px`,
+      );
+      header.style.setProperty(
+        "--header-trailing-inline-size",
+        `${Math.max(0, Math.ceil(box.right - (trailing?.left ?? box.right)))}px`,
+      );
+    };
+    publish();
+    if (typeof ResizeObserver !== "function") return clear;
+    const observer = new ResizeObserver(publish);
+    observer.observe(header);
+    if (leadingRef.current) observer.observe(leadingRef.current);
+    if (trailingRef.current) observer.observe(trailingRef.current);
+    return () => {
+      observer.disconnect();
+      clear();
+    };
+  }, [active]);
+
+  return { headerRef, leadingRef, trailingRef };
+}
+
 function UserMenu({ githubUser }: { githubUser: GithubStatusDto["user"] }) {
   return (
     <div className="header-user-menu">
@@ -330,6 +377,7 @@ export default function Header() {
   const compact = mode !== "wide";
   const sidebarLayout = useSidebarLayout();
   const chatSurface = workspaceMode === "chat" && view === "session";
+  const occupancy = useHeaderOccupancy(mode === "wide" && session !== null);
   useResizeFocusHandoff(mode);
   const switchWorkspaceMode = (next: "chat" | "widgets") => {
     closeWorkspacePane();
@@ -361,6 +409,7 @@ export default function Header() {
   return (
     <>
       <header
+        ref={occupancy.headerRef}
         className={`header${compact ? " header-compact" : ""}${chatSurface ? " header-chat" : ""}`}
         style={{ "--sidebar-inline-size": compact ? "0px" : `${sidebarLayout.collapsed ? 46 : sidebarLayout.width}px` } as React.CSSProperties}
       >
@@ -375,7 +424,7 @@ export default function Header() {
             onClick={() => setSidebarOpen(true)}
           />
         )}
-        <div className="header-left-cluster">
+        <div ref={occupancy.leadingRef} className="header-left-cluster">
           {(!compact || !chatSurface) && <button className="header-brand header-control" aria-label={tr("header.polythHome")} onClick={() => switchWorkspaceMode("chat")}>
             <span className="polyth-mark">{tr("header.p")}</span>
             <strong>{tr("header.polyth")}</strong>
@@ -391,27 +440,29 @@ export default function Header() {
         </div>
         {!compact && session && <DesktopSessionStatus />}
         <span className="header-spacer" />
-        {(!compact || !chatSurface) && (
-          <div className="header-actions customize-zone" aria-label={tr("header.application")}>
-            <SlotHost
-              slot="session.header.actions"
-              context={{ projectId: project?.id ?? null, sessionId: session?.id ?? null, workspaceMode }}
-              customizable
-            />
-            <SlotHost
-              slot="app.header.actions"
-              context={{ projectId: project?.id ?? null, sessionId: session?.id ?? null, workspaceMode }}
-              customizable
-            />
-            <CustomizeZoneButton
-              slot="app.header.actions"
-              slots={["session.header.actions", "app.header.actions"]}
-            />
-          </div>
-        )}
-        {compact && <MobileNavigationRail />}
-        {(!compact || !chatSurface) && <UserMenu githubUser={githubUser} />}
-        <SlotHost slot="app.window.controls" />
+        <div ref={occupancy.trailingRef} className="header-trailing-cluster">
+          {(!compact || !chatSurface) && (
+            <div className="header-actions customize-zone" aria-label={tr("header.application")}>
+              <SlotHost
+                slot="session.header.actions"
+                context={{ projectId: project?.id ?? null, sessionId: session?.id ?? null, workspaceMode }}
+                customizable
+              />
+              <SlotHost
+                slot="app.header.actions"
+                context={{ projectId: project?.id ?? null, sessionId: session?.id ?? null, workspaceMode }}
+                customizable
+              />
+              <CustomizeZoneButton
+                slot="app.header.actions"
+                slots={["session.header.actions", "app.header.actions"]}
+              />
+            </div>
+          )}
+          {compact && <MobileNavigationRail />}
+          {(!compact || !chatSurface) && <UserMenu githubUser={githubUser} />}
+          <SlotHost slot="app.window.controls" />
+        </div>
       </header>
     </>
   );

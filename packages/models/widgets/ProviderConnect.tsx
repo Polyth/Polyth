@@ -4,7 +4,7 @@ import {
   type ProviderAuthView as ProviderAuthViewDto,
 } from "@polyth/session/web-api";
 import type { AuthErrorDto, NormalizedAuthMethod } from "@polyth/contracts";
-import { Button, Dialog } from "../../../apps/web/src/components/ui/index.ts";
+import { Button, Dialog, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import {
   clearSecretValues,
@@ -348,8 +348,7 @@ export function OrganizationLogin({ onDone }: { onDone: () => void }) {
       <p className="muted">{tr("settings.modelspage.organizationLoginHint")}</p>
       <label className="provider-auth-field">
         <span className="provider-auth-label">{tr("settings.modelspage.organizationUrl")}</span>
-        <input
-          className="ui-input"
+        <TextInput
           value={origin}
           onChange={(event) => setOrigin(event.target.value)}
           placeholder="https://organization.example"

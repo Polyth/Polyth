@@ -144,6 +144,108 @@ test("agent tool bridge authorizes the exact scoped grant before invoking", asyn
   });
 });
 
+test("agent tool bridge waits for asynchronous Polyth authorization", async () => {
+  const registry = createCapabilityContributionRegistry();
+  let executed = false;
+  registry.register("example-feature", {
+    descriptor: {
+      id: "example-feature.write",
+      kind: "tool",
+      owner: "example-feature",
+      scope: "project",
+      revision: "1",
+      name: "write",
+      description: "write",
+      inputSchema: { type: "object", properties: {} },
+      trust: "workspace",
+      mutating: true,
+    },
+    execute: async () => {
+      executed = true;
+      return { output: "done" };
+    },
+  });
+  let decide!: (decision: "allow" | "deny") => void;
+  const authorization = new Promise<"allow" | "deny">((resolve) => { decide = resolve; });
+  const bridge = createAgentToolBridge({
+    executor: (id) => registry.executor(id),
+    contribution: (id) => registry.contribution(id),
+    authorize: async () => authorization,
+  });
+  const descriptor = registry.list()[0]!.descriptor as Extract<import("@polyth/contracts").AgentCapabilityDescriptor, { kind: "tool" }>;
+  const grant = bridge.mint({
+    spaceId: "space-a",
+    projectId: "project-a",
+    cwd: "/workspace/a",
+    tools: [descriptor],
+  });
+  let captured: { code: number; body: unknown } | undefined;
+  const route = bridge.route({
+    path: AGENT_TOOLS_PATH,
+    method: "POST",
+    ingress: { kind: "public-http", listenerId: "public", loopback: true, secure: false },
+    req: { headers: { authorization: `Bearer ${grant.token}` } },
+    body: async () => ({ id: descriptor.id, arguments: {} }),
+    json: (code: number, body: unknown) => { captured = { code, body }; },
+  } as never);
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(executed, false);
+  assert.equal(captured, undefined);
+  decide("allow");
+  assert.equal(await route, true);
+  assert.equal(captured?.code, 200);
+  assert.equal(executed, true);
+});
+
+test("agent tool bridge revalidates a contribution after asynchronous authorization", async () => {
+  const registry = createCapabilityContributionRegistry();
+  let executed = false;
+  const registration = registry.register("example-feature", {
+    descriptor: {
+      id: "example-feature.write",
+      kind: "tool",
+      owner: "example-feature",
+      scope: "project",
+      revision: "1",
+      name: "write",
+      description: "write",
+      inputSchema: { type: "object", properties: {} },
+      trust: "workspace",
+      mutating: true,
+    },
+    execute: async () => {
+      executed = true;
+      return { output: "stale" };
+    },
+  });
+  let decide!: (decision: "allow" | "deny") => void;
+  const authorization = new Promise<"allow" | "deny">((resolve) => { decide = resolve; });
+  const bridge = createAgentToolBridge({
+    executor: (id) => registry.executor(id),
+    contribution: (id) => registry.contribution(id),
+    authorize: async () => authorization,
+  });
+  const descriptor = registry.list()[0]!.descriptor as Extract<import("@polyth/contracts").AgentCapabilityDescriptor, { kind: "tool" }>;
+  const grant = bridge.mint({ spaceId: "space-a", projectId: "project-a", cwd: "/workspace/a", tools: [descriptor] });
+  let captured: { code: number; body: unknown } | undefined;
+  const route = bridge.route({
+    path: AGENT_TOOLS_PATH,
+    method: "POST",
+    ingress: { kind: "public-http", listenerId: "public", loopback: true, secure: false },
+    req: { headers: { authorization: `Bearer ${grant.token}` } },
+    body: async () => ({ id: descriptor.id, arguments: {} }),
+    json: (code: number, body: unknown) => { captured = { code, body }; },
+  } as never);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  registration.dispose();
+  decide("allow");
+  await route;
+
+  assert.equal(executed, false);
+  assert.equal(captured?.code, 404);
+});
+
 test("agent-tools MCP stdio uses newline-delimited JSON-RPC", async () => {
   const script = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "agentToolsMcp.mjs");
   const child = spawn(process.execPath, [script], { stdio: ["pipe", "pipe", "pipe"] });

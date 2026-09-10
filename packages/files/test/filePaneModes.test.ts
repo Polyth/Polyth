@@ -112,6 +112,12 @@ test("code files open straight into edit mode; toolbar is trimmed", async () => 
 
     // Finding 5: the trimmed toolbar has no permanent single-action buttons.
     const toolbar = container.querySelector<HTMLElement>(".editor-toolbar")!;
+    assert.equal(container.querySelector(".editor-head"), null, "the tab is the only file title row");
+    assert.equal(
+      container.querySelector('[aria-label="Close file"]'),
+      null,
+      "FilePane does not duplicate the tab close action",
+    );
     const toolbarLabels = [...toolbar.querySelectorAll("button")].map((b) => (b.textContent ?? "").trim());
     for (const gone of ["Edit", "Rename", "Delete", "Wrap", "Go to line", "Add file to chat", "Add selection to chat"]) {
       assert.equal(toolbarLabels.includes(gone), false, `toolbar must not contain a "${gone}" button`);

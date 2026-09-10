@@ -29,7 +29,10 @@ export function handoffRoutes(deps: {
 }): RouteHandler {
   const { host, registry, bundles } = deps;
 
-  return async ({ path, method, url, body, json, space }) => {
+  return async (request) => {
+    const { path } = request;
+    if (!path.startsWith("/api/handoff/")) return false;
+    const { method, url, body, json, space } = request;
     try {
       const spaces = host.forSpace(space);
       const query = (key: string) => url.searchParams.get(key) ?? "";

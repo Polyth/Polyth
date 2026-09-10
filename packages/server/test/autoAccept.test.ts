@@ -22,6 +22,7 @@ function fakeRuntime() {
     for (const l of listeners) l(sessionId, ev);
   };
   const rt: AgentRuntime = {
+    harnessId: "opencode",
     capabilities: async () => ({ streaming: true, permissions: true, questions: true, compaction: false, subagents: true }),
     models: async () => [],
     agents: async () => [],
@@ -46,7 +47,7 @@ const flush = () => new Promise((r) => setTimeout(r, 25));
 function harness(opts: { permission?: "allow" | "deny" | "ask"; dir?: string } = {}) {
   const dir = opts.dir ?? mkdtempSync(join(tmpdir(), "polyth-aa-"));
   const store = createStore(join(dir, "s.db"));
-  const project: Project = { id: "p1", path: dir, name: "p", createdAt: 1 };
+  const project: Project = { id: "p1", path: dir, name: "p", spaceId: "space-a", createdAt: 1 };
   const projects: ProjectService = {
     list: async () => [project],
     get: async (id) => (id === "p1" ? project : undefined),
@@ -54,8 +55,9 @@ function harness(opts: { permission?: "allow" | "deny" | "ask"; dir?: string } =
     create: async () => project,
     remove: async () => {},
   };
+  let permission = opts.permission ?? "ask";
   const permissions = {
-    evaluate: () => opts.permission ?? "ask",
+    evaluate: () => permission,
     addRule: () => {},
     rules: () => [],
   } as unknown as PermissionService;
@@ -78,8 +80,108 @@ function harness(opts: { permission?: "allow" | "deny" | "ask"; dir?: string } =
     },
     shell: { run: async () => ({ output: "ok", exitCode: 0, timedOut: false, truncated: false }) },
   });
-  return { sessions, store, fake, attention, stopped, statuses, broadcasts };
+  return {
+    sessions, store, fake, attention, stopped, statuses, broadcasts,
+    setPermission: (value: "allow" | "deny" | "ask") => { permission = value; },
+  };
 }
+
+test("project-scoped agent tool pauses in the active canonical session until approved", async () => {
+  const { sessions, store, fake, attention } = harness();
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await sessions.send(id, { text: "do the requested package action" });
+  await flush();
+
+  const decision = sessions.requestAgentToolPermission({
+    spaceId: "space-a",
+    projectId: "p1",
+    cwd: (await store.projection(id))?.runtimeBinding?.location.directory ?? "",
+    harnessId: "opencode",
+    toolId: "example-feature.write",
+    toolName: "write",
+    owner: "example-feature",
+  });
+  await flush();
+
+  const requested = (await store.events(id)).find((event) =>
+    event.type === "permission/requested"
+    && (event.data as { permission?: string }).permission === "package-tool");
+  assert.ok(requested);
+  assert.equal((await store.projection(id))?.status, "waiting");
+  assert.deepEqual(attention, [{ sessionId: id, kind: "permission" }]);
+  await sessions.replyPermission(
+    id,
+    (requested.data as { requestId: string }).requestId,
+    "once",
+  );
+  assert.equal(await decision, "allow");
+  assert.deepEqual(fake.permissionReplies, [], "package-tool approval is owned by Polyth, not forwarded to the harness");
+  assert.ok((await store.events(id)).some((event) =>
+    event.type === "permission/resolved"
+    && (event.data as { requestId?: string }).requestId === (requested.data as { requestId: string }).requestId));
+});
+
+test("a deny rule added while agent-tool approval is pending still wins", async () => {
+  const { sessions, store, setPermission } = harness();
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await sessions.send(id, { text: "do the requested package action" });
+  await flush();
+  const projection = await store.projection(id);
+  const decision = sessions.requestAgentToolPermission({
+    spaceId: "space-a",
+    projectId: "p1",
+    cwd: projection?.runtimeBinding?.location.directory ?? "",
+    harnessId: "opencode",
+    toolId: "example-feature.write",
+    toolName: "write",
+    owner: "example-feature",
+  });
+  await flush();
+  const requested = (await store.events(id)).find((event) =>
+    event.type === "permission/requested"
+    && (event.data as { permission?: string }).permission === "package-tool");
+  assert.ok(requested);
+
+  setPermission("deny");
+  await sessions.replyPermission(id, (requested.data as { requestId: string }).requestId, "once");
+  assert.equal(await decision, "deny");
+});
+
+test("agent tool authorization fails closed for idle, foreign-Space, and ambiguous sessions", async () => {
+  const { sessions, store } = harness();
+  const { id } = await sessions.create({ projectId: "p1", title: "Idle" });
+  const projection = await store.projection(id);
+  const request = (spaceId: string, harnessId = "opencode") => sessions.requestAgentToolPermission({
+    spaceId,
+    projectId: "p1",
+    cwd: projection?.runtimeBinding?.location.directory ?? "",
+    harnessId,
+    toolId: "example-feature.write",
+    toolName: "write",
+    owner: "example-feature",
+  });
+  assert.equal(await request("space-a"), "permission-required");
+
+  await sessions.send(id, { text: "first active turn" });
+  await flush();
+  assert.equal(await request("space-b"), "permission-required");
+  assert.equal(await request("space-a", "claude"), "permission-required");
+
+  const { id: second } = await sessions.create({ projectId: "p1", title: "Also active" });
+  await sessions.send(second, { text: "second active turn" });
+  await flush();
+  assert.equal(await sessions.requestAgentToolPermission({
+    spaceId: "space-a",
+    projectId: "p1",
+    cwd: projection?.runtimeBinding?.location.directory ?? "",
+    harnessId: "opencode",
+    toolId: "example-feature.write",
+    toolName: "write",
+    owner: "example-feature",
+  }), "permission-required");
+  assert.equal((await store.events(id)).some((event) => event.type === "permission/requested"), false);
+  assert.equal((await store.events(second)).some((event) => event.type === "permission/requested"), false);
+});
 
 test("auto-accept on: request resolves with auto:true, runtime replied, no notify", async () => {
   const { sessions, store, fake, attention, broadcasts } = harness();

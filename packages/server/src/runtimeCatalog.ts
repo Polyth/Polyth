@@ -138,8 +138,8 @@ export function createRuntimeCatalog(deps: {
     const pool = deps.runtimes as SnapshotRuntimePool;
     let run!: Promise<CatalogSnapshot>;
     run = (async () => {
+      if (!pool.harnessSnapshots) return loadFallback();
       const harnessSnapshots = pool.harnessSnapshots;
-      if (!harnessSnapshots) return loadFallback();
       const projects = await deps.projects.list();
       const authority = projects.find((project) => !project.remote) ?? projects[0];
       const projectId = authority?.id ?? "__default__";

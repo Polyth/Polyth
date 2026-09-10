@@ -464,6 +464,105 @@ test("Usage dashboard responds to a docked panel instead of the viewport", { ski
   }
 });
 
+test("Files keeps its editor beside the tree regardless of package style load order", { skip: !CHROME }, async (t) => {
+  assert.ok(page);
+  t.after(async () => { await page!.setViewportSize({ width: 390, height: 720 }); });
+  const [coreCss, filesCss] = await Promise.all([
+    read("../src/styles.css"),
+    read("../../../packages/files/widgets/styles.css"),
+  ]);
+  await page.setViewportSize({ width: 1247, height: 951 });
+  const content = (styles: string) => `
+    <style>${styles}</style>
+    <aside class="rail rail-workspace" style="width: 1158px; height: 850px">
+      <section class="module-view">
+        <div class="module-view-body">
+          <div class="module-view-content module-view-content--workspace">
+            <div class="rail-body">
+              <div class="editor-view mobile-editor">
+                <div class="editor-mobile-tabs">Files / AGENTS.md</div>
+                <aside class="editor-tree">
+                  <div class="files-search"><input class="ui-input ui-input--sm" placeholder="Search files…"></div>
+                  <div class="ft-tree">
+                    <div class="ft-row" style="padding-inline-start: 8px">
+                      <span class="ft-name">AGENTS.md</span><button class="ft-at">@</button>
+                    </div>
+                  </div>
+                </aside>
+                <section class="editor-pane">
+                  <div class="pane-tabs"><div class="pane-tab-group active"><button class="pane-tab">AGENTS.md</button></div></div>
+                  <div class="pane-body"><div class="editor-toolbar">Edit <span>Preview</span></div><div class="editor-body">Editor</div></div>
+                </section>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </aside>
+  `;
+
+  const geometry = async () => page!.evaluate(() => {
+    const root = document.querySelector<HTMLElement>(".editor-view")!;
+    const mobileTabs = document.querySelector<HTMLElement>(".editor-mobile-tabs")!;
+    const tree = document.querySelector<HTMLElement>(".editor-tree")!;
+    const editor = document.querySelector<HTMLElement>(".editor-pane")!;
+    const row = document.querySelector<HTMLElement>(".ft-row")!;
+    const rowName = document.querySelector<HTMLElement>(".ft-name")!;
+    const rowAction = document.querySelector<HTMLElement>(".ft-at")!;
+    const tab = document.querySelector<HTMLElement>(".pane-tab")!;
+    const toolbar = document.querySelector<HTMLElement>(".editor-toolbar")!;
+    return {
+      direction: getComputedStyle(root).flexDirection,
+      mobileTabsDisplay: getComputedStyle(mobileTabs).display,
+      treeDisplay: getComputedStyle(tree).display,
+      treeWidth: tree.getBoundingClientRect().width,
+      editorDisplay: getComputedStyle(editor).display,
+      editorWidth: editor.getBoundingClientRect().width,
+      editorHeight: editor.getBoundingClientRect().height,
+      rowHeight: row.getBoundingClientRect().height,
+      tabHeight: tab.getBoundingClientRect().height,
+      toolbarHeight: toolbar.getBoundingClientRect().height,
+      rowFontFamily: getComputedStyle(rowName).fontFamily,
+      rowFontSize: getComputedStyle(rowName).fontSize,
+      tabFontFamily: getComputedStyle(tab).fontFamily,
+      tabFontSize: getComputedStyle(tab).fontSize,
+      rowActionOpacity: getComputedStyle(rowAction).opacity,
+      rowActionPointerEvents: getComputedStyle(rowAction).pointerEvents,
+    };
+  });
+
+  for (const [order, styles] of [
+    ["package-before-core", `${filesCss}\n${coreCss}`],
+    ["core-before-package", `${coreCss}\n${filesCss}`],
+  ] as const) {
+    await page.setContent(content(styles));
+    const wide = await geometry();
+    assert.equal(wide.direction, "row", `${order}: the host does not override the Files wide split axis`);
+    assert.equal(wide.mobileTabsDisplay, "none");
+    assert.notEqual(wide.treeDisplay, "none");
+    assert.ok(wide.treeWidth > 0);
+    assert.equal(wide.editorDisplay, "flex");
+    assert.ok(wide.editorWidth > 0, "the editor owns the width left beside the tree");
+    assert.ok(wide.editorHeight > 0, "the editor fills the workspace pane height");
+    assert.equal(wide.rowHeight, 32, `${order}: file rows use the compact control rhythm`);
+    assert.equal(wide.tabHeight, 32, `${order}: file tabs use the compact control rhythm`);
+    assert.equal(wide.toolbarHeight, 32, `${order}: editor toolbar uses the compact control rhythm`);
+    assert.equal(wide.rowFontFamily, wide.tabFontFamily, `${order}: file names share one technical typeface`);
+    assert.equal(wide.rowFontSize, wide.tabFontSize, `${order}: file names share one technical type size`);
+    assert.equal(wide.rowActionOpacity, "0", `${order}: desktop row actions stay contextual`);
+    assert.equal(wide.rowActionPointerEvents, "none", `${order}: hidden row actions do not intercept clicks`);
+  }
+
+  await page.locator(".rail-workspace").evaluate((element) => { element.style.width = "805px"; });
+  const compact = await geometry();
+  assert.equal(compact.direction, "column");
+  assert.equal(compact.mobileTabsDisplay, "flex");
+  assert.equal(compact.treeDisplay, "none", "the selected editor replaces the tree in compact mode");
+  assert.equal(compact.editorDisplay, "flex");
+  assert.ok(compact.editorWidth > 0);
+  assert.ok(compact.editorHeight > 0);
+});
+
 test("390px package windows cover Chat, clear the shell menu, and preserve the app background", { skip: !CHROME }, async () => {
   assert.ok(page);
   const css = await read("../src/styles.css");

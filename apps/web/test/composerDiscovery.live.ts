@@ -521,6 +521,7 @@ test("voice: availability is truthful and named for preference-off and unsupport
   await prefOff.waitForSelector(".mic-control", { state: "visible" });
   assert.equal((await prefOff.locator(".mic-status").innerText()).trim(), "Dictation is off");
   assert.equal(await prefOff.locator(".mic-btn").isDisabled(), true);
+  assert.equal(await prefOff.locator(".mic-settings").count(), 0, "voice settings stay out of the composer");
   await closePage(prefOff);
 
   // Browser without the Web Speech API.
@@ -531,6 +532,7 @@ test("voice: availability is truthful and named for preference-off and unsupport
     "Dictation is not supported in this browser",
   );
   assert.equal(await unsupported.locator(".mic-btn").isDisabled(), true);
+  assert.equal(await unsupported.locator(".mic-settings").count(), 0, "voice settings stay out of the composer");
   await shot(unsupported, "voice_unsupported.png");
   await closePage(unsupported);
 });
@@ -579,7 +581,7 @@ test("voice lifecycle: listening and failure are visible; transcripts stay draft
   await page.waitForSelector(".mic-control.mic-failed", { state: "visible" });
   assert.equal((await page.locator(".mic-status").innerText()).trim(), "Dictation failed: synthetic-error");
   await page.waitForSelector(".mic-retry", { state: "visible" });
-  await page.waitForSelector(".mic-settings", { state: "visible" });
+  assert.equal(await page.locator(".mic-settings").count(), 0, "voice settings stay out of the composer");
   await shot(page, "voice_failed.png");
 
   // Idempotent registration: a full reload still yields exactly one slot.
@@ -589,7 +591,7 @@ test("voice lifecycle: listening and failure are visible; transcripts stay draft
   await closePage(page);
 });
 
-test("selectors: truthful model and agent names with per-session model persistence", async () => {
+test("selectors: truthful model names with per-session model persistence", async () => {
   const page = await openApp();
 
   // Model picker: current value in the accessible name; quiet rows, details on hover.
@@ -633,13 +635,7 @@ test("selectors: truthful model and agent names with per-session model persisten
     "Select model, current Fable Mini",
   );
 
-  // The current agent mode is named and opens the canonical listbox.
-  const agentChip = page.locator(".composer-agent-chip .picker-chip");
-  assert.equal(await agentChip.getAttribute("aria-label"), "Select agent mode, current Build");
-  await agentChip.click();
-  await page.waitForSelector(".picker-pop", { state: "visible" });
-  assert.equal(await page.locator(".picker-pop [role='listbox']").getAttribute("aria-label"), "Agent");
-  await page.keyboard.press("Escape");
+  assert.equal(await page.locator(".composer-agent-chip").count(), 0, "agent choices stay out of the composer");
   await closePage(page);
 });
 
@@ -755,7 +751,7 @@ test("coarse pointer: the 44px target contract holds at desktop width", async ()
   await closePage(page);
 });
 
-test("sequential focus order: editor → Add → selectors → voice → primary action", async () => {
+test("sequential focus order: editor → Add → model → voice → primary action", async () => {
   const page = await openApp();
   // A nonempty draft makes the primary action operable (a disabled Send is
   // rightly skipped by sequential focus).
@@ -774,7 +770,7 @@ test("sequential focus order: editor → Add → selectors → voice → primary
     visited.push(cls);
   }
   const order = [
-    "composer-add-trigger", "picker-model", "composer-agent-chip", "mic-btn", "send",
+    "composer-add-trigger", "picker-model", "mic-btn", "send",
   ];
   let at = -1;
   for (const marker of order) {

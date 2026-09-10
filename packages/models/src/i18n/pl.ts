@@ -115,6 +115,8 @@ export const pl: ModelsMessages = {
   "settings.modelspage.noMatches": "Brak wyników",
   "settings.modelspage.noModelsAvailable": "Brak dostępnych modeli",
   "settings.modelspage.noModelsYet": "No models yet — discover them or add one manually.",
+  "settings.modelspage.noProvidersYet": "Brak dostawców",
+  "settings.modelspage.noProvidersHint": "Użyj „Dodaj dostawcę”, aby podłączyć jednego. Modele pojawią się tutaj.",
   "settings.modelspage.oauthMethod": "OAuth",
   "settings.modelspage.openLoginPage": "Otwórz stronę logowania",
   "settings.modelspage.orApiKey": "Lub użyj klucza API",

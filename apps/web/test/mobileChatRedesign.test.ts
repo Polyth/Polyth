@@ -439,7 +439,7 @@ test("the composer is adaptive, with one primary action at a time", async () => 
   );
 });
 
-test("phone execution choices live behind the model picker with harness tabs", async () => {
+test("phone execution controls live behind the model picker with harness tabs", async () => {
   const composer = await read("../src/components/Composer.tsx");
   const harnessPicker = await read("../../../packages/harness-runtime/widgets/runtime.tsx");
   const modelPicker = await read("../../../packages/models/widgets/ModelPicker.tsx");
@@ -448,8 +448,8 @@ test("phone execution choices live behind the model picker with harness tabs", a
   const miniWidgets = await read("../src/widgets/builtinMiniWidgets.tsx");
   const styles = await read("../src/styles.css");
 
-  // Phones expose the model trigger; its sheet owns harness tabs plus role and
-  // thinking controls. Desktop keeps the same model control in the rail.
+  // Phones expose the model trigger; its sheet owns harness tabs plus thinking
+  // controls. Desktop keeps the same model control in the rail.
   assert.ok(!composer.includes('className="composer-config-top"'), "phones do not stack a second configuration row above the editor");
   assert.ok(composer.includes("{!phoneLayout && modelControl}"), "the desktop rail keeps the model control");
   assert.ok(composer.includes("{phoneLayout && modelControl}"), "the collapsed phone rail keeps the model trigger available");
@@ -462,6 +462,8 @@ test("phone execution choices live behind the model picker with harness tabs", a
   assert.ok(!harnessPicker.includes("pkg-harnesses-trigger"), "there is no separate harness picker trigger");
   assert.ok(modelPicker.includes("AdjacentDetailsPanel"), "model details render in an adjacent panel");
   assert.ok(!modelPicker.includes("{detail ? detailsView"), "the picker shell never swaps to an in-overlay details page");
+  assert.ok(!composer.includes("executionAgentControl"), "agent choices are not passed into the composer");
+  assert.ok(!harnessPicker.includes("agentControl"), "the model sheet does not render agent choices");
   assert.ok(harnessPicker.includes('aria-label="Execution settings"'), "the model sheet groups execution controls accessibly");
   assert.match(modelStyles, /\.model-picker-trigger\s*\{[^}]*var\(--hit-min\)/s, "the phone model trigger keeps a coarse-pointer hit target");
   assert.ok(composer.includes("const effortControl"), "composer derives one effort control");

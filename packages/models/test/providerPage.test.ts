@@ -48,6 +48,24 @@ test("header rows are real name/value fields, not a free-form textarea", () => {
   assert.match(dialog, /configuredModels/);
 });
 
+test("empty catalog is a compact no-providers state, not a backend-down card", () => {
+  const page = source();
+  assert.match(page, /noProvidersYet/);
+  assert.match(page, /noProvidersHint/);
+  assert.match(page, /<Notice heading/);
+  assert.equal(page.includes("noModelsAvailable"), false);
+  assert.equal(page.includes("checkThatTheBackendIsRunningAnd"), false);
+  assert.equal(page.includes("EmptyState"), false);
+});
+
+test("organization login is secondary to the provider list", () => {
+  const page = source();
+  const list = page.indexOf('className="provider-list"');
+  const org = page.indexOf("provider-org-login-wrap");
+  assert.ok(list >= 0 && org >= 0);
+  assert.ok(org > list);
+});
+
 test("enable toggle is not labeled as connection", () => {
   const page = source();
   assert.equal(page.includes("notConnected"), false);
@@ -57,4 +75,10 @@ test("enable toggle is not labeled as connection", () => {
   assert.equal(page.includes("statusError"), false);
   assert.equal(page.includes("runtimeError"), false);
   assert.equal(page.includes("models.map((model) => ({ ...model, enabled: on }))"), false);
+});
+
+test("initial provider catalog load does not invalidate its harness settings parent", () => {
+  const page = source();
+  assert.match(page, /void refreshCatalog\(\{ invalidateRuntime: false \}\)/);
+  assert.match(page, /if \(invalidateRuntime\) invalidateRuntimeCatalogs\(\)/);
 });

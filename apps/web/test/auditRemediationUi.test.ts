@@ -65,7 +65,7 @@ const google: ProviderCatalogDto = {
 
 (globalThis as { fetch?: unknown }).fetch = async (input: string | URL | Request) => {
   const url = String(input);
-  const body = url === "/api/providers"
+  const body = url === "/api/providers" || url.startsWith("/api/opencode/providers")
     ? [google]
     : url === "/api/providers/auth-capabilities"
       ? {

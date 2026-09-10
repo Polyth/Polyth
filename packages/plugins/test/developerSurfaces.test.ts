@@ -25,7 +25,7 @@ test("developer surfaces keep narrow layouts and monospace overflow contained", 
   assert.match(refinement, /\.term-body\s*\{[^}]*overflow-x:\s*auto/s);
   assert.match(refinement, /\.editor-body,[\s\S]*?max-width:\s*100%/);
   assert.match(refinement, /\.split-diff\s*\{[^}]*max-width:\s*100%/);
-  assert.match(refinement, /@media \(max-width: 820px\)[\s\S]*?\.editor-view\.mobile-tree \.editor-pane\s*\{\s*display:\s*none/);
+  assert.match(refinement, /@container feature-panel \(max-width: 820px\)[\s\S]*?\.editor-view\.mobile-tree \.editor-pane\s*\{\s*display:\s*none/);
   assert.match(refinement, /@container source-surface \(max-width: 700px\)[\s\S]*?\.split-diff-row\s*\{\s*display:\s*block/);
   assert.match(refinement, /@media \(pointer: coarse\)[\s\S]*?\.sidebar-resize,[\s\S]*?\.rail-resize\s*\{\s*display:\s*none/);
 });

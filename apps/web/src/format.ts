@@ -104,6 +104,27 @@ export function displaySessionTitle(title: string, sessionId?: string, firstUser
   return tr("format.newSession");
 }
 
+/** The wide session rail can carry more prompt context than compact session
+ *  lists. Keep deliberate/native titles intact, but expand Polyth's clipped
+ *  prompt fallback when the original first message is already cached. */
+export function displayWideSessionTitle(
+  title: string,
+  titleSource: "manual" | "native" | "polyth" | "placeholder" | undefined,
+  sessionId?: string,
+  firstUserText?: string,
+  maxPromptLength = 72,
+): string {
+  if (firstUserText !== undefined && firstUserText.trim() !== "") {
+    const compactPromptTitle = titleFromPrompt(firstUserText);
+    const promptDerived = titleSource === "polyth"
+      || titleSource === "placeholder"
+      || isPlaceholderTitle(title, sessionId)
+      || (titleSource === undefined && title.trim() === compactPromptTitle);
+    if (promptDerived) return titleFromPrompt(firstUserText, maxPromptLength);
+  }
+  return displaySessionTitle(title, sessionId, firstUserText);
+}
+
 /** Compact "time ago" for session rows: 45s, 3m, 6h, 2d. */
 export function ago(ts: number, now = Date.now()): string {
   const seconds = Math.max(0, Math.floor((now - ts) / 1000));

@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { createStore, deriveMessages, effectiveHistory, rewindDraft } from "@polyth/session";
 import type {
   AgentRuntime, JsonObject, ModelMessage, ModelRef, Project, ProjectService, RuntimeBranchRequest,
-  RuntimeEndpoint, RuntimeEvent, RuntimeSessionBinding, RuntimeSnapshot,
+  RuntimeEndpoint, RuntimeEvent, RuntimeLifecycleNotification, RuntimeSessionBinding, RuntimeSnapshot,
 } from "@polyth/contracts";
 import { createSessionService, type Broadcaster } from "../src/sessions.ts";
 import type { PermissionService } from "@polyth/permissions";
@@ -130,6 +130,7 @@ function makeService(fake: ReturnType<typeof fakeRuntime>, opts: {
       output: string; exitCode: number | null; timedOut: boolean; truncated: boolean;
     }>;
   };
+  onRestart?: (listener: (runtime: AgentRuntime) => void | Promise<void>) => { dispose(): void };
 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "polyth-delivery-"));
   const store = createStore(join(dir, "s.db"));
@@ -149,7 +150,10 @@ function makeService(fake: ReturnType<typeof fakeRuntime>, opts: {
   const broadcast: Broadcaster = { event: () => {}, projection: () => {} };
   const sessions = createSessionService({
     store, projects, permissions, broadcast, queue: store,
-    runtimes: { forProject: async () => fake.rt },
+    runtimes: {
+      forProject: async () => fake.rt,
+      ...(opts.onRestart ? { onRestart: opts.onRestart } : {}),
+    },
     ...(opts.shell ? { shell: opts.shell } : {}),
   });
   return { sessions, store };
@@ -224,6 +228,231 @@ test("two concurrent idle sends admit once and durably queue the loser", async (
     event.type === "delivery/fallback-queued"
     && (event.data as { reason?: string }).reason === "turn-active").length, 1);
   await store.close();
+});
+
+test("follow-ups queue while the active turn is still awaiting runtime admission", async (t) => {
+  const fake = fakeRuntime();
+  let releaseFirstAdmission: (() => void) | undefined;
+  let firstAdmissionReleased = false;
+  let admissionCount = 0;
+  fake.rt.startTurnOperation = (request, operationId) => {
+    admissionCount += 1;
+    fake.startedTexts.push(request.text);
+    if (admissionCount > 1) {
+      fake.emit(request.sessionId, { type: "turn/started", turnId: operationId });
+      return Promise.resolve({
+        kind: "confirmed" as const,
+        value: { admissionId: operationId },
+        receipt: operationId,
+      });
+    }
+    return new Promise((resolve) => {
+      releaseFirstAdmission = () => {
+        if (firstAdmissionReleased) return;
+        firstAdmissionReleased = true;
+        fake.emit(request.sessionId, { type: "turn/started", turnId: operationId });
+        resolve({
+          kind: "confirmed" as const,
+          value: { admissionId: operationId },
+          receipt: operationId,
+        });
+      };
+    });
+  };
+  const { sessions, store } = makeService(fake);
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+
+  const first = sessions.send(id, { text: "first" });
+  t.after(async () => {
+    releaseFirstAdmission?.();
+    await first.catch(() => {});
+    await store.close();
+  });
+  await flush();
+  assert.ok(releaseFirstAdmission, "the first runtime mutation reached its admission wait");
+
+  // Cursor may not emit turn/started until its first ACP update. During that
+  // window the composer still looks idle, while the durable submit operation
+  // is already executing. Both an unlabelled follow-up and an explicit queue
+  // intent must be preserved instead of receiving a 409 conflict.
+  const normal = await sessions.send(id, { text: "normal follow-up" });
+  const queued = await sessions.send(id, { text: "explicitly queued", delivery: "queue" });
+  assert.ok(normal.queued);
+  assert.ok(queued.queued);
+  assert.deepEqual((await store.queueList(id)).map((item) => item.text), [
+    "normal follow-up",
+    "explicitly queued",
+  ]);
+
+  releaseFirstAdmission!();
+  await first;
+  fake.emit(id, { type: "turn/stopped", reason: "completed" });
+  await flush();
+  assert.deepEqual(fake.startedTexts, ["first", "normal follow-up"]);
+  fake.emit(id, { type: "turn/stopped", reason: "completed" });
+  await flush();
+  assert.deepEqual(fake.startedTexts, ["first", "normal follow-up", "explicitly queued"]);
+});
+
+for (const notification of ["stream-connected", "stream-disconnected", "endpoint-replaced", "restart"] as const) {
+  test(`queue drains after ${notification} reconciliation without re-entering the session lock`, async (t) => {
+    const fake = fakeRuntime();
+    let lifecycle: ((notification: RuntimeLifecycleNotification) => void) | undefined;
+    let restart: ((runtime: AgentRuntime) => void | Promise<void>) | undefined;
+    fake.rt.onLifecycle = (listener) => {
+      lifecycle = listener;
+      return { dispose() {} };
+    };
+    const { sessions, store } = makeService(fake, {
+      onRestart(listener) {
+        restart = listener;
+        return { dispose() {} };
+      },
+    });
+    t.after(() => store.close());
+    const { id } = await sessions.create({ projectId: "p1", title: "T" });
+    await sessions.send(id, { text: "first" });
+    await flush();
+    await sessions.send(id, { text: "second", delivery: "queue" });
+    await sessions.send(id, { text: "third", delivery: "queue" });
+    // ACP emits a lifecycle notification immediately after completion. Both
+    // callbacks are serialized before the stop handler's queued dispatch.
+    fake.emit(id, { type: "turn/stopped", reason: "completed" });
+    let restarted = false;
+    if (notification === "restart") {
+      void Promise.resolve(restart!(fake.rt)).then(() => { restarted = true; });
+    } else {
+      lifecycle!(notification === "endpoint-replaced"
+        ? { type: notification, authorityId: "fake-runtime", generation: 1, reason: "connect" }
+        : { type: notification });
+    }
+    for (let attempt = 0; attempt < 50 && fake.startedTexts.length < 2; attempt++) await flush();
+    assert.deepEqual(fake.startedTexts, ["first", "second"]);
+    fake.emit(id, { type: "turn/stopped", reason: "completed" });
+    for (let attempt = 0; attempt < 50 && fake.startedTexts.length < 3; attempt++) await flush();
+    assert.deepEqual(fake.startedTexts, ["first", "second", "third"]);
+    await flush();
+    assert.equal((await store.queueList(id)).length, 0);
+    if (notification === "restart") assert.equal(restarted, true);
+  });
+}
+
+test("owned epoch recovery after lifecycle reconcile does not deadlock the session lock", async (t) => {
+  const listeners = new Set<(sessionId: string, ev: RuntimeEvent) => void>();
+  const lifecycleListeners = new Set<(notification: RuntimeLifecycleNotification) => void>();
+  const startedTexts: string[] = [];
+  let authorityId = "owned:initial";
+  let resetOperationId: string | undefined;
+  const emit = (sessionId: string, ev: RuntimeEvent) => {
+    for (const listener of listeners) listener(sessionId, ev);
+  };
+  const rt: AgentRuntime = {
+    capabilities: async () => ({
+      streaming: true, permissions: true, questions: true, compaction: false, subagents: false,
+    }),
+    models: async () => [],
+    agents: async () => [],
+    ensureSession: async (input) => input.backendSessionId ?? `backend-${input.sessionId}`,
+    resetSessionOperation: async (_input, operationId) => {
+      resetOperationId = operationId;
+      return {
+        kind: "confirmed" as const,
+        value: { backendSessionId: "backend-after-epoch" },
+        receipt: "backend-after-epoch",
+      };
+    },
+    sessions: async () => [],
+    history: async () => [],
+    startTurn: async (req) => {
+      startedTexts.push(req.text);
+      emit(req.sessionId, { type: "turn/started", turnId: `t${startedTexts.length}` });
+    },
+    abort: async () => undefined,
+    replyPermission: async () => undefined,
+    replyQuestion: async () => undefined,
+    endpoint: async () => ({
+      authorityId,
+      continuity: "verified" as const,
+      generation: 1,
+      url: "http://fake.invalid",
+      location: { directory: "/fake" },
+      control: { kind: "owned" as const, instanceToken: authorityId },
+      config: { kind: "read-only" as const },
+      authentication: { kind: "none" as const },
+    }),
+    protocol: async () => "legacy" as const,
+    reconcile: async (binding) => ({
+      authorityId: binding.authorityId,
+      generation: binding.generation,
+      location: binding.location,
+      backendSessionId: binding.backendSessionId!,
+      reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+      state: resetOperationId
+        ? { value: "idle" as const, causalOperationId: resetOperationId }
+        : {
+            value: "idle" as const,
+            comparison: { domain: "owned-delivery", order: 1 },
+          },
+      completeness: {
+        events: "partial" as const,
+        permissions: "partial" as const,
+        questions: "partial" as const,
+      },
+      permissions: [],
+      questions: [],
+      events: [],
+    }),
+    onEvent(cb) {
+      listeners.add(cb);
+      return { dispose: () => listeners.delete(cb) };
+    },
+    onLifecycle(listener) {
+      lifecycleListeners.add(listener);
+      return { dispose: () => lifecycleListeners.delete(listener) };
+    },
+    dispose: async () => undefined,
+  };
+  const { sessions, store } = makeService({ rt, emit, startedTexts } as ReturnType<typeof fakeRuntime>);
+  t.after(() => store.close());
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await sessions.send(id, { text: "first" });
+  await flush();
+  await sessions.send(id, { text: "second", delivery: "queue" });
+  emit(id, { type: "turn/stopped", reason: "completed" });
+  authorityId = "owned:replacement";
+  for (const listener of lifecycleListeners) {
+    listener({ type: "stream-connected" });
+  }
+  for (let attempt = 0; attempt < 100 && startedTexts.length < 2; attempt++) await flush();
+  assert.equal(startedTexts[0], "first");
+  assert.match(startedTexts[1] ?? "", /second/);
+  assert.match(startedTexts[1] ?? "", /<polyth-runtime-epoch-recovery/);
+  assert.equal((await store.projection(id))?.status, "working");
+  assert.equal((await store.projection(id))?.runtimeBinding?.epoch, 1);
+  assert.equal(
+    (await store.events(id)).filter((event) => event.type === "runtime/epoch-replaced").length,
+    1,
+  );
+});
+
+test("an already reserved queue row cannot be copied through the composer edit/steer path", async (t) => {
+  const fake = fakeRuntime();
+  const { sessions, store } = makeService(fake);
+  t.after(() => store.close());
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await flush();
+  const item = await store.enqueue(id, "reserved", "queue");
+  const reservation = await store.reserveQueueHead({ sessionId: id });
+  assert.equal(reservation.kind, "reserved");
+  await assert.rejects(sessions.queueEditStart!(id, item.id), { code: "conflict" });
+  await assert.rejects(sessions.queueSendNow!(id, item.id, item.text), { code: "conflict" });
+  assert.equal((await store.events(id)).some((event) => event.type === "queue/removed"), false);
+  if (reservation.kind !== "reserved") return;
+  await store.claimOperation(reservation.reservation.operation.operationId);
+  await store.settleOperation(reservation.reservation.operation.operationId, { kind: "unknown" });
+  await assert.rejects(sessions.queueEditStart!(id, item.id), { code: "conflict" });
+  assert.equal((await store.queueList(id)).length, 1);
+  assert.deepEqual(fake.startedTexts, []);
 });
 
 test("steer persists user intent before I/O and records confirmed delivery afterward", async () => {

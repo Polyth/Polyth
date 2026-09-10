@@ -157,7 +157,7 @@
   --font-response-lh: calc(25.5px * var(--ui-font-scale));
   --font-response-heading: calc(18px * var(--ui-font-scale));
   --font-response-heading-lh: calc(24px * var(--ui-font-scale));
-  --font-session-title: calc(16px * var(--ui-font-scale));
+  --font-session-title: calc(15px * var(--ui-font-scale));
   --font-session-title-lh: calc(20px * var(--ui-font-scale));
   --font-activity-title: calc(15.5px * var(--ui-font-scale));
   --font-activity-title-lh: calc(21px * var(--ui-font-scale));

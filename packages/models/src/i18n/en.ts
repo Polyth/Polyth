@@ -117,6 +117,8 @@ export const en = {
   "settings.modelspage.noMatches": "No matches",
   "settings.modelspage.noModelsAvailable": "No models available",
   "settings.modelspage.noModelsYet": "No models yet — discover them or add one manually.",
+  "settings.modelspage.noProvidersYet": "No providers yet",
+  "settings.modelspage.noProvidersHint": "Use Add provider to connect one. Its models will appear here.",
   "settings.modelspage.oauthMethod": "OAuth",
   "settings.modelspage.openLoginPage": "Open login page",
   "settings.modelspage.orApiKey": "Or use an API key",

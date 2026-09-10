@@ -4,6 +4,7 @@ import { register } from "node:module";
 import { readFile } from "node:fs/promises";
 import { Window } from "happy-dom";
 import {
+  classifyTool,
   cleanShellCommand,
   compactUrl,
   executionGroupLabel,
@@ -184,6 +185,17 @@ test("file, URL, edit, search, MCP, and subagent previews are semantic", () => {
   }));
   assert.equal(subagent.label, "Subagent");
   assert.equal(subagent.preview, "Review mobile UX implementation");
+
+  const packageTool = executionPresentation(tool({
+    tool: "polyth-agent-tools_personal-coach_coach-propose-goal-af6bc22515351df5",
+    input: { title: "Build strength" },
+  }));
+  assert.equal(packageTool.kind, "tool");
+  assert.notEqual(packageTool.label, "Subagent");
+  assert.equal(classifyTool(
+    "mcp__polyth-agent-tools__personal-coach_coach-propose-goal-af6bc22515351df5",
+    {},
+  ), "tool");
 });
 
 test("normalized details hide bulky payloads until level three", () => {

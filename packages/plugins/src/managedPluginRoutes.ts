@@ -20,6 +20,7 @@ export function managedPluginRoutes(
 ): RouteHandler {
   return async (request) => {
     const { path, method } = request;
+    if (path !== "/api/plugins" && !path.startsWith("/api/plugins/")) return false;
     const storage = host.spaceStorage(request.space);
     if (path === "/api/plugins" && method === "GET") {
       request.json(200, registry.list(storage));

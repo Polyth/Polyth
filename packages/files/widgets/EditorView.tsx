@@ -383,7 +383,7 @@ export default function EditorView() {
                     aria-selected={selected}
                     {...(e.dir ? { "aria-expanded": open.has(e.path) } : {})}
                     className={`ft-row${e.dir ? " ft-dir" : ""}${selected ? " ft-selected" : ""}`}
-                    style={{ paddingLeft: 6 + depth * 14 }}
+                    style={{ paddingInlineStart: 8 + depth * 16 }}
                     draggable
                     onDragStart={(ev) => setDragPath(ev.dataTransfer, e.path)}
                     onContextMenu={(ev) => onRowContext(ev, e)}

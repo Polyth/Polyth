@@ -156,20 +156,6 @@ const COMPOSER_CONTROLS_PLUGIN = defineWidgetPlugin({
       order: 60,
       render: (context) => context.composerEffortControl as ReactNode ?? null,
     },
-    {
-      id: "composer.agent",
-      title: tr("composer.agent"),
-      description: tr("composer.agent"),
-      kind: "mini-widget",
-      defaultSlot: "composer.trailing",
-      supportedSlots: ["composer.leading", "composer.trailing"],
-      defaultVisible: true,
-      defaultSize: { w: 1, h: 1 },
-      resizable: false,
-      audience: "simple",
-      order: 70,
-      render: (context) => context.composerAgentControl as ReactNode ?? null,
-    },
   ],
 });
 let installed = false;
