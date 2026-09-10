@@ -89,17 +89,27 @@ function HostedMarketsSurface({ host, active }: { host: WebPackageHost; active?:
 }
 
 function HostedCompareSurface({ host, active }: { host: WebPackageHost; active?: boolean }) {
+  const handoffOptions = useMarketHandoffOptions(host);
   return (
     <MarketSurfaceFrame host={host} activeId="markets.compare">
-      <MarketCompareSurface active={active} onOpen={(symbol) => openMarketSymbol(host, symbol)} />
+      <MarketCompareSurface
+        active={active}
+        handoffOptions={handoffOptions}
+        onOpen={(symbol) => openMarketSymbol(host, symbol)}
+      />
     </MarketSurfaceFrame>
   );
 }
 
 function HostedPortfolioSurface({ host, active }: { host: WebPackageHost; active?: boolean }) {
+  const handoffOptions = useMarketHandoffOptions(host);
   return (
     <MarketSurfaceFrame host={host} activeId="markets.portfolio">
-      <MarketPortfolioSurface active={active} onOpen={(symbol) => openMarketSymbol(host, symbol)} />
+      <MarketPortfolioSurface
+        active={active}
+        handoffOptions={handoffOptions}
+        onOpen={(symbol) => openMarketSymbol(host, symbol)}
+      />
     </MarketSurfaceFrame>
   );
 }
