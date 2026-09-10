@@ -31,10 +31,14 @@ const EXCHANGE_SUFFIX: Array<{ match: RegExp; suffix: string }> = [
   { match: /^nse$/i, suffix: ".NS" },
   { match: /^bse$/i, suffix: ".BO" },
 ];
+const US_FUNDAMENTALS_SYMBOL = /^[A-Z][A-Z0-9-]{0,15}$/;
 
 const stripEmphasis = (value: string): string => value.replace(/<\/?em>/g, "");
 const suffixFor = (exchange: string): string => EXCHANGE_SUFFIX.find((item) => item.match.test(exchange))?.suffix ?? "";
 const assetType = (type: string): MarketAssetType => type === "fund" ? "etf" : type === "stock" || type === "dr" ? "equity" : "unknown";
+const miss = (message: string): never => {
+  throw Object.assign(new Error(message), { code: "not-found" });
+};
 
 export function createTradingViewProvider(options: TradingViewProviderOptions = {}): MarketProvider {
   const fetchImpl = options.fetch ?? fetch;
@@ -77,7 +81,9 @@ export function createTradingViewProvider(options: TradingViewProviderOptions = 
       }).slice(0, 15);
     },
     async fundamentals(symbol, signal) {
-      if (symbol.includes(".")) throw Object.assign(new Error("tradingview fundamentals currently support US symbols"), { code: "not-found" });
+      if (!US_FUNDAMENTALS_SYMBOL.test(symbol)) {
+        miss(`tradingview fundamentals do not support symbol ${symbol}`);
+      }
       const tickers = ["NASDAQ", "NYSE", "AMEX"].map((exchange) => `${exchange}:${symbol}`);
       const columns = [
         "market_cap_basic",
@@ -98,7 +104,7 @@ export function createTradingViewProvider(options: TradingViewProviderOptions = 
       const first = Array.isArray(rows) ? record(rows[0]) : undefined;
       const values = Array.isArray(first?.d) ? first.d : undefined;
       const ticker = text(first?.s);
-      if (!values || !ticker) throw new Error(`tradingview: no fundamentals for ${symbol}`);
+      if (!values || !ticker) miss(`tradingview: no fundamentals for ${symbol}`);
       const [marketCap, pe, eps, dividendYieldPct, beta, sharesOutstanding, sector, industry] = values;
       const exchange = ticker.split(":")[0];
       return {
