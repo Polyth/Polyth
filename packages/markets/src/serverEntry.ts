@@ -52,7 +52,7 @@ const numberParam = (url: URL, name: string): number | undefined => {
 export function marketsRoutes(
   host: Pick<ServerPackageHost, "spaceStorage">,
   markets: MarketsService,
-  screener?: Pick<MarketUniverseService, "screen">,
+  universe?: Pick<MarketUniverseService, "screen" | "heatmap">,
 ): NonNullable<ServerPackage["routes"]> {
   return async ({ path, method, url, body, json, space }) => {
     if (!path.startsWith("/api/markets")) return false;
@@ -100,8 +100,27 @@ export function marketsRoutes(
       return true;
     }
 
+    if (path === "/api/markets/heatmap") {
+      if (!universe) {
+        json(503, { error: "unavailable", message: "market heatmap is unavailable" });
+        return true;
+      }
+      try {
+        const sector = url.searchParams.get("sector")?.trim();
+        const limit = numberParam(url, "limit");
+        json(200, await universe.heatmap({
+          ...(sector ? { sector } : {}),
+          ...(limit !== undefined ? { limit } : {}),
+        }));
+      } catch (cause) {
+        if (isInvalidInput(cause)) return badRequest(json, errorMessage(cause));
+        throw cause;
+      }
+      return true;
+    }
+
     if (path === "/api/markets/screener") {
-      if (!screener) {
+      if (!universe) {
         json(503, { error: "unavailable", message: "market screener is unavailable" });
         return true;
       }
@@ -124,7 +143,7 @@ export function marketsRoutes(
           ...(offset !== undefined ? { offset } : {}),
           ...(limit !== undefined ? { limit } : {}),
         };
-        json(200, await screener.screen(query));
+        json(200, await universe.screen(query));
       } catch (cause) {
         if (isInvalidInput(cause)) return badRequest(json, errorMessage(cause));
         throw cause;
@@ -279,11 +298,11 @@ export function marketsRoutes(
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   const markets = createMarketsService();
-  const screener = new MarketUniverseService(createTradingViewUniverseLoader());
+  const universe = new MarketUniverseService(createTradingViewUniverseLoader());
   registerDefaultMarketProviders(markets, { secUserAgent: process.env.POLYTH_SEC_USER_AGENT });
   host.services.provide(marketsServiceKey, markets);
   return {
-    routes: marketsRoutes(host, markets, screener),
+    routes: marketsRoutes(host, markets, universe),
     remoteAccess: localOnlyRemoteAccess(["markets"]),
   };
 }
