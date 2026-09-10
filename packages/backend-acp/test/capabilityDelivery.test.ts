@@ -64,6 +64,10 @@ test("session creation does not acknowledge text; prompt preserves user blocks a
     target: { ...context, harnessId: "fixture-agent" }, desiredRevision: "revision-a",
     capabilityIds: ["fixture.skill", "fixture.context"], outcome: "unverifiable",
     reason: "ACP accepted the prompt text projection; native model consumption is not observable",
+    evidence: {
+      stage: "staged",
+      source: "ACP prompt text projection was appended; native model consumption is not observable",
+    },
   });
 });
 

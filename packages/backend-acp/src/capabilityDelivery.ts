@@ -76,6 +76,10 @@ export function configureAcpCapabilityDelivery(
         capabilityIds: projection.capabilityIds,
         outcome: "unverifiable",
         reason: "ACP accepted the prompt text projection; native model consumption is not observable",
+        evidence: {
+          stage: "staged",
+          source: "ACP prompt text projection was appended; native model consumption is not observable",
+        },
       });
     }
     return result;

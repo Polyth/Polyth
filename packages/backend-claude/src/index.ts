@@ -130,6 +130,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                 desiredRevision: staged.desiredRevision,
             });
         }
+        let initialization!: Awaited<ReturnType<Query["initializationResult"]>>;
         try {
             query = sdk.query({ prompt: prompts(), options: { cwd: context.cwd, ...(resume ? { resume: id } : { sessionId: id }), pathToClaudeCodeExecutable: claudeExecutable(), permissionMode: "default", includePartialMessages: false,
                     ...(effort ? { effort: effort as EffortLevel } : {}),
@@ -138,6 +139,11 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                     disallowedTools: ["Agent", "Task", "AskUserQuestion"],
                     ...(overlay?.append ? { systemPrompt: { type: "preset" as const, preset: "claude_code" as const, append: overlay.append } } : {}),
                     ...(overlay?.mcpServers ? { mcpServers: overlay.mcpServers } : {}),
+                    ...(overlay?.plugins ? { plugins: overlay.plugins } : {}),
+                    pluginDelivery: "initialize",
+                    // An explicit allowlist prevents unrelated user/global
+                    // skills from entering this Space-private native session.
+                    skills: overlay?.skills ?? [],
                     spawnClaudeCodeProcess(options) { const child = authority.spawn(options.command, options.args, { cwd: options.cwd, env: options.env, signal: options.signal }); child.stderr!.resume(); return child as SpawnedProcess; },
                     canUseTool: async (tool, input, options) => {
                         markAccepted();
@@ -147,7 +153,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                         return new Promise<PermissionResult>(resolve => { permissions.set(requestId, { resolve, input, tool }); emit({ type: "permission/requested", requestId, permission: tool, patterns: [String(input.command ?? input.file_path ?? tool)] }, requestId); options.signal.addEventListener("abort", () => { permissions.delete(requestId); resolve({ behavior: "deny", message: "Cancelled" }); }, { once: true }); });
                     },
                 } });
-            await query.initializationResult();
+            initialization = await query.initializationResult();
             if (effort) appliedEffort = effort;
         }
         catch (error) {
@@ -160,14 +166,96 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
             throw error;
         }
         if (staged) {
-            claudeOverlays.consumeIfRevision(context, "claude", staged.desiredRevision);
-            acknowledgeCapabilityApplication({
+            const verification = overlay?.verification;
+            const commandsResult = verification?.skills.length && typeof query.supportedCommands === "function"
+                ? await query.supportedCommands().then((value) => ({ ok: true as const, value }), () => ({ ok: false as const, value: [] }))
+                : { ok: true as const, value: [] };
+            if (commandsResult.ok) {
+                nativeCommands.splice(0, nativeCommands.length, ...toNativeCommands(commandsResult.value));
+            }
+            const mcpResult = verification && (verification.mcpServers.length || verification.tools.length) && typeof query.mcpServerStatus === "function"
+                ? await query.mcpServerStatus().then((value) => ({ ok: true as const, value }), () => ({ ok: false as const, value: [] }))
+                : { ok: !(verification && (verification.mcpServers.length || verification.tools.length)), value: [] };
+            const receipt = (
+                capabilityId: string,
+                outcome: "applied" | "unverifiable" | "failed",
+                reason: string,
+                evidence: { stage: "staged" | "discovered" | "connected" | "invocable"; source: string },
+            ) => acknowledgeCapabilityApplication({
                 target: provisioningTarget(context, "claude", { authorityId: authority.authorityId, generation: authority.generation }),
                 desiredRevision: staged.desiredRevision,
-                capabilityIds: staged.capabilityIds,
-                outcome: "applied",
-                reason: "Claude Agent SDK initialized with the staged overlay",
+                capabilityIds: [capabilityId],
+                outcome,
+                reason,
+                evidence,
             });
+            for (const capabilityId of verification?.promptIds ?? []) {
+                receipt(capabilityId, "unverifiable", "Claude Agent SDK accepted the launch prompt; native application has no readback", {
+                    stage: "staged", source: "Claude SDK launch options",
+                });
+            }
+            for (const skill of verification?.skills ?? []) {
+                if (initialization.plugins_applied !== true) {
+                    receipt(
+                        skill.capabilityId,
+                        initialization.plugins_applied === false ? "failed" : "unverifiable",
+                        initialization.plugins_applied === false
+                            ? "Claude reported that the Space-private plugin was not applied"
+                            : "Claude did not report whether the Space-private plugin was applied",
+                        { stage: "staged", source: "initializationResult.plugins_applied" },
+                    );
+                    continue;
+                }
+                const discovered = commandsResult.value.some((command) => command.name === skill.canonicalName);
+                receipt(
+                    skill.capabilityId,
+                    discovered ? "applied" : commandsResult.ok ? "failed" : "unverifiable",
+                    discovered
+                        ? "Claude loaded and discovered the exact Space-private skill"
+                        : commandsResult.ok
+                            ? "Claude loaded the plugin but did not discover the exact skill"
+                            : "Claude loaded the plugin but command discovery was unavailable",
+                    { stage: discovered ? "discovered" : "staged", source: discovered ? "supportedCommands exact canonical name" : "initializationResult.plugins_applied" },
+                );
+            }
+            for (const server of verification?.mcpServers ?? []) {
+                const status = mcpResult.value.find((candidate) => candidate.name === server.name);
+                if (!server.enabled) {
+                    const absent = mcpResult.ok && (!status || status.status === "disabled");
+                    receipt(
+                        server.capabilityId,
+                        absent ? "applied" : mcpResult.ok ? "failed" : "unverifiable",
+                        absent ? "Claude confirmed the retired MCP server is absent" : "Claude still reports the retired MCP server",
+                        { stage: mcpResult.ok ? "discovered" : "staged", source: "mcpServerStatus" },
+                    );
+                } else if (status?.status === "connected") {
+                    receipt(server.capabilityId, "applied", "Claude reports the MCP server connected", {
+                        stage: "connected", source: "mcpServerStatus connected",
+                    });
+                } else {
+                    receipt(
+                        server.capabilityId,
+                        mcpResult.ok && status?.status !== "pending" ? "failed" : "unverifiable",
+                        status ? `Claude reports MCP server status ${status.status}` : "Claude did not report the configured MCP server",
+                        { stage: mcpResult.ok ? "discovered" : "staged", source: "mcpServerStatus" },
+                    );
+                }
+            }
+            for (const tool of verification?.tools ?? []) {
+                const discovered = mcpResult.value.some((server) =>
+                    server.name === "polyth-agent-tools"
+                    && server.status === "connected"
+                    && server.tools?.some((candidate) => candidate.name === tool.name));
+                receipt(
+                    tool.capabilityId,
+                    discovered ? "unverifiable" : mcpResult.ok ? "failed" : "unverifiable",
+                    discovered
+                        ? "Claude discovered the MCP tool; invocation was not observed"
+                        : "Claude did not discover the MCP tool on the Polyth agent-tools server",
+                    { stage: discovered ? "discovered" : mcpResult.ok ? "discovered" : "staged", source: "mcpServerStatus tools" },
+                );
+            }
+            claudeOverlays.consumeIfRevision(context, "claude", staged.desiredRevision);
         }
         void (async () => {
             try {

@@ -43,7 +43,7 @@ test("one harness failure does not corrupt canonical desired state", async () =>
   const behavior = createBehaviorService({ file: join(dir, "behavior.md") });
   await mcp.create(space, {
     name: "alpha",
-    transport: { kind: "http", url: "https://a.example", headersSecretRefs: [] },
+    transport: { kind: "http", url: "https://a.example", headersSecretRefs: ["TOKEN"] },
     secrets: { TOKEN: "super-secret-value" },
   });
   const created = mcp.list(space)[0]!;
@@ -59,6 +59,7 @@ test("one harness failure does not corrupt canonical desired state", async () =>
         desiredRevision: item.capability.revision,
         mode: item.mode,
         status: "applied" as const,
+        evidence: { stage: "connected" as const, source: "test:simulated-native-connection" },
         mutability: item.mutability,
       })),
     }),
@@ -88,6 +89,167 @@ test("one harness failure does not corrupt canonical desired state", async () =>
   assert.equal(other.every((row) => row.records.length === 0 || row.desiredRevision === ""), true);
   const desired = await controller.desired(context);
   assert.equal(desired[0]?.id, "polyth.behavior");
+});
+
+test("native MCP and skill receipts require evidence and fence stale evidence", async () => {
+  const dir = tmp();
+  const space = spaceOf(dir);
+  const cwd = join(dir, "project");
+  const context = { spaceId: space.spaceId, projectId: "p", cwd, space };
+  const contributions = createCapabilityContributionRegistry();
+  let skill = contributions.register("fixture", {
+    descriptor: {
+      id: "fixture.skill",
+      kind: "skill",
+      owner: "fixture",
+      scope: "space",
+      revision: "1",
+      name: "fixture",
+      title: "Fixture",
+      description: "Fixture skill",
+      instructions: "Use fixture",
+    },
+  });
+  const mcp = mcpOf(dir);
+  const mcpServer = await mcp.create(space, {
+    name: "fixture-mcp",
+    transport: { kind: "stdio", command: "fixture", args: [], envKeys: [] },
+  });
+  const harness = provider("fixture", {
+    support: () => ({
+      harnessId: "fixture",
+      targetLifetime: "physical-runtime",
+      kinds: {
+        "mcp-server": { modes: ["native"], mutability: "requires-restart" },
+        skill: { modes: ["native"], mutability: "requires-restart" },
+      },
+    }),
+    apply: async (_ctx, plan) => ({
+      harnessId: "fixture",
+      desiredRevision: plan.desiredRevision,
+      records: plan.items.map((item) => ({
+        capabilityId: item.capability.id,
+        kind: item.capability.kind,
+        owner: item.capability.owner,
+        desiredRevision: item.capability.revision,
+        mode: item.mode,
+        status: "pending" as const,
+        mutability: item.mutability,
+      })),
+    }),
+  });
+  const controller = createCapabilityProvisioningController({
+    contributions,
+    harnesses: mockHarnessRegistry(harness),
+    behavior: createBehaviorService({ file: join(dir, "behavior.md") }),
+    mcp,
+    file: join(dir, "status.json"),
+  });
+  const first = await controller.reconcile(harness, context);
+  const ids = first.records.filter((record) => record.kind === "mcp-server" || record.kind === "skill").map((record) => record.capabilityId);
+  controller.acknowledge({
+    target: { spaceId: space.spaceId, projectId: "p", cwd, harnessId: "fixture", authorityId: "a", generation: 1 },
+    desiredRevision: first.desiredRevision,
+    capabilityIds: ids,
+    outcome: "applied",
+  });
+  const withoutEvidence = controller.status(context, "fixture")[0]!.records.filter((record) => ids.includes(record.capabilityId));
+  assert.ok(withoutEvidence.every((record) => record.status === "unverifiable"));
+  assert.ok(withoutEvidence.every((record) => record.evidence === undefined));
+  controller.acknowledge({
+    target: { spaceId: space.spaceId, projectId: "p", cwd, harnessId: "fixture", authorityId: "a", generation: 1 },
+    desiredRevision: first.desiredRevision,
+    capabilityIds: ids,
+    outcome: "applied",
+    evidence: { stage: "connected", source: "  " },
+  });
+  assert.ok(controller.status(context, "fixture")[0]!.records.filter((record) => ids.includes(record.capabilityId))
+    .every((record) => record.status === "unverifiable" && record.evidence === undefined));
+
+  skill.dispose();
+  skill = contributions.register("fixture", {
+    descriptor: {
+      id: "fixture.skill",
+      kind: "skill",
+      owner: "fixture",
+      scope: "space",
+      revision: "2",
+      name: "fixture",
+      title: "Fixture",
+      description: "Fixture skill",
+      instructions: "Use fixture v2",
+    },
+  });
+  const second = await controller.reconcile(harness, context);
+  const secondIds = second.records.filter((record) => ids.includes(record.capabilityId)).map((record) => record.capabilityId);
+  const mcpId = second.records.find((record) => record.kind === "mcp-server")!.capabilityId;
+  const skillId = second.records.find((record) => record.kind === "skill")!.capabilityId;
+  controller.acknowledge({
+    target: { spaceId: space.spaceId, projectId: "p", cwd, harnessId: "fixture", authorityId: "a", generation: 2 },
+    desiredRevision: second.desiredRevision,
+    capabilityIds: secondIds,
+    outcome: "applied",
+    evidence: { stage: "invocable", source: "test:simulated-tool-invocation" },
+  });
+  const unchanged = await controller.reconcile(harness, context);
+  assert.equal(unchanged.records.find((record) => record.capabilityId === mcpId)?.status, "applied");
+  assert.equal(unchanged.records.find((record) => record.capabilityId === mcpId)?.evidence?.stage, "invocable");
+  assert.equal(unchanged.records.find((record) => record.capabilityId === skillId)?.status, "applied");
+  assert.equal(unchanged.records.find((record) => record.capabilityId === skillId)?.evidence?.stage, "invocable");
+  const mcpCurrent = mcp.list(space).find((server) => server.id === mcpServer.id)!;
+  await mcp.update(space, mcpServer.id, {
+    transport: { kind: "stdio", command: "fixture-v2", args: [], envKeys: [] },
+  }, mcpCurrent.revision);
+  skill.dispose();
+  skill = contributions.register("fixture", {
+    descriptor: {
+      id: "fixture.skill",
+      kind: "skill",
+      owner: "fixture",
+      scope: "space",
+      revision: "3",
+      name: "fixture",
+      title: "Fixture",
+      description: "Fixture skill",
+      instructions: "Use fixture v3",
+    },
+  });
+  const changed = await controller.reconcile(harness, context);
+  assert.equal(changed.records.find((record) => record.capabilityId === mcpId)?.status, "pending-restart");
+  assert.equal(changed.records.find((record) => record.capabilityId === skillId)?.status, "pending-restart");
+  controller.acknowledge({
+    target: { spaceId: space.spaceId, projectId: "p", cwd, harnessId: "fixture", authorityId: "a", generation: 3 },
+    desiredRevision: changed.desiredRevision,
+    capabilityIds: [mcpId],
+    outcome: "applied",
+    evidence: { stage: "connected", source: "test:simulated-native-connection" },
+  });
+  const partial = controller.status(context, "fixture")[0]!.records;
+  assert.equal(partial.find((record) => record.capabilityId === mcpId)?.status, "applied");
+  assert.equal(partial.find((record) => record.capabilityId === skillId)?.status, "pending-restart");
+  assert.equal(partial.find((record) => record.capabilityId === skillId)?.evidence?.stage, "staged");
+  controller.acknowledge({
+    target: { spaceId: space.spaceId, projectId: "p", cwd, harnessId: "fixture", authorityId: "a", generation: 3 },
+    desiredRevision: changed.desiredRevision,
+    capabilityIds: [skillId],
+    outcome: "applied",
+    evidence: { stage: "discovered", source: "test:simulated-native-connection" },
+  });
+  controller.acknowledge({
+    target: { spaceId: space.spaceId, projectId: "p", cwd, harnessId: "fixture", authorityId: "a", generation: 1 },
+    desiredRevision: first.desiredRevision,
+    capabilityIds: [mcpId, skillId],
+    outcome: "applied",
+    evidence: { stage: "connected", source: "test:stale-generation" },
+  });
+  const current = controller.status(context, "fixture")[0]!.records.filter((record) => secondIds.includes(record.capabilityId));
+  assert.equal(current.find((record) => record.capabilityId === mcpId)?.status, "applied");
+  assert.equal(current.find((record) => record.capabilityId === mcpId)?.evidence?.stage, "connected");
+  assert.equal(current.find((record) => record.capabilityId === skillId)?.status, "applied");
+  assert.equal(current.find((record) => record.capabilityId === skillId)?.evidence?.stage, "discovered");
+  assert.equal(controller.status(context, "fixture")[0]!.target?.generation, 3);
+  mcp.remove(space, mcpServer.id);
+  skill.dispose();
 });
 
 test("disabled package tool cannot execute after contribution dispose", async () => {

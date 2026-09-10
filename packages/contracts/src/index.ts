@@ -2933,6 +2933,15 @@ export interface HarnessCapabilitySupport {
   kinds: { [K in AgentCapabilityKind]?: AgentCapabilitySupport };
 }
 
+/** Evidence supplied by a harness for a capability projection. The source is
+ * a short, sanitized description of the observation; it must not contain
+ * prompts, credentials or tool output. */
+export type HarnessCapabilityEvidenceStage = "staged" | "discovered" | "connected" | "invocable";
+export interface HarnessCapabilityEvidence {
+  stage: HarnessCapabilityEvidenceStage;
+  source: string;
+}
+
 /** Fields shared by every capability descriptor. `spaceId`/`projectId` filter
  * resolution when a contribution is not deployment-wide. */
 export interface AgentCapabilityBase {
@@ -3002,6 +3011,8 @@ export interface HarnessCapabilityRecord {
   mutability?: CapabilityMutability;
   /** Sanitized reason. Must never contain secret values or full prompts. */
   reason?: string;
+  /** Optional positive observation of the capability projection. */
+  evidence?: HarnessCapabilityEvidence;
 }
 
 export interface HarnessProvisioningPlan {
@@ -3039,15 +3050,17 @@ export interface HarnessProvisioningTarget {
   generation?: number;
 }
 
-/** Native admission acknowledgement. `applied` requires evidence the current
- * target is using the revision; `unverifiable` means the native create API
- * accepted the payload without authoritative readback. */
+/** Native admission acknowledgement. `applied` requires capability-specific
+ * evidence that the current target is using the revision; `unverifiable` means
+ * the native create API accepted the payload without sufficient observation. */
 export interface HarnessCapabilityApplicationReceipt {
   target: HarnessProvisioningTarget;
   desiredRevision: string;
   capabilityIds: string[];
   outcome: Extract<CapabilityProvisionStatus, "applied" | "unverifiable" | "failed">;
   reason?: string;
+  /** Optional positive observation of the capability projection. */
+  evidence?: HarnessCapabilityEvidence;
 }
 
 /** Durable negative intent for a retired native MCP name. Canonical deletion

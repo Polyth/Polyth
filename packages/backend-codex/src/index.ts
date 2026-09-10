@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { isAbsolute, join } from "node:path";
-import type { AgentRuntime, CanonicalTurnRequest, HarnessContext, JsonObject, ModelDescriptor, ModelRef, MutationOutcome, RateLimitRetryHint, RuntimeErrorCode, RuntimeEvent, RuntimeObservation, RuntimeSnapshot, TokenUsage } from "@polyth/contracts";
+import { isAbsolute, join, resolve } from "node:path";
+import type { AgentRuntime, CanonicalTurnRequest, HarnessCapabilityApplicationReceipt, HarnessContext, JsonObject, ModelDescriptor, ModelRef, MutationOutcome, RateLimitRetryHint, RuntimeErrorCode, RuntimeEvent, RuntimeObservation, RuntimeSnapshot, TokenUsage } from "@polyth/contracts";
 import {
     acknowledgeCapabilityApplication,
     attachmentModality,
@@ -15,7 +15,7 @@ import {
     unsupportedAttachmentMessage,
     type RpcPeer,
 } from "@polyth/harness-runtime";
-import { codexOverlays } from "./provisioner.ts";
+import { codexOverlays, type CodexNativeMcp, type CodexNativeSkill } from "./provisioner.ts";
 // These are the small provider-local fields used from App Server v2. The
 // installed CLI can generate its full schema; it is not a core Polyth contract.
 type Item = {
@@ -57,6 +57,180 @@ type Thread = {
     turns?: Turn[];
 };
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+type CapabilityVerification = Pick<
+    HarnessCapabilityApplicationReceipt,
+    "capabilityIds" | "outcome" | "reason" | "evidence"
+>;
+
+const verifyNativeSkills = async (
+    rpc: RpcPeer,
+    cwd: string,
+    root: string,
+    expected: readonly CodexNativeSkill[],
+): Promise<CapabilityVerification[]> => {
+    try {
+        await rpc.request("skills/extraRoots/set", { extraRoots: [root] });
+        const response = await rpc.request<{
+            data?: Array<{
+                cwd?: string;
+                skills?: Array<{ name?: string; path?: string; enabled?: boolean }>;
+                errors?: Array<{ path?: string; message?: string }>;
+            }>;
+        }>("skills/list", { cwds: [cwd], forceReload: true });
+        const entry = response.data?.find((item) =>
+            typeof item.cwd === "string" && resolve(item.cwd) === resolve(cwd));
+        if (!entry || !Array.isArray(entry.skills) || !Array.isArray(entry.errors)) {
+            return expected.map((skill) => ({
+                capabilityIds: [skill.capabilityId],
+                outcome: "failed",
+                reason: "Codex returned malformed native skill discovery",
+            }));
+        }
+        const discoveredSkills = entry.skills;
+        const rootPath = resolve(root);
+        const rootPrefix = `${rootPath}/`;
+        const rootErrors = entry.errors.filter((error) =>
+            typeof error.path === "string"
+            && (resolve(error.path) === rootPath || resolve(error.path).startsWith(rootPrefix)));
+        return expected.map((skill) => {
+            const expectedPath = resolve(skill.path);
+            const found = discoveredSkills.find((item) =>
+                item.name === skill.name
+                && typeof item.path === "string"
+                && resolve(item.path) === expectedPath);
+            const skillError = rootErrors.find((error) =>
+                typeof error.path === "string"
+                && (resolve(error.path) === expectedPath
+                    || expectedPath.startsWith(`${resolve(error.path)}/`)
+                    || resolve(error.path).startsWith(`${expectedPath}/`)));
+            if (skillError) {
+                return {
+                    capabilityIds: [skill.capabilityId],
+                    outcome: "failed" as const,
+                    reason: "Codex reported an error for the staged native skill",
+                    evidence: { stage: "discovered" as const, source: "skills/list(forceReload:true)" },
+                };
+            }
+            if (!found) {
+                return {
+                    capabilityIds: [skill.capabilityId],
+                    outcome: "failed" as const,
+                    reason: "Codex did not discover the expected native skill name and path",
+                    evidence: { stage: "discovered" as const, source: "skills/list(forceReload:true)" },
+                };
+            }
+            if (found.enabled !== true) {
+                return {
+                    capabilityIds: [skill.capabilityId],
+                    outcome: "failed" as const,
+                    reason: "Codex discovered the native skill but reported it disabled",
+                    evidence: { stage: "discovered" as const, source: "skills/list(forceReload:true)" },
+                };
+            }
+            return {
+                capabilityIds: [skill.capabilityId],
+                outcome: "applied" as const,
+                reason: "Codex discovered the expected enabled native skill",
+                evidence: { stage: "discovered" as const, source: "skills/list(forceReload:true)" },
+            };
+        });
+    } catch {
+        return expected.map((skill) => ({
+            capabilityIds: [skill.capabilityId],
+            outcome: "failed",
+            reason: "Codex native skill discovery failed",
+        }));
+    }
+};
+
+const verifyNativeMcp = async (
+    rpc: RpcPeer,
+    threadId: string,
+    expected: readonly CodexNativeMcp[],
+): Promise<CapabilityVerification[]> => {
+    type NativeMcpStatus = {
+        name?: string;
+        runtimeStatus?: "notStarted" | "starting" | "connected" | "authenticationRequired" | "failed" | "cancelled" | "disabled" | null;
+        tools?: Record<string, { name?: string }>;
+    };
+    try {
+        const rows: NativeMcpStatus[] = [];
+        const cursors = new Set<string>();
+        let cursor: string | undefined;
+        for (let page = 0; page < 100; page++) {
+            const response = await rpc.request<{ data?: NativeMcpStatus[]; nextCursor?: string | null }>(
+                "mcpServerStatus/list",
+                { threadId, detail: "toolsAndAuthOnly", ...(cursor ? { cursor } : {}) },
+            );
+            if (!Array.isArray(response.data)) throw new Error("Malformed MCP status response");
+            rows.push(...response.data);
+            const next = typeof response.nextCursor === "string" && response.nextCursor
+                ? response.nextCursor
+                : undefined;
+            if (!next) break;
+            if (cursors.has(next) || page === 99) throw new Error("Invalid MCP status pagination");
+            cursors.add(next);
+            cursor = next;
+        }
+        return expected.map((server) => {
+            const found = rows.find((row) => row.name === server.name);
+            if (!found) {
+                return [{
+                    capabilityIds: [server.capabilityId, ...server.tools.map((tool) => tool.capabilityId)],
+                    outcome: "failed" as const,
+                    reason: "Codex did not discover the expected native MCP server",
+                    evidence: { stage: "discovered" as const, source: "mcpServerStatus/list" },
+                }];
+            }
+            const toolReceipts: CapabilityVerification[] = server.tools.map((tool) => {
+                const discovered = Object.values(found.tools ?? {}).some((candidate) => candidate.name === tool.name);
+                return discovered ? {
+                    capabilityIds: [tool.capabilityId],
+                    outcome: "unverifiable",
+                    reason: "Codex discovered the native MCP tool; direct invocation was not exercised",
+                    evidence: { stage: "discovered", source: "mcpServerStatus/list" },
+                } : {
+                    capabilityIds: [tool.capabilityId],
+                    outcome: "failed",
+                    reason: "Codex did not discover the expected native MCP tool",
+                    evidence: { stage: "discovered", source: "mcpServerStatus/list" },
+                };
+            });
+            if (found.runtimeStatus === "connected") {
+                return [{
+                    capabilityIds: [server.capabilityId],
+                    outcome: "applied" as const,
+                    reason: "Codex reports the native MCP server connected; tool invocation was not exercised",
+                    evidence: { stage: "connected" as const, source: "mcpServerStatus/list" },
+                }, ...toolReceipts];
+            }
+            if (found.runtimeStatus === "failed"
+                || found.runtimeStatus === "authenticationRequired"
+                || found.runtimeStatus === "cancelled"
+                || found.runtimeStatus === "disabled") {
+                return [{
+                    capabilityIds: [server.capabilityId],
+                    outcome: "failed" as const,
+                    reason: `Codex reports the native MCP server ${found.runtimeStatus}`,
+                    evidence: { stage: "discovered" as const, source: "mcpServerStatus/list" },
+                }, ...toolReceipts];
+            }
+            return [{
+                capabilityIds: [server.capabilityId],
+                outcome: "unverifiable" as const,
+                reason: `Codex discovered the native MCP server but reports ${found.runtimeStatus ?? "no runtime status"}`,
+                evidence: { stage: "discovered" as const, source: "mcpServerStatus/list" },
+            }, ...toolReceipts];
+        }).flat();
+    } catch {
+        return expected.map((server) => ({
+            capabilityIds: [server.capabilityId, ...server.tools.map((tool) => tool.capabilityId)],
+            outcome: "unverifiable",
+            reason: "Codex accepted the MCP launch configuration but native status could not be read",
+            evidence: { stage: "staged", source: "thread/start config.mcp_servers" },
+        }));
+    }
+};
 const eventFor = (item: Item): RuntimeEvent | undefined => {
     if (item.type === "agentMessage" && typeof item.text === "string") return { type: "assistant/message", partId: item.id, text: item.text };
     if (item.type === "commandExecution") {
@@ -358,6 +532,14 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
                     desiredRevision: staged.desiredRevision,
                 });
             }
+            const skillVerification = overlay?.nativeSkills
+                ? await verifyNativeSkills(
+                    rpc,
+                    context.cwd,
+                    overlay.nativeSkills.root,
+                    overlay.nativeSkills.skills,
+                )
+                : [];
             let result: { thread: Thread; model?: string; modelProvider?: string };
             try {
                 result = await rpc.request<{ thread: Thread; model?: string; modelProvider?: string }>("thread/start", {
@@ -384,17 +566,32 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
             if (result.model && result.modelProvider) nativeModel = { modelID: result.model, providerID: result.modelProvider };
             else if (input.model) nativeModel = input.model;
             nativeId = thread.id;
+            await rpc.receipt(operationId, nativeId);
             if (staged) {
                 codexOverlays.consumeIfRevision(context, "codex", staged.desiredRevision);
-                acknowledgeCapabilityApplication({
-                    target: provisioningTarget(context, "codex"),
-                    desiredRevision: staged.desiredRevision,
-                    capabilityIds: staged.capabilityIds,
-                    outcome: "unverifiable",
-                    reason: "Codex thread/start accepted the overlay; native application is unverifiable",
-                });
+                const mcpVerification = overlay?.nativeMcp
+                    ? await verifyNativeMcp(rpc, nativeId, overlay.nativeMcp)
+                    : [];
+                const stagedCapabilityIds = overlay?.stagedCapabilityIds
+                    ?? (!overlay?.nativeSkills && !overlay?.nativeMcp ? staged.capabilityIds : []);
+                const verification: CapabilityVerification[] = [
+                    ...(stagedCapabilityIds.length ? [{
+                        capabilityIds: stagedCapabilityIds,
+                        outcome: "unverifiable" as const,
+                        reason: "Codex thread/start accepted the staged capability without authoritative readback",
+                        evidence: { stage: "staged" as const, source: "thread/start" },
+                    }] : []),
+                    ...skillVerification,
+                    ...mcpVerification,
+                ];
+                for (const receipt of verification) {
+                    acknowledgeCapabilityApplication({
+                        target: launchTarget,
+                        desiredRevision: staged.desiredRevision,
+                        ...receipt,
+                    });
+                }
             }
-            await rpc.receipt(operationId, nativeId);
             return { backendSessionId: nativeId };
         });
         return outcome.kind === "confirmed" ? { ...outcome, receipt: nativeId } : outcome;

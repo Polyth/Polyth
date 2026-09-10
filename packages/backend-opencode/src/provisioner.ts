@@ -1,16 +1,14 @@
-// OpenCode capability projector. Persistent user/global config still goes
-// through BackendConfigApplier. MCP and Polyth tools are delivered through a
-// private launch overlay; canonical instructions, skills, and context stay in
-// Polyth and are appended to admitted prompts. This avoids coupling portable
-// capability semantics to version-specific OpenCode instruction/skill config.
 import {
   existsSync,
   mkdirSync,
+  lstatSync,
+  realpathSync,
+  readFileSync,
   readdirSync,
   rmSync,
 } from "node:fs";
 import { createHash } from "node:crypto";
-import { join, resolve } from "node:path";
+import { join, resolve, relative, sep } from "node:path";
 import type {
   CapabilitySecretResolver,
   HarnessCapabilityRecord,
@@ -30,6 +28,10 @@ const MAX_SKILL_NAME = 64;
 
 export type OpenCodeLaunchOverlay = {
   configContent: string;
+  /** File config is required: OpenCode 1.18 ignores inline skills.paths. */
+  configPath?: string;
+  skills?: Array<{ capabilityId: string; name: string; path: string }>;
+  mcpNames?: Record<string, string>;
   env: Record<string, string>;
   desiredRevision: string;
   /** Capabilities admitted by the physical OpenCode process launch. */
@@ -40,6 +42,9 @@ export type OpenCodeLaunchOverlay = {
 
 type OverlayRecord = {
   mcp: Record<string, Record<string, unknown>>;
+  configPath?: string;
+  skills?: OpenCodeLaunchOverlay["skills"];
+  mcpNames?: Record<string, string>;
   env: Record<string, string>;
   desiredRevision: string;
   capabilityIds: string[];
@@ -57,6 +62,9 @@ const serializeOverlay = (record: OverlayRecord): OpenCodeLaunchOverlay => {
   return {
     configContent: Object.keys(config).length > 0 ? JSON.stringify(config) : "",
     env: { ...record.env },
+    ...(record.configPath ? { configPath: record.configPath } : {}),
+    ...(record.skills ? { skills: record.skills.map((skill) => ({ ...skill })) } : {}),
+    ...(record.mcpNames ? { mcpNames: { ...record.mcpNames } } : {}),
     desiredRevision: record.desiredRevision,
     capabilityIds: [...record.capabilityIds],
     ...(record.prompt
@@ -85,6 +93,14 @@ export function applyOpenCodeLaunchOverlay(
 ): NodeJS.ProcessEnv {
   if (!overlay) return { ...env };
   const next: NodeJS.ProcessEnv = { ...env, ...overlay.env };
+  if (overlay.configPath) {
+    // Do not relocate an existing custom config: its plugins and file references
+    // are resolved against its original directory by OpenCode.
+    if (env.OPENCODE_CONFIG && resolve(env.OPENCODE_CONFIG) !== overlay.configPath) {
+      throw new Error("Native Polyth skills require a private OPENCODE_CONFIG; an existing custom config cannot be relocated safely");
+    }
+    next.OPENCODE_CONFIG = overlay.configPath;
+  }
   if (!overlay.configContent.trim()) return next;
   const existing = env.OPENCODE_CONFIG_CONTENT?.trim();
   if (!existing) {
@@ -106,9 +122,15 @@ export function applyOpenCodeLaunchOverlay(
   const extra = parsedExtra;
   const baseMcp = isPlainObject(base.mcp) ? base.mcp : {};
   const extraMcp = isPlainObject(extra.mcp) ? extra.mcp : {};
+  const baseSkills = isPlainObject(base.skills) ? base.skills : {};
+  const extraSkills = isPlainObject(extra.skills) ? extra.skills : {};
   next.OPENCODE_CONFIG_CONTENT = JSON.stringify({
     ...base,
     ...extra,
+    ...(Object.keys(extraSkills).length ? { skills: {
+      ...baseSkills, ...extraSkills,
+      paths: [...new Set([...(Array.isArray(baseSkills.paths) ? baseSkills.paths : []), ...(Array.isArray(extraSkills.paths) ? extraSkills.paths : [])])],
+    } } : {}),
     ...(Object.keys(baseMcp).length || Object.keys(extraMcp).length
       ? { mcp: { ...baseMcp, ...extraMcp } }
       : {}),
@@ -126,7 +148,7 @@ const supportFor = (_context: HarnessContext): HarnessCapabilitySupport => ({
     instruction: { modes: ["prompt"], mutability: "immediate", configScope: "project", remote: false },
     "mcp-server": { modes: ["config"], mutability: "requires-restart", configScope: "project", remote: false },
     tool: { modes: ["mcp"], mutability: "requires-restart", remote: false, configScope: "project" },
-    skill: { modes: ["prompt"], mutability: "immediate", configScope: "project", remote: false },
+    skill: { modes: ["filesystem"], mutability: "requires-restart", configScope: "project", remote: false },
     context: { modes: ["prompt"], mutability: "immediate", configScope: "project", remote: false },
     extension: { modes: ["unsupported"], mutability: "immutable" },
   },
@@ -134,18 +156,34 @@ const supportFor = (_context: HarnessContext): HarnessCapabilitySupport => ({
 
 const runtimeRoot = (context: HarnessContext, ...parts: string[]): string | undefined => {
   if (!context.space) return undefined;
-  const projectId = context.projectId.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80) || "project";
-  const projectKey = `${projectId}-${createHash("sha1").update(resolve(context.cwd)).digest("hex").slice(0, 8)}`;
-  return join(context.space.storageDir, "runtime", "opencode", projectKey, ...parts);
+  if (context.space.spaceId !== context.spaceId) throw new Error("OpenCode Space identity mismatch");
+  if (lstatSync(context.space.storageDir).isSymbolicLink()) throw new Error("OpenCode Space storage cannot be a symlink");
+  const projectKey = createHash("sha256").update(JSON.stringify([context.projectId, resolve(context.cwd)])).digest("hex");
+  const base = realpathSync(context.space.storageDir);
+  const target = join(base, "runtime", "opencode", projectKey, ...parts);
+  let cursor = base;
+  for (const part of relative(base, target).split(sep)) {
+    if (!part || part === "." || part === "..") throw new Error("Invalid private OpenCode path");
+    cursor = join(cursor, part);
+    try {
+      if (lstatSync(cursor).isSymbolicLink()) throw new Error("Symlink in private OpenCode storage");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  return target;
 };
 
-const revisionToken = (revision: string): string => {
-  const safe = revision
-    .replace(/[^a-zA-Z0-9._-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 64);
-  return safe || "rev";
+const revisionToken = (revision: string): string => createHash("sha256").update(revision).digest("hex");
+
+const writeRevisionFile = (path: string, content: string): void => {
+  if (existsSync(path)) {
+    if (lstatSync(path).isSymbolicLink() || readFileSync(path, "utf8") !== content) {
+      throw new Error("Refusing to modify an immutable OpenCode revision");
+    }
+    return;
+  }
+  atomicWriteSync(path, content, 0o600);
 };
 
 const writeSecretFile = (
@@ -158,7 +196,7 @@ const writeSecretFile = (
   if (!dir) return undefined;
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const path = join(dir, filename.replace(/[^A-Za-z0-9._-]+/g, "_"));
-  atomicWriteSync(path, value, 0o600);
+  writeRevisionFile(path, value);
   return path;
 };
 
@@ -228,8 +266,7 @@ const overlayMcpEntry = (
   };
 };
 
-// Kept as a public compatibility utility for callers that still need a stable
-// portable skill ID; canonical OpenCode skill delivery itself is prompt-based.
+// Native identifiers are stable across revisions.
 export function polythSkillId(owner: string, name: string): string {
   const raw = `polyth-${owner}-${name}`
     .toLowerCase()
@@ -297,7 +334,6 @@ export function createOpenCodeProvisioner(_applier: BackendConfigApplier): Harne
       const records: HarnessCapabilityRecord[] = [];
       for (const item of plan.items.filter((row) =>
         row.capability.kind === "instruction"
-        || row.capability.kind === "skill"
         || row.capability.kind === "context")) {
         if (item.mode === "unsupported") {
           records.push(recordFor(item, "unsupported", "Capability scope is narrower than the OpenCode project target"));
@@ -309,6 +345,47 @@ export function createOpenCodeProvisioner(_applier: BackendConfigApplier): Harne
       const overlayEnv: Record<string, string> = {};
       const overlayMcp: Record<string, Record<string, unknown>> = {};
       const spawnCapabilityIds: string[] = [];
+      const nativeSkills: NonNullable<OpenCodeLaunchOverlay["skills"]> = [];
+      const mcpNames: Record<string, string> = {};
+      let configPath: string | undefined;
+      const skillItems = plan.items.filter((item) => item.capability.kind === "skill");
+      try {
+        for (const item of skillItems) {
+          if (item.capability.kind !== "skill") continue;
+          if (item.mode === "unsupported") {
+            records.push(recordFor(item, "unsupported", "Skill scope is narrower than the OpenCode project target"));
+            continue;
+          }
+          const name = polythSkillId(item.capability.owner, item.capability.name);
+          if (nativeSkills.some((skill) => skill.name === name)) throw new Error("Native OpenCode skill name collision");
+          const root = runtimeRoot(context, "revisions", revisionToken(plan.desiredRevision), "skills");
+          if (!root) throw new Error("Native OpenCode skills require Space storage");
+          const dir = runtimeRoot(context, "revisions", revisionToken(plan.desiredRevision), "skills", name)!;
+          mkdirSync(dir, { recursive: true, mode: 0o700 });
+          const path = join(dir, "SKILL.md");
+          writeRevisionFile(path, `---\nname: ${name}\ndescription: ${JSON.stringify(item.capability.description)}\npolyth-owned: "true"\n---\n${item.capability.instructions}\n`);
+          writeRevisionFile(join(dir, ".polyth-owned"), item.capability.id);
+          nativeSkills.push({ capabilityId: item.capability.id, name, path });
+        }
+        if (nativeSkills.length) {
+          configPath = runtimeRoot(context, "revisions", revisionToken(plan.desiredRevision), "opencode.json")!;
+          const root = runtimeRoot(context, "revisions", revisionToken(plan.desiredRevision), "skills")!;
+          writeRevisionFile(configPath, JSON.stringify({ $schema: "https://opencode.ai/config.json", skills: { paths: [root] } }));
+        }
+        for (const skill of nativeSkills) {
+          const item = skillItems.find((item) => item.capability.id === skill.capabilityId)!;
+          records.push(recordFor(item, "pending", "Staged for native OpenCode skill discovery"));
+          spawnCapabilityIds.push(skill.capabilityId);
+        }
+      } catch {
+        configPath = undefined;
+        nativeSkills.length = 0;
+        for (const item of skillItems) {
+          if (!records.some((record) => record.capabilityId === item.capability.id)) {
+            records.push(recordFor(item, "failed", "Could not stage private native OpenCode skills"));
+          }
+        }
+      }
       const mcpItems = plan.items.filter((item) => item.capability.kind === "mcp-server");
       const toolItems = plan.items.filter((item) => item.capability.kind === "tool");
       try {
@@ -334,6 +411,7 @@ export function createOpenCodeProvisioner(_applier: BackendConfigApplier): Harne
             item.capability,
             secrets,
           );
+          mcpNames[item.capability.id] = item.capability.name;
           spawnCapabilityIds.push(item.capability.id);
           records.push(recordFor(item, "pending", "Staged as a private OpenCode launch overlay"));
         }
@@ -373,6 +451,9 @@ export function createOpenCodeProvisioner(_applier: BackendConfigApplier): Harne
       const promptText = promptIds.length ? renderCapabilityText(plan) : undefined;
       overlayStore.set(overlayKeyOf(context), {
         mcp: overlayMcp,
+        configPath,
+        skills: nativeSkills,
+        mcpNames,
         env: overlayEnv,
         desiredRevision: plan.desiredRevision,
         capabilityIds: spawnCapabilityIds,
