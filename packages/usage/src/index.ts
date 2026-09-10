@@ -21,7 +21,6 @@ export {
   discoverQuotaProviders,
   listConfiguredQuotaProviders,
   mapProviderUsage,
-  mapOpen\u0043hamberUsage,
 } from "./providers/index.ts";
 export type { QuotaDiscoveryOptions, QuotaDiscoveryPaths } from "./providers/index.ts";
 export { USAGE_WIDGETS } from "../widgets/catalog.ts";
