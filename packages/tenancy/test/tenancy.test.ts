@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { DeploymentProfile } from "@polyth/contracts";
+import type { AuthPrincipal, DeploymentProfile } from "@polyth/contracts";
 import {
   BOOTSTRAP_USER_ID,
   createIdentityResolver,
@@ -168,6 +168,42 @@ test("a bogus remembered hint falls back to the default space instead of failing
     { remembered: "spc_stale" },
   );
   assert.equal(ctx.spaceId, home.id);
+});
+
+test("an authenticated account with an interrupted provisioning is given a Personal space", () => {
+  const dir = tmp();
+  const store = storeIn(dir);
+  store.createUser("Alice", "usr_alice");
+  assert.deepEqual(store.spacesFor("usr_alice"), []);
+
+  const resolver = createSpaceResolver({
+    store,
+    identities: createIdentityResolver({
+      ownerUserId: BOOTSTRAP_USER_ID,
+      deployment: "server-trusted",
+    }),
+    dataDir: dir,
+    deployment: "server-trusted",
+  });
+  const principal = {
+    kind: "ui-session",
+    sessionId: "alice-session",
+    rememberedDeviceId: "alice-device",
+    userId: "usr_alice",
+  } as AuthPrincipal & { userId: string };
+
+  const context = resolver.forPrincipal(principal);
+  assert.equal(context.userId, "usr_alice");
+  assert.equal(context.role, "owner");
+  assert.equal(store.spacesFor("usr_alice").length, 1);
+  assert.equal(store.defaultSpaceFor("usr_alice")?.id, context.spaceId);
+
+  assert.equal(resolver.forPrincipal(principal).spaceId, context.spaceId);
+  assert.equal(store.spacesFor("usr_alice").length, 1);
+
+  const reopened = storeIn(dir);
+  assert.equal(reopened.spacesFor("usr_alice").length, 1);
+  assert.equal(reopened.defaultSpaceFor("usr_alice")?.id, context.spaceId);
 });
 
 test("each space gets its own storage root and switching changes it", () => {
