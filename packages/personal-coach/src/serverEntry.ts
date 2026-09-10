@@ -28,6 +28,7 @@ import {
   type CoachPlanCapabilitySet,
 } from "./planCapabilities.ts";
 import { personalCoachProposalRoutes } from "./proposalRoutes.ts";
+import { personalCoachReminderRoutes } from "./reminderRoutes.ts";
 import { personalCoachRoutes } from "./routes.ts";
 import { createPersonalCoachService, type PersonalCoachService } from "./service.ts";
 import { personalCoachSessionRoute } from "./sessionRoute.ts";
@@ -165,6 +166,11 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     async onEnable() {
       const handlers = [
         personalCoachSessionRoute(host, { coach: service, ensureCapabilities }),
+        personalCoachReminderRoutes(host, {
+          coach: service,
+          ensureCapabilities,
+          schedule: () => host.services.get(serverServiceKey<CoachScheduleService>("schedule")),
+        }),
         personalCoachProposalRoutes(service),
         personalCoachInsightRoutes(service),
         personalCoachRoutes(service),
