@@ -34,6 +34,11 @@ function fakeApi(overrides: Partial<CoachApi> = {}): CoachApi {
     home: async () => home(),
     settings: async () => ({ revision: 1, profile: home().profile }),
     updateSettings: async (patch) => ({ ...home().profile, ...patch }),
+    resetState: async () => ({
+      revision: 2,
+      resetAt: 2,
+      profile: { ...home().profile, onboardingState: "new", updatedAt: 2 },
+    }),
     reminders: async () => ({
       available: true,
       settings: {
@@ -51,7 +56,7 @@ function fakeApi(overrides: Partial<CoachApi> = {}): CoachApi {
       },
     }),
     completeCommitment: async (id) => ({ id, title: "Done", status: "done" }),
-    skipCommitment: async (id) => ({ id, title: "Skipped", status: "skipped" }),
+    skipCommitment: async (id, reason) => ({ id, title: "Skipped", status: "skipped", ...(reason ? { lastReason: reason } : {}) }),
     recordCheckIn: async ({ energy, focus }) => ({ id: "check", energy, focus, createdAt: 1 }),
     createSession: async () => ({ sessionId: "coach-session" }),
     insight: async (id) => ({
@@ -127,6 +132,19 @@ test("complete is optimistic and reconciles with one explicit refresh", async ()
   await complete;
   assert.equal(homeCalls, 2);
   assert.equal(c.getSnapshot().error, undefined);
+});
+
+test("skip reason is transported without adding an LLM round trip", async () => {
+  let capturedReason: string | undefined;
+  const c = client(fakeApi({
+    skipCommitment: async (id, reason) => {
+      capturedReason = reason;
+      return { id, title: "Skipped", status: "skipped", ...(reason ? { lastReason: reason } : {}) };
+    },
+  }));
+  await c.ensureLoaded();
+  await c.skip("c1", "Blocked");
+  assert.equal(capturedReason, "Blocked");
 });
 
 test("failed optimistic mutation rolls back the previous projection", async () => {
