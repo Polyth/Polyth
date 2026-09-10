@@ -18,7 +18,11 @@ const sessionTitle = (value: unknown): string => {
 
 export interface CoachSessionDeps {
   coach: PersonalCoachService;
-  ensureCapabilities(space: Pick<SpaceContext, "spaceId">, projectId: string, store: CoachStore): void;
+  ensureCapabilities(
+    space: Pick<SpaceContext, "spaceId">,
+    projectId: string,
+    store: CoachStore,
+  ): void | Promise<void>;
 }
 
 /**
@@ -39,7 +43,7 @@ export function personalCoachSessionRoute(
     // Register project-scoped capabilities before SessionService materializes a
     // backend runtime so the first turn sees the same tool/instruction set as
     // later turns.
-    deps.ensureCapabilities(request.space, workspace.projectId, store);
+    await deps.ensureCapabilities(request.space, workspace.projectId, store);
 
     const scoped = host.forSpace(request.space);
     const session = await scoped.sessions.create({
