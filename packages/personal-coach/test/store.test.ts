@@ -97,6 +97,10 @@ test("commitment lifecycle is deterministic, idempotent, and audited", () => {
     "commitment.rescheduled",
     "commitment.created",
   ]);
+  assert.deepEqual(
+    events.find((event) => event.eventType === "commitment.rescheduled")?.payload,
+    { plannedFor: 20_000, reason: "Need to finish API first" },
+  );
   store.close();
 });
 
@@ -107,6 +111,17 @@ test("skipped commitments can be deliberately rescheduled but cancelled ones can
   assert.equal(store.rescheduleCommitment(commitment.id, 50_000).status, "open");
   assert.equal(store.cancelCommitment(commitment.id, "No longer relevant").status, "cancelled");
   assert.throws(() => store.completeCommitment(commitment.id), /cancelled commitment/);
+
+  const events = store.listEvents({ entityType: "commitment", entityId: commitment.id });
+  assert.deepEqual(
+    events.find((event) => event.eventType === "commitment.skipped")?.payload,
+    { reason: "No time" },
+    "later rescheduling must not erase why an earlier attempt was skipped",
+  );
+  assert.deepEqual(
+    events.find((event) => event.eventType === "commitment.cancelled")?.payload,
+    { reason: "No longer relevant" },
+  );
   store.close();
 });
 
