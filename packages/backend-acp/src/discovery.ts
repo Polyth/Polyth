@@ -1,7 +1,6 @@
 // Cold model discovery for an ACP agent, so the composer can offer models
-// before a Polyth session exists. ACP publishes the catalog on a session, not
-// on the connection, so discovery opens a throwaway session, reads what the
-// agent advertised, and terminates the process.
+// before a Polyth session exists. A profile may use a read-only connection
+// extension; generic ACP agents fall back to metadata from a throwaway session.
 //
 // That is a process spawn, so it is cached and deduped per (harness, command
 // version, auth state). An agent that needs a native sign-in reports
@@ -10,9 +9,10 @@ import type { HarnessAvailabilityState, ModelDescriptor } from "@polyth/contract
 import { acpModelDescriptors, parseSessionConfig } from "./sessionConfig.ts";
 
 export interface AcpDiscoveryProbe {
-  /** Opens a connection, runs `session/new`, returns its raw result. */
+  /** Opens a connection and returns either direct descriptors or raw session metadata. */
   open(signal?: AbortSignal): Promise<{
     result: unknown;
+    models?: ModelDescriptor[];
     setConfigOption?(configId: string, value: string): Promise<unknown>;
     close(): Promise<void>;
   }>;
@@ -69,6 +69,7 @@ const discoverDescriptors = async (
   opened: Awaited<ReturnType<AcpDiscoveryProbe["open"]>>,
   harnessId: string,
 ): Promise<ModelDescriptor[]> => {
+  if (opened.models) return opened.models;
   const initial = parseSessionConfig(opened.result);
   const models = acpModelDescriptors(initial, harnessId).map(withoutVariants);
   // The fresh session's controls say nothing about the other models: selecting

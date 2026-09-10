@@ -182,7 +182,7 @@ test("the Cursor profile never reaches for the flag that the CLI ignores", async
     }
 });
 
-test("Cursor discovery preserves complete variant model IDs without probing each row", { skip: process.platform !== "linux" }, async (t) => {
+test("Cursor discovery uses the direct catalog and preserves per-model reasoning", { skip: process.platform !== "linux" }, async (t) => {
     invalidateAcpDiscovery();
     const dir = await mkdtemp(join(tmpdir(), "polyth-cursor-discovery-"));
     t.after(() => rm(dir, { recursive: true, force: true }));
@@ -195,13 +195,15 @@ fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ startup: args }) + "\
 if (args[0] === "--version") { process.stdout.write("2026.09.02\\n"); process.exit(0); }
 require("node:readline").createInterface({ input: process.stdin }).on("line", line => {
   const request = JSON.parse(line);
-  fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ method: request.method }) + "\\n");
-  let result = {};
-  if (request.method === "initialize") result = { protocolVersion: 1 };
-  if (request.method === "session/new") result = { sessionId: "probe", configOptions: [{ id: "model", name: "Model", category: "model", type: "select", currentValue: "model[reasoning=high]", options: [
-    { value: "model[reasoning=high]", name: "Model High" },
-    { value: "model[reasoning=low]", name: "Model Low" },
-  ] }] };
+    fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ method: request.method, params: request.params }) + "\\n");
+    let result = {};
+    if (request.method === "initialize") result = { protocolVersion: 1 };
+    if (request.method === "cursor/list_available_models") result = { models: [
+      { value: "fast", name: "Fast", configOptions: [] },
+      { value: "deep", name: "Deep", configOptions: [{ id: "reasoning", category: "thought_level", type: "select", currentValue: "medium", options: [
+        { value: "low", name: "Low" }, { value: "medium", name: "Medium" }, { value: "high", name: "High" },
+      ] }] },
+    ] };
   process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) + "\\n");
 });
 `, { mode: 0o755 });
@@ -225,12 +227,16 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
     const first = await provider.discover!(discoveryContext);
     assert.equal(first.state, "ready", first.state === "degraded" ? first.message : undefined);
     assert.deepEqual(first.state === "ready" ? first.catalog.models.map((model) => model.modelID) : [], [
-        "model[reasoning=high]", "model[reasoning=low]",
+        "fast", "deep",
+    ]);
+    assert.deepEqual(first.state === "ready" ? first.catalog.models.map((model) => model.variants) : [], [
+        undefined, ["low", "medium", "high"],
     ]);
     const before = (await readFile(log, "utf8")).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
     await provider.discover!(discoveryContext);
     const after = (await readFile(log, "utf8")).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
-    assert.deepEqual(after.filter((entry) => entry.method).map((entry) => entry.method), ["initialize", "session/new"]);
+    assert.deepEqual(after.filter((entry) => entry.method).map((entry) => entry.method), ["initialize", "cursor/list_available_models"]);
+    assert.equal(after.find((entry) => entry.method === "initialize")?.params?.clientCapabilities?._meta?.parameterizedModelPicker, true);
     assert.equal(after.filter((entry) => entry.startup?.[0] === "acp").length, 1);
     assert.equal(after.length - before.length, 1); // only the second probe's --version startup is new
     await registry.snapshots(discoveryContext, { harnessId: "cursor", force: true });
@@ -239,5 +245,5 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
     assert.equal(refreshed.filter((entry) => entry.startup?.[0] === "acp").length, 2,
         "explicit refresh bypasses the provider's internal discovery cache");
     assert.deepEqual(refreshed.filter((entry) => entry.method).map((entry) => entry.method),
-        ["initialize", "session/new", "initialize", "session/new"]);
+        ["initialize", "cursor/list_available_models", "initialize", "cursor/list_available_models"]);
 });

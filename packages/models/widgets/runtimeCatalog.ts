@@ -73,10 +73,16 @@ const catalogFromSnapshot = (snapshot: HarnessSnapshot | undefined, harnessId?: 
 
 const readDraftCatalog = (projectId: string, harnessId: string, spaceId?: string): Promise<Catalog> =>
   catalogCache.read(draftCatalogKey(projectId, harnessId, spaceId), async () => {
-    const query = new URLSearchParams({ projectId, detail: "1", harnessId, force: "1" });
+    const query = new URLSearchParams({ projectId, detail: "1", harnessId });
     const snapshots = await api.get<HarnessSnapshot[]>(`/api/harnesses/snapshots?${query}`);
     return catalogFromSnapshot(snapshots[0], harnessId);
   });
+
+/** Finish target metadata discovery before committing a harness selection. */
+export async function prepareRuntimeCatalog(options: { projectId: string; harnessId: string; spaceId?: string }): Promise<void> {
+  const catalog = await readDraftCatalog(options.projectId, options.harnessId, options.spaceId);
+  if (catalog.discovery.state === "unavailable") throw new Error(catalog.discovery.reason);
+}
 export function useCatalogRevision(): number {
   return useSyncExternalStore((listener) => {
     listeners.add(listener);
@@ -128,6 +134,9 @@ export function useRuntimeCatalog(
     ...(requestedHarness ? { harnessId: requestedHarness } : {}),
     discovery: fallbackModels.length > 0 ? { state: "available" } : { state: "pending" },
   };
+  const preloaded = requestedHarness && (prospective?.projectId ?? session?.projectId)
+    ? catalogCache.peek(draftCatalogKey(prospective?.projectId ?? session!.projectId, requestedHarness, prospective?.spaceId))
+    : undefined;
   const [result, setResult] = useState<{ key: string; catalog: Catalog }>();
   useEffect(() => {
     if (session?.harnessTransition) return;
@@ -190,5 +199,5 @@ export function useRuntimeCatalog(
   }, [key, session?.id, session?.harnessTransition, prospective?.projectId, prospective?.harnessId]);
   return !key
     ? { models, agents, nativeDefault: false, ready: true, discovery: models.length > 0 ? { state: "available" } : { state: "empty" } }
-    : result?.key === key ? result.catalog : catalogCache.peek(key) ?? fallback;
+    : result?.key === key ? result.catalog : catalogCache.peek(key) ?? preloaded ?? fallback;
 }

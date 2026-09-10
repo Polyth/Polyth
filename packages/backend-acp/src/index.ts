@@ -53,6 +53,11 @@ export interface AcpProfile {
     probe: HarnessProvider["probe"];
     /** Disable when native catalog IDs already encode all model variants. */
     probeModelControls?: boolean;
+    /** Provider-specific, read-only catalog discovery. Undefined falls back
+     * to the standard throwaway `session/new` path. */
+    discoverModels?(connection: AcpConnection, context: HarnessContext): Promise<ModelDescriptor[] | undefined>;
+    /** Native client extension metadata advertised during `initialize`. */
+    initializeClientMeta?: JsonObject;
     /**
      * Optional gate on cold model discovery. Some agent generations cannot
      * answer it, and spawning them to find that out every time is wasted work.
@@ -185,7 +190,15 @@ export async function connectAcp(profile: AcpProfile, context: HarnessContext, s
             protocolVersion: number;
             agentCapabilities?: AcpAgentCapabilities;
             authMethods?: unknown;
-        }>("initialize", { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false }, clientInfo: { name: "polyth", version: "0.1.0" } });
+        }>("initialize", {
+            protocolVersion: 1,
+            clientCapabilities: {
+                fs: { readTextFile: false, writeTextFile: false },
+                terminal: false,
+                ...(profile.initializeClientMeta ? { _meta: profile.initializeClientMeta } : {}),
+            },
+            clientInfo: { name: "polyth", version: "0.1.0" },
+        });
         if (result.protocolVersion !== 1)
             throw new Error("unsupported ACP version");
         const authMethods = parseAuthMethods(result.authMethods);

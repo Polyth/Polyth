@@ -24,7 +24,7 @@ globalThis.fetch = async (input) => {
 };
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { invalidateRuntimeCatalogs, peekHarnessSnapshots, readHarnessSnapshots, useRuntimeCatalog } = await import("../widgets/runtimeCatalog.ts");
+const { invalidateRuntimeCatalogs, peekHarnessSnapshots, prepareRuntimeCatalog, readHarnessSnapshots, useRuntimeCatalog } = await import("../widgets/runtimeCatalog.ts");
 const models: ModelDescriptor[] = [];
 const agents: AgentDescriptor[] = [];
 const snapshot = (harnessId: string, modelID: string) => [{
@@ -101,11 +101,18 @@ test("warming Cursor runs behind selected Codex and survives source changes and 
   try {
     await act(async () => { root.render(createElement(Harness, { models: [] })); });
     assert.equal(requests.some((path) => path.includes("harnessId=cursor")), true);
-    assert.equal(requests.some((path) => path.includes("harnessId=cursor") && path.includes("force=1")), true);
+    assert.equal(requests.some((path) => path.includes("harnessId=cursor") && path.includes("force=1")), false,
+      "background preload must reuse the server cache in another window");
     assert.equal(requests.some((path) => path.includes("harnessId=codex")), true);
     await act(async () => { pending.get("codex")!([{ identity: { id: "codex", name: "Codex" }, availability: { state: "ready" }, catalog: { models: [] } }]); });
     assert.equal(catalog?.ready, true, "Codex is usable while Cursor is still loading");
+    let prepared = false;
+    const preparation = prepareRuntimeCatalog({ projectId: "warm", harnessId: "cursor" }).then(() => { prepared = true; });
+    await act(async () => {});
+    assert.equal(prepared, false, "selection waits for the shared background catalog request");
     await act(async () => { pending.get("cursor")!(snapshot("cursor", "cursor-a")); });
+    await preparation;
+    assert.equal(prepared, true);
     const cursorRequests = () => requests.filter((path) => path.includes("harnessId=cursor")).length;
     assert.equal(cursorRequests(), 1);
     await act(async () => { root.render(createElement(Harness, { models: [] })); });

@@ -12,7 +12,7 @@ import { createApiTransport, defineWebPackage, type WebPackageHost } from "@poly
 import { Button, Dialog, Notice, Select, Switch, Tabs, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 import MoveControls from "../../../apps/web/src/components/MoveControls.tsx";
 import ProviderLogo from "../../models/widgets/ProviderLogo.tsx";
-import { invalidateRuntimeCatalogs, peekHarnessSnapshots, readHarnessSnapshots, useCatalogRevision } from "@polyth/models/runtime-catalog";
+import { invalidateRuntimeCatalogs, peekHarnessSnapshots, prepareRuntimeCatalog, readHarnessSnapshots, useCatalogRevision } from "@polyth/models/runtime-catalog";
 import { activeBrowserAccountId } from "@polyth/web/account-storage";
 
 const api = createApiTransport();
@@ -120,7 +120,7 @@ function GenericControl({
   </div>;
 }
 
-function HarnessTabs({
+export function HarnessTabs({
   host,
   projectId,
   sessionId,
@@ -176,27 +176,30 @@ function HarnessTabs({
 
   const perform = async (next: HarnessSelection, timing: "after-turn" | "stop-now") => {
     if (!projectId) return;
-    if (!sessionId) {
-      const previous = host.executionDraft.get(projectId);
-      const nextHarnessId = next.mode === "pinned" ? next.harnessId : undefined;
-      const config = host.executionDraft.update(projectId, {
-        harnessSelection: next,
-        harnessSelectionExplicit: true,
-        ...(previous.model && (!nextHarnessId || previous.model.harnessId !== nextHarnessId) ? { model: undefined } : {}),
-        ...(previous.agent && (!nextHarnessId || previous.agent.harnessId !== nextHarnessId) ? { agent: undefined } : {}),
-      });
-      setDraftSelection(config.harnessSelection);
-      setDraftExplicit(true);
-      setChoice(undefined);
-      const nextName = next.mode === "pinned"
-        ? rows.find((row) => row.identity.id === next.harnessId)?.identity.name ?? next.harnessId
-        : undefined;
-      setAnnouncement(nextName ? `${nextName} selected for the new conversation.` : "Automatic harness selection enabled.");
-      return;
-    }
     setBusy(true);
     setFailure("");
     try {
+      if (next.mode === "pinned" && next.harnessId === "cursor") {
+        await prepareRuntimeCatalog({ projectId, harnessId: next.harnessId, spaceId });
+      }
+      if (!sessionId) {
+        const previous = host.executionDraft.get(projectId);
+        const nextHarnessId = next.mode === "pinned" ? next.harnessId : undefined;
+        const config = host.executionDraft.update(projectId, {
+          harnessSelection: next,
+          harnessSelectionExplicit: true,
+          ...(previous.model && (!nextHarnessId || previous.model.harnessId !== nextHarnessId) ? { model: undefined } : {}),
+          ...(previous.agent && (!nextHarnessId || previous.agent.harnessId !== nextHarnessId) ? { agent: undefined } : {}),
+        });
+        setDraftSelection(config.harnessSelection);
+        setDraftExplicit(true);
+        setChoice(undefined);
+        const nextName = next.mode === "pinned"
+          ? rows.find((row) => row.identity.id === next.harnessId)?.identity.name ?? next.harnessId
+          : undefined;
+        setAnnouncement(nextName ? `${nextName} selected for the new conversation.` : "Automatic harness selection enabled.");
+        return;
+      }
       const result = await api.post<SessionProjection>(`/api/harnesses/sessions/${encodeURIComponent(sessionId)}`, {
         selection: next,
         timing,

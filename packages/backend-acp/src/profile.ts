@@ -17,7 +17,15 @@ export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile)
             const connection = await connectAcp(profile, context, undefined, signal);
             const abort = () => { void connection.rpc.close().catch(() => {}); };
             signal?.addEventListener("abort", abort, { once: true });
+            const close = async () => {
+                signal?.removeEventListener("abort", abort);
+                await connection.rpc.close();
+            };
             try {
+                // Profiles may expose a connection-level catalog. Older ACP
+                // runtimes still fall back to metadata from a throwaway session.
+                const models = await profile.discoverModels?.(connection, context);
+                if (models) return { result: {}, models, close };
                 const result = await connection.rpc.request("session/new", { cwd: context.cwd, mcpServers: [] });
                 return {
                     result,
@@ -26,14 +34,10 @@ export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile)
                         configId,
                         value,
                     }),
-                    close: async () => {
-                        signal?.removeEventListener("abort", abort);
-                        await connection.rpc.close();
-                    },
+                    close,
                 };
             } catch (error) {
-                signal?.removeEventListener("abort", abort);
-                await connection.rpc.close();
+                await close();
                 throw error;
             }
         },
