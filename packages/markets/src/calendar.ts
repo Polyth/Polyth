@@ -35,7 +35,9 @@ const EARNINGS_POLICY = {
   hardTtlMs: 12 * 60 * 60_000,
   maxEntries: 100,
 } as const;
-const US_SYMBOL = /^[A-Z][A-Z0-9-]{0,15}$/;
+// Plain US tickers plus the common one-letter class-share form (BRK.B, BF.B).
+// Do not accept arbitrary dot suffixes: those are also used for non-US listings (BMW.DE, VOD.L).
+const US_SYMBOL = /^[A-Z][A-Z0-9-]{0,15}(?:\.[ABC])?$/;
 
 const invalid = (message: string): never => {
   throw Object.assign(new Error(message), { code: "invalid-input" });
