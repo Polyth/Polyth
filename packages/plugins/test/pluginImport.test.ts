@@ -63,9 +63,9 @@ test("collects malformed entry errors without throwing", () => {
 });
 
 test("describePluginSpec derives a readable name from scoped and versioned npm specs", () => {
-  assert.deepEqual(describePluginSpec("@polyth/opencode-cursor@2.5.0"), {
+  assert.deepEqual(describePluginSpec("@example-scope/opencode-cursor@2.5.0"), {
     name: "opencode-cursor",
-    path: "@polyth/opencode-cursor@2.5.0",
+    path: "@example-scope/opencode-cursor@2.5.0",
     kind: "npm",
     version: "2.5.0",
     description: "npm package · v2.5.0",
