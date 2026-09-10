@@ -75,9 +75,11 @@ export function createPackageLifecycle(routeRegistry: RouteRegistry): PackageLif
         if (!registry.isEnabled(descriptor.id)) continue;
         try {
           await enable(descriptor.id);
-        } catch {
+        } catch (error) {
           // Package boot is isolated: one optional package cannot prevent the
-          // remaining enabled packages from starting.
+          // remaining enabled packages from starting. Keep the cause visible:
+          // otherwise the catalog says "ready" while every owned route is 404.
+          console.warn(`[polyth] package "${descriptor.id}" failed to start`, error);
         }
       }
     },

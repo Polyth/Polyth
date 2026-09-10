@@ -83,6 +83,9 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   assert.match(source, /function CostPulse/);
   assert.match(source, /label=\{tr\("usage\.usagedashboard\.dashboardDensity"\)\}/);
   assert.match(source, /setUsageDashboardPrefs/);
+  assert.match(source, /setProviderPinned/);
+  assert.match(source, /formatQuotaReset\(quota\.resetsAt\)/);
+  assert.doesNotMatch(source, /resetsValue", \{ date:/);
   assert.match(source, /tr\("usage\.usagedashboard\.sessionCohortsByLatestTurn"\)/);
   assert.match(source, /tr\("usage\.usagedashboard\.eachSessionAppearsOnceInBucket"\)/);
   assert.match(source, /<table className="sr-only">/);
@@ -115,6 +118,8 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   assert.doesNotMatch(styles, /\.settings-page-usage > \.settings-nav \{ display: flex; \}/);
   assert.match(styles, /\.settings-mobile-page \.settings-nav \{ display: none; \}/);
   assert.match(styles, /--usage-bg: var\(--bg\)/);
+  assert.match(styles, /--usage-card-bg: color-mix\(in srgb, var\(--elevated\)/);
+  assert.match(styles, /\.usage-provider-detail-card\.pinned/);
   assert.doesNotMatch(styles, /full dark analytics workspace/);
   assert.doesNotMatch(styles, /--usage-bg: #0d0e10/);
   assert.match(styles, /\.usage-status-pill\.session-only/);
@@ -131,5 +136,5 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   const usageMobileStyles = styles.slice(usageMobileStart, usageMobileEnd);
   assert.match(usageMobileStyles, /\.usage-spend-legend \{[\s\S]*?width: 100%;[\s\S]*?min-width: 0;[\s\S]*?max-width: none;/);
   assert.match(styles, /\.usage-view-tabs \.ui-tab\s*\{\s*flex:\s*1;\s*\}/);
-  assert.match(styles, /\.usage-layout-compact \.usage-cohort-chart\s*\{\s*height:\s*174px;/);
+  assert.match(styles, /\.usage-layout-compact \.usage-cohort-chart\s*\{\s*height:\s*150px;/);
 });

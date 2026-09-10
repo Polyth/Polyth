@@ -314,6 +314,8 @@ export const bg: AppMessages = {
   "contextrail.collapse": "Свиване",
   "contextrail.collapseValue": "Свиване {value}",
   "contextrail.dockBesideChat": "Докинг до Чата",
+  "contextrail.dockBelowChat": "Докинг под Чата",
+  "contextrail.unpinWindow": "Откачване на прозореца",
   "contextrail.expand": "Разгъване",
   "contextrail.expandValue": "Разгъване {value}",
   "contextrail.message": "×",

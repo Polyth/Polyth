@@ -83,6 +83,8 @@ export function groupQuotaWindows<W extends QuotaWindowLike>(windows: readonly W
 export interface UsagePrefs {
   /** Provider ids unchecked in Settings → Usage; stay hidden after reload. */
   hiddenProviders: string[];
+  /** Provider cards explicitly kept ahead of the regular provider order. */
+  pinnedProviders: string[];
   /** Collapsed quota groups as "providerId/family" keys. */
   collapsedGroups: string[];
   /** Browser-local dashboard presentation, restored whenever Settings remounts. */
@@ -119,6 +121,7 @@ export function parseUsagePrefs(raw: string | null): UsagePrefs {
     const dashboard = data.dashboard as Partial<UsageDashboardPrefs> | undefined;
     return {
       hiddenProviders: stringList(data.hiddenProviders),
+      pinnedProviders: stringList(data.pinnedProviders),
       collapsedGroups: stringList(data.collapsedGroups),
       dashboard: {
         view: dashboard?.view === "providers" ? "providers" : "overview",
@@ -133,6 +136,7 @@ export function parseUsagePrefs(raw: string | null): UsagePrefs {
   } catch {
     return {
       hiddenProviders: [],
+      pinnedProviders: [],
       collapsedGroups: [],
       dashboard: { ...DEFAULT_DASHBOARD_PREFS },
     };
@@ -163,6 +167,10 @@ export function setProviderHidden(providerId: string, hidden: boolean): void {
   save({ ...prefs, hiddenProviders: toggled(prefs.hiddenProviders, providerId, hidden) });
 }
 
+export function setProviderPinned(providerId: string, pinned: boolean): void {
+  save({ ...prefs, pinnedProviders: toggled(prefs.pinnedProviders, providerId, pinned) });
+}
+
 export function setGroupCollapsed(key: string, collapsed: boolean): void {
   save({ ...prefs, collapsedGroups: toggled(prefs.collapsedGroups, key, collapsed) });
 }
@@ -175,6 +183,22 @@ export function orderUsageBlocks<T>(items: readonly T[], order: readonly string[
   const rank = new Map(order.map((itemId, index) => [itemId, index]));
   return [...items].sort((left, right) =>
     (rank.get(id(left)) ?? order.length) - (rank.get(id(right)) ?? order.length));
+}
+
+/** Preserve the user's order within both groups while guaranteeing pinned
+ * providers always render before every unpinned provider. */
+export function orderPinnedUsageBlocks<T>(
+  items: readonly T[],
+  order: readonly string[],
+  pinned: readonly string[],
+  id: (item: T) => string,
+): T[] {
+  const ordered = orderUsageBlocks(items, order, id);
+  const pinnedIds = new Set(pinned);
+  return [
+    ...ordered.filter((item) => pinnedIds.has(id(item))),
+    ...ordered.filter((item) => !pinnedIds.has(id(item))),
+  ];
 }
 
 export function moveUsageBlock(ids: readonly string[], id: string, to: string | number): string[] {

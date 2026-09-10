@@ -45,7 +45,7 @@ export const en = {
   "settings.voicepage.serverVoiceCheckSample": "Polyth server voice check.",
   "settings.voicepage.showsTheMicButtonInTheComposer": "Shows the mic button in the composer; your speech is inserted as text.",
   "settings.voicepage.speakSample": "Speak sample",
-  "settings.voicepage.speaksEachCompletedAssistantReplyInThe": "Speaks each completed assistant reply in the active session.",
+  "settings.voicepage.speaksEachCompletedAssistantReplyInThe": "Replies play only when you press the button beneath them.",
   "settings.voicepage.speechIsNotSupportedInThisBrowser": "Speech is not supported in this browser",
   "settings.voicepage.speechRate": "Speech rate",
   "settings.voicepage.speechToTextServer": "Speech-to-text server",

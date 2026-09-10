@@ -21,6 +21,8 @@ export interface RailSurfaceContext {
 /** UX-PANE-MODEL: presentation metadata for a canonical workspace surface
  *  (Files/Git/Terminal/Preview). Layout policy stays in the host; the
  *  component never decides dock versus full-screen geometry. */
+export type WorkspacePaneDock = "side" | "bottom";
+
 export interface WorkspacePanePresentation {
   kind: "workspace";
   /** Initializer for a MISSING width preference, as a ratio of the measured
@@ -40,15 +42,36 @@ export interface WorkspacePanePresentation {
    *  (or "side") keeps the classic dock beside Chat. "bottom" pins the pane
    *  as a full-width strip under the workspace, lifting Chat's composer above
    *  it. Only the pinned mode reads this; dynamic/fullscreen ignore it. */
-  dock?: "side" | "bottom";
+  dock?: WorkspacePaneDock;
+  /** Edges supported by the pinned window. If omitted, only the default edge
+   *  is offered, preserving the classic side-dock behavior for old packages. */
+  dockOptions?: readonly WorkspacePaneDock[];
+}
+
+function defaultPaneDockEdge(presentation: WorkspacePanePresentation | undefined): WorkspacePaneDock {
+  return presentation?.dock === "bottom" ? "bottom" : "side";
+}
+
+/** The package-declared edges available to the host's pinned-window controls. */
+export function paneDockOptions(presentation: WorkspacePanePresentation | undefined): WorkspacePaneDock[] {
+  if (!presentation) return [];
+  const configured = [...new Set((presentation.dockOptions ?? []).filter(
+    (edge): edge is WorkspacePaneDock => edge === "side" || edge === "bottom",
+  ))];
+  return configured.length > 0 ? configured : [defaultPaneDockEdge(presentation)];
 }
 
 /** The edge a pinned pane attaches to. Undefined presentation, or a
- *  presentation without an explicit `dock`, means the classic side dock. */
+ *  presentation without an explicit `dock`, means the classic side dock.
+ *  A persisted selection is honored only while it remains package-supported. */
 export function paneDockEdge(
   presentation: WorkspacePanePresentation | undefined,
+  selected?: WorkspacePaneDock,
 ): "side" | "bottom" {
-  return presentation?.dock === "bottom" ? "bottom" : "side";
+  const options = paneDockOptions(presentation);
+  if (selected && options.includes(selected)) return selected;
+  const preferred = defaultPaneDockEdge(presentation);
+  return options.includes(preferred) ? preferred : options[0] ?? "side";
 }
 
 /** Keep-alive surface components can pause background work while hidden. */
