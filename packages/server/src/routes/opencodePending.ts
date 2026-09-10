@@ -6,8 +6,10 @@ import type { RouteHandler } from "../http.ts";
 import type { OpenCodePendingService } from "../opencodePending.ts";
 
 export function opencodePendingRoutes(pending: OpenCodePendingService): RouteHandler {
-  return async ({ path, method, json, space }) => {
+  return async (request) => {
+    const { path, method, json } = request;
     if (path !== "/api/opencode/pending" && path !== "/api/opencode/apply-restart") return false;
+    const { space } = request;
     // Local single-user only. Hosted/server-trusted must not list or apply
     // a deployment-global restart queue that can embed another Space's cwd.
     if (space.deployment !== "local-trusted") {

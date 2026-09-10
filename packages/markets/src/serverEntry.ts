@@ -58,8 +58,10 @@ export function marketsRoutes(
   universe?: Pick<MarketUniverseService, "screen" | "heatmap">,
   calendar?: Pick<MarketCalendarService, "economic" | "earnings">,
 ): NonNullable<ServerPackage["routes"]> {
-  return async ({ path, method, url, body, json, space }) => {
+  return async (request) => {
+    const { path } = request;
     if (!path.startsWith("/api/markets")) return false;
+    const { method, url, body, json, space } = request;
 
     if (path === "/api/markets/watchlists") {
       const storage = host.spaceStorage(space);

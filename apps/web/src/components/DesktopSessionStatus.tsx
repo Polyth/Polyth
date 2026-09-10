@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { displaySessionTitle, fmtTokens } from "../format.ts";
+import { displayWideSessionTitle, fmtTokens } from "../format.ts";
 import { openSession } from "../init.ts";
 import { recentSessionsForIsland, sessionTitleOf } from "../mobileIsland.ts";
 import { resolveSessionStatus } from "../sessionStatus.ts";
@@ -30,7 +30,12 @@ export default function DesktopSessionStatus() {
   const model = useActiveModel();
   const recent = useMemo(() => recentSessionsForIsland(sessions, activeSessionId ?? undefined, 5), [sessions, activeSessionId]);
   const status = session ? resolveSessionStatus(session) : null;
-  const title = session ? displaySessionTitle(session.title, session.id, firstUserTextCached(events[session.id])) : "";
+  const title = session ? displayWideSessionTitle(
+    session.title,
+    session.titleSource,
+    session.id,
+    firstUserTextCached(events[session.id]),
+  ) : "";
   const activeTask = session ? model.tasks?.items.find((task) => task.status === "active") : undefined;
   const prompt = lastUserTextCached(session ? events[session.id] : undefined);
   const activeModel = model.contextUsage?.model ?? model.turn?.model ?? session?.model;

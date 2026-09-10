@@ -49,7 +49,10 @@ export function chatWorkspaceRoutes(deps: {
 }): RouteHandler {
   const { host, service, profiles } = deps;
 
-  return async ({ path, method, url, body, json, space }) => {
+  return async (request) => {
+    const { path } = request;
+    if (!path.startsWith("/api/chat-workspace/")) return false;
+    const { method, url, body, json, space } = request;
     try {
       const storage = host.spaceStorage(space);
       const spaces = host.forSpace(space);
