@@ -12,7 +12,7 @@ import {
   timestampValue,
   type QuotaRuntime,
 } from "../opencodeAuth.ts";
-import { mappolythUsage, ocWindow, type polythUsage } from "../ocWindows.ts";
+import { mapProviderUsage, usageWindow, type ProviderUsage } from "../ocWindows.ts";
 
 const PROVIDER_ID = "claude";
 const PROVIDER_NAME = "Claude";
@@ -78,12 +78,12 @@ const amount = (value: unknown): number | null => {
   return minor / 10 ** (numberValue(money?.exponent) ?? 2);
 };
 
-const toClaudeUsage = (raw: unknown): polythUsage => {
+const toClaudeUsage = (raw: unknown): ProviderUsage => {
   const payload = objectValue(raw) ?? {};
-  const windows: NonNullable<polythUsage["windows"]> = {};
-  const models: NonNullable<polythUsage["models"]> = {};
+  const windows: NonNullable<ProviderUsage["windows"]> = {};
+  const models: NonNullable<ProviderUsage["models"]> = {};
   const addPercent = (
-    target: NonNullable<polythUsage["windows"]>,
+    target: NonNullable<ProviderUsage["windows"]>,
     key: string,
     percent: unknown,
     resetAt: unknown,
@@ -91,7 +91,7 @@ const toClaudeUsage = (raw: unknown): polythUsage => {
   ) => {
     const usedPercent = numberValue(percent);
     if (usedPercent === null) return;
-    target[key] = ocWindow({ usedPercent, resetAt: timestampValue(resetAt), windowSeconds });
+    target[key] = usageWindow({ usedPercent, resetAt: timestampValue(resetAt), windowSeconds });
   };
   const limits = Array.isArray(payload.limits) ? payload.limits : [];
   if (limits.length > 0) {
@@ -105,7 +105,7 @@ const toClaudeUsage = (raw: unknown): polythUsage => {
       } else if (limit.kind === "weekly_scoped") {
         const modelName = stringValue(objectValue(objectValue(limit.scope)?.model)?.display_name);
         if (!modelName) continue;
-        const scoped: NonNullable<polythUsage["windows"]> = {};
+        const scoped: NonNullable<ProviderUsage["windows"]> = {};
         addPercent(scoped, "7d", limit.percent, limit.resets_at, 7 * 24 * 60 * 60);
         if (Object.keys(scoped).length > 0) models[modelName] = { windows: scoped };
       }
@@ -121,7 +121,7 @@ const toClaudeUsage = (raw: unknown): polythUsage => {
     const used = amount(spend.used);
     const limit = amount(spend.limit);
     if (used !== null || numberValue(spend.percent) !== null) {
-      windows.extra_usage = ocWindow({
+      windows.extra_usage = usageWindow({
         usedPercent: numberValue(spend.percent),
         ...(used !== null && limit !== null ? { used, limit, unit: "currency" } : {}),
       });
@@ -140,12 +140,12 @@ const cooldownMs = (response: Response, now: number): number => {
 };
 
 export const createClaudeProvider = (runtime: QuotaRuntime): QuotaProvider & { isConfigured(): boolean } => {
-  let cached: { fingerprint: string; usage: polythUsage; planLabel: string | null } | null = null;
+  let cached: { fingerprint: string; usage: ProviderUsage; planLabel: string | null } | null = null;
   let cooldownUntil = 0;
-  const snapshot = (usage: polythUsage, planLabel: string | null): QuotaSnapshot => ({
+  const snapshot = (usage: ProviderUsage, planLabel: string | null): QuotaSnapshot => ({
     providerId: PROVIDER_ID,
     accountLabel: planLabel ?? PROVIDER_NAME,
-    windows: mappolythUsage(usage),
+    windows: mapProviderUsage(usage),
     fetchedAt: runtime.now(),
     stale: false,
   });
@@ -195,7 +195,7 @@ export const createClaudeProvider = (runtime: QuotaRuntime): QuotaProvider & { i
         throw new Error("Unexpected response from Anthropic");
       }
       const usage = toClaudeUsage(payload);
-      if (mappolythUsage(usage).length === 0) throw new Error("Claude usage data could not be parsed");
+      if (mapProviderUsage(usage).length === 0) throw new Error("Claude usage data could not be parsed");
       cached = { fingerprint, usage, planLabel: credential.planLabel };
       return snapshot(usage, credential.planLabel);
     },
