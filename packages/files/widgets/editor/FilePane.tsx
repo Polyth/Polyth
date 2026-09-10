@@ -389,27 +389,6 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
 
   return (
     <>
-      <div className="editor-head">
-        <span className="editor-path" title={doc.path}>
-          {doc.path}
-          {dirty && (
-            <span className="editor-dirty" title={tr("editor.filepane.unsavedChanges")}>
-              {" "}•
-            </span>
-          )}
-        </span>
-        <span className="header-spacer" />
-        {live?.kind === "saving" && <span className="editor-save-state">{tr("common.saving")}</span>}
-        {live?.kind === "saved" && <span className="editor-save-state">{tr("common.saved")}</span>}
-        {flash && <span className="editor-flash">{flash}</span>}
-        <IconButton
-          icon={CloseIcon}
-          size="sm"
-          label={tr("editor.filepane.closeFile")}
-          title={tr("editor.filepane.closeFileEsc")}
-          onClick={() => actions?.closeSelf("file", path)}
-        />
-      </div>
       <div className="editor-toolbar">
         {previewKind !== null && (
           <span className="editor-mode-switch">
@@ -422,6 +401,9 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
             <span className={`editor-mode-label${!editing ? " on" : ""}`}>{previewName}</span>
           </span>
         )}
+        {live?.kind === "saving" && <span className="editor-save-state">{tr("common.saving")}</span>}
+        {live?.kind === "saved" && <span className="editor-save-state">{tr("common.saved")}</span>}
+        {flash && <span className="editor-flash">{flash}</span>}
         <span className="header-spacer" />
         {gotoOpen && (
           <span className="editor-goto">

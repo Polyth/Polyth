@@ -17,3 +17,8 @@ test("resource pane owns the remaining Files surface", () => {
   assert.match(styles, /\.pane-body\s*\{[^}]*flex:\s*1 1 0[^}]*min-width:\s*0[^}]*min-height:\s*0[^}]*display:\s*flex[^}]*flex-direction:\s*column/s);
   assert.match(styles, /\.pane-body\[hidden\]\s*\{[^}]*display:\s*none/s);
 });
+
+test("file tabs are the only file title and close chrome", () => {
+  assert.doesNotMatch(filePane, /className="editor-head"/);
+  assert.doesNotMatch(filePane, /editor\.filepane\.closeFile/);
+});
