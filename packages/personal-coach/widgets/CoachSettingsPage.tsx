@@ -9,9 +9,37 @@ import {
 import type {
   CoachApi,
   CoachProfileDto,
+  CoachReminderPatch,
+  CoachRemindersDto,
   CoachSettingsPatch,
 } from "./api.ts";
 import type { CoachClient } from "./store.ts";
+
+const minuteText = (value: number): string => {
+  const minute = Math.max(0, Math.min(1439, Math.trunc(value)));
+  return `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`;
+};
+
+const minuteValue = (value: string): number | undefined => {
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return undefined;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return undefined;
+  return hour * 60 + minute;
+};
+
+const reminderPatch = (response: CoachRemindersDto): CoachReminderPatch | null => {
+  const settings = response.settings;
+  if (!response.available || !settings) return null;
+  return {
+    dailyCheckIn: settings.dailyCheckIn.enabled,
+    dailyMinuteOfDay: settings.dailyCheckIn.minuteOfDay,
+    weeklyReview: settings.weeklyReview.enabled,
+    weeklyDay: settings.weeklyReview.day,
+    weeklyMinuteOfDay: settings.weeklyReview.minuteOfDay,
+  };
+};
 
 export default function CoachSettingsPage({
   api,
@@ -24,6 +52,8 @@ export default function CoachSettingsPage({
 }) {
   const [profile, setProfile] = useState<CoachProfileDto | null>(null);
   const [draft, setDraft] = useState<CoachSettingsPatch>({});
+  const [reminders, setReminders] = useState<CoachRemindersDto | null>(null);
+  const [reminderDraft, setReminderDraft] = useState<CoachReminderPatch | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
@@ -39,6 +69,14 @@ export default function CoachSettingsPage({
         timeZone: settings.profile.timeZone,
         challengeAssumptions: settings.profile.challengeAssumptions,
       });
+      if (settings.profile.onboardingState === "complete") {
+        const nextReminders = await api.reminders();
+        setReminders(nextReminders);
+        setReminderDraft(reminderPatch(nextReminders));
+      } else {
+        setReminders(null);
+        setReminderDraft(null);
+      }
     } catch (cause) {
       setError(friendlyError("Load Personal Coach settings", cause));
     }
@@ -60,6 +98,11 @@ export default function CoachSettingsPage({
         timeZone: next.timeZone,
         challengeAssumptions: next.challengeAssumptions,
       });
+      if (next.onboardingState === "complete" && reminders?.available && reminderDraft) {
+        const nextReminders = await api.updateReminders(reminderDraft);
+        setReminders(nextReminders);
+        setReminderDraft(reminderPatch(nextReminders));
+      }
       setSaved(true);
       await client.refresh();
     } catch (cause) {
@@ -67,6 +110,10 @@ export default function CoachSettingsPage({
     } finally {
       setBusy(false);
     }
+  };
+
+  const updateReminder = (patch: Partial<CoachReminderPatch>) => {
+    setReminderDraft((current) => current ? { ...current, ...patch } : current);
   };
 
   return (
@@ -104,7 +151,7 @@ export default function CoachSettingsPage({
           <div className="set-row">
             <div className="set-row-text">
               <div className="set-row-label">Initiative</div>
-              <div className="set-row-hint">How readily Coach raises useful next steps during a conversation. Scheduled check-ins remain explicit Schedule tasks.</div>
+              <div className="set-row-hint">How readily Coach raises useful next steps during a conversation. Scheduled check-ins are controlled below.</div>
             </div>
             <div className="set-row-control">
               <Select
@@ -150,6 +197,84 @@ export default function CoachSettingsPage({
               />
             </div>
           </div>
+
+          {profile.onboardingState === "complete" && reminders?.available && reminderDraft && (
+            <>
+              <div className="set-row" data-settings-item="personal-coach-reminders">
+                <div className="set-row-text">
+                  <div className="set-row-label" id="coach-daily-label">Daily check-in</div>
+                  <div className="set-row-hint">One short scheduled Coach session. No background model work happens between runs.</div>
+                </div>
+                <div className="set-row-control set-add-form">
+                  <Switch
+                    labelledBy="coach-daily-label"
+                    checked={reminderDraft.dailyCheckIn}
+                    onChange={(dailyCheckIn) => updateReminder({ dailyCheckIn })}
+                  />
+                  <TextInput
+                    type="time"
+                    aria-label="Daily check-in time"
+                    disabled={!reminderDraft.dailyCheckIn}
+                    value={minuteText(reminderDraft.dailyMinuteOfDay)}
+                    onChange={(event) => {
+                      const value = minuteValue(event.target.value);
+                      if (value !== undefined) updateReminder({ dailyMinuteOfDay: value });
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className="set-row">
+                <div className="set-row-text">
+                  <div className="set-row-label" id="coach-weekly-label">Weekly review</div>
+                  <div className="set-row-hint">Review durable activity and propose changes only when there is evidence.</div>
+                </div>
+                <div className="set-row-control set-add-form">
+                  <Switch
+                    labelledBy="coach-weekly-label"
+                    checked={reminderDraft.weeklyReview}
+                    onChange={(weeklyReview) => updateReminder({ weeklyReview })}
+                  />
+                  <Select
+                    label="Weekly review day"
+                    ariaLabel="Weekly review day"
+                    disabled={!reminderDraft.weeklyReview}
+                    value={String(reminderDraft.weeklyDay)}
+                    onChange={(value) => updateReminder({ weeklyDay: Number(value) })}
+                    options={[
+                      { value: "1", label: "Monday" },
+                      { value: "2", label: "Tuesday" },
+                      { value: "3", label: "Wednesday" },
+                      { value: "4", label: "Thursday" },
+                      { value: "5", label: "Friday" },
+                      { value: "6", label: "Saturday" },
+                      { value: "0", label: "Sunday" },
+                    ]}
+                  />
+                  <TextInput
+                    type="time"
+                    aria-label="Weekly review time"
+                    disabled={!reminderDraft.weeklyReview}
+                    value={minuteText(reminderDraft.weeklyMinuteOfDay)}
+                    onChange={(event) => {
+                      const value = minuteValue(event.target.value);
+                      if (value !== undefined) updateReminder({ weeklyMinuteOfDay: value });
+                    }}
+                  />
+                </div>
+              </div>
+            </>
+          )}
+
+          {profile.onboardingState === "complete" && reminders && !reminders.available && (
+            <div className="set-row">
+              <div className="set-row-text">
+                <div className="set-row-label">Scheduled check-ins</div>
+                <div className="set-row-hint">The Schedule package is unavailable. Coach itself still works normally.</div>
+              </div>
+              <div className="set-row-control"><span className="tag">Unavailable</span></div>
+            </div>
+          )}
 
           <div className="set-row">
             <div className="set-row-text">
