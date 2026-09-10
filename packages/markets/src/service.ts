@@ -9,6 +9,8 @@ import type {
   MarketEarningsSurprise,
   MarketFiling,
   MarketFundamentals,
+  MarketMacroIndicator,
+  MarketMacroSnapshot,
   MarketNewsItem,
   MarketPerformance,
   MarketQuote,
@@ -24,6 +26,9 @@ const FUNDAMENTALS_POLICY: SwrCachePolicy = { softTtlMs: 30 * 60_000, hardTtlMs:
 const NEWS_POLICY: SwrCachePolicy = { softTtlMs: 2 * 60_000, hardTtlMs: 30 * 60_000, maxEntries: 1_000 };
 const FILINGS_POLICY: SwrCachePolicy = { softTtlMs: 5 * 60_000, hardTtlMs: 6 * 60 * 60_000, maxEntries: 1_000 };
 const EARNINGS_POLICY: SwrCachePolicy = { softTtlMs: 30 * 60_000, hardTtlMs: 12 * 60 * 60_000, maxEntries: 1_000 };
+const CRYPTO_POLICY: SwrCachePolicy = { softTtlMs: 10_000, hardTtlMs: 5 * 60_000, maxEntries: 1 };
+const MACRO_POLICY: SwrCachePolicy = { softTtlMs: 15 * 60_000, hardTtlMs: 6 * 60 * 60_000, maxEntries: 1 };
+const MACRO_MARKET_SYMBOLS = ["^GSPC", "^IXIC", "^VIX"] as const;
 const RANGES = new Set<MarketRange>(["1D", "5D", "1M", "6M", "YTD", "1Y", "5Y", "MAX"]);
 
 export interface MarketsServiceOptions {
@@ -41,6 +46,8 @@ export class MarketsService {
   private readonly newsCache: SwrCache<MarketNewsItem[]>;
   private readonly filingsCache: SwrCache<MarketFiling[]>;
   private readonly earningsCache: SwrCache<MarketEarningsSurprise[]>;
+  private readonly cryptoCache: SwrCache<MarketQuote[]>;
+  private readonly macroCache: SwrCache<MarketMacroIndicator[]>;
   private readonly quotePolicy: SwrCachePolicy;
   private readonly now: () => number;
 
@@ -54,6 +61,8 @@ export class MarketsService {
     this.newsCache = new SwrCache(this.now);
     this.filingsCache = new SwrCache(this.now);
     this.earningsCache = new SwrCache(this.now);
+    this.cryptoCache = new SwrCache(this.now);
+    this.macroCache = new SwrCache(this.now);
     this.quotePolicy = options.quotePolicy ?? QUOTE_POLICY;
   }
 
@@ -102,6 +111,36 @@ export class MarketsService {
     const normalized = normalizeSymbol(symbol);
     return this.cached(this.earningsCache, normalized, EARNINGS_POLICY, "earnings", 4_000, (provider, signal) =>
       provider.earnings!(normalized, signal));
+  }
+
+  crypto(): Promise<MarketDataResult<MarketQuote[]>> {
+    return this.cached(this.cryptoCache, "board", CRYPTO_POLICY, "crypto", 4_000, (provider, signal) =>
+      provider.crypto!(signal));
+  }
+
+  async macro(): Promise<MarketMacroSnapshot> {
+    const settled = await Promise.allSettled([
+      this.cached(this.macroCache, "indicators", MACRO_POLICY, "macro", 5_000, (provider, signal) =>
+        provider.macro!(signal)),
+      ...MACRO_MARKET_SYMBOLS.map((symbol) => this.quote(symbol)),
+    ]);
+    const [indicatorResult, ...quoteResults] = settled;
+    const errors: string[] = [];
+    collectError(errors, "macro", indicatorResult);
+    const markets: MarketQuote[] = [];
+    for (let index = 0; index < quoteResults.length; index += 1) {
+      const result = quoteResults[index];
+      const symbol = MACRO_MARKET_SYMBOLS[index];
+      if (!result || !symbol) continue;
+      if (result.status === "fulfilled") markets.push(result.value.data);
+      else collectError(errors, symbol, result);
+    }
+    return {
+      generatedAt: new Date(this.now()).toISOString(),
+      indicators: indicatorResult.status === "fulfilled" ? indicatorResult.value.data : [],
+      markets,
+      errors,
+    };
   }
 
   async context(symbol: string, range: MarketRange = "1M"): Promise<MarketResearchContext> {
@@ -176,7 +215,7 @@ export class MarketsService {
     cache: SwrCache<T>,
     key: string,
     policy: SwrCachePolicy,
-    capability: "quote" | "candles" | "search" | "fundamentals" | "filings" | "earnings",
+    capability: "quote" | "candles" | "search" | "fundamentals" | "filings" | "earnings" | "crypto" | "macro",
     timeoutMs: number,
     invoke: (provider: MarketProvider, signal: AbortSignal) => Promise<T>,
   ): Promise<MarketDataResult<T>> {
