@@ -55,7 +55,7 @@ const props = (h: ReturnType<typeof host>, projectId: string) => ({
   projectHarnessDefault: null,
 });
 
-test("draft harness selection is synchronous and never starts detail discovery", async () => {
+test("draft harness selection is synchronous and does not commit a session route", async () => {
   const requests: string[] = [];
   fetchHandler = async (input, init) => {
     const url = new URL(String(input), "http://test");
@@ -74,7 +74,8 @@ test("draft harness selection is synchronous and never starts detail discovery",
     await act(async () => { await Promise.resolve(); });
     await act(async () => { container.querySelector<HTMLButtonElement>("[role=tab][id$='-cursor']")?.click(); });
     assert.equal(updates.value, 1);
-    assert.equal(requests.some((request) => request.includes("detail=1")), false);
+    assert.equal(requests.some((request) => request.includes("detail=1")), false,
+      "the catalog owner, not the tab header, starts metadata discovery after selection rerenders");
     assert.equal(requests.some((request) => request.includes("harnessId=cursor")), false);
     assert.equal(requests.some((request) => request.startsWith("POST /api/harnesses/sessions/")), false);
   } finally {

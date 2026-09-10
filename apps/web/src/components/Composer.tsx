@@ -502,6 +502,7 @@ export default function Composer({
   const routeCatalog = useRuntimeCatalog(session, globalModels, globalAgents, {
     spaceId,
     projectId: activeProjectId ?? undefined,
+    cwd: activeProject?.path,
     harnessId: prospectiveHarnessId,
   });
   const catalogHarnessId = pendingSessionHarnessId
