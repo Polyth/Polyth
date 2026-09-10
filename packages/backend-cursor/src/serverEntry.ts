@@ -37,6 +37,29 @@ const methodMissing = (error: unknown) =>
     (error as { rpcCode?: number }).rpcCode === -32601
     || /method not found/i.test((error as { message?: string }).message ?? "");
 
+// Cursor blocks session/prompt until these extension requests receive valid
+// nested outcomes. Decline unsupported UI explicitly instead of stranding the turn.
+export const cursorClientRequest = (method: string) => {
+    if (method === "cursor/ask_question") {
+        return {
+            handled: true,
+            result: {
+                outcome: {
+                    outcome: "skipped",
+                    reason: "Interactive Cursor questions are not exposed by Polyth",
+                },
+            },
+        } as const;
+    }
+    if (method === "cursor/create_plan") {
+        return {
+            handled: true,
+            result: { outcome: { outcome: "cancelled" } },
+        } as const;
+    }
+    return { handled: false } as const;
+};
+
 export default function registerPackage(host: ServerPackageHost) {
     return registerAcpProfile(host, {
         descriptor: {
@@ -54,6 +77,7 @@ export default function registerPackage(host: ServerPackageHost) {
         // ignored). Model selection goes through the ACP session API only.
         command: "agent", args: ["acp"],
         initializeClientMeta: { parameterizedModelPicker: true },
+        clientRequest: cursorClientRequest,
         async discoverModels(connection) {
             try {
                 return cursorModels(await connection.rpc.request("cursor/list_available_models", {}, 10_000));
