@@ -1,11 +1,13 @@
 import { join } from "node:path";
-import type { SpaceContext, SpaceStorage } from "@polyth/contracts";
+import type { RouteHandler, SpaceContext, SpaceStorage } from "@polyth/contracts";
 import {
+  localOnlyRemoteAccess,
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
 import { createCoachStore, type CoachStore } from "./index.ts";
+import { personalCoachRoutes } from "./routes.ts";
 
 export interface PersonalCoachService {
   forSpace(space: SpaceContext): CoachStore;
@@ -37,7 +39,13 @@ export function createPersonalCoachService(
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   const service = createPersonalCoachService((space) => host.spaceStorage(space));
   host.services.provide(serverServiceKey<PersonalCoachService>("personal-coach"), service);
+  let routes: RouteHandler | null = null;
   return {
+    remoteAccess: localOnlyRemoteAccess(["personal-coach"]),
+    routes: async (request) => routes ? routes(request) : false,
+    onEnable() {
+      routes ??= personalCoachRoutes(service);
+    },
     onDisable() {
       service.close();
     },
