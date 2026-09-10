@@ -5,8 +5,8 @@
   min-height: 0;
   position: relative;
   container-type: inline-size;
-  padding-bottom: env(safe-area-inset-bottom, 0);
-  background: var(--raised);
+  padding-bottom: var(--safe-bottom);
+  background: transparent;
 }
 
 .chat-workspace-tabstrip {
@@ -14,17 +14,17 @@
   align-items: center;
   gap: var(--space-1);
   flex: none;
-  min-height: 32px;
-  max-height: 34px;
-  padding: 0 var(--space-2);
-  border-bottom: 1px solid var(--border);
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border-soft);
   overflow: hidden;
-  background: var(--raised);
+  background: transparent;
 }
 
 .chat-workspace-tabstrip-scroll {
   display: flex;
   flex: 1;
+  min-width: 0;
   gap: var(--space-1);
   overflow-x: auto;
   flex-wrap: nowrap;
@@ -34,23 +34,25 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 2px var(--space-2);
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  padding: 0 var(--control-pad-x-sm);
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   background: transparent;
   color: var(--muted);
+  font-size: var(--font-label);
   white-space: nowrap;
 }
 
 .chat-workspace-tab.is-active {
   color: var(--text);
-  background: var(--panel);
-  border-color: var(--border-soft);
+  background: var(--accent-wash);
+  border-color: transparent;
 }
 
 .chat-workspace-tab-glyph {
   color: var(--muted);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-meta);
 }
 
 .chat-workspace-viewport {
@@ -67,7 +69,6 @@
   width: 100%;
   height: 100%;
   object-fit: contain;
-  outline: none;
 }
 
 .chat-workspace-dock {
@@ -76,13 +77,11 @@
   gap: var(--space-2);
   align-items: center;
   flex: none;
-  height: 38px;
-  min-height: 38px;
-  max-height: 38px;
-  padding: 0 var(--space-2);
-  border-top: 1px solid var(--border);
+  min-height: max(var(--control-h), var(--hit-min));
+  padding: var(--space-1) var(--space-2);
+  border-top: 1px solid var(--border-soft);
   flex-wrap: nowrap;
-  background: var(--raised);
+  background: transparent;
   overflow: hidden;
 }
 
@@ -92,7 +91,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-meta);
   color: var(--muted);
 }
 
@@ -112,7 +111,7 @@ button.chat-workspace-dock-summary {
   color: var(--muted);
   cursor: pointer;
   padding: var(--space-1);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-meta);
 }
 
 .chat-workspace-popup-overlay {
@@ -121,10 +120,10 @@ button.chat-workspace-dock-summary {
   z-index: 20;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--raised);
-  box-shadow: var(--material-glass-shadow);
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-surface);
+  background: var(--material-glass);
+  box-shadow: var(--material-glass-highlight), var(--material-glass-shadow);
   overflow: hidden;
 }
 
@@ -134,12 +133,12 @@ button.chat-workspace-dock-summary {
   justify-content: space-between;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-2);
-  border-bottom: 1px solid var(--border);
-  min-height: 32px;
+  border-bottom: 1px solid var(--border-soft);
+  min-height: max(var(--control-h-sm), var(--hit-min));
 }
 
 .chat-workspace-popup-title {
-  font-size: var(--font-size-sm);
+  font-size: var(--font-meta);
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -159,7 +158,6 @@ button.chat-workspace-dock-summary {
   width: 100%;
   height: 100%;
   object-fit: contain;
-  outline: none;
 }
 
 .chat-workspace-profile-more {
@@ -174,7 +172,7 @@ button.chat-workspace-dock-summary {
   margin: 0;
   padding: var(--space-1) var(--space-2);
   color: var(--muted);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-meta);
 }
 
 .chat-workspace-loading-bar {
@@ -196,13 +194,13 @@ button.chat-workspace-dock-summary {
 .chat-workspace-settings {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
 }
 
 .chat-workspace-settings-empty,
 .chat-workspace-settings-hint {
   color: var(--muted);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-meta);
   margin: 0;
 }
 
@@ -215,7 +213,7 @@ button.chat-workspace-dock-summary {
 
 .chat-workspace-settings-provider-name {
   margin: 0;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-label);
   color: var(--text-dim);
 }
 
@@ -233,13 +231,13 @@ button.chat-workspace-dock-summary {
 .chat-workspace-preset-copy {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
   min-width: 0;
 }
 
 .chat-workspace-profile-meta {
   color: var(--muted);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-meta);
 }
 
 .chat-workspace-profile-actions,
@@ -262,6 +260,8 @@ button.chat-workspace-dock-summary {
   display: flex;
   gap: var(--space-1);
   flex: 1;
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .chat-workspace-empty {
@@ -277,14 +277,14 @@ button.chat-workspace-dock-summary {
 
 .chat-workspace-empty-title {
   margin: 0;
-  font-size: var(--font-size-md);
+  font-size: var(--font-heading);
   font-weight: 600;
 }
 
 .chat-workspace-empty-copy {
   margin: 0;
   color: var(--muted);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-meta);
 }
 
 .chat-workspace-empty-providers {
@@ -304,7 +304,7 @@ button.chat-workspace-dock-summary {
   background: transparent;
   color: var(--text);
   cursor: pointer;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-meta);
 }
 
 .chat-workspace-empty-provider:hover {
@@ -312,7 +312,7 @@ button.chat-workspace-dock-summary {
 }
 
 .chat-workspace-empty-glyph {
-  font-size: var(--font-size-sm);
+  font-size: var(--font-label);
   color: var(--muted);
 }
 
@@ -322,7 +322,7 @@ button.chat-workspace-dock-summary {
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-meta);
 }
 
 .chat-workspace-empty-custom:hover {
@@ -339,7 +339,7 @@ button.chat-workspace-dock-summary {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-label);
 }
 
 .chat-workspace-advanced-toggle {
@@ -348,7 +348,7 @@ button.chat-workspace-dock-summary {
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-label);
   padding: 0;
 }
 
@@ -361,6 +361,7 @@ button.chat-workspace-dock-summary {
   flex-direction: column;
   gap: var(--space-1);
   min-width: 200px;
+  max-width: 100%;
 }
 
 .chat-workspace-address-footer {
@@ -379,7 +380,7 @@ button.chat-workspace-dock-summary {
 
 .chat-workspace-popover-section {
   color: var(--muted);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-meta);
   margin: var(--space-2) 0 0;
 }
 
@@ -399,9 +400,15 @@ button.chat-workspace-dock-summary {
 
 .chat-workspace-failure-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
   justify-content: center;
   margin-top: var(--space-2);
+}
+
+/* The compact override must follow the base declaration. */
+.chat-workspace-tab-active-dropdown {
+  display: none;
 }
 
 @container (max-width: 420px) {
@@ -413,18 +420,21 @@ button.chat-workspace-dock-summary {
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
-    padding: 2px var(--space-2);
-    border: 1px solid var(--border-soft);
-    border-radius: var(--radius-sm);
-    background: var(--panel);
+    min-height: max(var(--control-h-sm), var(--hit-min));
+    padding: 0 var(--control-pad-x-sm);
+    border: 1px solid var(--control-border);
+    border-radius: var(--radius-control);
+    background: var(--input-bg);
     color: var(--text);
+    font-size: var(--font-label);
     white-space: nowrap;
     max-width: 60%;
     overflow: hidden;
     text-overflow: ellipsis;
   }
-}
 
-.chat-workspace-tab-active-dropdown {
-  display: none;
+  .chat-workspace-profile-row,
+  .chat-workspace-preset-row {
+    flex-wrap: wrap;
+  }
 }
