@@ -3,13 +3,13 @@ import type { HarnessContext, HarnessRegistry, ModelDescriptor } from "@polyth/c
 import { acknowledgeCapabilityApplication, releaseProcessExecution } from "@polyth/harness-runtime";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { ACP_STATIC_FEATURES, connectAcp, createAcpRuntime, type AcpProfile } from "./index.ts";
-import { discoverAcpModels } from "./discovery.ts";
+import { discoverAcpModels, invalidateAcpDiscovery } from "./discovery.ts";
 import { acpOverlays, createAcpProvisioner } from "./provisioner.ts";
 import { configureAcpCapabilityDelivery } from "./capabilityDelivery.ts";
 export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile) {
     const registry = host.services.require(serverServiceKey<HarnessRegistry>("harnesses"));
     let registration: ReturnType<HarnessRegistry["register"]> | undefined;
-    const catalogs = new Map<string, ModelDescriptor[]>();
+    const catalogs = new Map<string, { models?: ModelDescriptor[] }>();
     const contextKey = (context: HarnessContext) => JSON.stringify([context.spaceId, context.projectId, context.cwd]);
     /** ACP exposes its model catalog only while opening a native session. */
     const discoveryProbe = (context: HarnessContext) => ({
@@ -21,7 +21,7 @@ export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile)
                 const result = await connection.rpc.request("session/new", { cwd: context.cwd, mcpServers: [] });
                 return {
                     result,
-                    setConfigOption: (configId: string, value: string) => connection.rpc.request("session/set_config_option", {
+                    setConfigOption: profile.probeModelControls === false ? undefined : (configId: string, value: string) => connection.rpc.request("session/set_config_option", {
                         sessionId: (result as { sessionId: string }).sessionId,
                         configId,
                         value,
@@ -49,6 +49,10 @@ export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile)
                 descriptor: profile.descriptor,
                 staticFeatures: ACP_STATIC_FEATURES,
                 probe: profile.probe,
+                invalidateDiscovery(context) {
+                    invalidateAcpDiscovery({ harnessId: profile.descriptor.id, cacheIdentity: contextKey(context) });
+                    catalogs.delete(contextKey(context));
+                },
                 // Stage HTTP entries, then require the actual initialize
                 // advertisement before sending any native session request.
                 provisioner: createAcpProvisioner(profile.descriptor.id, true),
@@ -56,6 +60,9 @@ export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile)
                     if (context.remote || process.platform !== "linux") {
                         throw Object.assign(new Error("Local Linux runtimes are supported"), { code: "unsupported" });
                     }
+                    const key = contextKey(context);
+                    const catalogEntry = catalogs.get(key) ?? {};
+                    catalogs.set(key, catalogEntry);
                     const availability = await profile.probe(context);
                     if (!availability.installed) {
                         return { state: "not-installed" as const, message: availability.message ?? "The agent is not installed" };
@@ -80,7 +87,7 @@ export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile)
                                 : discovery.reason,
                         };
                     }
-                    catalogs.set(contextKey(context), discovery.models);
+                    if (catalogs.get(key) === catalogEntry) catalogEntry.models = discovery.models;
                     return {
                         state: "ready" as const,
                         catalog: { models: discovery.models, agents: [] },
@@ -101,7 +108,7 @@ export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile)
                             profile.descriptor.id,
                             connection.agentCapabilities,
                             profile.descriptor.name,
-                            { models: catalogs.get(contextKey(context)) },
+                            { models: catalogs.get(contextKey(context))?.models },
                         );
                     } catch (error) {
                         await connection.rpc.close().catch(() => {});

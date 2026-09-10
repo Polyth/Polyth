@@ -91,10 +91,12 @@ const discoverDescriptors = async (
   return models;
 };
 
-export function invalidateAcpDiscovery(options?: Pick<AcpDiscoveryOptions, "harnessId">): void {
+export function invalidateAcpDiscovery(options?: Pick<AcpDiscoveryOptions, "harnessId" | "cacheIdentity">): void {
   if (!options) { cache.clear(); return; }
   for (const key of [...cache.keys()]) {
-    if ((JSON.parse(key) as string[])[0] === options.harnessId) cache.delete(key);
+    const [harnessId, , , identity] = JSON.parse(key) as string[];
+    if (harnessId === options.harnessId
+        && (options.cacheIdentity === undefined || identity === options.cacheIdentity)) cache.delete(key);
   }
 }
 
@@ -151,10 +153,12 @@ export function discoverAcpModels(options: AcpDiscoveryOptions): Promise<AcpDisc
     const ttl = value.state === "ready" ? DEFAULT_TTL_MS
       : value.state === "auth-required" ? AUTH_TTL_MS
       : DEGRADED_TTL_MS;
-    cache.set(key, { value, expiresAt: now() + (options.ttlMs ?? ttl) });
+    if (cache.get(key)?.pending === pending) {
+      cache.set(key, { value, expiresAt: now() + (options.ttlMs ?? ttl) });
+    }
     return value;
   }, (error) => {
-    cache.delete(key);
+    if (cache.get(key)?.pending === pending) cache.delete(key);
     throw error;
   });
 }

@@ -162,8 +162,10 @@ export function createHarnessRegistry() {
                 // A forced probe can reflect an auth/config/runtime change.
                 // Keep the old catalog only as presentation fallback while
                 // making the next detail caller revalidate it.
-                if (options.force)
+                if (options.force) {
                     entry.detailedAt = undefined;
+                    provider.invalidateDiscovery?.(context);
+                }
                 const now = Date.now();
                 const summaryFresh = entry.current
                     && now - entry.current.context.fetchedAt < SNAPSHOT_TTL_MS;

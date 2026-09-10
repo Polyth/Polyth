@@ -20,6 +20,10 @@ export default function registerPackage(host: ServerPackageHost) {
         // `agent acp` has no --model flag (verified: it is accepted and
         // ignored). Model selection goes through the ACP session API only.
         command: "agent", args: ["acp"],
+        // Without the parameterizedModelPicker extension, Cursor advertises
+        // complete variant IDs. Selecting every row adds network round trips
+        // and persists native model preferences just to open the picker.
+        probeModelControls: false,
         supportsModelDiscovery: cursorModelDiscoverySupport,
         async probe(context) {
             if (context.remote || process.platform !== "linux")

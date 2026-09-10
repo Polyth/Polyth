@@ -51,6 +51,8 @@ export interface AcpProfile {
     args: string[];
     /** Verified native authentication check; never read credential files. */
     probe: HarnessProvider["probe"];
+    /** Disable when native catalog IDs already encode all model variants. */
+    probeModelControls?: boolean;
     /**
      * Optional gate on cold model discovery. Some agent generations cannot
      * answer it, and spawning them to find that out every time is wasted work.

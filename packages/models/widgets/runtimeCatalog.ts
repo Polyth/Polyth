@@ -16,37 +16,67 @@ type Catalog = {
   discovery: ModelDiscoveryState;
 };
 const unavailable: Catalog = { models: [], agents: [], nativeDefault: false, ready: false, discovery: { state: "empty" } };
-const catalogCache = createCatalogCache<Catalog>();
+// Model catalogs remain warm for the lifetime of this page. Explicit
+// invalidation (auth/settings/runtime changes) is the freshness boundary.
+const catalogCache = createCatalogCache<Catalog>(Infinity);
 const harnessCache = createCatalogCache<HarnessSnapshot[]>();
 let revision = 0;
 const listeners = new Set<() => void>();
-const sources = new WeakMap<object, number>();
-let sourceId = 0;
-const sourceKey = (source: object) => {
-  if (!sources.has(source)) sources.set(source, ++sourceId);
-  return sources.get(source)!;
-};
-export function invalidateRuntimeCatalogs(): void {
+export function invalidateRuntimeCatalogs(notify = true): void {
   catalogCache.clear();
   harnessCache.clear();
   revision++;
-  for (const listener of listeners) listener();
+  if (notify) for (const listener of listeners) listener();
 }
 type SnapshotRequest = { projectId?: string | null; spaceId?: string; force?: boolean; detail?: boolean };
 const snapshotRequestKey = (options: SnapshotRequest) => JSON.stringify([
   activeBrowserAccountId(), options.spaceId ?? "page", options.projectId ?? "", options.detail === true, revision,
 ]);
+const draftCatalogKey = (projectId: string, harnessId: string, spaceId?: string) => JSON.stringify([
+  activeBrowserAccountId(), spaceId ?? "page", projectId, `draft:${projectId}:${harnessId}`, revision,
+]);
 export function peekHarnessSnapshots(options: SnapshotRequest): HarnessSnapshot[] | undefined {
   return harnessCache.peek(snapshotRequestKey(options));
 }
 export function readHarnessSnapshots(options: SnapshotRequest): Promise<HarnessSnapshot[]> {
-  if (options.force) invalidateRuntimeCatalogs();
   const query = new URLSearchParams();
   if (options.projectId) query.set("projectId", options.projectId);
   if (options.force) query.set("force", "1");
   if (options.detail) query.set("detail", "1");
-  return harnessCache.read(snapshotRequestKey(options), () => api.get<HarnessSnapshot[]>(`/api/harnesses/snapshots?${query}`));
+  if (!options.force) return harnessCache.read(snapshotRequestKey(options), () => api.get<HarnessSnapshot[]>(`/api/harnesses/snapshots?${query}`));
+  // Fetch first: invalidating before the forced response arrives lets
+  // subscribers immediately refill the old server-side snapshot. Seed the
+  // new revision before notifying them so they reuse this authoritative read.
+  return api.get<HarnessSnapshot[]>(`/api/harnesses/snapshots?${query}`).then(async (rows) => {
+    invalidateRuntimeCatalogs(false);
+    const seeded = await harnessCache.read(snapshotRequestKey(options), async () => rows);
+    for (const listener of listeners) listener();
+    return seeded;
+  });
 }
+
+const catalogFromSnapshot = (snapshot: HarnessSnapshot | undefined, harnessId?: string): Catalog => {
+  if (!snapshot || !harnessId) return { ...unavailable, ready: true, discovery: { state: "unavailable", reason: "No engine is ready for this project" } };
+  const catalog = snapshot.catalog;
+  const reason = snapshotUnavailableReason(snapshot);
+  const catalogModels = pickerCatalogModels(catalog?.models ?? [], harnessId);
+  return {
+    models: catalogModels,
+    agents: catalog?.agents ?? catalog?.roles ?? [],
+    nativeDefault: !reason && (catalog?.models === undefined || catalog.models.length === 0),
+    ready: true,
+    harnessId,
+    harnessName: snapshot.identity.name,
+    discovery: catalogModels.length > 0 ? { state: "available" } : reason ? { state: "unavailable", reason } : { state: "empty" },
+  };
+};
+
+const readDraftCatalog = (projectId: string, harnessId: string, spaceId?: string): Promise<Catalog> =>
+  catalogCache.read(draftCatalogKey(projectId, harnessId, spaceId), async () => {
+    const query = new URLSearchParams({ projectId, detail: "1", harnessId, force: "1" });
+    const snapshots = await api.get<HarnessSnapshot[]>(`/api/harnesses/snapshots?${query}`);
+    return catalogFromSnapshot(snapshots[0], harnessId);
+  });
 export function useCatalogRevision(): number {
   return useSyncExternalStore((listener) => {
     listeners.add(listener);
@@ -81,7 +111,7 @@ export function useRuntimeCatalog(
   // Space/account switching reloads the shell, so this memory cache also has
   // a page-lifetime fence. Explicit identity protects mounted route changes.
   const key = routeKey ? JSON.stringify([activeBrowserAccountId(), prospective?.spaceId ?? "page", prospective?.projectId,
-    routeKey, sourceKey(models), sourceKey(agents), catalogRevision]) : "";
+    routeKey, catalogRevision]) : "";
   const requestedHarness = session?.resolvedHarnessId ?? prospective?.harnessId;
   const fallbackModels = pickerCatalogModels(models, requestedHarness);
   const fallbackAgents = requestedHarness
@@ -105,53 +135,42 @@ export function useRuntimeCatalog(
     const controller = new AbortController();
     // Warm the cheap tab summaries alongside the selected model catalog, so
     // opening the picker does not begin a second discovery waterfall.
-    void readHarnessSnapshots({ projectId: prospective?.projectId ?? session?.projectId, spaceId: prospective?.spaceId }).catch(() => {});
+    const projectId = prospective?.projectId ?? session?.projectId;
+    const spaceId = prospective?.spaceId;
+    const warmRevision = catalogRevision;
+    void readHarnessSnapshots({ projectId, spaceId }).then((snapshots) => {
+      // Cursor is the only currently expensive alternate catalog worth
+      // warming. Its availability is cheap metadata; the selected harness
+      // request continues independently and is never delayed by this read.
+      const cursor = snapshots.find((snapshot) => snapshot.identity.id === "cursor");
+      if (!controller.signal.aborted && revision === warmRevision && projectId && cursor?.policy.enabled && cursor.availability.installed) {
+        void readDraftCatalog(projectId, "cursor", spaceId).catch(() => {});
+      }
+    }).catch(() => {});
     // A consumer leaving does not abort a shared metadata read; late results
     // can warm their own key but can never publish into the newly chosen one.
-    const request = catalogCache.read(key, () => (session?.id
+    const load = (): Promise<Catalog> => session?.id
       ? api.get<Catalog>(`/api/runtime-catalog?sessionId=${encodeURIComponent(session.id)}`)
       : (async (): Promise<Catalog> => {
           const query = new URLSearchParams({
-            projectId: prospective!.projectId!,
-            detail: "1",
-            ...(prospective!.harnessId
-              ? { harnessId: prospective!.harnessId }
-              : { auto: "1" }),
+            projectId: prospective!.projectId!, detail: "1",
+            ...(prospective!.harnessId ? { harnessId: prospective!.harnessId } : { auto: "1" }),
           });
-          // One request only. For Auto, the server selects from cheap cached
-          // summaries and then details just that harness, reusing singleflight.
           const snapshots = await api.get<HarnessSnapshot[]>(`/api/harnesses/snapshots?${query}`);
-          const snapshot = snapshots[0];
-          const harnessId = snapshot?.identity.id ?? prospective!.harnessId;
-          if (!snapshot || !harnessId) {
-            return { ...unavailable, ready: true, discovery: { state: "unavailable", reason: "No engine is ready for this project" } };
-          }
-          const catalog = snapshot.catalog;
-          const reason = snapshotUnavailableReason(snapshot);
-          const catalogModels = pickerCatalogModels(catalog?.models ?? [], harnessId);
-          return {
-            models: catalogModels,
-            agents: catalog?.agents ?? catalog?.roles ?? [],
-            // A harness without an enumerable catalog can still own a native
-            // default — but only when discovery actually succeeded. An auth
-            // failure is not a hidden model.
-            nativeDefault: !reason && (catalog?.models === undefined || catalog.models.length === 0),
-            ready: true,
-            harnessId,
-            harnessName: snapshot.identity.name,
-            discovery: catalogModels.length > 0
-              ? { state: "available" }
-              : reason
-                ? { state: "unavailable", reason }
-                : { state: "empty" },
-          };
-        })()).then((catalog) => ({
+          return catalogFromSnapshot(snapshots[0], snapshots[0]?.identity.id ?? prospective!.harnessId);
+        })();
+    // Cursor's draft key is owned by readDraftCatalog so the background
+    // prefetch and selected route share one pending/value entry.
+    const request = !session?.id && prospective?.harnessId === "cursor" && prospective.projectId
+      ? readDraftCatalog(prospective.projectId, "cursor", prospective.spaceId)
+      : catalogCache.read(key, load);
+    const normalized = request.then((catalog) => ({
           ...catalog,
           models: pickerCatalogModels(catalog.models, catalog.harnessId ?? requestedHarness),
           discovery: catalog.discovery ?? (catalog.models.length ? { state: "available" as const } : { state: "empty" as const }),
           ready: true,
-        })));
-    void request.then((catalog) => {
+        }));
+    void normalized.then((catalog) => {
       if (controller.signal.aborted) return;
       setResult({ key, catalog });
     }).catch((error: unknown) => {

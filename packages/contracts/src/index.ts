@@ -3117,6 +3117,9 @@ export interface HarnessProvider {
    * session merely to answer this call. Expensive discovery is requested only
    * for a selected detail surface. */
   discover?(context: HarnessContext): Promise<HarnessDiscovery>;
+  /** Explicit metadata refresh. Drop only this context's cached discovery;
+   * never modify native configuration or execution state. */
+  invalidateDiscovery?(context: HarnessContext): void;
   /** Applies one descriptor-declared, UI-safe native control. Providers retain
    * authority over validation and native config ownership. */
   applyControl?(context: HarnessContext, controlId: string, value: JsonValue): Promise<void>;
