@@ -4,18 +4,21 @@ import {
   BINANCE_CRYPTO_ASSETS,
   MarketUniverseService,
   buildMarketHeatmap,
+  calculateMarketTechnicals,
   createBinanceProvider,
   createFredProvider,
   createTradingViewUniverseLoader,
   parseFredCsv,
   screenMarketUniverse,
+  type MarketCandleSeries,
   type MarketHeatmapSnapshot,
   type MarketMacroIndicator,
   type MarketMacroSnapshot,
+  type MarketTechnicalSnapshot,
   type MarketUniverseRow,
 } from "../src/index.ts";
 
-test("Markets public entry exports macro, crypto, screener, and heatmap primitives", () => {
+test("Markets public entry exports macro, crypto, screener, heatmap, and technical primitives", () => {
   assert.equal(typeof createBinanceProvider, "function");
   assert.equal(typeof createFredProvider, "function");
   assert.equal(typeof parseFredCsv, "function");
@@ -23,6 +26,7 @@ test("Markets public entry exports macro, crypto, screener, and heatmap primitiv
   assert.equal(typeof MarketUniverseService, "function");
   assert.equal(typeof screenMarketUniverse, "function");
   assert.equal(typeof buildMarketHeatmap, "function");
+  assert.equal(typeof calculateMarketTechnicals, "function");
   assert.ok(BINANCE_CRYPTO_ASSETS.some((asset) => asset.symbol === "BTC/USDT"));
 
   const indicator: MarketMacroIndicator = {
@@ -60,4 +64,21 @@ test("Markets public entry exports macro, crypto, screener, and heatmap primitiv
     revalidating: false,
   };
   assert.equal(heatmap.cells[0]?.symbol, "NVDA");
+
+  const candleSeries: MarketCandleSeries = {
+    symbol: "NVDA",
+    range: "6M",
+    candles: Array.from({ length: 60 }, (_, index) => ({
+      time: 1_700_000_000 + index * 86_400,
+      open: 100,
+      high: 100,
+      low: 100,
+      close: 100,
+    })),
+    asOf: "2026-09-10T00:00:00.000Z",
+    source: "fixture",
+    freshness: "delayed",
+  };
+  const technicals: MarketTechnicalSnapshot = calculateMarketTechnicals(candleSeries);
+  assert.equal(technicals.latest?.rsi14, 50);
 });
