@@ -56,7 +56,7 @@ Beyond settings: six bundled themes (plus follow-system and paste-your-own JSON 
 
 ## Status
 
-Polyth tracks feature parity with polyth and Paseo in a per-feature matrix: [`docs/parity/polyth-parity.yaml`](docs/parity/polyth-parity.yaml). That matrix — not this README — is the source of truth for what's done; rows marked `planned` are not shipped, and rows marked `implementing` are not fully shipped (their notes say which subsets exist).
+Polyth tracks feature parity against reference implementations in a per-feature matrix: [`docs/parity/polyth-parity.yaml`](docs/parity/polyth-parity.yaml). That matrix — not this README — is the source of truth for what's done; rows marked `planned` are not shipped, and rows marked `implementing` are not fully shipped (their notes say which subsets exist).
 
 ## Documentation
 
