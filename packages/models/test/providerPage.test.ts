@@ -58,3 +58,9 @@ test("enable toggle is not labeled as connection", () => {
   assert.equal(page.includes("runtimeError"), false);
   assert.equal(page.includes("models.map((model) => ({ ...model, enabled: on }))"), false);
 });
+
+test("initial provider catalog load does not invalidate its harness settings parent", () => {
+  const page = source();
+  assert.match(page, /void refreshCatalog\(\{ invalidateRuntime: false \}\)/);
+  assert.match(page, /if \(invalidateRuntime\) invalidateRuntimeCatalogs\(\)/);
+});

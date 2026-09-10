@@ -89,10 +89,15 @@ export default function ModelsPage() {
     [providers],
   );
 
-  const refreshCatalog = () =>
+  const refreshCatalog = ({ invalidateRuntime = true }: { invalidateRuntime?: boolean } = {}) =>
     loadOpenCodeProviders().then((catalog) => {
       setProviders(catalog);
-      invalidateRuntimeCatalogs();
+      // Opening this page is a read-only projection of the same OpenCode
+      // catalog. Invalidating the parent harness snapshot here makes the
+      // harness detail disappear, unmounting this page and starting the load
+      // again. Mutations still use the default so composer/runtime metadata is
+      // rediscovered after provider configuration actually changes.
+      if (invalidateRuntime) invalidateRuntimeCatalogs();
     }).catch((e) => setError(e instanceof Error ? e.message : String(e)));
 
   const loadProviderOptions = async (opts: { force?: boolean; quiet?: boolean } = {}) => {
@@ -124,7 +129,7 @@ export default function ModelsPage() {
     // The visible provider catalog is the only metadata needed on page open.
     // Available-provider and auth discovery may initialize OpenCode plugins or
     // network flows, so load those only when the user opens an admin surface.
-    void refreshCatalog();
+    void refreshCatalog({ invalidateRuntime: false });
   }, []);
 
   const closeReconfigure = (id: string) =>
