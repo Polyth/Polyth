@@ -7,6 +7,7 @@
   },
   "polyth": {
     "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
     "descriptor": {
       "name": "Personal Coach",
       "description": "Durable goals, commitments, routines, and lightweight coaching state.",
@@ -19,6 +20,10 @@
   },
   "dependencies": {
     "@polyth/contracts": "0.1.0",
-    "@polyth/plugins": "0.1.0"
+    "@polyth/plugins": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
   }
 }
