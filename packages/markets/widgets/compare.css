@@ -59,7 +59,8 @@
   display: none;
 }
 
-.markets-compare-ranges button {
+.markets-compare-ranges button,
+.markets-compare-ask {
   min-width: max(var(--hit-min), var(--control-h-sm));
   min-height: max(var(--hit-min), var(--control-h-sm));
   padding: 0 var(--control-pad-x-sm);
@@ -72,7 +73,8 @@
   cursor: pointer;
 }
 
-.markets-compare-ranges button:hover {
+.markets-compare-ranges button:hover,
+.markets-compare-ask:hover:not(:disabled) {
   background: var(--surface-overlay-hover);
   color: var(--text);
 }
@@ -83,7 +85,19 @@
   color: var(--text);
 }
 
+.markets-compare-ask {
+  border-color: var(--accent-line);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.markets-compare-ask:disabled {
+  opacity: .5;
+  cursor: default;
+}
+
 .markets-compare-ranges button:focus-visible,
+.markets-compare-ask:focus-visible,
 .markets-compare-table button:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
@@ -95,6 +109,12 @@
 
 .markets-compare-hint.invalid {
   color: var(--red);
+}
+
+.markets-compare-status {
+  padding: var(--space-2) var(--space-3) 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
 }
 
 .markets-compare-notice {
@@ -208,6 +228,10 @@
 
   .markets-compare-ranges {
     width: 100%;
+  }
+
+  .markets-compare-ask {
+    align-self: flex-start;
   }
 
   .markets-compare-table-wrap {
