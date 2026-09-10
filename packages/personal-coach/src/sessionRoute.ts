@@ -46,11 +46,14 @@ export function personalCoachSessionRoute(
       projectId: workspace.projectId,
       title: sessionTitle(input.title),
     });
+    // package/context is intentionally model-visible: deriveMessages drops
+    // ignorable events. Proposal/insight timeline markers stay ignorable, this
+    // bounded durable-state snapshot must not.
     await host.events.append(session.id, "package/context", {
       packageId: host.pluginId,
       title: "Personal Coach state",
       text: buildCoachContext(store),
-    }, { ignorable: true, producerPlugin: host.pluginId });
+    }, { producerPlugin: host.pluginId });
     request.json(200, { sessionId: session.id });
     return true;
   };

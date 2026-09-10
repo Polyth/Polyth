@@ -43,13 +43,21 @@ async function invoke(route: RouteHandler, input: Record<string, unknown> = {}) 
   return { handled, status, value };
 }
 
-test("Coach session prepares scoped capabilities and injects bounded package context", async () => {
+const unusedReview = () => { throw new Error("proposal review is unused by session route tests"); };
+const unusedReviewAsync = async () => { throw new Error("proposal review is unused by session route tests"); };
+
+test("Coach session prepares scoped capabilities and injects model-visible bounded package context", async () => {
   const root = mkdtempSync(join(tmpdir(), "polyth-coach-session-"));
   const coachStore = createCoachStore(join(root, "coach.db"));
   coachStore.createGoal({ title: "Ship Coach", priority: 3 });
   let createdProjectId = "";
   let preparedProjectId = "";
-  let appended: { sessionId: string; type: string; data: Record<string, unknown> } | undefined;
+  let appended: {
+    sessionId: string;
+    type: string;
+    data: Record<string, unknown>;
+    opts?: { ignorable?: boolean; producerPlugin?: string };
+  } | undefined;
   const anchor: Project = {
     id: "__polyth_pkg_anchor",
     path: join(root, "packages", "personal-coach", "workspace"),
@@ -83,7 +91,9 @@ test("Coach session prepares scoped capabilities and injects bounded package con
   };
   const coach = {
     forSpace: () => coachStore,
+    proposalReviewForSpace: unusedReview,
     forWorkspaceProject: async () => coachStore,
+    proposalReviewForWorkspaceProject: unusedReviewAsync,
     close: () => {},
   } satisfies PersonalCoachService;
 
@@ -93,8 +103,8 @@ test("Coach session prepares scoped capabilities and injects bounded package con
     spaceStorage: () => storage,
     forSpace: () => ({ projects, sessions }),
     events: {
-      async append(sessionId, type, data) {
-        appended = { sessionId, type, data };
+      async append(sessionId, type, data, opts) {
+        appended = { sessionId, type, data, opts };
         return {} as never;
       },
     },
@@ -115,6 +125,8 @@ test("Coach session prepares scoped capabilities and injects bounded package con
   assert.equal(appended?.sessionId, "coach-session");
   assert.equal(appended?.type, "package/context");
   assert.equal(appended?.data.packageId, "personal-coach");
+  assert.notEqual(appended?.opts?.ignorable, true, "package/context must survive deriveMessages filtering");
+  assert.equal(appended?.opts?.producerPlugin, "personal-coach");
   const snapshot = JSON.parse(String(appended?.data.text)) as { activeGoals: Array<{ title: string }> };
   assert.equal(snapshot.activeGoals[0]?.title, "Ship Coach");
   coachStore.close();
@@ -145,7 +157,9 @@ test("Coach session title is bounded before session creation", async () => {
   };
   const coach = {
     forSpace: () => store,
+    proposalReviewForSpace: unusedReview,
     forWorkspaceProject: async () => store,
+    proposalReviewForWorkspaceProject: unusedReviewAsync,
     close: () => {},
   } satisfies PersonalCoachService;
   const route = personalCoachSessionRoute({
