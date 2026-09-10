@@ -3,6 +3,7 @@ import type {
   MarketCandleSeries,
   MarketComparison,
   MarketDataResult,
+  MarketFiling,
   MarketFundamentals,
   MarketNewsItem,
   MarketQuote,
@@ -36,6 +37,19 @@ export const marketsApi = {
   },
   news(symbol: string, signal?: AbortSignal): Promise<MarketDataResult<MarketNewsItem[]>> {
     return transport.get(`/api/markets/news?symbol=${encodeURIComponent(symbol)}`, { signal });
+  },
+  filings(
+    symbol: string,
+    forms: readonly string[] = ["10-K", "10-Q", "8-K", "20-F", "6-K"],
+    limit = 30,
+    signal?: AbortSignal,
+  ): Promise<MarketDataResult<MarketFiling[]>> {
+    const params = new URLSearchParams({
+      symbol,
+      forms: forms.join(","),
+      limit: String(limit),
+    });
+    return transport.get(`/api/markets/filings?${params}`, { signal });
   },
   context(symbol: string, range: MarketRange, signal?: AbortSignal): Promise<MarketResearchContext> {
     return transport.get(`/api/markets/context?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(range)}`, { signal });

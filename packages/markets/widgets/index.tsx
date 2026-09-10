@@ -4,18 +4,20 @@ import "./widgetStyles.css";
 import "./news.css";
 import "./compare.css";
 import "./portfolio.css";
+import "./filings.css";
 import "./surfaceFrame.css";
 import "./portfolioWidget.css";
 import { createElement, useEffect, useState, type ReactNode } from "react";
 import { defineWebPackage, type WebPackageHost } from "@polyth/web-sdk";
 import MarketsSurface, { type MarketHandoffOption } from "./MarketsSurface.tsx";
 import MarketCompareSurface from "./MarketCompareSurface.tsx";
+import MarketFilingsSurface from "./MarketFilingsSurface.tsx";
 import MarketPortfolioSurface from "./MarketPortfolioSurface.tsx";
 import { MarketPortfolioWidget } from "./MarketPortfolioWidget.tsx";
 import { MarketAssetWidget, MarketNewsWidget, MarketWatchlistWidget } from "./MarketWidgets.tsx";
 import { selectMarketSymbol } from "./selection.ts";
 
-type MarketSurfaceId = "markets" | "markets.compare" | "markets.portfolio";
+type MarketSurfaceId = "markets" | "markets.compare" | "markets.portfolio" | "markets.filings";
 
 function MarketSurfaceFrame({
   host,
@@ -30,6 +32,7 @@ function MarketSurfaceFrame({
     { id: "markets", label: "Research" },
     { id: "markets.compare", label: "Compare" },
     { id: "markets.portfolio", label: "Portfolio" },
+    { id: "markets.filings", label: "Filings" },
   ];
   return (
     <div className="markets-surface-frame">
@@ -55,11 +58,10 @@ function openMarketSymbol(host: WebPackageHost, symbol: string): void {
   host.navigation.openWorkspacePane("markets");
 }
 
-function HostedMarketsSurface({ host, active }: { host: WebPackageHost; active?: boolean }) {
+function useMarketHandoffOptions(host: WebPackageHost): MarketHandoffOption[] {
   const [snapshot, setSnapshot] = useState(() => host.store.getSnapshot());
   useEffect(() => host.store.subscribe(() => setSnapshot(host.store.getSnapshot())), [host]);
-
-  const handoffOptions: MarketHandoffOption[] = snapshot.activeProjectId
+  return snapshot.activeProjectId
     ? host.handoffTargets.list()
         .filter((target) => target.available())
         .map((target) => ({
@@ -72,6 +74,10 @@ function HostedMarketsSurface({ host, active }: { host: WebPackageHost; active?:
           }),
         }))
     : [];
+}
+
+function HostedMarketsSurface({ host, active }: { host: WebPackageHost; active?: boolean }) {
+  const handoffOptions = useMarketHandoffOptions(host);
   return (
     <MarketSurfaceFrame host={host} activeId="markets">
       <MarketsSurface active={active} handoffOptions={handoffOptions} />
@@ -91,6 +97,19 @@ function HostedPortfolioSurface({ host, active }: { host: WebPackageHost; active
   return (
     <MarketSurfaceFrame host={host} activeId="markets.portfolio">
       <MarketPortfolioSurface active={active} onOpen={(symbol) => openMarketSymbol(host, symbol)} />
+    </MarketSurfaceFrame>
+  );
+}
+
+function HostedFilingsSurface({ host, active }: { host: WebPackageHost; active?: boolean }) {
+  const handoffOptions = useMarketHandoffOptions(host);
+  return (
+    <MarketSurfaceFrame host={host} activeId="markets.filings">
+      <MarketFilingsSurface
+        active={active}
+        handoffOptions={handoffOptions}
+        onOpenResearch={(symbol) => openMarketSymbol(host, symbol)}
+      />
     </MarketSurfaceFrame>
   );
 }
@@ -161,6 +180,30 @@ export default defineWebPackage((host) => () => {
         minWidth: 360,
         minHeight: 300,
         preferredMaxWidth: 1_180,
+        keepAlive: true,
+        escape: "close",
+      },
+      placement: {
+        preferredRegion: "primary",
+        allowedRegions: ["primary", "end", "bottom"],
+        minInlineSize: 360,
+        minBlockSize: 280,
+        keepAlive: true,
+      },
+    }),
+    host.surfaces.register({
+      id: "markets.filings",
+      title: "SEC filings",
+      description: "Browse recent official EDGAR filings and hand filing context to Polyth.",
+      capabilityId: "markets.filings",
+      order: 55,
+      component: (props) => createElement(HostedFilingsSurface, { host, active: props?.active }),
+      presentation: {
+        kind: "workspace",
+        defaultRatio: 0.68,
+        minWidth: 360,
+        minHeight: 300,
+        preferredMaxWidth: 1_100,
         keepAlive: true,
         escape: "close",
       },
@@ -309,6 +352,16 @@ export default defineWebPackage((host) => () => {
       standardTier: "more",
       standardRank: 24,
       open: () => host.navigation.openWorkspacePane("markets.portfolio"),
+      available: () => true,
+    }),
+    host.capabilities.register({
+      id: "markets.filings",
+      label: "SEC filings",
+      plainDescription: "Browse official SEC EDGAR filings and send filing context to Polyth.",
+      keywords: ["market", "sec", "edgar", "filings", "10-k", "10-q", "8-k"],
+      standardTier: "more",
+      standardRank: 25,
+      open: () => host.navigation.openWorkspacePane("markets.filings"),
       available: () => true,
     }),
   ];
