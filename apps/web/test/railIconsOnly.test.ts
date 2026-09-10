@@ -127,6 +127,14 @@ test("right-rail utilities use distinct semantic icons", async () => {
   assert.match(usage, /id: "usage"/);
 });
 
+test("rail icon module initializes every configured glyph", async () => {
+  const { RAIL_ICONS } = await import("../src/railIcons.ts");
+  for (const [id, renderIcon] of Object.entries(RAIL_ICONS)) {
+    const element = renderIcon();
+    assert.ok(element.type, `${id} must resolve to an exported icon component`);
+  }
+});
+
 test("every primary built-in rail item has a unique Lucide icon", async () => {
   const mappingSource = await readFile(new URL("../src/railIcons.ts", import.meta.url), "utf8");
   const items = [

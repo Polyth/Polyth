@@ -142,8 +142,10 @@ export {
   Cpu as CpuIcon,
   FileInput as FileInputIcon,
   FlaskConical as FlaskIcon,
-  Github as GithubIcon,
-  Gitlab as GitlabIcon,
+  // lucide-react does not export these brand marks. Keep semantic aliases backed
+  // by the closest distinct git workflow glyphs that the package does export.
+  GitFork as GithubIcon,
+  GitMerge as GitlabIcon,
   History as HistoryIcon,
   Keyboard as KeyboardIcon,
   ListChecks as TasksIcon,
