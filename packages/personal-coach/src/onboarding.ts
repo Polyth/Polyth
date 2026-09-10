@@ -13,6 +13,11 @@ export interface CoachScheduleTask {
   projectId: string;
   title?: string;
   enabled?: boolean;
+  cadence?: {
+    kind: string;
+    expression?: string;
+    timeZone?: string;
+  };
 }
 
 export interface CoachScheduleService {
@@ -39,6 +44,19 @@ export interface CoachScheduleService {
   preview(cadence: { kind: "cron"; expression: string; timeZone: string }, count?: number): unknown;
 }
 
+export interface CoachReminderSettings {
+  dailyCheckIn: {
+    enabled: boolean;
+    minuteOfDay: number;
+  };
+  weeklyReview: {
+    enabled: boolean;
+    day: number;
+    minuteOfDay: number;
+  };
+  timeZone: string;
+}
+
 export interface CoachOnboardingCapabilitySet {
   ids: string[];
   dispose(): void | Promise<void>;
@@ -47,6 +65,9 @@ export interface CoachOnboardingCapabilitySet {
 const DAILY_TITLE = "Coach · Daily check-in";
 const WEEKLY_TITLE = "Coach · Weekly review";
 const COACH_SCHEDULE_TITLES = new Set([DAILY_TITLE, WEEKLY_TITLE]);
+const DEFAULT_DAILY_MINUTE = 8 * 60;
+const DEFAULT_WEEKLY_DAY = 0;
+const DEFAULT_WEEKLY_MINUTE = 18 * 60;
 
 const DAILY_PROMPT = `This is a user-enabled Personal Coach daily check-in. Call coach_read_context first. Keep the interaction short and practical. Ask for the user's current energy and focus only if they have not already provided them, then help identify one useful focus for today. Use coach_record_checkin only for values the user actually gives you. Do not invent state, create guilt, or turn this into a questionnaire.`;
 
@@ -128,6 +149,86 @@ function syncTask(
       });
   for (const duplicate of existing.slice(1)) schedule.remove(duplicate.id);
   return task.id;
+}
+
+function simpleCron(task: CoachScheduleTask | undefined): { minute: number; hour: number; day?: number } | undefined {
+  if (task?.cadence?.kind !== "cron" || typeof task.cadence.expression !== "string") return undefined;
+  const fields = task.cadence.expression.trim().split(/\s+/);
+  if (fields.length !== 5) return undefined;
+  const [minuteRaw, hourRaw, dom, month, dayRaw] = fields;
+  if (!/^\d+$/.test(minuteRaw!) || !/^\d+$/.test(hourRaw!) || dom !== "*" || month !== "*") return undefined;
+  const minute = Number(minuteRaw);
+  const hour = Number(hourRaw);
+  if (!Number.isInteger(minute) || minute < 0 || minute > 59 || !Number.isInteger(hour) || hour < 0 || hour > 23) return undefined;
+  if (dayRaw === "*") return { minute, hour };
+  if (/^[0-6]$/.test(dayRaw!)) return { minute, hour, day: Number(dayRaw) };
+  return undefined;
+}
+
+/** Read only the two exact Schedule tasks owned by Personal Coach. Unknown or
+ * manually-corrupted cadences fall back to safe defaults until the next save. */
+export function readCoachReminders(
+  schedule: CoachScheduleService,
+  projectId: string,
+  timeZone: string,
+): CoachReminderSettings {
+  const tasks = schedule.list(projectId);
+  const daily = tasks.find((task) => task.title === DAILY_TITLE);
+  const weekly = tasks.find((task) => task.title === WEEKLY_TITLE);
+  const dailyCron = simpleCron(daily);
+  const weeklyCron = simpleCron(weekly);
+  return {
+    dailyCheckIn: {
+      enabled: daily?.enabled === true,
+      minuteOfDay: dailyCron ? dailyCron.hour * 60 + dailyCron.minute : DEFAULT_DAILY_MINUTE,
+    },
+    weeklyReview: {
+      enabled: weekly?.enabled === true,
+      day: weeklyCron?.day ?? DEFAULT_WEEKLY_DAY,
+      minuteOfDay: weeklyCron ? weeklyCron.hour * 60 + weeklyCron.minute : DEFAULT_WEEKLY_MINUTE,
+    },
+    timeZone,
+  };
+}
+
+/** Apply reminder preferences through the existing Schedule service. There is
+ * no Coach timer and no LLM work on the idle path. */
+export function configureCoachReminders(
+  schedule: CoachScheduleService,
+  projectId: string,
+  settings: CoachReminderSettings,
+): { dailyTaskId?: string; weeklyTaskId?: string } {
+  if (!isCoachTimeZone(settings.timeZone)) {
+    throw Object.assign(new Error("timeZone must be a valid IANA time zone"), { code: "invalid-input" });
+  }
+  const dailyEnabled = bool(settings.dailyCheckIn.enabled, "dailyCheckIn.enabled");
+  const weeklyEnabled = bool(settings.weeklyReview.enabled, "weeklyReview.enabled");
+  const dailyMinute = integer(settings.dailyCheckIn.minuteOfDay, "dailyCheckIn.minuteOfDay", 0, 1439);
+  const weeklyDay = integer(settings.weeklyReview.day, "weeklyReview.day", 0, 6);
+  const weeklyMinute = integer(settings.weeklyReview.minuteOfDay, "weeklyReview.minuteOfDay", 0, 1439);
+
+  const dailyTaskId = syncTask(
+    schedule,
+    projectId,
+    DAILY_TITLE,
+    dailyEnabled,
+    DAILY_PROMPT,
+    clockCron(dailyMinute),
+    settings.timeZone,
+  );
+  const weeklyTaskId = syncTask(
+    schedule,
+    projectId,
+    WEEKLY_TITLE,
+    weeklyEnabled,
+    WEEKLY_PROMPT,
+    clockCron(weeklyMinute, weeklyDay),
+    settings.timeZone,
+  );
+  return {
+    ...(dailyTaskId ? { dailyTaskId } : {}),
+    ...(weeklyTaskId ? { weeklyTaskId } : {}),
+  };
 }
 
 /** Package disable is a hard boundary: cross-package scheduled work must not
@@ -212,52 +313,30 @@ export function registerCoachOnboardingCapabilities(input: {
       const weeklyReview = bool(value.weeklyReview, "weeklyReview");
       const dailyMinute = dailyCheckIn
         ? integer(value.dailyMinuteOfDay, "dailyMinuteOfDay", 0, 1439)
-        : undefined;
+        : DEFAULT_DAILY_MINUTE;
       const weeklyDay = weeklyReview
         ? integer(value.weeklyDay, "weeklyDay", 0, 6)
-        : undefined;
+        : DEFAULT_WEEKLY_DAY;
       const weeklyMinute = weeklyReview
         ? integer(value.weeklyMinuteOfDay, "weeklyMinuteOfDay", 0, 1439)
-        : undefined;
+        : DEFAULT_WEEKLY_MINUTE;
       const tone = value.tone === undefined ? undefined : String(value.tone) as CoachTone;
       const initiative = value.initiative === undefined ? undefined : String(value.initiative) as CoachInitiative;
       const challenge = value.challengeAssumptions === undefined
         ? undefined
         : bool(value.challengeAssumptions, "challengeAssumptions");
 
-      let dailyTaskId: string | undefined;
-      let weeklyTaskId: string | undefined;
-      if (dailyCheckIn || weeklyReview) {
-        const schedule = input.schedule();
-        if (!schedule) {
-          throw Object.assign(new Error("Schedule package is unavailable; Coach reminders were not enabled"), { code: "unavailable" });
-        }
-        dailyTaskId = syncTask(
-          schedule,
-          input.projectId,
-          DAILY_TITLE,
-          dailyCheckIn,
-          DAILY_PROMPT,
-          dailyMinute === undefined ? "0 8 * * *" : clockCron(dailyMinute),
+      let reminders: { dailyTaskId?: string; weeklyTaskId?: string } = {};
+      const schedule = input.schedule();
+      if ((dailyCheckIn || weeklyReview) && !schedule) {
+        throw Object.assign(new Error("Schedule package is unavailable; Coach reminders were not enabled"), { code: "unavailable" });
+      }
+      if (schedule) {
+        reminders = configureCoachReminders(schedule, input.projectId, {
           timeZone,
-        );
-        weeklyTaskId = syncTask(
-          schedule,
-          input.projectId,
-          WEEKLY_TITLE,
-          weeklyReview,
-          WEEKLY_PROMPT,
-          weeklyMinute === undefined || weeklyDay === undefined ? "0 18 * * 0" : clockCron(weeklyMinute, weeklyDay),
-          timeZone,
-        );
-      } else {
-        // Explicit opt-out also removes earlier Coach-created tasks when the
-        // scheduler is available; setup completion itself must not depend on it.
-        const schedule = input.schedule();
-        if (schedule) {
-          syncTask(schedule, input.projectId, DAILY_TITLE, false, DAILY_PROMPT, "0 8 * * *", timeZone);
-          syncTask(schedule, input.projectId, WEEKLY_TITLE, false, WEEKLY_PROMPT, "0 18 * * 0", timeZone);
-        }
+          dailyCheckIn: { enabled: dailyCheckIn, minuteOfDay: dailyMinute },
+          weeklyReview: { enabled: weeklyReview, day: weeklyDay, minuteOfDay: weeklyMinute },
+        });
       }
 
       const profile = input.store.updateProfile({
@@ -273,8 +352,7 @@ export function registerCoachOnboardingCapabilities(input: {
           reminders: {
             dailyCheckIn,
             weeklyReview,
-            ...(dailyTaskId ? { dailyTaskId } : {}),
-            ...(weeklyTaskId ? { weeklyTaskId } : {}),
+            ...reminders,
           },
         }),
       };
