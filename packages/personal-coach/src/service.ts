@@ -1,7 +1,8 @@
 import { basename, dirname, join, resolve } from "node:path";
 import type { ProjectService, SpaceContext, SpaceStorage } from "@polyth/contracts";
-import type { CoachStore } from "./index.ts";
+import type { CoachProfile, CoachStore } from "./index.ts";
 import { createCoachStore } from "./index.ts";
+import { resetCoachData } from "./maintenance.ts";
 import {
   createCoachProposalReviewStore,
   type CoachProposalReviewStore,
@@ -12,6 +13,7 @@ export interface PersonalCoachService {
   proposalReviewForSpace(space: SpaceContext): CoachProposalReviewStore;
   forWorkspaceProject(projectId: string, expectedSpaceId?: string): Promise<CoachStore>;
   proposalReviewForWorkspaceProject(projectId: string, expectedSpaceId?: string): Promise<CoachProposalReviewStore>;
+  resetForSpace(space: SpaceContext): { revision: number; resetAt: number; profile: CoachProfile };
   close(): void;
 }
 
@@ -85,6 +87,13 @@ export function createPersonalCoachService(input: {
     },
     async proposalReviewForWorkspaceProject(projectId, expectedSpaceId) {
       return review(await workspaceFile(projectId, expectedSpaceId));
+    },
+    resetForSpace(space) {
+      const file = spaceFile(space);
+      const store = open(file);
+      review(file); // ensure optional plan tables exist before the reset walk.
+      const result = resetCoachData(file);
+      return { ...result, profile: store.profile() };
     },
     close() {
       for (const store of reviews.values()) store.close();
