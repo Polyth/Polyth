@@ -1,5 +1,6 @@
 import type {
   MarketCandleSeries,
+  MarketFiling,
   MarketFundamentals,
   MarketNewsItem,
   MarketProviderCapability,
@@ -15,6 +16,7 @@ export interface MarketProvider {
   search?(query: string, signal: AbortSignal): Promise<MarketSearchResult[]>;
   fundamentals?(symbol: string, signal: AbortSignal): Promise<MarketFundamentals>;
   news?(symbol: string, signal: AbortSignal): Promise<MarketNewsItem[]>;
+  filings?(symbol: string, signal: AbortSignal): Promise<MarketFiling[]>;
 }
 
 export interface ProviderHealth {

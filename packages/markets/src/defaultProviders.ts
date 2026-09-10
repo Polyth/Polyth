@@ -1,6 +1,7 @@
 import type { MarketsService } from "./service.ts";
 import { createNasdaqProvider, type NasdaqProviderOptions } from "./providers/nasdaq.ts";
 import { createGoogleNewsProvider, createYahooNewsProvider, type NewsProviderOptions } from "./providers/news.ts";
+import { createSecProvider, type SecProviderOptions } from "./providers/sec.ts";
 import { createStooqProvider, type StooqProviderOptions } from "./providers/stooq.ts";
 import { createTradingViewProvider, type TradingViewProviderOptions } from "./providers/tradingview.ts";
 import { createYahooProvider, type YahooProviderOptions } from "./providers/yahoo.ts";
@@ -9,6 +10,7 @@ import type { FetchLike } from "./providers/http.ts";
 export interface DefaultMarketProviderOptions {
   fetch?: FetchLike;
   now?: () => number;
+  secUserAgent?: string;
 }
 
 export function registerDefaultMarketProviders(
@@ -25,4 +27,11 @@ export function registerDefaultMarketProviders(
   service.registerProvider(createStooqProvider(common satisfies StooqProviderOptions));
   service.registerProvider(createYahooNewsProvider({ fetch: options.fetch } satisfies NewsProviderOptions));
   service.registerProvider(createGoogleNewsProvider({ fetch: options.fetch } satisfies NewsProviderOptions));
+  if (options.secUserAgent?.trim()) {
+    service.registerProvider(createSecProvider({
+      userAgent: options.secUserAgent,
+      fetch: options.fetch,
+      now: options.now,
+    } satisfies SecProviderOptions));
+  }
 }

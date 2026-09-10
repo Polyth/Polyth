@@ -29,6 +29,7 @@ export {
   parseMarketRss,
   type NewsProviderOptions,
 } from "./providers/news.ts";
+export { createSecProvider, type SecProviderOptions } from "./providers/sec.ts";
 export { createStooqProvider, stooqSymbol, type StooqProviderOptions } from "./providers/stooq.ts";
 export { createTradingViewProvider, type TradingViewProviderOptions } from "./providers/tradingview.ts";
 export { createYahooProvider, type YahooProviderOptions } from "./providers/yahoo.ts";
@@ -49,6 +50,7 @@ export type {
   MarketComparisonItem,
   MarketDataFreshness,
   MarketDataResult,
+  MarketFiling,
   MarketFundamentals,
   MarketNewsItem,
   MarketPerformance,

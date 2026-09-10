@@ -125,6 +125,33 @@ export function marketsRoutes(
       return true;
     }
 
+    if (path === "/api/markets/filings") {
+      const symbol = url.searchParams.get("symbol") ?? "";
+      if (!symbol.trim()) return badRequest(json, "symbol is required");
+      const forms = [...new Set((url.searchParams.get("forms") ?? "10-K,10-Q,8-K")
+        .split(",")
+        .map((form) => form.trim().toUpperCase())
+        .filter(Boolean))];
+      if (forms.length === 0 || forms.length > 12 || forms.some((form) => !/^[A-Z0-9-]{1,12}$/.test(form))) {
+        return badRequest(json, "forms must contain 1-12 SEC form names");
+      }
+      const limit = Number(url.searchParams.get("limit") ?? "12");
+      if (!Number.isInteger(limit) || limit < 1 || limit > 50) return badRequest(json, "limit must be 1-50");
+      if (markets.providers.providerIds("filings").length === 0) {
+        json(503, {
+          error: "configuration-required",
+          message: "SEC filings require POLYTH_SEC_USER_AGENT with a declared application/contact identity.",
+        });
+        return true;
+      }
+      const result = await markets.filings(symbol);
+      json(200, {
+        ...result,
+        data: result.data.filter((filing) => forms.includes(filing.form.toUpperCase())).slice(0, limit),
+      });
+      return true;
+    }
+
     if (path === "/api/markets/context") {
       const symbol = url.searchParams.get("symbol") ?? "";
       const range = url.searchParams.get("range") ?? "1M";
@@ -154,7 +181,7 @@ export function marketsRoutes(
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   const markets = createMarketsService();
-  registerDefaultMarketProviders(markets);
+  registerDefaultMarketProviders(markets, { secUserAgent: process.env.POLYTH_SEC_USER_AGENT });
   host.services.provide(marketsServiceKey, markets);
   return {
     routes: marketsRoutes(host, markets),

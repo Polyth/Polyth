@@ -6,6 +6,7 @@ import type {
   MarketComparison,
   MarketComparisonItem,
   MarketDataResult,
+  MarketFiling,
   MarketFundamentals,
   MarketNewsItem,
   MarketPerformance,
@@ -20,6 +21,7 @@ const CANDLE_POLICY: SwrCachePolicy = { softTtlMs: 30_000, hardTtlMs: 60 * 60_00
 const SEARCH_POLICY: SwrCachePolicy = { softTtlMs: 12 * 60 * 60_000, hardTtlMs: 24 * 60 * 60_000, maxEntries: 500 };
 const FUNDAMENTALS_POLICY: SwrCachePolicy = { softTtlMs: 30 * 60_000, hardTtlMs: 24 * 60 * 60_000, maxEntries: 1_000 };
 const NEWS_POLICY: SwrCachePolicy = { softTtlMs: 2 * 60_000, hardTtlMs: 30 * 60_000, maxEntries: 1_000 };
+const FILINGS_POLICY: SwrCachePolicy = { softTtlMs: 5 * 60_000, hardTtlMs: 6 * 60 * 60_000, maxEntries: 1_000 };
 const RANGES = new Set<MarketRange>(["1D", "5D", "1M", "6M", "YTD", "1Y", "5Y", "MAX"]);
 
 export interface MarketsServiceOptions {
@@ -35,6 +37,7 @@ export class MarketsService {
   private readonly searches: SwrCache<MarketSearchResult[]>;
   private readonly fundamentalsCache: SwrCache<MarketFundamentals>;
   private readonly newsCache: SwrCache<MarketNewsItem[]>;
+  private readonly filingsCache: SwrCache<MarketFiling[]>;
   private readonly quotePolicy: SwrCachePolicy;
   private readonly now: () => number;
 
@@ -46,6 +49,7 @@ export class MarketsService {
     this.searches = new SwrCache(this.now);
     this.fundamentalsCache = new SwrCache(this.now);
     this.newsCache = new SwrCache(this.now);
+    this.filingsCache = new SwrCache(this.now);
     this.quotePolicy = options.quotePolicy ?? QUOTE_POLICY;
   }
 
@@ -82,6 +86,12 @@ export class MarketsService {
     const normalized = normalizeSymbol(symbol);
     return this.cachedAll(this.newsCache, normalized, NEWS_POLICY, "news", 4_000, (provider, signal) =>
       provider.news!(normalized, signal), (values) => dedupeMarketNews(values.flat()));
+  }
+
+  filings(symbol: string): Promise<MarketDataResult<MarketFiling[]>> {
+    const normalized = normalizeSymbol(symbol);
+    return this.cached(this.filingsCache, normalized, FILINGS_POLICY, "filings", 5_000, (provider, signal) =>
+      provider.filings!(normalized, signal));
   }
 
   async context(symbol: string, range: MarketRange = "1M"): Promise<MarketResearchContext> {
@@ -156,7 +166,7 @@ export class MarketsService {
     cache: SwrCache<T>,
     key: string,
     policy: SwrCachePolicy,
-    capability: "quote" | "candles" | "search" | "fundamentals",
+    capability: "quote" | "candles" | "search" | "fundamentals" | "filings",
     timeoutMs: number,
     invoke: (provider: MarketProvider, signal: AbortSignal) => Promise<T>,
   ): Promise<MarketDataResult<T>> {
