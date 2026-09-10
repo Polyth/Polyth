@@ -1,0 +1,104 @@
+/* Host-owned content layout. Window placement never decides page spacing.
+   Keep scroll on the stable rail/mount node, not on the frame shared by tabs.
+   No package names, control restyling, or workspace/editor geometry here. */
+.module-view { container: module-window / inline-size; }
+
+.module-view-content--page {
+  --module-content-inline: var(--gutter);
+  --module-content-block: var(--space-4);
+  --module-content-gap: var(--space-4);
+}
+.module-view-content--panel {
+  --module-content-inline: var(--space-3);
+  --module-content-block: var(--space-3);
+  --module-content-gap: var(--space-3);
+}
+
+:is(.module-view-content--page, .module-view-content--panel) {
+  gap: var(--module-content-gap);
+  padding: var(--module-content-block)
+    max(var(--module-content-inline), var(--safe-right, 0px))
+    max(var(--module-content-block), var(--safe-bottom, 0px))
+    max(var(--module-content-inline), var(--safe-left, 0px));
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/* An adopted body owns its own viewport and padding. The containing frame
+   must not add a second gutter/scrollbar or share scroll offsets across tabs. */
+:is(.module-view-content--page, .module-view-content--panel):has(> :is(.rail-body, .wb-slot)) {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+:is(.module-view-content--page, .module-view-content--panel) > .wb-slot {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+:is(.module-view-content--page, .module-view-content--panel) > .rail-body:not([hidden]),
+:is(.module-view-content--page, .module-view-content--panel) > .wb-slot > .wb-surface-mount {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  gap: var(--module-content-gap);
+  padding: var(--module-content-block)
+    max(var(--module-content-inline), var(--safe-right, 0px))
+    max(var(--module-content-block), var(--safe-bottom, 0px))
+    max(var(--module-content-inline), var(--safe-left, 0px));
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/* The package's single content root is not a second window. Normalize only
+   that boundary, never descendants, alerts, empty states or UI primitives.
+   Feature-specific grids/sections/cards keep their own layout and semantics. */
+:is(.module-view-content--page, .module-view-content--panel) > :is(div, main, section, article):only-child:not(.rail-body):not(.wb-slot):not(.empty-state):not([role="alert"]):not([class^="ui-"]):not([class*=" ui-"]),
+:is(.module-view-content--page, .module-view-content--panel) > .rail-body > :is(div, main, section, article):only-child:not(.empty-state):not([role="alert"]):not([class^="ui-"]):not([class*=" ui-"]),
+:is(.module-view-content--page, .module-view-content--panel) > .wb-slot > .wb-surface-mount > :is(div, main, section, article):only-child:not(.empty-state):not([role="alert"]):not([class^="ui-"]):not([class*=" ui-"]) {
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: auto;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  gap: var(--module-content-gap);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  font: inherit;
+  overflow: visible;
+}
+
+/* Low-specificity stack fallback: a package may still supply a grid or a
+   horizontal composition. Only the external frame chrome is non-negotiable. */
+:where(
+  .module-view-content--page > .rail-body > :is(div, main, section, article):only-child,
+  .module-view-content--panel > .rail-body > :is(div, main, section, article):only-child,
+  .module-view-content--page > .wb-slot > .wb-surface-mount > :is(div, main, section, article):only-child,
+  .module-view-content--panel > .wb-slot > .wb-surface-mount > :is(div, main, section, article):only-child
+) {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Query the window, not the page container itself: a narrow pinned window on
+   a wide desktop needs the same content rhythm as a small fullscreen window. */
+@container module-window (max-width: 700px) {
+  .module-view-content--page {
+    --module-content-inline: var(--space-3);
+    --module-content-block: var(--space-3);
+    --module-content-gap: var(--space-3);
+  }
+}

@@ -28,3 +28,18 @@ export function surfaceContentMode(
   const mode = (presentation as { contentMode?: unknown }).contentMode;
   return mode === "page" || mode === "panel" || mode === "workspace" ? mode : fallback;
 }
+
+/** Package windows inherit the design system without repeating layout classes.
+ *  Preserve the component identity, owner, window capabilities and any explicit
+ *  content mode. Legacy core surfaces bypass this package registration adapter. */
+export function withDefaultSurfaceContent<T extends { presentation: SurfacePresentation }>(
+  definition: T,
+): T & { presentation: SurfaceContentPresentation } {
+  return {
+    ...definition,
+    presentation: withSurfaceContent(
+      definition.presentation,
+      surfaceContentMode(definition.presentation, "page"),
+    ),
+  };
+}
