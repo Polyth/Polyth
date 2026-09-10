@@ -21,4 +21,4 @@ coverage; historical execution output is not retained as source.
 | 24-hour / 10,000-turn soak | Not run | No long-soak claim |
 
 Release claims are limited to the checked behavior above. This document does
-not claim complete OpenCode V2, polyth, or Paseo parity.
+not claim complete OpenCode V2 or external-reference parity.
