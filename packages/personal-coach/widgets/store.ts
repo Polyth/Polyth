@@ -14,7 +14,7 @@ export interface CoachClient {
   ensureLoaded(): Promise<void>;
   refresh(): Promise<void>;
   complete(id: string): Promise<void>;
-  skip(id: string): Promise<void>;
+  skip(id: string, reason?: string): Promise<void>;
   checkIn(energy: number, focus: number): Promise<void>;
   talk(title?: string): Promise<void>;
 }
@@ -100,13 +100,13 @@ export function createCoachClient(input: {
         setBusy(`commitment:${id}`, false);
       }
     },
-    async skip(id) {
+    async skip(id, reason) {
       const before = snapshot;
       if (!snapshot.home || snapshot.busy.has(`commitment:${id}`)) return;
       publish({ ...snapshot, home: withoutCommitment(snapshot.home, id), error: undefined });
       setBusy(`commitment:${id}`, true);
       try {
-        await input.api.skipCommitment(id);
+        await input.api.skipCommitment(id, reason);
         await refresh();
       } catch (cause) {
         fail("Skip commitment", cause, before);
