@@ -34,6 +34,23 @@ test("every phone view uses the same three-segment shell bar", async () => {
   assert.equal(shell.match(/window\.addEventListener\("keydown", onKey\)/g)?.length, 1);
 });
 
+test("compact project drawer is above its scrim", async () => {
+  const css = await readWebStyles();
+  const drawerStart = css.indexOf("/* Project/session drawer:");
+  assert.ok(drawerStart >= 0, "compact drawer style block is present");
+  const drawerStyles = css.slice(drawerStart, css.indexOf("\n}", drawerStart));
+  assert.match(
+    drawerStyles,
+    /\.sidebar\s*\{[\s\S]*?z-index:\s*var\(--z-overlay\)/,
+    "the open project/session drawer must share the overlay layer",
+  );
+  assert.match(
+    css,
+    /\.sidebar-backdrop\s*\{[^}]*z-index:\s*calc\(var\(--z-overlay\)\s*-\s*1\)/,
+    "the drawer scrim must stay below the drawer",
+  );
+});
+
 test("horizontal tabs and chips retain a visible scroll affordance", async () => {
   const css = await readWebStyles();
 
