@@ -139,15 +139,15 @@ export default function MarketScreenerSurface({
         </label>
         <label>
           <span>Chg% min</span>
-          <input inputMode="decimal" placeholder="0" value={changeMin} onChange={(event) => { setChangeMin(event.target.value); setOffset(0); }} />
+          <input type="number" step="any" placeholder="0" value={changeMin} onChange={(event) => { setChangeMin(event.target.value); setOffset(0); }} />
         </label>
         <label>
           <span>MCap min $B</span>
-          <input inputMode="decimal" placeholder="10" value={marketCapMin} onChange={(event) => { setMarketCapMin(event.target.value); setOffset(0); }} />
+          <input type="number" min="0" step="any" placeholder="10" value={marketCapMin} onChange={(event) => { setMarketCapMin(event.target.value); setOffset(0); }} />
         </label>
         <label>
           <span>Volume min M</span>
-          <input inputMode="decimal" placeholder="1" value={volumeMin} onChange={(event) => { setVolumeMin(event.target.value); setOffset(0); }} />
+          <input type="number" min="0" step="any" placeholder="1" value={volumeMin} onChange={(event) => { setVolumeMin(event.target.value); setOffset(0); }} />
         </label>
         <div className="markets-screener-actions">
           <button type="button" onClick={reset}>Reset</button>
