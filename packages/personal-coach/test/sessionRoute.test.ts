@@ -45,6 +45,7 @@ async function invoke(route: RouteHandler, input: Record<string, unknown> = {}) 
 
 const unusedReview = () => { throw new Error("proposal review is unused by session route tests"); };
 const unusedReviewAsync = async () => { throw new Error("proposal review is unused by session route tests"); };
+const unusedReset = () => { throw new Error("reset is unused by session route tests"); };
 
 test("Coach session prepares scoped capabilities and injects model-visible bounded package context", async () => {
   const root = mkdtempSync(join(tmpdir(), "polyth-coach-session-"));
@@ -94,6 +95,7 @@ test("Coach session prepares scoped capabilities and injects model-visible bound
     proposalReviewForSpace: unusedReview,
     forWorkspaceProject: async () => coachStore,
     proposalReviewForWorkspaceProject: unusedReviewAsync,
+    resetForSpace: unusedReset,
     close: () => {},
   } satisfies PersonalCoachService;
 
@@ -160,6 +162,7 @@ test("Coach session title is bounded before session creation", async () => {
     proposalReviewForSpace: unusedReview,
     forWorkspaceProject: async () => store,
     proposalReviewForWorkspaceProject: unusedReviewAsync,
+    resetForSpace: unusedReset,
     close: () => {},
   } satisfies PersonalCoachService;
   const route = personalCoachSessionRoute({
