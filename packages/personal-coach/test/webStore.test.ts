@@ -34,6 +34,22 @@ function fakeApi(overrides: Partial<CoachApi> = {}): CoachApi {
     home: async () => home(),
     settings: async () => ({ revision: 1, profile: home().profile }),
     updateSettings: async (patch) => ({ ...home().profile, ...patch }),
+    reminders: async () => ({
+      available: true,
+      settings: {
+        dailyCheckIn: { enabled: false, minuteOfDay: 480 },
+        weeklyReview: { enabled: false, day: 0, minuteOfDay: 1080 },
+        timeZone: "Europe/Kyiv",
+      },
+    }),
+    updateReminders: async (patch) => ({
+      available: true,
+      settings: {
+        dailyCheckIn: { enabled: patch.dailyCheckIn, minuteOfDay: patch.dailyMinuteOfDay },
+        weeklyReview: { enabled: patch.weeklyReview, day: patch.weeklyDay, minuteOfDay: patch.weeklyMinuteOfDay },
+        timeZone: "Europe/Kyiv",
+      },
+    }),
     completeCommitment: async (id) => ({ id, title: "Done", status: "done" }),
     skipCommitment: async (id) => ({ id, title: "Skipped", status: "skipped" }),
     recordCheckIn: async ({ energy, focus }) => ({ id: "check", energy, focus, createdAt: 1 }),
