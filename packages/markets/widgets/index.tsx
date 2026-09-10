@@ -2,9 +2,11 @@ import "./styles.css";
 import "./integration.css";
 import "./widgetStyles.css";
 import "./news.css";
+import "./compare.css";
 import { createElement, useEffect, useState } from "react";
 import { defineWebPackage, type WebPackageHost } from "@polyth/web-sdk";
 import MarketsSurface, { type MarketHandoffOption } from "./MarketsSurface.tsx";
+import MarketCompareSurface from "./MarketCompareSurface.tsx";
 import { MarketAssetWidget, MarketNewsWidget, MarketWatchlistWidget } from "./MarketWidgets.tsx";
 import { selectMarketSymbol } from "./selection.ts";
 
@@ -55,6 +57,30 @@ export default defineWebPackage((host) => () => {
         preferredRegion: "primary",
         allowedRegions: ["primary", "end", "bottom"],
         minInlineSize: 340,
+        minBlockSize: 280,
+        keepAlive: true,
+      },
+    }),
+    host.surfaces.register({
+      id: "markets.compare",
+      title: "Compare markets",
+      description: "Compare price performance and fundamentals across market assets.",
+      capabilityId: "markets.compare",
+      order: 53,
+      component: (props) => createElement(MarketCompareSurface, { active: props?.active, onOpen: openSymbol }),
+      presentation: {
+        kind: "workspace",
+        defaultRatio: 0.68,
+        minWidth: 360,
+        minHeight: 300,
+        preferredMaxWidth: 1_180,
+        keepAlive: true,
+        escape: "close",
+      },
+      placement: {
+        preferredRegion: "primary",
+        allowedRegions: ["primary", "end", "bottom"],
+        minInlineSize: 360,
         minBlockSize: 280,
         keepAlive: true,
       },
@@ -155,6 +181,16 @@ export default defineWebPackage((host) => () => {
       standardTier: "more",
       standardRank: 22,
       open: () => host.navigation.openWorkspacePane("markets"),
+      available: () => true,
+    }),
+    host.capabilities.register({
+      id: "markets.compare",
+      label: "Compare markets",
+      plainDescription: "Compare prices, performance, valuation, and fundamentals across market assets.",
+      keywords: ["market", "compare", "stocks", "finance", "performance", "valuation"],
+      standardTier: "more",
+      standardRank: 23,
+      open: () => host.navigation.openWorkspacePane("markets.compare"),
       available: () => true,
     }),
   ];
