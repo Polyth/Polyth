@@ -13,6 +13,7 @@ import type {
   MarketResearchContext,
   MarketSearchResult,
 } from "../src/types.ts";
+import type { MarketHeatmapQuery, MarketHeatmapSnapshot } from "../src/heatmap.ts";
 import type { MarketPortfolio, MarketPortfolioSnapshot } from "../src/portfolio.ts";
 import type { MarketScreenerPage, MarketScreenerQuery } from "../src/screener.ts";
 import type { MarketWatchlists } from "../src/watchlists.ts";
@@ -74,6 +75,12 @@ export const marketsApi = {
     if (query.offset !== undefined) params.set("offset", String(query.offset));
     if (query.limit !== undefined) params.set("limit", String(query.limit));
     return transport.get(`/api/markets/screener?${params}`, { signal });
+  },
+  heatmap(query: MarketHeatmapQuery = {}, signal?: AbortSignal): Promise<MarketHeatmapSnapshot> {
+    const params = new URLSearchParams();
+    if (query.sector) params.set("sector", query.sector);
+    if (query.limit !== undefined) params.set("limit", String(query.limit));
+    return transport.get(`/api/markets/heatmap?${params}`, { signal });
   },
   context(symbol: string, range: MarketRange, signal?: AbortSignal): Promise<MarketResearchContext> {
     return transport.get(`/api/markets/context?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(range)}`, { signal });
