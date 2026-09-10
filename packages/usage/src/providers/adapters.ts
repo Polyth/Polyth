@@ -11,7 +11,7 @@ import {
   timestampValue,
   type QuotaRuntime,
 } from "../opencodeAuth.ts";
-import { mappolythUsage, ocWindow, type polythUsage, type polythWindow } from "../ocWindows.ts";
+import { mapProviderUsage, usageWindow, type ProviderUsage, type ProviderUsageWindow } from "../ocWindows.ts";
 
 export type DiscoverableProvider = QuotaProvider & { isConfigured(): boolean };
 
@@ -82,14 +82,14 @@ const createProvider = (
   id: string,
   name: string,
   isConfigured: () => boolean,
-  fetchUsage: (signal: AbortSignal) => Promise<{ usage: polythUsage; accountLabel?: string }>,
+  fetchUsage: (signal: AbortSignal) => Promise<{ usage: ProviderUsage; accountLabel?: string }>,
 ): DiscoverableProvider => ({
   id,
   isConfigured,
   async fetch(signal): Promise<QuotaSnapshot> {
     if (!isConfigured()) throw new Error(`${name} is not configured`);
     const result = await fetchUsage(signal);
-    const windows = mappolythUsage(result.usage);
+    const windows = mapProviderUsage(result.usage);
     if (windows.length === 0) throw new Error(`${name} usage data could not be parsed`);
     return {
       providerId: id,
@@ -121,13 +121,13 @@ const createCodex = (runtime: QuotaRuntime): DiscoverableProvider => {
       },
       signal,
     }, "Codex session expired — please re-authenticate with OpenAI");
-    const windows: Record<string, polythWindow> = {};
+    const windows: Record<string, ProviderUsageWindow> = {};
     const rateLimit = objectValue(payload.rate_limit);
     for (const raw of [rateLimit?.primary_window, rateLimit?.secondary_window]) {
       const window = objectValue(raw);
       if (!window) continue;
       const seconds = numberValue(window.limit_window_seconds);
-      windows[windowLabel(seconds)] = ocWindow({
+      windows[windowLabel(seconds)] = usageWindow({
         usedPercent: numberValue(window.used_percent),
         windowSeconds: seconds,
         resetAt: timestampValue(window.reset_at),
@@ -136,9 +136,9 @@ const createCodex = (runtime: QuotaRuntime): DiscoverableProvider => {
     const credits = objectValue(payload.credits);
     const balance = numberValue(credits?.balance);
     if (credits?.unlimited === true) {
-      windows.credits_balance = ocWindow({ valueLabel: "Unlimited" });
+      windows.credits_balance = usageWindow({ valueLabel: "Unlimited" });
     } else if (balance !== null) {
-      windows.credits_balance = ocWindow({
+      windows.credits_balance = usageWindow({
         used: 0, limit: balance, unit: "currency", valueLabel: `$${balance.toFixed(2)} available`,
       });
     }
@@ -146,7 +146,7 @@ const createCodex = (runtime: QuotaRuntime): DiscoverableProvider => {
     const spent = numberValue(spendLimit?.used);
     const limit = numberValue(spendLimit?.limit);
     if (spent !== null && limit !== null) {
-      windows.credits = ocWindow({ used: spent, limit, unit: "currency" });
+      windows.credits = usageWindow({ used: spent, limit, unit: "currency" });
     }
     return { usage: { windows } };
   });
@@ -161,9 +161,9 @@ const createOpenRouter = (runtime: QuotaRuntime): DiscoverableProvider => {
     const data = objectValue(payload.data);
     const limit = numberValue(data?.total_credits);
     const used = numberValue(data?.total_usage);
-    const windows: Record<string, polythWindow> = {};
+    const windows: Record<string, ProviderUsageWindow> = {};
     if (used !== null && limit !== null) {
-      windows.credits = ocWindow({
+      windows.credits = usageWindow({
         used,
         limit,
         unit: "currency",
@@ -189,7 +189,7 @@ const createCommandCode = (runtime: QuotaRuntime): DiscoverableProvider => {
       orgId ? `/alpha/billing/credits?orgId=${encodeURIComponent(orgId)}` : "/alpha/billing/credits",
       signal,
     );
-    const windows: Record<string, polythWindow> = {};
+    const windows: Record<string, ProviderUsageWindow> = {};
     const credits = objectValue(payload.credits);
     for (const [label, field] of [
       ["monthly_credits", "monthlyCredits"],
@@ -197,7 +197,7 @@ const createCommandCode = (runtime: QuotaRuntime): DiscoverableProvider => {
       ["free_credits", "freeCredits"],
     ] as const) {
       const available = numberValue(credits?.[field]);
-      if (available !== null) windows[label] = ocWindow({ used: 0, limit: available, unit: "requests" });
+      if (available !== null) windows[label] = usageWindow({ used: 0, limit: available, unit: "requests" });
     }
     const limits = objectValue(payload.windowLimits);
     for (const [label, field, seconds] of [
@@ -208,7 +208,7 @@ const createCommandCode = (runtime: QuotaRuntime): DiscoverableProvider => {
       const used = numberValue(value?.used);
       const limit = numberValue(value?.cap);
       if (used === null || limit === null || limit <= 0) continue;
-      windows[label] = ocWindow({
+      windows[label] = usageWindow({
         usedPercent: percentOf(used, limit),
         windowSeconds: seconds,
         resetAt: timestampValue(value?.resetAt),
@@ -236,7 +236,7 @@ const createCopilot = (runtime: QuotaRuntime): DiscoverableProvider => {
     });
     const resetAt = timestampValue(payload.quota_reset_date);
     const snapshots = objectValue(payload.quota_snapshots);
-    const windows: Record<string, polythWindow> = {};
+    const windows: Record<string, ProviderUsageWindow> = {};
     for (const [label, field] of [
       ["chat", "chat"], ["completions", "completions"], ["premium", "premium_interactions"],
     ] as const) {
@@ -244,7 +244,7 @@ const createCopilot = (runtime: QuotaRuntime): DiscoverableProvider => {
       const entitlement = numberValue(value?.entitlement);
       const remaining = numberValue(value?.remaining);
       if (entitlement === null || remaining === null) continue;
-      windows[label] = ocWindow({
+      windows[label] = usageWindow({
         usedPercent: percentOf(entitlement - remaining, entitlement),
         resetAt,
         valueLabel: `${remaining.toFixed(0)} / ${entitlement.toFixed(0)} left`,
@@ -272,9 +272,9 @@ const createBalanceProvider = (
       signal,
     });
     const balance = config.balance(payload);
-    const windows: Record<string, polythWindow> = {};
+    const windows: Record<string, ProviderUsageWindow> = {};
     if (balance) {
-      windows.credits_balance = ocWindow({
+      windows.credits_balance = usageWindow({
         used: 0,
         limit: balance.amount,
         unit: "currency",
@@ -329,13 +329,13 @@ const createKimi = (runtime: QuotaRuntime): DiscoverableProvider => {
     const payload = await safeJson(runtime, "Kimi for Coding", "https://api.kimi.com/coding/v1/usages", {
       method: "GET", headers: bearer(key()!), signal,
     });
-    const windows: Record<string, polythWindow> = {};
+    const windows: Record<string, ProviderUsageWindow> = {};
     const usage = objectValue(payload.usage);
     if (usage) {
       const limit = numberValue(usage.limit);
       const used = numberValue(usage.used);
       const remaining = numberValue(usage.remaining);
-      windows.weekly = ocWindow({
+      windows.weekly = usageWindow({
         usedPercent: used !== null
           ? percentOf(used, limit)
           : remaining !== null && limit !== null ? percentOf(limit - remaining, limit) : null,
@@ -352,7 +352,7 @@ const createKimi = (runtime: QuotaRuntime): DiscoverableProvider => {
       const used = numberValue(detail?.used);
       const remaining = numberValue(detail?.remaining);
       const label = seconds === 5 * 60 * 60 ? "Rate Limit (5h)" : windowLabel(seconds);
-      windows[label] = ocWindow({
+      windows[label] = usageWindow({
         usedPercent: used !== null
           ? percentOf(used, cap)
           : remaining !== null && cap !== null ? percentOf(cap - remaining, cap) : null,
@@ -370,7 +370,7 @@ const createNanoGpt = (runtime: QuotaRuntime): DiscoverableProvider => {
     const payload = await safeJson(runtime, "NanoGPT", "https://nano-gpt.com/api/subscription/v1/usage", {
       method: "GET", headers: bearer(key()!), signal,
     });
-    const windows: Record<string, polythWindow> = {};
+    const windows: Record<string, ProviderUsageWindow> = {};
     const period = objectValue(payload.period);
     for (const [label, seconds] of [["daily", 86400], ["monthly", null]] as const) {
       const value = objectValue(payload[label]);
@@ -378,7 +378,7 @@ const createNanoGpt = (runtime: QuotaRuntime): DiscoverableProvider => {
       const fraction = numberValue(value.percentUsed);
       const used = numberValue(value.used);
       const limit = numberValue(value.limit) ?? numberValue(objectValue(value.limits)?.[label]);
-      windows[label] = ocWindow({
+      windows[label] = usageWindow({
         usedPercent: fraction !== null ? clampPercent(fraction * 100) : percentOf(used, limit),
         windowSeconds: seconds,
         resetAt: timestampValue(value.resetAt ?? (label === "monthly" ? period?.currentPeriodEnd : null)),
@@ -416,20 +416,20 @@ const createZai = (
     const limits = Array.isArray(objectValue(payload.data)?.limits)
       ? objectValue(payload.data)!.limits as unknown[]
       : [];
-    const windows: Record<string, polythWindow> = {};
+    const windows: Record<string, ProviderUsageWindow> = {};
     for (const raw of limits) {
       const limit = objectValue(raw);
       if (!limit) continue;
       if (limit.type === "TOKENS_LIMIT") {
         const seconds = zaiWindowSeconds(limit);
         const label = china ? "Tokens" : windowLabel(seconds);
-        windows[label] = ocWindow({
+        windows[label] = usageWindow({
           usedPercent: numberValue(limit.percentage),
           windowSeconds: seconds,
           resetAt: timestampValue(limit.nextResetTime),
         });
       } else if (limit.type === "TIME_LIMIT") {
-        windows["MCP Tools"] = ocWindow({
+        windows["MCP Tools"] = usageWindow({
           usedPercent: numberValue(limit.percentage),
           windowSeconds: 30 * 86400,
           resetAt: timestampValue(limit.nextResetTime),
@@ -443,8 +443,8 @@ const createZai = (
 const miniMaxUsage = (
   model: Record<string, unknown>,
   tokenPlan: boolean,
-): Record<string, polythWindow> => {
-  const windows: Record<string, polythWindow> = {};
+): Record<string, ProviderUsageWindow> => {
+  const windows: Record<string, ProviderUsageWindow> = {};
   const add = (weekly: boolean) => {
     const prefix = weekly ? "current_weekly" : "current_interval";
     const total = numberValue(model[`${prefix}_total_count`]);
@@ -462,7 +462,7 @@ const miniMaxUsage = (
       ? Math.floor((resetAt - startAt) / 1000)
       : remainsMs !== null && remainsMs > 0 ? Math.floor(remainsMs / 1000) : null;
     if (usedPercent === null) return;
-    windows[weekly ? "weekly" : "5h"] = ocWindow({ usedPercent, windowSeconds: seconds, resetAt });
+    windows[weekly ? "weekly" : "5h"] = usageWindow({ usedPercent, windowSeconds: seconds, resetAt });
   };
   add(false);
   const weeklyStatus = numberValue(model.current_weekly_status);
@@ -521,7 +521,7 @@ const createOllamaCloud = (runtime: QuotaRuntime): DiscoverableProvider => {
     try {
       response = await runtime.fetchImpl("https://ollama.com/settings", {
         method: "GET",
-        headers: { Cookie: credential()!.cookie, "User-Agent": "polyth quota provider" },
+        headers: { Cookie: credential()!.cookie, "User-Agent": "Polyth quota provider" },
         redirect: "manual",
         signal,
       });
@@ -533,16 +533,16 @@ const createOllamaCloud = (runtime: QuotaRuntime): DiscoverableProvider => {
     }
     if (!response.ok) throw new Error(`Ollama Cloud returned HTTP ${response.status}`);
     const html = await response.text();
-    const windows: Record<string, polythWindow> = {};
+    const windows: Record<string, ProviderUsageWindow> = {};
     const session = html.match(/Session\s+usage[^0-9]*([0-9.]+)%/i);
     const weekly = html.match(/Weekly\s+usage[^0-9]*([0-9.]+)%/i);
     const premium = html.match(/Premium[^0-9]*([0-9]+)\s*\/\s*([0-9]+)/i);
-    if (session) windows.session = ocWindow({ usedPercent: numberValue(session[1]) });
-    if (weekly) windows.weekly = ocWindow({ usedPercent: numberValue(weekly[1]) });
+    if (session) windows.session = usageWindow({ usedPercent: numberValue(session[1]) });
+    if (weekly) windows.weekly = usageWindow({ usedPercent: numberValue(weekly[1]) });
     if (premium) {
       const used = numberValue(premium[1]);
       const limit = numberValue(premium[2]);
-      if (used !== null && limit !== null) windows.premium = ocWindow({ used, limit, unit: "requests" });
+      if (used !== null && limit !== null) windows.premium = usageWindow({ used, limit, unit: "requests" });
     }
     return { usage: { windows } };
   });
@@ -566,7 +566,7 @@ const createWafer = (runtime: QuotaRuntime): DiscoverableProvider => {
     })();
     const usedPercent = numberValue(payload.current_period_used_percent);
     const windows = usedPercent === null && remaining === null && limit === null ? {} : {
-      [windowLabel(seconds)]: ocWindow({
+      [windowLabel(seconds)]: usageWindow({
         usedPercent: overage > 0 ? Math.max(0, usedPercent ?? 0) : clampPercent(usedPercent ?? 0),
         windowSeconds: seconds,
         resetAt: timestampValue(payload.window_end),
@@ -595,12 +595,12 @@ const createNeuralWatt = (runtime: QuotaRuntime): DiscoverableProvider => {
       headers: { Authorization: `Bearer ${key()!}`, "Accept-Encoding": "identity" },
       signal,
     });
-    const windows: Record<string, polythWindow> = {};
+    const windows: Record<string, ProviderUsageWindow> = {};
     const subscription = objectValue(payload.subscription);
     if (subscription) {
       const included = numberValue(subscription.kwh_included);
       const used = numberValue(subscription.kwh_used);
-      windows[stringValue(subscription.plan) ?? "plan_limit"] = ocWindow({
+      windows[stringValue(subscription.plan) ?? "plan_limit"] = usageWindow({
         usedPercent: subscription.in_overage ? 100 : percentOf(used, included),
         resetAt: timestampValue(subscription.kwh_reset_date) ?? timestampValue(subscription.current_period_end),
       });
@@ -615,14 +615,14 @@ const createNeuralWatt = (runtime: QuotaRuntime): DiscoverableProvider => {
       const keyName = period === "daily" || period === "weekly" || period === "monthly"
         ? period
         : period === "month" ? "monthly" : "billing_cycle";
-      windows[keyName] = ocWindow({
+      windows[keyName] = usageWindow({
         usedPercent: allowance.blocked ? 100 : percentOf(spent, effective),
         windowSeconds: periodSeconds(period),
         resetAt: timestampValue(allowance.reset_at),
         ...(stringValue(objectValue(payload.key)?.name) ? { valueLabel: stringValue(objectValue(payload.key)?.name)! } : {}),
       });
     } else if (credits !== null) {
-      windows.credits_balance = ocWindow({
+      windows.credits_balance = usageWindow({
         used: 0, limit: credits, unit: "currency", valueLabel: `$${credits.toFixed(2)} available`,
       });
     }
@@ -638,17 +638,17 @@ const createOpenCodeGo = (runtime: QuotaRuntime): DiscoverableProvider => {
       headers: {
         Accept: "application/json",
         Authorization: `Bearer ${key()!}`,
-        "User-Agent": "polyth quota provider",
+        "User-Agent": "Polyth quota provider",
       },
       signal,
     });
     const usage = objectValue(payload.usage);
-    const windows: Record<string, polythWindow> = {};
+    const windows: Record<string, ProviderUsageWindow> = {};
     for (const [label, field] of [["5h", "rolling"], ["weekly", "weekly"], ["monthly", "monthly"]] as const) {
       const value = objectValue(usage?.[field]);
       const percent = clampPercent(value?.percent);
       const resetAt = timestampValue(value?.resetsAt);
-      if (percent !== null && resetAt !== null) windows[label] = ocWindow({ usedPercent: percent, resetAt });
+      if (percent !== null && resetAt !== null) windows[label] = usageWindow({ usedPercent: percent, resetAt });
     }
     return { usage: { windows } };
   });
@@ -753,13 +753,13 @@ const createCursor = (runtime: QuotaRuntime): DiscoverableProvider => {
     const resetAt = timestampValue(usage.billingCycleEnd)
       ?? timestampValue(objectValue(plan.planInfo)?.billingCycleEnd);
     const seconds = resetAt === null ? null : Math.max(0, Math.floor((resetAt - runtime.now()) / 1000));
-    const windows: Record<string, polythWindow> = {};
+    const windows: Record<string, ProviderUsageWindow> = {};
     const totalSpend = numberValue(planUsage.totalSpend);
     const planLimit = numberValue(planUsage.limit);
     const remaining = numberValue(planUsage.remaining);
     const explicitPercent = numberValue(planUsage.totalPercentUsed);
     if (totalSpend !== null && planLimit !== null) {
-      windows.billing_cycle = ocWindow({
+      windows.billing_cycle = usageWindow({
         used: totalSpend / 100,
         limit: planLimit / 100,
         unit: "currency",
@@ -767,14 +767,14 @@ const createCursor = (runtime: QuotaRuntime): DiscoverableProvider => {
         resetAt,
       });
     } else if (explicitPercent !== null) {
-      windows.billing_cycle = ocWindow({ usedPercent: explicitPercent, windowSeconds: seconds, resetAt });
+      windows.billing_cycle = usageWindow({ usedPercent: explicitPercent, windowSeconds: seconds, resetAt });
     }
     for (const [label, field] of [["auto", "autoPercentUsed"], ["api", "apiPercentUsed"]] as const) {
       const percent = numberValue(planUsage[field]);
-      if (percent !== null) windows[label] = ocWindow({ usedPercent: percent, windowSeconds: seconds, resetAt });
+      if (percent !== null) windows[label] = usageWindow({ usedPercent: percent, windowSeconds: seconds, resetAt });
     }
     if (planLimit !== null && remaining !== null) {
-      windows.plan_limit = ocWindow({
+      windows.plan_limit = usageWindow({
         used: Math.max(0, planLimit - remaining) / 100,
         limit: planLimit / 100,
         unit: "currency",
@@ -785,7 +785,7 @@ const createCursor = (runtime: QuotaRuntime): DiscoverableProvider => {
     const onDemandLimit = numberValue(spendLimit.individualLimit) ?? numberValue(spendLimit.pooledLimit);
     const onDemandRemaining = numberValue(spendLimit.individualRemaining) ?? numberValue(spendLimit.pooledRemaining);
     if (onDemandLimit !== null && onDemandLimit > 0) {
-      windows.on_demand = ocWindow({
+      windows.on_demand = usageWindow({
         used: Math.max(0, onDemandLimit - (onDemandRemaining ?? 0)) / 100,
         limit: onDemandLimit / 100,
         unit: "currency",
@@ -797,7 +797,7 @@ const createCursor = (runtime: QuotaRuntime): DiscoverableProvider => {
       ?? numberValue(credits.totalBalanceCents)
       ?? numberValue(credits.amountCents);
     if (creditBalance !== null) {
-      windows.credits = ocWindow({ used: 0, limit: creditBalance / 100, unit: "currency" });
+      windows.credits = usageWindow({ used: 0, limit: creditBalance / 100, unit: "currency" });
     }
     const planName = stringValue(objectValue(plan.planInfo)?.planName);
     return { usage: { windows }, ...(planName ? { accountLabel: `Cursor ${planName}` } : {}) };
@@ -867,7 +867,7 @@ const googleSources = (runtime: QuotaRuntime): GoogleSource[] => {
 
 const createGoogle = (runtime: QuotaRuntime): DiscoverableProvider =>
   createProvider(runtime, "google", "Google", () => googleSources(runtime).length > 0, async (signal) => {
-    const models: NonNullable<polythUsage["models"]> = {};
+    const models: NonNullable<ProviderUsage["models"]> = {};
     for (const source of googleSources(runtime)) {
       let accessToken = source.accessToken;
       if (!accessToken || (source.expires !== null && source.expires <= runtime.now())) {
@@ -903,7 +903,7 @@ const createGoogle = (runtime: QuotaRuntime): DiscoverableProvider =>
             const fraction = numberValue(bucket?.remainingFraction);
             models[model.startsWith("gemini/") ? model : `gemini/${model}`] = {
               windows: {
-                daily: ocWindow({
+                daily: usageWindow({
                   usedPercent: fraction === null ? null : 100 - Math.round(fraction * 100),
                   windowSeconds: 86400,
                   resetAt: timestampValue(bucket?.resetTime),
@@ -933,7 +933,7 @@ const createGoogle = (runtime: QuotaRuntime): DiscoverableProvider =>
             signal,
           });
           break;
-        } catch { /* try the next polyth endpoint */ }
+        } catch { /* try the next provider endpoint */ }
       }
       const availableModels = objectValue(available?.models) ?? {};
       for (const [name, raw] of Object.entries(availableModels)) {
@@ -946,7 +946,7 @@ const createGoogle = (runtime: QuotaRuntime): DiscoverableProvider =>
           : resetAt !== null && (resetAt - runtime.now()) / 1000 <= 10 * 3600 ? 5 * 3600 : 86400;
         models[name.startsWith(`${source.sourceId}/`) ? name : `${source.sourceId}/${name}`] = {
           windows: {
-            [seconds === 5 * 3600 ? "5h" : "daily"]: ocWindow({
+            [seconds === 5 * 3600 ? "5h" : "daily"]: usageWindow({
               usedPercent: remaining === null ? null : 100 - Math.round(remaining * 100),
               windowSeconds: seconds,
               resetAt,
