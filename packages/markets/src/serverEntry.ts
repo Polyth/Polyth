@@ -6,8 +6,13 @@ import {
 } from "@polyth/plugins";
 import { registerDefaultMarketProviders } from "./defaultProviders.ts";
 import { loadPortfolio, savePortfolio, snapshotPortfolio } from "./portfolio.ts";
-import { createMarketsService, type MarketsService } from "./service.ts";
-import type { MarketRange } from "./types.ts";
+import {
+  createMarketsService,
+  normalizeQuery,
+  normalizeRange,
+  normalizeSymbol,
+  type MarketsService,
+} from "./service.ts";
 import { loadWatchlists, saveWatchlists } from "./watchlists.ts";
 
 export const marketsServiceKey = serverServiceKey<MarketsService>("markets");
@@ -20,6 +25,14 @@ const badRequest = (json: (status: number, value: unknown) => void, message: str
 };
 
 const isInvalidInput = (cause: unknown): boolean => (cause as { code?: string })?.code === "invalid-input";
+
+const parseInput = <T>(parse: () => T): { ok: true; value: T } | { ok: false; message: string } => {
+  try {
+    return { ok: true, value: parse() };
+  } catch (cause) {
+    return { ok: false, message: errorMessage(cause) };
+  }
+};
 
 export function marketsRoutes(
   host: Pick<ServerPackageHost, "spaceStorage">,
@@ -79,11 +92,13 @@ export function marketsRoutes(
 
     if (path === "/api/markets/quote") {
       const requested = url.searchParams.get("symbols") ?? url.searchParams.get("symbol") ?? "";
-      const symbols = [...new Set(requested.split(",").map((symbol) => symbol.trim()).filter(Boolean))];
-      if (symbols.length === 0) return badRequest(json, "symbols is required");
-      if (symbols.length > 50) return badRequest(json, "at most 50 symbols may be requested at once");
+      const rawSymbols = requested.split(",").map((symbol) => symbol.trim()).filter(Boolean);
+      if (rawSymbols.length === 0) return badRequest(json, "symbols is required");
+      if (rawSymbols.length > 50) return badRequest(json, "at most 50 symbols may be requested at once");
+      const parsed = parseInput(() => [...new Set(rawSymbols.map(normalizeSymbol))]);
+      if (!parsed.ok) return badRequest(json, parsed.message);
 
-      const settled = await Promise.all(symbols.map(async (symbol) => {
+      const settled = await Promise.all(parsed.value.map(async (symbol) => {
         try {
           return { ok: true as const, symbol, result: await markets.quote(symbol) };
         } catch (cause) {
@@ -97,44 +112,58 @@ export function marketsRoutes(
     }
 
     if (path === "/api/markets/search") {
-      const query = url.searchParams.get("q") ?? "";
-      if (!query.trim()) return badRequest(json, "q is required");
-      json(200, await markets.search(query));
+      const rawQuery = url.searchParams.get("q") ?? "";
+      if (!rawQuery.trim()) return badRequest(json, "q is required");
+      const parsed = parseInput(() => normalizeQuery(rawQuery));
+      if (!parsed.ok) return badRequest(json, parsed.message);
+      json(200, await markets.search(parsed.value));
       return true;
     }
 
     if (path === "/api/markets/candles") {
-      const symbol = url.searchParams.get("symbol") ?? "";
-      const range = url.searchParams.get("range") ?? "6M";
-      if (!symbol.trim()) return badRequest(json, "symbol is required");
-      json(200, await markets.candles(symbol, range as MarketRange));
+      const rawSymbol = url.searchParams.get("symbol") ?? "";
+      if (!rawSymbol.trim()) return badRequest(json, "symbol is required");
+      const parsed = parseInput(() => ({
+        symbol: normalizeSymbol(rawSymbol),
+        range: normalizeRange(url.searchParams.get("range") ?? "6M"),
+      }));
+      if (!parsed.ok) return badRequest(json, parsed.message);
+      json(200, await markets.candles(parsed.value.symbol, parsed.value.range));
       return true;
     }
 
     if (path === "/api/markets/fundamentals") {
-      const symbol = url.searchParams.get("symbol") ?? "";
-      if (!symbol.trim()) return badRequest(json, "symbol is required");
-      json(200, await markets.fundamentals(symbol));
+      const rawSymbol = url.searchParams.get("symbol") ?? "";
+      if (!rawSymbol.trim()) return badRequest(json, "symbol is required");
+      const parsed = parseInput(() => normalizeSymbol(rawSymbol));
+      if (!parsed.ok) return badRequest(json, parsed.message);
+      json(200, await markets.fundamentals(parsed.value));
       return true;
     }
 
     if (path === "/api/markets/news") {
-      const symbol = url.searchParams.get("symbol") ?? "";
-      if (!symbol.trim()) return badRequest(json, "symbol is required");
-      json(200, await markets.news(symbol));
+      const rawSymbol = url.searchParams.get("symbol") ?? "";
+      if (!rawSymbol.trim()) return badRequest(json, "symbol is required");
+      const parsed = parseInput(() => normalizeSymbol(rawSymbol));
+      if (!parsed.ok) return badRequest(json, parsed.message);
+      json(200, await markets.news(parsed.value));
       return true;
     }
 
     if (path === "/api/markets/earnings") {
-      const symbol = url.searchParams.get("symbol") ?? "";
-      if (!symbol.trim()) return badRequest(json, "symbol is required");
-      json(200, await markets.earnings(symbol));
+      const rawSymbol = url.searchParams.get("symbol") ?? "";
+      if (!rawSymbol.trim()) return badRequest(json, "symbol is required");
+      const parsed = parseInput(() => normalizeSymbol(rawSymbol));
+      if (!parsed.ok) return badRequest(json, parsed.message);
+      json(200, await markets.earnings(parsed.value));
       return true;
     }
 
     if (path === "/api/markets/filings") {
-      const symbol = url.searchParams.get("symbol") ?? "";
-      if (!symbol.trim()) return badRequest(json, "symbol is required");
+      const rawSymbol = url.searchParams.get("symbol") ?? "";
+      if (!rawSymbol.trim()) return badRequest(json, "symbol is required");
+      const parsedSymbol = parseInput(() => normalizeSymbol(rawSymbol));
+      if (!parsedSymbol.ok) return badRequest(json, parsedSymbol.message);
       const forms = [...new Set((url.searchParams.get("forms") ?? "10-K,10-Q,8-K")
         .split(",")
         .map((form) => form.trim().toUpperCase())
@@ -151,7 +180,7 @@ export function marketsRoutes(
         });
         return true;
       }
-      const result = await markets.filings(symbol);
+      const result = await markets.filings(parsedSymbol.value);
       json(200, {
         ...result,
         data: result.data.filter((filing) => forms.includes(filing.form.toUpperCase())).slice(0, limit),
@@ -160,25 +189,29 @@ export function marketsRoutes(
     }
 
     if (path === "/api/markets/context") {
-      const symbol = url.searchParams.get("symbol") ?? "";
-      const range = url.searchParams.get("range") ?? "1M";
-      if (!symbol.trim()) return badRequest(json, "symbol is required");
-      json(200, await markets.context(symbol, range as MarketRange));
+      const rawSymbol = url.searchParams.get("symbol") ?? "";
+      if (!rawSymbol.trim()) return badRequest(json, "symbol is required");
+      const parsed = parseInput(() => ({
+        symbol: normalizeSymbol(rawSymbol),
+        range: normalizeRange(url.searchParams.get("range") ?? "1M"),
+      }));
+      if (!parsed.ok) return badRequest(json, parsed.message);
+      json(200, await markets.context(parsed.value.symbol, parsed.value.range));
       return true;
     }
 
     if (path === "/api/markets/compare") {
       const requested = url.searchParams.get("symbols") ?? "";
-      const symbols = [...new Set(requested.split(",").map((symbol) => symbol.trim()).filter(Boolean))];
-      const range = url.searchParams.get("range") ?? "1M";
-      if (symbols.length < 2) return badRequest(json, "comparison requires at least 2 symbols");
-      if (symbols.length > 8) return badRequest(json, "comparison supports at most 8 symbols");
-      try {
-        json(200, await markets.compare(symbols, range as MarketRange));
-      } catch (cause) {
-        if (isInvalidInput(cause)) return badRequest(json, errorMessage(cause));
-        throw cause;
-      }
+      const rawSymbols = requested.split(",").map((symbol) => symbol.trim()).filter(Boolean);
+      if (rawSymbols.length < 2) return badRequest(json, "comparison requires at least 2 symbols");
+      if (rawSymbols.length > 8) return badRequest(json, "comparison supports at most 8 symbols");
+      const parsed = parseInput(() => ({
+        symbols: [...new Set(rawSymbols.map(normalizeSymbol))],
+        range: normalizeRange(url.searchParams.get("range") ?? "1M"),
+      }));
+      if (!parsed.ok) return badRequest(json, parsed.message);
+      if (parsed.value.symbols.length < 2) return badRequest(json, "comparison requires at least 2 unique symbols");
+      json(200, await markets.compare(parsed.value.symbols, parsed.value.range));
       return true;
     }
 

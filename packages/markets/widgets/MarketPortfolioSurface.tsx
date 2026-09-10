@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import type { MarketPortfolio, MarketPortfolioSnapshot } from "../src/portfolio.ts";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { MarketPortfolio, MarketPortfolioPosition, MarketPortfolioSnapshot } from "../src/portfolio.ts";
 import { marketsApi } from "./api.ts";
 
 const money = (value?: number, currency?: string): string => {
@@ -35,18 +35,35 @@ export default function MarketPortfolioSurface({
   const [quantity, setQuantity] = useState("");
   const [averageCost, setAverageCost] = useState("");
 
+  const positions = useMemo<MarketPortfolioPosition[]>(
+    () => snapshot?.positions ?? portfolio?.holdings.map((holding) => ({ holding })) ?? [],
+    [portfolio, snapshot],
+  );
+
   const reload = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
     try {
-      const [document, nextSnapshot] = await Promise.all([
+      const [documentResult, snapshotResult] = await Promise.allSettled([
         marketsApi.portfolio(signal),
         marketsApi.portfolioSnapshot(signal),
       ]);
-      setPortfolio(document);
-      setSnapshot(nextSnapshot);
-    } catch (cause) {
-      if (!aborted(cause)) setError(errorMessage(cause));
+      if (signal?.aborted) return;
+
+      const errors: string[] = [];
+      if (documentResult.status === "fulfilled") {
+        setPortfolio(documentResult.value);
+      } else if (!aborted(documentResult.reason)) {
+        errors.push(`Portfolio: ${errorMessage(documentResult.reason)}`);
+      }
+
+      if (snapshotResult.status === "fulfilled") {
+        setSnapshot(snapshotResult.value);
+      } else if (!aborted(snapshotResult.reason)) {
+        setSnapshot(null);
+        errors.push(`Valuation: ${errorMessage(snapshotResult.reason)}`);
+      }
+      if (errors.length > 0) setError(errors.join(" · "));
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
@@ -59,13 +76,18 @@ export default function MarketPortfolioSurface({
     return () => controller.abort();
   }, [active, reload]);
 
-  const save = async (next: MarketPortfolio) => {
+  const save = async (next: MarketPortfolio): Promise<void> => {
     setSaving(true);
     setError(null);
     try {
       const saved = await marketsApi.savePortfolio(next);
       setPortfolio(saved);
-      setSnapshot(await marketsApi.portfolioSnapshot());
+      setSnapshot(null);
+      try {
+        setSnapshot(await marketsApi.portfolioSnapshot());
+      } catch (cause) {
+        if (!aborted(cause)) setError(`Saved. Valuation refresh failed: ${errorMessage(cause)}`);
+      }
     } catch (cause) {
       setError(errorMessage(cause));
       throw cause;
@@ -181,7 +203,7 @@ export default function MarketPortfolioSurface({
               </tr>
             </thead>
             <tbody>
-              {(snapshot?.positions ?? []).map((position) => {
+              {positions.map((position) => {
                 const currency = position.currency;
                 return (
                   <tr key={position.holding.symbol} title={position.error}>

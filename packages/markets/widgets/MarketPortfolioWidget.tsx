@@ -77,7 +77,12 @@ export function MarketPortfolioWidget({
   return (
     <div className="markets-portfolio-widget">
       <button className="markets-portfolio-widget-summary" type="button" disabled={context.editing} onClick={onOpenPortfolio}>
-        {snapshot.currencies.slice(0, 2).map((summary) => (
+        {snapshot.currencies.length === 0 ? (
+          <span>
+            <small>Portfolio</small>
+            <strong>Quotes unavailable</strong>
+          </span>
+        ) : snapshot.currencies.slice(0, 2).map((summary) => (
           <span key={summary.currency}>
             <small>{summary.currency}</small>
             <strong>{money(summary.marketValue, summary.currency)}</strong>

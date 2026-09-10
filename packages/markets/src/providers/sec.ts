@@ -33,14 +33,14 @@ export function createSecProvider(options: SecProviderOptions): MarketProvider {
   let companiesLoadedAt = 0;
   let companiesPromise: Promise<Map<string, SecCompany>> | null = null;
 
-  const loadCompanies = async (signal: AbortSignal): Promise<Map<string, SecCompany>> => {
+  const loadCompanies = async (): Promise<Map<string, SecCompany>> => {
     if (companies.size > 0 && now() - companiesLoadedAt < TICKER_MAP_TTL_MS) return companies;
     if (companiesPromise) return companiesPromise;
     companiesPromise = limit(async () => {
       const json = await fetchJson(
         fetchImpl,
         "https://www.sec.gov/files/company_tickers.json",
-        { headers, signal },
+        { headers, signal: AbortSignal.timeout(5_000) },
         "sec tickers",
       );
       const root = record(json);
@@ -50,8 +50,9 @@ export function createSecProvider(options: SecProviderOptions): MarketProvider {
         const row = record(entry);
         const ticker = text(row?.ticker)?.toUpperCase();
         const cik = numeric(row?.cik_str);
+        const title = text(row?.title);
         if (!ticker || cik === undefined || !Number.isInteger(cik) || cik <= 0) continue;
-        next.set(ticker, { cik, ...(text(row?.title) ? { title: text(row?.title) } : {}) });
+        next.set(ticker, { cik, ...(title ? { title } : {}) });
       }
       if (next.size === 0) throw new Error("sec tickers: empty response");
       companies = next;
@@ -68,7 +69,7 @@ export function createSecProvider(options: SecProviderOptions): MarketProvider {
   return {
     id: "sec",
     async filings(symbol, signal) {
-      const company = (await loadCompanies(signal)).get(symbol);
+      const company = (await loadCompanies()).get(symbol);
       if (!company) throw new Error(`sec: no CIK mapping for ${symbol}`);
       const cik = String(company.cik).padStart(10, "0");
       const submission = await limit(() => fetchJson(
@@ -97,6 +98,8 @@ export function createSecProvider(options: SecProviderOptions): MarketProvider {
         if (!accessionNumber || !filedAt || !form) continue;
         const accessionPath = accessionNumber.replace(/-/g, "");
         const primaryDocument = text(value(primaryDocuments, index));
+        const reportDate = text(value(reportDates, index));
+        const description = text(value(descriptions, index));
         const documentPath = primaryDocument ? `/${encodeURIComponent(primaryDocument)}` : "/";
         filings.push({
           symbol,
@@ -104,10 +107,10 @@ export function createSecProvider(options: SecProviderOptions): MarketProvider {
           ...(companyName ? { companyName } : {}),
           form,
           filedAt,
-          ...(text(value(reportDates, index)) ? { reportDate: text(value(reportDates, index)) } : {}),
+          ...(reportDate ? { reportDate } : {}),
           accessionNumber,
           ...(primaryDocument ? { primaryDocument } : {}),
-          ...(text(value(descriptions, index)) ? { description: text(value(descriptions, index)) } : {}),
+          ...(description ? { description } : {}),
           url: `https://www.sec.gov/Archives/edgar/data/${cikPath}/${accessionPath}${documentPath}`,
           source: "sec",
         });
