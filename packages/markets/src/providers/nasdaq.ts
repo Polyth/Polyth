@@ -1,5 +1,5 @@
 import type { MarketProvider } from "../providers.ts";
-import type { MarketCandle, MarketRange } from "../types.ts";
+import type { MarketCandle, MarketEarningsSurprise, MarketRange } from "../types.ts";
 import {
   createLimiter,
   fetchJson,
@@ -123,6 +123,42 @@ export function createNasdaqProvider(options: NasdaqProviderOptions = {}): Marke
         source: "nasdaq",
         freshness: "delayed",
       };
+    },
+    async earnings(symbol, signal) {
+      const data = await get(
+        `https://api.nasdaq.com/api/company/${encodeURIComponent(symbol)}/earnings-surprise`,
+        signal,
+      );
+      const rows = valueAt(data, "earningsSurpriseTable", "rows");
+      if (!Array.isArray(rows)) throw new Error(`nasdaq: no earnings history for ${symbol}`);
+      const earnings: MarketEarningsSurprise[] = [];
+      for (const raw of rows) {
+        const row = record(raw);
+        if (!row) continue;
+        const fiscalQuarterEnd = text(row.fiscalQtrEnd);
+        const reportedAt = text(row.dateReported);
+        const actualEps = numeric(row.eps);
+        const consensusEps = numeric(row.consensusForecast);
+        const surprisePercent = numeric(row.percentageSurprise);
+        if (
+          fiscalQuarterEnd === undefined
+          && reportedAt === undefined
+          && actualEps === undefined
+          && consensusEps === undefined
+          && surprisePercent === undefined
+        ) continue;
+        earnings.push({
+          symbol,
+          ...(fiscalQuarterEnd ? { fiscalQuarterEnd } : {}),
+          ...(reportedAt ? { reportedAt } : {}),
+          ...(actualEps !== undefined ? { actualEps } : {}),
+          ...(consensusEps !== undefined ? { consensusEps } : {}),
+          ...(surprisePercent !== undefined ? { surprisePercent } : {}),
+          source: "nasdaq",
+        });
+      }
+      if (earnings.length === 0) throw new Error(`nasdaq: empty earnings history for ${symbol}`);
+      return earnings;
     },
   };
 }

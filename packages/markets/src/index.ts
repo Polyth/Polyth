@@ -50,6 +50,7 @@ export type {
   MarketComparisonItem,
   MarketDataFreshness,
   MarketDataResult,
+  MarketEarningsSurprise,
   MarketFiling,
   MarketFundamentals,
   MarketNewsItem,

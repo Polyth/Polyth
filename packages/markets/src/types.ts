@@ -10,7 +10,7 @@ export type MarketAssetType =
 export type MarketRange = "1D" | "5D" | "1M" | "6M" | "YTD" | "1Y" | "5Y" | "MAX";
 export type MarketDataFreshness = "live" | "delayed" | "indicative";
 export type MarketCacheState = "fresh" | "stale" | "refreshed";
-export type MarketProviderCapability = "quote" | "candles" | "search" | "fundamentals" | "news" | "filings";
+export type MarketProviderCapability = "quote" | "candles" | "search" | "fundamentals" | "news" | "filings" | "earnings";
 
 export interface MarketQuote {
   symbol: string;
@@ -95,6 +95,16 @@ export interface MarketFiling {
   primaryDocument?: string;
   description?: string;
   url: string;
+  source: string;
+}
+
+export interface MarketEarningsSurprise {
+  symbol: string;
+  fiscalQuarterEnd?: string;
+  reportedAt?: string;
+  actualEps?: number;
+  consensusEps?: number;
+  surprisePercent?: number;
   source: string;
 }
 

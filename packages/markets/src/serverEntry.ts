@@ -125,6 +125,13 @@ export function marketsRoutes(
       return true;
     }
 
+    if (path === "/api/markets/earnings") {
+      const symbol = url.searchParams.get("symbol") ?? "";
+      if (!symbol.trim()) return badRequest(json, "symbol is required");
+      json(200, await markets.earnings(symbol));
+      return true;
+    }
+
     if (path === "/api/markets/filings") {
       const symbol = url.searchParams.get("symbol") ?? "";
       if (!symbol.trim()) return badRequest(json, "symbol is required");
