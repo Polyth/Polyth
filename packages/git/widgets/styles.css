@@ -1142,12 +1142,36 @@ color: var(--purple);
   font-size: var(--font-label);
   font-weight: 650;
 }
+.isolation-card-meta,
+.isolation-card-stats {
+  font-size: var(--font-meta);
+}
+.isolation-card-progress {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--font-meta);
+  color: var(--text-dim);
+}
+.isolation-card-progress [aria-current="step"] {
+  color: var(--text);
+  font-weight: 600;
+}
+.isolation-card-progress-done {
+  color: var(--muted);
+}
 .isolation-card-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
   flex: none;
+}
+.isolation-card-overflow {
+  margin-inline-start: auto;
 }
 .isolation-badge {
   display: inline-flex;
@@ -1159,16 +1183,7 @@ color: var(--purple);
   background: var(--elevated);
   color: var(--text-dim);
   font-size: var(--font-meta);
-  cursor: pointer;
-}
-.isolation-badge:hover,
-.isolation-badge:focus-visible {
-  background: var(--raised);
-  color: var(--text);
-}
-.isolation-badge--warn {
-  color: var(--amber-on-wash);
-  border-color: color-mix(in srgb, var(--amber) 32%, var(--control-border));
+  cursor: default;
 }
 .isolation-list-badge {
   flex: none;
