@@ -44,7 +44,7 @@ test("file summaries keep the filename primary and make project paths relative",
   );
 });
 
-test("shell previews remove setup noise without losing the useful command", () => {
+test("shell previews remove setup noise and keep raw commands in details only", () => {
   assert.equal(cleanShellCommand("cd /workspace && git status --short"), "git status --short");
   assert.equal(
     cleanShellCommand("cd /workspace && export NODE_ENV=test && env CI=1 npm run test"),
@@ -56,8 +56,10 @@ test("shell previews remove setup noise without losing the useful command", () =
   );
   assert.equal(
     executionPresentation(tool()).preview,
-    "git diff -- apps/web/src/components/Timeline.tsx",
+    "Review changes",
   );
+  assert.equal(executionPresentation(tool()).kind, "git");
+  assert.equal(executionPresentation(tool({ input: { command: "command -v chromium || true" } })).preview, "Check command availability");
 });
 
 test("shell-backed repository inspection is presented by semantic action", () => {
@@ -67,7 +69,7 @@ test("shell-backed repository inspection is presented by semantic action", () =>
   const search = executionPresentation(searchTool);
   assert.equal(search.kind, "search");
   assert.equal(search.label, "Search");
-  assert.equal(search.preview, 'rg -n -C 12 -S "harnessTransition" packages/server/test/harnessSwitch.test.ts');
+  assert.equal(search.preview, "“harnessTransition” · packages/server/test/harnessSwitch.test.ts");
 
   const readTool = tool({
     input: { command: "/bin/bash -lc \"sed -n '1,185p' packages/server/test/harnessSwitch.test.ts\"" },
@@ -75,7 +77,7 @@ test("shell-backed repository inspection is presented by semantic action", () =>
   const read = executionPresentation(readTool);
   assert.equal(read.kind, "read");
   assert.equal(read.label, "Read");
-  assert.equal(read.preview, "sed -n '1,185p' packages/server/test/harnessSwitch.test.ts");
+  assert.equal(read.preview, "packages/server/test/harnessSwitch.test.ts · L1–185");
 
   assert.equal(executionPresentation(tool({ input: { command: "sed -i 's/a/b/' file.ts" } })).kind, "shell");
   assert.equal(executionGroupLabel([searchTool, readTool]), "Repository inspection");
@@ -85,15 +87,31 @@ test("shell-backed repository inspection is presented by semantic action", () =>
   }));
   assert.equal(compound.kind, "search");
   assert.equal(compound.label, "Search");
-  assert.equal(compound.preview, "rg --files -g '!!!node_modules!!!' | sed -n '1,20p'");
+  assert.equal(compound.preview, "Workspace files");
 
   const inventory = executionPresentation(tool({
     input: { command: "/bin/bash -lc \"printf '%s\\\\n' '--- repo top ---'; find ../polyth -maxdepth 2 -type d -print | sort\"" },
   }));
   assert.equal(inventory.kind, "search");
   assert.equal(inventory.label, "Search");
-  assert.equal(inventory.preview, "find ../polyth -maxdepth 2 -type d -print | sort");
+  assert.equal(inventory.preview, "Workspace items · ../polyth");
   assert.equal(executionPresentation(tool({ input: { command: "find . -exec rm {} \\;" } })).kind, "shell");
+});
+
+test("shell-backed tests use human summaries across harness command shapes", () => {
+  const direct = executionPresentation(tool({
+    input: { command: "node --experimental-strip-types --test --test-name-pattern=\"Files keeps its draft\" apps/web/test/responsiveOverlays.test.ts" },
+  }));
+  assert.equal(direct.kind, "test");
+  assert.equal(direct.preview, "apps/web/test/responsiveOverlays.test.ts · “Files keeps its draft”");
+
+  const build = executionPresentation(tool({ input: { command: "npm run build:web" } }));
+  assert.equal(build.kind, "test");
+  assert.equal(build.preview, "Build web");
+
+  const whitespace = executionPresentation(tool({ input: { command: "git diff --check" } }));
+  assert.equal(whitespace.kind, "git");
+  assert.equal(whitespace.preview, "Check diff whitespace");
 });
 
 test("file, URL, edit, search, MCP, and subagent previews are semantic", () => {
@@ -350,10 +368,10 @@ test("execution row renders collapsed value first, expands inline, and opens lev
     const disclosure = container.querySelector<HTMLButtonElement>(".execution-summary");
     assert.ok(disclosure);
     assert.equal(disclosure.getAttribute("aria-expanded"), "false");
-    // Historical rows render immediately; the accessible name always carries
-    // the full command independently of the latest-row entrance treatment.
+    // Historical rows render immediately; the accessible name follows the
+    // same human summary while the raw command stays inside the disclosure.
     assert.ok((disclosure.getAttribute("aria-label") ?? "")
-      .includes("Expand Shell: git diff -- apps/web/src/components/Timeline.tsx"));
+      .includes("Expand Git: Review changes"));
     assert.equal(container.querySelector(".execution-details"), null, "raw details do not clutter the collapsed row");
 
     await act(async () => disclosure.click());

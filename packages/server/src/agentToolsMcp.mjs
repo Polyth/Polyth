@@ -8,6 +8,7 @@ import { request as httpsRequest } from "node:https";
 
 const url = process.env.POLYTH_AGENT_TOOLS_URL ?? "";
 const token = process.env.POLYTH_AGENT_TOOLS_TOKEN ?? "";
+const capabilityIds = new Map();
 
 const output = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
 
@@ -59,9 +60,11 @@ async function handle(message) {
   if (message.method === "tools/list") {
     const listed = await call("GET");
     const tools = Array.isArray(listed.tools) ? listed.tools : [];
+    capabilityIds.clear();
+    for (const tool of tools) capabilityIds.set(tool.name, tool.id);
     return {
       tools: tools.map((tool) => ({
-        name: tool.id,
+        name: tool.name,
         description: tool.description,
         inputSchema: tool.inputSchema ?? { type: "object", properties: {} },
       })),
@@ -69,7 +72,8 @@ async function handle(message) {
   }
   if (message.method === "tools/call") {
     const name = message.params?.name;
-    const result = await call("POST", { id: name, arguments: message.params?.arguments ?? {} });
+    if (!capabilityIds.has(name)) await handle({ jsonrpc: "2.0", method: "tools/list" });
+    const result = await call("POST", { id: capabilityIds.get(name) ?? name, arguments: message.params?.arguments ?? {} });
     if (result.error) {
       return { content: [{ type: "text", text: result.error.message ?? "tool failed" }], isError: true };
     }

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createAgentToolBridge, AGENT_TOOLS_PATH } from "../src/agentTools.ts";
 import { createCapabilityContributionRegistry } from "@polyth/harness-runtime";
 import { spawn } from "node:child_process";
+import { createServer } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -46,6 +47,17 @@ test("agent tool bridge lists granted tools and refuses a disposed executor", as
     body: async () => ({ id: "example-feature.ping", arguments: {} }),
     json,
   };
+  assert.equal(await bridge.route({ ...rc, method: "GET" } as never), true);
+  assert.deepEqual(captured, {
+    code: 200,
+    body: { tools: [{
+      id: "example-feature.ping",
+      name: "ping",
+      description: "ping",
+      inputSchema: { type: "object", properties: {} },
+    }] },
+  });
+  captured = undefined;
   assert.equal(await bridge.route(rc as never), true);
   assert.equal(captured?.code, 200);
   assert.deepEqual(captured?.body, { output: "pong:space-a" });
@@ -274,4 +286,63 @@ test("agent-tools MCP stdio uses newline-delimited JSON-RPC", async () => {
   assert.doesNotMatch(reply, /Content-Length/i);
   const message = JSON.parse(reply) as { result?: { serverInfo?: { name?: string } } };
   assert.equal(message.result?.serverInfo?.name, "polyth-agent-tools");
+});
+
+test("agent-tools MCP publishes native tool names and maps calls back to capability ids", async () => {
+  let invokedId = "";
+  const server = createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    req.on("end", () => {
+      res.setHeader("content-type", "application/json");
+      if (req.method === "GET") {
+        res.end(JSON.stringify({ tools: [{
+          id: "browser.polyth-browser",
+          name: "polyth_browser",
+          description: "Drive the controlled browser",
+          inputSchema: { type: "object" },
+        }] }));
+        return;
+      }
+      invokedId = String(JSON.parse(Buffer.concat(chunks).toString("utf8")).id ?? "");
+      res.end(JSON.stringify({ output: "opened" }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const script = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "agentToolsMcp.mjs");
+  const child = spawn(process.execPath, [script], {
+    env: {
+      ...process.env,
+      POLYTH_AGENT_TOOLS_URL: `http://127.0.0.1:${address.port}/internal/agent-tools`,
+      POLYTH_AGENT_TOOLS_TOKEN: "test-token",
+    },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let output = "";
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => { output += chunk; });
+  const request = async (id: number, method: string, params: Record<string, unknown> = {}) => {
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const line = output.split("\n").find((candidate) => {
+        try { return JSON.parse(candidate).id === id; } catch { return false; }
+      });
+      if (line) return JSON.parse(line) as { result: Record<string, unknown> };
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error(`timed out waiting for MCP response ${id}`);
+  };
+  try {
+    const listed = await request(1, "tools/list") as { result: { tools?: Array<{ name?: string }> } };
+    assert.equal(listed.result.tools?.[0]?.name, "polyth_browser");
+    const called = await request(2, "tools/call", { name: "polyth_browser", arguments: { action: "browser.open" } });
+    assert.equal(invokedId, "browser.polyth-browser");
+    assert.deepEqual(called.result.content, [{ type: "text", text: "opened" }]);
+  } finally {
+    child.kill();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });
