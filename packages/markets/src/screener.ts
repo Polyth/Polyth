@@ -1,4 +1,10 @@
 import { SwrCache } from "./cache.ts";
+import {
+  buildMarketHeatmap,
+  normalizeHeatmapQuery,
+  type MarketHeatmapQuery,
+  type MarketHeatmapSnapshot,
+} from "./heatmap.ts";
 
 export interface MarketUniverseRow {
   symbol: string;
@@ -119,6 +125,18 @@ export class MarketUniverseService {
     const page = screenMarketUniverse(snapshot.value, normalized);
     return {
       ...page,
+      generatedAt: new Date(snapshot.updatedAt).toISOString(),
+      cache: snapshot.state,
+      revalidating: snapshot.revalidating,
+    };
+  }
+
+  async heatmap(query: MarketHeatmapQuery = {}): Promise<MarketHeatmapSnapshot> {
+    const normalized = normalizeHeatmapQuery(query);
+    const snapshot = await this.cache.get("us-common-stocks", POLICY, this.load);
+    const data = buildMarketHeatmap(snapshot.value, normalized);
+    return {
+      ...data,
       generatedAt: new Date(snapshot.updatedAt).toISOString(),
       cache: snapshot.state,
       revalidating: snapshot.revalidating,

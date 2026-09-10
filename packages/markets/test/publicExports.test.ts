@@ -3,23 +3,26 @@ import test from "node:test";
 import {
   BINANCE_CRYPTO_ASSETS,
   MarketUniverseService,
+  buildMarketHeatmap,
   createBinanceProvider,
   createFredProvider,
   createTradingViewUniverseLoader,
   parseFredCsv,
   screenMarketUniverse,
+  type MarketHeatmapSnapshot,
   type MarketMacroIndicator,
   type MarketMacroSnapshot,
   type MarketUniverseRow,
 } from "../src/index.ts";
 
-test("Markets public entry exports macro, crypto, and screener primitives", () => {
+test("Markets public entry exports macro, crypto, screener, and heatmap primitives", () => {
   assert.equal(typeof createBinanceProvider, "function");
   assert.equal(typeof createFredProvider, "function");
   assert.equal(typeof parseFredCsv, "function");
   assert.equal(typeof createTradingViewUniverseLoader, "function");
   assert.equal(typeof MarketUniverseService, "function");
   assert.equal(typeof screenMarketUniverse, "function");
+  assert.equal(typeof buildMarketHeatmap, "function");
   assert.ok(BINANCE_CRYPTO_ASSETS.some((asset) => asset.symbol === "BTC/USDT"));
 
   const indicator: MarketMacroIndicator = {
@@ -50,4 +53,11 @@ test("Markets public entry exports macro, crypto, and screener primitives", () =
     source: "fixture",
   };
   assert.equal(screenMarketUniverse([row]).rows[0]?.symbol, "NVDA");
+  const heatmap: MarketHeatmapSnapshot = {
+    ...buildMarketHeatmap([row], { limit: 25 }),
+    generatedAt: "2026-09-10T00:00:00.000Z",
+    cache: "fresh",
+    revalidating: false,
+  };
+  assert.equal(heatmap.cells[0]?.symbol, "NVDA");
 });

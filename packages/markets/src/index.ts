@@ -1,5 +1,14 @@
 export { SwrCache, type SwrCachePolicy, type SwrCacheResult } from "./cache.ts";
 export {
+  buildMarketHeatmap,
+  normalizeHeatmapQuery,
+  type MarketHeatmapCell,
+  type MarketHeatmapData,
+  type MarketHeatmapQuery,
+  type MarketHeatmapSector,
+  type MarketHeatmapSnapshot,
+} from "./heatmap.ts";
+export {
   registerDefaultMarketProviders,
   type DefaultMarketProviderOptions,
 } from "./defaultProviders.ts";
