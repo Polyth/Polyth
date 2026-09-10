@@ -8,6 +8,7 @@ import "./earnings.css";
 import "./filings.css";
 import "./overview.css";
 import "./overviewWidget.css";
+import "./screener.css";
 import "./surfaceFrame.css";
 import "./portfolioWidget.css";
 import { createElement, useEffect, useState, type ReactNode } from "react";
@@ -20,10 +21,11 @@ import MarketOverviewSurface from "./MarketOverviewSurface.tsx";
 import { MarketOverviewWidget } from "./MarketOverviewWidget.tsx";
 import MarketPortfolioSurface from "./MarketPortfolioSurface.tsx";
 import { MarketPortfolioWidget } from "./MarketPortfolioWidget.tsx";
+import MarketScreenerSurface from "./MarketScreenerSurface.tsx";
 import { MarketAssetWidget, MarketNewsWidget, MarketWatchlistWidget } from "./MarketWidgets.tsx";
 import { selectMarketSymbol } from "./selection.ts";
 
-type MarketSurfaceId = "markets.overview" | "markets" | "markets.compare" | "markets.portfolio" | "markets.earnings" | "markets.filings";
+type MarketSurfaceId = "markets.overview" | "markets" | "markets.screener" | "markets.compare" | "markets.portfolio" | "markets.earnings" | "markets.filings";
 
 function MarketSurfaceFrame({
   host,
@@ -37,6 +39,7 @@ function MarketSurfaceFrame({
   const links: Array<{ id: MarketSurfaceId; label: string }> = [
     { id: "markets.overview", label: "Overview" },
     { id: "markets", label: "Research" },
+    { id: "markets.screener", label: "Screener" },
     { id: "markets.compare", label: "Compare" },
     { id: "markets.portfolio", label: "Portfolio" },
     { id: "markets.earnings", label: "Earnings" },
@@ -102,6 +105,19 @@ function HostedMarketsSurface({ host, active }: { host: WebPackageHost; active?:
   return (
     <MarketSurfaceFrame host={host} activeId="markets">
       <MarketsSurface active={active} handoffOptions={handoffOptions} />
+    </MarketSurfaceFrame>
+  );
+}
+
+function HostedScreenerSurface({ host, active }: { host: WebPackageHost; active?: boolean }) {
+  const handoffOptions = useMarketHandoffOptions(host);
+  return (
+    <MarketSurfaceFrame host={host} activeId="markets.screener">
+      <MarketScreenerSurface
+        active={active}
+        handoffOptions={handoffOptions}
+        onOpen={(symbol) => openMarketSymbol(host, symbol)}
+      />
     </MarketSurfaceFrame>
   );
 }
@@ -213,11 +229,35 @@ export default defineWebPackage((host) => () => {
       },
     }),
     host.surfaces.register({
+      id: "markets.screener",
+      title: "Market screener",
+      description: "Filter and sort US common stocks without per-symbol quote fan-out.",
+      capabilityId: "markets.screener",
+      order: 53,
+      component: (props) => createElement(HostedScreenerSurface, { host, active: props?.active }),
+      presentation: {
+        kind: "workspace",
+        defaultRatio: 0.72,
+        minWidth: 360,
+        minHeight: 300,
+        preferredMaxWidth: 1_200,
+        keepAlive: true,
+        escape: "close",
+      },
+      placement: {
+        preferredRegion: "primary",
+        allowedRegions: ["primary", "end", "bottom"],
+        minInlineSize: 360,
+        minBlockSize: 280,
+        keepAlive: true,
+      },
+    }),
+    host.surfaces.register({
       id: "markets.compare",
       title: "Compare markets",
       description: "Compare price performance and fundamentals across market assets.",
       capabilityId: "markets.compare",
-      order: 53,
+      order: 54,
       component: (props) => createElement(HostedCompareSurface, { host, active: props?.active }),
       presentation: {
         kind: "workspace",
@@ -241,7 +281,7 @@ export default defineWebPackage((host) => () => {
       title: "Portfolio",
       description: "Track holdings and build per-space market context without mixing currencies.",
       capabilityId: "markets.portfolio",
-      order: 54,
+      order: 55,
       component: (props) => createElement(HostedPortfolioSurface, { host, active: props?.active }),
       presentation: {
         kind: "workspace",
@@ -265,7 +305,7 @@ export default defineWebPackage((host) => () => {
       title: "Earnings",
       description: "Review historical EPS versus consensus and earnings surprise trends.",
       capabilityId: "markets.earnings",
-      order: 55,
+      order: 56,
       component: (props) => createElement(HostedEarningsSurface, { host, active: props?.active }),
       presentation: {
         kind: "workspace",
@@ -289,7 +329,7 @@ export default defineWebPackage((host) => () => {
       title: "SEC filings",
       description: "Browse recent official EDGAR filings and hand filing context to Polyth.",
       capabilityId: "markets.filings",
-      order: 56,
+      order: 57,
       component: (props) => createElement(HostedFilingsSurface, { host, active: props?.active }),
       presentation: {
         kind: "workspace",
@@ -459,12 +499,22 @@ export default defineWebPackage((host) => () => {
       available: () => true,
     }),
     host.capabilities.register({
+      id: "markets.screener",
+      label: "Market screener",
+      plainDescription: "Filter and sort US common stocks by sector, move, volume, and market cap.",
+      keywords: ["market", "screener", "stocks", "filter", "sector", "volume", "market cap"],
+      standardTier: "more",
+      standardRank: 23,
+      open: () => host.navigation.openWorkspacePane("markets.screener"),
+      available: () => true,
+    }),
+    host.capabilities.register({
       id: "markets.compare",
       label: "Compare markets",
       plainDescription: "Compare prices, performance, valuation, and fundamentals across market assets.",
       keywords: ["market", "compare", "stocks", "finance", "performance", "valuation"],
       standardTier: "more",
-      standardRank: 23,
+      standardRank: 24,
       open: () => host.navigation.openWorkspacePane("markets.compare"),
       available: () => true,
     }),
@@ -474,7 +524,7 @@ export default defineWebPackage((host) => () => {
       plainDescription: "Track holdings, current value, daily move, and unrealized gain by quote currency.",
       keywords: ["market", "portfolio", "holdings", "investing", "positions", "pnl"],
       standardTier: "more",
-      standardRank: 24,
+      standardRank: 25,
       open: () => host.navigation.openWorkspacePane("markets.portfolio"),
       available: () => true,
     }),
@@ -484,7 +534,7 @@ export default defineWebPackage((host) => () => {
       plainDescription: "Review historical EPS versus consensus and earnings surprise trends.",
       keywords: ["market", "earnings", "eps", "surprise", "consensus", "estimates"],
       standardTier: "more",
-      standardRank: 25,
+      standardRank: 26,
       open: () => host.navigation.openWorkspacePane("markets.earnings"),
       available: () => true,
     }),
@@ -494,7 +544,7 @@ export default defineWebPackage((host) => () => {
       plainDescription: "Browse official SEC EDGAR filings and send filing context to Polyth.",
       keywords: ["market", "sec", "edgar", "filings", "10-k", "10-q", "8-k"],
       standardTier: "more",
-      standardRank: 26,
+      standardRank: 27,
       open: () => host.navigation.openWorkspacePane("markets.filings"),
       available: () => true,
     }),

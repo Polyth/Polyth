@@ -2,17 +2,24 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   BINANCE_CRYPTO_ASSETS,
+  MarketUniverseService,
   createBinanceProvider,
   createFredProvider,
+  createTradingViewUniverseLoader,
   parseFredCsv,
+  screenMarketUniverse,
   type MarketMacroIndicator,
   type MarketMacroSnapshot,
+  type MarketUniverseRow,
 } from "../src/index.ts";
 
-test("Markets public entry exports macro and crypto primitives", () => {
+test("Markets public entry exports macro, crypto, and screener primitives", () => {
   assert.equal(typeof createBinanceProvider, "function");
   assert.equal(typeof createFredProvider, "function");
   assert.equal(typeof parseFredCsv, "function");
+  assert.equal(typeof createTradingViewUniverseLoader, "function");
+  assert.equal(typeof MarketUniverseService, "function");
+  assert.equal(typeof screenMarketUniverse, "function");
   assert.ok(BINANCE_CRYPTO_ASSETS.some((asset) => asset.symbol === "BTC/USDT"));
 
   const indicator: MarketMacroIndicator = {
@@ -30,4 +37,17 @@ test("Markets public entry exports macro and crypto primitives", () => {
     errors: [],
   };
   assert.equal(snapshot.indicators[0]?.id, "treasury-10y");
+
+  const row: MarketUniverseRow = {
+    symbol: "NVDA",
+    name: "NVIDIA",
+    price: 100,
+    changePercent: 2,
+    volume: 1_000_000,
+    marketCap: 1_000_000_000,
+    sector: "Technology",
+    exchange: "NASDAQ",
+    source: "fixture",
+  };
+  assert.equal(screenMarketUniverse([row]).rows[0]?.symbol, "NVDA");
 });

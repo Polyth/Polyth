@@ -6,6 +6,13 @@ import {
 } from "@polyth/plugins";
 import { registerDefaultMarketProviders } from "./defaultProviders.ts";
 import { loadPortfolio, savePortfolio, snapshotPortfolio } from "./portfolio.ts";
+import { createTradingViewUniverseLoader } from "./providers/tradingviewUniverse.ts";
+import {
+  MarketUniverseService,
+  type MarketScreenerDirection,
+  type MarketScreenerQuery,
+  type MarketScreenerSort,
+} from "./screener.ts";
 import {
   createMarketsService,
   normalizeQuery,
@@ -34,9 +41,18 @@ const parseInput = <T>(parse: () => T): { ok: true; value: T } | { ok: false; me
   }
 };
 
+const numberParam = (url: URL, name: string): number | undefined => {
+  const raw = url.searchParams.get(name);
+  if (raw === null || raw.trim() === "") return undefined;
+  const value = Number(raw);
+  if (!Number.isFinite(value)) throw Object.assign(new Error(`${name} must be finite`), { code: "invalid-input" });
+  return value;
+};
+
 export function marketsRoutes(
   host: Pick<ServerPackageHost, "spaceStorage">,
   markets: MarketsService,
+  screener?: Pick<MarketUniverseService, "screen">,
 ): NonNullable<ServerPackage["routes"]> {
   return async ({ path, method, url, body, json, space }) => {
     if (!path.startsWith("/api/markets")) return false;
@@ -81,6 +97,38 @@ export function marketsRoutes(
 
     if (path === "/api/markets/providers") {
       json(200, { providers: markets.providers.healthSnapshot() });
+      return true;
+    }
+
+    if (path === "/api/markets/screener") {
+      if (!screener) {
+        json(503, { error: "unavailable", message: "market screener is unavailable" });
+        return true;
+      }
+      try {
+        const sector = url.searchParams.get("sector")?.trim();
+        const changeMin = numberParam(url, "changeMin");
+        const marketCapMin = numberParam(url, "marketCapMin");
+        const volumeMin = numberParam(url, "volumeMin");
+        const sort = url.searchParams.get("sort");
+        const direction = url.searchParams.get("dir");
+        const offset = numberParam(url, "offset");
+        const limit = numberParam(url, "limit");
+        const query: MarketScreenerQuery = {
+          ...(sector ? { sector } : {}),
+          ...(changeMin !== undefined ? { changeMin } : {}),
+          ...(marketCapMin !== undefined ? { marketCapMin } : {}),
+          ...(volumeMin !== undefined ? { volumeMin } : {}),
+          ...(sort ? { sort: sort as MarketScreenerSort } : {}),
+          ...(direction ? { direction: direction as MarketScreenerDirection } : {}),
+          ...(offset !== undefined ? { offset } : {}),
+          ...(limit !== undefined ? { limit } : {}),
+        };
+        json(200, await screener.screen(query));
+      } catch (cause) {
+        if (isInvalidInput(cause)) return badRequest(json, errorMessage(cause));
+        throw cause;
+      }
       return true;
     }
 
@@ -231,10 +279,11 @@ export function marketsRoutes(
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   const markets = createMarketsService();
+  const screener = new MarketUniverseService(createTradingViewUniverseLoader());
   registerDefaultMarketProviders(markets, { secUserAgent: process.env.POLYTH_SEC_USER_AGENT });
   host.services.provide(marketsServiceKey, markets);
   return {
-    routes: marketsRoutes(host, markets),
+    routes: marketsRoutes(host, markets, screener),
     remoteAccess: localOnlyRemoteAccess(["markets"]),
   };
 }

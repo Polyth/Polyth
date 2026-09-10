@@ -14,6 +14,7 @@ import type {
   MarketSearchResult,
 } from "../src/types.ts";
 import type { MarketPortfolio, MarketPortfolioSnapshot } from "../src/portfolio.ts";
+import type { MarketScreenerPage, MarketScreenerQuery } from "../src/screener.ts";
 import type { MarketWatchlists } from "../src/watchlists.ts";
 
 const transport = createApiTransport();
@@ -61,6 +62,18 @@ export const marketsApi = {
   },
   crypto(signal?: AbortSignal): Promise<MarketDataResult<MarketQuote[]>> {
     return transport.get("/api/markets/crypto", { signal });
+  },
+  screener(query: MarketScreenerQuery, signal?: AbortSignal): Promise<MarketScreenerPage> {
+    const params = new URLSearchParams();
+    if (query.sector) params.set("sector", query.sector);
+    if (query.changeMin !== undefined) params.set("changeMin", String(query.changeMin));
+    if (query.marketCapMin !== undefined) params.set("marketCapMin", String(query.marketCapMin));
+    if (query.volumeMin !== undefined) params.set("volumeMin", String(query.volumeMin));
+    if (query.sort) params.set("sort", query.sort);
+    if (query.direction) params.set("dir", query.direction);
+    if (query.offset !== undefined) params.set("offset", String(query.offset));
+    if (query.limit !== undefined) params.set("limit", String(query.limit));
+    return transport.get(`/api/markets/screener?${params}`, { signal });
   },
   context(symbol: string, range: MarketRange, signal?: AbortSignal): Promise<MarketResearchContext> {
     return transport.get(`/api/markets/context?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(range)}`, { signal });
