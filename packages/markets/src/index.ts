@@ -76,6 +76,22 @@ export {
   normalizeSymbol,
   type MarketsServiceOptions,
 } from "./service.ts";
+export {
+  bollingerBands,
+  calculateMarketTechnicals,
+  exponentialMovingAverage,
+  movingAverageConvergenceDivergence,
+  relativeStrengthIndex,
+  simpleMovingAverage,
+  type BollingerSeries,
+  type MacdSeries,
+  type MarketBandSignal,
+  type MarketRsiSignal,
+  type MarketTechnicalPoint,
+  type MarketTechnicalSignal,
+  type MarketTechnicalSignals,
+  type MarketTechnicalSnapshot,
+} from "./technicals.ts";
 export type {
   MarketAssetType,
   MarketCacheState,
