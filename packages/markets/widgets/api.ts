@@ -3,6 +3,7 @@ import type {
   MarketCandleSeries,
   MarketComparison,
   MarketDataResult,
+  MarketEarningsSurprise,
   MarketFiling,
   MarketFundamentals,
   MarketNewsItem,
@@ -37,6 +38,9 @@ export const marketsApi = {
   },
   news(symbol: string, signal?: AbortSignal): Promise<MarketDataResult<MarketNewsItem[]>> {
     return transport.get(`/api/markets/news?symbol=${encodeURIComponent(symbol)}`, { signal });
+  },
+  earnings(symbol: string, signal?: AbortSignal): Promise<MarketDataResult<MarketEarningsSurprise[]>> {
+    return transport.get(`/api/markets/earnings?symbol=${encodeURIComponent(symbol)}`, { signal });
   },
   filings(
     symbol: string,

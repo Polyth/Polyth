@@ -4,6 +4,7 @@ import "./widgetStyles.css";
 import "./news.css";
 import "./compare.css";
 import "./portfolio.css";
+import "./earnings.css";
 import "./filings.css";
 import "./surfaceFrame.css";
 import "./portfolioWidget.css";
@@ -11,13 +12,14 @@ import { createElement, useEffect, useState, type ReactNode } from "react";
 import { defineWebPackage, type WebPackageHost } from "@polyth/web-sdk";
 import MarketsSurface, { type MarketHandoffOption } from "./MarketsSurface.tsx";
 import MarketCompareSurface from "./MarketCompareSurface.tsx";
+import MarketEarningsSurface from "./MarketEarningsSurface.tsx";
 import MarketFilingsSurface from "./MarketFilingsSurface.tsx";
 import MarketPortfolioSurface from "./MarketPortfolioSurface.tsx";
 import { MarketPortfolioWidget } from "./MarketPortfolioWidget.tsx";
 import { MarketAssetWidget, MarketNewsWidget, MarketWatchlistWidget } from "./MarketWidgets.tsx";
 import { selectMarketSymbol } from "./selection.ts";
 
-type MarketSurfaceId = "markets" | "markets.compare" | "markets.portfolio" | "markets.filings";
+type MarketSurfaceId = "markets" | "markets.compare" | "markets.portfolio" | "markets.earnings" | "markets.filings";
 
 function MarketSurfaceFrame({
   host,
@@ -32,6 +34,7 @@ function MarketSurfaceFrame({
     { id: "markets", label: "Research" },
     { id: "markets.compare", label: "Compare" },
     { id: "markets.portfolio", label: "Portfolio" },
+    { id: "markets.earnings", label: "Earnings" },
     { id: "markets.filings", label: "Filings" },
   ];
   return (
@@ -97,6 +100,19 @@ function HostedPortfolioSurface({ host, active }: { host: WebPackageHost; active
   return (
     <MarketSurfaceFrame host={host} activeId="markets.portfolio">
       <MarketPortfolioSurface active={active} onOpen={(symbol) => openMarketSymbol(host, symbol)} />
+    </MarketSurfaceFrame>
+  );
+}
+
+function HostedEarningsSurface({ host, active }: { host: WebPackageHost; active?: boolean }) {
+  const handoffOptions = useMarketHandoffOptions(host);
+  return (
+    <MarketSurfaceFrame host={host} activeId="markets.earnings">
+      <MarketEarningsSurface
+        active={active}
+        handoffOptions={handoffOptions}
+        onOpenResearch={(symbol) => openMarketSymbol(host, symbol)}
+      />
     </MarketSurfaceFrame>
   );
 }
@@ -192,11 +208,35 @@ export default defineWebPackage((host) => () => {
       },
     }),
     host.surfaces.register({
+      id: "markets.earnings",
+      title: "Earnings",
+      description: "Review historical EPS versus consensus and earnings surprise trends.",
+      capabilityId: "markets.earnings",
+      order: 55,
+      component: (props) => createElement(HostedEarningsSurface, { host, active: props?.active }),
+      presentation: {
+        kind: "workspace",
+        defaultRatio: 0.68,
+        minWidth: 360,
+        minHeight: 300,
+        preferredMaxWidth: 1_050,
+        keepAlive: true,
+        escape: "close",
+      },
+      placement: {
+        preferredRegion: "primary",
+        allowedRegions: ["primary", "end", "bottom"],
+        minInlineSize: 360,
+        minBlockSize: 280,
+        keepAlive: true,
+      },
+    }),
+    host.surfaces.register({
       id: "markets.filings",
       title: "SEC filings",
       description: "Browse recent official EDGAR filings and hand filing context to Polyth.",
       capabilityId: "markets.filings",
-      order: 55,
+      order: 56,
       component: (props) => createElement(HostedFilingsSurface, { host, active: props?.active }),
       presentation: {
         kind: "workspace",
@@ -355,12 +395,22 @@ export default defineWebPackage((host) => () => {
       available: () => true,
     }),
     host.capabilities.register({
+      id: "markets.earnings",
+      label: "Earnings",
+      plainDescription: "Review historical EPS versus consensus and earnings surprise trends.",
+      keywords: ["market", "earnings", "eps", "surprise", "consensus", "estimates"],
+      standardTier: "more",
+      standardRank: 25,
+      open: () => host.navigation.openWorkspacePane("markets.earnings"),
+      available: () => true,
+    }),
+    host.capabilities.register({
       id: "markets.filings",
       label: "SEC filings",
       plainDescription: "Browse official SEC EDGAR filings and send filing context to Polyth.",
       keywords: ["market", "sec", "edgar", "filings", "10-k", "10-q", "8-k"],
       standardTier: "more",
-      standardRank: 25,
+      standardRank: 26,
       open: () => host.navigation.openWorkspacePane("markets.filings"),
       available: () => true,
     }),
