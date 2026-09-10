@@ -26,17 +26,26 @@ test("screener filters, sorts, paginates, and keeps missing sort values last", (
   assert.deepEqual(ascending.rows.map((row) => row.symbol), ["AAA", "BBB", "CCC"]);
 });
 
-test("screener validates bounded pagination", () => {
+test("screener validates bounded pagination and non-negative size filters", () => {
   assert.throws(() => screenMarketUniverse(rows, { limit: 101 }), /limit must be 1-100/);
   assert.throws(() => screenMarketUniverse(rows, { offset: -1 }), /offset must be 0-10000/);
+  assert.throws(() => screenMarketUniverse(rows, { marketCapMin: -1 }), /marketCapMin must be non-negative/);
+  assert.throws(() => screenMarketUniverse(rows, { volumeMin: -1 }), /volumeMin must be non-negative/);
 });
 
-test("market universe service shares one cached load across screener queries", async () => {
+test("blank sector is normalized away instead of filtering out the universe", () => {
+  const page = screenMarketUniverse(rows, { sector: "   " });
+  assert.equal(page.total, rows.length);
+});
+
+test("market universe service validates before loading and shares one cached load across queries", async () => {
   let calls = 0;
   const service = new MarketUniverseService(async () => {
     calls += 1;
     return rows;
   }, () => 0);
+  await assert.rejects(service.screen({ limit: 101 }), /limit must be 1-100/);
+  assert.equal(calls, 0);
   const first = await service.screen({ sector: "Technology" });
   const second = await service.screen({ sector: "Financials" });
   assert.equal(first.total, 2);
