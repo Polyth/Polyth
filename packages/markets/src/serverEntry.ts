@@ -4,8 +4,11 @@ import {
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
+import { MarketCalendarService } from "./calendar.ts";
 import { registerDefaultMarketProviders } from "./defaultProviders.ts";
 import { loadPortfolio, savePortfolio, snapshotPortfolio } from "./portfolio.ts";
+import { createForexFactoryEconomicCalendarLoader } from "./providers/economicCalendar.ts";
+import { createTradingViewEarningsCalendarLoader } from "./providers/tradingviewCalendar.ts";
 import { createTradingViewUniverseLoader } from "./providers/tradingviewUniverse.ts";
 import {
   MarketUniverseService,
@@ -53,6 +56,7 @@ export function marketsRoutes(
   host: Pick<ServerPackageHost, "spaceStorage">,
   markets: MarketsService,
   universe?: Pick<MarketUniverseService, "screen" | "heatmap">,
+  calendar?: Pick<MarketCalendarService, "economic" | "earnings">,
 ): NonNullable<ServerPackage["routes"]> {
   return async ({ path, method, url, body, json, space }) => {
     if (!path.startsWith("/api/markets")) return false;
@@ -97,6 +101,34 @@ export function marketsRoutes(
 
     if (path === "/api/markets/providers") {
       json(200, { providers: markets.providers.healthSnapshot() });
+      return true;
+    }
+
+    if (path === "/api/markets/calendar/economic") {
+      if (!calendar) {
+        json(503, { error: "unavailable", message: "economic calendar is unavailable" });
+        return true;
+      }
+      json(200, await calendar.economic());
+      return true;
+    }
+
+    if (path === "/api/markets/calendar/earnings") {
+      if (!calendar) {
+        json(503, { error: "unavailable", message: "earnings calendar is unavailable" });
+        return true;
+      }
+      const symbols = (url.searchParams.get("symbols") ?? "")
+        .split(",")
+        .map((symbol) => symbol.trim())
+        .filter(Boolean);
+      if (symbols.length === 0) return badRequest(json, "symbols is required");
+      try {
+        json(200, await calendar.earnings(symbols));
+      } catch (cause) {
+        if (isInvalidInput(cause)) return badRequest(json, errorMessage(cause));
+        throw cause;
+      }
       return true;
     }
 
@@ -299,10 +331,14 @@ export function marketsRoutes(
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   const markets = createMarketsService();
   const universe = new MarketUniverseService(createTradingViewUniverseLoader());
+  const calendar = new MarketCalendarService(
+    createForexFactoryEconomicCalendarLoader(),
+    createTradingViewEarningsCalendarLoader(),
+  );
   registerDefaultMarketProviders(markets, { secUserAgent: process.env.POLYTH_SEC_USER_AGENT });
   host.services.provide(marketsServiceKey, markets);
   return {
-    routes: marketsRoutes(host, markets, universe),
+    routes: marketsRoutes(host, markets, universe, calendar),
     remoteAccess: localOnlyRemoteAccess(["markets"]),
   };
 }
