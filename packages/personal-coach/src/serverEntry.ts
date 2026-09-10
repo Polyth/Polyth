@@ -2,6 +2,7 @@ import type {
   AgentCapabilityContributionRegistry,
   RouteHandler,
   SpaceContext,
+  ToolExecutionContext,
 } from "@polyth/contracts";
 import {
   localOnlyRemoteAccess,
@@ -22,6 +23,10 @@ import {
   type CoachOnboardingCapabilitySet,
   type CoachScheduleService,
 } from "./onboarding.ts";
+import {
+  registerCoachPlanCapabilities,
+  type CoachPlanCapabilitySet,
+} from "./planCapabilities.ts";
 import { personalCoachProposalRoutes } from "./proposalRoutes.ts";
 import { personalCoachRoutes } from "./routes.ts";
 import { createPersonalCoachService, type PersonalCoachService } from "./service.ts";
@@ -49,33 +54,38 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   let routes: RouteHandler | null = null;
   const capabilities = new Map<string, CoachCapabilityBundle>();
 
-  const ensureCapabilities = (
+  const ensureCapabilities = async (
     space: Pick<SpaceContext, "spaceId">,
     projectId: string,
     store: CoachStore,
-  ): void => {
+  ): Promise<void> => {
+    if (capabilities.has(projectId)) return;
+    const plans = await service.proposalReviewForWorkspaceProject(projectId, space.spaceId);
+    // A concurrent first Coach session may have opened the same review store
+    // while the await above was in flight. Registration stays exactly once.
     if (capabilities.has(projectId)) return;
     const registry = host.services.require(
       serverServiceKey<AgentCapabilityContributionRegistry>("harness.capabilities"),
     );
+    const publishProposal = async (proposal: CoachProposal, ctx: ToolExecutionContext): Promise<void> => {
+      if (!ctx.sessionId) return;
+      await host.events.append(
+        ctx.sessionId,
+        "coach/proposal-created",
+        {
+          proposalId: proposal.id,
+          proposalType: proposal.type,
+          summary: proposalSummary(proposal),
+        },
+        { ignorable: true, producerPlugin: "personal-coach" },
+      );
+    };
     const main: CoachCapabilitySet = registerCoachCapabilities({
       registry,
       space,
       projectId,
       store,
-      onProposalCreated: async (proposal, ctx) => {
-        if (!ctx.sessionId) return;
-        await host.events.append(
-          ctx.sessionId,
-          "coach/proposal-created",
-          {
-            proposalId: proposal.id,
-            proposalType: proposal.type,
-            summary: proposalSummary(proposal),
-          },
-          { ignorable: true, producerPlugin: "personal-coach" },
-        );
-      },
+      onProposalCreated: publishProposal,
     });
     const onboarding: CoachOnboardingCapabilitySet = registerCoachOnboardingCapabilities({
       registry,
@@ -104,9 +114,18 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         );
       },
     });
+    const planTools: CoachPlanCapabilitySet = registerCoachPlanCapabilities({
+      registry,
+      space,
+      projectId,
+      store,
+      plans,
+      onProposalCreated: publishProposal,
+    });
     capabilities.set(projectId, {
-      ids: [...main.ids, ...onboarding.ids, ...insights.ids],
+      ids: [...main.ids, ...onboarding.ids, ...insights.ids, ...planTools.ids],
       async dispose() {
+        await planTools.dispose();
         await insights.dispose();
         await onboarding.dispose();
         await main.dispose();
@@ -132,7 +151,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       if (!project?.spaceId) continue;
       try {
         const store = await service.forWorkspaceProject(projectId, project.spaceId);
-        ensureCapabilities({ spaceId: project.spaceId }, projectId, store);
+        await ensureCapabilities({ spaceId: project.spaceId }, projectId, store);
       } catch (cause) {
         if ((cause as { code?: string }).code !== "not-found") throw cause;
         // Another package owns this internal workspace.
