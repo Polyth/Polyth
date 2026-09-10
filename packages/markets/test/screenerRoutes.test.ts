@@ -53,7 +53,11 @@ test("invalid screener input returns 400 before loading the market universe", as
     loads += 1;
     return rows;
   }, () => 0);
-  const response = await invoke("/api/markets/screener?limit=101", screener);
-  assert.equal(response.status, 400);
+  const oversized = await invoke("/api/markets/screener?limit=101", screener);
+  assert.equal(oversized.status, 400);
+  assert.equal(loads, 0);
+
+  const negative = await invoke("/api/markets/screener?marketCapMin=-1", screener);
+  assert.equal(negative.status, 400);
   assert.equal(loads, 0);
 });
