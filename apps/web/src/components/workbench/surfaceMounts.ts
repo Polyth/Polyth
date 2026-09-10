@@ -50,7 +50,8 @@ export function rememberSurfaceState(surfaceId: string): void {
   if (active instanceof HTMLElement && node.contains(active)) lastFocus.set(surfaceId, active);
   else lastFocus.delete(surfaceId);
   const offsets: Array<[Element, number, number]> = [];
-  for (const el of node.querySelectorAll(SCROLL_KEEPERS)) {
+  // Page content scrolls on the stable mount itself; querySelectorAll excludes it.
+  for (const el of [node, ...node.querySelectorAll(SCROLL_KEEPERS)]) {
     if (el.scrollTop !== 0 || el.scrollLeft !== 0) offsets.push([el, el.scrollTop, el.scrollLeft]);
   }
   scrollMemory.set(node, offsets);

@@ -11,6 +11,7 @@ import type {
   WidgetPlugin,
 } from "@polyth/web-sdk";
 import { resourceKey } from "@polyth/web-sdk";
+import { withDefaultSurfaceContent } from "@polyth/web-sdk/surface-content";
 import { Icon } from "../icons.tsx";
 import { getLocale, tr } from "../i18n/index.ts";
 import { highlight, langOf } from "../highlight.ts";
@@ -174,7 +175,7 @@ export const webPackageHost: WebPackageHost = {
   },
   surfaces: {
     register: (definition: SurfaceDefinition) =>
-      registerSurface(definition as unknown as RailSurface),
+      registerSurface(withDefaultSurfaceContent(definition) as unknown as RailSurface),
   },
   capabilities: {
     register: (definition: CapabilityDefinition) =>

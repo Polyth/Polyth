@@ -58,14 +58,15 @@ function MarketSurfaceFrame({
     <div className="markets-surface-frame">
       <nav className="markets-surface-nav" aria-label="Markets sections">
         {links.map((link) => (
-          <button
+          <host.ui.components.Button
             key={link.id}
-            type="button"
+            size="sm"
+            variant={activeId === link.id ? "quiet" : "ghost"}
             aria-current={activeId === link.id ? "page" : undefined}
             onClick={() => host.navigation.openWorkspacePane(link.id)}
           >
             {link.label}
-          </button>
+          </host.ui.components.Button>
         ))}
       </nav>
       <div className="markets-surface-frame-body">{children}</div>

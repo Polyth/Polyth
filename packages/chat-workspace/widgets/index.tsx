@@ -2,6 +2,7 @@ import "./styles.css";
 import { createElement } from "react";
 import { defineWebPackage, type WebPackageHost } from "@polyth/web-sdk";
 import { createApiTransport } from "@polyth/web-sdk";
+import { withSurfaceContent } from "@polyth/web-sdk/surface-content";
 import ChatWorkspaceView from "./ChatWorkspaceView.tsx";
 import ChatWorkspaceSettingsPage from "./ChatWorkspaceSettingsPage.tsx";
 import { createChatWorkspaceCommands } from "./lib/commands.ts";
@@ -55,7 +56,7 @@ export default defineWebPackage((host) => () => {
         host,
         active: props?.active ?? true,
       }),
-      presentation: {
+      presentation: withSurfaceContent({
         kind: "workspace",
         defaultRatio: 0.45,
         minWidth: 380,
@@ -63,7 +64,7 @@ export default defineWebPackage((host) => () => {
         keepAlive: true,
         escape: "content",
         dock: "side",
-      },
+      }, "workspace"),
     }),
     host.capabilities.register({
       id: "chat-workspace",
@@ -109,9 +110,9 @@ export default defineWebPackage((host) => () => {
     host.slots.register({
       slot: "session.header.actions",
       id: "chat-workspace.review",
-      render: ({ projectId, sessionId }) => projectId && sessionId ? createElement("button", {
-        type: "button",
-        className: "btn btn-ghost btn-sm",
+      render: ({ projectId, sessionId }) => projectId && sessionId ? createElement(host.ui.components.Button, {
+        size: "sm",
+        variant: "ghost",
         onClick: () => { void commands.openPreset("review"); },
       }, "Review in Chat Workspace") : null,
     }),

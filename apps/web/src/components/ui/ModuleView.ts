@@ -12,11 +12,13 @@
 // and the createElement-only WorkspaceHost can import it without the tsx
 // loader — the same rule ViewErrorBoundary.ts follows.
 import { createElement, type ReactNode } from "react";
+import { surfaceContentMode, type SurfaceContentMode } from "@polyth/web-sdk/surface-content";
+import { listSurfaces } from "../../surfaces.ts";
 import { tr } from "../../i18n/index.ts";
 import { CloseIcon, CollapseIcon, DockBottomIcon, DockSideIcon, ExpandIcon, PinIcon } from "./icons.ts";
 
 export type ModuleViewVariant = "main" | "rail";
-export type ModuleContentMode = "page" | "panel" | "workspace";
+export type ModuleContentMode = SurfaceContentMode;
 export type ModuleDockEdge = "side" | "bottom";
 
 export interface ModuleDockAction {
@@ -29,6 +31,8 @@ export interface ModuleDockAction {
 export interface ModuleViewProps {
   /** Stable module id (workspace surface id / rail surface id). */
   id: string;
+  /** Active registered surface when this frame represents a workbench region. */
+  surfaceId?: string;
   title: string;
   description?: string;
   /** Small leading glyph shown before the title. */
@@ -55,7 +59,7 @@ export interface ModuleViewProps {
   closeLabel?: string;
   /** "main" = WorkspaceHost surface, "rail" = ContextRail panel. */
   variant?: ModuleViewVariant;
-  /** Core-owned content behavior. Packages only render their feature root. */
+  /** Legacy/core fallback. Registered content metadata wins in every placement. */
   contentMode?: ModuleContentMode;
   /** Phone stacking depth: a higher value sits on top of lower ones. */
   depth?: number;
@@ -86,16 +90,22 @@ function dockIcon(edge: ModuleDockEdge): typeof DockSideIcon {
 
 export default function ModuleView(props: ModuleViewProps): ReactNode {
   const {
-    id, title, description, icon, actions, tabs, headingProps, onClose, closeLabel,
+    id, surfaceId, title, description, icon, actions, tabs, headingProps, onClose, closeLabel,
     onTogglePin, dockActions, onToggleFullscreen, pinned = false, fullscreen = false,
     variant = "main", contentMode = "page", depth = 0, className, children,
   } = props;
+  // Both rail and workbench hosts already subscribe to the surface registry.
+  // Resolve here, once per frame, so moving a page cannot turn it into an
+  // edge-to-edge canvas. Unknown/legacy surfaces retain the caller's fallback.
+  const surface = listSurfaces().find((item) => item.id === (surfaceId ?? id));
+  const resolvedContentMode = surfaceContentMode(surface?.presentation, contentMode);
   return createElement(
     "section",
     {
       className: `module-view module-view--${variant}${className ? ` ${className}` : ""}`,
       "data-module-id": id,
       "data-module-depth": depth,
+      "data-content-mode": resolvedContentMode,
       style: { ["--module-depth" as string]: depth },
     },
     createElement(
@@ -130,7 +140,7 @@ export default function ModuleView(props: ModuleViewProps): ReactNode {
       { className: "module-view-body" },
       createElement(
         "div",
-        { className: `module-view-content module-view-content--${contentMode}` },
+        { className: `module-view-content module-view-content--${resolvedContentMode}` },
         children,
       ),
     ),

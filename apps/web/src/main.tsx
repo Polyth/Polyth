@@ -5,6 +5,7 @@ import { ensureLocale, getLocaleSnapshot } from "./i18n/index.ts";
 import { prefetchAuthStatus } from "./authPrefetch.ts";
 import { prepareMobileLaunch } from "@polyth/mobile/runtime";
 import "./styles.css";
+import "./moduleContent.css";
 
 // Auth and locale start in parallel. The app graph itself waits for auth
 // prefetch so a remembered multi-user session restores its browser-local

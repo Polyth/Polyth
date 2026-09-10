@@ -1,66 +1,44 @@
+/* Markets owns section composition; the host owns the window and controls. */
 .markets-surface-frame {
   container-type: inline-size;
   display: flex;
+  min-width: 0;
   min-height: 0;
-  height: 100%;
   flex-direction: column;
+  gap: var(--module-content-gap, var(--space-3));
 }
 
 .markets-surface-nav {
   display: flex;
+  flex: none;
+  min-width: 0;
   align-items: center;
   gap: var(--space-1);
   overflow-x: auto;
-  padding: var(--space-1) var(--space-3);
-  border-bottom: 1px solid var(--hair);
-  background: var(--surface-overlay);
-  scrollbar-width: none;
+  /* Leave space for the shared keyboard focus ring without shifting the
+     first control away from the content's common leading edge. */
+  padding: var(--space-2);
+  margin-inline: calc(-1 * var(--space-2));
+  scrollbar-width: thin;
 }
 
-.markets-surface-nav::-webkit-scrollbar {
-  display: none;
-}
-
-.markets-surface-nav button {
-  min-height: max(var(--hit-min), var(--control-h-sm));
-  flex: 0 0 auto;
-  padding: 0 var(--control-pad-x-sm);
-  border: 1px solid transparent;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--text-dim);
-  font: inherit;
-  font-size: var(--font-label);
-  cursor: pointer;
-}
-
-.markets-surface-nav button:hover {
-  background: var(--surface-overlay-hover);
-  color: var(--text);
-}
-
-.markets-surface-nav button[aria-current="page"] {
-  border-color: var(--accent-line);
-  background: var(--accent-wash);
-  color: var(--text);
-}
-
-.markets-surface-nav button:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
+/* No local button colors, radii, fonts, hover rules or focus suppression.
+   The selected quiet action and remaining ghost actions are host Buttons. */
+.markets-surface-nav > .ui-btn { flex: none; }
 
 .markets-surface-frame-body {
+  min-width: 0;
   min-height: 0;
-  flex: 1;
 }
 
-.markets-surface-frame-body > * {
-  height: 100%;
-}
-
-@container (max-width: 440px) {
-  .markets-surface-nav {
-    padding-inline: var(--space-2);
-  }
+/* These section views already live inside a host-padded page. Their root
+   must not create another viewport or a second set of exterior gutters. */
+.markets-surface-frame-body > :is(div, section, main):not(.empty-state):not([role="alert"]):not([class^="ui-"]):not([class*=" ui-"]) {
+  min-width: 0;
+  height: auto;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  overflow: visible;
 }
