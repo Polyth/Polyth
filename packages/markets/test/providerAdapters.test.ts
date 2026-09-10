@@ -51,6 +51,21 @@ test("nasdaq adapter normalizes quote data", async () => {
   assert.equal(quote.source, "nasdaq");
 });
 
+test("nasdaq adapter skips unsupported symbols before network", async () => {
+  let calls = 0;
+  const provider = createNasdaqProvider({
+    fetch: fetchFrom(() => {
+      calls += 1;
+      return json({});
+    }),
+  });
+  await assert.rejects(
+    provider.quote!("^VIX", new AbortController().signal),
+    (cause: unknown) => (cause as { code?: string }).code === "not-found",
+  );
+  assert.equal(calls, 0);
+});
+
 test("yahoo adapter uses chart metadata without crumb state", async () => {
   const provider = createYahooProvider({
     fetch: fetchFrom(() => json({ chart: { result: [{ meta: {
