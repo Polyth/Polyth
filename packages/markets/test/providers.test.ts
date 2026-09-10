@@ -22,6 +22,7 @@ test("provider registry falls back and records health", async () => {
   assert.equal(result.value.price, 100);
   const health = registry.healthSnapshot();
   assert.equal(health[0]?.failures, 1);
+  assert.equal(health[0]?.capabilities[0]?.failures, 1);
   assert.equal(health[1]?.successes, 1);
 });
 
@@ -66,6 +67,44 @@ test("provider registry opens a circuit after repeated failures", async () => {
   const primaryHealth = registry.healthSnapshot()[0];
   assert.equal(primaryHealth?.consecutiveFailures, 2);
   assert.ok((primaryHealth?.circuitOpenUntil ?? 0) > now);
+  const quoteHealth = primaryHealth?.capabilities.find((item) => item.capability === "quote");
+  assert.equal(quoteHealth?.consecutiveFailures, 2);
+  assert.ok((quoteHealth?.circuitOpenUntil ?? 0) > now);
+});
+
+test("circuit failures are isolated by provider capability", async () => {
+  let now = 1_000;
+  let quoteCalls = 0;
+  const registry = new ProviderRegistry({ failureThreshold: 2, circuitMs: 30_000, now: () => now });
+  registry.register({
+    id: "multi",
+    quote: async () => {
+      quoteCalls += 1;
+      return quote("multi");
+    },
+    earnings: async () => {
+      throw new Error("earnings endpoint down");
+    },
+  });
+
+  for (let index = 0; index < 2; index += 1) {
+    await assert.rejects(
+      registry.run("earnings", (provider) => provider.earnings!("NVDA", new AbortController().signal)),
+      /earnings endpoint down/,
+    );
+    now += 10;
+  }
+
+  const result = await registry.run("quote", (provider) => provider.quote!("NVDA", new AbortController().signal));
+  assert.equal(result.providerId, "multi");
+  assert.equal(quoteCalls, 1);
+
+  const health = registry.healthSnapshot()[0];
+  const earnings = health?.capabilities.find((item) => item.capability === "earnings");
+  const quotes = health?.capabilities.find((item) => item.capability === "quote");
+  assert.ok((earnings?.circuitOpenUntil ?? 0) > now);
+  assert.equal(quotes?.circuitOpenUntil, undefined);
+  assert.equal(quotes?.successes, 1);
 });
 
 test("provider ids reject duplicates", () => {
