@@ -111,9 +111,9 @@
   min-width: 0;
   min-height: calc(var(--tap) + var(--space-2));
   gap: var(--space-1);
-  padding-inline:
-    max(var(--screen-gutter), var(--safe-left, 0px))
-    max(var(--screen-gutter), var(--safe-right, 0px));
+  /* The fixed phone layer already owns safe-left/right; adding them again here
+     doubles the landscape notch gutter. */
+  padding-inline: var(--screen-gutter);
   border-bottom: 1px solid var(--material-glass-border);
   background: var(--material-glass-chrome);
   box-shadow: var(--material-glass-highlight);
