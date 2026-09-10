@@ -20,7 +20,7 @@ export type { HttpQuotaProviderSpec, HttpQuotaProviderOptions } from "./http.ts"
 export {
   discoverQuotaProviders,
   listConfiguredQuotaProviders,
-  mappolythUsage,
+  mapProviderUsage,
 } from "./providers/index.ts";
 export type { QuotaDiscoveryOptions, QuotaDiscoveryPaths } from "./providers/index.ts";
 export { USAGE_WIDGETS } from "../widgets/catalog.ts";
