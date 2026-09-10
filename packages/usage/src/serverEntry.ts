@@ -47,10 +47,10 @@ export function usageRoutes(usage: UsageService): RouteHandler {
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
-  // WP12: quota telemetry. Built-in adapters discover the same OpenCode,
-  // Claude Code, and polyth-managed credentials as polyth. The
-  // browser only receives sanitized snapshots. The fake and hand-written HTTP
-  // adapter paths remain available for development and private providers.
+  // WP12: quota telemetry. Built-in adapters discover provider credentials
+  // locally and expose only sanitized snapshots to the browser. The fake and
+  // hand-written HTTP adapter paths remain available for development and
+  // private providers.
   const usage = createUsageService({ file: join(host.storageDir, "quotas.json") });
   if (process.env.POLYTH_FAKE_QUOTAS === "1") usage.register(createFakeQuotaProvider());
   try {
