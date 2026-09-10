@@ -1,11 +1,13 @@
 import "./styles.css";
 import "./proposal.css";
+import "./workspace.css";
 import { createElement } from "react";
 import type { SessionEvent } from "@polyth/contracts";
 import { defineWebPackage } from "@polyth/web-sdk";
-import { openSession } from "../../../apps/web/src/init.ts";
 import { createCoachApi } from "./api.ts";
-import CoachView, {
+import { createCoachJourneyApi } from "./journeyApi.ts";
+import CoachWorkspace from "./CoachWorkspace.tsx";
+import {
   CheckInWidget,
   CommitmentsWidget,
   GoalWidget,
@@ -18,16 +20,30 @@ import ProposalCard from "./ProposalCard.tsx";
 import { createCoachClient } from "./store.ts";
 
 export default defineWebPackage((host) => () => {
-  const api = createCoachApi();
+  const api = createCoachJourneyApi(createCoachApi());
   const errorText = host.errors.friendly;
   const client = createCoachClient({
     api,
-    openSession,
+    openSession: host.conversation.openSession,
     friendlyError: errorText,
+    navigationToken: () => {
+      const state = host.store.getSnapshot();
+      return JSON.stringify([state.activeProjectId, state.activeSessionId, state.activeView, state.overlay, state.railPlugin]);
+    },
   });
 
-  const onFocus = () => { void client.refresh(); };
+  const onFocus = () => { if (document.visibilityState !== "hidden") void client.refresh(); };
   window.addEventListener("focus", onFocus);
+  const isOpen = () => {
+    const state = host.store.getSnapshot();
+    return state.railPlugin === "personal-coach" || state.activeView === "personal-coach";
+  };
+  let wasOpen = isOpen();
+  const stopNavigation = host.store.subscribe(() => {
+    const open = isOpen();
+    if (open && !wasOpen) void client.refresh();
+    wasOpen = open;
+  });
 
   const off = [
     host.surfaces.register({
@@ -36,7 +52,10 @@ export default defineWebPackage((host) => () => {
       description: "Focus, commitments, and progress that persist across chats.",
       capabilityId: "personal-coach",
       order: 34,
-      component: () => createElement(CoachView, { client }),
+      component: () => createElement(CoachWorkspace, {
+        api, client, ui: host.ui.components, friendlyError: errorText,
+        openSettings: () => host.navigation.openSettingsPage("personal-coach"),
+      }),
       presentation: {
         kind: "workspace",
         defaultRatio: 0.4,
@@ -55,7 +74,7 @@ export default defineWebPackage((host) => () => {
       keywords: ["coach", "goals", "commitments", "today", "focus"],
       standardTier: "primary",
       standardRank: 16,
-      open: () => host.navigation.openWorkspacePane("personal-coach"),
+      open: () => { void client.refresh(); host.navigation.openWorkspacePane("personal-coach"); },
       available: () => true,
     }),
     host.settings.registerPage({
@@ -188,6 +207,8 @@ export default defineWebPackage((host) => () => {
   ];
 
   return () => {
+    client.dispose();
+    stopNavigation();
     window.removeEventListener("focus", onFocus);
     off.toReversed().forEach((dispose) => dispose());
   };

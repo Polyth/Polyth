@@ -1,0 +1,116 @@
+.personal-coach-root.coach-workspace {
+  display: grid;
+  gap: var(--space-5);
+  min-inline-size: 0;
+}
+.personal-coach-root .coach-toolbar,
+.personal-coach-root .coach-actions,
+.personal-coach-root .coach-bottom-actions,
+.personal-coach-root .coach-starters,
+.personal-coach-root .coach-steps {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-inline-size: 0;
+}
+.personal-coach-root .coach-toolbar { justify-content: space-between; }
+.personal-coach-root .coach-bottom-actions { padding-block-start: var(--space-4); border-block-start: 1px solid var(--border-soft); }
+.personal-coach-root .coach-bottom-actions > .coach-meta { margin-inline-start: auto; }
+.personal-coach-root .coach-intro,
+.personal-coach-root .coach-form,
+.personal-coach-root .coach-setup,
+.personal-coach-root .coach-detail-panel {
+  display: grid;
+  gap: var(--space-4);
+  min-inline-size: 0;
+}
+.personal-coach-root .coach-intro { gap: var(--space-3); }
+.personal-coach-root .coach-intro h2 {
+  font-size: clamp(var(--subheader-font-size), 5cqi, var(--font-title));
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  max-inline-size: 28ch;
+  overflow-wrap: anywhere;
+}
+.personal-coach-root .coach-intro p {
+  color: var(--text-dim);
+  line-height: 1.6;
+  max-inline-size: 58ch;
+}
+.personal-coach-root .coach-field {
+  display: grid;
+  gap: var(--space-2);
+  min-inline-size: 0;
+  color: var(--text-dim);
+}
+.personal-coach-root .coach-field > span { font-size: var(--font-meta); }
+.personal-coach-root .coach-field :is(input, textarea) {
+  inline-size: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  box-sizing: border-box;
+  font-size: var(--font-input);
+}
+.personal-coach-root .coach-field textarea { resize: vertical; }
+.personal-coach-root .coach-quick-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--space-3);
+  padding-block: var(--space-3);
+}
+.personal-coach-root .coach-quick-add > .coach-inline-error { grid-column: 1 / -1; }
+.personal-coach-root .coach-steps {
+  padding-block-end: var(--space-3);
+  border-block-end: 1px solid var(--border-soft);
+}
+.personal-coach-root .coach-steps > button { flex: 1 1 0; min-inline-size: 0; white-space: normal; }
+.personal-coach-root .coach-step-number {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 1.4em;
+  block-size: 1.4em;
+  margin-inline-end: var(--space-1);
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay);
+  font-size: var(--font-meta);
+}
+.personal-coach-root .coach-steps [aria-current="step"] .coach-step-number { background: var(--accent-wash); color: var(--accent); }
+.personal-coach-root .coach-preferences {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding: var(--space-4) 0 0;
+  border: 0;
+  border-block-start: 1px solid var(--border-soft);
+  min-inline-size: 0;
+}
+.personal-coach-root .coach-preferences legend { padding-inline-end: var(--space-3); font-weight: 600; }
+.personal-coach-root .coach-preference-row { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; min-inline-size: 0; }
+.personal-coach-root .coach-preference-row > * { min-inline-size: 0; max-inline-size: 100%; }
+.personal-coach-root .coach-goal-detail {
+  display: grid;
+  gap: var(--space-3);
+  padding-block: var(--space-4);
+  border-block-start: 1px solid var(--border-soft);
+  min-inline-size: 0;
+}
+.personal-coach-root .coach-detail-panel :is(h3, p),
+.personal-coach-root .coach-inline-error { overflow-wrap: anywhere; }
+.personal-coach-root .coach-detail-panel h3 { font-size: var(--subheader-font-size); }
+.personal-coach-root .coach-history summary { padding-block: var(--space-3); cursor: pointer; color: var(--text-dim); min-block-size: var(--hit-min); box-sizing: border-box; }
+.personal-coach-root .coach-history article { display: grid; gap: var(--space-2); padding-block: var(--space-3); border-block-start: 1px solid var(--border-soft); }
+.personal-coach-root.coach-workspace .coach-focus { border-color: var(--accent-line); background: var(--accent-wash); gap: var(--space-3); }
+.personal-coach-root.coach-workspace .coach-focus .coach-row-actions { margin-block-start: var(--space-2); }
+.personal-coach-root .coach-inline-error { display: grid; gap: var(--space-2); }
+.personal-coach-root .coach-inline-error > button { justify-self: start; }
+@container (max-width: 420px) {
+  .personal-coach-root .coach-toolbar { align-items: flex-start; }
+  .personal-coach-root .coach-quick-add { grid-template-columns: minmax(0, 1fr); }
+  .personal-coach-root .coach-quick-add > button { justify-self: start; }
+  .personal-coach-root .coach-bottom-actions > .coach-meta { margin-inline-start: 0; flex-basis: 100%; }
+  .personal-coach-root .coach-steps { gap: var(--space-1); }
+  .personal-coach-root .coach-step-number { display: none; }
+  .personal-coach-root .coach-section-head { flex-wrap: wrap; }
+}
