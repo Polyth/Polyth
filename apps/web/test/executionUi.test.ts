@@ -78,6 +78,13 @@ test("shell-backed repository inspection is presented by semantic action", () =>
 
   assert.equal(executionPresentation(tool({ input: { command: "sed -i 's/a/b/' file.ts" } })).kind, "shell");
   assert.equal(executionGroupLabel([searchTool, readTool]), "Repository inspection");
+
+  const compound = executionPresentation(tool({
+    input: { command: "/bin/bash -lc \"printf '%s\\\\n' '--- files ---'; rg --files -g '!!!node_modules!!!' | sed -n '1,20p'\"" },
+  }));
+  assert.equal(compound.kind, "search");
+  assert.equal(compound.label, "Search");
+  assert.equal(compound.preview, "rg --files -g '!!!node_modules!!!' | sed -n '1,20p'");
 });
 
 test("file, URL, edit, search, MCP, and subagent previews are semantic", () => {

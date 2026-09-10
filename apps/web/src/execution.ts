@@ -109,7 +109,11 @@ function compactCommandPaths(command: string): string {
 }
 
 export function cleanShellCommand(command: string): string {
-  const segments = shellSegments(command);
+  // Native runtimes commonly wrap the complete compound command in `sh -c`.
+  // Unwrap before splitting so a leading formatter (`printf`) does not hide
+  // the repository operation that follows it.
+  const launched = unwrapShellLauncher(command.trim());
+  const segments = shellSegments(launched);
   let operative = "";
   for (const candidate of segments) {
     if (/^(?:cd|pushd|popd)\b/i.test(candidate)) continue;
@@ -117,7 +121,7 @@ export function cleanShellCommand(command: string): string {
     const stripped = stripEnvironmentPrefix(candidate);
     if (stripped) operative = stripped;
   }
-  const cleaned = operative || stripEnvironmentPrefix(segments.at(-1) ?? command.trim()) || command.trim();
+  const cleaned = operative || stripEnvironmentPrefix(segments.at(-1) ?? launched) || launched;
   return compactCommandPaths(unwrapShellLauncher(cleaned).replace(/\s+/g, " "));
 }
 
