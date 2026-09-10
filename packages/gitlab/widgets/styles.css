@@ -1,0 +1,17 @@
+@import "@polyth/code-hosting/widgets/styles.css";
+
+.gitlab-accounts { border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3); margin-block: var(--space-3); min-width: 0; }
+.gitlab-accounts summary, .gitlab-account-row { display: flex; align-items: center; gap: var(--space-2); }
+.gitlab-accounts summary { cursor: pointer; justify-content: space-between; }
+.gitlab-accounts form, .gitlab-accounts label, .gitlab-identity-menu, .gitlab-identity-menu label { display: grid; gap: var(--space-2); min-width: 0; }
+.gitlab-accounts form { margin-top: var(--space-3); }
+.gitlab-account-row { flex-wrap: wrap; padding-block: var(--space-2); }
+.gitlab-account-row > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.gitlab-account-row small { display: block; color: var(--muted); }
+.gitlab-accounts select, .gitlab-identity select { width: 100%; min-width: 0; color: var(--text); background: var(--input-bg); border: 1px solid var(--control-border); border-radius: var(--radius-sm); padding: var(--space-2); }
+.gitlab-identity { position: relative; min-width: 0; max-width: 100%; font-size: var(--font-meta); }
+ .gitlab-identity-trigger { background: transparent; color: var(--text); border: 1px solid var(--control-border); border-radius: var(--radius-sm); padding: var(--space-1) var(--space-2); font: inherit; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: min(16rem, 40vw); }
+.gitlab-identity-footer { padding: var(--space-2); display: grid; gap: var(--space-2); overflow-wrap: anywhere; }
+.gitlab-identity-footer label { display: grid; gap: var(--space-1); }
+.gitlab-identity-footer select { width: 100%; min-width: 0; }
+.gitlab-identity-footer small { color: var(--muted); }

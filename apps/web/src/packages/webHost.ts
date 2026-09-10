@@ -12,6 +12,22 @@ import type {
 } from "@polyth/web-sdk";
 import { resourceKey } from "@polyth/web-sdk";
 import { Icon } from "../icons.tsx";
+import { getLocale, tr } from "../i18n/index.ts";
+import { highlight, langOf } from "../highlight.ts";
+import { MarkdownDoc } from "../markdown.tsx";
+import { requestComposerInsert } from "../composerInsert.ts";
+import { openSession } from "../init.ts";
+import {
+  Button,
+  Checkbox,
+  EmptyState,
+  IconButton,
+  Menu,
+  Select,
+  Tabs,
+  Textarea,
+  TextInput,
+} from "../components/ui/index.ts";
 import Dialog from "../components/a11y/Dialog.tsx";
 import SlotHost from "../components/slots/SlotHost.ts";
 import { friendlyError } from "../settings.ts";
@@ -24,6 +40,7 @@ import {
   setActiveView,
   setOverlay,
   setRailPlugin,
+  startNewSession,
   subscribeStore,
   upsertSession,
 } from "../store.ts";
@@ -98,9 +115,12 @@ function publicWorkbenchSnapshot() {
   return { ...snap, activeProfile: CONVERSATION_PROFILE_ID };
 }
 
+let previousStoreState: ReturnType<typeof getState> | null = null;
+let previousSnapshot: WebStoreSnapshot | null = null;
 const snapshot = (): WebStoreSnapshot => {
   const state = getState();
-  return {
+  if (state === previousStoreState && previousSnapshot) return previousSnapshot;
+  const next: WebStoreSnapshot = {
     activeProjectId: state.activeProjectId,
     activeSessionId: state.activeSessionId,
     activeView: state.activeView,
@@ -109,6 +129,9 @@ const snapshot = (): WebStoreSnapshot => {
     workbenchProfile: publicWorkbenchProfileId(),
     settings: { ...state.settings },
   };
+  previousStoreState = state;
+  previousSnapshot = next;
+  return next;
 };
 
 function openResource(ref: ResourceRef, options: OpenResourceOptions = {}): void {
@@ -184,6 +207,16 @@ export const webPackageHost: WebPackageHost = {
   sessions: {
     upsert: upsertSession,
   },
+  conversation: {
+    insert: (text) => {
+      requestComposerInsert(text);
+      setActiveView("session");
+    },
+    startNewSession: (projectId, seed) => {
+      startNewSession(projectId, seed);
+    },
+    openSession,
+  },
   navigation: {
     setActiveView: (view) => setActiveView(view as never),
     openSettingsPage,
@@ -227,6 +260,20 @@ export const webPackageHost: WebPackageHost = {
     icons: Icon,
     Dialog,
     Slot: SlotHost,
+    components: {
+      Button: Button as unknown as WebPackageHost["ui"]["components"]["Button"],
+      IconButton: IconButton as unknown as WebPackageHost["ui"]["components"]["IconButton"],
+      Menu: Menu as unknown as WebPackageHost["ui"]["components"]["Menu"],
+      Tabs: Tabs as unknown as WebPackageHost["ui"]["components"]["Tabs"],
+      TextInput: TextInput as unknown as WebPackageHost["ui"]["components"]["TextInput"],
+      Textarea: Textarea as unknown as WebPackageHost["ui"]["components"]["Textarea"],
+      Checkbox: Checkbox as unknown as WebPackageHost["ui"]["components"]["Checkbox"],
+      Select: Select as unknown as WebPackageHost["ui"]["components"]["Select"],
+      EmptyState: EmptyState as unknown as WebPackageHost["ui"]["components"]["EmptyState"],
+      MarkdownDoc: MarkdownDoc as unknown as WebPackageHost["ui"]["components"]["MarkdownDoc"],
+    },
+    syntax: { highlight, languageForPath: langOf },
+    locale: { get: getLocale, translate: (key, values) => tr(key as Parameters<typeof tr>[0], values) },
   },
   errors: {
     friendly: friendlyError,

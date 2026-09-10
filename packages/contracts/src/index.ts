@@ -3856,7 +3856,8 @@ export const UI_SLOTS = [
   "app.nav", "app.header.actions", "app.window.controls", "session.header.actions", "session.list.badges",
   "sidebar.footer",
   "composer.leading", "composer.execution", "composer.trailing", "modelPicker.header", "contextRail.tabs",
-  "settings.pages", "settings.footer", "commandPalette.commands",
+  "settings.pages", "settings.footer", "settings.integrations", "commandPalette.commands",
+  "git.repository.identity", "git.change-request.create", "project.repository.options",
   // Widget definitions enter through the catalog/settings seams. The six
   // workspace slots are first-class placement targets alongside panel and
   // toolbar slots, rather than a canvas-only parallel vocabulary.

@@ -5,6 +5,26 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { PrCheck } from "@polyth/contracts";
+import {
+  buildConflictResolutionPrompt as buildHostingConflictResolutionPrompt,
+} from "@polyth/code-hosting/conflicts";
+import type {
+  ChangeRequest,
+  ChangeRequestComment,
+  ChangeRequestDetail,
+  ChangeRequestFile,
+  HostingIssue,
+  HostingIssueComment,
+  HostingIssueDetail,
+  HostingRepository,
+  HostingResult,
+  HostingService,
+  HostingStatus,
+  MergeStrategy as HostingMergeStrategy,
+  PrCreateInput as HostingPrCreateInput,
+  ReviewCommentInput as HostingReviewCommentInput,
+  SubmitReviewInput as HostingSubmitReviewInput,
+} from "@polyth/code-hosting/types";
 import { normalizeCheck, type RollupEntry } from "./checks.ts";
 
 export { anyCheckPending, normalizeCheck, summarizeChecks } from "./checks.ts";
@@ -39,45 +59,12 @@ const defaultExec: ExecFn = (bin, args, opts) =>
     }
   });
 
-export type GhResult<T> = { ok: true; data: T } | { ok: false; reason: string };
-
-export interface GithubRepo {
-  name: string;
-  owner: string;
-  url: string;
-  description: string;
-  defaultBranch: string;
-  isPrivate: boolean;
-}
-
-export interface GithubIssue {
-  number: number;
-  title: string;
-  state: string;
-  author: string;
-  updatedAt: string;
-  url: string;
-  /** Included by detail reads; list reads may omit it to keep payloads small. */
-  body?: string;
-}
-
-export interface GithubIssueDetail extends GithubIssue {
-  body: string;
-  createdAt: string;
-}
-
-export interface GithubIssueComment {
-  id: string;
-  author: string;
-  body: string;
-  createdAt: string;
-  url: string;
-}
-
-export interface GithubPr extends GithubIssue {
-  isDraft: boolean;
-  headRefName: string;
-}
+export type GhResult<T> = HostingResult<T>;
+export type GithubRepo = HostingRepository;
+export type GithubIssue = HostingIssue;
+export type GithubIssueDetail = HostingIssueDetail;
+export type GithubIssueComment = HostingIssueComment;
+export type GithubPr = ChangeRequest;
 
 export interface CurrentPrSummary {
   number: number;
@@ -88,120 +75,36 @@ export interface CurrentPrSummary {
   deletions: number;
 }
 
-export interface GithubStatus {
-  installed: boolean;
-  authenticated: boolean;
-  /** Public profile data from the authenticated GitHub account. Never includes tokens. */
-  user: { login: string; avatarUrl: string } | null;
-  repo: GithubRepo | null;
-  reason?: string;
-}
+export type GithubStatus = HostingStatus;
 
 // ---- PR detail surfaces (WP11) ----------------------------------------------
 
-export interface PrDetail {
-  number: number;
-  title: string;
-  state: string;
-  isDraft: boolean;
-  author: string;
-  url: string;
-  body: string;
-  baseRefName: string;
-  headRefName: string;
-  /** source commit SHA the detail was read at — anchors comments/staleness */
-  headRefOid: string;
-  additions: number;
-  deletions: number;
-  changedFiles: number;
-  mergeable: string;
-  createdAt: string;
-  updatedAt: string;
-}
+export type PrDetail = ChangeRequestDetail;
 
 export function buildConflictResolutionPrompt(
   detail: Pick<PrDetail, "number" | "title" | "url" | "baseRefName" | "headRefName">,
   userPrompt: string,
 ): string {
-  const instructions = userPrompt.trim();
-  return [
-    `Resolve the merge conflicts for pull request #${detail.number}.`,
-    "",
-    "Pull request context:",
-    `- Title: ${detail.title}`,
-    `- URL: ${detail.url}`,
-    `- Base branch: ${detail.baseRefName}`,
-    `- Head branch: ${detail.headRefName}`,
-    "",
-    "User instructions:",
-    instructions || "Inspect and resolve every merge conflict in the current worktree.",
-    "",
-    "Required safety and completion steps:",
-    "- Resolve the conflicts carefully and explain each non-obvious decision.",
-    "- Run the relevant tests or checks after resolving the conflicts.",
-    "- Commit the completed conflict resolution locally with a descriptive commit message.",
-    "- Do not merge the pull request or push any commits without explicit user approval.",
-  ].join("\n");
+  return buildHostingConflictResolutionPrompt(detail, userPrompt);
 }
 
-export interface PrFile {
-  path: string;
-  additions: number;
-  deletions: number;
-}
-
-export interface PrComment {
-  id: string;
-  author: string;
-  body: string;
-  createdAt: string;
-  url: string;
-  /** review comments carry a file anchor; issue comments do not */
-  path?: string;
-  line?: number;
-  outdated?: boolean;
-  kind: "issue" | "review";
-  reviewState?: string;
-}
-
-export interface ReviewCommentInput {
-  path: string;
-  side?: "LEFT" | "RIGHT";
-  line: number;
-  startLine?: number;
-  body: string;
-}
-
-export interface SubmitReviewInput {
-  number: number;
-  event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
-  body: string;
-  comments?: ReviewCommentInput[];
-  commitSha?: string;
-}
+export type PrFile = ChangeRequestFile;
+export type PrComment = ChangeRequestComment;
+export type ReviewCommentInput = HostingReviewCommentInput;
+export type SubmitReviewInput = HostingSubmitReviewInput;
 
 // ---- PR lifecycle (F7) -------------------------------------------------------
 
-export interface PrCreateInput {
-  title: string;
-  body: string;
-  /** target branch; defaults to the repo's default branch when omitted */
-  base?: string;
-  draft?: boolean;
-  /** fork-aware head ref (owner:branch); omitted = current branch */
-  head?: string;
-}
-
-export type MergeStrategy = "squash" | "merge" | "rebase";
-
-export interface GithubService {
+export type PrCreateInput = HostingPrCreateInput;
+export type MergeStrategy = HostingMergeStrategy;
+export interface GithubService extends HostingService {
   status(cwd: string): Promise<GithubStatus>;
   repo(cwd: string): Promise<GhResult<GithubRepo>>;
-  issues(cwd: string, limit?: number): Promise<GhResult<GithubIssue[]>>;
+  issues(cwd: string, limit?: number, filters?: { state?: string; search?: string }): Promise<GhResult<GithubIssue[]>>;
   getIssue(cwd: string, number: number): Promise<GhResult<GithubIssueDetail>>;
   getIssueComments(cwd: string, number: number): Promise<GhResult<GithubIssueComment[]>>;
   addIssueComment(cwd: string, number: number, body: string): Promise<GhResult<{ url: string }>>;
-  prs(cwd: string, limit?: number): Promise<GhResult<GithubPr[]>>;
+  prs(cwd: string, limit?: number, filters?: { state?: string; search?: string }): Promise<GhResult<GithubPr[]>>;
   addPrComment(cwd: string, number: number, body: string): Promise<GhResult<{ url: string }>>;
   currentPrSummary(cwd: string): Promise<GhResult<CurrentPrSummary>>;
   prDetail(cwd: string, number: number): Promise<GhResult<PrDetail>>;
@@ -316,10 +219,10 @@ export function createGithubService(deps: { exec?: ExecFn } = {}): GithubService
       };
     },
 
-    async issues(cwd, limit = 30) {
+    async issues(cwd, limit = 30, filters) {
       const r = await ghJson<Array<{ number: number; title: string; state: string; author: { login: string } | null; updatedAt: string; url: string }>>(
         cwd,
-        ["issue", "list", "--limit", String(limit), "--json", "number,title,state,author,updatedAt,url"],
+        ["issue", "list", "--limit", String(limit), ...(filters?.state ? [`--state=${filters.state}`] : []), ...(filters?.search ? [`--search=${filters.search}`] : []), "--json", "number,title,state,author,updatedAt,url"],
       );
       if (!r.ok) return r;
       return {
@@ -390,10 +293,10 @@ export function createGithubService(deps: { exec?: ExecFn } = {}): GithubService
       }
     },
 
-    async prs(cwd, limit = 30) {
+    async prs(cwd, limit = 30, filters) {
       const r = await ghJson<Array<{ number: number; title: string; state: string; author: { login: string } | null; updatedAt: string; url: string; isDraft: boolean; headRefName: string }>>(
         cwd,
-        ["pr", "list", "--limit", String(limit), "--json", "number,title,state,author,updatedAt,url,isDraft,headRefName"],
+        ["pr", "list", "--limit", String(limit), ...(filters?.state ? [`--state=${filters.state}`] : []), ...(filters?.search ? [`--search=${filters.search}`] : []), "--json", "number,title,state,author,updatedAt,url,isDraft,headRefName"],
       );
       if (!r.ok) return r;
       return {

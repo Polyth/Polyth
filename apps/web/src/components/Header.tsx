@@ -337,7 +337,7 @@ export default function Header() {
     setWorkspaceMode(next);
   };
 
-  // The fixed user menu uses the public profile reported by gh when available.
+  // Project activation only reads cached profile data and local remotes.
   // It remains a local account icon when GitHub is unavailable or unsigned-in.
   useEffect(() => {
     if (!project?.id) {
@@ -345,7 +345,7 @@ export default function Header() {
       return;
     }
     let stale = false;
-    void api.githubStatus(project.id).then((status) => {
+    void api.githubStatus(project.id, true).then((status) => {
       if (!stale) setGithubUser(status.authenticated ? status.user : null);
     });
     return () => { stale = true; };

@@ -4,7 +4,9 @@
 // destination, so the only field is the repository URL (plus an optional
 // name). Cloning onto an SSH host lives in the SSH source, whose server picker
 // and remote browser already point at the destination.
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { Project } from "@polyth/contracts";
+import type { WebPackageHost } from "@polyth/web-sdk";
 import { cloneProject } from "../../../apps/web/src/init.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { Button, TextInput } from "../../../apps/web/src/components/ui/index.ts";
@@ -20,7 +22,12 @@ const repoName = (url: string): string => {
   return tail;
 };
 
+interface GitProjectSourceProps extends Record<string, unknown> {
+  host: WebPackageHost;
+}
+
 interface HostContext {
+  host: WebPackageHost;
   busy: boolean;
   browsedPath: string;
   armedId: string | null;
@@ -29,8 +36,9 @@ interface HostContext {
   onProjectOpened?: () => void;
 }
 
-function readContext(props: Record<string, unknown>): HostContext {
+function readContext(props: GitProjectSourceProps): HostContext {
   return {
+    host: props.host as WebPackageHost,
     busy: props.busy === true,
     browsedPath: typeof props.browsedPath === "string" ? props.browsedPath : "",
     armedId: typeof props.armedId === "string" ? props.armedId : null,
@@ -49,6 +57,12 @@ function CloneInlinePanel({ ctx, onCancel }: { ctx: HostContext; onCancel: () =>
   const [name, setName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const configure = useRef(new Map<string, (projectId: string) => Promise<void>>());
+  const [created, setCreated] = useState<Project | null>(null);
+  const onConfigure = useCallback((id: string, callback?: (projectId: string) => Promise<void>) => {
+    if (callback) configure.current.set(id, callback);
+    else configure.current.delete(id);
+  }, []);
 
   const busy = submitting || ctx.busy;
 
@@ -61,11 +75,13 @@ function CloneInlinePanel({ ctx, onCancel }: { ctx: HostContext; onCancel: () =>
     setSubmitting(true);
     setError("");
     try {
-      await cloneProject({
+      const project: Project = created ?? await cloneProject({
         repository: repository.trim(),
         parentPath,
         ...(name.trim() ? { name: name.trim() } : {}),
       });
+      setCreated(project);
+      for (const callback of configure.current.values()) await callback(project.id);
       ctx.onProjectOpened?.();
     } catch (cause) {
       setError(message(cause));
@@ -88,9 +104,9 @@ function CloneInlinePanel({ ctx, onCancel }: { ctx: HostContext; onCancel: () =>
         <TextInput
           autoFocus
           value={repository}
-          placeholder="https://github.com/org/repo.git"
+          placeholder="https://git.example.com/group/repo.git"
           spellCheck={false}
-          disabled={busy}
+          disabled={busy || !!created}
           onChange={(event) => setRepository(event.target.value)}
           onKeyDown={(event) => { if (event.key === "Enter" && !event.ctrlKey && !event.metaKey) void submit(); }}
         />
@@ -102,7 +118,7 @@ function CloneInlinePanel({ ctx, onCancel }: { ctx: HostContext; onCancel: () =>
           value={name}
           placeholder={repoName(repository) || "repo"}
           spellCheck={false}
-          disabled={busy}
+          disabled={busy || !!created}
           onChange={(event) => setName(event.target.value)}
         />
       </label>
@@ -112,12 +128,17 @@ function CloneInlinePanel({ ctx, onCancel }: { ctx: HostContext; onCancel: () =>
         <code className="mono">{ctx.browsedPath || "…"}</code>
       </p>
 
+      <ctx.host.ui.Slot slot="project.repository.options" context={{
+        repository,
+        onConfigure,
+      }} />
+
       {error && <div className="form-error folder-error" role="alert">{error}</div>}
 
       <div className="folder-source-actions">
         <Button size="sm" variant="ghost" disabled={busy} onClick={onCancel}>{tr("common.cancel")}</Button>
         <Button size="sm" variant="primary" busy={submitting} disabled={!canSubmit} onClick={() => void submit()}>
-          {tr("gitprojectsource.cloneRepository")}
+          {created ? tr("common.retry") : tr("gitprojectsource.cloneRepository")}
         </Button>
       </div>
     </div>
@@ -125,7 +146,7 @@ function CloneInlinePanel({ ctx, onCancel }: { ctx: HostContext; onCancel: () =>
 }
 
 export default function GitProjectSource(props: Record<string, unknown>) {
-  const ctx = readContext(props);
+  const ctx = readContext(props as GitProjectSourceProps);
   const [open, setOpen] = useState(false);
   const chipRef = useRef<HTMLButtonElement>(null);
   const armRef = useRef(ctx.arm);

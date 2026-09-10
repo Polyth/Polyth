@@ -14,7 +14,7 @@ const css = [
   "../../../apps/web/src/tokens.css",
   "../../../apps/web/src/styles.css",
   "../widgets/styles.css",
-  "../../github/widgets/styles.css",
+  "../../code-hosting/widgets/styles.css",
   "../../files/widgets/styles.css",
 ].map((path) => readFileSync(new URL(path, import.meta.url), "utf8")).join("\n");
 let browser: Browser | null = null;

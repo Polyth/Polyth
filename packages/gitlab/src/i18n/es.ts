@@ -1,0 +1,2 @@
+import type { GitlabMessageKey } from "./en.ts";
+export const es: Partial<Record<GitlabMessageKey, string>> = { title: "GitLab", connected: "{count} cuentas", notConnected: "No conectado", description: "Incidencias, solicitudes de fusión y pipelines", check: "Comprobar", remove: "Eliminar", instance: "Instancia de GitLab", username: "Nombre de usuario", authentication: "Autenticación", addAccount: "Añadir cuenta", connect: "Conectar", manage: "Gestionar cuentas…" };

@@ -8,6 +8,7 @@
     "./next-action": "./src/nextAction.ts"
   },
   "dependencies": {
-    "@polyth/contracts": "0.1.0"
+    "@polyth/contracts": "0.1.0",
+    "@polyth/code-hosting": "0.1.0"
   }
 }

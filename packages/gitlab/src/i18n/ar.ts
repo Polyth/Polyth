@@ -1,0 +1,2 @@
+import type { GitlabMessageKey } from "./en.ts";
+export const ar: Partial<Record<GitlabMessageKey, string>> = { title: "GitLab", connected: "{count} حساب", notConnected: "غير متصل", description: "المشكلات وطلبات الدمج وخطوط الأنابيب", check: "تحقق", remove: "إزالة", instance: "مثيل GitLab", username: "اسم المستخدم", authentication: "المصادقة", addAccount: "إضافة حساب", connect: "اتصال", manage: "إدارة الحسابات…" };

@@ -15,6 +15,7 @@ import files from "../../../packages/files/src/serverEntry.ts";
 import editor from "../../../packages/editor/src/serverEntry.ts";
 import fusion from "../../../packages/fusion/src/serverEntry.ts";
 import git from "../../../packages/git/src/serverEntry.ts";
+import gitlab from "../../../packages/gitlab/src/serverEntry.ts";
 import github from "../../../packages/github/src/serverEntry.ts";
 import goals from "../../../packages/goals/src/serverEntry.ts";
 import homeAssistant from "../../../packages/home-assistant/src/serverEntry.ts";
@@ -76,6 +77,7 @@ export const desktopServerPackages = [
   entry("files", { name: "Files", description: "Workspace file access and attachments.", core: true, enabled: true, hasSettings: false }, files),
   entry("fusion", { name: "Fusion", description: "Synthesize multiple model responses.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⧉", hasSettings: false }, fusion),
   entry("git", { name: "Git", description: "Source control status, diffs, commits, and worktrees.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⎇", hasSettings: true }, git),
+  entry("gitlab", { name: "GitLab", description: "GitLab issues, merge requests and pipelines.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⎇", hasSettings: false }, gitlab),
   entry("github", { name: "GitHub", description: "GitHub pull request and check integration.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⎇", hasSettings: false }, github),
   entry("goals", { name: "Goals", description: "Goal tracking and completion audits.", core: false, enabled: true, settingsGroup: "Workspace", icon: "◎", hasSettings: false }, goals),
   entry("handoff", { name: "Handoff", description: "Build context bundles and import chat results into Polyth sessions.", core: false, enabled: true, settingsGroup: "Workspace", icon: "⇄", hasSettings: false }, handoff),

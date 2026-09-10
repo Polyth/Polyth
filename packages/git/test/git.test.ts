@@ -90,7 +90,10 @@ test("repository clone URLs accept GitHub/GitLab HTTP and SSH forms only", async
   ]) assert.equal(normalizeRepositoryUrl(value), value);
   assert.throws(() => normalizeRepositoryUrl("https://github.com/acme/app.git?token=secret"), /URL/);
   assert.throws(() => normalizeRepositoryUrl("https://user:secret@github.com/acme/app.git"), /without credentials/);
-  assert.throws(() => normalizeRepositoryUrl("https://example.com/acme/app.git"), /GitHub or GitLab/);
+  assert.equal(normalizeRepositoryUrl("https://git.company.example/group/subgroup/app.git"), "https://git.company.example/group/subgroup/app.git");
+  assert.equal(normalizeRepositoryUrl("git@git.company.example:group/subgroup/app.git"), "git@git.company.example:group/subgroup/app.git");
+  assert.throws(() => normalizeRepositoryUrl("file:///etc/passwd"), /URL/);
+  assert.throws(() => normalizeRepositoryUrl("ext::sh -c bad"), /URL/);
 });
 
 test("remote clone quotes the URL and registers the repository folder", async () => {

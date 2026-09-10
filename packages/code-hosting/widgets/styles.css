@@ -1194,3 +1194,10 @@ width: 100%;
   display: inline-grid; place-items: center; min-width: 20px; height: 20px;
   border-radius: var(--radius-round); background: var(--surface-overlay-strong); color: var(--muted); font-size: var(--font-meta);
 }
+
+.hosting-integration { border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3); margin-block: var(--space-3); min-width: 0; }
+.hosting-integration summary { display: flex; justify-content: space-between; gap: var(--space-2); cursor: pointer; }
+
+.hosting-access { color: var(--muted); font-size: var(--font-meta); }
+.hosting-access dl > div { display: flex; justify-content: space-between; gap: var(--space-2); flex-wrap: wrap; }
+.hosting-access dd { margin: 0; }
