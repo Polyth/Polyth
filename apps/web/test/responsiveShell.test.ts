@@ -287,8 +287,6 @@ test("Focus uses compact mobile composer controls without editor chrome", async 
   assert.ok(permissions.includes("icon: ShieldIcon"), "Focus exposes the auto-approve shield");
   assert.ok(goals.includes("icon={TargetIcon}"), "Focus exposes the goals target");
   assert.ok(composer.includes("<Icon.send />"), "Focus uses a paper-plane send icon");
-  const css = await read("../src/styles.css");
-  assert.ok(css.includes(".composer-agent-chip .chip-k { display: none; }"), "technical picker keys are hidden");
   const dictationCss = await read("../../../packages/dictation/widgets/styles.css");
   assert.ok(dictationCss.includes('body[data-dictate="false"] .mic-control .mic-btn'),
     "the package-owned microphone can be hidden without suppressing other slot items");

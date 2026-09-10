@@ -115,6 +115,8 @@ export const zhCN: ModelsMessages = {
   "settings.modelspage.noMatches": "无结果",
   "settings.modelspage.noModelsAvailable": "暂无可用型号",
   "settings.modelspage.noModelsYet": "No models yet — discover them or add one manually.",
+  "settings.modelspage.noProvidersYet": "还没有提供商",
+  "settings.modelspage.noProvidersHint": "使用“添加提供商”进行连接，模型将显示在此处。",
   "settings.modelspage.oauthMethod": "OAuth",
   "settings.modelspage.openLoginPage": "打开登录页面",
   "settings.modelspage.orApiKey": "或使用 API 密钥",

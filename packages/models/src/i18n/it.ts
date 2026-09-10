@@ -115,6 +115,8 @@ export const it: ModelsMessages = {
   "settings.modelspage.noMatches": "Nessuna partita",
   "settings.modelspage.noModelsAvailable": "Nessun modello disponibile",
   "settings.modelspage.noModelsYet": "No models yet — discover them or add one manually.",
+  "settings.modelspage.noProvidersYet": "Nessun provider ancora",
+  "settings.modelspage.noProvidersHint": "Usa «Aggiungi provider» per connetterne uno. I suoi modelli appariranno qui.",
   "settings.modelspage.oauthMethod": "OAuth",
   "settings.modelspage.openLoginPage": "Apri la pagina di accesso",
   "settings.modelspage.orApiKey": "Oppure usa una chiave API",

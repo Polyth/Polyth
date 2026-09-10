@@ -115,6 +115,8 @@ export const ptBR: ModelsMessages = {
   "settings.modelspage.noMatches": "Sem resultados",
   "settings.modelspage.noModelsAvailable": "Nenhum modelo disponível",
   "settings.modelspage.noModelsYet": "No models yet — discover them or add one manually.",
+  "settings.modelspage.noProvidersYet": "Ainda não há provedores",
+  "settings.modelspage.noProvidersHint": "Use «Adicionar provedor» para conectar um. Os modelos aparecerão aqui.",
   "settings.modelspage.oauthMethod": "OAuth",
   "settings.modelspage.openLoginPage": "Abrir página de login",
   "settings.modelspage.orApiKey": "Ou use uma chave de API",

@@ -115,6 +115,8 @@ export const ar: ModelsMessages = {
   "settings.modelspage.noMatches": "لا توجد نتائج",
   "settings.modelspage.noModelsAvailable": "لا توجد نماذج متاحة",
   "settings.modelspage.noModelsYet": "No models yet — discover them or add one manually.",
+  "settings.modelspage.noProvidersYet": "لا يوجد مزودون بعد",
+  "settings.modelspage.noProvidersHint": "استخدم «إضافة مزود» للاتصال. ستظهر النماذج هنا.",
   "settings.modelspage.oauthMethod": "OAuth",
   "settings.modelspage.openLoginPage": "فتح صفحة تسجيل الدخول",
   "settings.modelspage.orApiKey": "أو استخدم مفتاح API",

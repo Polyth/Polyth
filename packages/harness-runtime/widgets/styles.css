@@ -37,6 +37,7 @@
 .pkg-harnesses-command-review { display: grid; gap: var(--space-3); }
 .pkg-harnesses-command-review pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: var(--space-3); border-radius: var(--radius-control); background: var(--sunken); font: var(--font-technical) var(--mono); }
 .pkg-harnesses-tabs { display: flex; flex-wrap: wrap; gap: var(--space-1); border-block-end: 1px solid var(--border-soft); padding-block-end: var(--space-2); }
+.pkg-harnesses.pkg-harnesses-detail { min-width: 0; min-height: 0; }
 .pkg-harnesses-overview { display: grid; gap: var(--space-4); }
 .pkg-harnesses-overview dl, .pkg-harnesses-switch-marker dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-2) var(--space-4); margin: 0; }
 .pkg-harnesses-overview dt, .pkg-harnesses-switch-marker dt { color: var(--muted); }

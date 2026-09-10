@@ -115,6 +115,8 @@ export const de: ModelsMessages = {
   "settings.modelspage.noMatches": "Keine Treffer",
   "settings.modelspage.noModelsAvailable": "Keine Modelle verfügbar",
   "settings.modelspage.noModelsYet": "No models yet — discover them or add one manually.",
+  "settings.modelspage.noProvidersYet": "Noch keine Provider",
+  "settings.modelspage.noProvidersHint": "Fügen Sie einen Provider hinzu, um dessen Modelle hier zu sehen.",
   "settings.modelspage.oauthMethod": "OAuth",
   "settings.modelspage.openLoginPage": "Anmeldeseite öffnen",
   "settings.modelspage.orApiKey": "Oder einen API-Schlüssel verwenden",

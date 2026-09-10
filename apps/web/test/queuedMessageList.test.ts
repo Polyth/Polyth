@@ -92,6 +92,80 @@ const click = (element: HTMLElement) =>
 const drag = (element: HTMLElement, type: string) =>
   element.dispatchEvent(new Event(type, { bubbles: true, cancelable: true }));
 
+test("late queue reads cannot resurrect a dispatched row", async () => {
+  const originalFetch = globalThis.fetch;
+  let release!: (value: ReturnType<typeof response>) => void;
+  let reads = 0;
+  globalThis.fetch = (async () => {
+    if (++reads === 1) return new Promise((resolve) => { release = resolve; });
+    return response([]);
+  }) as typeof fetch;
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(createElement(QueuedMessageList, {
+      sessionId: "s1", onItemsChange() {},
+    })));
+    await act(async () => root.render(createElement(QueuedMessageList, {
+      sessionId: "s1", onItemsChange() {},
+    })));
+    await act(async () => { release(response(items)); });
+    assert.equal(container.querySelectorAll(".queue-chip").length, 0);
+  } finally {
+    await act(async () => root.unmount());
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("same-tick double clicks promote a queued row only once", async () => {
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  let calls = 0;
+  let release!: () => void;
+  try {
+    await act(async () => root.render(createElement(QueuedMessageList, {
+      sessionId: "s1",
+      onSteer: async () => {
+        calls++;
+        await new Promise<void>((resolve) => { release = resolve; });
+      },
+    })));
+    const button = container.querySelector<HTMLElement>(".queue-steer")!;
+    await act(async () => { click(button); click(button); });
+    assert.equal(calls, 1);
+    await act(async () => { release(); });
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
+test("delete of an already dispatched row resyncs without an unhandled error", async () => {
+  const originalFetch = globalThis.fetch;
+  let removed = false;
+  let deletes = 0;
+  globalThis.fetch = (async (_input, init) => {
+    if (init?.method === "DELETE") {
+      deletes++;
+      removed = true;
+      return { ...response({ error: "not-found", message: "queue item not found" }), ok: false, status: 404 };
+    }
+    return response(removed ? [] : items);
+  }) as typeof fetch;
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(createElement(QueuedMessageList, { sessionId: "s1" })));
+    const button = container.querySelector<HTMLElement>(".queue-remove")!;
+    await act(async () => { click(button); click(button); });
+    assert.equal(deletes, 1);
+    assert.equal(container.querySelectorAll(".queue-chip").length, 0);
+    assert.equal(container.querySelector('[role="alert"]'), null);
+  } finally {
+    await act(async () => root.unmount());
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("moveQueuedItem preserves metadata while assigning the new positions", () => {
   const reordered = moveQueuedItem(items, "q1", "q3");
   assert.deepEqual(reordered.map((item) => item.id), ["q2", "q3", "q1"]);

@@ -115,6 +115,8 @@ export const uk: ModelsMessages = {
   "settings.modelspage.noMatches": "Нічого не знайдено",
   "settings.modelspage.noModelsAvailable": "Немає доступних моделей",
   "settings.modelspage.noModelsYet": "Моделей ще немає — виявіть їх або додайте вручну.",
+  "settings.modelspage.noProvidersYet": "Ще немає провайдерів",
+  "settings.modelspage.noProvidersHint": "Натисніть «Додати провайдера», щоб підключити його. Моделі з’являться тут.",
   "settings.modelspage.oauthMethod": "OAuth",
   "settings.modelspage.openLoginPage": "Відкрити сторінку входу",
   "settings.modelspage.orApiKey": "Або скористайтеся ключем API",

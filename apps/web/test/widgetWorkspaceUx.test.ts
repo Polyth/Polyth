@@ -127,7 +127,7 @@ test("critic-reported mobile controls use 44px hit boxes", async () => {
     ["drag handle", /\.widget-drag-handle,[\s\S]*?\{[^}]*height:\s*var\(--tap\)/s],
     ["settings checkbox", /\.widget-order-chip input\[type="checkbox"\]\s*\{[^}]*height:\s*var\(--tap\)/s],
     ["file reference", /\.file-ref\s*\{[^}]*min-height:\s*var\(--tap\)/s],
-    // P2-W3A: model, agent, and effort share one config-chip touch contract.
+    // P2-W3A: model and effort share one config-chip touch contract.
     ["config chips", /\.composer-mobile \.composer-config \.config-chip,[\s\S]*?\.composer-mobile \.composer-config \.picker-chip\s*\{[^}]*min-height:\s*var\(--tap\)/s],
   ] as const) {
     assert.match(css, pattern, `${name} uses the shared 44px target`);

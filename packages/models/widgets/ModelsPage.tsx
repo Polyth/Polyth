@@ -19,7 +19,7 @@ import {
   type ProviderCatalogDto,
   type VisibilityStateDto,
 } from "@polyth/session/web-api";
-import { EmptyState, PageHead, Toggle } from "../../../apps/web/src/components/settings/parts.tsx";
+import { Toggle } from "../../../apps/web/src/components/settings/parts.tsx";
 import { modelDisplayName } from "../../../apps/web/src/composer/discovery.ts";
 import Picker from "../../../apps/web/src/components/Picker.tsx";
 import { confirmAlert } from "../../../apps/web/src/alerts.ts";
@@ -35,7 +35,9 @@ import {
   FavoriteIcon,
   Icon,
   IconButton,
+  Notice,
   RefreshIcon,
+  Spinner,
   Switch,
   TextInput,
 } from "../../../apps/web/src/components/ui/index.ts";
@@ -258,17 +260,20 @@ export default function ModelsPage() {
   );
 
   if (providers === null && !error) {
-    return <div className="models-page"><PageHead title={tr("settings.modelspage.providersModels")} /><EmptyState title={tr("settings.modelspage.loadingCatalog")} busy /></div>;
+    return (
+      <div className="models-page">
+        <p className="models-loading" role="status">
+          <Spinner label={tr("settings.modelspage.loadingCatalog")} />
+          {tr("settings.modelspage.loadingCatalog")}
+        </p>
+      </div>
+    );
   }
 
   const editing = customOpen?.id ? providers?.find((p) => p.id === customOpen.id) : undefined;
 
   return (
     <div className="models-page">
-      <PageHead
-        title={tr("settings.modelspage.providersModels")}
-        blurb={tr("settings.modelspage.whatTheModelPickerOffersTogglesAre")}
-      />
       <div className="models-toolbar" data-settings-item="models.catalog">
         <IconButton
           className="models-refresh"
@@ -312,17 +317,6 @@ export default function ModelsPage() {
           }}
         />
       </div>
-      <details
-        className="provider-org-login-wrap"
-        onToggle={(event) => { if (event.currentTarget.open) void loadProviderOptions(); }}
-      >
-        <summary>{tr("settings.modelspage.organizationLogin")}</summary>
-        {options.authCapabilities?.discovery?.status === "unavailable" ? (
-          <p className="muted">{tr("settings.modelspage.authManagedByDeployment")}</p>
-        ) : (
-          <OrganizationLogin onDone={() => { void refreshCatalog(); void loadProviderOptions({ force: true, quiet: true }); }} />
-        )}
-      </details>
 
       {error && <div className="form-error" role="alert">{error}</div>}
 
@@ -506,12 +500,22 @@ export default function ModelsPage() {
           );
         })}
         {providers?.length === 0 && (
-          <EmptyState
-            title={tr("settings.modelspage.noModelsAvailable")}
-            body={tr("settings.modelspage.checkThatTheBackendIsRunningAnd")}
-          />
+          <Notice heading={tr("settings.modelspage.noProvidersYet")}>
+            {tr("settings.modelspage.noProvidersHint")}
+          </Notice>
         )}
       </div>
+      <details
+        className="provider-org-login-wrap"
+        onToggle={(event) => { if (event.currentTarget.open) void loadProviderOptions(); }}
+      >
+        <summary>{tr("settings.modelspage.organizationLogin")}</summary>
+        {options.authCapabilities?.discovery?.status === "unavailable" ? (
+          <p className="muted">{tr("settings.modelspage.authManagedByDeployment")}</p>
+        ) : (
+          <OrganizationLogin onDone={() => { void refreshCatalog(); void loadProviderOptions({ force: true, quiet: true }); }} />
+        )}
+      </details>
       {customOpen && (
         <CustomProviderDialog
           existing={editing

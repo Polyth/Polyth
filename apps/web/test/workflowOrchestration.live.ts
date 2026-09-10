@@ -665,7 +665,7 @@ test("current compact navigation exposes Workflows on phones and tablets", async
   }
 });
 
-test("chat page load repairs a hidden workflow launcher placement", async () => {
+test("chat page load preserves a hidden workflow launcher placement", async () => {
   const staleLayout = JSON.stringify({
     version: 1,
     audience: "standard",
@@ -691,20 +691,14 @@ test("chat page load repairs a hidden workflow launcher placement", async () => 
   const composer = page.locator(".composer-simple");
   await composer.waitFor({ state: "visible" });
   const launcher = composer.locator(".composer-workflow");
-  assert.equal(await launcher.count(), 1, "chat must mount exactly one workflow launcher");
-  assert.equal(await launcher.getAttribute("aria-label"), "Run workflow");
-  assert.equal(await launcher.getAttribute("aria-haspopup"), "dialog");
+  assert.equal(await launcher.count(), 0, "a disabled workflow launcher stays out of Chat");
   const repaired = await page.evaluate(
     (key) => JSON.parse(localStorage.getItem(key) ?? "{}").widgets?.["workflow.composer-action"]?.visible,
     `polyth.widgetLayout.${PROJECT_ID}`,
   );
-  assert.equal(repaired, true, "page load repairs the stale hidden placement");
+  assert.equal(repaired, false, "page load preserves the disabled placement");
 
-  await composer.screenshot({ path: join(ARTIFACTS, "workflow_launcher_button_repaired.png") });
-  await launcher.click();
-  await page.getByRole("dialog", { name: "Run a workflow" }).waitFor({ state: "visible" });
-  await waitForAnimations(page, ".workflow-launch-dialog");
-  await page.screenshot({ path: join(ARTIFACTS, "workflow_launcher_hidden_layout_repaired.png") });
+  await composer.screenshot({ path: join(ARTIFACTS, "workflow_launcher_button_disabled.png") });
   await page.context().close();
 });
 
