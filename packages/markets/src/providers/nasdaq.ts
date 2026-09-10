@@ -12,6 +12,7 @@ import {
 } from "./http.ts";
 
 const ETFS = new Set(["SPY", "DIA", "QQQ", "GLD", "USO", "UUP", "IWM", "VTI", "TLT"]);
+const NASDAQ_SYMBOL = /^[A-Z][A-Z0-9-]{0,15}$/;
 const RANGE_DAYS: Record<MarketRange, number> = {
   "1D": 5,
   "5D": 10,
@@ -29,6 +30,12 @@ export interface NasdaqProviderOptions {
 }
 
 const date = (value: Date): string => value.toISOString().slice(0, 10);
+const miss = (message: string): never => {
+  throw Object.assign(new Error(message), { code: "not-found" });
+};
+const requireSupportedSymbol = (symbol: string): void => {
+  if (!NASDAQ_SYMBOL.test(symbol)) miss(`nasdaq: unsupported symbol ${symbol}`);
+};
 
 export function createNasdaqProvider(options: NasdaqProviderOptions = {}): MarketProvider {
   const fetchImpl = options.fetch ?? fetch;
@@ -43,7 +50,7 @@ export function createNasdaqProvider(options: NasdaqProviderOptions = {}): Marke
   const get = (url: string, signal: AbortSignal): Promise<unknown> => limit(async () => {
     const json = await fetchJson(fetchImpl, url, { headers, signal }, "nasdaq");
     const data = valueAt(json, "data");
-    if (data === undefined || data === null) throw new Error("nasdaq: missing data");
+    if (data === undefined || data === null) miss("nasdaq: missing data");
     return data;
   });
   const assetClass = (symbol: string): "stocks" | "etf" => ETFS.has(symbol) ? "etf" : "stocks";
@@ -51,6 +58,7 @@ export function createNasdaqProvider(options: NasdaqProviderOptions = {}): Marke
   return {
     id: "nasdaq",
     async quote(symbol, signal) {
+      requireSupportedSymbol(symbol);
       const kind = assetClass(symbol);
       const encoded = encodeURIComponent(symbol);
       const [info, summary] = await Promise.all([
@@ -58,7 +66,7 @@ export function createNasdaqProvider(options: NasdaqProviderOptions = {}): Marke
         get(`https://api.nasdaq.com/api/quote/${encoded}/summary?assetclass=${kind}`, signal).catch(() => undefined),
       ]);
       const price = numeric(valueAt(info, "primaryData", "lastSalePrice"));
-      if (price === undefined) throw new Error(`nasdaq: no quote for ${symbol}`);
+      if (price === undefined) miss(`nasdaq: no quote for ${symbol}`);
       const previousClose = numeric(valueAt(info, "primaryData", "previousClose"))
         ?? numeric(valueAt(summary, "summaryData", "PreviousClose", "value"));
       const change = numeric(valueAt(info, "primaryData", "netChange"));
@@ -87,6 +95,7 @@ export function createNasdaqProvider(options: NasdaqProviderOptions = {}): Marke
       };
     },
     async candles(symbol, range, signal) {
+      requireSupportedSymbol(symbol);
       const end = new Date(now());
       const start = new Date(end.getTime() - RANGE_DAYS[range] * 86_400_000);
       const data = await get(
@@ -94,7 +103,7 @@ export function createNasdaqProvider(options: NasdaqProviderOptions = {}): Marke
         signal,
       );
       const rows = valueAt(data, "chart");
-      if (!Array.isArray(rows)) throw new Error(`nasdaq: no chart for ${symbol}`);
+      if (!Array.isArray(rows)) miss(`nasdaq: no chart for ${symbol}`);
       const candles: MarketCandle[] = [];
       for (const raw of rows) {
         const row = record(raw);
@@ -114,7 +123,7 @@ export function createNasdaqProvider(options: NasdaqProviderOptions = {}): Marke
           ...(numeric(z?.volume) !== undefined ? { volume: numeric(z?.volume) } : {}),
         });
       }
-      if (candles.length === 0) throw new Error(`nasdaq: empty chart for ${symbol}`);
+      if (candles.length === 0) miss(`nasdaq: empty chart for ${symbol}`);
       return {
         symbol,
         range,
@@ -125,12 +134,13 @@ export function createNasdaqProvider(options: NasdaqProviderOptions = {}): Marke
       };
     },
     async earnings(symbol, signal) {
+      requireSupportedSymbol(symbol);
       const data = await get(
         `https://api.nasdaq.com/api/company/${encodeURIComponent(symbol)}/earnings-surprise`,
         signal,
       );
       const rows = valueAt(data, "earningsSurpriseTable", "rows");
-      if (!Array.isArray(rows)) throw new Error(`nasdaq: no earnings history for ${symbol}`);
+      if (!Array.isArray(rows)) miss(`nasdaq: no earnings history for ${symbol}`);
       const earnings: MarketEarningsSurprise[] = [];
       for (const raw of rows) {
         const row = record(raw);
@@ -157,7 +167,7 @@ export function createNasdaqProvider(options: NasdaqProviderOptions = {}): Marke
           source: "nasdaq",
         });
       }
-      if (earnings.length === 0) throw new Error(`nasdaq: empty earnings history for ${symbol}`);
+      if (earnings.length === 0) miss(`nasdaq: empty earnings history for ${symbol}`);
       return earnings;
     },
   };
