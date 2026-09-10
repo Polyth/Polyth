@@ -170,6 +170,36 @@ test("release evidence is fenced to the exact authority generation", { skip: pro
     await authority.close();
     await rm(dir, { recursive: true, force: true });
 });
+test("an uncertain legacy release records the boot recovery boundary", { skip: process.platform !== "linux" }, async () => {
+    const dir = await mkdtemp(join(tmpdir(), "authority-legacy-release-"));
+    const file = join(dir, "state.json");
+    await writeFile(file, JSON.stringify({
+        authorityId: "old-authority",
+        generation: 7,
+        pid: process.pid,
+        startTime: "not-this-process",
+        receiptFile: `${file}.old-authority.7.released`,
+        receipts: {},
+        releasedAuthorities: [],
+    }));
+    const outcome = await releaseProcessExecution(file, {
+        canonicalSessionId: "canonical",
+        backendSessionId: "native-session",
+        authorityId: "old-authority",
+        generation: 7,
+        continuity: "generation-only",
+        location: { directory: dir },
+    }, "release-op");
+    assert.equal(outcome.kind, "unknown");
+    const observed = JSON.parse(await readFile(file, "utf8")) as {
+        legacyRecoveryBootId?: string;
+    };
+    assert.equal(
+        observed.legacyRecoveryBootId,
+        (await readFile("/proc/sys/kernel/random/boot_id", "utf8")).trim(),
+    );
+    await rm(dir, { recursive: true, force: true });
+});
 test("stdio receipts survive restart; release kills the owned worker and its detached tool child", { skip: process.platform !== "linux" }, async () => {
     const dir = await mkdtemp(join(tmpdir(), "rpc-"));
     const file = join(dir, "state.json");
@@ -336,12 +366,51 @@ test("legacy authorities still block replacement when no containment can prove r
             createProcessAuthority(file, false, undefined, { containment: false }),
             { code: "outcome-unknown" },
         );
+        const observed = JSON.parse(await readFile(file, "utf8")) as {
+            legacyRecoveryBootId?: string;
+        };
+        assert.equal(
+            observed.legacyRecoveryBootId,
+            (await readFile("/proc/sys/kernel/random/boot_id", "utf8")).trim(),
+        );
+        await assert.rejects(
+            createProcessAuthority(file, false, undefined, { containment: false }),
+            { code: "outcome-unknown" },
+        );
     } finally {
         try {
             process.kill(nativePid, "SIGKILL");
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
         }
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test("a later host boot releases a previously observed legacy authority", { skip: process.platform !== "linux" }, async () => {
+    const dir = await mkdtemp(join(tmpdir(), "rpc-legacy-boot-proof-"));
+    const file = join(dir, "state.json");
+    const receiptFile = `${file}.old-authority.7.released`;
+    await writeFile(file, JSON.stringify({
+        authorityId: "old-authority",
+        generation: 7,
+        pid: process.pid,
+        startTime: "not-this-process",
+        receiptFile,
+        receipts: {},
+        releasedAuthorities: [],
+        legacyRecoveryBootId: "00000000-0000-0000-0000-000000000000",
+    }));
+    try {
+        const next = await createProcessAuthority(file, false, undefined, { containment: false });
+        assert.deepEqual(JSON.parse(await readFile(receiptFile, "utf8")), {
+            authorityId: "old-authority",
+            generation: 7,
+        });
+        assert.equal(next.generation, 8);
+        await next.close();
+    }
+    finally {
         await rm(dir, { recursive: true, force: true });
     }
 });
