@@ -4,7 +4,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createWorkflowService, layerize } from "../src/index.ts";
-import { createWorkflowSampleSeeder, WORKFLOW_SAMPLES } from "../src/samples.ts";
+import { WORKFLOW_SAMPLES } from "../src/sampleCatalog.ts";
+import { createWorkflowSampleSeeder } from "../src/samples.ts";
 
 const serviceIn = (dir: string) => createWorkflowService({
   file: join(dir, "workflows.json"),
