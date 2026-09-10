@@ -118,6 +118,34 @@ test("cold discovery probes dependent thinking controls per model", async () => 
     ]);
 });
 
+test("cold discovery probes models whose thinking levels appear only once selected", async () => {
+    invalidateAcpDiscovery();
+    // A fresh session that advertises no thought_level proves nothing about the
+    // models it is not currently on: this agent adds the control on selection.
+    const modelOnlySession = {
+        ...configOptionsSession,
+        configOptions: configOptionsSession.configOptions.filter((option) => option.category !== "thought_level"),
+    };
+    const result = await discoverAcpModels({
+        harnessId: "acp",
+        version: "late-thought-level",
+        authFingerprint: "true",
+        probe: {
+            async open() {
+                return {
+                    result: modelOnlySession,
+                    async setConfigOption(_id: string, value: string) { return sessionConfigAt(value, "medium"); },
+                    close: async () => {},
+                };
+            },
+        },
+    });
+    assert.deepEqual(result.state === "ready" ? result.models.map((model) => model.variants) : [], [
+        undefined,
+        ["low", "medium", "high"],
+    ]);
+});
+
 test("the legacy models block becomes the same canonical catalog", async () => {
     const { rt } = await startedRuntime(legacySession);
     assert.deepEqual((await rt.models!()).map((model) => model.modelID), ["legacy-a", "legacy-b"]);
