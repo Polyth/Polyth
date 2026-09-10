@@ -11,6 +11,7 @@ type Catalog = {
   nativeDefault: boolean;
   ready: boolean;
   harnessId?: string;
+  harnessName?: string;
   /** Why the model list looks the way it does, for honest composer copy. */
   discovery: ModelDiscoveryState;
 };
@@ -137,6 +138,7 @@ export function useRuntimeCatalog(
             nativeDefault: !reason && (catalog?.models === undefined || catalog.models.length === 0),
             ready: true,
             harnessId,
+            harnessName: snapshot.identity.name,
             discovery: catalogModels.length > 0
               ? { state: "available" }
               : reason

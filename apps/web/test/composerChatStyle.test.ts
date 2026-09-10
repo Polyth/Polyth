@@ -35,8 +35,18 @@ test("spawning is an above-composer activity status and never replaces the compo
   const composer = read("../src/components/Composer.tsx");
 
   assert.match(surface, /function SessionSpawnStatus\(\)[\s\S]*spawningAgent[\s\S]*<AgentStatusDock/);
+  assert.match(surface, /ProviderLogo providerID=\{harnessId\}[\s\S]*model=\{harnessLabel\}/);
   assert.doesNotMatch(composer, /if \(creatingSession\)\s*\{\s*return/);
   assert.match(composer, /aria-busy=\{creatingSession \|\| undefined\}/);
+  assert.match(composer, /!session && !creatingSession && <SessionContextBar/);
+});
+
+test("agent status docks center their content with token spacing", () => {
+  const css = read("../src/styles.css");
+
+  assert.match(css, /\.agent-status-dock\s*\{[^}]*align-items:\s*center;[^}]*padding:\s*var\(--space-3\) var\(--space-4\)/s);
+  assert.match(css, /\.agent-status-dock-icon\s*\{[^}]*place-items:\s*center;[^}]*width:\s*var\(--icon-xl\)/s);
+  assert.doesNotMatch(css, /\.agent-status-dock-icon\s*\{[^}]*margin-block-start:/s);
 });
 
 test("composer radius uses the shared corner setting", () => {

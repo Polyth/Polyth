@@ -1353,7 +1353,13 @@ export default function Composer({
     if (target) {
       void deliver(target);
     } else if (activeProjectId) {
-      const spawnRequestId = beginSessionSpawn(activeProjectId);
+      const spawnHarnessId = creationHarness?.mode === "pinned"
+        ? creationHarness.harnessId
+        : catalogHarnessId ?? modelHarnessId;
+      const spawnRequestId = beginSessionSpawn(activeProjectId, {
+        ...(spawnHarnessId ? { harnessId: spawnHarnessId } : {}),
+        ...(routeCatalog.harnessName ? { harnessName: routeCatalog.harnessName } : {}),
+      });
       void (async () => {
         let created: string;
         if (newSessionTarget.kind === "new-worktree") {
@@ -1434,6 +1440,7 @@ export default function Composer({
     session?.model, session?.status, session?.runtimeControl, preferredModel,
     sessionDefaults.defaultThinking, chatModels, creatingSession, newSessionTarget,
     newSessionAutoApprove, newSessionGoal, newSessionIntent, commandCatalog,
+    catalogHarnessId, routeCatalog.harnessName,
     draftExecution, profiles, activeProject?.defaults?.harness,
   ]);
 
@@ -1996,7 +2003,7 @@ export default function Composer({
       {/* The project/worktree pickers only make sense before a session exists:
           in an open session the location is fixed, and picking here silently
           switched project or spawned a new session instead of retargeting. */}
-      {!session && <SessionContextBar {...contextBar} />}
+      {!session && !creatingSession && <SessionContextBar {...contextBar} />}
       {/* Widget-areas (WA4): the project/branch meta row is a widget area. */}
       <SlotHost slot="composer.meta" context={slotContext} customizable />
       {failedSend && (

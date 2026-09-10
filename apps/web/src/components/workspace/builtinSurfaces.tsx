@@ -39,6 +39,7 @@ import {
 import { tr } from "../../i18n/index.ts";
 import { AgentStatusDock, Button } from "../ui/index.ts";
 import { resolveSessionStatus } from "../../sessionStatus.ts";
+import ProviderLogo from "../../../../../packages/models/widgets/ProviderLogo.tsx";
 
 const NOOP_STARTER = (_prompt: string, _id?: string): void => {};
 
@@ -223,13 +224,24 @@ function SessionLoading() {
  * zone as an active run. The composer stays mounted and usable for the next
  * draft; the transient status never impersonates the input itself. */
 function SessionSpawnStatus() {
+  const spawn = useStore((state) => state.sessionSpawn);
   const status = tr("workspace.builtinsurfaces.spawningAgent");
+  const harnessId = spawn?.harnessId;
+  const harnessName = spawn?.harnessName?.trim() || harnessId
+    ?.split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) => part[0]!.toUpperCase() + part.slice(1))
+    .join(" ")
+    || tr("timeline.agent");
+  const harnessLabel = `${harnessName} harness`;
   return (
     <AgentStatusDock
-      icon={<Icon.session />}
-      model={tr("timeline.agent")}
+      icon={harnessId
+        ? <ProviderLogo providerID={harnessId} providerName={harnessName} size="regular" />
+        : <Icon.session />}
+      model={harnessLabel}
       status={status}
-      label={status}
+      label={`${harnessLabel}: ${status}`}
     />
   );
 }

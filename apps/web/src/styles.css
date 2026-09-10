@@ -11967,9 +11967,9 @@ html[data-font] body :is(
   margin-inline: auto;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: start;
+  align-items: center;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-4);
   color: var(--text-dim);
   text-align: start;
   cursor: pointer;
@@ -11984,7 +11984,7 @@ html[data-font] body :is(
 .agent-status-dock:not(.agent-status-dock--status):hover { background: var(--elevated); color: var(--text); }
 .agent-status-dock:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .agent-status-dock--status { cursor: default; }
-.agent-status-dock-icon { position: relative; display: grid; place-items: center; width: var(--icon-xl); height: var(--icon-xl); margin-block-start: var(--space-1); }
+.agent-status-dock-icon { position: relative; display: grid; place-items: center; width: var(--icon-xl); height: var(--icon-xl); }
 .agent-status-dock-icon > i { position: absolute; inset-inline-end: 0; inset-block-end: 0; width: var(--space-2); height: var(--space-2); border: 2px solid var(--surface); border-radius: 50%; background: var(--green); animation: status-pulse 1.8s ease-in-out infinite; }
 .agent-status-dock-content { min-width: 0; display: grid; gap: var(--space-1); }
 .agent-status-dock-primary { min-width: 0; display: flex; align-items: center; gap: var(--space-2); }
@@ -11992,7 +11992,7 @@ html[data-font] body :is(
 .agent-status-dock-state { min-width: 0; overflow: hidden; color: var(--text-dim); font-size: var(--font-label); text-overflow: ellipsis; white-space: nowrap; }
 .agent-status-dock-secondary { min-width: 0; display: flex; align-items: center; gap: var(--space-2); overflow: hidden; color: var(--muted); font-size: var(--font-response-meta); }
 .agent-status-dock-diff { display: inline-flex; align-items: center; gap: var(--space-2); white-space: nowrap; }
-.agent-status-dock-time { color: var(--muted); font-size: var(--font-response-meta); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.agent-status-dock-time { align-self: center; color: var(--muted); font-size: var(--font-response-meta); font-variant-numeric: tabular-nums; white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .agent-status-dock::after { animation: none; } }
 
 .msg.assistant > .bubble {
