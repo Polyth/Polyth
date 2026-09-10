@@ -22,6 +22,16 @@ export {
   type ProviderHealth,
   type ProviderRegistryOptions,
 } from "./providers.ts";
+export {
+  BINANCE_CRYPTO_ASSETS,
+  createBinanceProvider,
+  type BinanceProviderOptions,
+} from "./providers/binance.ts";
+export {
+  createFredProvider,
+  parseFredCsv,
+  type FredProviderOptions,
+} from "./providers/fred.ts";
 export { createNasdaqProvider, type NasdaqProviderOptions } from "./providers/nasdaq.ts";
 export {
   createGoogleNewsProvider,
@@ -54,6 +64,9 @@ export type {
   MarketEarningsSurprise,
   MarketFiling,
   MarketFundamentals,
+  MarketMacroIndicator,
+  MarketMacroSnapshot,
+  MarketMacroUnit,
   MarketNewsItem,
   MarketPerformance,
   MarketProviderCapability,
