@@ -49,7 +49,7 @@ export interface ModuleViewProps {
    * geometry; they only declare supported capabilities at registration. */
   onTogglePin?: () => void;
   /** Package-declared pinned edges. When present, these replace the generic
-   * pin toggle with one header action per supported edge. */
+   *  pin toggle with one header action per supported edge. */
   dockActions?: readonly ModuleDockAction[];
   onToggleFullscreen?: () => void;
   pinned?: boolean;
@@ -117,7 +117,7 @@ export default function ModuleView(props: ModuleViewProps): ReactNode {
         icon ? createElement("span", { key: "icon", className: "module-view-icon", "aria-hidden": true }, icon) : null,
         createElement(
           "div",
-          { key: "heading", className: "module-view-heading", ...headingProps },
+          { key: "heading", className: "module-view-heading", ...(!phone ? headingProps : {}) },
           createElement("h1", { className: "module-view-title", tabIndex: -1, title }, title),
           description
             ? createElement("p", { className: "module-view-desc" }, description)
