@@ -62,7 +62,7 @@ export const WORKFLOW_SAMPLES: readonly WorkflowSample[] = [
     ],
     defaults: {
       pipe: "ancestors",
-      permissions: "auto",
+      permissions: "manual",
       maxParallel: 2,
       nodeTimeoutMs: 1_800_000,
     },
