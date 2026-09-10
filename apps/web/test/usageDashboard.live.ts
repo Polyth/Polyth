@@ -19,6 +19,7 @@ const chromiumCandidates = [
   "/usr/bin/chromium-browser",
   "/usr/bin/google-chrome",
   "/usr/bin/google-chrome-stable",
+  "/snap/bin/chromium",
 ].filter((path): path is string => typeof path === "string");
 
 let browser: Browser;
@@ -64,7 +65,11 @@ async function showUsage(page: Page): Promise<void> {
   await page.waitForTimeout(120);
 }
 
-async function openUsage(width: number, height = 900): Promise<Page> {
+async function openUsage(
+  width: number,
+  height = 900,
+  productSettings: { theme: string; appearanceMode: "dark" | "light" } | null = null,
+): Promise<Page> {
   const context = await browser.newContext({
     viewport: { width, height },
     hasTouch: width <= 700,
@@ -72,16 +77,36 @@ async function openUsage(width: number, height = 900): Promise<Page> {
     serviceWorkers: "block",
   });
   contexts.push(context);
-  await context.addInitScript(() => {
+  await context.addInitScript((settings) => {
     localStorage.setItem("polyth.prefs", JSON.stringify({ persona: "engineer", plugins: [] }));
     localStorage.setItem("polyth.packageTours.v1", JSON.stringify({ skippedAll: true, completed: {} }));
-  });
+    if (settings) localStorage.setItem("polyth.productSettings.v1", JSON.stringify(settings));
+  }, productSettings);
   const page = await context.newPage();
   await page.goto(`${base}/p/${projectId}`, { waitUntil: "load" });
   await page.waitForSelector(".app", { state: "visible", timeout: 15_000 });
   await showUsage(page);
   return page;
 }
+
+test("usage surfaces follow contrasting app themes", async () => {
+  const colors: string[][] = [];
+  for (const settings of [
+    { theme: "ocean", appearanceMode: "dark" as const },
+    { theme: "rosewater", appearanceMode: "light" as const },
+  ]) {
+    const page = await openUsage(1280, 900, settings);
+    colors.push(await page.evaluate(() => [
+      getComputedStyle(document.querySelector<HTMLElement>(".usage-dashboard")!).backgroundColor,
+      getComputedStyle(document.querySelector<HTMLElement>(".usage-dashboard-toolbar")!).backgroundColor,
+      getComputedStyle(document.querySelector<HTMLElement>(".usage-dashboard-card")!).backgroundColor,
+      getComputedStyle(document.querySelector<HTMLElement>(".usage-dashboard-card")!).color,
+    ]));
+    await page.screenshot({ path: join(artifacts, `theme-${settings.theme}.png`) });
+    await closePage(page);
+  }
+  assert.notDeepEqual(colors[0], colors[1], "usage surfaces remain the same gray palette across app themes");
+});
 
 async function closePage(page: Page): Promise<void> {
   const context = page.context();
@@ -195,7 +220,7 @@ test("populated charts render cleanly at desktop and 400px mobile", async () => 
     });
 
     for (const range of [7, 30, 90]) {
-      await page.locator(`.usage-range-control button[aria-label="${range} day range"]`).click();
+      await page.locator(".usage-range-control button", { hasText: `${range}d` }).click();
       for (const metric of ["Tokens", "Cost", "Sessions"]) {
         await page.locator('.usage-metric-toggle[aria-label="Chart metric"] button', { hasText: metric }).click();
         await page.waitForTimeout(40);
@@ -230,7 +255,7 @@ test("populated charts render cleanly at desktop and 400px mobile", async () => 
 test("all usage controls update data, focus, hover, and provider visibility", async () => {
   const page = await openUsage(1280);
 
-  const inactiveView = page.locator(".usage-view-tabs button:not(.active)").first();
+  const inactiveView = page.locator(".usage-view-tabs button:not(.ui-tab--selected)").first();
   const resting = await inactiveView.evaluate((element) => {
     const style = getComputedStyle(element);
     return `${style.color}|${style.backgroundColor}|${style.borderColor}`;
@@ -242,9 +267,9 @@ test("all usage controls update data, focus, hover, and provider visibility", as
   });
   assert.notEqual(hovered, resting, "view-tab hover has no visual feedback");
 
-  await page.locator('.usage-range-control button[aria-label="30 day range"]').click();
+  await page.locator(".usage-range-control button", { hasText: "30d" }).click();
   await page.waitForFunction(() => document.querySelector(".usage-card-heading p")?.textContent?.includes("72 hours each"));
-  await page.locator('.usage-range-control button[aria-label="90 day range"]').click();
+  await page.locator(".usage-range-control button", { hasText: "90d" }).click();
   await page.waitForFunction(() => document.querySelector(".usage-card-heading p")?.textContent?.includes("180 hours each"));
 
   await page.locator('.usage-metric-toggle[aria-label="Chart metric"] button', { hasText: "Cost" }).click();
@@ -253,13 +278,16 @@ test("all usage controls update data, focus, hover, and provider visibility", as
   await page.locator('.usage-metric-toggle[aria-label="Chart metric"] button', { hasText: "Sessions" }).click();
   assert.ok(await page.locator(".usage-chart-bar").count() > 0, "sessions metric emptied a populated chart");
 
-  await page.locator('.usage-layout-control button[aria-label="Compact widgets"]').click();
+  const expandedCardHeight = await page.locator(".usage-stat-card").first().evaluate((element) => element.getBoundingClientRect().height);
+  await page.locator(".usage-layout-control button", { hasText: "Compact" }).click();
   assert.equal(await page.locator(".usage-dashboard").evaluate((element) => element.classList.contains("usage-layout-compact")), true);
+  const compactCardHeight = await page.locator(".usage-stat-card").first().evaluate((element) => element.getBoundingClientRect().height);
+  assert.ok(compactCardHeight < expandedCardHeight - 20, `compact density only changed a stat card from ${expandedCardHeight}px to ${compactCardHeight}px`);
   await page.reload({ waitUntil: "load" });
   await page.waitForSelector(".app", { state: "visible", timeout: 15_000 });
   await showUsage(page);
   await page.waitForSelector(".usage-dashboard.usage-layout-compact", { state: "visible", timeout: 15_000 });
-  assert.equal(await page.locator('.usage-range-control button[aria-label="90 day range"]').getAttribute("aria-pressed"), "true");
+  assert.equal(await page.locator(".usage-range-control button", { hasText: "90d" }).getAttribute("aria-selected"), "true");
 
   const overviewButton = page.locator(".usage-view-tabs button", { hasText: "Overview" });
   await overviewButton.focus();
@@ -286,6 +314,9 @@ test("all usage controls update data, focus, hover, and provider visibility", as
       .find((candidate) => candidate.textContent?.includes("Refresh") && candidate.closest(".usage-provider-detail-card")?.textContent?.includes("Fake Provider"));
     return button?.disabled === false;
   });
+  await fakeCard.getByLabel("Pin Fake Provider to top").click();
+  assert.match(await page.locator(".usage-provider-detail-card").first().textContent() ?? "", /Fake Provider/);
+  assert.equal(await fakeCard.locator(".usage-provider-pin").getAttribute("aria-pressed"), "true");
 
   const anthropicCard = page.locator(".usage-provider-detail-card", { hasText: "Claude" });
   await anthropicCard.locator("button", { hasText: "Hide from breakdowns" }).click();
@@ -295,9 +326,9 @@ test("all usage controls update data, focus, hover, and provider visibility", as
   assert.equal(await page.locator(".usage-provider-cell", { hasText: "Claude" }).count(), 0, "hidden provider remains in breakdown table");
   assert.match(await page.locator(".usage-action-strip").textContent() ?? "", /1 provider is hidden/);
 
-  await page.locator(".usage-spend-card .usage-icon-button").click();
+  await page.locator(".usage-spend-card .ui-icon-btn").click();
   await page.waitForSelector(".usage-provider-view", { state: "visible" });
-  assert.equal(await page.locator(".usage-view-tabs button", { hasText: "Providers" }).getAttribute("aria-pressed"), "true");
+  assert.equal(await page.locator(".usage-view-tabs button", { hasText: "Providers" }).getAttribute("aria-selected"), "true");
 
   await page.locator(".usage-provider-view-intro button", { hasText: "Add provider" }).click();
   await page.waitForSelector(".settings-page-models", { state: "visible", timeout: 15_000 });
@@ -410,10 +441,10 @@ test("usage labels expose valid names and meet AA text contrast", async () => {
   );
 
   const overviewRatios = await contrastRatios([
-    ".usage-view-tabs button.active",
-    ".usage-range-control button.active",
-    ".usage-layout-control button.active",
-    ".usage-metric-toggle button.active",
+    ".usage-view-tabs button.ui-tab--selected",
+    ".usage-range-control button.ui-tab--selected",
+    ".usage-layout-control button.ui-tab--selected",
+    ".usage-metric-toggle button.ui-tab--selected",
     ".usage-trend-up > span:last-child",
     ".usage-trend-down > span:last-child",
   ]);

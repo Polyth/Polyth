@@ -95,6 +95,7 @@ const canonicalProviderId = (providerId: string): string => {
   const normalized = providerId.trim().toLowerCase();
   if (normalized === "claude" || normalized === "claude-code") return "anthropic";
   if (normalized === "codex" || normalized === "chatgpt") return "openai";
+  if (normalized === "github-copilot-addon") return "github-copilot";
   if (normalized === "gemini") return "google";
   return providerId;
 };
@@ -119,6 +120,7 @@ const displayProvider = (providerId: string): string => {
     openrouter: "OpenRouter",
     google: "Gemini",
     gemini: "Gemini",
+    "github-copilot": "GitHub Copilot",
     xai: "xAI",
     default: "Default",
   };

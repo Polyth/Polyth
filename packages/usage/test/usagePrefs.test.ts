@@ -2,7 +2,7 @@
 // localStorage-persisted usage prefs parser.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { familyLabel, groupQuotaWindows, modelFamily, moveUsageBlock, orderUsageBlocks, parseUsagePrefs } from "../widgets/usagePrefs.ts";
+import { familyLabel, groupQuotaWindows, modelFamily, moveUsageBlock, orderPinnedUsageBlocks, orderUsageBlocks, parseUsagePrefs } from "../widgets/usagePrefs.ts";
 
 test("modelFamily recognizes vendor lines and folds sub-brands", () => {
   assert.equal(modelFamily("claude-3-5-sonnet-latest"), "claude");
@@ -62,12 +62,14 @@ test("groupQuotaWindows without model windows yields a single unlabeled bucket",
 test("parseUsagePrefs round-trips and survives garbage", () => {
   const prefs = {
     hiddenProviders: ["anthropic"],
+    pinnedProviders: ["openai"],
     collapsedGroups: ["openai/gpt"],
     dashboard: { view: "providers", layout: "compact", rangeDays: 90, overviewOrder: ["models"], providerOrder: ["openai"] },
   };
   assert.deepEqual(parseUsagePrefs(JSON.stringify(prefs)), prefs);
   const defaults = {
     hiddenProviders: [],
+    pinnedProviders: [],
     collapsedGroups: [],
     dashboard: { view: "overview", layout: "expanded", rangeDays: 7, overviewOrder: [], providerOrder: [] },
   };
@@ -81,6 +83,15 @@ test("parseUsagePrefs round-trips and survives garbage", () => {
       dashboard: { view: "invalid", layout: "invalid", rangeDays: 365 },
     })),
     { ...defaults, hiddenProviders: ["a"] },
+  );
+});
+
+test("pinned provider ordering stays above regular cards without losing manual order", () => {
+  const items = [{ id: "anthropic" }, { id: "openai" }, { id: "google" }, { id: "summary" }];
+  assert.deepEqual(
+    orderPinnedUsageBlocks(items, ["google", "summary", "openai", "anthropic"], ["openai", "google"], (item) => item.id)
+      .map((item) => item.id),
+    ["google", "openai", "summary", "anthropic"],
   );
 });
 
