@@ -9,6 +9,8 @@ The samples have two jobs:
 
 All samples intentionally use the existing DAG engine only. They do not pretend that loops, conditional branches, or explicit human-gate nodes exist before those primitives are implemented.
 
+The composer workflow launcher recognizes an untouched bundled sample by its canonical name, shows its short description, and can run it even when the task field is empty. In that case the sample's bundled example input is used. Entering any task always takes precedence. This behavior needs no workflow schema or API extension; sample metadata comes from the browser-safe catalog.
+
 ## 1. Example · Build & Review
 
 **Use case:** software implementation with independent review and verification.
@@ -47,6 +49,7 @@ Expected behavior:
 - Reviewer inspects the actual diff and reports actionable findings without editing.
 - Verifier runs relevant checks without editing.
 - Finalizer repairs only confirmed problems and reruns the relevant checks.
+- Default permission policy is `manual` because the example can modify the open project.
 
 This is the most representative engineering sample and should remain conservative: minimal diff, reuse before invention, no speculative abstraction, and no weakening of security/accessibility/data-safety checks.
 
@@ -117,9 +120,9 @@ What it demonstrates:
 
 The writers must not invent customer quotes, metrics, certifications, traction, urgency, or product capabilities. The final editor keeps unresolved proof requirements visible instead of polishing them into unsupported claims.
 
-## Seeding behavior
+## Source layout and seeding
 
-Bundled definitions live in `packages/workflow/src/samples.ts`.
+The browser-safe definitions and example metadata live in `packages/workflow/src/sampleCatalog.ts`. Server-only persistence/seeding lives in `packages/workflow/src/samples.ts`.
 
 On the first `GET /api/workflows?projectId=...` for a project, the workflow package copies any not-yet-seeded samples into that project. A small package-owned sidecar (`workflow-samples.json`) records sample keys already offered to each project.
 
@@ -132,6 +135,8 @@ This gives the desired semantics:
 - editing or renaming an example does not cause a replacement copy to appear;
 - deleting an example is respected and it stays deleted;
 - if the sidecar is missing but an exact sample name already exists, the seeder adopts it rather than duplicating it.
+
+A renamed sample intentionally stops receiving special launcher presentation because it is now user-owned/customized. Its workflow definition continues to work normally.
 
 ## Canonical coverage
 
@@ -154,11 +159,12 @@ Future samples should be added only when they demonstrate a materially different
 
 For a manual product smoke test:
 
-1. Open any project and open Workflows.
-2. Confirm all three `Example · ...` workflows appear once.
-3. Open each definition and inspect its graph/layers.
-4. Run it with the example input above or an equivalent task.
-5. Confirm parallel nodes overlap in the run timeline where the selected harness permits it.
-6. Edit or rename a sample and reload Workflows; confirm the edited copy remains and no replacement appears.
-7. Delete a sample and reload; confirm it remains deleted.
-8. Open a different project; confirm that project receives its own three examples.
+1. Open any project and open the workflow launcher.
+2. Confirm all three `Example · ...` workflows appear once and include a short explanation.
+3. With the task field empty, run Research & Decide or Content Studio and confirm the bundled example input is used.
+4. Open Workflows and inspect each definition's graph/layers.
+5. Run Build & Review and confirm tool actions that can mutate the project require manual permission.
+6. Confirm parallel nodes overlap in the run timeline where the selected harness permits it.
+7. Edit or rename a sample and reload Workflows; confirm the edited copy remains and no replacement appears.
+8. Delete a sample and reload; confirm it remains deleted.
+9. Open a different project; confirm that project receives its own three examples.
