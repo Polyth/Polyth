@@ -851,6 +851,8 @@ test("live expanded agent action remains above the full status and composer dock
       viewportDockGap: dockRect.top - port.bottom,
       actionBottomGap: port.bottom - row.bottom,
       actionIntersectsDock: row.top < dockRect.bottom && row.bottom > dockRect.top,
+      distanceFromTail: timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight,
+      revealVisible: document.querySelector(".timeline-reveal .jump-latest") !== null,
       statusAboveComposer: (document.querySelector<HTMLElement>(".agent-status-dock")?.getBoundingClientRect().bottom ?? Infinity)
         <= (document.querySelector<HTMLElement>(".composer")?.getBoundingClientRect().top ?? -Infinity) + 1,
     };
@@ -858,6 +860,8 @@ test("live expanded agent action remains above the full status and composer dock
   assert.ok(geometry.viewportDockGap >= -1, `timeline extends ${-geometry.viewportDockGap}px under the dock`);
   assert.ok(geometry.actionBottomGap >= -1, `live expanded action is ${-geometry.actionBottomGap}px below the viewport`);
   assert.equal(geometry.actionIntersectsDock, false, "live expanded action intersects the dock");
+  assert.ok(geometry.distanceFromTail <= 2, `activity reflow detached tail follow by ${geometry.distanceFromTail}px`);
+  assert.equal(geometry.revealVisible, false, "activity reflow mounted a phantom Jump to latest control");
   assert.equal(geometry.statusAboveComposer, true, "agent activity status is not above the composer");
   await page.screenshot({ path: join(ARTIFACTS, "live-action-above-dock-1280.png") });
   await closePage(lp);
@@ -887,6 +891,7 @@ test("windowing: reveal keeps the anchor; hidden prompt and dialog jumps land an
   // row keeps its usable-edge offset and nothing duplicates.
   await page.evaluate(() => {
     const el = document.querySelector<HTMLElement>(".timeline")!;
+    el.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -1 }));
     el.scrollTop = el.scrollHeight / 2;
   });
   await page.waitForTimeout(120);
@@ -968,6 +973,7 @@ test("anchors: reading position survives reload, session switch, and server rest
   // Hold a position away from the tail and let the debounced anchor save run.
   await page.evaluate(() => {
     const el = document.querySelector<HTMLElement>(".timeline")!;
+    el.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -1 }));
     el.scrollTop = el.scrollHeight / 2;
   });
   await page.waitForTimeout(450);
@@ -1045,6 +1051,7 @@ test("event purity: hover, jumps, dialog, reveal, menu, copy, and reasoning appe
     // Scroll away, reveal Jump to latest, activate it.
     await page.evaluate(() => {
       const el = document.querySelector<HTMLElement>(".timeline")!;
+      el.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -1 }));
       el.scrollTop = 0;
     });
     await page.waitForSelector(".timeline-reveal .jump-latest", { state: "visible", timeout: 5000 });
@@ -1231,6 +1238,7 @@ test("zoom200 dynamic: disjoint composer controls, reachable strip, 120px floor 
   await page.evaluate(() => { (document.activeElement as HTMLElement | null)?.blur?.(); });
   await page.evaluate(() => {
     const el = document.querySelector<HTMLElement>(".timeline")!;
+    el.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -1 }));
     el.scrollTop = 0;
   });
   await page.waitForSelector(".timeline-reveal .jump-latest", { state: "visible", timeout: 5000 });

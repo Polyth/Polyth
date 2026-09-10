@@ -1640,6 +1640,11 @@ export default function Timeline({
   const readerDetached = useRef(false);
   const lastScrollTop = useRef(0);
   const touchY = useRef<number | null>(null);
+  const scrollbarPointer = useRef(false);
+  const readerIntent = useRef<{
+    direction: "toward-history" | "toward-tail";
+    until: number;
+  } | null>(null);
   const expectedScrollTop = useRef<number | null>(null);
   // A newly appended user prompt owns a fresh-sheet tail. Presentation-only
   // padding lets that prompt sit at the reading top and yields, pixel for
@@ -1653,6 +1658,15 @@ export default function Timeline({
   // Latest-reveal state (§2.4): true while the reader holds a position away
   // from the tail, mounting the reserved Jump to latest region.
   const [showJump, setShowJump] = useState(false);
+  useEffect(() => {
+    const releaseScrollbar = () => { scrollbarPointer.current = false; };
+    window.addEventListener("pointerup", releaseScrollbar);
+    window.addEventListener("pointercancel", releaseScrollbar);
+    return () => {
+      window.removeEventListener("pointerup", releaseScrollbar);
+      window.removeEventListener("pointercancel", releaseScrollbar);
+    };
+  }, []);
   // UX-PANE-MODEL stable anchor: session switches adjust during render so the
   // outgoing anchor is captured from the STILL-CURRENT DOM (before commit) and
   // the incoming one is ready before the first paint of the new session.
@@ -1671,6 +1685,8 @@ export default function Timeline({
     restoreRef.current = stored !== null && !stored.atBottom ? stored : null;
     atBottom.current = stored?.atBottom ?? true;
     readerDetached.current = stored !== null && !stored.atBottom;
+    readerIntent.current = null;
+    scrollbarPointer.current = false;
     expectedScrollTop.current = null;
     lastScrollTop.current = el?.scrollTop ?? 0;
     setShowJump(stored !== null && !stored.atBottom);
@@ -1767,6 +1783,8 @@ export default function Timeline({
     if (!latestUserMessage || latestSeq <= observedPrompt.current.seq) return;
     observedPrompt.current = { sessionId, seq: latestSeq };
     turnSheetPromptId.current = latestUserMessage.id;
+    readerIntent.current = null;
+    scrollbarPointer.current = false;
     readerDetached.current = false;
     atBottom.current = true;
     setShowJump(false);
@@ -1826,18 +1844,43 @@ export default function Timeline({
   }, [sessionId, scrollToTail, syncTurnSheet]);
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noteReaderIntent = (direction: "toward-history" | "toward-tail") => {
+    // One physical gesture can deliver several scroll events (wheel momentum,
+    // touch inertia, scrollbar drag). Keep its direction briefly, but never
+    // infer intent from geometry alone: reflow emits the same scroll event.
+    readerIntent.current = { direction, until: Date.now() + 700 };
+  };
+
+  const stopFollowing = () => {
+    const el = ref.current;
+    if (!el || el.scrollHeight - el.clientHeight <= TIMELINE_TAIL_EPSILON) return;
+    noteReaderIntent("toward-history");
+    expectedScrollTop.current = null;
+    readerDetached.current = true;
+    atBottom.current = false;
+    setShowJump(true);
+  };
+
   const onScroll = () => {
     const el = ref.current;
     if (!el) return;
-    const programmatic = expectedScrollTop.current !== null
+    const delta = el.scrollTop - lastScrollTop.current;
+    if (scrollbarPointer.current && delta < -0.25) stopFollowing();
+    else if (scrollbarPointer.current && delta > 0.25) noteReaderIntent("toward-tail");
+    const lease = readerIntent.current;
+    const intent = lease !== null && lease.until >= Date.now() ? lease.direction : null;
+    if (lease !== null && intent === null) readerIntent.current = null;
+    const programmatic = intent === null && expectedScrollTop.current !== null
       && Math.abs(el.scrollTop - expectedScrollTop.current) < 1;
     expectedScrollTop.current = null;
     if (!programmatic) {
+      const distanceFromEnd = Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight);
       const next = timelineFollowState({
         scrollTop: el.scrollTop,
         previousScrollTop: lastScrollTop.current,
-        distanceFromEnd: Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight),
+        distanceFromEnd,
         readerDetached: readerDetached.current,
+        readerIntent: intent,
       });
       readerDetached.current = next.readerDetached;
       atBottom.current = next.following;
@@ -1854,15 +1897,6 @@ export default function Timeline({
       const now = ref.current;
       if (now) saveTimelineAnchor(sessionId, captureTimelineAnchor(now, atBottom.current));
     }, 200);
-  };
-
-  const stopFollowing = () => {
-    const el = ref.current;
-    if (!el || el.scrollHeight - el.clientHeight <= TIMELINE_TAIL_EPSILON) return;
-    expectedScrollTop.current = null;
-    readerDetached.current = true;
-    atBottom.current = false;
-    setShowJump(true);
   };
 
   // Debounce safety: reload and unmount flush the stable anchor immediately.
@@ -2150,6 +2184,7 @@ export default function Timeline({
     el.scrollTop += restoreScrollDelta(el, node, a);
   });
   const jump = (id: string, opts?: { focus?: boolean }) => {
+    stopFollowing();
     const index = rows.findIndex((r) => r.kind !== "activity" && r.id === id);
     const next = limitToInclude(rows.length, limit, index);
     if (next !== limit) {
@@ -2172,6 +2207,8 @@ export default function Timeline({
   const jumpToLatest = () => {
     const el = ref.current;
     if (!el) return;
+    readerIntent.current = null;
+    scrollbarPointer.current = false;
     readerDetached.current = false;
     atBottom.current = true;
     syncTurnSheet();
@@ -2293,15 +2330,59 @@ export default function Timeline({
         ref={ref}
         onScroll={onScroll}
         onWheelCapture={(event) => {
+          // Trackpad pinch zoom and a predominantly horizontal gesture are
+          // viewport/content actions, not a request to leave tail follow.
+          if (event.ctrlKey || Math.abs(event.deltaY) < Math.abs(event.deltaX)) return;
           if (event.deltaY < 0) stopFollowing();
+          else if (event.deltaY > 0) noteReaderIntent("toward-tail");
         }}
+        onKeyDownCapture={(event) => {
+          const target = event.target as HTMLElement;
+          if (target.matches("input, textarea, select, [contenteditable=true]")) return;
+          const towardHistory = event.key === "ArrowUp"
+            || event.key === "PageUp"
+            || event.key === "Home"
+            || ((event.key === " " || event.key === "Spacebar") && event.shiftKey)
+            || (event.metaKey && event.key === "ArrowUp");
+          const towardTail = event.key === "ArrowDown"
+            || event.key === "PageDown"
+            || event.key === "End"
+            || ((event.key === " " || event.key === "Spacebar") && !event.shiftKey)
+            || (event.metaKey && event.key === "ArrowDown");
+          if (towardHistory) stopFollowing();
+          else if (towardTail) noteReaderIntent("toward-tail");
+        }}
+        onPointerDownCapture={(event) => {
+          const el = event.currentTarget;
+          const rect = el.getBoundingClientRect();
+          const direction = getComputedStyle(el).direction;
+          const gutter = Math.max(12, el.offsetWidth - el.clientWidth);
+          const inScrollbar = direction === "rtl"
+            ? event.clientX <= rect.left + gutter
+            : event.clientX >= rect.right - gutter;
+          scrollbarPointer.current = event.button === 1
+            || (event.button === 0 && inScrollbar && el.scrollHeight > el.clientHeight);
+        }}
+        onPointerUpCapture={() => { scrollbarPointer.current = false; }}
+        onPointerCancelCapture={() => { scrollbarPointer.current = false; }}
         onTouchStartCapture={(event) => { touchY.current = event.touches[0]?.clientY ?? null; }}
         onTouchMoveCapture={(event) => {
           const y = event.touches[0]?.clientY;
-          if (touchY.current !== null && y !== undefined && y > touchY.current) stopFollowing();
-          touchY.current = y ?? null;
+          if (touchY.current !== null && y !== undefined) {
+            const deltaY = y - touchY.current;
+            // Ignore tap jitter, but accumulate it against the last accepted
+            // sample so a slow deliberate drag still wins after a few pixels.
+            if (deltaY > 2) {
+              stopFollowing();
+              touchY.current = y;
+            } else if (deltaY < -2) {
+              noteReaderIntent("toward-tail");
+              touchY.current = y;
+            }
+          }
         }}
         onTouchEndCapture={() => { touchY.current = null; }}
+        onTouchCancelCapture={() => { touchY.current = null; }}
       >
         <SlotHost slot="session.timeline.before" context={slotSummary} customizable />
         {model.messages.length === 0 && !model.workflowRun && (

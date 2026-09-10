@@ -19,15 +19,23 @@ test("composer and above-composer widgets sit directly on the workspace", () => 
   assert.doesNotMatch(css, /\.focus-conversation\s*\{[^}]*background:/s);
 });
 
-test("the conversation reserves the complete glass dock and keeps fresh-turn space inside the timeline", () => {
+test("the conversation keeps the complete glass dock in flow and fresh-turn space inside the timeline", () => {
   const surface = read("../src/components/workspace/builtinSurfaces.tsx");
   const css = read("../src/styles.css");
 
   assert.match(surface, /className="conversation-composer-dock"[\s\S]*slot="session\.composer\.before"[\s\S]*slot="session\.footer"[\s\S]*spawning && <SessionSpawnStatus \/>[\s\S]*<Composer \/>/);
-  assert.match(surface, /new ResizeObserver\(publishHeight\)/);
-  assert.match(css, /\.conversation-composer-dock\s*\{[^}]*position:\s*absolute;[^}]*inset:\s*auto 0 0;/s);
-  assert.match(css, /\.focus-conversation:has\(> \.conversation-composer-dock\) > \.timeline-wrap\s*\{[^}]*margin-block-end:\s*var\(--conversation-dock-height\)/s);
+  assert.doesNotMatch(surface, /composerDock|publishHeight|ResizeObserver/);
+  assert.match(css, /\.conversation-composer-dock\s*\{[^}]*position:\s*relative;[^}]*flex:\s*none;/s);
+  assert.doesNotMatch(css, /--conversation-dock-height|margin-block-end:\s*var\(--conversation-dock-height\)/);
   assert.match(css, /padding-bottom:\s*calc\(var\(--conversation-group-gap\) \+ var\(--timeline-turn-sheet-space, 0px\)\)/);
+});
+
+test("new timeline surfaces animate without moving the measured row", () => {
+  const css = read("../src/styles.css");
+
+  assert.match(css, /\.timeline > \.timeline-row-enter:not\(\.activity-group\) > \*/);
+  assert.match(css, /animation:\s*timeline-surface-in var\(--motion-surface\) var\(--motion-ease\) both/);
+  assert.doesNotMatch(css, /\.timeline > \.timeline-row-enter,\s*\n/);
 });
 
 test("spawning is an above-composer activity status and never replaces the composer", () => {

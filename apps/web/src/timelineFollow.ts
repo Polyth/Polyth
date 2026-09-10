@@ -7,6 +7,8 @@ export interface TimelineFollowSample {
   previousScrollTop: number;
   distanceFromEnd: number;
   readerDetached: boolean;
+  /** Input captured before the scroll event. Layout reflow has no intent. */
+  readerIntent?: "toward-history" | "toward-tail" | null;
 }
 
 export interface TimelineFollowState {
@@ -15,17 +17,19 @@ export interface TimelineFollowState {
   showJump: boolean;
 }
 
-/** Resolve a real reader scroll. Moving upward always detaches, even if the
- * movement is sub-pixel and still very close to the tail. A detached reader
- * reconnects only by deliberately reaching the true tail while moving down. */
+/** Resolve a timeline scroll without confusing browser layout correction for
+ * reader intent. Wheel, touch, keyboard and scrollbar handlers own detach;
+ * ResizeObserver, shrinking turn space and composer reflow carry no intent.
+ * Once detached, the reader reconnects only while deliberately moving down
+ * into the true tail. */
 export function timelineFollowState(sample: TimelineFollowSample): TimelineFollowState {
-  const movingUp = sample.scrollTop < sample.previousScrollTop - 0.25;
   const movingDown = sample.scrollTop > sample.previousScrollTop + 0.25;
   const atTail = sample.distanceFromEnd <= TIMELINE_TAIL_EPSILON;
-  let readerDetached = sample.readerDetached || movingUp;
-  if (readerDetached && movingDown && atTail) readerDetached = false;
-  const following = !readerDetached && atTail;
-  return { readerDetached, following, showJump: !following };
+  let readerDetached = sample.readerDetached || sample.readerIntent === "toward-history";
+  if (readerDetached && sample.readerIntent === "toward-tail" && movingDown && atTail) {
+    readerDetached = false;
+  }
+  return { readerDetached, following: !readerDetached, showJump: readerDetached };
 }
 
 export interface TurnSheetPaddingInput {

@@ -1268,18 +1268,21 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
    "inconsistent paddings" between timeline rows. Rows are content-sized. */
 .timeline > * { flex-shrink: 0; }
 
-/* Only the newest visible row enters. Session switches remount history, so an
-   unconditional row selector would replay every message and execution line.
-   Late blocks inside that newest row keep the same bottom-up entrance. */
+/* Only the newest visible row enters. Animate its visual children, never the
+   measured row itself: prompt alignment and scroll anchoring must see stable
+   geometry while the surface settles. Session switches therefore do not
+   replay history, while late activity items still arrive with quiet depth. */
 @media (prefers-reduced-motion: no-preference) {
-  .timeline > .timeline-row-enter,
-  .activity-group-items > .timeline-row-enter,
-  .timeline > .timeline-row-enter > :is(.reasoning, .task-list, .agent-reply-header, .assistant-gallery-shortcut) {
-    animation: msg-in var(--motion-surface) var(--motion-ease);
+  .timeline > .timeline-row-enter:not(.activity-group) > *,
+  .timeline > .activity-group.timeline-row-enter > .ui-run-summary,
+  .activity-group-items > .timeline-row-enter > * {
+    transform-origin: 50% 0;
+    animation: timeline-surface-in var(--motion-surface) var(--motion-ease) both;
   }
-  @keyframes msg-in {
-    from { opacity: 0; transform: translateY(14px); }
-    to { opacity: 1; transform: none; }
+  @keyframes timeline-surface-in {
+    0% { opacity: 0; transform: translate3d(0, 7px, 0) scale(.994); filter: blur(2px); }
+    62% { opacity: 1; filter: blur(0); }
+    100% { opacity: 1; transform: none; filter: none; }
   }
 }
 
@@ -1839,10 +1842,11 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-/* The composer dock floats absolutely at the bottom; lift the card clear of it
-   so its actions never sit under the composer. */
+/* Question cards and the composer are normal-flow siblings; neither can cover
+   the other's actions while their async contents resize. Keep only the quiet
+   token gap that was previously added on top of the measured dock height. */
 .focus-conversation:has(> .conversation-composer-dock) > .question-cards {
-  margin-bottom: calc(var(--conversation-dock-height) + var(--space-4));
+  margin-block-end: var(--space-4);
 }
 .question-card {
   container-type: inline-size;
@@ -4815,25 +4819,15 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 
 /* Focus is a conversation, not a dashboard. */
 .focus-conversation {
-  --conversation-dock-height: calc(var(--composer-height) + var(--space-5));
   position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column;
 }
 .conversation-composer-dock {
-  position: absolute; inset: auto 0 0; z-index: var(--z-shell); pointer-events: none;
+  position: relative; z-index: var(--z-shell); flex: none; min-width: 0; pointer-events: none;
 }
 .conversation-composer-dock > * { pointer-events: auto; }
-/* The dock may remain visually positioned over the workspace, but its exact
-   measured height is reserved in flex layout. The timeline scrollport ends at
-   the dock's top edge, so transcript rows can never paint under the composer
-   or the active-agent status above it. */
-.focus-conversation:has(> .conversation-composer-dock) > .timeline-wrap {
-  margin-block-end: var(--conversation-dock-height);
-}
-/* A question card already reserves the complete dock height with its own
-   margin; do not count the same interaction zone twice. */
-.focus-conversation:has(> .conversation-composer-dock):has(> .question-cards) > .timeline-wrap {
-  margin-block-end: 0;
-}
+/* The dock is a normal-flow flex sibling of the timeline. Its real height —
+   including async status/widgets and safe-area changes — therefore reduces
+   the scrollport before paint, with no observer/measurement race. */
 .focus-customize {
   position: absolute; top: 16px; right: 22px; z-index: 8; height: 34px; display: flex; align-items: center; gap: 7px;
   padding: 0 12px; border-color: var(--border-soft); background: var(--elevated); color: var(--text-dim); box-shadow: 0 4px 18px -14px rgba(0,0,0,.25);

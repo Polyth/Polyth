@@ -4,7 +4,7 @@
 // built-ins once. Every built-in requires a project; the host renders the
 // standard project empty state when none is open. None require an open
 // session: the session surface shows its hero until one exists.
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Timeline from "../Timeline.tsx";
 import Composer from "../Composer.tsx";
 import QuestionCards from "../QuestionCards.tsx";
@@ -285,40 +285,6 @@ function SessionSurface() {
     [gitStatus, model],
   );
   const [latestRevealAnchor, setLatestRevealAnchor] = useState<HTMLDivElement | null>(null);
-  const [composerDock, setComposerDock] = useState<HTMLDivElement | null>(null);
-
-  useLayoutEffect(() => {
-    const conversation = composerDock?.parentElement;
-    if (!composerDock || !conversation) return;
-    let raf = 0;
-    const publishHeight = () => {
-      // getBoundingClientRect (not offsetHeight) so sub-pixel growth and late
-      // async widgets — usage panel, pending-changes list, question card — are
-      // all reflected in the transcript viewport reserved above the dock.
-      const height = Math.ceil(composerDock.getBoundingClientRect().height);
-      conversation.style.setProperty("--conversation-dock-height", `${height}px`);
-    };
-    const schedule = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(publishHeight);
-    };
-    publishHeight();
-    // ResizeObserver catches the dock's own box growing/shrinking; a
-    // MutationObserver catches children mounting or unmounting (widgets toggled
-    // by git status) whose height only settles a frame later.
-    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(publishHeight) : null;
-    observer?.observe(composerDock);
-    const mutations = typeof MutationObserver === "function" ? new MutationObserver(schedule) : null;
-    mutations?.observe(composerDock, { childList: true, subtree: true });
-    window.addEventListener("resize", schedule);
-    return () => {
-      cancelAnimationFrame(raf);
-      observer?.disconnect();
-      mutations?.disconnect();
-      window.removeEventListener("resize", schedule);
-      conversation.style.removeProperty("--conversation-dock-height");
-    };
-  }, [composerDock]);
 
   if (workspaceMode !== "chat") return <WidgetCanvas />;
 
@@ -357,7 +323,7 @@ function SessionSurface() {
             <SlotHost slot="session.footer" context={{ projectId, sessionId, editing: false }} customizable />
             <ArchivedComposerGuard sessionId={sessionId} />
           </>
-        : <div ref={setComposerDock} className="conversation-composer-dock">
+        : <div className="conversation-composer-dock">
             <SlotHost slot="session.composer.before" context={{ projectId, sessionId, editing: false }} customizable />
             <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />
             <SlotHost slot="session.footer" context={{ projectId, sessionId, editing: false }} customizable />
