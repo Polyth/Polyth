@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { createCapabilityContributionRegistry } from "@polyth/harness-runtime";
 import { createCoachStore } from "../src/index.ts";
 import {
+  pauseCoachSchedules,
   registerCoachOnboardingCapabilities,
   type CoachScheduleService,
   type CoachScheduleTask,
@@ -34,6 +35,12 @@ function fakeSchedule() {
       const task = tasks.find((item) => item.id === id);
       if (!task) throw Object.assign(new Error("missing task"), { code: "not-found" });
       Object.assign(task, patch);
+      return task;
+    },
+    setEnabled(id, enabled) {
+      const task = tasks.find((item) => item.id === id);
+      if (!task) throw Object.assign(new Error("missing task"), { code: "not-found" });
+      task.enabled = enabled;
       return task;
     },
     remove(id) {
@@ -116,6 +123,24 @@ test("explicit reminder opt-in creates timezone-aware new-session schedule tasks
   assert.equal(schedule.tasks.length, 2, "retry updates the same two tasks");
   await set.dispose();
   store.close();
+});
+
+test("package disable pauses only enabled Coach-owned schedule tasks", () => {
+  const schedule = fakeSchedule();
+  schedule.tasks.push(
+    { id: "daily", projectId, title: "Coach · Daily check-in", enabled: true },
+    { id: "weekly", projectId, title: "Coach · Weekly review", enabled: true },
+    { id: "already-paused", projectId, title: "Coach · Weekly review", enabled: false },
+    { id: "other", projectId, title: "My unrelated task", enabled: true },
+    { id: "other-project", projectId: "elsewhere", title: "Coach · Daily check-in", enabled: true },
+  );
+
+  assert.equal(pauseCoachSchedules(schedule.service, projectId), 2);
+  assert.equal(schedule.tasks.find((task) => task.id === "daily")?.enabled, false);
+  assert.equal(schedule.tasks.find((task) => task.id === "weekly")?.enabled, false);
+  assert.equal(schedule.tasks.find((task) => task.id === "already-paused")?.enabled, false);
+  assert.equal(schedule.tasks.find((task) => task.id === "other")?.enabled, true);
+  assert.equal(schedule.tasks.find((task) => task.id === "other-project")?.enabled, true);
 });
 
 test("missing Schedule package leaves onboarding incomplete when the user opted in", async () => {

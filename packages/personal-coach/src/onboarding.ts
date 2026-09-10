@@ -12,6 +12,7 @@ export interface CoachScheduleTask {
   id: string;
   projectId: string;
   title?: string;
+  enabled?: boolean;
 }
 
 export interface CoachScheduleService {
@@ -33,6 +34,7 @@ export interface CoachScheduleService {
     title?: string;
     enabled?: boolean;
   }): CoachScheduleTask;
+  setEnabled(id: string, enabled: boolean): CoachScheduleTask;
   remove(id: string): boolean;
   preview(cadence: { kind: "cron"; expression: string; timeZone: string }, count?: number): unknown;
 }
@@ -44,6 +46,7 @@ export interface CoachOnboardingCapabilitySet {
 
 const DAILY_TITLE = "Coach · Daily check-in";
 const WEEKLY_TITLE = "Coach · Weekly review";
+const COACH_SCHEDULE_TITLES = new Set([DAILY_TITLE, WEEKLY_TITLE]);
 
 const DAILY_PROMPT = `This is a user-enabled Personal Coach daily check-in. Call coach_read_context first. Keep the interaction short and practical. Ask for the user's current energy and focus only if they have not already provided them, then help identify one useful focus for today. Use coach_record_checkin only for values the user actually gives you. Do not invent state, create guilt, or turn this into a questionnaire.`;
 
@@ -125,6 +128,19 @@ function syncTask(
       });
   for (const duplicate of existing.slice(1)) schedule.remove(duplicate.id);
   return task.id;
+}
+
+/** Package disable is a hard boundary: cross-package scheduled work must not
+ * keep running after the capabilities/instructions it depends on disappear.
+ * We pause only the two exact tasks Coach itself owns on its internal project. */
+export function pauseCoachSchedules(schedule: CoachScheduleService, projectId: string): number {
+  let paused = 0;
+  for (const task of schedule.list(projectId)) {
+    if (!task.title || !COACH_SCHEDULE_TITLES.has(task.title) || task.enabled === false) continue;
+    schedule.setEnabled(task.id, false);
+    paused++;
+  }
+  return paused;
 }
 
 export function registerCoachOnboardingCapabilities(input: {

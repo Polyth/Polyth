@@ -17,6 +17,7 @@ import {
 } from "./insights.ts";
 import { personalCoachInsightRoutes } from "./insightRoutes.ts";
 import {
+  pauseCoachSchedules,
   registerCoachOnboardingCapabilities,
   type CoachOnboardingCapabilitySet,
   type CoachScheduleService,
@@ -159,6 +160,10 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     },
     async onDisable() {
       routes = null;
+      const schedule = host.services.get(serverServiceKey<CoachScheduleService>("schedule"));
+      if (schedule) {
+        for (const projectId of capabilities.keys()) pauseCoachSchedules(schedule, projectId);
+      }
       for (const capability of [...capabilities.values()].toReversed()) {
         await capability.dispose();
       }
