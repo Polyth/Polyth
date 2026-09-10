@@ -68,6 +68,10 @@ export function harnessRoutes(host: ServerPackageHost): RouteHandler {
                 throw harnessError("not-found", "project not found");
             return { space: request.space, spaceId: request.space.spaceId, projectId: project?.id ?? "__default__", cwd: project?.path ?? process.cwd(), remote: Boolean(project?.remote) };
         };
+        if (request.path === "/api/harnesses/roster" && request.method === "GET") {
+            request.json(200, await registry.roster(await contextForRequest()));
+            return true;
+        }
         if (request.path === "/api/harnesses/snapshots" && request.method === "GET") {
             const context = await contextForRequest();
             let harnessId = request.url.searchParams.get("harnessId") ?? undefined;

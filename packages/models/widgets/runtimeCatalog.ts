@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
-import type { AgentDescriptor, HarnessSnapshot, ModelDescriptor, ModelDiscoveryState, SessionProjection } from "@polyth/contracts";
+import type { AgentDescriptor, HarnessRosterItem, HarnessSnapshot, ModelDescriptor, ModelDiscoveryState, SessionProjection } from "@polyth/contracts";
 import { createApiTransport } from "@polyth/web-sdk";
 import { activeBrowserAccountId } from "@polyth/web/account-storage";
 import { createCatalogCache } from "./catalogCache.ts";
@@ -20,27 +20,40 @@ const unavailable: Catalog = { models: [], agents: [], nativeDefault: false, rea
 // invalidation (auth/settings/runtime changes) is the freshness boundary.
 const catalogCache = createCatalogCache<Catalog>(Infinity);
 const harnessCache = createCatalogCache<HarnessSnapshot[]>();
+const rosterCache = createCatalogCache<HarnessRosterItem[]>(Infinity);
 let revision = 0;
 const listeners = new Set<() => void>();
 export function invalidateRuntimeCatalogs(notify = true): void {
   catalogCache.clear();
   harnessCache.clear();
+  rosterCache.clear();
   revision++;
   if (notify) for (const listener of listeners) listener();
 }
-type SnapshotRequest = { projectId?: string | null; spaceId?: string; force?: boolean; detail?: boolean };
+type SnapshotRequest = { projectId?: string | null; spaceId?: string; harnessId?: string; force?: boolean; detail?: boolean };
 const snapshotRequestKey = (options: SnapshotRequest) => JSON.stringify([
-  activeBrowserAccountId(), options.spaceId ?? "page", options.projectId ?? "", options.detail === true, revision,
+  activeBrowserAccountId(), options.spaceId ?? "page", options.projectId ?? "", options.harnessId ?? "all", options.detail === true, revision,
 ]);
-const draftCatalogKey = (projectId: string, harnessId: string, spaceId?: string) => JSON.stringify([
-  activeBrowserAccountId(), spaceId ?? "page", projectId, `draft:${projectId}:${harnessId}`, revision,
+const previewCatalogKey = (projectId: string, harnessId: string | undefined, spaceId?: string) => JSON.stringify([
+  activeBrowserAccountId(), spaceId ?? "page", projectId, `preview:${projectId}:${harnessId ?? "auto"}`, revision,
 ]);
+const rosterKey = (options: Pick<SnapshotRequest, "projectId" | "spaceId">) => JSON.stringify([
+  activeBrowserAccountId(), options.spaceId ?? "page", options.projectId ?? "", revision,
+]);
+export function peekHarnessRoster(options: Pick<SnapshotRequest, "projectId" | "spaceId">): HarnessRosterItem[] | undefined {
+  return rosterCache.peek(rosterKey(options));
+}
+export function readHarnessRoster(options: Pick<SnapshotRequest, "projectId" | "spaceId">): Promise<HarnessRosterItem[]> {
+  const query = options.projectId ? `?projectId=${encodeURIComponent(options.projectId)}` : "";
+  return rosterCache.read(rosterKey(options), () => api.get<HarnessRosterItem[]>(`/api/harnesses/roster${query}`));
+}
 export function peekHarnessSnapshots(options: SnapshotRequest): HarnessSnapshot[] | undefined {
   return harnessCache.peek(snapshotRequestKey(options));
 }
 export function readHarnessSnapshots(options: SnapshotRequest): Promise<HarnessSnapshot[]> {
   const query = new URLSearchParams();
   if (options.projectId) query.set("projectId", options.projectId);
+  if (options.harnessId) query.set("harnessId", options.harnessId);
   if (options.force) query.set("force", "1");
   if (options.detail) query.set("detail", "1");
   if (!options.force) return harnessCache.read(snapshotRequestKey(options), () => api.get<HarnessSnapshot[]>(`/api/harnesses/snapshots?${query}`));
@@ -71,18 +84,14 @@ const catalogFromSnapshot = (snapshot: HarnessSnapshot | undefined, harnessId?: 
   };
 };
 
-const readDraftCatalog = (projectId: string, harnessId: string, spaceId?: string): Promise<Catalog> =>
-  catalogCache.read(draftCatalogKey(projectId, harnessId, spaceId), async () => {
-    const query = new URLSearchParams({ projectId, detail: "1", harnessId });
-    const snapshots = await api.get<HarnessSnapshot[]>(`/api/harnesses/snapshots?${query}`);
-    return catalogFromSnapshot(snapshots[0], harnessId);
+const readPreviewCatalog = (projectId: string, harnessId?: string, spaceId?: string): Promise<Catalog> =>
+  catalogCache.read(previewCatalogKey(projectId, harnessId, spaceId), async () => {
+    const snapshots = harnessId
+      ? await readHarnessSnapshots({ projectId, harnessId, spaceId })
+      : await api.get<HarnessSnapshot[]>(`/api/harnesses/snapshots?${new URLSearchParams({ projectId, auto: "1" })}`);
+    const resolvedHarnessId = snapshots[0]?.identity.id ?? harnessId;
+    return catalogFromSnapshot(snapshots[0], resolvedHarnessId);
   });
-
-/** Finish target metadata discovery before committing a harness selection. */
-export async function prepareRuntimeCatalog(options: { projectId: string; harnessId: string; spaceId?: string }): Promise<void> {
-  const catalog = await readDraftCatalog(options.projectId, options.harnessId, options.spaceId);
-  if (catalog.discovery.state === "unavailable") throw new Error(catalog.discovery.reason);
-}
 export function useCatalogRevision(): number {
   return useSyncExternalStore((listener) => {
     listeners.add(listener);
@@ -109,7 +118,9 @@ export function useRuntimeCatalog(
   prospective?: { projectId?: string; harnessId?: string; spaceId?: string },
 ): Catalog {
   const catalogRevision = useCatalogRevision();
-  const routeKey = session?.id
+  const previewRoute = Boolean(prospective?.projectId
+    && (!session?.id || (prospective.harnessId && prospective.harnessId !== session.resolvedHarnessId)));
+  const routeKey = session?.id && !previewRoute
     ? `session:${session.id}:${session.resolvedHarnessId ?? ""}:${session.runtimeLeg?.id ?? ""}:${session.harnessTransition?.id ?? ""}`
     : prospective?.projectId
       ? `draft:${prospective.projectId}:${prospective.harnessId ?? "auto"}`
@@ -118,7 +129,7 @@ export function useRuntimeCatalog(
   // a page-lifetime fence. Explicit identity protects mounted route changes.
   const key = routeKey ? JSON.stringify([activeBrowserAccountId(), prospective?.spaceId ?? "page", prospective?.projectId,
     routeKey, catalogRevision]) : "";
-  const requestedHarness = session?.resolvedHarnessId ?? prospective?.harnessId;
+  const requestedHarness = previewRoute ? prospective?.harnessId : session?.resolvedHarnessId ?? prospective?.harnessId;
   const fallbackModels = pickerCatalogModels(models, requestedHarness);
   const fallbackAgents = requestedHarness
     ? agents.filter((agent) => agent.harnessId === requestedHarness
@@ -129,13 +140,15 @@ export function useRuntimeCatalog(
   const fallback: Catalog = {
     models: fallbackModels,
     agents: fallbackAgents,
-    nativeDefault: fallbackModels.length === 0,
-    ready: fallbackModels.length > 0,
+    nativeDefault: previewRoute && fallbackModels.length === 0,
+    ready: previewRoute || fallbackModels.length > 0,
     ...(requestedHarness ? { harnessId: requestedHarness } : {}),
-    discovery: fallbackModels.length > 0 ? { state: "available" } : { state: "pending" },
+    discovery: fallbackModels.length > 0
+      ? { state: "available" }
+      : previewRoute ? { state: "empty" } : { state: "pending" },
   };
   const preloaded = requestedHarness && (prospective?.projectId ?? session?.projectId)
-    ? catalogCache.peek(draftCatalogKey(prospective?.projectId ?? session!.projectId, requestedHarness, prospective?.spaceId))
+    ? catalogCache.peek(previewCatalogKey(prospective?.projectId ?? session!.projectId, requestedHarness, prospective?.spaceId))
     : undefined;
   const [result, setResult] = useState<{ key: string; catalog: Catalog }>();
   useEffect(() => {
@@ -146,33 +159,16 @@ export function useRuntimeCatalog(
     // opening the picker does not begin a second discovery waterfall.
     const projectId = prospective?.projectId ?? session?.projectId;
     const spaceId = prospective?.spaceId;
-    const warmRevision = catalogRevision;
-    void readHarnessSnapshots({ projectId, spaceId }).then((snapshots) => {
-      // Cursor is the only currently expensive alternate catalog worth
-      // warming. Its availability is cheap metadata; the selected harness
-      // request continues independently and is never delayed by this read.
-      const cursor = snapshots.find((snapshot) => snapshot.identity.id === "cursor");
-      if (!controller.signal.aborted && revision === warmRevision && projectId && cursor?.policy.enabled && cursor.availability.installed) {
-        void readDraftCatalog(projectId, "cursor", spaceId).catch(() => {});
-      }
-    }).catch(() => {});
+    // Picker chrome has its own process-free roster. Start it with the
+    // composer so the first open never waits for native version/auth probes.
+    void readHarnessRoster({ projectId, spaceId }).catch(() => {});
+    void readHarnessSnapshots({ projectId, spaceId }).catch(() => {});
     // A consumer leaving does not abort a shared metadata read; late results
     // can warm their own key but can never publish into the newly chosen one.
-    const load = (): Promise<Catalog> => session?.id
+    const load = (): Promise<Catalog> => session?.id && !previewRoute
       ? api.get<Catalog>(`/api/runtime-catalog?sessionId=${encodeURIComponent(session.id)}`)
-      : (async (): Promise<Catalog> => {
-          const query = new URLSearchParams({
-            projectId: prospective!.projectId!, detail: "1",
-            ...(prospective!.harnessId ? { harnessId: prospective!.harnessId } : { auto: "1" }),
-          });
-          const snapshots = await api.get<HarnessSnapshot[]>(`/api/harnesses/snapshots?${query}`);
-          return catalogFromSnapshot(snapshots[0], snapshots[0]?.identity.id ?? prospective!.harnessId);
-        })();
-    // Cursor's draft key is owned by readDraftCatalog so the background
-    // prefetch and selected route share one pending/value entry.
-    const request = !session?.id && prospective?.harnessId === "cursor" && prospective.projectId
-      ? readDraftCatalog(prospective.projectId, "cursor", prospective.spaceId)
-      : catalogCache.read(key, load);
+      : readPreviewCatalog(prospective!.projectId!, prospective?.harnessId, prospective?.spaceId);
+    const request = session?.id && !previewRoute ? catalogCache.read(key, load) : load();
     const normalized = request.then((catalog) => ({
           ...catalog,
           models: pickerCatalogModels(catalog.models, catalog.harnessId ?? requestedHarness),
@@ -196,7 +192,7 @@ export function useRuntimeCatalog(
       });
     });
     return () => controller.abort();
-  }, [key, session?.id, session?.harnessTransition, prospective?.projectId, prospective?.harnessId]);
+  }, [key, previewRoute, session?.id, session?.harnessTransition, prospective?.projectId, prospective?.harnessId]);
   return !key
     ? { models, agents, nativeDefault: false, ready: true, discovery: models.length > 0 ? { state: "available" } : { state: "empty" } }
     : result?.key === key ? result.catalog : catalogCache.peek(key) ?? preloaded ?? fallback;

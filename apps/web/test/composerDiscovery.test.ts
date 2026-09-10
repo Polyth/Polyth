@@ -26,7 +26,7 @@ const {
   configEquals, consumeComposerConfig, emptyComposerConfig, isDefaultComposerConfig,
   loadComposerConfig, parseComposerConfig, saveComposerConfig, serializeComposerConfig,
   wireProfileId, withAutoThinking, withExplicitAgent, withExplicitModel, withExplicitThinking,
-  withModelForNextTurn, withProfile, withProfileNone,
+  withHarnessForNextTurn, withModelForNextTurn, withProfile, withProfileNone,
 } = await import("../src/composerConfig.ts");
 
 const cmd = (name: string, description = `${name} desc`): SlashCommand =>
@@ -325,9 +325,11 @@ test("composer config: versioned parse/serialize round-trip and corruption safet
   const parsed = parseComposerConfig(serializeComposerConfig(cfg));
   assert.ok(configEquals(parsed, cfg));
   assert.equal(parsed.model?.harnessId, "acp");
+  assert.deepEqual(parsed.harness, { mode: "pinned", harnessId: "acp" });
   assert.deepEqual(parseComposerConfig(null), emptyComposerConfig());
   assert.deepEqual(parseComposerConfig("not json"), emptyComposerConfig());
   assert.deepEqual(parseComposerConfig('{"v":2,"profile":"x"}'), emptyComposerConfig());
+  assert.equal(parseComposerConfig('{"v":1,"profile":null,"harness":{"mode":"pinned","harnessId":"../bad"}}').harness, undefined);
   assert.ok(isDefaultComposerConfig(emptyComposerConfig()));
   assert.ok(!isDefaultComposerConfig(cfg));
 });
@@ -369,6 +371,32 @@ test("agent switches preserve effort; model switches clear only the pending effo
   const nextModel = withModelForNextTurn(nextAgent, { providerID: "p", modelID: "plain" });
   assert.equal(nextModel.thinking, undefined, "a model switch cannot carry an incompatible pending effort");
   assert.equal(nextModel.agent, "review", "model and agent choices stay independent");
+});
+
+test("staging a harness clears incompatible runtime choices without switching the active route", () => {
+  const configured = withExplicitThinking({
+    profile: { kind: "inherit" },
+    model: { harnessId: "opencode", providerID: "openai", modelID: "shared" },
+    agent: "build",
+  }, "high");
+  const staged = withHarnessForNextTurn(
+    configured,
+    { mode: "pinned", harnessId: "codex" },
+    { harnessId: "opencode", profileId: "profile-open" },
+    [{ id: "profile-open", harnessId: "opencode" }],
+  );
+  assert.deepEqual(staged, {
+    profile: { kind: "none" },
+    harness: { mode: "pinned", harnessId: "codex" },
+  });
+
+  const returned = withHarnessForNextTurn(
+    staged,
+    { mode: "pinned", harnessId: "opencode" },
+    { harnessId: "opencode" },
+    [],
+  );
+  assert.equal(returned.harness, undefined, "choosing the live route cancels the staged switch");
 });
 
 test("Auto is explicit and survives persistence as a distinct choice", () => {
@@ -416,5 +444,16 @@ test("consume after send removes the record only when it still equals what was s
   assert.ok(configEquals(loadComposerConfig("sess-a"), changed));
   // unchanged record is consumed
   consumeComposerConfig("sess-a", changed);
+  assert.ok(configEquals(loadComposerConfig("sess-a"), emptyComposerConfig()));
+
+  // A live projection can commit only the route while the same send is still
+  // awaiting admission. That is not a newer picker edit.
+  const routed = withExplicitModel(emptyComposerConfig(), {
+    harnessId: "codex", providerID: "openai", modelID: "gpt",
+  });
+  saveComposerConfig("sess-a", routed);
+  const { harness: _committed, ...afterRouteCommit } = routed;
+  saveComposerConfig("sess-a", afterRouteCommit);
+  consumeComposerConfig("sess-a", routed);
   assert.ok(configEquals(loadComposerConfig("sess-a"), emptyComposerConfig()));
 });

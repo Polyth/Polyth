@@ -64,6 +64,7 @@ import type {
     HarnessProbe,
     HarnessProvider,
     HarnessRegistry,
+    HarnessRosterItem,
     HarnessSelection,
     HarnessSnapshot,
     RuntimeSessionBinding,
@@ -156,6 +157,21 @@ export function createHarnessRegistry() {
             return providers.get(id);
         },
         probe: (context: HarnessContext) => Promise.all(list().map((provider) => probeOne(provider, context))),
+        async roster(context: HarnessContext): Promise<HarnessRosterItem[]> {
+            const preferences = await policy(context);
+            return list().map((provider) => ({
+                identity: {
+                    id: provider.descriptor.id,
+                    name: provider.descriptor.name,
+                    integration: provider.descriptor.integration,
+                },
+                policy: {
+                    enabled: preferences[provider.descriptor.id]?.enabled ?? true,
+                    priority: preferences[provider.descriptor.id]?.priority ?? provider.descriptor.priority,
+                    autoSelect: provider.descriptor.autoSelect !== false,
+                },
+            }));
+        },
         async snapshots(context: HarnessContext, options: { harnessId?: string; force?: boolean; detail?: boolean } = {}) {
             const preferences = await policy(context);
             const selected = options.harnessId

@@ -172,6 +172,7 @@ const messageInput = (body: Record<string, unknown>): UserTurnInput => {
   }
   const model = modelInput(body.model);
   const agent = optionalString(body, "agent");
+  const harness = harnessInput(body.harness);
   const command = commandInput(body.command);
   return {
     text: body.text,
@@ -180,6 +181,7 @@ const messageInput = (body: Record<string, unknown>): UserTurnInput => {
     ...(Array.isArray(body.attachments) ? { attachments: body.attachments as never } : {}),
     ...(model ? { model } : {}),
     ...(agent !== undefined ? { agent } : {}),
+    ...(harness ? { harness } : {}),
     ...(typeof body.delivery === "string"
       ? { delivery: body.delivery as UserTurnInput["delivery"] }
       : {}),

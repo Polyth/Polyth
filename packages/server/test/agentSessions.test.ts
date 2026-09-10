@@ -406,6 +406,14 @@ test("agent mutations cover create/send, queue, lifecycle, metadata, goals, and 
     assert.ok(created.body.sendResult.turnId);
     await settle();
 
+    const invalidHarness = await jsonFetch<{ error: string }>(
+      app.base,
+      `/api/agent/sessions/${id}/messages`,
+      jsonRequest("POST", { text: "must not send", harness: { mode: "pinned", harnessId: "../escape" } }),
+    );
+    assert.equal(invalidHarness.status, 400);
+    assert.equal(invalidHarness.body.error, "invalid-input");
+
     const queued = await jsonFetch<{ sendResult: { queued: boolean; queueId: string } }>(
       app.base,
       `/api/agent/sessions/${id}/messages`,

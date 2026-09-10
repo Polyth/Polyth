@@ -24,7 +24,7 @@ globalThis.fetch = async (input) => {
 };
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { invalidateRuntimeCatalogs, peekHarnessSnapshots, prepareRuntimeCatalog, readHarnessSnapshots, useRuntimeCatalog } = await import("../widgets/runtimeCatalog.ts");
+const { invalidateRuntimeCatalogs, peekHarnessSnapshots, readHarnessSnapshots, useRuntimeCatalog } = await import("../widgets/runtimeCatalog.ts");
 const models: ModelDescriptor[] = [];
 const agents: AgentDescriptor[] = [];
 const snapshot = (harnessId: string, modelID: string) => [{
@@ -48,7 +48,7 @@ test("mounted draft A/B/A rejects stale publishes and reuses the pending catalog
   let root = createRoot(container);
   try {
     await act(async () => { root.render(createElement(Harness, { harnessId: "cursor" })); });
-    assert.equal(catalog?.ready, false);
+    assert.equal(catalog?.ready, true, "a staged route is immediately usable with its native default");
     await act(async () => { root.render(createElement(Harness, { harnessId: "codex" })); });
     await act(async () => { pending.get("cursor")!(snapshot("cursor", "cursor-choice")); });
     assert.equal(catalog?.harnessId, "codex");
@@ -58,6 +58,8 @@ test("mounted draft A/B/A rejects stale publishes and reuses the pending catalog
     await act(async () => { root.render(createElement(Harness, { harnessId: "cursor" })); });
     assert.equal(catalog?.models[0]?.modelID, "cursor-choice");
     assert.equal(requests.filter((path) => path.includes("harnessId=cursor")).length, 1);
+    assert.equal(requests.some((path) => path.includes("detail=1")), false,
+      "picker previews must never start detailed native discovery");
     await act(async () => { root.unmount(); });
     root = createRoot(container);
     await act(async () => { root.render(createElement(Harness, { harnessId: "cursor" })); });
@@ -81,15 +83,11 @@ test("mounted draft A/B/A rejects stale publishes and reuses the pending catalog
   }
 });
 
-test("warming Cursor runs behind selected Codex and survives source changes and elapsed time", async (t) => {
+test("preview catalogs load only the selected summary and stay warm without native detail discovery", async (t) => {
   invalidateRuntimeCatalogs();
   requests.length = 0;
   pending.clear();
-  cheapSnapshots = [{
-    identity: { id: "cursor", name: "Cursor" },
-    policy: { enabled: true },
-    availability: { state: "ready", installed: true },
-  }];
+  cheapSnapshots = [];
   let catalog: ReturnType<typeof useRuntimeCatalog> | undefined;
   function Harness({ models, harnessId = "codex" }: { models: ModelDescriptor[]; harnessId?: string }) {
     catalog = useRuntimeCatalog(null, models, [], { projectId: "warm", harnessId });
@@ -100,28 +98,24 @@ test("warming Cursor runs behind selected Codex and survives source changes and 
   const root = createRoot(container);
   try {
     await act(async () => { root.render(createElement(Harness, { models: [] })); });
-    assert.equal(requests.some((path) => path.includes("harnessId=cursor")), true);
-    assert.equal(requests.some((path) => path.includes("harnessId=cursor") && path.includes("force=1")), false,
-      "background preload must reuse the server cache in another window");
     assert.equal(requests.some((path) => path.includes("harnessId=codex")), true);
+    assert.equal(requests.some((path) => path.includes("harnessId=cursor")), false,
+      "an alternate harness must not be speculatively connected or discovered");
+    assert.equal(requests.some((path) => path.includes("detail=1")), false);
     await act(async () => { pending.get("codex")!([{ identity: { id: "codex", name: "Codex" }, availability: { state: "ready" }, catalog: { models: [] } }]); });
     assert.equal(catalog?.ready, true, "Codex is usable while Cursor is still loading");
-    let prepared = false;
-    const preparation = prepareRuntimeCatalog({ projectId: "warm", harnessId: "cursor" }).then(() => { prepared = true; });
-    await act(async () => {});
-    assert.equal(prepared, false, "selection waits for the shared background catalog request");
-    await act(async () => { pending.get("cursor")!(snapshot("cursor", "cursor-a")); });
-    await preparation;
-    assert.equal(prepared, true);
     const cursorRequests = () => requests.filter((path) => path.includes("harnessId=cursor")).length;
+    assert.equal(cursorRequests(), 0);
+    await act(async () => { root.render(createElement(Harness, { models: [], harnessId: "cursor" })); });
+    assert.equal(catalog?.ready, true, "the tab changes synchronously before its summary arrives");
     assert.equal(cursorRequests(), 1);
-    await act(async () => { root.render(createElement(Harness, { models: [] })); });
-    assert.equal(cursorRequests(), 1, "the page-lifetime catalog stays warm across source arrays");
+    await act(async () => { pending.get("cursor")!(snapshot("cursor", "cursor-a")); });
+    assert.equal(catalog?.models[0]?.modelID, "cursor-a");
     const now = Date.now();
     t.mock.method(Date, "now", () => now + 24 * 60 * 60_000);
-    await act(async () => { root.render(createElement(Harness, { models: [], harnessId: "cursor" })); });
+    await act(async () => { root.render(createElement(Harness, { models: [{ harnessId: "other", providerID: "p", modelID: "m", name: "changed" }], harnessId: "cursor" })); });
     assert.equal(catalog?.models[0]?.modelID, "cursor-a");
-    assert.equal(cursorRequests(), 1, "switching to the prefetched Cursor catalog stays warm a day later");
+    assert.equal(cursorRequests(), 1, "the page-lifetime preview stays warm across rerenders and elapsed time");
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();

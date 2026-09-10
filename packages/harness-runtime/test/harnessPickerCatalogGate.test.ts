@@ -55,15 +55,12 @@ const props = (h: ReturnType<typeof host>, projectId: string) => ({
   projectHarnessDefault: null,
 });
 
-test("Cursor selection waits for its catalog before updating a draft", async () => {
+test("draft harness selection is synchronous and never starts detail discovery", async () => {
   const requests: string[] = [];
-  let resolveDetail!: (value: unknown) => void;
   fetchHandler = async (input, init) => {
     const url = new URL(String(input), "http://test");
     requests.push(`${init?.method ?? "GET"} ${url.pathname}${url.search}`);
-    if (init?.method === "POST") return new Response(JSON.stringify({ resolvedHarnessId: "cursor" }));
-    if (!url.searchParams.has("harnessId")) return new Response(JSON.stringify([snapshot("codex"), snapshot("cursor")]));
-    return new Response(JSON.stringify(await new Promise((resolve) => { resolveDetail = resolve; })));
+    return new Response(JSON.stringify([snapshot("codex"), snapshot("cursor")]));
   };
   const updates = { value: 0 };
   const container = document.createElement("div");
@@ -73,14 +70,12 @@ test("Cursor selection waits for its catalog before updating a draft", async () 
     await act(async () => { root.render(createElement(HarnessTabs, {
       ...props(host(updates), "session-gate-success"),
       harnessSelection: { mode: "pinned", harnessId: "codex" },
-      sessionStatus: "idle",
     })); });
     await act(async () => { await Promise.resolve(); });
     await act(async () => { container.querySelector<HTMLButtonElement>("[role=tab][id$='-cursor']")?.click(); });
-    assert.equal(updates.value, 0);
-    assert.equal(requests.some((request) => request.includes("harnessId=cursor")), true);
-    await act(async () => { resolveDetail([snapshot("cursor", "auto")]); });
     assert.equal(updates.value, 1);
+    assert.equal(requests.some((request) => request.includes("detail=1")), false);
+    assert.equal(requests.some((request) => request.includes("harnessId=cursor")), false);
     assert.equal(requests.some((request) => request.startsWith("POST /api/harnesses/sessions/")), false);
   } finally {
     await act(async () => { root.unmount(); });
@@ -88,15 +83,15 @@ test("Cursor selection waits for its catalog before updating a draft", async () 
   }
 });
 
-test("failed target catalog leaves an active session unswitched and reports the error", async () => {
+test("active-session tab changes stay local until a message is submitted", async () => {
   const requests: string[] = [];
   fetchHandler = async (input, init) => {
     const url = new URL(String(input), "http://test");
     requests.push(`${init?.method ?? "GET"} ${url.pathname}${url.search}`);
-    if (!url.searchParams.has("harnessId")) return new Response(JSON.stringify([snapshot("codex"), snapshot("cursor")]));
-    return new Response(JSON.stringify({ message: "ACP discovery timed out" }), { status: 503 });
+    return new Response(JSON.stringify([snapshot("codex"), snapshot("cursor")]));
   };
   const updates = { value: 0 };
+  const selected: string[] = [];
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -105,14 +100,49 @@ test("failed target catalog leaves an active session unswitched and reports the 
       ...props(host(updates), "session-gate"),
       sessionId: "session-1",
       harnessSelection: { mode: "pinned", harnessId: "codex" },
-      sessionStatus: "idle",
+      onSelectHarness: (selection: { mode: "auto" } | { mode: "pinned"; harnessId: string }) => {
+        if (selection.mode === "pinned") selected.push(selection.harnessId);
+      },
     })); });
     await act(async () => { await Promise.resolve(); });
     await act(async () => { container.querySelector<HTMLButtonElement>("[role=tab][id$='-cursor']")?.click(); });
     await act(async () => { await Promise.resolve(); });
+    assert.deepEqual(selected, ["cursor"]);
     assert.equal(requests.some((request) => request.startsWith("POST /api/harnesses/sessions/")), false);
-    assert.match(container.textContent ?? "", /ACP discovery timed out/);
+    assert.doesNotMatch(container.textContent ?? "", /Starting Cursor/);
   } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("process-free roster renders harness logos before slow availability probes finish", async () => {
+  let finishSnapshots!: (value: unknown) => void;
+  fetchHandler = async (input) => {
+    const url = new URL(String(input), "http://test");
+    if (url.pathname === "/api/harnesses/roster") {
+      return new Response(JSON.stringify([
+        { identity: { id: "codex", name: "Codex", integration: "App Server" }, policy: { enabled: true, priority: 10, autoSelect: true } },
+        { identity: { id: "cursor", name: "Cursor", integration: "ACP v1" }, policy: { enabled: true, priority: 20, autoSelect: false } },
+      ]));
+    }
+    return new Response(JSON.stringify(await new Promise((resolve) => { finishSnapshots = resolve; })));
+  };
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(HarnessTabs, {
+      ...props(host({ value: 0 }), "instant-roster"),
+      harnessSelection: { mode: "pinned", harnessId: "codex" },
+    })); });
+    await act(async () => { await Promise.resolve(); });
+    assert.deepEqual(
+      [...container.querySelectorAll<HTMLElement>("[role=tab] .provider-logo")].map((logo) => logo.dataset.provider),
+      ["openai", "cursor"],
+    );
+  } finally {
+    await act(async () => { finishSnapshots([]); });
     await act(async () => { root.unmount(); });
     container.remove();
   }

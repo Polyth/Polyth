@@ -9,6 +9,7 @@ import {
   canonicalizeRemotePath,
   type AgentRuntime,
   type AuthResolution,
+  type HarnessSelection,
   type JsonObject,
   type ModelDescriptor,
   type RequestIngress,
@@ -68,6 +69,21 @@ const RECOVERY_CONFLICT_CODES = new Set([
   "outcome-unknown",
   "stale-evidence",
 ]);
+
+const harnessSelectionInput = (value: unknown): HarnessSelection | undefined => {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw Object.assign(new Error("invalid harness selection"), { code: "invalid-input" });
+  }
+  const raw = value as { mode?: unknown; harnessId?: unknown };
+  if (raw.mode === "auto" && raw.harnessId === undefined) return { mode: "auto" };
+  if (raw.mode === "pinned"
+    && typeof raw.harnessId === "string"
+    && /^[a-z][a-z0-9-]*$/.test(raw.harnessId)) {
+    return { mode: "pinned", harnessId: raw.harnessId };
+  }
+  throw Object.assign(new Error("invalid harness selection"), { code: "invalid-input" });
+};
 
 /** Gzip cache keyed by path+mtime so a rebuilt dist never serves stale bytes. */
 const gzipCache = new Map<string, { mtimeMs: number; gz: Buffer }>();
@@ -547,15 +563,7 @@ async function dispatchHttp(
       }
       if (path === "/api/sessions" && method === "POST") {
         const b = await loadBody();
-        const rawHarness = b.harness as { mode?: unknown; harnessId?: unknown } | undefined;
-        const harness = rawHarness?.mode === "auto"
-          ? { mode: "auto" as const }
-          : rawHarness?.mode === "pinned" && typeof rawHarness.harnessId === "string" && /^[a-z][a-z0-9-]*$/.test(rawHarness.harnessId)
-            ? { mode: "pinned" as const, harnessId: rawHarness.harnessId }
-            : undefined;
-        if (b.harness !== undefined && !harness) {
-          throw Object.assign(new Error("invalid harness selection"), { code: "invalid-input" });
-        }
+        const harness = harnessSelectionInput(b.harness);
         const ref = await space().sessions.create({
           projectId: String(b.projectId),
           ...(harness ? { harness } : {}),
@@ -599,6 +607,7 @@ async function dispatchHttp(
       if (m && method === "POST") {
         const b = await loadBody();
         const delivery = b.delivery;
+        const harness = harnessSelectionInput(b.harness);
         const validCommand = b.command !== undefined ? parseTurnCommand(b.command) : undefined;
         return json(res, 200, await space().sessions.send(m[1]!, {
           text: String(b.text ?? ""),
@@ -608,6 +617,7 @@ async function dispatchHttp(
           ...(Array.isArray(b.attachments) ? { attachments: b.attachments as never } : {}),
           ...(b.model ? { model: b.model as { providerID: string; modelID: string } } : {}),
           ...(b.agent ? { agent: String(b.agent) } : {}),
+          ...(harness ? { harness } : {}),
           ...(delivery === "steer" || delivery === "queue" || delivery === "interrupt" || delivery === "normal"
             ? { delivery } : {}),
           ...(b.dismissPending === true ? { dismissPending: true } : {}),

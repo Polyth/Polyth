@@ -185,6 +185,30 @@ test("A1 A2 → B1 → A retains one canonical session, cwd and confirmed contex
   await f.close();
 });
 
+test("a submit-time harness intent switches once before admitting that message", async () => {
+  const f = fixture();
+  const { id } = await f.sessions.create({ projectId: "p" });
+  await f.sessions.send(id, { text: "first" });
+  f.engines.at(-1)!.complete();
+  await f.idle(id);
+
+  await f.sessions.send(id, {
+    text: "run on B",
+    harness: { mode: "pinned", harnessId: "fake-b" },
+  });
+
+  assert.equal(f.engines.at(-1)!.harnessId, "fake-b");
+  assert.equal(f.engines.at(-1)!.requests.at(-1)?.text.endsWith("run on B"), true);
+  const events = await f.store.events(id);
+  const switched = events.filter((event) => event.type === "harness/switched");
+  assert.equal(switched.length, 1);
+  assert.ok(switched[0]!.seq < events.findLast((event) => event.type === "user/message")!.seq);
+  assert.equal((await f.store.projection(id))?.resolvedHarnessId, "fake-b");
+  f.engines.at(-1)!.complete();
+  await f.idle(id);
+  await f.close();
+});
+
 test("active switch waits for completion; queued admission uses the new harness", async () => {
   const f = fixture(); const { id } = await f.sessions.create({ projectId: "p" });
   await f.sessions.send(id, { text: "working" });

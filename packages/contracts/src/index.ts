@@ -1069,6 +1069,10 @@ export interface UserTurnInput {
   attachments?: AttachmentRef[];
   model?: ModelRef;
   agent?: string;
+  /** Optional submit-time route intent. When it differs from the canonical
+   * session route, the server completes the safe harness switch before this
+   * turn is admitted. Absence preserves the current route. */
+  harness?: HarnessSelection;
   /** Active-turn delivery admission; defaults to "normal". */
   delivery?: DeliveryMode;
   /** Atomically reject open questions / deny open permissions of this session before admission. */
@@ -2761,6 +2765,15 @@ export interface HarnessDescriptor {
   installCommand?: string;
   signInCommand?: string;
 }
+/** Stable, process-free presentation metadata for the harness picker. */
+export interface HarnessRosterItem {
+  identity: Pick<HarnessDescriptor, "id" | "name" | "integration">;
+  policy: {
+    enabled: boolean;
+    priority: number;
+    autoSelect: boolean;
+  };
+}
 export type HarnessAvailabilityState =
   | "not-installed"
   | "starting"
@@ -3138,6 +3151,9 @@ export interface HarnessRegistry {
   get(id: string): HarnessProvider | undefined;
   probe(context: HarnessContext): Promise<HarnessProbe[]>;
   resolve(context: HarnessContext, selection: HarnessSelection, stickyId?: string): Promise<HarnessProvider>;
+  /** Process-free picker metadata. Availability remains owned by snapshots;
+   * this roster exists so labels and logos never wait for native probes. */
+  roster(context: HarnessContext): Promise<HarnessRosterItem[]>;
   snapshots(context: HarnessContext, options?: { harnessId?: string; force?: boolean; detail?: boolean }): Promise<HarnessSnapshot[]>;
   invalidate(context?: Partial<Pick<HarnessContext, "spaceId" | "projectId" | "cwd" | "remote">> & { harnessId?: string }): void;
 }

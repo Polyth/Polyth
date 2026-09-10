@@ -2,6 +2,7 @@ import "./styles.css";
 import { useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
 import type {
   HarnessControlDescriptor,
+  HarnessRosterItem,
   HarnessSelection,
   HarnessSnapshot,
   HarnessTransition,
@@ -12,7 +13,7 @@ import { createApiTransport, defineWebPackage, type WebPackageHost } from "@poly
 import { Button, Dialog, Notice, Select, Switch, Tabs, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 import MoveControls from "../../../apps/web/src/components/MoveControls.tsx";
 import ProviderLogo from "../../models/widgets/ProviderLogo.tsx";
-import { invalidateRuntimeCatalogs, peekHarnessSnapshots, prepareRuntimeCatalog, readHarnessSnapshots, useCatalogRevision } from "@polyth/models/runtime-catalog";
+import { invalidateRuntimeCatalogs, peekHarnessRoster, peekHarnessSnapshots, readHarnessRoster, readHarnessSnapshots, useCatalogRevision } from "@polyth/models/runtime-catalog";
 import { activeBrowserAccountId } from "@polyth/web/account-storage";
 
 const api = createApiTransport();
@@ -51,6 +52,7 @@ function useHarnesses(projectId?: string | null, spaceId?: string) {
   const revision = useCatalogRevision();
   const key = JSON.stringify([activeBrowserAccountId(), spaceId ?? "page", projectId ?? "", revision]);
   const [result, setResult] = useState<{ key: string; rows: HarnessSnapshot[] }>();
+  const [rosterResult, setRosterResult] = useState<{ key: string; rows: HarnessRosterItem[] }>();
   const requestSeq = useRef(0);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -70,11 +72,16 @@ function useHarnesses(projectId?: string | null, spaceId?: string) {
     }
   }, [key, projectId, spaceId]);
   useEffect(() => {
+    let active = true;
+    void readHarnessRoster({ projectId, spaceId }).then((rows) => {
+      if (active) setRosterResult({ key, rows });
+    }).catch(() => {});
     void refresh();
-    return () => { requestSeq.current++; };
-  }, [refresh]);
+    return () => { active = false; requestSeq.current++; };
+  }, [refresh, key, projectId, spaceId]);
   const rows = result?.key === key ? result.rows : peekHarnessSnapshots({ projectId, spaceId }) ?? [];
-  return { rows, error, loading, refresh };
+  const roster = rosterResult?.key === key ? rosterResult.rows : peekHarnessRoster({ projectId, spaceId }) ?? [];
+  return { rows, roster, error, loading, refresh };
 }
 
 function GenericControl({
@@ -124,10 +131,11 @@ export function HarnessTabs({
   host,
   projectId,
   sessionId,
-  sessionStatus,
   harnessSelection,
   resolvedHarnessId,
   transition,
+  pendingHarnessSelection,
+  onSelectHarness,
   projectHarnessDefault,
   agentControl,
   effortControl,
@@ -137,18 +145,18 @@ export function HarnessTabs({
   host: WebPackageHost;
   projectId?: string;
   sessionId?: string;
-  sessionStatus?: string;
   harnessSelection?: HarnessSelection;
   resolvedHarnessId?: string;
   transition?: HarnessTransition;
+  pendingHarnessSelection?: HarnessSelection;
+  onSelectHarness?: (selection: HarnessSelection) => void;
   projectHarnessDefault?: HarnessSelection | null;
   agentControl?: ReactNode;
   effortControl?: ReactNode;
   phoneLayout?: boolean;
   spaceId?: string;
 }) {
-  const { rows, error, loading } = useHarnesses(projectId, spaceId);
-  const [choice, setChoice] = useState<HarnessSelection>();
+  const { rows, roster, error, loading } = useHarnesses(projectId, spaceId);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState("");
   const [announcement, setAnnouncement] = useState("");
@@ -165,41 +173,21 @@ export function HarnessTabs({
     sync();
     return host.executionDraft.subscribe(sync);
   }, [host, projectId]);
-  useEffect(() => setChoice(undefined), [projectId, sessionId, resolvedHarnessId, transition?.id]);
-
   const selection = sessionId
     ? harnessSelection ?? { mode: "auto" }
     : !draftExplicit && projectHarnessDefault
       ? projectHarnessDefault
       : draftSelection;
-  const target = transition ? rows.find((row) => row.identity.id === transition.targetHarnessId) : undefined;
+  const target = transition
+    ? rows.find((row) => row.identity.id === transition.targetHarnessId)
+      ?? roster.find((row) => row.identity.id === transition.targetHarnessId)
+    : undefined;
 
   const perform = async (next: HarnessSelection, timing: "after-turn" | "stop-now") => {
-    if (!projectId) return;
+    if (!sessionId) return;
     setBusy(true);
     setFailure("");
     try {
-      if (next.mode === "pinned" && next.harnessId === "cursor") {
-        await prepareRuntimeCatalog({ projectId, harnessId: next.harnessId, spaceId });
-      }
-      if (!sessionId) {
-        const previous = host.executionDraft.get(projectId);
-        const nextHarnessId = next.mode === "pinned" ? next.harnessId : undefined;
-        const config = host.executionDraft.update(projectId, {
-          harnessSelection: next,
-          harnessSelectionExplicit: true,
-          ...(previous.model && (!nextHarnessId || previous.model.harnessId !== nextHarnessId) ? { model: undefined } : {}),
-          ...(previous.agent && (!nextHarnessId || previous.agent.harnessId !== nextHarnessId) ? { agent: undefined } : {}),
-        });
-        setDraftSelection(config.harnessSelection);
-        setDraftExplicit(true);
-        setChoice(undefined);
-        const nextName = next.mode === "pinned"
-          ? rows.find((row) => row.identity.id === next.harnessId)?.identity.name ?? next.harnessId
-          : undefined;
-        setAnnouncement(nextName ? `${nextName} selected for the new conversation.` : "Automatic harness selection enabled.");
-        return;
-      }
       const result = await api.post<SessionProjection>(`/api/harnesses/sessions/${encodeURIComponent(sessionId)}`, {
         selection: next,
         timing,
@@ -211,7 +199,6 @@ export function HarnessTabs({
       setAnnouncement(result.harnessTransition
         ? `Harness switch scheduled. The current response will finish, then ${destination} will continue.`
         : `Now using ${destination}.`);
-      setChoice(undefined);
     } catch (cause) {
       setFailure(host.errors.friendly("Change harness", cause));
     } finally {
@@ -220,11 +207,31 @@ export function HarnessTabs({
   };
 
   const choose = (next: HarnessSelection) => {
-    if (sessionId && (sessionStatus === "working" || sessionStatus === "waiting") && !transition) {
-      setChoice(next);
+    if (!projectId || transition) return;
+    const nextHarnessId = next.mode === "pinned" ? next.harnessId : undefined;
+    const nextName = nextHarnessId
+      ? (roster.find((row) => row.identity.id === nextHarnessId)
+          ?? rows.find((row) => row.identity.id === nextHarnessId))?.identity.name ?? nextHarnessId
+      : undefined;
+    if (sessionId) {
+      onSelectHarness?.(next);
+      setAnnouncement(nextName
+        ? `${nextName} selected for the next message. It will connect when you send.`
+        : "Automatic harness selection staged for the next message.");
       return;
     }
-    void perform(next, transition?.phase === "requested" ? transition.timing : "after-turn");
+    const previous = host.executionDraft.get(projectId);
+    const config = host.executionDraft.update(projectId, {
+      harnessSelection: next,
+      harnessSelectionExplicit: true,
+      ...(previous.model && (!nextHarnessId || previous.model.harnessId !== nextHarnessId) ? { model: undefined } : {}),
+      ...(previous.agent && (!nextHarnessId || previous.agent.harnessId !== nextHarnessId) ? { agent: undefined } : {}),
+    });
+    setDraftSelection(config.harnessSelection);
+    setDraftExplicit(true);
+    setAnnouncement(nextName
+      ? `${nextName} selected for the new conversation. It will connect when you send.`
+      : "Automatic harness selection enabled for the new conversation.");
   };
 
   const cancel = async () => {
@@ -234,7 +241,6 @@ export function HarnessTabs({
     try {
       host.sessions.upsert(await api.post<SessionProjection>(`/api/harnesses/sessions/${encodeURIComponent(sessionId)}/cancel`, {}));
       setAnnouncement("Harness switch cancelled. The current harness will continue.");
-      setChoice(undefined);
     } catch (cause) {
       setFailure(host.errors.friendly("Cancel harness switch", cause));
     } finally {
@@ -242,9 +248,19 @@ export function HarnessTabs({
     }
   };
 
-  const activeSelection = choice ?? transition?.selection ?? selection;
-  const ordered = rows.toSorted((a, b) => a.policy.priority - b.policy.priority || a.identity.name.localeCompare(b.identity.name));
-  const firstExecutable = ordered.find(canExecute) ?? ordered[0];
+  const activeSelection = transition?.selection ?? pendingHarnessSelection ?? selection;
+  const snapshots = new Map(rows.map((row) => [row.identity.id, row]));
+  type PickerRow = HarnessRosterItem & { snapshot?: HarnessSnapshot };
+  const pickerRows: PickerRow[] = [
+    ...roster.map((row) => {
+      const snapshot = snapshots.get(row.identity.id);
+      return { ...row, ...(snapshot ? { snapshot } : {}) };
+    }),
+    ...rows.filter((row) => !roster.some((item) => item.identity.id === row.identity.id))
+      .map((row) => ({ identity: row.identity, policy: row.policy, snapshot: row })),
+  ];
+  const ordered = pickerRows.toSorted((a, b) => a.policy.priority - b.policy.priority || a.identity.name.localeCompare(b.identity.name));
+  const firstExecutable = ordered.find((row) => row.policy.enabled && (!row.snapshot || canExecute(row.snapshot))) ?? ordered[0];
   const resolvedTab = resolvedHarnessId && ordered.some((row) => row.identity.id === resolvedHarnessId)
     ? resolvedHarnessId
     : firstExecutable?.identity.id;
@@ -258,15 +274,12 @@ export function HarnessTabs({
       <ProviderLogo providerID={row.identity.id} providerName={row.identity.name} size="compact" />
       <span className="sr-only">{row.identity.name}</span>
     </span>,
-    disabled: activeTab !== row.identity.id && (busy || Boolean(transition) || !canExecute(row)),
+    disabled: activeTab !== row.identity.id && (busy || Boolean(transition) || !row.policy.enabled || (row.snapshot ? !canExecute(row.snapshot) : false)),
   }));
   const activeRow = ordered.find((row) => row.identity.id === activeTab);
-  const committedTab = selection.mode === "pinned"
-    ? selection.harnessId
-    : resolvedTab;
   const chooseTab = (id: string) => {
     const next: HarnessSelection = { mode: "pinned", harnessId: id };
-    if (!choice && !transition && id === committedTab) return;
+    if (!transition && id === activeTab) return;
     choose(next);
   };
 
@@ -274,11 +287,7 @@ export function HarnessTabs({
     <div className="pkg-harnesses-picker-tabs-head">
       <Tabs tabs={tabs} value={activeTab} onChange={chooseTab} label="Execution harness" size="sm" className="pkg-harnesses-tablist" />
     </div>
-    {choice ? <div className="pkg-harnesses-timing">
-        <Button block variant="quiet" className="pkg-harnesses-timing-choice" busy={busy} onClick={() => void perform(choice, "after-turn")}><span className="pkg-harnesses-timing-choice-copy"><strong>After this response</strong><small>Let the current harness finish normally.</small></span></Button>
-        <Button block variant="ghost" className="pkg-harnesses-timing-choice" disabled={busy} onClick={() => void perform(choice, "stop-now")}><span className="pkg-harnesses-timing-choice-copy"><strong>Switch now</strong><small>Stop this response and continue.</small></span></Button>
-        <Button size="sm" variant="ghost" onClick={() => setChoice(undefined)}>Back</Button>
-      </div> : <>
+    <>
         {transition?.phase === "requested" && <div className="pkg-harnesses-transition" role="status">
           <span>Waiting for current response · Will run with <ProviderLogo providerID={target?.identity.id ?? transition.targetHarnessId} providerName={target?.identity.name} size="compact" />{target?.identity.name ?? transition.targetHarnessId}</span>
           <Button size="sm" busy={busy} onClick={() => void perform(transition.selection, "stop-now")}>Switch now</Button>
@@ -288,12 +297,12 @@ export function HarnessTabs({
         {transition?.phase === "failed" && <Notice tone="error" role="alert" heading={`${target?.identity.name ?? transition.targetHarnessId} couldn't start`} actions={<Button size="sm" busy={busy} onClick={() => void perform(transition.selection, "after-turn")}>Retry</Button>}>
           The previous harness stopped safely. {transition.error?.message ?? "Choose another harness tab to continue."}
         </Notice>}
-        {activeRow && !canExecute(activeRow) && !transition && <p className="pkg-harnesses-picker-state" role="status">{availabilityLabel(activeRow)}. Open Harnesses in Settings to finish setup.</p>}
+        {activeRow?.snapshot && !canExecute(activeRow.snapshot) && !transition && <p className="pkg-harnesses-picker-state" role="status">{availabilityLabel(activeRow.snapshot)}. Open Harnesses in Settings to finish setup.</p>}
         {phoneLayout && (agentControl || effortControl) && <section className="pkg-harnesses-mobile-config" aria-label="Execution settings">
           {agentControl && <div><span>Role</span>{agentControl}</div>}
           {effortControl && <div><span>Thinking</span>{effortControl}</div>}
         </section>}
-      </>}
+      </>
     {(failure || error) && <Notice tone="error" role="alert">{failure || error}</Notice>}
     <span className="sr-only" role="status" aria-live="polite">{announcement}</span>
   </section>;
@@ -473,7 +482,7 @@ function SwitchMarker({ event }: { event: SessionEvent }) {
 export default defineWebPackage((host) => () => {
   const off = [
     host.settings.registerPage({ id: "harnesses", packageId: "harness-runtime", label: "Harnesses", group: "Engineering", order: 15, component: () => <HarnessSettings host={host}/> }),
-    host.slots.register({ id: "harnesses.model-tabs", slot: "modelPicker.header", order: 10, render: (props) => <HarnessTabs host={host} spaceId={props.spaceId as string | undefined} projectId={props.projectId as string | undefined} sessionId={props.sessionId as string | undefined} sessionStatus={props.sessionStatus as string | undefined} harnessSelection={props.harnessSelection as HarnessSelection | undefined} resolvedHarnessId={props.resolvedHarnessId as string | undefined} transition={props.harnessTransition as HarnessTransition | undefined} projectHarnessDefault={props.projectHarnessDefault as HarnessSelection | null | undefined} agentControl={props.executionAgentControl as ReactNode} effortControl={props.executionEffortControl as ReactNode} phoneLayout={props.phoneLayout === true} /> }),
+    host.slots.register({ id: "harnesses.model-tabs", slot: "modelPicker.header", order: 10, render: (props) => <HarnessTabs host={host} spaceId={props.spaceId as string | undefined} projectId={props.projectId as string | undefined} sessionId={props.sessionId as string | undefined} harnessSelection={props.harnessSelection as HarnessSelection | undefined} resolvedHarnessId={props.resolvedHarnessId as string | undefined} transition={props.harnessTransition as HarnessTransition | undefined} pendingHarnessSelection={props.pendingHarnessSelection as HarnessSelection | undefined} onSelectHarness={props.onSelectHarness as ((selection: HarnessSelection) => void) | undefined} projectHarnessDefault={props.projectHarnessDefault as HarnessSelection | null | undefined} agentControl={props.executionAgentControl as ReactNode} effortControl={props.executionEffortControl as ReactNode} phoneLayout={props.phoneLayout === true} /> }),
     host.slots.register({ id: "harnesses.transition", slot: "composer.execution", order: 10, render: (props) => <HarnessTransitionStatus host={host} sessionId={props.sessionId as string | undefined} resolvedHarnessId={props.resolvedHarnessId as string | undefined} transition={props.harnessTransition as HarnessTransition | undefined} /> }),
     host.slots.register({ id: "harnesses.switch-marker", slot: "session.timeline.event", meta: { eventTypes: ["harness/switched"] }, render: (props) => <SwitchMarker event={props.event as SessionEvent} /> }),
   ];

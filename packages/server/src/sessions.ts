@@ -6063,6 +6063,20 @@ export function createSessionService(deps: {
         if (prepared) input.attachments = prepared;
         else delete input.attachments;
       }
+      if (input.harness) {
+        const selection = input.harness;
+        const switchHarness = service.switchHarness;
+        if (!switchHarness) {
+          throw Object.assign(new Error("harness selection unavailable"), { code: "unsupported" });
+        }
+        // A submit-time route is an atomic "run this turn there" intent. Finish
+        // the existing safe switch transaction before model checks or
+        // user-message persistence, so no part of this turn can reach the old
+        // harness. Picker-only changes never call this path.
+        input = { ...input };
+        delete input.harness;
+        proj = await switchHarness(sessionId, selection, "stop-now");
+      }
       if (proj.harnessTransition) {
         proj = await withSessionLock(sessionId, () => finishHarnessSwitchUnderLock(sessionId));
         if (proj.harnessTransition) return enqueueMessage(sessionId, input.text, "queue", "harness-switch", input.attachments);
