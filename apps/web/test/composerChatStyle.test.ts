@@ -19,14 +19,34 @@ test("composer and above-composer widgets sit directly on the workspace", () => 
   assert.doesNotMatch(css, /\.focus-conversation\s*\{[^}]*background:/s);
 });
 
-test("the conversation fills behind the glass composer without hiding its tail", () => {
+test("the conversation reserves the complete glass dock and keeps fresh-turn space inside the timeline", () => {
   const surface = read("../src/components/workspace/builtinSurfaces.tsx");
   const css = read("../src/styles.css");
 
-  assert.match(surface, /className="conversation-composer-dock"[\s\S]*slot="session\.composer\.before"[\s\S]*slot="session\.footer"[\s\S]*<Composer \/>/);
+  assert.match(surface, /className="conversation-composer-dock"[\s\S]*slot="session\.composer\.before"[\s\S]*slot="session\.footer"[\s\S]*spawning && <SessionSpawnStatus \/>[\s\S]*<Composer \/>/);
   assert.match(surface, /new ResizeObserver\(publishHeight\)/);
   assert.match(css, /\.conversation-composer-dock\s*\{[^}]*position:\s*absolute;[^}]*inset:\s*auto 0 0;/s);
-  assert.match(css, /\.focus-conversation:has\(> \.conversation-composer-dock\) \.timeline\s*\{[^}]*padding-bottom:\s*calc\(var\(--conversation-dock-height\)/s);
+  assert.match(css, /\.focus-conversation:has\(> \.conversation-composer-dock\) > \.timeline-wrap\s*\{[^}]*margin-block-end:\s*var\(--conversation-dock-height\)/s);
+  assert.match(css, /padding-bottom:\s*calc\(var\(--conversation-group-gap\) \+ var\(--timeline-turn-sheet-space, 0px\)\)/);
+});
+
+test("spawning is an above-composer activity status and never replaces the composer", () => {
+  const surface = read("../src/components/workspace/builtinSurfaces.tsx");
+  const composer = read("../src/components/Composer.tsx");
+
+  assert.match(surface, /function SessionSpawnStatus\(\)[\s\S]*spawningAgent[\s\S]*<AgentStatusDock/);
+  assert.match(surface, /ProviderLogo providerID=\{harnessId\}[\s\S]*model=\{harnessLabel\}/);
+  assert.doesNotMatch(composer, /if \(creatingSession\)\s*\{\s*return/);
+  assert.match(composer, /aria-busy=\{creatingSession \|\| undefined\}/);
+  assert.match(composer, /!session && !creatingSession && <SessionContextBar/);
+});
+
+test("agent status docks center their content with token spacing", () => {
+  const css = read("../src/styles.css");
+
+  assert.match(css, /\.agent-status-dock\s*\{[^}]*align-items:\s*center;[^}]*padding:\s*var\(--space-3\) var\(--space-4\)/s);
+  assert.match(css, /\.agent-status-dock-icon\s*\{[^}]*place-items:\s*center;[^}]*width:\s*var\(--icon-xl\)/s);
+  assert.doesNotMatch(css, /\.agent-status-dock-icon\s*\{[^}]*margin-block-start:/s);
 });
 
 test("composer radius uses the shared corner setting", () => {

@@ -94,6 +94,8 @@ export {
   Lock as LockIcon,
   Unlock as UnlockIcon,
   PanelLeft as SidebarIcon,
+  PanelRight as DockSideIcon,
+  PanelBottom as DockBottomIcon,
   Maximize2 as ExpandIcon,
   Minimize2 as CollapseIcon,
   ZoomIn as ZoomInIcon,

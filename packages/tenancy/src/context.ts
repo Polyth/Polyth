@@ -143,12 +143,17 @@ export function createSpaceResolver(opts: {
   };
 
   const ensureUser = (identity: Identity): void => {
-    if (store.user(identity.userId)) return;
+    if (!store.user(identity.userId)) {
+      store.createUser(accountName(identity.userId), identity.userId);
+    }
     // Only an authenticated, server-minted principal can reach this point.
     // Provisioning here avoids a second account registry and guarantees every
-    // newly authenticated user starts inside an isolated Personal Space.
-    store.createUser(accountName(identity.userId), identity.userId);
-    store.createSpace({ name: "Personal", ownerId: identity.userId, isDefault: true });
+    // newly authenticated user starts inside an isolated Personal Space. The
+    // user and Space are persisted separately, so also repair an interrupted
+    // or older partial provisioning that left a known user with no membership.
+    if (store.spacesFor(identity.userId).length === 0) {
+      store.createSpace({ name: "Personal", ownerId: identity.userId, isDefault: true });
+    }
   };
 
   return {

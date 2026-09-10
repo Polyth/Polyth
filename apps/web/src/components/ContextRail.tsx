@@ -27,15 +27,15 @@ import {
 import { useGitStatus } from "../../../../packages/git/widgets/gitStatusStore.ts";
 import { gitChangedFiles } from "../pendingChanges.ts";
 import {
-  CHAT_FLOOR, clampDockWidth, decideDock, keptSurfaces, listSurfaces, paneDockEdge, slotSurfaces, useSurfaceVersion, visibleSurfaces,
-  type DockGeometry, type RailSurface, type RailSurfaceContext,
+  CHAT_FLOOR, clampDockWidth, decideDock, keptSurfaces, listSurfaces, paneDockEdge, paneDockOptions, slotSurfaces, useSurfaceVersion, visibleSurfaces,
+  type DockGeometry, type RailSurface, type RailSurfaceContext, type WorkspacePaneDock,
 } from "../surfaces.ts";
 import { clampRailWidth, railWidthOf, setRailWidth } from "../railPrefs.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import { useModalSurface } from "./a11y/Dialog.tsx";
 import { useResolvedCapabilities, type ResolvedCapability } from "../capabilities.ts";
 import { isCapabilityActive, toggleCapability } from "../builtinCapabilities.ts";
-import { clampPaneDimension, getWorkspacePanePrefs, setPaneDynamicHeight, setPanePreferredWidth } from "../workspace/panePrefs.ts";
+import { clampPaneDimension, getWorkspacePanePrefs, setPaneDockEdge, setPaneDynamicHeight, setPanePreferredWidth } from "../workspace/panePrefs.ts";
 import { chatDockViability, dockGuardTargets } from "../workspace/dockGuard.ts";
 import { PaneVisibilityContext } from "../workspace/paneVisibility.ts";
 import "./railSurfaces.tsx";
@@ -192,6 +192,7 @@ export default function ContextRail() {
   const { rail, surfaces, open, ctx } = useRailSurfaceModel();
   const projectId = useStore((s) => s.activeProjectId);
   const paneMode = useStore((s) => s.paneMode);
+  const panePreviousMode = useStore((s) => s.panePreviousMode);
   const resolved = useResolvedCapabilities();
   const keymap = useKeymap();
   const terminalShortcut = formatCombo(keymap.viewTerminal, MOD === "⌘");
@@ -302,12 +303,15 @@ export default function ContextRail() {
   }, [rail, known, open]);
   const kept = keptSurfaces(surfaces, rail, visited);
 
+  const dockSelectionKey = `${projectId ?? ""}:${open?.id ?? ""}`;
+  const [localDockSelection, setLocalDockSelection] = useState<{ key: string; edge: WorkspacePaneDock } | null>(null);
+  useEffect(() => setLocalDockSelection(null), [dockSelectionKey]);
+
   // ---- geometry: measured post-sidebar workspace (Chat + pane + chrome) --------
   const railbarRef = useRef<HTMLElement>(null);
   const paneRef = useRef<HTMLDivElement>(null);
   const separatorRef = useRef<HTMLDivElement>(null);
   const bottomSeparatorRef = useRef<HTMLDivElement>(null);
-  const dockEdge = paneDockEdge(presentation);
   const geometryKey = `${projectId ?? ""}:${open?.id ?? ""}:${presentation ? "workspace" : "context"}:${compact ? "compact" : "wide"}:${paneMode}`;
   const [geometry, setGeometry] = useState<{ key: string; width: number; height: number }>({ key: "", width: 0, height: 0 });
   const workspaceWidth = geometry.key === geometryKey ? geometry.width : 0;
@@ -374,6 +378,11 @@ export default function ContextRail() {
   const paneWidths = panePrefs?.widths ?? {};
   const remembered = open !== null && presentation ? paneWidths[open.id] ?? null : null;
   const decision = presentation ? decideDock(remembered, presentation, geo) : null;
+  const persistedDockEdge = open !== null ? panePrefs?.dockEdges?.[open.id] : undefined;
+  const selectedDockEdge = localDockSelection?.key === dockSelectionKey
+    ? localDockSelection.edge
+    : persistedDockEdge;
+  const dockEdge = paneDockEdge(presentation, selectedDockEdge);
   const rememberedHeight = open !== null ? panePrefs?.heights[open.id] : undefined;
   // The bottom-dock strip persists under its own key so its height never
   // bleeds into (or from) the same surface's floating dynamic-window height.
@@ -412,6 +421,32 @@ export default function ContextRail() {
   const layered = isWorkspacePane && effectivePaneMode === "fullscreen";
   const dynamic = isWorkspacePane && effectivePaneMode === "dynamic";
   const pinned = isWorkspacePane && effectivePaneMode === "pinned";
+  const dockPinned = pinned || (layered && panePreviousMode === "pinned");
+  const supportedDockOptions = isWorkspacePane && !compact && presentation?.dockOptions?.length
+    ? paneDockOptions(presentation)
+    : [];
+  const chooseDock = (edge: WorkspacePaneDock) => {
+    if (open === null) return;
+    if (dockPinned && dockEdge === edge) {
+      togglePanePin();
+      return;
+    }
+    setLocalDockSelection({ key: dockSelectionKey, edge });
+    if (projectId !== null) setPaneDockEdge(projectId, open.id, edge);
+    // Choosing an edge means "use this edge when pinned". Preserve an
+    // already pinned/fullscreen-pinned mode, otherwise enter pinned mode.
+    if (!pinned && !(layered && panePreviousMode === "pinned")) togglePanePin();
+  };
+  const dockActions = supportedDockOptions.length > 0
+    ? supportedDockOptions.map((edge) => ({
+      edge,
+      label: dockPinned && dockEdge === edge
+        ? tr("contextrail.unpinWindow")
+        : edge === "bottom" ? tr("contextrail.dockBelowChat") : tr("contextrail.dockBesideChat"),
+      selected: dockPinned ? dockEdge === edge : false,
+      onClick: () => chooseDock(edge),
+    }))
+    : undefined;
   // Deliberate bottom dock: a pinned pane whose presentation asks for the
   // bottom edge. It reuses the pinned-narrow row layout (pane under the
   // workspace, composer lifted above) but is a stable choice, not a
@@ -875,6 +910,7 @@ export default function ContextRail() {
             icon={open?.icon ? open.icon() : undefined}
             pinned={pinned}
             fullscreen={layered}
+            dockActions={dockActions}
             onTogglePin={isWorkspacePane && !compact ? togglePanePin : undefined}
             onToggleFullscreen={isWorkspacePane && !compact ? togglePaneFullscreen : undefined}
             onClose={() => {

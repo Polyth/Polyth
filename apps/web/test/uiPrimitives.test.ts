@@ -163,6 +163,37 @@ test("Button: variants, sizes, busy state", async () => {
   } finally { await busy.unmount(); }
 });
 
+test("AgentStatusDock is a passive live status unless a details action exists", async () => {
+  const passive = await mount(createElement(ui.AgentStatusDock, {
+    icon: createElement("span", null, "A"),
+    model: "Agent",
+    status: "Spawning agent…",
+    label: "Spawning agent…",
+  }));
+  try {
+    const status = passive.container.querySelector<HTMLElement>(".agent-status-dock")!;
+    assert.equal(status.tagName, "DIV");
+    assert.equal(status.getAttribute("role"), "status");
+    assert.equal(status.getAttribute("aria-busy"), "true");
+    assert.equal(passive.container.querySelector("button"), null);
+  } finally { await passive.unmount(); }
+
+  let opened = 0;
+  const actionable = await mount(createElement(ui.AgentStatusDock, {
+    icon: createElement("span", null, "A"),
+    model: "Agent",
+    status: "Running tests",
+    label: "Open active run",
+    onClick: () => { opened += 1; },
+  }));
+  try {
+    const button = actionable.container.querySelector<HTMLButtonElement>("button.agent-status-dock")!;
+    await act(async () => { button.click(); });
+    assert.equal(opened, 1);
+    assert.equal(button.querySelector('[role="status"]')?.textContent, "Running tests");
+  } finally { await actionable.unmount(); }
+});
+
 test("IconButton: mandatory accessible name, pressed state, token-sized glyph", async () => {
   const view = await mount(createElement(ui.IconButton, {
     icon: ui.CloseIcon,

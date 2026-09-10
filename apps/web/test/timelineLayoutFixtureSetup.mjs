@@ -3,9 +3,9 @@
 // session logs covering the layout gate's states — a rich mixed-content
 // conversation (markdown, code, long URL, RTL, reasoning, tool work, usage
 // footer), a >150-row session for suffix-window/anchor gates, an empty
-// session, and a stream-capable session whose fake backend emits growing
-// snapshots — plus a bin dir whose `opencode` wrapper launches the shared
-// synthetic fake (msgActionsFakeBackend.mjs, `turnBehavior: "stream"`).
+// session — plus a bin dir whose `opencode` wrapper launches the shared
+// synthetic fake. Live stream/work sessions are created through Polyth's real
+// session-create path so their durable runtime binding is genuine.
 // Existing fixture paths are wiped only when they carry the sentinel.
 //
 // Usage: imported by timelineLayout.live.ts (buildTimelineLayoutFixture()),
@@ -32,6 +32,7 @@ export const SESSIONS = {
   many: "tl01-many",
   empty: "tl01-empty",
   stream: "tl01-stream",
+  work: "tl01-work",
 };
 
 /** How many user/assistant turns the many-rows session seeds (2 rows each —
@@ -104,19 +105,13 @@ export async function buildTimelineLayoutFixture() {
   writeFileSync(wrapper, `#!/bin/sh\nexec "${process.execPath}" "${fake}" "$@"\n`);
   chmodSync(wrapper, 0o755);
 
-  // --- backend seed: only the stream session talks to the fake ---------------
+  // --- backend seed: sessions created by the live gate remain synthetic -------
   writeFileSync(OC_SEED, JSON.stringify({
-    sessions: [
-      {
-        id: "oc_tl_stream",
-        title: "Streaming layout session",
-        turnBehavior: "stream",
-        messages: [
-          { id: "st_u1", role: "user", text: "Warm-up prompt before the streaming gate." },
-          { id: "st_a1", role: "assistant", text: "Settled synthetic answer before any live stream." },
-        ],
-      },
-    ],
+    sessions: [],
+    createdTurnBehaviors: {
+      "Streaming layout session": "stream",
+      "Live activity layout session": "work",
+    },
   }, null, 2));
 
   // --- isolated Polyth data: project registry + seeded session logs --------
@@ -180,12 +175,6 @@ export async function buildTimelineLayoutFixture() {
   // Empty session: created, zero messages, no phantom utilities.
   await store.append(SESSIONS.empty, "session/created", { title: "Empty layout session" }, { ignorable: true });
   await store.upsertProjection(projection(SESSIONS.empty, "Empty layout session", "idle"));
-
-  // Stream session: settled first turn on disk; live streams run through the
-  // real send path against the fake backend's `stream` behavior.
-  await store.append(SESSIONS.stream, "session/created", { title: "Streaming layout session" }, { ignorable: true });
-  await turn(SESSIONS.stream, 1, "Warm-up prompt before the streaming gate.", "Settled synthetic answer before any live stream.");
-  await store.upsertProjection(projection(SESSIONS.stream, "Streaming layout session", "idle", { backendSessionId: "oc_tl_stream" }));
 
   await store.close();
 

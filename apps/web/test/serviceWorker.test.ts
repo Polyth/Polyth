@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 
 const source = readFileSync(new URL("../sw.js", import.meta.url), "utf8");
+const shell = readFileSync(new URL("../src/index.html", import.meta.url), "utf8");
 
 interface WorkerEvent {
   action?: string;
@@ -65,6 +66,11 @@ function workerHarness(options: { visible?: boolean; fetchStatus?: number } = {}
 const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 test("PWA manifest declares standalone root scope and install icons", () => {
+  assert.match(
+    shell,
+    /<link rel="manifest" href="\/manifest\.json" crossorigin="use-credentials" \/>/,
+    "authenticated shells must opt the manifest request into same-origin credentials",
+  );
   const manifest = JSON.parse(readFileSync(new URL("../manifest.json", import.meta.url), "utf8")) as {
     id: string;
     start_url: string;

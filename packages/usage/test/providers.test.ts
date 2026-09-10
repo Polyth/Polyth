@@ -72,7 +72,6 @@ test("registry exposes every polyth dispatcher provider and skips unconfigured e
     "deepseek",
     "google",
     "github-copilot",
-    "github-copilot-addon",
     "kimi-for-coding",
     "nano-gpt",
     "openrouter",
@@ -93,6 +92,32 @@ test("registry exposes every polyth dispatcher provider and skips unconfigured e
     homedir: "/unused",
     readFile: () => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); },
   }), ["openrouter"]);
+});
+
+test("GitHub Copilot exposes standard and premium quotas as one provider", async () => {
+  let calls = 0;
+  const providers = discoverQuotaProviders({
+    readAuth: () => ({ "github-copilot": { access: "copilot-secret" } }),
+    env: {},
+    homedir: "/unused",
+    readFile: () => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); },
+    fetchImpl: (async () => {
+      calls += 1;
+      return jsonResponse({
+        quota_reset_date: "2027-01-01T00:00:00Z",
+        quota_snapshots: {
+          chat: { entitlement: 100, remaining: 80 },
+          completions: { entitlement: 200, remaining: 150 },
+          premium_interactions: { entitlement: 50, remaining: 35 },
+        },
+      });
+    }) as typeof fetch,
+  });
+
+  assert.deepEqual(providers.map((value) => value.id), ["github-copilot"]);
+  const snapshot = await providers[0]!.fetch(new AbortController().signal);
+  assert.equal(calls, 1);
+  assert.deepEqual(snapshot.windows.map((window) => window.id), ["chat", "completions", "premium"]);
 });
 
 test("OpenRouter uses auth.json bearer credentials and maps spent/remaining credits", async () => {

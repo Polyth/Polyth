@@ -4,7 +4,7 @@
 // built-ins once. Every built-in requires a project; the host renders the
 // standard project empty state when none is open. None require an open
 // session: the session surface shows its hero until one exists.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import Timeline from "../Timeline.tsx";
 import Composer from "../Composer.tsx";
 import QuestionCards from "../QuestionCards.tsx";
@@ -37,8 +37,9 @@ import {
   type StarterContext,
 } from "../../starters.ts";
 import { tr } from "../../i18n/index.ts";
-import { Button } from "../ui/index.ts";
+import { AgentStatusDock, Button } from "../ui/index.ts";
 import { resolveSessionStatus } from "../../sessionStatus.ts";
+import ProviderLogo from "../../../../../packages/models/widgets/ProviderLogo.tsx";
 
 const NOOP_STARTER = (_prompt: string, _id?: string): void => {};
 
@@ -219,6 +220,32 @@ function SessionLoading() {
   );
 }
 
+/** First-send runtime startup belongs in the same above-composer activity
+ * zone as an active run. The composer stays mounted and usable for the next
+ * draft; the transient status never impersonates the input itself. */
+function SessionSpawnStatus() {
+  const spawn = useStore((state) => state.sessionSpawn);
+  const status = tr("workspace.builtinsurfaces.spawningAgent");
+  const harnessId = spawn?.harnessId;
+  const harnessName = spawn?.harnessName?.trim() || harnessId
+    ?.split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) => part[0]!.toUpperCase() + part.slice(1))
+    .join(" ")
+    || tr("timeline.agent");
+  const harnessLabel = `${harnessName} harness`;
+  return (
+    <AgentStatusDock
+      icon={harnessId
+        ? <ProviderLogo providerID={harnessId} providerName={harnessName} size="regular" />
+        : <Icon.session />}
+      model={harnessLabel}
+      status={status}
+      label={`${harnessLabel}: ${status}`}
+    />
+  );
+}
+
 /** Archived sessions are read-only: one explicit, atomic restore-and-continue
  *  action replaces the composer (UX-FIXTURE-VISUAL P1). */
 function ArchivedComposerGuard({ sessionId }: { sessionId: string }) {
@@ -260,21 +287,16 @@ function SessionSurface() {
   const [latestRevealAnchor, setLatestRevealAnchor] = useState<HTMLDivElement | null>(null);
   const [composerDock, setComposerDock] = useState<HTMLDivElement | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const conversation = composerDock?.parentElement;
     if (!composerDock || !conversation) return;
     let raf = 0;
     const publishHeight = () => {
-      const timeline = conversation.querySelector<HTMLElement>(".timeline");
-      const followTail = timeline
-        ? timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight < 80
-        : false;
       // getBoundingClientRect (not offsetHeight) so sub-pixel growth and late
       // async widgets — usage panel, pending-changes list, question card — are
-      // all reflected in the timeline's bottom padding.
+      // all reflected in the transcript viewport reserved above the dock.
       const height = Math.ceil(composerDock.getBoundingClientRect().height);
       conversation.style.setProperty("--conversation-dock-height", `${height}px`);
-      if (timeline && followTail) timeline.scrollTop = timeline.scrollHeight;
     };
     const schedule = () => {
       cancelAnimationFrame(raf);
@@ -339,6 +361,7 @@ function SessionSurface() {
             <SlotHost slot="session.composer.before" context={{ projectId, sessionId, editing: false }} customizable />
             <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />
             <SlotHost slot="session.footer" context={{ projectId, sessionId, editing: false }} customizable />
+            {spawning && <SessionSpawnStatus />}
             <Composer />
           </div>}
     </div>

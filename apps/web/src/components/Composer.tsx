@@ -1353,7 +1353,13 @@ export default function Composer({
     if (target) {
       void deliver(target);
     } else if (activeProjectId) {
-      const spawnRequestId = beginSessionSpawn(activeProjectId);
+      const spawnHarnessId = creationHarness?.mode === "pinned"
+        ? creationHarness.harnessId
+        : catalogHarnessId ?? modelHarnessId;
+      const spawnRequestId = beginSessionSpawn(activeProjectId, {
+        ...(spawnHarnessId ? { harnessId: spawnHarnessId } : {}),
+        ...(routeCatalog.harnessName ? { harnessName: routeCatalog.harnessName } : {}),
+      });
       void (async () => {
         let created: string;
         if (newSessionTarget.kind === "new-worktree") {
@@ -1434,6 +1440,7 @@ export default function Composer({
     session?.model, session?.status, session?.runtimeControl, preferredModel,
     sessionDefaults.defaultThinking, chatModels, creatingSession, newSessionTarget,
     newSessionAutoApprove, newSessionGoal, newSessionIntent, commandCatalog,
+    catalogHarnessId, routeCatalog.harnessName,
     draftExecution, profiles, activeProject?.defaults?.harness,
   ]);
 
@@ -1987,35 +1994,16 @@ export default function Composer({
     ? ` composer-mobile ${expanded ? "composer-expanded" : "composer-collapsed"}${inputFocused ? " composer-input-active" : ""}${hasDraft ? " composer-has-draft" : ""}`
     : "";
 
-  // Creating a canonical session can cold-start OpenCode. Replace the empty
-  // new-chat composer immediately, rather than leaving a sent prompt looking
-  // like it disappeared until the server responds.
-  if (creatingSession) {
-    return (
-      <div
-        ref={rootRef}
-        className={`composer ${widgetMode ? "composer-widget" : "composer-chat"} composer-simple${widgetMode ? "" : " composer-focus-light"}${stateClass}`}
-        aria-busy="true"
-      >
-        <GlassDock className="composer-card">
-          <div className="session-loading" role="status">
-            <span className="ui-spinner ui-spinner--sm" aria-hidden="true" />
-            <span>{tr("workspace.builtinsurfaces.spawningAgent")}</span>
-          </div>
-        </GlassDock>
-      </div>
-    );
-  }
-
   return (
     <div
       ref={rootRef}
       className={`composer ${widgetMode ? "composer-widget" : "composer-chat"} composer-simple${widgetMode ? "" : " composer-focus-light"}${stateClass}`}
+      aria-busy={creatingSession || undefined}
     >
       {/* The project/worktree pickers only make sense before a session exists:
           in an open session the location is fixed, and picking here silently
           switched project or spawned a new session instead of retargeting. */}
-      {!session && <SessionContextBar {...contextBar} />}
+      {!session && !creatingSession && <SessionContextBar {...contextBar} />}
       {/* Widget-areas (WA4): the project/branch meta row is a widget area. */}
       <SlotHost slot="composer.meta" context={slotContext} customizable />
       {failedSend && (

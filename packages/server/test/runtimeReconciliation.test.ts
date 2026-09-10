@@ -744,6 +744,59 @@ test("a blocked reconciliation queues a new message instead of rejecting it", as
   await store.close();
 });
 
+test("a follow-up steer is durably queued while restart reconciliation is blocked", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-queue-blocked-steer-"));
+  const endpoint = endpointFor(dir);
+  let submissions = 0;
+  const runtime = runtimeWithSnapshot(endpoint, (binding) => ({
+    authorityId: binding.authorityId,
+    generation: binding.generation,
+    location: binding.location,
+    backendSessionId: binding.backendSessionId!,
+    reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+    state: { value: "unknown" },
+    completeness: { events: "partial", permissions: "partial", questions: "partial" },
+    permissions: [],
+    questions: [],
+    events: [],
+  }));
+  runtime.startTurn = async () => { submissions += 1; };
+  const { sessions, store, project } = makeHarness(runtime, dir);
+  const sessionId = "session-queue-blocked-steer";
+  await store.upsertProjection({
+    id: sessionId,
+    projectId: project.id,
+    backendSessionId: "backend-queue-blocked-steer",
+    runtimeBinding: persistedBindingFor(endpoint, "backend-queue-blocked-steer"),
+    title: "Blocked reconciliation steer",
+    // The web composer chooses follow-up delivery from this working state.
+    status: "working",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+  const reconciliation = await store.startReconciliation(sessionId);
+  await store.settleReconciliation(sessionId, reconciliation.ordinal, "blocked", "runtime was replaced");
+
+  const result = await sessions.send(sessionId, {
+    text: "keep investigating after recovery",
+    delivery: "steer",
+  });
+
+  assert.equal(result.queued, true);
+  assert.equal(submissions, 0);
+  assert.deepEqual(
+    (await store.queueList(sessionId)).map((item) => ({ text: item.text, delivery: item.delivery })),
+    [{ text: "keep investigating after recovery", delivery: "steer" }],
+  );
+  assert.equal(
+    ((await store.events(sessionId)).findLast((event) => event.type === "delivery/fallback-queued")?.data as {
+      reason?: string;
+    } | undefined)?.reason,
+    "reconciliation-blocked",
+  );
+  await store.close();
+});
+
 test("a locally stopped turn is not wedged back to unknown when the backend is unreachable", async () => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-stopped-unknown-"));
   const endpoint = endpointFor(dir);
