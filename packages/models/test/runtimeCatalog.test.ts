@@ -163,6 +163,50 @@ test("shell bootstrap preloads enabled catalogs, scopes returned data, and keeps
   }
 });
 
+test("a failed shell preload is evicted so restored context can discover models", async () => {
+  invalidateRuntimeCatalogs();
+  requests.length = 0;
+  pending.clear();
+  cheapSnapshots = [];
+  const warming = preloadRuntimeCatalogs();
+  for (let attempt = 0; attempt < 20 && (!pending.has("codex") || !pending.has("cursor")); attempt++) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  pending.get("codex")!([{
+    identity: { id: "codex", name: "Codex" },
+    availability: { state: "degraded" },
+    message: "Previous executor has no verified release receipt",
+    context: { projectId: "restored", spaceId: "space-a", cwd: "/restored", revision: "1", fetchedAt: 1 },
+  }]);
+  pending.get("cursor")!(snapshot("cursor", "cursor-a", "restored"));
+  await warming;
+
+  let catalog: ReturnType<typeof useRuntimeCatalog> | undefined;
+  function Harness() {
+    catalog = useRuntimeCatalog(null, models, agents, {
+      projectId: "restored",
+      harnessId: "codex",
+      spaceId: "space-a",
+      cwd: "/restored",
+    });
+    return null;
+  }
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(Harness)); });
+    assert.deepEqual(catalog?.discovery, { state: "pending" });
+    assert.equal(requests.filter((path) => path.includes("harnessId=codex")).length, 2,
+      "the failed bootstrap value must not poison the page cache");
+    await act(async () => { pending.get("codex")!(snapshot("codex", "recovered", "restored")); });
+    assert.equal(catalog?.models[0]?.modelID, "recovered");
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
 test("an invalidated bootstrap flight cannot alias stale models into the restored context", async () => {
   invalidateRuntimeCatalogs();
   requests.length = 0;

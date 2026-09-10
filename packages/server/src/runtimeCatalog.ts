@@ -139,14 +139,15 @@ export function createRuntimeCatalog(deps: {
     let run!: Promise<CatalogSnapshot>;
     run = (async () => {
       if (!pool.harnessSnapshots) return loadFallback();
+      const harnessSnapshots = pool.harnessSnapshots;
       const projects = await deps.projects.list();
       const authority = projects.find((project) => !project.remote) ?? projects[0];
       const projectId = authority?.id ?? "__default__";
       const cwd = authority?.path;
-      const summaries = await pool.harnessSnapshots(projectId, cwd);
+      const summaries = await harnessSnapshots(projectId, cwd);
       const enabled = summaries.filter((snapshot) => snapshot.policy.enabled);
       const detailed = await Promise.allSettled(enabled.map(async (summary) => {
-        const rows = await pool.harnessSnapshots(projectId, cwd, {
+        const rows = await harnessSnapshots(projectId, cwd, {
           harnessId: summary.identity.id,
           detail: true,
         });

@@ -1,4 +1,4 @@
-import type { AgentRuntime, HarnessContext, HarnessProvider, HarnessRegistry, ModelDescriptor, SpaceContext } from "@polyth/contracts";
+import type { AgentRuntime, HarnessContext, HarnessProvider, HarnessRegistry, ModelDescriptor, RouteRequest, SpaceContext } from "@polyth/contracts";
 import {
   localOnlyRemoteAccess,
   serverServiceKey,
@@ -41,14 +41,26 @@ export default function registerPackage(host: ServerPackageHost) {
     if (!context.remote) configureOpenCodeCapabilityDelivery(engine, context);
     return engine;
   };
-  const harness = createOpenCodeHarness(runtime, releaseExecution);
+  const openCodeRuntime = (space: SpaceContext): Promise<AgentRuntime> =>
+    pool(localOpenCodeAuthContext(space, host.storageDir));
+  const harness = createOpenCodeHarness(runtime, releaseExecution, (context, primaryError) => {
+    // This sentinel has its own pool key, runtime directory and authority
+    // state. It can enumerate host-global OpenCode providers when a project
+    // executor remains correctly fenced by an unverified release. Never use a
+    // local catalog as evidence about a remote host, and never let this seam
+    // participate in execution/session creation.
+    if (
+      context.remote
+      || !context.space
+      || (primaryError as { code?: string })?.code !== "outcome-unknown"
+    ) throw primaryError;
+    return openCodeRuntime(context.space);
+  });
   const applier = host.services.get(serverServiceKey<BackendConfigApplier>("plugins.config"));
   if (applier && typeof applier.applyBehavior === "function" && typeof applier.applyMcp === "function") {
     harness.provisioner = createOpenCodeProvisioner(applier);
   }
   const registration = registry.register(harness);
-  const openCodeRuntime = (space: SpaceContext): Promise<AgentRuntime> =>
-    pool(localOpenCodeAuthContext(space, host.storageDir));
   const auth = createProviderAuthController({
     runtime: openCodeRuntime,
     invalidateModels: () => catalog?.invalidateModels(),
@@ -66,7 +78,7 @@ export default function registerPackage(host: ServerPackageHost) {
 
   return {
     remoteAccess: localOnlyRemoteAccess(["backend-opencode"]),
-    routes: async (request) => {
+    routes: async (request: RouteRequest) => {
       // OpenCode provider administration must not wait for generic multi-harness
       // catalog aggregation. Query the host-global OpenCode authority directly.
       if (request.path === "/api/opencode/providers" && request.method === "GET") {

@@ -109,6 +109,13 @@ const readPreviewCatalog = (projectId?: string, harnessId?: string, spaceId?: st
     }
     const resolvedHarnessId = snapshot?.identity.id ?? harnessId;
     const catalog = catalogFromSnapshot(snapshot, resolvedHarnessId);
+    // A transient discovery failure is not page-lifetime truth. Reject it so
+    // createCatalogCache evicts the flight and a later restored-project mount
+    // or harness switch can retry instead of preserving "No models found"
+    // until the whole shell reloads. Successful empty catalogs remain cached.
+    if (catalog.discovery.state === "unavailable") {
+      throw Object.assign(new Error(catalog.discovery.reason), { code: "unavailable" });
+    }
     // A context-free bootstrap request is scoped by the server. Alias its
     // result under the returned identity so later project/Space consumers hit
     // the same value without treating default-context data as global truth.
