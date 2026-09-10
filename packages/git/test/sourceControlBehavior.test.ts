@@ -420,6 +420,21 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
       applyEvents([ev("turn/stopped", { turnId: "turn-active", reason: "completed" })]);
       await delay(20);
     });
+
+    await act(async () => {
+      setModels([{ providerID: "cursor", modelID: "auto", name: "Auto" }]);
+      applyEvents([ev("turn/started", { turnId: "turn-cursor-auto" })]);
+      await delay(20);
+    });
+    const cursorAutoStatus = view.container.querySelector(".agent-status-dock");
+    assert.ok(cursorAutoStatus, "Cursor Auto work keeps the active status dock");
+    assert.match(cursorAutoStatus.textContent ?? "", /Auto/);
+    assert.doesNotMatch(cursorAutoStatus.textContent ?? "", /default|Polyth/i);
+
+    await act(async () => {
+      applyEvents([ev("turn/stopped", { turnId: "turn-cursor-auto", reason: "completed" })]);
+      await delay(20);
+    });
     bubble = view.container.querySelector<HTMLButtonElement>(".pending-changes-bar--collapsed .ui-run-summary");
     assert.ok(bubble, "the compact change summary returns when work settles");
 

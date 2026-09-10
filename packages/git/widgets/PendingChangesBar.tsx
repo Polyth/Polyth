@@ -208,7 +208,10 @@ export default function PendingChangesBar() {
       ? models.find((candidate) =>
           candidate.providerID === modelRef.providerID && candidate.modelID === modelRef.modelID)
       : undefined;
-    const modelName = descriptor?.name ?? modelRef?.modelID ?? tr("providerlogo.polyth");
+    // ACP runtimes such as Cursor omit the model from `turn/started` when the
+    // native Auto selection is active. Keep that intentional selection visible
+    // instead of falling through to the generic provider label.
+    const modelName = descriptor?.name ?? modelRef?.modelID ?? tr("composer.auto");
     const activeTask = model.tasks?.items.find((item) => item.status === "active");
     const activeSubagent = model.subagents?.agents.find((agent) => /^(?:working|running|active)$/i.test(agent.status));
     const activeTool = [...model.messages].reverse().find((message) =>
