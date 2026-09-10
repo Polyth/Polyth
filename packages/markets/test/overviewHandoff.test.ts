@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { MarketDataResult, MarketMacroSnapshot, MarketQuote } from "../src/types.ts";
-import { buildOverviewHandoffText } from "../widgets/MarketOverviewSurface.tsx";
+import { buildOverviewHandoffText } from "../widgets/overviewContext.ts";
 import { UNTRUSTED_MARKET_DATA_NOTICE } from "../widgets/untrusted.ts";
 
 const quote: MarketQuote = {
