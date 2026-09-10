@@ -683,6 +683,7 @@ export function createCapabilityProvisioningController(opts: {
             spaceId: context.spaceId,
             projectId: context.projectId,
             cwd: context.cwd,
+            harnessId: provider.descriptor.id,
             ...(toolScope === "session" && applyContext.sessionId ? { sessionId: applyContext.sessionId } : {}),
             tools,
           }).token;

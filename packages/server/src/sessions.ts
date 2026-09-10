@@ -174,6 +174,20 @@ export interface RuntimeEpochTransitionOptions {
 }
 
 export interface RuntimeEpochSessionService extends RestartSafetySessionService {
+  /** Authorize one package-contributed MCP tool against the canonical session
+   * that currently owns execution. Project-scoped native runtimes do not put a
+   * session id in their MCP configuration, so the owner is resolved from live
+   * Polyth occupancy and ambiguous/idle calls fail closed. */
+  requestAgentToolPermission(input: {
+    spaceId: string;
+    projectId: string;
+    cwd: string;
+    harnessId?: string;
+    sessionId?: string;
+    toolId: string;
+    toolName: string;
+    owner: string;
+  }): Promise<"allow" | "deny" | "permission-required">;
   /** Complete the durable runtime epoch after Phase 4 has protocol-confirmed a
    * fresh session-reset. This never creates or hydrates a backend session. */
   transitionRuntimeEpoch(
@@ -514,6 +528,10 @@ export function createSessionService(deps: {
     return dependents;
   };
   const lastTurnId = new Map<string, string>();           // sessionId -> active turnId
+  const pendingAgentToolPermissions = new Map<string, {
+    sessionId: string;
+    resolve(decision: "allow" | "deny"): void;
+  }>();
   // sessions whose turn admission is in flight (startTurn sent, turn/started
   // not yet observed) — a concurrent send must treat these as active
   const admitting = new Set<string>();
@@ -3621,6 +3639,32 @@ export function createSessionService(deps: {
   const turnActive = (sessionId: string): boolean =>
     lastTurnId.has(sessionId) || admitting.has(sessionId);
 
+  const activeAgentToolSession = async (input: {
+    spaceId: string;
+    projectId: string;
+    cwd: string;
+    harnessId?: string;
+    sessionId?: string;
+  }): Promise<SessionProjection | undefined> => {
+    const candidates: SessionProjection[] = [];
+    const ids = input.sessionId
+      ? [input.sessionId]
+      : [...new Set([...lastTurnId.keys(), ...admitting])];
+    for (const sessionId of ids) {
+      if (!turnActive(sessionId)) continue;
+      const projection = await store.projection(sessionId);
+      if (!projection
+        || projection.projectId !== input.projectId
+        || projection.spaceId !== input.spaceId) continue;
+      if (input.harnessId && projection.resolvedHarnessId !== input.harnessId) continue;
+      const facts = await workspaceFacts(projection);
+      if (![facts.effectiveCwd, facts.runtimeCwd]
+        .some((path) => path && resolve(path) === resolve(input.cwd))) continue;
+      candidates.push(projection);
+    }
+    return candidates.length === 1 ? candidates[0] : undefined;
+  };
+
   /** Unresolved question/permission/secret requests derived from durable events. */
   const openRequestCount = (events: SessionEvent[]): number => {
     const questions = new Set<string>();
@@ -3951,7 +3995,14 @@ export function createSessionService(deps: {
     const shellRequest = (original.data as { permission?: string }).permission === "shell"
       ? original
       : undefined;
-    const rt = shellRequest ? undefined : await ensureWired(sessionId, proj);
+    const isAgentToolRequest = (original.data as { permission?: string }).permission === "package-tool";
+    const pendingAgentToolRequest = isAgentToolRequest
+      ? pendingAgentToolPermissions.get(requestId)
+      : undefined;
+    const agentToolRequest = pendingAgentToolRequest?.sessionId === sessionId
+      ? pendingAgentToolRequest
+      : undefined;
+    const rt = shellRequest || isAgentToolRequest ? undefined : await ensureWired(sessionId, proj);
     const expected: JsonObject = { reply, ...(scope ? { scope } : {}), ...(auto ? { auto: true } : {}) };
     const choice = await broadcastTail(sessionId, () => durable.chooseResponseIntent({
       kind: "permission",
@@ -3979,6 +4030,13 @@ export function createSessionService(deps: {
           () => ({}),
           completion,
         )
+      : isAgentToolRequest
+        ? await runResponseOperation<Record<string, never>, void>(
+            operation,
+            async () => {},
+            () => ({}),
+            completion,
+          )
       : await runResponseOperation<Record<string, never>, void>(
           operation,
           (operationId) => rt!.replyPermissionOperation
@@ -3996,17 +4054,27 @@ export function createSessionService(deps: {
       }
       throw outcomeError(outcome);
     }
+    const permissionData = original.data as { permission?: string; patterns?: string[] };
     if (reply === "always") {
-      const data = original.data as { permission?: string; patterns?: string[] };
-      for (const pattern of data.patterns?.length ? data.patterns : ["*"]) {
+      for (const pattern of permissionData.patterns?.length ? permissionData.patterns : ["*"]) {
         if (scope === "session") {
-          permissions.addRule({ permission: data.permission ?? "*", pattern, action: "allow", scope: "session", sessionId });
+          permissions.addRule({ permission: permissionData.permission ?? "*", pattern, action: "allow", scope: "session", sessionId });
         } else if (scope === "project") {
-          permissions.addRule({ permission: data.permission ?? "*", pattern, action: "allow", scope: "project", projectId: proj.projectId });
+          permissions.addRule({ permission: permissionData.permission ?? "*", pattern, action: "allow", scope: "project", projectId: proj.projectId });
         } else {
-          permissions.addRule({ permission: data.permission ?? "*", pattern, action: "allow", scope: "user" });
+          permissions.addRule({ permission: permissionData.permission ?? "*", pattern, action: "allow", scope: "user" });
         }
       }
+    }
+    if (agentToolRequest) {
+      pendingAgentToolPermissions.delete(requestId);
+      const denied = permissions.evaluate(
+        permissionData.permission ?? "package-tool",
+        permissionData.patterns ?? ["*"],
+        proj.projectId,
+        sessionId,
+      ) === "deny";
+      agentToolRequest.resolve(reply === "reject" || denied ? "deny" : "allow");
     }
     await settleAfterLastRequest(sessionId);
     await closeParentRequestMirror(sessionId, requestId, "permission", {
@@ -5664,6 +5732,66 @@ export function createSessionService(deps: {
   };
 
   const service: RuntimeEpochSessionService = {
+    async requestAgentToolPermission(input) {
+      const projection = await activeAgentToolSession(input);
+      if (!projection) return "permission-required";
+      const automatic = await automaticPermissionResolution(
+        projection.id,
+        "package-tool",
+        [input.toolId],
+      );
+      if (automatic) return automatic.reply === "reject" ? "deny" : "allow";
+
+      const requestId = `pkg_${randomUUID()}`;
+      return new Promise<"allow" | "deny">((resolveDecision) => {
+        pendingAgentToolPermissions.set(requestId, {
+          sessionId: projection.id,
+          resolve: resolveDecision,
+        });
+        void withSessionLock(projection.id, async () => {
+          // Policy can change while this request waits behind another session
+          // transition. Re-evaluate before publishing a human-needed prompt.
+          const resolution = await automaticPermissionResolution(
+            projection.id,
+            "package-tool",
+            [input.toolId],
+          );
+          if (resolution) {
+            pendingAgentToolPermissions.delete(requestId);
+            resolveDecision(resolution.reply === "reject" ? "deny" : "allow");
+            return;
+          }
+          const event = await appendAndBroadcast(projection.id, "permission/requested", {
+            requestId,
+            permission: "package-tool",
+            patterns: [input.toolId],
+            tool: input.toolName,
+            preview: buildPermissionPreview({
+              permission: "package-tool",
+              patterns: [input.toolId],
+              tool: input.toolName,
+            }) as unknown as JsonObject,
+            allowedScopes: [...PERMISSION_ALLOWED_SCOPES],
+          }, { ignorable: true, producerPlugin: input.owner });
+          const current = await store.projection(projection.id);
+          if (current?.status !== "unknown") {
+            await updateProjection(projection.id, { status: "waiting" });
+          }
+          deps.notify?.attention(projection.id, "permission", requestId);
+          if (projection.parentId) {
+            await appendAndBroadcast(projection.parentId, "permission/requested", {
+              ...event.data,
+              sourceSessionId: projection.id,
+            }, { ignorable: true });
+            await updateProjection(projection.parentId, { status: "waiting" });
+          }
+        }).catch(() => {
+          if (!pendingAgentToolPermissions.delete(requestId)) return;
+          resolveDecision("deny");
+        });
+      });
+    },
+
     async switchHarness(sessionId, selection, timing = "after-turn") {
       return withSessionLock(sessionId, async () => {
         let projection = await store.projection(sessionId);

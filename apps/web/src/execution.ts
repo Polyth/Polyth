@@ -221,7 +221,13 @@ function displayIntegration(tool: string): string {
 }
 
 export function classifyTool(tool: string, input: JsonObject): ExecutionKind {
-  const value = tool.toLowerCase();
+  // OpenCode prefixes project-provisioned package tools with the MCP server
+  // name. "polyth-agent-tools" describes the bridge, not a delegated agent;
+  // classify the contributed tool itself so ordinary package actions do not
+  // render as Subagent cards.
+  const value = tool.toLowerCase().replace(
+    /^(?:mcp(?:__|[_:/-])*)?polyth-agent-tools(?:__|[_:/-])+/, "",
+  );
   const shell = /^(bash|shell|shell_command|run_shell|exec|terminal)$/.test(value);
   const command = firstString(input, ["command", "cmd"]);
   // Some native runtimes expose repository work through one command transport.

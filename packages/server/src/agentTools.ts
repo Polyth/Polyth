@@ -29,6 +29,7 @@ export interface AgentToolGrant {
   spaceId: string;
   projectId: string;
   cwd: string;
+  harnessId?: string;
   sessionId?: string;
   tools: Array<Extract<AgentCapabilityDescriptor, { kind: "tool" }>>;
   bindings: AgentToolBinding[];
@@ -84,7 +85,10 @@ const bindingOf = (
 export function createAgentToolBridge(opts: {
   executor(id: string): ToolExecutor | undefined;
   contribution?(id: string): { descriptor: AgentCapabilityDescriptor; execute?: ToolExecutor } | undefined;
-  authorize?: (tool: Extract<AgentCapabilityDescriptor, { kind: "tool" }>, grant: AgentToolGrant) => AgentToolAuthz;
+  authorize?: (
+    tool: Extract<AgentCapabilityDescriptor, { kind: "tool" }>,
+    grant: AgentToolGrant,
+  ) => AgentToolAuthz | Promise<AgentToolAuthz>;
 }): AgentToolBridge {
   const grants = new Map<string, AgentToolGrant>();
   const grantFor = (token: string | undefined): AgentToolGrant | undefined => {
@@ -187,7 +191,7 @@ export function createAgentToolBridge(opts: {
         rc.json(403, { error: { code: "stale-capability", message: "tool grant no longer matches the registered capability" } });
         return true;
       }
-      const decision = (opts.authorize ?? defaultAuthorize)(descriptor, grant);
+      const decision = await (opts.authorize ?? defaultAuthorize)(descriptor, grant);
       if (decision === "deny") {
         rc.json(403, { error: { code: "forbidden", message: "tool is not permitted" } });
         return true;
@@ -196,12 +200,34 @@ export function createAgentToolBridge(opts: {
         rc.json(403, { error: { code: "permission-required", message: "Polyth authorization is required before this tool can run" } });
         return true;
       }
+      // Authorization may wait for a person. Re-resolve the token and the
+      // contribution after that wait so package disable/reload or grant
+      // revocation cannot execute the stale function captured above.
+      const liveGrant = grantFor(token);
+      const liveBinding = liveGrant?.bindings.find((item) => item.id === id);
+      const liveContribution = opts.contribution?.(id);
+      const liveDescriptor = liveContribution?.descriptor.kind === "tool"
+        ? liveContribution.descriptor
+        : undefined;
+      const liveExecute = liveContribution?.execute;
+      if (!liveGrant || !liveBinding || !liveDescriptor || !liveExecute) {
+        rc.json(404, { error: { code: "not-found", message: "tool is not available" } });
+        return true;
+      }
+      if (!matchesBinding(liveBinding, liveDescriptor)) {
+        rc.json(403, { error: { code: "stale-capability", message: "tool grant no longer matches the registered capability" } });
+        return true;
+      }
+      // A native MCP client can time out or disappear while a human decides.
+      // Never perform a newly authorized mutation after its response channel
+      // has already gone away.
+      if (rc.req.aborted || rc.res?.destroyed) return true;
       try {
-        const result = await execute((body.arguments ?? {}) as JsonObject, {
-          sessionId: grant.sessionId ?? "",
-          projectId: grant.projectId,
-          cwd: grant.cwd,
-          spaceId: grant.spaceId,
+        const result = await liveExecute((body.arguments ?? {}) as JsonObject, {
+          sessionId: liveGrant.sessionId ?? "",
+          projectId: liveGrant.projectId,
+          cwd: liveGrant.cwd,
+          spaceId: liveGrant.spaceId,
         });
         rc.json(200, result);
       } catch (error) {
