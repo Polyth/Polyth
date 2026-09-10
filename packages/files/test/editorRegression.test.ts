@@ -12,6 +12,7 @@ test("editor reveal callback stays stable across FilePane rerenders", () => {
 });
 
 test("resource pane owns the remaining Files surface", () => {
+  assert.match(styles, /\.editor-view\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*row/s);
   assert.match(styles, /\.editor-pane\s*\{[^}]*flex:\s*1 1 0[^}]*display:\s*flex[^}]*flex-direction:\s*column[^}]*overflow:\s*hidden/s);
   assert.match(styles, /\.pane-body\s*\{[^}]*flex:\s*1 1 0[^}]*min-width:\s*0[^}]*min-height:\s*0[^}]*display:\s*flex[^}]*flex-direction:\s*column/s);
   assert.match(styles, /\.pane-body\[hidden\]\s*\{[^}]*display:\s*none/s);

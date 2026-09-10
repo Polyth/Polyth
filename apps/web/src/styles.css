@@ -9733,8 +9733,15 @@ transition: none;
   padding: var(--space-4) var(--gutter);
   overflow: auto;
 }
-.module-view-content--page > :only-child,
-.module-view-content--workspace > .rail-body > :only-child {
+.module-view-content--page > :only-child {
+  flex: 1; min-width: 0; min-height: 0;
+  display: flex; flex-direction: column;
+}
+:where(.module-view-content--workspace > .rail-body) > :only-child {
+  /* Workspace roots fill the pane, with a low-specificity column fallback.
+     A package such as Files can own a different wide-layout axis without
+     fighting host ancestry selectors; its container query still owns the
+     compact transition. */
   flex: 1; min-width: 0; min-height: 0;
   display: flex; flex-direction: column;
 }

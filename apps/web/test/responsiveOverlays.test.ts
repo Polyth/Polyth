@@ -464,6 +464,71 @@ test("Usage dashboard responds to a docked panel instead of the viewport", { ski
   }
 });
 
+test("Files keeps its editor beside the tree when a workspace pane grows past the compact seam", { skip: !CHROME }, async (t) => {
+  assert.ok(page);
+  t.after(async () => { await page!.setViewportSize({ width: 390, height: 720 }); });
+  const [coreCss, filesCss] = await Promise.all([
+    read("../src/styles.css"),
+    read("../../../packages/files/widgets/styles.css"),
+  ]);
+  await page.setViewportSize({ width: 1247, height: 951 });
+  await page.setContent(`
+    <style>${coreCss}\n${filesCss}</style>
+    <aside class="rail rail-workspace" style="width: 934px; height: 850px">
+      <section class="module-view">
+        <div class="module-view-body">
+          <div class="module-view-content module-view-content--workspace">
+            <div class="rail-body">
+              <div class="editor-view mobile-editor">
+                <div class="editor-mobile-tabs">Files / AGENTS.md</div>
+                <aside class="editor-tree">Files</aside>
+                <section class="editor-pane">
+                  <div class="pane-tabs">AGENTS.md</div>
+                  <div class="pane-body">Editor</div>
+                </section>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </aside>
+  `);
+
+  const geometry = async () => page!.evaluate(() => {
+    const root = document.querySelector<HTMLElement>(".editor-view")!;
+    const mobileTabs = document.querySelector<HTMLElement>(".editor-mobile-tabs")!;
+    const tree = document.querySelector<HTMLElement>(".editor-tree")!;
+    const editor = document.querySelector<HTMLElement>(".editor-pane")!;
+    return {
+      direction: getComputedStyle(root).flexDirection,
+      mobileTabsDisplay: getComputedStyle(mobileTabs).display,
+      treeDisplay: getComputedStyle(tree).display,
+      treeWidth: tree.getBoundingClientRect().width,
+      editorDisplay: getComputedStyle(editor).display,
+      editorWidth: editor.getBoundingClientRect().width,
+      editorHeight: editor.getBoundingClientRect().height,
+    };
+  });
+
+  const wide = await geometry();
+  assert.equal(wide.direction, "row", "the host does not override the Files wide split axis");
+  assert.equal(wide.mobileTabsDisplay, "none");
+  assert.notEqual(wide.treeDisplay, "none");
+  assert.ok(wide.treeWidth > 0);
+  assert.equal(wide.editorDisplay, "flex");
+  assert.ok(wide.editorWidth > 0, "the editor owns the width left beside the tree");
+  assert.ok(wide.editorHeight > 0, "the editor fills the workspace pane height");
+
+  await page.locator(".rail-workspace").evaluate((element) => { element.style.width = "805px"; });
+  const compact = await geometry();
+  assert.equal(compact.direction, "column");
+  assert.equal(compact.mobileTabsDisplay, "flex");
+  assert.equal(compact.treeDisplay, "none", "the selected editor replaces the tree in compact mode");
+  assert.equal(compact.editorDisplay, "flex");
+  assert.ok(compact.editorWidth > 0);
+  assert.ok(compact.editorHeight > 0);
+});
+
 test("390px package windows cover Chat, clear the shell menu, and preserve the app background", { skip: !CHROME }, async () => {
   assert.ok(page);
   const css = await read("../src/styles.css");
