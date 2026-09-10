@@ -57,12 +57,12 @@ export default function MarketScreenerSurface({
     let disposed = false;
     let running = false;
     let controller: AbortController | null = null;
+    setLoading(true);
     const load = async () => {
       if (disposed || running || document.visibilityState === "hidden") return;
       running = true;
       controller?.abort();
       controller = new AbortController();
-      setLoading(true);
       setError(null);
       try {
         const result = await marketsApi.screener(query, controller.signal);
@@ -110,7 +110,7 @@ export default function MarketScreenerSurface({
 
   const askPolyth = async () => {
     const target = handoffOptions[0];
-    if (!target || !page?.rows.length) return;
+    if (loading || !target || !page?.rows.length) return;
     setHandoffStatus("Sending…");
     try {
       await target.send(buildScreenerHandoffText(page, query));
@@ -151,7 +151,7 @@ export default function MarketScreenerSurface({
         </label>
         <div className="markets-screener-actions">
           <button type="button" onClick={reset}>Reset</button>
-          <button type="button" disabled={!page?.rows.length || handoffOptions.length === 0} onClick={() => void askPolyth()}>Ask Polyth</button>
+          <button type="button" disabled={loading || !page?.rows.length || handoffOptions.length === 0} onClick={() => void askPolyth()}>Ask Polyth</button>
         </div>
       </div>
 
