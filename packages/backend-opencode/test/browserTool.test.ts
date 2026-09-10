@@ -15,7 +15,7 @@ import {
 
 const HOME = "http://127.0.0.1:5173/";
 
-test("browser tool maps polyth-like actions onto the shared BrowserService", async () => {
+test("browser tool maps reference actions onto the shared BrowserService", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "polyth-browser-tool-"));
   const browser = createBrowserService({
     driver: createFakeDriver({
