@@ -6,7 +6,7 @@ import {
   type OpenCodeAuth,
   type QuotaRuntime,
 } from "../opencodeAuth.ts";
-import { mappolythUsage, ocWindow } from "../ocWindows.ts";
+import { mapProviderUsage, usageWindow } from "../ocWindows.ts";
 import type { DiscoverableProvider } from "./adapters.ts";
 
 const USAGE_URL = "https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig";
@@ -222,7 +222,7 @@ export const createXaiProvider = (runtime: QuotaRuntime): DiscoverableProvider =
             "Content-Type": "application/grpc-web+proto",
             "x-grpc-web": "1",
             "x-user-agent": "connect-es/2.1.1",
-            "User-Agent": "polyth",
+            "User-Agent": "Polyth",
           },
           body: EMPTY_GRPC_BODY,
           signal,
@@ -237,9 +237,9 @@ export const createXaiProvider = (runtime: QuotaRuntime): DiscoverableProvider =
       return {
         providerId: "xai",
         accountLabel: "xAI",
-        windows: mappolythUsage({
+        windows: mapProviderUsage({
           windows: {
-            billing_cycle: ocWindow({ usedPercent: usage.usedPercent, resetAt: usage.resetAt }),
+            billing_cycle: usageWindow({ usedPercent: usage.usedPercent, resetAt: usage.resetAt }),
           },
         }),
         fetchedAt: runtime.now(),
