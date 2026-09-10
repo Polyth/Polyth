@@ -114,7 +114,20 @@ test("goal and commitment routes support the deterministic execution loop", asyn
   h.close();
 });
 
-test("settings reject an invalid time zone before it reaches persistent state", async () => {
+test("direct commitment creation cannot forge agent/import provenance", async () => {
+  const h = harness();
+  const ctx = space("space");
+  const response = await invoke(h.route, ctx, "/api/personal-coach/commitments", "POST", {
+    title: "Client-created commitment",
+    source: "agent",
+    sourceSessionId: "forged-session",
+  });
+  assert.equal((response.value as { source: string }).source, "user");
+  assert.equal((response.value as { sourceSessionId?: string }).sourceSessionId, undefined);
+  h.close();
+});
+
+test("settings reject invalid zones and do not expose onboardingState as a client mutation", async () => {
   const h = harness();
   const ctx = space("space");
   await assert.rejects(
@@ -127,8 +140,10 @@ test("settings reject an invalid time zone before it reaches persistent state", 
     timeZone: "Europe/Kyiv",
     tone: "direct",
     challengeAssumptions: true,
+    onboardingState: "complete",
   });
   assert.equal((updated.value as { timeZone: string }).timeZone, "Europe/Kyiv");
+  assert.equal((updated.value as { onboardingState: string }).onboardingState, "new");
   h.close();
 });
 

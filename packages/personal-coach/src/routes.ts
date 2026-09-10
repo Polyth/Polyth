@@ -6,7 +6,6 @@ import type {
   CoachCommitmentStatus,
   CoachGoalStatus,
   CoachInitiative,
-  CoachOnboardingState,
   CoachRoutineCadence,
   CoachRoutineStatus,
   CoachStore,
@@ -21,9 +20,6 @@ export interface CoachStoreResolver {
 const GOAL_STATUSES: readonly CoachGoalStatus[] = ["active", "paused", "completed", "cancelled"];
 const COMMITMENT_STATUSES: readonly CoachCommitmentStatus[] = ["open", "done", "skipped", "cancelled"];
 const ROUTINE_STATUSES: readonly CoachRoutineStatus[] = ["active", "paused", "archived"];
-const TONES: readonly CoachTone[] = ["supportive", "balanced", "direct"];
-const INITIATIVES: readonly CoachInitiative[] = ["reactive", "balanced", "proactive"];
-const ONBOARDING: readonly CoachOnboardingState[] = ["new", "started", "complete"];
 
 const invalid = (message: string): Error => Object.assign(new Error(message), { code: "invalid-input" });
 
@@ -77,17 +73,15 @@ export function personalCoachRoutes(service: CoachStoreResolver): RouteHandler {
     if (path === "/api/personal-coach/settings" && method === "PUT") {
       const input = await request.body();
       const timeZone = optionalString(input.timeZone);
+      const challengeAssumptions = optionalBoolean(input.challengeAssumptions, "challengeAssumptions");
       if (timeZone !== undefined && !isCoachTimeZone(timeZone)) throw invalid("timeZone must be a valid IANA time zone");
       json(200, store.updateProfile({
         ...(input.tone !== undefined ? { tone: String(input.tone) as CoachTone } : {}),
         ...(input.initiative !== undefined ? { initiative: String(input.initiative) as CoachInitiative } : {}),
         ...(timeZone !== undefined ? { timeZone } : {}),
-        ...(optionalBoolean(input.challengeAssumptions, "challengeAssumptions") !== undefined
-          ? { challengeAssumptions: optionalBoolean(input.challengeAssumptions, "challengeAssumptions")! }
-          : {}),
-        ...(input.onboardingState !== undefined
-          ? { onboardingState: String(input.onboardingState) as CoachOnboardingState }
-          : {}),
+        ...(challengeAssumptions !== undefined ? { challengeAssumptions } : {}),
+        // onboardingState is intentionally not client-writable here. The
+        // Coach onboarding tool owns that transition after explicit choices.
       }));
       return true;
     }
@@ -147,8 +141,9 @@ export function personalCoachRoutes(service: CoachStoreResolver): RouteHandler {
         ...(optionalNumber(input.plannedFor) !== undefined ? { plannedFor: optionalNumber(input.plannedFor)! } : {}),
         ...(optionalNumber(input.dueAt) !== undefined ? { dueAt: optionalNumber(input.dueAt)! } : {}),
         ...(input.estimateMinutes !== undefined ? { estimateMinutes: Number(input.estimateMinutes) } : {}),
-        ...(input.source !== undefined ? { source: String(input.source) as "user" | "agent" | "import" } : {}),
-        ...(optionalString(input.sourceSessionId) ? { sourceSessionId: optionalString(input.sourceSessionId)! } : {}),
+        // Direct REST creation is a user action. Agent/import provenance must
+        // come from their dedicated trusted flows, never client-supplied tags.
+        source: "user",
       }));
       return true;
     }
