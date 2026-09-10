@@ -17,12 +17,18 @@
   border-bottom: 1px solid var(--border-soft);
 }
 
-.markets-portfolio-toolbar > div {
+.markets-portfolio-toolbar > div:first-child {
   display: grid;
   gap: var(--space-1);
 }
 
-.markets-portfolio-toolbar > div > span,
+.markets-portfolio-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.markets-portfolio-toolbar > div:first-child > span,
 .markets-portfolio-add label > span {
   color: var(--muted);
   font-size: var(--font-meta);
@@ -42,11 +48,18 @@
   cursor: pointer;
 }
 
-.markets-portfolio-toolbar button:hover,
-.markets-portfolio-add button:hover,
-.markets-portfolio-remove:hover {
+.markets-portfolio-toolbar button:hover:not(:disabled),
+.markets-portfolio-add button:hover:not(:disabled),
+.markets-portfolio-remove:hover:not(:disabled) {
   background: var(--surface-overlay-hover);
   color: var(--text);
+}
+
+.markets-portfolio-toolbar button:disabled,
+.markets-portfolio-add button:disabled,
+.markets-portfolio-remove:disabled {
+  opacity: .5;
+  cursor: default;
 }
 
 .markets-portfolio-toolbar button:focus-visible,
@@ -90,6 +103,12 @@
 .markets-portfolio-add label:first-child input {
   font-family: var(--mono);
   text-transform: uppercase;
+}
+
+.markets-portfolio-status {
+  padding: var(--space-2) var(--space-3) 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
 }
 
 .markets-portfolio-notice {
@@ -218,6 +237,11 @@
     align-items: flex-start;
   }
 
+  .markets-portfolio-toolbar-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
   .markets-portfolio-add {
     grid-template-columns: 1fr 1fr;
   }
@@ -232,8 +256,17 @@
 }
 
 @container (max-width: 440px) {
-  .markets-portfolio-toolbar > div > span {
-    max-width: 62cqi;
+  .markets-portfolio-toolbar {
+    flex-direction: column;
+  }
+
+  .markets-portfolio-toolbar > div:first-child > span {
+    max-width: 100%;
+  }
+
+  .markets-portfolio-toolbar-actions {
+    width: 100%;
+    justify-content: flex-start;
   }
 
   .markets-portfolio-add {
