@@ -5,6 +5,7 @@ import type {
   MarketRange,
   MarketResearchContext,
 } from "../src/types.ts";
+import { untrustedMarketDataBlock } from "./untrusted.ts";
 
 export interface MarketHandoffSnapshot {
   symbol: string;
@@ -52,6 +53,9 @@ export function buildMarketHandoffText(context: MarketResearchContext): string {
   ].filter((source): source is string => !!source))];
   const news = context.news.slice(0, 6).map((item, index) =>
     `${index + 1}. ${item.title} — ${item.publisher}${item.publishedAt ? ` (${item.publishedAt})` : ""}`);
+  const newsBlock = news.length
+    ? untrustedMarketDataBlock("Recent news metadata", news)
+    : ["Recent news", "No news was available from the configured market feeds."];
 
   return [
     `Market research context — ${context.symbol}`,
@@ -73,8 +77,7 @@ export function buildMarketHandoffText(context: MarketResearchContext): string {
     `- Sector: ${fundamentals?.sector ?? "unknown"}`,
     `- Industry: ${fundamentals?.industry ?? "unknown"}`,
     "",
-    "Recent news",
-    ...(news.length ? news : ["No news was available from the configured market feeds."]),
+    ...newsBlock,
     "",
     `Data sources: ${sources.length ? sources.join(", ") : "unknown"}`,
     `Freshness: ${quote?.freshness ?? context.performance?.freshness ?? fundamentals?.freshness ?? "unknown"}`,
