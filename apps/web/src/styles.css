@@ -1253,7 +1253,10 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
    clearance between the last surface and the composer boundary. */
 .timeline {
   flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto;
-  scroll-behavior: auto; /* chaseTail rAF loop needs instant scrollTop; html's smooth breaks it */
+  scroll-behavior: auto;
+  /* Browser anchoring and Polyth's explicit fresh-turn/follow contract must not
+     compete when an activity disclosure changes height. */
+  overflow-anchor: none;
   padding-block: var(--gutter) calc(var(--conversation-message-gap) + var(--conversation-group-gap));
   padding-inline: max(var(--conversation-inset), calc((100% - var(--chat-measure)) / 2));
   display: flex; flex-direction: column; gap: var(--conversation-message-gap);
@@ -4819,6 +4822,18 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
   position: absolute; inset: auto 0 0; z-index: var(--z-shell); pointer-events: none;
 }
 .conversation-composer-dock > * { pointer-events: auto; }
+/* The dock may remain visually positioned over the workspace, but its exact
+   measured height is reserved in flex layout. The timeline scrollport ends at
+   the dock's top edge, so transcript rows can never paint under the composer
+   or the active-agent status above it. */
+.focus-conversation:has(> .conversation-composer-dock) > .timeline-wrap {
+  margin-block-end: var(--conversation-dock-height);
+}
+/* A question card already reserves the complete dock height with its own
+   margin; do not count the same interaction zone twice. */
+.focus-conversation:has(> .conversation-composer-dock):has(> .question-cards) > .timeline-wrap {
+  margin-block-end: 0;
+}
 .focus-customize {
   position: absolute; top: 16px; right: 22px; z-index: 8; height: 34px; display: flex; align-items: center; gap: 7px;
   padding: 0 12px; border-color: var(--border-soft); background: var(--elevated); color: var(--text-dim); box-shadow: 0 4px 18px -14px rgba(0,0,0,.25);
@@ -11966,8 +11981,9 @@ html[data-font] body :is(
   animation: agent-dock-breathe 2.4s var(--motion-ease) infinite;
 }
 @keyframes agent-dock-breathe { 50% { opacity: .42; } }
-.agent-status-dock:hover { background: var(--elevated); color: var(--text); }
+.agent-status-dock:not(.agent-status-dock--status):hover { background: var(--elevated); color: var(--text); }
 .agent-status-dock:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.agent-status-dock--status { cursor: default; }
 .agent-status-dock-icon { position: relative; display: grid; place-items: center; width: var(--icon-xl); height: var(--icon-xl); margin-block-start: var(--space-1); }
 .agent-status-dock-icon > i { position: absolute; inset-inline-end: 0; inset-block-end: 0; width: var(--space-2); height: var(--space-2); border: 2px solid var(--surface); border-radius: 50%; background: var(--green); animation: status-pulse 1.8s ease-in-out infinite; }
 .agent-status-dock-content { min-width: 0; display: grid; gap: var(--space-1); }
@@ -12186,17 +12202,12 @@ html[data-font] body :is(
   .activity-group .task-activity-mark { width: var(--icon-md); flex-basis: var(--icon-md); }
 }
 
-/* Keep this after responsive timeline shorthands: the floating dock may grow
-   when a pending widget appears, and its full height must remain scrollable. */
+/* Keep this after responsive timeline shorthands. The dock's height is already
+   reserved outside the scrollport; this padding is only the normal breathing
+   room plus the fresh-turn sheet that shrinks as live content arrives. */
 .focus-conversation:has(> .conversation-composer-dock) .timeline {
-  padding-bottom: calc(var(--conversation-dock-height) + var(--conversation-group-gap));
-  scroll-padding-bottom: var(--conversation-dock-height);
-}
-/* When a question card is up it is lifted to sit just above the dock (see the
-   .question-cards margin-bottom rule), so it — not the timeline — owns the
-   clearance. The timeline then only needs to clear the card itself. */
-.focus-conversation:has(> .conversation-composer-dock):has(> .question-cards) .timeline {
-  padding-bottom: var(--conversation-group-gap);
+  padding-bottom: calc(var(--conversation-group-gap) + var(--timeline-turn-sheet-space, 0px));
+  scroll-padding-bottom: var(--conversation-group-gap);
 }
 
 @media (prefers-reduced-motion: reduce) {

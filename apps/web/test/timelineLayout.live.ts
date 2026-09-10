@@ -34,6 +34,8 @@ import {
 const SELF_BOOT = !process.env.POLYTH_LIVE_URL;
 const BASE = (process.env.POLYTH_LIVE_URL ?? "http://127.0.0.1:4463").replace(/\/$/, "");
 const ARTIFACTS = process.env.POLYTH_LIVE_ARTIFACTS ?? "/tmp/polyth-tl01-artifacts";
+let streamSessionId = SESSIONS.stream;
+let workSessionId = SESSIONS.work;
 
 const CHROMIUM_CANDIDATES = [
   "/usr/bin/chromium",
@@ -75,6 +77,7 @@ const SERVER_ENV = () => ({
   PATH: `${FIXTURE_BIN}:${process.env.PATH ?? ""}`,
   MSGACT_OC_SEED: OC_SEED,
   MSGACT_OC_STATE: OC_STATE,
+  MSGACT_STREAM_STEP_MS: "500",
   POLYTH_FAKE_BROWSER: "1",
 });
 
@@ -119,6 +122,13 @@ before(async () => {
     startServer();
   }
   await waitHealthy();
+  await waitRuntimeReady();
+  streamSessionId = await createLiveSession("Streaming layout session");
+  workSessionId = await createLiveSession("Live activity layout session");
+  await sendMessage(streamSessionId, "Warm-up prompt before the streaming gate.");
+  await waitForTurnSettled(streamSessionId, "Warm-up prompt before the streaming gate.");
+  await sendMessage(workSessionId, "Warm-up prompt before the live activity gate.");
+  await waitForTurnSettled(workSessionId, "Warm-up prompt before the live activity gate.");
   const pw = await import("playwright-core");
   browser = await pw.chromium.launch({
     executablePath: await chromiumPath(),
@@ -184,13 +194,65 @@ type EventRow = { seq: number; time: number; type: string; data: Record<string, 
 const fetchEvents = (sessionId: string): Promise<EventRow[]> =>
   fetch(`${BASE}/api/sessions/${sessionId}/events?afterSeq=0`).then((r) => r.json()) as Promise<never>;
 
+const createLiveSession = async (title: string): Promise<string> => {
+  const res = await fetch(`${BASE}/api/sessions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ projectId: PROJECT_ID, title }),
+  });
+  const body = await res.text();
+  assert.equal(res.status, 200, `create ${title} failed: ${body.slice(0, 240)}`);
+  const id = (JSON.parse(body) as { id?: unknown }).id;
+  assert.equal(typeof id, "string", `create ${title} returned no session id`);
+  return id as string;
+};
+
+const waitForTurnSettled = async (sessionId: string, prompt: string) => {
+  const deadline = Date.now() + 20_000;
+  for (;;) {
+    const events = await fetchEvents(sessionId);
+    const promptEvent = events.findLast((event) =>
+      event.type === "user/message" && event.data.text === prompt);
+    if (promptEvent && events.some((event) =>
+      event.seq > promptEvent.seq && event.type === "turn/stopped")) return;
+    if (Date.now() > deadline) throw new Error(`turn did not settle for ${sessionId}`);
+    await sleep(100);
+  }
+};
+
+const waitRuntimeReady = async () => {
+  const deadline = Date.now() + 45_000;
+  let lastDetail = "no response";
+  for (;;) {
+    try {
+      const res = await fetch(`${BASE}/api/models`);
+      const body = await res.text();
+      lastDetail = `${res.status} ${body.slice(0, 240)}`;
+      if (res.ok) {
+        const catalog = JSON.parse(body) as unknown;
+        if (Array.isArray(catalog) && catalog.length > 0) return;
+      }
+    } catch (error) {
+      lastDetail = String(error);
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`runtime did not become ready: ${lastDetail}`);
+    }
+    await sleep(250);
+  }
+};
+
 const sendMessage = async (sessionId: string, text: string) => {
+  // Readiness is established through a read-only catalog probe. Do not retry
+  // the message POST: an interrupted mutation would have uncertain outcome.
+  await waitRuntimeReady();
   const res = await fetch(`${BASE}/api/sessions/${sessionId}/message`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ text }),
   });
-  assert.equal(res.status, 200, `send to ${sessionId} failed`);
+  const detail = res.status === 200 ? "" : `: ${(await res.text()).slice(0, 240)}`;
+  assert.equal(res.status, 200, `send to ${sessionId} failed${detail}`);
 };
 
 /** Distance from the scroll maximum, visible row-id list, and duplicates. */
@@ -218,6 +280,12 @@ const topAnchor = (page: Page) => page.evaluate(() => {
   }
   return { id: "", offset: 0 };
 });
+
+/** Initial session hydration is newest-first. Wait for the saved row itself,
+ * rather than guessing how long older-event backfill will take. */
+const waitForAnchorRow = (page: Page, id: string) => page.waitForFunction((target) =>
+  [...document.querySelectorAll<HTMLElement>(".timeline [data-msg-id]")]
+    .some((node) => node.dataset.msgId === target), id, { timeout: 15_000 });
 
 test("user message actions wrap without making the timeline horizontally pannable", async () => {
   for (const width of [390, 1280]) {
@@ -543,61 +611,170 @@ test("empty session: honest empty state, no phantom nav/reveal, composer reachab
   await closePage(lp);
 });
 
+test("new-chat spawn status stays above the still-mounted composer", async () => {
+  const lp = await openApp({ width: 1280, height: 620, session: SESSIONS.empty, ready: ".composer" });
+  const { page } = lp;
+  let releaseCreate = () => {};
+  const createGate = new Promise<void>((resolve) => { releaseCreate = resolve; });
+  let finishCreateRoute = () => {};
+  const createRouteDone = new Promise<void>((resolve) => { finishCreateRoute = resolve; });
+  let createHeld = false;
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    createHeld = true;
+    try {
+      await createGate;
+      await route.continue();
+    } finally {
+      finishCreateRoute();
+    }
+  });
+
+  try {
+    await page.locator(".sidebar-new-session").click();
+    await page.locator("[data-composer-input]").fill("Hold the new-chat spawn layout for verification.");
+    await page.locator(".composer .send").click();
+    try {
+      await page.waitForSelector(".agent-status-dock--status", { state: "visible", timeout: 2000 });
+    } catch (error) {
+      const snapshot = await page.evaluate(() => ({
+        text: document.body.innerText.slice(-1000),
+        hero: document.querySelector(".session-hero") !== null,
+        conversation: document.querySelector(".focus-conversation") !== null,
+        activeSession: location.pathname,
+        composerBusy: document.querySelector(".composer")?.getAttribute("aria-busy") ?? null,
+        statusCount: document.querySelectorAll(".agent-status-dock--status").length,
+      }));
+      throw new Error(`spawn dock did not mount: ${JSON.stringify({ ...snapshot, errors: lp.errors })}`, { cause: error });
+    }
+    assert.equal(createHeld, true, "the isolated session-create request was not held");
+
+    const geometry = await page.evaluate(() => {
+      const timeline = document.querySelector<HTMLElement>(".timeline")!;
+      const dock = document.querySelector<HTMLElement>(".conversation-composer-dock")!;
+      const status = dock.querySelector<HTMLElement>(".agent-status-dock--status")!;
+      const composer = dock.querySelector<HTMLElement>(".composer")!;
+      const send = composer.querySelector<HTMLButtonElement>(".send")!;
+      const timelineRect = timeline.getBoundingClientRect();
+      const statusRect = status.getBoundingClientRect();
+      const composerRect = composer.getBoundingClientRect();
+      return {
+        statusBeforeComposer: [...dock.children].indexOf(status) < [...dock.children].indexOf(composer),
+        statusAboveComposer: statusRect.bottom <= composerRect.top + 1,
+        timelineAboveStatus: timelineRect.bottom <= statusRect.top + 1,
+        composerVisible: composerRect.width > 0 && composerRect.height > 0,
+        inputMounted: composer.querySelector("[data-composer-input]") !== null,
+        composerBusy: composer.getAttribute("aria-busy"),
+        sendDisabled: send.disabled,
+        statusRole: status.getAttribute("role"),
+        statusLabel: status.getAttribute("aria-label"),
+      };
+    });
+    assert.equal(geometry.statusBeforeComposer, true, "spawn status followed the composer in DOM order");
+    assert.equal(geometry.statusAboveComposer, true, "spawn status was not visually above the composer");
+    assert.equal(geometry.timelineAboveStatus, true, "timeline extended underneath the spawn status");
+    assert.equal(geometry.composerVisible, true, "composer disappeared while spawning");
+    assert.equal(geometry.inputMounted, true, "composer input unmounted while spawning");
+    assert.equal(geometry.composerBusy, "true", "composer did not expose its busy state");
+    assert.equal(geometry.sendDisabled, true, "a second send remained enabled while spawning");
+    assert.equal(geometry.statusRole, "status", "spawn dock lost its live-status semantics");
+    assert.match(geometry.statusLabel ?? "", /Spawning agent/i);
+    await page.screenshot({ path: join(ARTIFACTS, "new-chat-spawning-above-composer-1280.png") });
+  } finally {
+    releaseCreate();
+    if (createHeld) await createRouteDone;
+    await page.unroute("**/api/sessions");
+  }
+
+  await page.waitForSelector(".agent-status-dock--status", { state: "hidden", timeout: 15_000 });
+  assert.equal(await page.locator(".composer").count(), 1, "composer did not survive session creation");
+  await closePage(lp);
+});
+
 // =============================================================================
-// 3. Streaming (spec 9.1 item 4): tail follow within 2px; a reader who
-//    scrolled up holds within 1px while scrollHeight grows; one named
-//    Jump to latest with keyboard activation, arrival, resumed follow, and
-//    non-BODY focus.
+// 3. Streaming (spec 9.1 item 4): every new prompt starts at the reading top;
+//    a tiny upward gesture detaches immediately while the SAME response grows;
+//    Jump to latest remains keyboard-operable and reconnects follow mode.
 // =============================================================================
 
-test("streaming: tail follow, reader-held position, keyboard Jump to latest, resumed follow", async () => {
-  const lp = await openApp({ width: 1280, height: 900, session: SESSIONS.stream, ready: ".msg" });
+test("streaming: fresh prompt sheet, immediate reader detach, keyboard Jump to latest, resumed follow", async () => {
+  const lp = await openApp({ width: 1280, height: 520, session: streamSessionId, ready: ".msg" });
   const { page } = lp;
 
-  // --- at the tail: growth follows -----------------------------------------
+  // --- a new user turn starts at the top of the usable reading area --------
   const before = await scrollState(page);
   assert.ok(before.distance <= 2, `not at the tail before streaming (distance ${before.distance})`);
-  await sendMessage(SESSIONS.stream, "Stream one: follow the tail.");
-  await page.waitForSelector('.msg.assistant[aria-label="Assistant answer streaming"]', { timeout: 10_000 });
-  await page.waitForFunction(
-    () => document.querySelector('.msg.assistant[aria-label="Assistant answer streaming"]') === null,
-    undefined, { timeout: 15_000 },
+  const firstPrompt = "Stream one: start on a fresh sheet.";
+  await sendMessage(streamSessionId, firstPrompt);
+  await page.waitForFunction((text) => {
+    const rows = document.querySelectorAll<HTMLElement>(".timeline > .msg.user");
+    return rows[rows.length - 1]?.textContent?.includes(text) === true;
+  }, firstPrompt);
+  const fresh = await page.evaluate(() => {
+    const el = document.querySelector<HTMLElement>(".timeline")!;
+    const prompt = [...el.querySelectorAll<HTMLElement>(":scope > .msg.user")].at(-1)!;
+    const port = el.getBoundingClientRect();
+    return {
+      topDelta: prompt.getBoundingClientRect().top - port.top - (Number.parseFloat(getComputedStyle(el).paddingTop) || 0),
+      sheetSpace: Number.parseFloat(el.style.getPropertyValue("--timeline-turn-sheet-space")) || 0,
+      scrollTop: el.scrollTop,
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+      paddingTop: Number.parseFloat(getComputedStyle(el).paddingTop) || 0,
+      paddingBottom: Number.parseFloat(getComputedStyle(el).paddingBottom) || 0,
+      promptTop: prompt.getBoundingClientRect().top - port.top,
+      promptOffsetTop: prompt.offsetTop,
+      distance: el.scrollHeight - el.scrollTop - el.clientHeight,
+    };
+  });
+  assert.ok(
+    Math.abs(fresh.topDelta) <= 2,
+    `new prompt missed the reading top: ${JSON.stringify(fresh)}`,
   );
-  await page.waitForTimeout(250); // layout settles
+  assert.ok(fresh.sheetSpace > 0, "new prompt did not reserve a fresh response sheet");
+
+  // --- growth follows until even a tiny upward wheel gesture ----------------
+  await page.waitForSelector('.msg.assistant[aria-label="Assistant response streaming"]', { timeout: 10_000 });
   const followed = await scrollState(page);
   assert.ok(followed.distance <= 2, `tail follow drifted to ${followed.distance}px`);
-  assert.ok(
-    await page.evaluate(() => document.querySelectorAll('.msg.assistant[aria-label^="Assistant answer completed"]').length >= 1),
-    "finalized assistant container lost its completed name",
-  );
 
-  // --- scrolled-up reader holds while the stream grows ----------------------
   const timelineBox = await page.locator(".timeline").boundingBox();
   assert.ok(timelineBox, "timeline has no visible scrollport");
   await page.mouse.move(timelineBox.x + timelineBox.width / 2, timelineBox.y + timelineBox.height / 2);
-  await page.mouse.wheel(0, -Math.max(200, timelineBox.height / 2));
+  await page.mouse.wheel(0, -4);
   await page.waitForSelector(".timeline-reveal .jump-latest", { state: "visible", timeout: 5000 });
   const held = await page.evaluate(() => document.querySelector<HTMLElement>(".timeline")!.scrollTop);
-  await sendMessage(SESSIONS.stream, "Stream two: hold the reading line.");
   const hold = await page.evaluate(async (heldTop: number) => {
     const el = document.querySelector<HTMLElement>(".timeline")!;
     const h0 = el.scrollHeight;
     const samples: Array<{ top: number; h: number }> = [];
-    for (let i = 0; i < 24; i++) {
-      await new Promise((r) => setTimeout(r, 100));
+    for (let i = 0; i < 50; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
       samples.push({ top: el.scrollTop, h: el.scrollHeight });
     }
     return {
-      grew: samples.some((s) => s.h > h0 + 40),
-      maxDrift: samples.reduce((max, s) => Math.max(max, Math.abs(s.top - heldTop)), 0),
+      grew: samples.some((sample) => sample.h > h0 + 2),
+      maxDrift: samples.reduce((max, sample) => Math.max(max, Math.abs(sample.top - heldTop)), 0),
     };
   }, held);
-  assert.ok(hold.grew, "stream two never grew the scroll maximum");
-  assert.ok(hold.maxDrift <= 1, `reader position drifted ${hold.maxDrift}px during streaming`);
+  assert.ok(hold.grew, "the response did not grow after the tiny detach gesture");
+  assert.ok(hold.maxDrift <= 1, `reader position drifted ${hold.maxDrift}px after a tiny upward gesture`);
+
+  await page.waitForFunction(
+    () => document.querySelector('.msg.assistant[aria-label="Assistant response streaming"]') === null,
+    undefined, { timeout: 15_000 },
+  );
+  assert.ok(
+    await page.evaluate(() => document.querySelectorAll('.msg.assistant[aria-label^="Assistant response completed"]').length >= 1),
+    "finalized assistant container lost its completed name",
+  );
 
   // --- Jump to latest: named, keyboard-operable, arrives, resumes follow ----
   const jump = page.locator(".timeline-reveal .jump-latest");
-  assert.equal((await jump.textContent())?.trim(), "Jump to latest", "reveal control lost its visible name");
+  assert.equal(await jump.getAttribute("aria-label"), "Jump to latest", "reveal control lost its accessible name");
   await page.screenshot({ path: join(ARTIFACTS, "streaming-jump-latest-1280.png") });
   await jump.focus();
   await page.keyboard.press("Enter");
@@ -616,17 +793,73 @@ test("streaming: tail follow, reader-held position, keyboard Jump to latest, res
   assert.notEqual(after.activeTag, "BODY", "keyboard jump dropped focus to BODY");
   assert.ok(after.activeInTimeline, "focus did not move into the timeline");
 
-  // --- follow resumes for later growth --------------------------------------
-  await sendMessage(SESSIONS.stream, "Stream three: follow resumes.");
-  await page.waitForSelector('.msg.assistant[aria-label="Assistant answer streaming"]', { timeout: 10_000 });
+  // --- even from detached history, the next prompt gets a clean sheet -------
+  const boxBeforeSecond = await page.locator(".timeline").boundingBox();
+  assert.ok(boxBeforeSecond, "timeline disappeared before the next prompt");
+  await page.mouse.move(
+    boxBeforeSecond.x + boxBeforeSecond.width / 2,
+    boxBeforeSecond.y + boxBeforeSecond.height / 2,
+  );
+  await page.mouse.wheel(0, -120);
+  await page.waitForSelector(".timeline-reveal .jump-latest", { state: "visible", timeout: 5000 });
+  const secondPrompt = "Stream two: start another fresh sheet.";
+  await sendMessage(streamSessionId, secondPrompt);
+  await page.waitForFunction((text) => {
+    const rows = document.querySelectorAll<HTMLElement>(".timeline > .msg.user");
+    return rows[rows.length - 1]?.textContent?.includes(text) === true;
+  }, secondPrompt);
+  const secondTopDelta = await page.evaluate(() => {
+    const el = document.querySelector<HTMLElement>(".timeline")!;
+    const prompt = [...el.querySelectorAll<HTMLElement>(":scope > .msg.user")].at(-1)!;
+    return prompt.getBoundingClientRect().top - el.getBoundingClientRect().top
+      - (Number.parseFloat(getComputedStyle(el).paddingTop) || 0);
+  });
+  assert.ok(Math.abs(secondTopDelta) <= 2, `next prompt missed the reading top by ${secondTopDelta}px`);
+  assert.equal(
+    await page.locator(".timeline-reveal").count(),
+    0,
+    "a new prompt left the reader detached from the fresh sheet",
+  );
+  await page.screenshot({ path: join(ARTIFACTS, "fresh-turn-sheet-1280.png") });
+  await page.waitForSelector('.msg.assistant[aria-label="Assistant response streaming"]', { timeout: 10_000 });
   await page.waitForFunction(
-    () => document.querySelector('.msg.assistant[aria-label="Assistant answer streaming"]') === null,
+    () => document.querySelector('.msg.assistant[aria-label="Assistant response streaming"]') === null,
     undefined, { timeout: 15_000 },
   );
   await page.waitForTimeout(250);
   const resumed = await scrollState(page);
   assert.ok(resumed.distance <= 2, `follow did not resume (distance ${resumed.distance})`);
   assert.deepEqual(resumed.duplicateIds, [], "streaming duplicated a visible message id");
+  await closePage(lp);
+});
+
+test("live expanded agent action remains above the full status and composer dock", async () => {
+  const lp = await openApp({ width: 1280, height: 620, session: workSessionId, ready: ".msg" });
+  const { page } = lp;
+  await sendMessage(workSessionId, "Run the live action visibility gate.");
+  await page.waitForSelector(".activity-group.current .execution-row.current.open", { state: "visible", timeout: 15_000 });
+  await page.waitForTimeout(100);
+
+  const geometry = await page.evaluate(() => {
+    const timeline = document.querySelector<HTMLElement>(".timeline")!;
+    const action = document.querySelector<HTMLElement>(".activity-group.current .execution-row.current.open")!;
+    const dock = document.querySelector<HTMLElement>(".conversation-composer-dock")!;
+    const port = timeline.getBoundingClientRect();
+    const row = action.getBoundingClientRect();
+    const dockRect = dock.getBoundingClientRect();
+    return {
+      viewportDockGap: dockRect.top - port.bottom,
+      actionBottomGap: port.bottom - row.bottom,
+      actionIntersectsDock: row.top < dockRect.bottom && row.bottom > dockRect.top,
+      statusAboveComposer: (document.querySelector<HTMLElement>(".agent-status-dock")?.getBoundingClientRect().bottom ?? Infinity)
+        <= (document.querySelector<HTMLElement>(".composer")?.getBoundingClientRect().top ?? -Infinity) + 1,
+    };
+  });
+  assert.ok(geometry.viewportDockGap >= -1, `timeline extends ${-geometry.viewportDockGap}px under the dock`);
+  assert.ok(geometry.actionBottomGap >= -1, `live expanded action is ${-geometry.actionBottomGap}px below the viewport`);
+  assert.equal(geometry.actionIntersectsDock, false, "live expanded action intersects the dock");
+  assert.equal(geometry.statusAboveComposer, true, "agent activity status is not above the composer");
+  await page.screenshot({ path: join(ARTIFACTS, "live-action-above-dock-1280.png") });
   await closePage(lp);
 });
 
@@ -744,7 +977,7 @@ test("anchors: reading position survives reload, session switch, and server rest
   // Direct reload restores the same row at the same usable-edge offset.
   await page.reload({ waitUntil: "load" });
   await page.waitForSelector(".timeline .msg", { timeout: 15_000 });
-  await page.waitForTimeout(300);
+  await waitForAnchorRow(page, anchorBefore.id);
   const afterReload = await topAnchor(page);
   assert.equal(afterReload.id, anchorBefore.id, "reload restored a different row");
   assert.ok(
@@ -757,7 +990,7 @@ test("anchors: reading position survives reload, session switch, and server rest
   await page.waitForSelector(".timeline .msg", { timeout: 15_000 });
   await page.goto(`${BASE}/p/${PROJECT_ID}/s/${SESSIONS.many}`, { waitUntil: "load" });
   await page.waitForSelector(".timeline .msg", { timeout: 15_000 });
-  await page.waitForTimeout(300);
+  await waitForAnchorRow(page, anchorBefore.id);
   const afterSwitch = await topAnchor(page);
   assert.equal(afterSwitch.id, anchorBefore.id, "session switch lost the anchored row");
   assert.ok(
@@ -773,7 +1006,7 @@ test("anchors: reading position survives reload, session switch, and server rest
     await waitHealthy();
     await page.reload({ waitUntil: "load" });
     await page.waitForSelector(".timeline .msg", { timeout: 15_000 });
-    await page.waitForTimeout(300);
+    await waitForAnchorRow(page, anchorBefore.id);
     const restarted = await scrollState(page);
     assert.deepEqual(restarted.ids, idsBefore, "server restart changed visible content or order");
     assert.deepEqual(restarted.duplicateIds, [], "server restart duplicated a row");
