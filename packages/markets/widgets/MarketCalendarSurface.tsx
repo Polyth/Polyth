@@ -58,10 +58,12 @@ export default function MarketCalendarSurface({
 
   const watchlists = useMarketWatchlists(active && tab === "earnings");
   const activeWatchlist = watchlists.data?.items.find((item) => item.id === watchlists.data?.activeId);
+  const watchlistSymbols = activeWatchlist?.symbols ?? [];
   const supportedSymbols = useMemo(
-    () => (activeWatchlist?.symbols ?? []).filter(calendarSymbolSupported).slice(0, 100),
-    [activeWatchlist],
+    () => watchlistSymbols.filter(calendarSymbolSupported).slice(0, 100),
+    [watchlistSymbols],
   );
+  const unsupportedCount = Math.max(0, watchlistSymbols.length - supportedSymbols.length);
   const symbolsKey = supportedSymbols.join("\u0000");
 
   useEffect(() => {
@@ -89,10 +91,11 @@ export default function MarketCalendarSurface({
       setEarningsError(null);
       return;
     }
+    const requestedSymbols = symbolsKey.split("\u0000");
     const controller = new AbortController();
     setEarningsLoading(true);
     setEarningsError(null);
-    void marketsApi.earningsCalendar(supportedSymbols, controller.signal)
+    void marketsApi.earningsCalendar(requestedSymbols, controller.signal)
       .then((result) => {
         if (!controller.signal.aborted) setEarnings(result);
       })
@@ -155,9 +158,9 @@ export default function MarketCalendarSurface({
   return (
     <div className="markets-calendar" aria-busy={loading}>
       <header className="markets-calendar-header">
-        <div role="tablist" aria-label="Market calendar type">
-          <button type="button" role="tab" aria-selected={tab === "economic"} onClick={() => setTab("economic")}>Economic</button>
-          <button type="button" role="tab" aria-selected={tab === "earnings"} onClick={() => setTab("earnings")}>Earnings</button>
+        <div role="group" aria-label="Market calendar type">
+          <button type="button" aria-pressed={tab === "economic"} onClick={() => setTab("economic")}>Economic</button>
+          <button type="button" aria-pressed={tab === "earnings"} onClick={() => setTab("earnings")}>Earnings</button>
         </div>
         <div className="markets-calendar-actions">
           <button type="button" disabled={loading} onClick={refresh}>Refresh</button>
@@ -214,7 +217,7 @@ export default function MarketCalendarSurface({
         <>
           <div className="markets-calendar-toolbar">
             <span>{activeWatchlist ? activeWatchlist.name : "Active watchlist"}</span>
-            <span>{supportedSymbols.length} supported US symbols</span>
+            <span>{supportedSymbols.length} supported US symbols{unsupportedCount > 0 ? ` · ${unsupportedCount} skipped` : ""}</span>
             <span className="markets-calendar-cache">{earnings ? `${earnings.cache} · ${new Date(earnings.cachedAt).toLocaleTimeString()}` : "Watchlist earnings"}</span>
           </div>
           {watchlists.error && <div className="markets-calendar-notice" role="status">{watchlists.error}</div>}
