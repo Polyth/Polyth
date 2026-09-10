@@ -21,6 +21,17 @@ export interface MarketProvider {
   earnings?(symbol: string, signal: AbortSignal): Promise<MarketEarningsSurprise[]>;
 }
 
+export interface ProviderCapabilityHealth {
+  capability: MarketProviderCapability;
+  successes: number;
+  failures: number;
+  consecutiveFailures: number;
+  lastSuccessAt?: number;
+  lastFailureAt?: number;
+  circuitOpenUntil?: number;
+  lastError?: string;
+}
+
 export interface ProviderHealth {
   providerId: string;
   successes: number;
@@ -32,6 +43,7 @@ export interface ProviderHealth {
   lastFailureAt?: number;
   circuitOpenUntil?: number;
   lastError?: string;
+  capabilities: ProviderCapabilityHealth[];
 }
 
 export interface ProviderRegistryOptions {
@@ -39,6 +51,16 @@ export interface ProviderRegistryOptions {
   circuitMs?: number;
   now?: () => number;
 }
+
+const CAPABILITIES: readonly MarketProviderCapability[] = [
+  "quote",
+  "candles",
+  "search",
+  "fundamentals",
+  "news",
+  "filings",
+  "earnings",
+];
 
 const supports = (provider: MarketProvider, capability: MarketProviderCapability): boolean =>
   typeof provider[capability] === "function";
@@ -49,6 +71,7 @@ const errorMessage = (cause: unknown): string =>
 export class ProviderRegistry {
   private readonly providers: MarketProvider[] = [];
   private readonly health = new Map<string, ProviderHealth>();
+  private readonly capabilityHealth = new Map<string, Map<MarketProviderCapability, ProviderCapabilityHealth>>();
   private readonly failureThreshold: number;
   private readonly circuitMs: number;
   private readonly now: () => number;
@@ -67,11 +90,23 @@ export class ProviderRegistry {
       throw new Error(`market provider already registered: ${provider.id}`);
     }
     this.providers.push(provider);
+    const byCapability = new Map<MarketProviderCapability, ProviderCapabilityHealth>();
+    for (const capability of CAPABILITIES) {
+      if (!supports(provider, capability)) continue;
+      byCapability.set(capability, {
+        capability,
+        successes: 0,
+        failures: 0,
+        consecutiveFailures: 0,
+      });
+    }
+    this.capabilityHealth.set(provider.id, byCapability);
     this.health.set(provider.id, {
       providerId: provider.id,
       successes: 0,
       failures: 0,
       consecutiveFailures: 0,
+      capabilities: [],
     });
   }
 
@@ -82,7 +117,11 @@ export class ProviderRegistry {
   }
 
   healthSnapshot(): ProviderHealth[] {
-    return this.providers.map((provider) => ({ ...this.requireHealth(provider.id) }));
+    return this.providers.map((provider) => {
+      const health = this.requireHealth(provider.id);
+      const capabilities = [...this.requireCapabilityMap(provider.id).values()].map((item) => ({ ...item }));
+      return { ...health, capabilities };
+    });
   }
 
   async run<T>(
@@ -98,19 +137,20 @@ export class ProviderRegistry {
     let attempted = 0;
     for (const provider of candidates) {
       const health = this.requireHealth(provider.id);
+      const capabilityState = this.requireCapabilityHealth(provider.id, capability);
       const now = this.now();
-      if ((health.circuitOpenUntil ?? 0) > now) continue;
+      if ((capabilityState.circuitOpenUntil ?? 0) > now) continue;
 
       attempted += 1;
       const started = now;
       try {
         const value = await invoke(provider);
-        this.recordSuccess(health, Math.max(0, this.now() - started));
+        this.recordSuccess(health, capabilityState, Math.max(0, this.now() - started));
         return { value, providerId: provider.id };
       } catch (cause) {
         const message = errorMessage(cause);
         errors.push(`${provider.id}: ${message}`);
-        this.recordFailure(health, Math.max(0, this.now() - started), message);
+        this.recordFailure(health, capabilityState, Math.max(0, this.now() - started), message);
       }
     }
 
@@ -131,7 +171,7 @@ export class ProviderRegistry {
     const now = this.now();
     const candidates = this.providers.filter((provider) => {
       if (!supports(provider, capability)) return false;
-      return (this.requireHealth(provider.id).circuitOpenUntil ?? 0) <= now;
+      return (this.requireCapabilityHealth(provider.id, capability).circuitOpenUntil ?? 0) <= now;
     });
     if (candidates.length === 0) {
       const hasCapability = this.providers.some((provider) => supports(provider, capability));
@@ -142,14 +182,15 @@ export class ProviderRegistry {
 
     const settled = await Promise.all(candidates.map(async (provider) => {
       const health = this.requireHealth(provider.id);
+      const capabilityState = this.requireCapabilityHealth(provider.id, capability);
       const started = this.now();
       try {
         const value = await invoke(provider);
-        this.recordSuccess(health, Math.max(0, this.now() - started));
+        this.recordSuccess(health, capabilityState, Math.max(0, this.now() - started));
         return { ok: true as const, value, providerId: provider.id };
       } catch (cause) {
         const message = errorMessage(cause);
-        this.recordFailure(health, Math.max(0, this.now() - started), message);
+        this.recordFailure(health, capabilityState, Math.max(0, this.now() - started), message);
         return { ok: false as const, providerId: provider.id, message };
       }
     }));
@@ -165,26 +206,60 @@ export class ProviderRegistry {
     return health;
   }
 
-  private recordSuccess(health: ProviderHealth, latencyMs: number): void {
+  private requireCapabilityMap(providerId: string): Map<MarketProviderCapability, ProviderCapabilityHealth> {
+    const health = this.capabilityHealth.get(providerId);
+    if (!health) throw new Error(`unknown market provider: ${providerId}`);
+    return health;
+  }
+
+  private requireCapabilityHealth(providerId: string, capability: MarketProviderCapability): ProviderCapabilityHealth {
+    const health = this.requireCapabilityMap(providerId).get(capability);
+    if (!health) throw new Error(`market provider ${providerId} does not support ${capability}`);
+    return health;
+  }
+
+  private syncAggregateCircuit(health: ProviderHealth): void {
+    const now = this.now();
+    const open = [...this.requireCapabilityMap(health.providerId).values()]
+      .map((item) => item.circuitOpenUntil ?? 0)
+      .filter((until) => until > now);
+    health.circuitOpenUntil = open.length ? Math.max(...open) : undefined;
+  }
+
+  private recordSuccess(health: ProviderHealth, capability: ProviderCapabilityHealth, latencyMs: number): void {
+    const now = this.now();
     health.successes += 1;
     health.consecutiveFailures = 0;
     health.lastLatencyMs = latencyMs;
     health.averageLatencyMs = health.averageLatencyMs === undefined
       ? latencyMs
       : Math.round((health.averageLatencyMs * 0.8) + (latencyMs * 0.2));
-    health.lastSuccessAt = this.now();
-    health.circuitOpenUntil = undefined;
+    health.lastSuccessAt = now;
     health.lastError = undefined;
+
+    capability.successes += 1;
+    capability.consecutiveFailures = 0;
+    capability.lastSuccessAt = now;
+    capability.circuitOpenUntil = undefined;
+    capability.lastError = undefined;
+    this.syncAggregateCircuit(health);
   }
 
-  private recordFailure(health: ProviderHealth, latencyMs: number, message: string): void {
+  private recordFailure(health: ProviderHealth, capability: ProviderCapabilityHealth, latencyMs: number, message: string): void {
+    const now = this.now();
     health.failures += 1;
     health.consecutiveFailures += 1;
     health.lastLatencyMs = latencyMs;
-    health.lastFailureAt = this.now();
+    health.lastFailureAt = now;
     health.lastError = message;
-    if (health.consecutiveFailures >= this.failureThreshold) {
-      health.circuitOpenUntil = this.now() + this.circuitMs;
+
+    capability.failures += 1;
+    capability.consecutiveFailures += 1;
+    capability.lastFailureAt = now;
+    capability.lastError = message;
+    if (capability.consecutiveFailures >= this.failureThreshold) {
+      capability.circuitOpenUntil = now + this.circuitMs;
     }
+    this.syncAggregateCircuit(health);
   }
 }
