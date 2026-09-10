@@ -50,7 +50,11 @@ export const marketsApi = {
     limit = 30,
     signal?: AbortSignal,
   ): Promise<MarketDataResult<MarketFiling[]>> {
-    const params = new URLSearchParams({ symbol, forms: forms.join(","), limit: String(limit) });
+    const params = new URLSearchParams({
+      symbol,
+      forms: forms.join(","),
+      limit: String(limit),
+    });
     return transport.get(`/api/markets/filings?${params}`, { signal });
   },
   macro(signal?: AbortSignal): Promise<MarketMacroSnapshot> {
