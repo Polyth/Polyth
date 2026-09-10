@@ -12,6 +12,7 @@ import { Icon } from "../../../apps/web/src/icons.tsx";
 import Dialog from "../../../apps/web/src/components/a11y/Dialog.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { workflowNodeCount } from "./workflowRun.ts";
+import { workflowSampleByName } from "../src/sampleCatalog.ts";
 import {
   AddIcon,
   Button,
@@ -106,8 +107,10 @@ export default function WorkflowLauncher({
   };
 
   const run = async (workflow: WorkflowDto) => {
-    if (!projectId || !task.trim() || busyId) return;
-    const submittedTask = task.trim();
+    if (!projectId || busyId) return;
+    const enteredTask = task.trim();
+    const submittedTask = enteredTask || workflowSampleByName(workflow.name)?.exampleInput || "";
+    if (!submittedTask) return;
     let draftConsumed = false;
     setBusyId(workflow.id);
     setError("");
@@ -131,7 +134,7 @@ export default function WorkflowLauncher({
       });
       setOpen(false);
     } catch (cause) {
-      if (draftConsumed) requestComposerReplace(submittedTask);
+      if (draftConsumed && enteredTask) requestComposerReplace(enteredTask);
       setError(friendlyError(tr("workflowlauncher.couldNotStart"), cause));
     } finally {
       setBusyId("");
@@ -209,34 +212,43 @@ export default function WorkflowLauncher({
             </div>
           ) : workflows.length > 0 ? (
             <ul className="workflow-launch-list" aria-label={tr("workflowlauncher.savedWorkflows")}>
-              {workflows.map((workflow) => (
-                <li key={workflow.id} className="workflow-launch-row">
-                  <span className="workflow-definition-icon" aria-hidden="true"><Icon.workflow /></span>
-                  <span>
-                    <strong>{workflow.name}</strong>
-                    <small>{workflowNodeCount(workflow.nodes.length)} · {workflow.defaults?.permissions === "manual" ? tr("workflowlauncher.manualApproval") : tr("workflowlauncher.autoApprove")}</small>
-                  </span>
-                  <Button
-                    size="sm"
-                    disabled={!!busyId}
-                    aria-label={tr("workflowlauncher.editValue", { name: workflow.name })}
-                    onClick={() => openBuilder(workflow.id)}
-                  >
-                    {tr("common.edit")}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    disabled={!task.trim() || !!busyId}
-                    busy={busyId === workflow.id}
-                    title={!task.trim() ? tr("workflowlauncher.enterTaskBeforeRunning") : tr("workflowlauncher.runValue", { name: workflow.name })}
-                    aria-label={tr("workflowlauncher.runValue", { name: workflow.name })}
-                    onClick={() => void run(workflow)}
-                  >
-                    {tr("workflowlauncher.run")}
-                  </Button>
-                </li>
-              ))}
+              {workflows.map((workflow) => {
+                const sample = workflowSampleByName(workflow.name);
+                const canRun = !!task.trim() || !!sample?.exampleInput;
+                return (
+                  <li key={workflow.id} className="workflow-launch-row">
+                    <span className="workflow-definition-icon" aria-hidden="true"><Icon.workflow /></span>
+                    <span>
+                      <strong>{workflow.name}</strong>
+                      {sample && <small className="workflow-sample-description">{sample.description}</small>}
+                      <small>{workflowNodeCount(workflow.nodes.length)} · {workflow.defaults?.permissions === "manual" ? tr("workflowlauncher.manualApproval") : tr("workflowlauncher.autoApprove")}</small>
+                    </span>
+                    <Button
+                      size="sm"
+                      disabled={!!busyId}
+                      aria-label={tr("workflowlauncher.editValue", { name: workflow.name })}
+                      onClick={() => openBuilder(workflow.id)}
+                    >
+                      {tr("common.edit")}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      disabled={!canRun || !!busyId}
+                      busy={busyId === workflow.id}
+                      title={!canRun
+                        ? tr("workflowlauncher.enterTaskBeforeRunning")
+                        : !task.trim() && sample
+                          ? sample.exampleInput
+                          : tr("workflowlauncher.runValue", { name: workflow.name })}
+                      aria-label={tr("workflowlauncher.runValue", { name: workflow.name })}
+                      onClick={() => void run(workflow)}
+                    >
+                      {tr("workflowlauncher.run")}
+                    </Button>
+                  </li>
+                );
+              })}
             </ul>
           ) : (
             <div className="workflow-launch-empty">
@@ -261,7 +273,7 @@ export default function WorkflowLauncher({
             <span aria-live="polite">
               {busyId
                 ? tr("workflowlauncher.startingWorkflow")
-                : !task.trim() && workflows.length > 0
+                : !task.trim() && workflows.length > 0 && !workflows.some((workflow) => workflowSampleByName(workflow.name))
                   ? tr("workflowlauncher.enterTaskToEnable")
                   : ""}
             </span>

@@ -19,6 +19,7 @@ import {
   type WorkflowUpdateInput,
 } from "./index.ts";
 import { createWorkflowRunNode } from "./runner.ts";
+import { createWorkflowSampleSeeder } from "./samples.ts";
 
 const asModel = (value: unknown): ModelRef | undefined => {
   if (!value || typeof value !== "object") return undefined;
@@ -80,10 +81,15 @@ const edgesOf = (value: unknown): WorkflowEdgeDto[] => Array.isArray(value)
     })
   : [];
 
-export function workflowRoutes(workflow: WorkflowService): RouteHandler {
+export function workflowRoutes(
+  workflow: WorkflowService,
+  ensureSamples?: (projectId: string) => void,
+): RouteHandler {
   return async ({ path, method, url, body, json }) => {
     if (path === "/api/workflows" && method === "GET") {
-      json(200, workflow.list(url.searchParams.get("projectId") ?? undefined));
+      const projectId = url.searchParams.get("projectId") ?? undefined;
+      if (projectId) ensureSamples?.(projectId);
+      json(200, workflow.list(projectId));
       return true;
     }
     if (path === "/api/workflows" && method === "POST") {
@@ -180,9 +186,13 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       }),
     runNode: createWorkflowRunNode(host.sessions),
   });
+  const ensureSamples = createWorkflowSampleSeeder(
+    workflow,
+    join(host.storageDir, "workflow-samples.json"),
+  );
   host.services.provide(serverServiceKey<WorkflowService>("workflow"), workflow);
   return {
     remoteAccess: localOnlyRemoteAccess(["workflow"]),
-    routes: workflowRoutes(workflow),
+    routes: workflowRoutes(workflow, ensureSamples),
   };
 }
