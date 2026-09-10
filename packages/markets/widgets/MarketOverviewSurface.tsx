@@ -40,7 +40,8 @@ const macroValue = (value: number, unit: "percent" | "percentage-point"): string
 
 function handoffText(macro: MarketMacroSnapshot | null, crypto: MarketDataResult<MarketQuote[]> | null): string {
   const evidence = {
-    generatedAt: macro?.generatedAt ?? new Date().toISOString(),
+    macroGeneratedAt: macro?.generatedAt,
+    cryptoCachedAt: crypto?.cachedAt,
     macroIndicators: macro?.indicators ?? [],
     majorMarkets: macro?.markets ?? [],
     crypto: crypto?.data ?? [],
@@ -140,6 +141,8 @@ export default function MarketOverviewSurface({
     }
   };
 
+  const macroErrors = macro?.errors ?? [];
+
   return (
     <div className="markets-overview" aria-busy={macroLoading || cryptoLoading}>
       <header className="markets-overview-header">
@@ -188,7 +191,7 @@ export default function MarketOverviewSurface({
             </button>
           ))}
         </div>
-        {(macro?.errors.length ?? 0) > 0 && <div className="markets-overview-errors">Partial data: {macro!.errors.join(" · ")}</div>}
+        {macroErrors.length > 0 && <div className="markets-overview-errors">Partial data: {macroErrors.join(" · ")}</div>}
       </section>
 
       <section className="markets-overview-section markets-overview-crypto-section">
@@ -197,12 +200,12 @@ export default function MarketOverviewSurface({
           <span>{crypto ? `${crypto.data.length} Binance pairs · ${crypto.cache}` : "Binance · 15s while visible"}</span>
         </div>
         {cryptoError && <div className="markets-overview-notice" role="status">{cryptoError}</div>}
-        <div className="markets-overview-crypto-table" role="table" aria-label="Crypto market board">
+        <div className="markets-overview-crypto-table" aria-label="Crypto market board">
           {(crypto?.data ?? []).map((quote) => (
-            <button key={quote.symbol} type="button" role="row" onClick={() => onOpen?.(quote.symbol)}>
-              <span role="cell"><strong>{quote.symbol.split("/")[0]}</strong><small>{quote.name}</small></span>
-              <span role="cell">{price(quote)}</span>
-              <span role="cell" className={(quote.changePercent ?? 0) >= 0 ? "positive" : "negative"}>{change(quote.changePercent)}</span>
+            <button key={quote.symbol} type="button" onClick={() => onOpen?.(quote.symbol)}>
+              <span><strong>{quote.symbol.split("/")[0]}</strong><small>{quote.name}</small></span>
+              <span>{price(quote)}</span>
+              <span className={(quote.changePercent ?? 0) >= 0 ? "positive" : "negative"}>{change(quote.changePercent)}</span>
             </button>
           ))}
           {cryptoLoading && !crypto && <div className="markets-overview-empty">Loading crypto board…</div>}
