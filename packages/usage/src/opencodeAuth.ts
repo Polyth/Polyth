@@ -9,7 +9,7 @@ export type OpenCodeAuth = Record<string, OpenCodeAuthEntry>;
 export interface QuotaDiscoveryPaths {
   authFile?: string;
   claudeCredentialsFile?: string;
-  polythDataDir?: string;
+  managedDataDir?: string;
   antigravityAccountsFiles?: string[];
 }
 
@@ -58,16 +58,16 @@ export const resolveQuotaRuntime = (opts: QuotaDiscoveryOptions = {}): QuotaRunt
     ? opts.homedir()
     : opts.homedir ?? systemHomedir();
   const env = opts.env ?? process.env;
-  const polythRoot = opts.paths?.polythDataDir
-    ?? (env.polyth_DATA_DIR
-      ? resolve(env.polyth_DATA_DIR)
+  const managedRoot = opts.paths?.managedDataDir
+    ?? (env.POLYTH_DATA_DIR
+      ? resolve(env.POLYTH_DATA_DIR)
       : join(home, ".config", "polyth"));
   const authFile = opts.paths?.authFile ?? join(home, ".local", "share", "opencode", "auth.json");
   const claudeRoot = env.CLAUDE_CONFIG_DIR ? resolve(env.CLAUDE_CONFIG_DIR) : join(home, ".claude");
   const paths: Required<QuotaDiscoveryPaths> = {
     authFile,
     claudeCredentialsFile: opts.paths?.claudeCredentialsFile ?? join(claudeRoot, ".credentials.json"),
-    polythDataDir: polythRoot,
+    managedDataDir: managedRoot,
     antigravityAccountsFiles: opts.paths?.antigravityAccountsFiles ?? [
       join(home, ".config", "opencode", "antigravity-accounts.json"),
       join(home, ".local", "share", "opencode", "antigravity-accounts.json"),
@@ -86,7 +86,7 @@ export const resolveQuotaRuntime = (opts: QuotaDiscoveryOptions = {}): QuotaRunt
   const writeAuth = opts.writeAuth ?? ((auth: OpenCodeAuth) => atomicWriteJson(authFile, auth));
   const writeManagedCredential = opts.writeManagedCredential
     ?? ((providerId: "cursor", value: Record<string, string>) =>
-      atomicWriteJson(join(polythRoot, "quota", `${providerId}.json`), value));
+      atomicWriteJson(join(managedRoot, "quota", `${providerId}.json`), value));
   return {
     fetchImpl: opts.fetchImpl ?? fetch,
     readAuth,
@@ -157,11 +157,11 @@ export const readManagedCredential = (
   runtime: QuotaRuntime,
   providerId: "cursor" | "ollama-cloud",
 ): Record<string, unknown> | null =>
-  readJson(runtime, join(runtime.paths.polythDataDir, "quota", `${providerId}.json`));
+  readJson(runtime, join(runtime.paths.managedDataDir, "quota", `${providerId}.json`));
 
 export const removeLegacyOpenCodeGoCredential = (runtime: QuotaRuntime): void => {
   try {
-    runtime.unlink(join(runtime.paths.polythDataDir, "quota", "opencode-go.json"));
+    runtime.unlink(join(runtime.paths.managedDataDir, "quota", "opencode-go.json"));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
