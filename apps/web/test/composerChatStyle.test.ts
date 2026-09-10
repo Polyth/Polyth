@@ -77,6 +77,17 @@ test("conversation rows omit role chrome, keep assistant prose flat, and accent 
   assert.match(css, /\.msg\.assistant > \.bubble\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent/s);
 });
 
+test("conversation code surfaces follow the configured glass material", () => {
+  const css = read("../src/styles.css");
+
+  assert.match(css, /\.msg \.bubble :is\(code, pre\)\s*\{[^}]*background:\s*var\(--material-glass-medium\)/s);
+  assert.match(
+    css,
+    /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\)[\s\S]*?\.msg \.bubble :is\(code, pre\)[\s\S]*?backdrop-filter:\s*blur\(var\(--material-glass-blur\)\)/s,
+  );
+  assert.match(css, /\.msg \.bubble pre code\s*\{[^}]*background:\s*transparent/s);
+});
+
 test("message actions use one lightweight copy control and local hover zones", () => {
   const timeline = read("../src/components/Timeline.tsx");
   const css = read("../src/styles.css");

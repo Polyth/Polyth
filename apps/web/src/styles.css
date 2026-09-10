@@ -1318,6 +1318,18 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   padding: 0; border: 0; border-radius: 0; background: transparent;
   color: var(--text); font-size: var(--font-response); line-height: var(--font-response-lh); box-shadow: none;
 }
+/* Markdown code stays part of the conversation material. Keep an opaque
+   fallback for unsupported/low-resource clients; the glass pass below applies
+   the user's transparency preference when the surface can use it. */
+.msg .bubble :is(code, pre) {
+  background: var(--material-glass-medium);
+  border-color: var(--material-glass-border);
+  background-clip: padding-box;
+}
+.msg .bubble pre code {
+  background: transparent;
+  border-color: transparent;
+}
 /* Markdown headings inside chat prose follow the shared type roles: one
    heading step, then bold body/label text — no bespoke pixel ladder. */
 .bubble h1, .bubble h2, .bubble h3, .bubble h4, .bubble h5, .bubble h6 { margin: 12px 0 4px; }
@@ -12378,13 +12390,22 @@ body:not([data-glass="off"]) :is(
       .composer-effort-tooltip,
       .turn-rate-limit .turn-rate-limit-action,
       .turn-rate-limit .turn-rate-limit-model .picker-chip,
-      .jump-latest
+      .jump-latest,
+      .msg .bubble :is(code, pre)
     ) {
       background: radial-gradient(140% 140% at 50% 50%,
         color-mix(in srgb, var(--material-glass) var(--material-glass-fill), transparent) 0%,
         color-mix(in srgb, var(--material-glass) var(--material-glass-edge), transparent) 100%);
       -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
       backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
+    }
+    /* The block owns the translucent surface; its nested code element keeps
+       the inherited monospace treatment without painting a second rectangle. */
+    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .msg .bubble pre code {
+      background: transparent;
+      border-color: transparent;
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
     }
     body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) :is(
       .composer-card,
