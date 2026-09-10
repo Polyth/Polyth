@@ -10875,11 +10875,13 @@ html[data-font] body :is(
 .reasoning {
   width: 100%;
   max-width: 100%;
+  min-width: 0;
   margin: 0;
 }
 .msg > .reasoning + .bubble { margin-top: var(--space-1); }
 .reasoning-toggle {
   width: 100%;
+  min-width: 0;
   min-height: 32px;
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) 16px;
@@ -10923,7 +10925,6 @@ html[data-font] body :is(
 /* Collapsed preview: one line that dissolves toward its end instead of a
    hard ellipsis cut. Type matches .execution-main .tool-preview. */
 .reasoning-preview {
-  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   color: var(--muted);
@@ -10932,6 +10933,7 @@ html[data-font] body :is(
   -webkit-mask-image: linear-gradient(to right, #000 90%, transparent 100%);
   mask-image: linear-gradient(to right, #000 90%, transparent 100%);
 }
+.reasoning-main .reasoning-preview { flex: 1 1 auto; }
 .reasoning-chevron { width: 16px; height: 16px; display: grid; place-items: center; color: var(--faint); }
 .reasoning-chevron svg { width: 14px; height: 14px; stroke-width: 1.75; }
 /* Expanded thinking: the real reasoning as secondary prose in a height-capped

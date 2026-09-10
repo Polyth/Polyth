@@ -149,7 +149,10 @@ test("thinking, tasks, and every execution share the compact activity-card treat
   assert.match(css, /\.reasoning,\s*\.task-list\s*\{[^}]*border:\s*0;/s);
   assert.match(css, /\.tool-card\.execution-row\s*\{[^}]*border:\s*0;/s);
   assert.match(css, /\.task-list\s*\{[^}]*margin:\s*var\(--space-1\) 0 0;/s);
-  assert.match(css, /\.reasoning-preview\s*\{[^}]*flex:\s*1 1 auto;[^}]*overflow:\s*hidden;[^}]*-webkit-mask-image:\s*linear-gradient\(to right, #000 90%, transparent 100%\);/s);
+  assert.match(css, /\.reasoning\s*\{[^}]*max-width:\s*100%;[^}]*min-width:\s*0;/s);
+  assert.match(css, /\.reasoning-toggle\s*\{[^}]*width:\s*100%;[^}]*min-width:\s*0;/s);
+  assert.match(css, /\.reasoning-preview\s*\{[^}]*overflow:\s*hidden;[^}]*-webkit-mask-image:\s*linear-gradient\(to right, #000 90%, transparent 100%\);/s);
+  assert.match(css, /\.reasoning-main \.reasoning-preview\s*\{\s*flex:\s*1 1 auto;/);
 });
 
 test("task plans collapse like other agent actions", () => {
