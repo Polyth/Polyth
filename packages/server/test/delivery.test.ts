@@ -226,6 +226,70 @@ test("two concurrent idle sends admit once and durably queue the loser", async (
   await store.close();
 });
 
+test("follow-ups queue while the active turn is still awaiting runtime admission", async (t) => {
+  const fake = fakeRuntime();
+  let releaseFirstAdmission: (() => void) | undefined;
+  let firstAdmissionReleased = false;
+  let admissionCount = 0;
+  fake.rt.startTurnOperation = (request, operationId) => {
+    admissionCount += 1;
+    fake.startedTexts.push(request.text);
+    if (admissionCount > 1) {
+      fake.emit(request.sessionId, { type: "turn/started", turnId: operationId });
+      return Promise.resolve({
+        kind: "confirmed" as const,
+        value: { admissionId: operationId },
+        receipt: operationId,
+      });
+    }
+    return new Promise((resolve) => {
+      releaseFirstAdmission = () => {
+        if (firstAdmissionReleased) return;
+        firstAdmissionReleased = true;
+        fake.emit(request.sessionId, { type: "turn/started", turnId: operationId });
+        resolve({
+          kind: "confirmed" as const,
+          value: { admissionId: operationId },
+          receipt: operationId,
+        });
+      };
+    });
+  };
+  const { sessions, store } = makeService(fake);
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+
+  const first = sessions.send(id, { text: "first" });
+  t.after(async () => {
+    releaseFirstAdmission?.();
+    await first.catch(() => {});
+    await store.close();
+  });
+  await flush();
+  assert.ok(releaseFirstAdmission, "the first runtime mutation reached its admission wait");
+
+  // Cursor may not emit turn/started until its first ACP update. During that
+  // window the composer still looks idle, while the durable submit operation
+  // is already executing. Both an unlabelled follow-up and an explicit queue
+  // intent must be preserved instead of receiving a 409 conflict.
+  const normal = await sessions.send(id, { text: "normal follow-up" });
+  const queued = await sessions.send(id, { text: "explicitly queued", delivery: "queue" });
+  assert.ok(normal.queued);
+  assert.ok(queued.queued);
+  assert.deepEqual((await store.queueList(id)).map((item) => item.text), [
+    "normal follow-up",
+    "explicitly queued",
+  ]);
+
+  releaseFirstAdmission!();
+  await first;
+  fake.emit(id, { type: "turn/stopped", reason: "completed" });
+  await flush();
+  assert.deepEqual(fake.startedTexts, ["first", "normal follow-up"]);
+  fake.emit(id, { type: "turn/stopped", reason: "completed" });
+  await flush();
+  assert.deepEqual(fake.startedTexts, ["first", "normal follow-up", "explicitly queued"]);
+});
+
 test("steer persists user intent before I/O and records confirmed delivery afterward", async () => {
   const fake = fakeRuntime({ steering: true });
   const { sessions, store } = makeService(fake);

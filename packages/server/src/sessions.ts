@@ -6191,6 +6191,28 @@ export function createSessionService(deps: {
         if (prepared) input.attachments = prepared;
         else delete input.attachments;
       }
+      // ACP may claim a submit before its first update confirms admission, so
+      // the durable operation can be executing while the projection (and the
+      // composer) still looks idle. A second user intent is distinct work:
+      // preserve it behind that mutation instead of returning a misleading
+      // conflict and dropping the follow-up.
+      const queueBehindBlockingOperation = (
+        operation: DurableOperation,
+      ): Promise<SendResult> => {
+        if (!deps.queue) {
+          throw Object.assign(
+            new Error(`cannot send while operation ${operation.operationId} is ${operation.state}`),
+            { code: "conflict" },
+          );
+        }
+        return enqueueMessage(
+          sessionId,
+          input.text,
+          delivery === "steer" || delivery === "interrupt" ? delivery : "queue",
+          "mutation-active",
+          input.attachments,
+        );
+      };
       if (input.harness) {
         const selection = input.harness;
         const switchHarness = service.switchHarness;
@@ -6341,10 +6363,7 @@ export function createSessionService(deps: {
         }
         const existingOperation = await sendAdmissionBlocking(sessionId);
         if (existingOperation) {
-          throw Object.assign(
-            new Error(`cannot send while operation ${existingOperation.operationId} is ${existingOperation.state}`),
-            { code: "conflict" },
-          );
+          return queueBehindBlockingOperation(existingOperation);
         }
         try {
           rt = await ensureWired(sessionId, proj);
@@ -6390,10 +6409,7 @@ export function createSessionService(deps: {
       }
       const readyOperation = await sendAdmissionBlocking(sessionId);
       if (readyOperation) {
-        throw Object.assign(
-          new Error(`cannot send while operation ${readyOperation.operationId} is ${readyOperation.state}`),
-          { code: "conflict" },
-        );
+        return queueBehindBlockingOperation(readyOperation);
       }
 
       // A replacement send after rewind must not continue in the backend's
