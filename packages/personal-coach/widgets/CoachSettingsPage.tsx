@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { PageHead } from "../../../apps/web/src/components/settings/parts.tsx";
 import {
   Button,
+  confirmAlert,
   Select,
   Switch,
   TextInput,
@@ -41,6 +42,13 @@ const reminderPatch = (response: CoachRemindersDto): CoachReminderPatch | null =
   };
 };
 
+const profileDraft = (profile: CoachProfileDto): CoachSettingsPatch => ({
+  tone: profile.tone,
+  initiative: profile.initiative,
+  timeZone: profile.timeZone,
+  challengeAssumptions: profile.challengeAssumptions,
+});
+
 export default function CoachSettingsPage({
   api,
   client,
@@ -63,12 +71,7 @@ export default function CoachSettingsPage({
     try {
       const settings = await api.settings();
       setProfile(settings.profile);
-      setDraft({
-        tone: settings.profile.tone,
-        initiative: settings.profile.initiative,
-        timeZone: settings.profile.timeZone,
-        challengeAssumptions: settings.profile.challengeAssumptions,
-      });
+      setDraft(profileDraft(settings.profile));
       if (settings.profile.onboardingState === "complete") {
         const nextReminders = await api.reminders();
         setReminders(nextReminders);
@@ -92,12 +95,7 @@ export default function CoachSettingsPage({
     try {
       const next = await api.updateSettings(draft);
       setProfile(next);
-      setDraft({
-        tone: next.tone,
-        initiative: next.initiative,
-        timeZone: next.timeZone,
-        challengeAssumptions: next.challengeAssumptions,
-      });
+      setDraft(profileDraft(next));
       if (next.onboardingState === "complete" && reminders?.available && reminderDraft) {
         const nextReminders = await api.updateReminders(reminderDraft);
         setReminders(nextReminders);
@@ -107,6 +105,30 @@ export default function CoachSettingsPage({
       await client.refresh();
     } catch (cause) {
       setError(friendlyError("Save Personal Coach settings", cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resetState = async () => {
+    if (busy) return;
+    const confirmed = await confirmAlert(
+      "Delete Coach goals, commitments, routines, plans, check-ins, reflections, insights, and Coach-owned schedules? Existing Polyth chat transcripts and your Coach style/time-zone preferences stay.",
+      { title: "Reset Coach state?", confirmLabel: "Reset Coach", destructive: true },
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    setError("");
+    setSaved(false);
+    try {
+      const result = await api.resetState();
+      setProfile(result.profile);
+      setDraft(profileDraft(result.profile));
+      setReminders(null);
+      setReminderDraft(null);
+      await client.refresh();
+    } catch (cause) {
+      setError(friendlyError("Reset Personal Coach state", cause));
     } finally {
       setBusy(false);
     }
@@ -283,6 +305,16 @@ export default function CoachSettingsPage({
             </div>
             <div className="set-row-control">
               <span className="tag">{profile.onboardingState}</span>
+            </div>
+          </div>
+
+          <div className="set-row" data-settings-item="personal-coach-data">
+            <div className="set-row-text">
+              <div className="set-row-label">Coach state</div>
+              <div className="set-row-hint">Clear goals, commitments, routines, plans, check-ins, reflections, insights, and Coach-owned schedules. Existing chat transcripts and communication preferences stay.</div>
+            </div>
+            <div className="set-row-control">
+              <Button variant="danger" disabled={busy} onClick={() => void resetState()}>Reset Coach state</Button>
             </div>
           </div>
 
