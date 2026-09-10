@@ -29,6 +29,7 @@ import {
 } from "./planCapabilities.ts";
 import { personalCoachProposalRoutes } from "./proposalRoutes.ts";
 import { personalCoachReminderRoutes } from "./reminderRoutes.ts";
+import { personalCoachResetRoute } from "./resetRoute.ts";
 import { personalCoachRoutes } from "./routes.ts";
 import { createPersonalCoachService, type PersonalCoachService } from "./service.ts";
 import { personalCoachSessionRoute } from "./sessionRoute.ts";
@@ -169,6 +170,10 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         personalCoachReminderRoutes(host, {
           coach: service,
           ensureCapabilities,
+          schedule: () => host.services.get(serverServiceKey<CoachScheduleService>("schedule")),
+        }),
+        personalCoachResetRoute(host, {
+          coach: service,
           schedule: () => host.services.get(serverServiceKey<CoachScheduleService>("schedule")),
         }),
         personalCoachProposalRoutes(service),
