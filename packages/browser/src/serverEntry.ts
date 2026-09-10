@@ -1,6 +1,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
+  AgentCapabilityContributionRegistry,
+  Disposable,
   BrowserAction,
   BrowserContextCaptureInput,
   BrowserTarget,
@@ -32,6 +34,7 @@ import {
 } from "./index.ts";
 import { originOf } from "./policy.ts";
 import { isBrowserArtifactId } from "./artifacts.ts";
+import { createBrowserAgentTool } from "./agentTool.ts";
 
 const STATUS: Record<string, number> = {
   "not-found": 404,
@@ -540,6 +543,7 @@ export default async function registerPackage(host: ServerPackageHost): Promise<
   host.services.provide(serverServiceKey<BrowserService>("browser"), browser);
   host.services.provide(serverServiceKey<ProfileRegistry>("browser.profiles"), profiles);
   let routes: RouteHandler | null = null;
+  let agentTool: Disposable | undefined;
   return {
     remoteAccess: BROWSER_REMOTE_ACCESS,
     routes: async (request) => routes ? routes(request) : false,
@@ -549,6 +553,10 @@ export default async function registerPackage(host: ServerPackageHost): Promise<
       const bridge = host.services.require(
         serverServiceKey<{ route: RouteHandler }>("browser.tool-bridge"),
       );
+      const capabilities = host.services.require(
+        serverServiceKey<AgentCapabilityContributionRegistry>("harness.capabilities"),
+      );
+      agentTool = capabilities.register("browser", createBrowserAgentTool(browser));
       const browserRoute = browserRoutes({
         browser,
         profiles,
@@ -567,6 +575,8 @@ export default async function registerPackage(host: ServerPackageHost): Promise<
       };
     },
     async onDisable() {
+      agentTool?.dispose();
+      agentTool = undefined;
       await browser.closeAll();
       await profiles.closeAll();
     },

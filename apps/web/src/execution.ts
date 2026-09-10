@@ -243,7 +243,9 @@ export function classifyTool(tool: string, input: JsonObject): ExecutionKind {
     if (executable === "sed" && /(?:^|\s)-(?:[A-Za-z]*n[A-Za-z]*)(?:\s|$)/.test(operation)
       && !/(?:^|\s)(?:-[A-Za-z]*i[A-Za-z]*|--in-place)(?:[=\s]|$)/.test(operation)) return "read";
     if (executable && /^(cat|head|tail|less|more|bat|nl)$/.test(executable)) return "read";
-    if (/^(?:npm|pnpm|yarn|node)\s+(?:run\s+)?(?:test|check|lint|build)\b/.test(operation)) return "test";
+    if (/^(?:npm|pnpm|yarn)\s+(?:run\s+)?(?:test|check|lint|build)\b/.test(operation)
+      || /^node(?:\s+--[\w-]+(?:=\S+)?)*\s+--test(?:\s|$)/.test(operation)) return "test";
+    if (/^git\s+(?:diff|status|log|show|blame)\b/.test(operation)) return "git";
   }
   if (shell) return "shell";
   if (/(^|[_:/-])(subagent|agent|task)([_:/-]|$)/.test(value) || value === "task") return "subagent";
@@ -259,7 +261,8 @@ export function classifyTool(tool: string, input: JsonObject): ExecutionKind {
   if (/read|view|file/.test(value)) return "read";
   if (/test|check|lint|build/.test(value)) return "test";
   if (/^git(?:[_:/-]|$)/.test(value)) return "git";
-  if (command && /^(?:npm|pnpm|yarn|node)\s+(?:run\s+)?(?:test|check|lint|build)\b/.test(cleanShellCommand(command))) return "test";
+  if (command && (/^(?:npm|pnpm|yarn)\s+(?:run\s+)?(?:test|check|lint|build)\b/.test(cleanShellCommand(command))
+    || /^node(?:\s+--[\w-]+(?:=\S+)?)*\s+--test(?:\s|$)/.test(cleanShellCommand(command)))) return "test";
   return "tool";
 }
 
@@ -290,6 +293,132 @@ function resultCount(output: string | undefined): number | undefined {
   return output.split(/\r?\n/).filter((line) => line.trim()).length;
 }
 
+function shellWords(command: string): string[] {
+  const words: string[] = [];
+  let word = "";
+  let quote = "";
+  let escaped = false;
+  for (const char of command) {
+    if (escaped) {
+      word += char;
+      escaped = false;
+    } else if (char === "\\" && quote !== "'") {
+      escaped = true;
+    } else if (quote) {
+      if (char === quote) quote = "";
+      else word += char;
+    } else if (char === "'" || char === '"') {
+      quote = char;
+    } else if (/\s/.test(char)) {
+      if (word) words.push(word);
+      word = "";
+    } else {
+      word += char;
+    }
+  }
+  if (escaped) word += "\\";
+  if (word) words.push(word);
+  return words;
+}
+
+const commandBasename = (value: string): string => value.replaceAll("\\", "/").split("/").at(-1) ?? value;
+
+function testCommandPreview(command: string): string {
+  const words = shellWords(command);
+  const executable = commandBasename(words[0] ?? "").toLowerCase();
+  const npmAction = command.match(/^(?:npm|pnpm|yarn)\s+(?:run\s+)?(build(?::[^\s]+)?|test|check|lint)\b/i)?.[1];
+  if (npmAction) {
+    const [action, target] = npmAction.split(":", 2);
+    const verb = action === "build" ? "Build" : action === "lint" ? "Lint" : action === "check" ? "Check" : "Run tests";
+    return target ? `${verb} ${target}` : verb;
+  }
+  if (executable === "node" && words.includes("--test")) {
+    const pattern = words.find((word) => word.startsWith("--test-name-pattern="))?.slice("--test-name-pattern=".length);
+    const testIndex = words.indexOf("--test");
+    const path = words.slice(testIndex + 1).find((word) => !word.startsWith("-") && /(?:^|[\\/])[^\\/]+(?:\.test)?\.[cm]?[jt]sx?$/.test(word));
+    const subject = path ? middleTruncatePath(path, 58) : "Node tests";
+    return pattern ? `${subject} · “${endTruncate(pattern, 42)}”` : subject;
+  }
+  return "Run checks";
+}
+
+function readCommandPreview(command: string): string {
+  const words = shellWords(command);
+  const executable = commandBasename(words[0] ?? "").toLowerCase();
+  if (executable === "sed") {
+    const scriptIndex = words.findIndex((word) => /^(\d+)(?:,(\d+))?p$/.test(word));
+    const script = scriptIndex >= 0 ? words[scriptIndex]! : "";
+    const range = script.match(/^(\d+)(?:,(\d+))?p$/);
+    const path = words.slice(scriptIndex + 1).find((word) => word !== "|" && !word.startsWith("-"));
+    if (path) {
+      const line = range ? ` · L${range[1]}${range[2] ? `–${range[2]}` : ""}` : "";
+      return `${middleTruncatePath(path, 62)}${line}`;
+    }
+  }
+  const path = [...words].reverse().find((word) => word !== "-" && !word.startsWith("-") && !/[|;&]/.test(word));
+  return path ? middleTruncatePath(path, 72) : "Workspace content";
+}
+
+const RG_OPTIONS_WITH_VALUE = new Set([
+  "-A", "-B", "-C", "-e", "-f", "-g", "-j", "-M", "-m", "-r", "-t", "-T",
+  "--after-context", "--before-context", "--context", "--encoding", "--engine", "--file", "--glob",
+  "--iglob", "--max-columns", "--max-count", "--max-depth", "--path-separator", "--regexp", "--replace", "--type", "--type-not",
+]);
+
+function searchCommandPreview(command: string): string {
+  const words = shellWords(command);
+  const executable = commandBasename(words[0] ?? "").toLowerCase();
+  if (executable === "find") {
+    const root = words.slice(1).find((word) => !word.startsWith("-") && !word.startsWith("!"));
+    return root && root !== "." ? `Workspace items · ${middleTruncatePath(root, 48)}` : "Workspace items";
+  }
+  if (executable === "fd") {
+    const query = words.slice(1).find((word) => !word.startsWith("-"));
+    return query ? `“${endTruncate(query, 54)}”` : "Workspace files";
+  }
+  if (/^(?:rg|ripgrep|grep|egrep|fgrep)$/.test(executable)) {
+    if (words.includes("--files")) return "Workspace files";
+    const positionals: string[] = [];
+    for (let index = 1; index < words.length; index++) {
+      const word = words[index]!;
+      if (RG_OPTIONS_WITH_VALUE.has(word)) {
+        index++;
+        continue;
+      }
+      if (word.startsWith("-")) continue;
+      if (/^[|;&]/.test(word)) break;
+      positionals.push(word);
+    }
+    const query = positionals[0];
+    const scopes = positionals.slice(1, 4);
+    if (query) return `“${endTruncate(query, 48)}”${scopes.length ? ` · ${scopes.map((scope) => middleTruncatePath(scope, 24)).join(", ")}` : ""}`;
+  }
+  return "Workspace";
+}
+
+function gitCommandPreview(command: string): string {
+  if (/^git\s+diff\s+--check\b/.test(command)) return "Check diff whitespace";
+  if (/^git\s+diff\b/.test(command)) return "Review changes";
+  if (/^git\s+status\b/.test(command)) return "Check working tree";
+  if (/^git\s+log\b/.test(command)) return "Review history";
+  if (/^git\s+(?:show|blame)\b/.test(command)) return "Inspect history";
+  return "Repository operation";
+}
+
+/** Collapsed rows describe intent; the complete command remains available in
+ * the expanded Command section for inspection and copying. */
+function shellCommandPreview(kind: ExecutionKind, command: string): string {
+  const cleaned = cleanShellCommand(command);
+  if (kind === "read") return readCommandPreview(cleaned);
+  if (kind === "search") return searchCommandPreview(cleaned);
+  if (kind === "test") return testCommandPreview(cleaned);
+  if (kind === "git") return gitCommandPreview(cleaned);
+  if (/^command\s+-v\b/.test(cleaned)) return "Check command availability";
+  const words = shellWords(cleaned);
+  const executable = commandBasename(words[0] ?? "");
+  return executable ? `Run ${executable}` : "Run command";
+}
+
 export function executionPresentation(message: Pick<ToolMsg, "tool" | "input" | "output" | "title">): ExecutionPresentation {
   const { tool, input, output, title } = message;
   const kind = classifyTool(tool, input);
@@ -306,10 +435,8 @@ export function executionPresentation(message: Pick<ToolMsg, "tool" | "input" | 
   const compactPath = displayPath ? middleTruncatePath(displayPath) : undefined;
   let preview = "";
 
-  if (kind === "shell" || (kind === "test" && command)) {
-    preview = endTruncate(cleanShellCommand(command ?? title ?? tool));
-  } else if (kind === "read" && command) {
-    preview = endTruncate(cleanShellCommand(command));
+  if (command && (kind === "shell" || kind === "read" || kind === "search" || kind === "test" || kind === "git")) {
+    preview = endTruncate(shellCommandPreview(kind, command));
   } else if (kind === "read") {
     const offset = typeof input.offset === "number" ? input.offset : undefined;
     const limit = typeof input.limit === "number" ? input.limit : undefined;
@@ -325,8 +452,6 @@ export function executionPresentation(message: Pick<ToolMsg, "tool" | "input" | 
     const from = firstString(input, ["from", "source", "oldPath", "old_path"]);
     const to = firstString(input, ["to", "destination", "newPath", "new_path", "path"]);
     preview = from && to ? `${middleTruncatePath(from, 28)} → ${middleTruncatePath(to, 28)}` : compactPath ?? description ?? "";
-  } else if (kind === "search" && command) {
-    preview = endTruncate(cleanShellCommand(command));
   } else if (kind === "search") {
     const count = resultCount(output);
     preview = `${query ? `"${endTruncate(query, 46)}"` : description ?? title ?? "Workspace"}${count !== undefined ? ` · ${count} ${count === 1 ? "match" : "matches"}` : ""}`;
