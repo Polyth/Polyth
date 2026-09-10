@@ -335,23 +335,40 @@ test("all usage controls update data, focus, hover, and provider visibility", as
   await closePage(page);
 });
 
-test("usage layout has no horizontal overflow across every responsive breakpoint", async () => {
+test("usage layout has no horizontal overflow or toolbar overlap across every responsive breakpoint", async () => {
   const widths = [1280, 1050, 821, 820, 761, 760, 701, 700, 601, 600, 481, 480, 400, 320];
-  const reports: Array<{ width: number; documentOverflow: number; paneOverflow: number; dashboardOverflow: number }> = [];
+  const reports: Array<{
+    width: number;
+    documentOverflow: number;
+    paneOverflow: number;
+    dashboardOverflow: number;
+    toolbarContainsControls: boolean;
+    contentStartsAfterToolbar: boolean;
+  }> = [];
   for (const width of widths) {
     const page = await openUsage(width);
-    const report = await page.evaluate((viewportWidth) => ({
-      width: viewportWidth,
-      documentOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
-      paneOverflow: document.querySelector<HTMLElement>(".settings-pane-body")!.scrollWidth
-        - document.querySelector<HTMLElement>(".settings-pane-body")!.clientWidth,
-      dashboardOverflow: document.querySelector<HTMLElement>(".usage-dashboard")!.scrollWidth
-        - document.querySelector<HTMLElement>(".usage-dashboard")!.clientWidth,
-    }), width);
+    const report = await page.evaluate((viewportWidth) => {
+      const pane = document.querySelector<HTMLElement>(".settings-pane-body")!;
+      pane.scrollTop = 0;
+      const dashboard = document.querySelector<HTMLElement>(".usage-dashboard")!;
+      const toolbar = document.querySelector<HTMLElement>(".usage-dashboard-toolbar")!.getBoundingClientRect();
+      const controls = document.querySelector<HTMLElement>(".usage-toolbar-controls")!.getBoundingClientRect();
+      const content = document.querySelector<HTMLElement>(".usage-dashboard-content")!.getBoundingClientRect();
+      return {
+        width: viewportWidth,
+        documentOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        paneOverflow: pane.scrollWidth - pane.clientWidth,
+        dashboardOverflow: dashboard.scrollWidth - dashboard.clientWidth,
+        toolbarContainsControls: controls.top >= toolbar.top - 1 && controls.bottom <= toolbar.bottom + 1,
+        contentStartsAfterToolbar: content.top >= toolbar.bottom - 1,
+      };
+    }, width);
     reports.push(report);
     assert.ok(report.documentOverflow <= 1, `${width}px: document overflows by ${report.documentOverflow}px`);
     assert.ok(report.paneOverflow <= 1, `${width}px: settings pane overflows by ${report.paneOverflow}px`);
     assert.ok(report.dashboardOverflow <= 1, `${width}px: usage dashboard overflows by ${report.dashboardOverflow}px`);
+    assert.equal(report.toolbarContainsControls, true, `${width}px: usage controls escape the toolbar`);
+    assert.equal(report.contentStartsAfterToolbar, true, `${width}px: usage controls overlap dashboard content`);
     await closePage(page);
   }
   await writeFile(join(artifacts, "responsive-breakpoints.json"), JSON.stringify(reports, null, 2));

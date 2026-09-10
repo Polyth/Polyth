@@ -1135,7 +1135,9 @@ margin-left: auto;
 }
 @container usage-dashboard (max-width: 700px) {
 .usage-dashboard-toolbar {
-padding: 8px 14px;
+display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  padding: 8px 14px;
 }
 
 .usage-view-tabs {
@@ -1143,7 +1145,10 @@ width: 100%; margin: 0;
 }
 
 .usage-toolbar-controls {
-width: 100%; flex: 1 0 100%; justify-content: stretch;
+width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  justify-content: stretch;
 }
 
 .usage-view-tabs .ui-tab {
@@ -1151,7 +1156,7 @@ flex: 1;
 }
 
 .usage-range-control {
-flex: 1 1 180px;
+width: 100%;
 }
 
 .usage-range-control .ui-tab {

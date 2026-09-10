@@ -124,6 +124,8 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   assert.doesNotMatch(styles, /--usage-bg: #0d0e10/);
   assert.match(styles, /\.usage-status-pill\.session-only/);
   assert.match(styles, /@container usage-dashboard \(max-width: 700px\)[\s\S]*?\.usage-providers-card tbody tr/);
+  assert.match(styles, /@container usage-dashboard \(max-width: 700px\)[\s\S]*?\.usage-dashboard-toolbar\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/);
+  assert.match(styles, /@container usage-dashboard \(max-width: 700px\)[\s\S]*?\.usage-toolbar-controls\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto auto;/);
   assert.match(styles, /\.usage-provider-error \{[\s\S]*?padding: 9px 10px;/);
   assert.match(styles, /@container usage-dashboard \(min-width: 701px\) and \(max-width: 760px\)\s*\{[\s\S]*?\.usage-view-tabs\s*\{[^}]*width:\s*100%;\s*margin:\s*0;/);
 
