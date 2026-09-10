@@ -69,6 +69,21 @@ test("earnings calendar route batches normalized symbols", async () => {
   assert.deepEqual(body.data.map((item) => item.symbol), ["MSFT", "NVDA"]);
 });
 
+test("earnings calendar route ignores unsupported symbols when US names remain", async () => {
+  let requested: readonly string[] = [];
+  const calendar = new MarketCalendarService(
+    async () => [],
+    async (symbols) => {
+      requested = symbols;
+      return symbols.map((symbol) => ({ symbol, source: "fixture" }));
+    },
+    () => 1_000,
+  );
+  const response = await invoke("/api/markets/calendar/earnings?symbols=BTC%2FUSDT,NVDA,BMW.DE,%5EGSPC", calendar);
+  assert.equal(response.status, 200);
+  assert.deepEqual(requested, ["NVDA"]);
+});
+
 test("invalid earnings calendar symbols return 400 before loader execution", async () => {
   let loads = 0;
   const calendar = new MarketCalendarService(
