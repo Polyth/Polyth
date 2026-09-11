@@ -136,7 +136,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                     ...(effort ? { effort: effort as EffortLevel } : {}),
                     ...(model ? { model } : {}),
                     // Parallel subagents are not yet represented by this adapter.
-                    disallowedTools: ["Agent", "Task", "AskUserQuestion"],
+                    disallowedTools: ["Agent", "Task"],
                     ...(overlay?.append ? { systemPrompt: { type: "preset" as const, preset: "claude_code" as const, append: overlay.append } } : {}),
                     ...(overlay?.mcpServers ? { mcpServers: overlay.mcpServers } : {}),
                     ...(overlay?.plugins ? { plugins: overlay.plugins } : {}),
