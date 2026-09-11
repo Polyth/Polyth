@@ -4,6 +4,7 @@ import type { HarnessProvider, HarnessRegistry } from "@polyth/contracts";
 import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/harness-runtime/executable-discovery";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 const exec = promisify(execFile);
+const windowsShim = (command: string) => process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
 
 const resolvePiBinary = async () => {
     const report = await discoverHarnessExecutable(process.env.POLYTH_PI_BIN?.trim() || "pi");
@@ -29,7 +30,7 @@ export default function registerPackage(host: ServerPackageHost) {
                 return { harnessId: "pi", installed: false, authenticated: "unknown", healthy: false, message: "Local execution only" };
             try {
                 const { command, env } = await resolvePiBinary();
-                const version = await exec(command, ["--version"], { timeout: 5000, maxBuffer: 4096, env })
+                const version = await exec(command, ["--version"], { timeout: 5000, maxBuffer: 4096, env, shell: windowsShim(command) })
                     .then(({ stdout, stderr }) => (stdout || stderr).trim())
                     .catch(() => undefined);
                 return {
