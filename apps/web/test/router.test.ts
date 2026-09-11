@@ -32,9 +32,11 @@ test("percent-encoded ids round-trip", () => {
 
 test("settingsPageFromSearch reads a safe settings deep-link", () => {
   assert.equal(settingsPageFromSearch("?settings=plugins"), "plugins");
+  assert.equal(settingsPageFromSearch("?settings=harnesses/opencode/roles"), "harnesses/opencode/roles");
   assert.equal(settingsPageFromSearch("?session=ses_1&settings=plugins"), "plugins");
   assert.equal(settingsPageFromSearch("?settings=not a page"), null);
   assert.equal(settingsPageFromSearch("?settings=/evil"), null);
+  assert.equal(settingsPageFromSearch("?settings=harnesses/opencode/roles/extra"), null);
   assert.equal(settingsPageFromSearch(""), null);
 });
 

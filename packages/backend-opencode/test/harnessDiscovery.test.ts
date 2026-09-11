@@ -62,6 +62,7 @@ test("OpenCode catalog discovery falls back to its isolated local metadata autho
     throw releaseError;
   };
   let harness: HarnessProvider | undefined;
+  let queueStatus = { pendingChanges: 3, restartRequired: true };
   const registry = {
     register(provider: HarnessProvider) {
       harness = provider;
@@ -74,13 +75,34 @@ test("OpenCode catalog discovery falls back to its isolated local metadata autho
       if (key.id === "polyth.service.opencode.runtime") return pool;
       throw new Error(`unexpected required service ${key.id}`);
     },
-    get: () => undefined,
+    get(key: { id: string }) {
+      if (key.id === "polyth.service.opencode.configuration-status") {
+        return () => queueStatus;
+      }
+      if (key.id === "polyth.service.harness.provisioning") {
+        return {
+          status: () => [{
+            harnessId: "opencode",
+            desiredRevision: "r1",
+            records: [
+              { capabilityId: "pending", kind: "instruction", owner: "test", desiredRevision: "r1", mode: "prompt", status: "pending" },
+              { capabilityId: "restart", kind: "skill", owner: "test", desiredRevision: "r1", mode: "filesystem", status: "pending-restart" },
+              { capabilityId: "done", kind: "context", owner: "test", desiredRevision: "r0", mode: "prompt", status: "applied" },
+            ],
+          }],
+        };
+      }
+      return undefined;
+    },
   };
   registerOpenCodePackage({
     services,
     storageDir: "/host/storage",
   } as unknown as ServerPackageHost);
 
+  assert.deepEqual(await harness!.inspectConfiguration!(context), { pendingChanges: 3, restartRequired: true });
+  queueStatus = { pendingChanges: 0, restartRequired: false };
+  assert.deepEqual(await harness!.inspectConfiguration!(context), { pendingChanges: 0, restartRequired: false });
   const discovery = await harness!.discover!(context);
   assert.deepEqual(discovery.catalog?.models?.map((model) => model.modelID), ["claude-sonnet"]);
   assert.equal(discovery.state, "ready");

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "../widgets/ModelsPage.tsx");
 const source = () => readFileSync(root, "utf8");
+const entry = () => readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../widgets/index.tsx"), "utf8");
 
 test("Providers page no longer has Connected/All, chips, or global model search", () => {
   const page = source();
@@ -81,4 +82,10 @@ test("initial provider catalog load does not invalidate its harness settings par
   const page = source();
   assert.match(page, /void refreshCatalog\(\{ invalidateRuntime: false \}\)/);
   assert.match(page, /if \(invalidateRuntime\) invalidateRuntimeCatalogs\(\)/);
+});
+
+test("catalog invalidation does not rewarm every runtime", () => {
+  const widgets = entry();
+  assert.match(widgets, /host\.store\.subscribe\(warmCatalogs\)/);
+  assert.doesNotMatch(widgets, /subscribeRuntimeCatalogs/);
 });

@@ -56,6 +56,78 @@ test("picker roster is process-free and still applies Space policy", async () =>
   assert.deepEqual(counters, { probes: 0, discovers: 0 });
 });
 
+test("cheap snapshots expose static features and canonical capability support without starting discovery", async () => {
+  let discoveries = 0;
+  let creations = 0;
+  let supports = 0;
+  let pendingChanges = 2;
+  const registry = createHarnessRegistry();
+  registry.register({
+    descriptor: { id: "static", name: "Static", integration: "test", priority: 0 },
+    staticFeatures: { streaming: true, permissions: false, questions: false, compaction: false, subagents: false },
+    probe: async () => ({ harnessId: "static", installed: true, healthy: true, authenticated: true }),
+    provisioner: {
+      support: () => {
+        supports += 1;
+        return {
+          harnessId: "static",
+          targetLifetime: "session",
+          kinds: { instruction: { modes: ["prompt"], mutability: "session-create", configScope: "session" } },
+        };
+      },
+      apply: async () => ({ harnessId: "static", desiredRevision: "none", records: [] }),
+    },
+    inspectConfiguration: async () => ({ pendingChanges, restartRequired: pendingChanges > 0 }),
+    discover: async () => {
+      discoveries += 1;
+      return { state: "ready" as const };
+    },
+    createRuntime: async () => {
+      creations += 1;
+      throw new Error("cheap snapshot started a runtime");
+    },
+  },
+  );
+
+  const [snapshot] = await registry.snapshots(context);
+  assert.deepEqual(snapshot?.capabilities, {
+    streaming: true,
+    permissions: false,
+    questions: false,
+    compaction: false,
+    subagents: false,
+  });
+  assert.equal(snapshot?.capabilitySupport?.kinds.instruction?.modes[0], "prompt");
+  assert.deepEqual(snapshot?.configuration, { controls: [], pendingChanges: 2, restartRequired: true });
+  assert.deepEqual({ discoveries, creations, supports }, { discoveries: 0, creations: 0, supports: 1 });
+
+  pendingChanges = 0;
+  const empty = (await registry.snapshots(context, { force: true }))[0]!;
+  assert.deepEqual(empty.configuration, { controls: [], pendingChanges: 0, restartRequired: false });
+
+  await registry.snapshots(context, { harnessId: "static", detail: true });
+  assert.deepEqual({ discoveries, creations }, { discoveries: 1, creations: 0 });
+});
+
+test("detail discovery is limited to the requested harness", async () => {
+  const discoveries: string[] = [];
+  const registry = createHarnessRegistry();
+  for (const id of ["one", "two"]) {
+    registry.register({
+      descriptor: { id, name: id, integration: "test", priority: 0 },
+      probe: async () => ({ harnessId: id, installed: true, healthy: true, authenticated: true }),
+      discover: async () => {
+        discoveries.push(id);
+        return { state: "ready" as const };
+      },
+      createRuntime: async () => ({} as AgentRuntime),
+    });
+  }
+
+  await registry.snapshots(context, { harnessId: "one", detail: true });
+  assert.deepEqual(discoveries, ["one"]);
+});
+
 test("resolve reuses a fresh detailed snapshot without probe/discover", async () => {
   const counters = { probes: 0, discovers: 0 };
   const registry = createHarnessRegistry();

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { AgentDescriptor, HarnessSnapshot, ModelRef, OpenCodePendingResponseDto } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
 import { defineWebPackage } from "@polyth/web-sdk";
+import { readHarnessSnapshots } from "@polyth/models/runtime-catalog";
 import { setAgents, useStore } from "../../../apps/web/src/store.ts";
 import { Button, Dialog, Notice, Select, Textarea } from "../../../apps/web/src/components/ui/index.ts";
 
@@ -71,7 +72,7 @@ function OpenCodeRoles() {
   </div>;
 }
 
-function OpenCodeRuntime({ snapshot }: { snapshot?: HarnessSnapshot }) {
+function OpenCodeRuntime({ snapshot, refreshCatalog }: { snapshot?: HarnessSnapshot; refreshCatalog: () => Promise<void> }) {
   const [pending, setPending] = useState<OpenCodePendingResponseDto>({ changes: [], count: 0 });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -79,14 +80,16 @@ function OpenCodeRuntime({ snapshot }: { snapshot?: HarnessSnapshot }) {
   useEffect(() => {
     void refresh();
     const timer = window.setInterval(refresh, 5_000);
-    window.addEventListener("polyth:opencode-pending", refresh);
-    return () => { window.clearInterval(timer); window.removeEventListener("polyth:opencode-pending", refresh); };
+    const onPending = () => { void refresh(); };
+    window.addEventListener("polyth:opencode-pending", onPending);
+    return () => { window.clearInterval(timer); window.removeEventListener("polyth:opencode-pending", onPending); };
   }, []);
   const apply = async () => {
     setBusy(true);
     setError("");
     try {
       await api.opencodeApplyRestart();
+      await refreshCatalog();
       await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -113,40 +116,39 @@ function OpenCodeRuntime({ snapshot }: { snapshot?: HarnessSnapshot }) {
 }
 
 export default defineWebPackage((host) => {
-  const Slot = host.ui.Slot;
-  const OpenCodeSettingsPage = () => {
-    const projectId = useStore((state) => state.activeProjectId);
-    const [snapshot, setSnapshot] = useState<HarnessSnapshot>();
-    useEffect(() => {
-      let cancelled = false;
-      // This page needs only runtime identity/status for its chrome. Provider
-      // and role sections own their explicit detail discovery; do not boot a
-      // native runtime just because Settings opened.
-      void api.harnessSnapshots(projectId ?? undefined, false, "opencode")
-        .then((rows) => { if (!cancelled) setSnapshot(rows[0]); })
-        .catch(() => {});
-      return () => { cancelled = true; };
-    }, [projectId]);
-    const context = { harnessId: "opencode", snapshot };
-    return <div className="pkg-opencode-settings-page">
-      <Slot slot="settings.harness.detail" context={{ ...context, sectionId: "providers-models" }} />
-      <Slot slot="settings.harness.detail" context={{ ...context, sectionId: "roles" }} />
-      <Slot slot="settings.harness.detail" context={{ ...context, sectionId: "runtime" }} />
-    </div>;
+  const refreshOpenCodeSnapshot = async (projectId?: string | null): Promise<void> => {
+    try {
+      await readHarnessSnapshots({ projectId, harnessId: "opencode", force: true });
+    } catch {
+      // The pending queue is still refreshed locally; a transient catalog
+      // failure must not make a successful restart look like a failed apply.
+    }
   };
   return () => {
     const off = [
+      (() => {
+        const onPending = () => {
+          void refreshOpenCodeSnapshot(host.store.getSnapshot().activeProjectId);
+        };
+        window.addEventListener("polyth:opencode-pending", onPending);
+        return () => window.removeEventListener("polyth:opencode-pending", onPending);
+      })(),
       host.settings.registerPage({
         id: "opencode",
         label: "OpenCode",
         group: "Engineering",
         order: 35,
-        component: OpenCodeSettingsPage,
+        nav: false,
+        redirect: {
+          pageId: "harnesses",
+          target: { itemId: "opencode", sectionId: "providers-models" },
+        },
+        component: () => null,
       }),
-      // Keep the harness-detail contributions for deep-link/backward
-      // compatibility; the top-level page composes these same sections.
+      // These sections remain package-owned contributions. Harnesses is the
+      // sole composer and selects one section at a time.
       host.slots.register({ id: "opencode.roles", slot: "settings.harness.detail", order: 20, meta: { harnessId: "opencode", sectionId: "roles", label: "Roles" }, render: (context) => context.harnessId === "opencode" && context.sectionId === "roles" ? <OpenCodeRoles /> : null }),
-      host.slots.register({ id: "opencode.runtime", slot: "settings.harness.detail", order: 80, meta: { harnessId: "opencode", sectionId: "runtime", label: "Runtime" }, render: (context) => context.harnessId === "opencode" && context.sectionId === "runtime" ? <OpenCodeRuntime snapshot={context.snapshot as HarnessSnapshot | undefined} /> : null }),
+      host.slots.register({ id: "opencode.runtime", slot: "settings.harness.detail", order: 80, meta: { harnessId: "opencode", sectionId: "runtime", label: "Runtime", handlesPendingChanges: true }, render: (context) => context.harnessId === "opencode" && context.sectionId === "runtime" ? <OpenCodeRuntime snapshot={context.snapshot as HarnessSnapshot | undefined} refreshCatalog={() => refreshOpenCodeSnapshot(context.projectId as string | null | undefined)} /> : null }),
     ];
     return () => off.toReversed().forEach((dispose) => dispose());
   };

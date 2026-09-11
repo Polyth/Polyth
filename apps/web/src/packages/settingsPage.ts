@@ -1,4 +1,5 @@
 import { createElement, type ComponentType } from "react";
+import type { SettingsNavigationTarget, SettingsPageRedirect } from "@polyth/web-sdk";
 import { registerSlot } from "../slots.ts";
 import type { SettingsSearchItem } from "../settings/registry.ts";
 
@@ -11,7 +12,9 @@ interface PackageSettingsPage {
   group: SettingsPageGroup;
   icon?: string;
   order?: number;
-  component: ComponentType;
+  nav?: boolean;
+  redirect?: SettingsPageRedirect;
+  component: ComponentType<{ settingsTarget?: SettingsNavigationTarget }>;
   settingsItems?: SettingsSearchItem[];
 }
 
@@ -20,12 +23,17 @@ export function installSettingsPage(page: PackageSettingsPage): () => void {
   return registerSlot(
     "settings.pages",
     page.id,
-    () => createElement(page.component),
+    (props) => createElement(
+      page.component,
+      { settingsTarget: props.settingsTarget as SettingsNavigationTarget | undefined },
+    ),
     page.order ?? 0,
     {
       label: page.label,
       group: page.group,
       ...(page.icon ? { icon: page.icon } : {}),
+      ...(page.nav === false ? { nav: false } : {}),
+      ...(page.redirect ? { redirect: page.redirect } : {}),
       packageId: ownerPackageId,
       pageId: page.id,
       ...(page.settingsItems ? { settingsItems: page.settingsItems } : {}),

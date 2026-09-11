@@ -4,7 +4,6 @@ import ModelsPage from "./ModelsPage.tsx";
 import {
   invalidateRuntimeCatalogs,
   preloadRuntimeCatalogs,
-  subscribeRuntimeCatalogs,
 } from "./runtimeCatalog.ts";
 
 export default defineWebPackage((host) => () => {
@@ -53,10 +52,6 @@ export default defineWebPackage((host) => () => {
   const off = [
     () => window.removeEventListener("polyth:desktop-performance-changed", onResourceMode),
     host.store.subscribe(warmCatalogs),
-    subscribeRuntimeCatalogs(() => {
-      warmScope = undefined;
-      warmCatalogs();
-    }),
     host.slots.register({
       id: "opencode.providers-models",
       slot: "settings.harness.detail",
@@ -71,7 +66,7 @@ export default defineWebPackage((host) => () => {
       keywords: ["model", "profile", "provider", "OpenCode"],
       standardTier: "technical",
       standardRank: 32,
-      open: () => host.navigation.openSettingsPage("opencode"),
+      open: () => host.navigation.openSettingsPage("harnesses", { itemId: "opencode", sectionId: "providers-models" }),
       available: () => true,
     }),
   ];

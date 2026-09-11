@@ -2843,6 +2843,11 @@ export interface HarnessDiscovery {
   pendingChanges?: number;
   native?: JsonValue;
 }
+/** Cheap, read-only configuration state that does not require native startup. */
+export interface HarnessConfigurationMetadata {
+  restartRequired?: boolean;
+  pendingChanges?: number;
+}
 export interface HarnessSnapshot {
   identity: {
     id: string;
@@ -2862,6 +2867,9 @@ export interface HarnessSnapshot {
     setupUrl?: string;
   };
   capabilities?: RuntimeCapabilities;
+  /** Static projection support for desired agent capabilities. This is safe to
+   * expose before a native runtime or detail discovery exists. */
+  capabilitySupport?: HarnessCapabilitySupport;
   catalog?: HarnessDiscovery["catalog"];
   configuration?: {
     controls: HarnessControlDescriptor[];
@@ -3085,6 +3093,8 @@ export interface McpTombstone {
 }
 
 export interface HarnessProvisioner {
+  /** Process-free projection metadata. This is used by cheap harness
+   * snapshots, so it must not start a runtime or perform native discovery. */
   support(context: HarnessContext): HarnessCapabilitySupport | Promise<HarnessCapabilitySupport>;
   apply(
     context: HarnessContext,
@@ -3130,6 +3140,8 @@ export interface HarnessProvider {
    * session merely to answer this call. Expensive discovery is requested only
    * for a selected detail surface. */
   discover?(context: HarnessContext): Promise<HarnessDiscovery>;
+  /** Read-only configuration state for cheap snapshots. */
+  inspectConfiguration?(context: HarnessContext): Promise<HarnessConfigurationMetadata>;
   /** Explicit metadata refresh. Drop only this context's cached discovery;
    * never modify native configuration or execution state. */
   invalidateDiscovery?(context: HarnessContext): void;

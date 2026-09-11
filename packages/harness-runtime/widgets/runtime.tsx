@@ -1,5 +1,5 @@
 import "./styles.css";
-import { useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, useId, type DragEvent, type ReactNode } from "react";
 import type {
   HarnessControlDescriptor,
   HarnessRosterItem,
@@ -9,29 +9,16 @@ import type {
   SessionEvent,
   SessionProjection,
 } from "@polyth/contracts";
-import { createApiTransport, defineWebPackage, type WebPackageHost } from "@polyth/web-sdk";
-import { Button, Dialog, Notice, Select, Switch, Tabs, TextInput } from "../../../apps/web/src/components/ui/index.ts";
+import { createApiTransport, defineWebPackage, type WebPackageHost, type SettingsNavigationTarget } from "@polyth/web-sdk";
+import { Button, Dialog, Notice, Select, Switch, Tabs, TabPanel, TextInput, Tooltip } from "../../../apps/web/src/components/ui/index.ts";
 import MoveControls from "../../../apps/web/src/components/MoveControls.tsx";
 import ProviderLogo from "../../models/widgets/ProviderLogo.tsx";
 import { invalidateRuntimeCatalogs, peekHarnessRoster, peekHarnessSnapshots, readHarnessRoster, readHarnessSnapshots, useCatalogRevision } from "@polyth/models/runtime-catalog";
 import { activeBrowserAccountId } from "@polyth/web/account-storage";
 
-const api = createApiTransport();
+import { attachmentFacts, availabilityLabel, configurationSections, integrationLabel, orderedHarnesses, pendingLabel, projectionFacts, resolvedAuto, routingLabel, runtimeFacts, summaryFacts, type CapabilityFact } from "./presentation.ts";
 
-const availabilityLabel = (row: HarnessSnapshot): string => {
-  switch (row.availability.state) {
-    case "ready": return "Ready";
-    case "not-installed": return "Not installed";
-    case "starting": return "Starting…";
-    case "auth-required": return "Sign in";
-    case "setup-required":
-    case "partially-configured": return "Setup incomplete";
-    case "incompatible": return "Not available here";
-    case "offline":
-    case "degraded": return row.stale ? "Last known" : "Unavailable";
-    case "unknown": return row.availability.healthy ? "Ready" : "Unavailable";
-  }
-};
+const api = createApiTransport();
 
 const canExecute = (row: HarnessSnapshot): boolean => row.policy.enabled
   && row.availability.installed
@@ -40,15 +27,7 @@ const canExecute = (row: HarnessSnapshot): boolean => row.policy.enabled
   && !["setup-required", "partially-configured", "incompatible", "offline", "not-installed"]
     .includes(row.availability.state);
 
-const setupLabel = (row: HarnessSnapshot): string | undefined => {
-  if (!row.availability.installed && row.setup?.installCommand) return "Install";
-  if (row.availability.state === "auth-required" && row.setup?.signInCommand) return "Sign in";
-  if (["setup-required", "partially-configured"].includes(row.availability.state)) return "Configure";
-  if (!canExecute(row)) return "Details";
-  return undefined;
-};
-
-function useHarnesses(projectId?: string | null, spaceId?: string) {
+function useHarnesses(projectId?: string | null, spaceId?: string, harnessId?: string) {
   const revision = useCatalogRevision();
   const key = JSON.stringify([activeBrowserAccountId(), spaceId ?? "page", projectId ?? "", revision]);
   const [result, setResult] = useState<{ key: string; rows: HarnessSnapshot[] }>();
@@ -56,11 +35,15 @@ function useHarnesses(projectId?: string | null, spaceId?: string) {
   const requestSeq = useRef(0);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const refresh = useCallback(async (force = false, detail = false) => {
+  const refresh = useCallback(async (force = false) => {
     const seq = ++requestSeq.current;
     setLoading(true);
     try {
-      const rows = await readHarnessSnapshots({ projectId, spaceId, force, detail });
+      let rows = await readHarnessSnapshots({ projectId, spaceId, force });
+      if (harnessId) {
+        const selected = await readHarnessSnapshots({ projectId, spaceId, harnessId, detail: true });
+        rows = rows.map((row) => selected.find((item) => item.identity.id === row.identity.id) ?? row);
+      }
       if (seq !== requestSeq.current) return;
       setResult({ key, rows });
       setError("");
@@ -70,7 +53,7 @@ function useHarnesses(projectId?: string | null, spaceId?: string) {
     } finally {
       if (seq === requestSeq.current) setLoading(false);
     }
-  }, [key, projectId, spaceId]);
+  }, [key, projectId, spaceId, harnessId]);
   useEffect(() => {
     let active = true;
     void readHarnessRoster({ projectId, spaceId }).then((rows) => {
@@ -120,7 +103,7 @@ function GenericControl({
       {control.applySemantics === "read-only" ? <code>{String(control.value ?? "—")}</code>
         : control.kind === "toggle" ? <Switch label={control.label} checked={control.value === true} disabled={disabled} onChange={(value) => void apply(value)} />
           : control.kind === "select" ? <Select label={control.label} value={String(control.value ?? "")} options={(control.choices ?? []).map((choice) => ({ value: choice.value, label: choice.label }))} disabled={disabled} onChange={(value) => void apply(value)} />
-            : control.kind === "text" ? <TextInput uiSize="sm" value={textValue} disabled={disabled} onChange={(event) => setTextValue(event.target.value)} onBlur={() => { if (textValue !== control.value) void apply(textValue); }} />
+            : control.kind === "text" ? <TextInput uiSize="sm" aria-label={control.label} value={textValue} disabled={disabled} onChange={(event) => setTextValue(event.target.value)} onBlur={() => { if (textValue !== control.value) void apply(textValue); }} />
               : <Button size="sm" busy={busy} disabled={disabled} onClick={() => void apply(true)}>{control.label}</Button>}
     </div>
     {error && <Notice tone="error" role="alert">{error}</Notice>}
@@ -360,14 +343,17 @@ function HarnessTransitionStatus({
   </div>;
 }
 
-function HarnessSettings({ host }: { host: WebPackageHost }) {
+export function HarnessSettings({ host, settingsTarget }: { host: WebPackageHost; settingsTarget?: SettingsNavigationTarget }) {
   const projectId = host.store.select((state) => state.activeProjectId);
-  const { rows, error, loading, refresh } = useHarnesses(projectId);
   const [failure, setFailure] = useState("");
   const [busy, setBusy] = useState(false);
   const [dragged, setDragged] = useState<string>();
-  const [detailId, setDetailId] = useState<string>();
-  const [sectionId, setSectionId] = useState("overview");
+  const [detailId, setDetailId] = useState(settingsTarget?.itemId);
+  const [sectionId, setSectionId] = useState(settingsTarget?.sectionId ?? "overview");
+  useEffect(() => { setDetailId(settingsTarget?.itemId); setSectionId(settingsTarget?.sectionId ?? "overview"); }, [settingsTarget]);
+  const { rows, error, loading, refresh } = useHarnesses(projectId, undefined, detailId);
+  const tabsId = useId();
+  const [explanation, setExplanation] = useState<CapabilityFact>();
   const [setup, setSetup] = useState<{ row: HarnessSnapshot; command: string; label: string }>();
   const [terminal, setTerminal] = useState<string>();
 
@@ -381,9 +367,9 @@ function HarnessSettings({ host }: { host: WebPackageHost }) {
       }).catch(() => setTerminal(undefined));
     }, 3000);
     return () => { window.removeEventListener("focus", focus); clearInterval(interval); };
-  }, [projectId, terminal]);
+  }, [projectId, terminal, refresh]);
 
-  const ordered = rows.toSorted((a, b) => a.policy.priority - b.policy.priority || a.identity.id.localeCompare(b.identity.id));
+  const ordered = orderedHarnesses(rows);
   const saveOrder = async (next: HarnessSnapshot[]) => {
     setBusy(true);
     setFailure("");
@@ -397,6 +383,7 @@ function HarnessSettings({ host }: { host: WebPackageHost }) {
     }
   };
   const move = (id: string, index: number) => {
+    if (busy) return;
     const from = ordered.findIndex((row) => row.identity.id === id);
     if (from < 0 || index < 0 || index >= ordered.length || from === index) return;
     const next = [...ordered];
@@ -405,12 +392,29 @@ function HarnessSettings({ host }: { host: WebPackageHost }) {
     void saveOrder(next);
   };
   const toggle = (id: string, enabled: boolean) => void saveOrder(ordered.map((row) => row.identity.id === id ? { ...row, policy: { ...row.policy, enabled } } : row));
-  const openDetail = (id: string) => { setDetailId(id); setSectionId("overview"); void refresh(false, true); };
+  const openDetail = (id: string, section = "overview") => { setDetailId(id); setSectionId(section); };
   const detail = rows.find((row) => row.identity.id === detailId);
-  const contributed = detail ? host.slots.list("settings.harness.detail")
-    .filter((item) => item.meta?.harnessId === detail.identity.id)
-    .map((item) => ({ id: String(item.meta?.sectionId ?? item.id), label: String(item.meta?.label ?? item.id), order: item.order }))
-    .toSorted((a, b) => a.order - b.order || a.id.localeCompare(b.id)) : [];
+  const sectionsFor = (id: string) => configurationSections(host.slots.list("settings.harness.detail"), id);
+  const contributed = detail ? sectionsFor(detail.identity.id) : [];
+  const pendingSection = contributed.find((section) => section.handlesPendingChanges);
+  const activeSection = sectionId === "overview" || contributed.some((section) => section.id === sectionId) ? sectionId : "overview";
+  const target = rows.some((row) => row.context.remote) ? "Remote execution target" : "This machine";
+  const auto = resolvedAuto(rows);
+  const explain = (fact: CapabilityFact, showLabel = true) => <Tooltip key={fact.id} content={fact.description}><button type="button" className="pkg-harnesses-chip" aria-label={`${fact.label}: ${fact.value}. ${fact.description}`} onClick={() => setExplanation(fact)}>{showLabel ? `${fact.label} · ` : ""}{fact.value}</button></Tooltip>;
+  const matrix = (title: string, facts: CapabilityFact[]) => <section className="pkg-harnesses-matrix"><h3>{title}</h3>{facts.map((fact) => <div className="pkg-harnesses-fact" key={fact.id} data-unsupported={fact.unsupported || undefined}><span>{fact.label}</span><span>{explain(fact, false)}</span>{fact.application && <small>{fact.application}</small>}</div>)}</section>;
+  const setupActions = (row: HarnessSnapshot) => {
+    const needsSetup = !canExecute({ ...row, policy: { ...row.policy, enabled: true } });
+    const command = !row.availability.installed ? row.setup?.installCommand : row.availability.state === "auth-required" ? row.setup?.signInCommand : undefined;
+    return <div className="pkg-harnesses-setup-actions">
+      {command && <Button size="sm" disabled={!projectId || busy} onClick={() => setSetup({ row, command, label: !row.availability.installed ? "Install" : "Sign in to" })}>{!row.availability.installed ? "Install" : "Sign in"}</Button>}
+      {needsSetup && row.setup?.setupUrl && <a href={row.setup.setupUrl} target="_blank" rel="noreferrer">Setup guide ↗</a>}
+      {needsSetup && <Button size="sm" variant="ghost" busy={loading} onClick={() => void refresh(true)}>Retry</Button>}
+    </div>;
+  };
+  const dialogs = <>
+    {explanation && <Dialog title={`${explanation.label} · ${explanation.value}`} onClose={() => setExplanation(undefined)}><p>{explanation.description}</p></Dialog>}
+    {setup && <Dialog title={`${setup.label} ${setup.row.identity.name}`} onClose={() => setSetup(undefined)}><div className="pkg-harnesses pkg-harnesses-command-review"><p>Run this native command on the selected project target:</p><pre>{setup.command}</pre><Button busy={busy} onClick={() => void runSetup()}>Run command</Button></div></Dialog>}
+  </>;
 
   const runSetup = async () => {
     if (!setup || !projectId) return;
@@ -429,38 +433,67 @@ function HarnessSettings({ host }: { host: WebPackageHost }) {
     }
   };
 
-  if (detail) return <div className="pkg-harnesses pkg-harnesses-settings pkg-harnesses-detail">
-    <Button size="sm" variant="ghost" onClick={() => setDetailId(undefined)}>‹ Harnesses</Button>
-    <header><h2><ProviderLogo providerID={detail.identity.id} providerName={detail.identity.name} size="regular" />{detail.identity.name}</h2><p>{availabilityLabel(detail)}{detail.identity.version ? ` · ${detail.identity.version}` : ""}</p></header>
-    <nav className="pkg-harnesses-tabs" aria-label={`${detail.identity.name} settings`}>
-      {[{ id: "overview", label: "Overview", order: -1 }, ...contributed].map((section) => <Button key={section.id} size="sm" variant={sectionId === section.id ? "quiet" : "ghost"} aria-pressed={sectionId === section.id} onClick={() => setSectionId(section.id)}>{section.label}</Button>)}
-    </nav>
-    {sectionId === "overview" ? <section className="pkg-harnesses-overview">
-      <dl><dt>Status</dt><dd>{availabilityLabel(detail)}</dd>{detail.identity.version && <><dt>Version</dt><dd>{detail.identity.version}</dd></>}<dt>Protocol</dt><dd>{detail.identity.integration}</dd><dt>Target</dt><dd>{detail.context.remote ? "Remote project target" : "This machine"}</dd></dl>
-      {detail.configuration?.controls?.filter((control) => control.placement === "harness-overview" || control.placement === "harness-settings").map((control) => <GenericControl key={control.id} control={control} harnessId={detail.identity.id} projectId={projectId ?? undefined} refresh={() => refresh(true, true).then(() => {})} />)}
-      {detail.stale && <Notice tone="warning">Offline. Showing the last known catalog.</Notice>}
-      {detail.message && <details><summary>Diagnostics</summary><p>{detail.message}</p></details>}
-    </section> : <host.ui.Slot slot="settings.harness.detail" context={{ harnessId: detail.identity.id, sectionId, snapshot: detail, projectId }} />}
+  if (detail) return <div className="pkg-harnesses pkg-harnesses-settings pkg-harnesses-detail" aria-busy={loading}>
+    <div className="pkg-harnesses-settings-actions"><Button size="sm" variant="ghost" onClick={() => setDetailId(undefined)}>‹ Harnesses</Button><Button size="sm" variant="ghost" busy={loading} onClick={() => void refresh(true)} aria-label="Refresh harness">↻</Button></div>
+    <header className="pkg-harnesses-detail-head"><h2><ProviderLogo providerID={detail.identity.id} providerName={detail.identity.name} size="regular" />{detail.identity.name}</h2><span className="pkg-harnesses-status" data-state={detail.availability.state}>{availabilityLabel(detail)}</span><p>{integrationLabel(detail)} · {detail.identity.integration}</p></header>
+    {(error || failure) && <Notice tone="error" role="alert">{failure || error}</Notice>}
+    {pendingLabel(detail) && <Notice actions={pendingSection && <Button size="sm" onClick={() => setSectionId(pendingSection.id)}>Review changes</Button>}>{pendingLabel(detail)}</Notice>}
+    {detail.stale && <Notice tone="warning">Showing the last known configuration. Refresh to verify current availability.</Notice>}
+    {setupActions(detail)}
+    <Tabs className="pkg-harnesses-tabs" tabs={[{ id: "overview", label: "Overview" }, ...contributed]} value={activeSection} onChange={setSectionId} label={`${detail.identity.name} settings`} size="sm" idBase={tabsId} />
+    <TabPanel idBase={tabsId} tabId={activeSection} active>
+    {activeSection === "overview" ? <div className="pkg-harnesses-overview">
+      <section className="pkg-harnesses-selection"><h3>Selection</h3><dl>
+        <dt>Auto routing</dt><dd>{routingLabel(detail, rows)}{detail.policy.enabled && detail.policy.autoSelect && !canExecute(detail) ? " · Not ready" : ""}</dd>
+        <dt>Auto eligible</dt><dd>{detail.policy.autoSelect ? "Yes, when enabled and ready" : "No · Select this harness manually"}</dd>
+        <dt>Enabled for new sessions</dt><dd><Switch label={`Allow ${detail.identity.name} for new sessions`} checked={detail.policy.enabled} disabled={busy} onChange={(enabled) => toggle(detail.identity.id, enabled)} /></dd>
+        <dt>Execution target</dt><dd>{target}</dd>
+      </dl></section>
+      <section className="pkg-harnesses-configuration"><h3>Configuration</h3>
+        {contributed.length > 0 ? <div className="pkg-harnesses-section-links">{contributed.map((section) => <Button key={section.id} variant="ghost" size="sm" onClick={() => setSectionId(section.id)}>{section.label} ›</Button>)}</div> : <p>This harness contributes no additional settings sections.</p>}
+        {detail.configuration?.controls?.filter((control) => control.placement === "harness-overview" || control.placement === "harness-settings").map((control) => <GenericControl key={control.id} control={control} harnessId={detail.identity.id} projectId={projectId ?? undefined} refresh={() => refresh(true)} />)}
+      </section>
+      {detail.catalog && <section className="pkg-harnesses-catalog"><h3>Models &amp; providers</h3><dl>
+        <dt>Models</dt><dd>{detail.catalog.models ? `${detail.catalog.models.length} available` : "Not reported"}</dd>
+        {detail.catalog.providers && <><dt>Providers</dt><dd>{detail.catalog.providers.map((provider) => provider.name).join(", ") || "None configured"}</dd></>}
+        {detail.catalog.modes && <><dt>Modes</dt><dd>{detail.catalog.modes.join(", ") || "None reported"}</dd></>}
+      </dl><p className="pkg-harnesses-help">Choose models in the conversation picker. Harness-specific configuration is listed above.</p></section>}
+      {matrix("Polyth integration", projectionFacts(detail))}
+      <p className="pkg-harnesses-help">{detail.capabilitySupport?.targetLifetime === "physical-runtime" ? "Polyth manages capability configuration for a shared runtime. Some changes need a runtime restart." : "Capability configuration is scoped to each session. Delivery modes below describe how Polyth supplies instructions, tools and context."}</p>
+      {matrix("Runtime features", runtimeFacts(detail))}
+      {detail.capabilities?.commands && matrix("Commands", [{ id: "discovery", label: "Discovery", value: detail.capabilities.commands.discovery, description: "How the harness exposes its native command catalog." }, { id: "invocation", label: "Invocation", value: detail.capabilities.commands.invoke === "raw-native-input" ? "Native input" : "Unsupported", description: "Commands are passed to the harness as native input." }])}
+      {matrix("Attachments", attachmentFacts(detail))}
+      <p className="pkg-harnesses-help">Declared harness support. Selected models, native versions and execution targets can impose additional limits.</p>
+      <details className="pkg-harnesses-diagnostics"><summary>Diagnostics</summary><dl><dt>Version</dt><dd>{detail.identity.version ?? "Not reported"}</dd><dt>Protocol</dt><dd>{detail.identity.integration}</dd><dt>Target</dt><dd>{target}</dd><dt>Last checked</dt><dd>{new Date(detail.availability.checkedAt).toLocaleString()}</dd></dl>{detail.message && <p>{detail.message}</p>}</details>
+    </div> : <host.ui.Slot key={`${detail.identity.id}:${activeSection}`} slot="settings.harness.detail" context={{ harnessId: detail.identity.id, sectionId: activeSection, snapshot: detail, projectId }} />}
+    </TabPanel>
+    {dialogs}
   </div>;
 
-  return <div className="pkg-harnesses pkg-harnesses-settings">
-    <header><h2>Harnesses</h2><p>Choose execution engines for new conversations. Existing conversations keep their current harness.</p></header>
-    <section className="pkg-harnesses-default"><div><strong>Default for new sessions</strong><span>Auto</span></div><p>Polyth chooses the first compatible harness and keeps using it for the conversation while it remains available.</p><small>Checking harnesses on <strong>{rows.some((row) => row.context.remote) ? "project execution target" : "This machine"}</strong></small></section>
-    <div className="pkg-harnesses-settings-actions"><strong>Preferred order</strong><Button size="sm" busy={loading} onClick={() => void refresh(true)}>Refresh</Button></div>
+  return <div className="pkg-harnesses pkg-harnesses-settings" aria-busy={loading}>
+    <header><p>Choose which execution engines Polyth can use for conversations.</p><small>{target}</small></header>
+    <section className="pkg-harnesses-default"><div><span>Default for new sessions</span><strong>Auto → {auto?.identity.name ?? (loading ? "Checking…" : "No available harness")}</strong></div><p>Uses the first ready Auto-eligible harness in priority order. Availability is checked again when connecting.</p></section>
+    <div className="pkg-harnesses-settings-actions"><div><h3>Harness order</h3><small>Auto checks eligible harnesses in this order.</small></div><Button size="sm" variant="ghost" busy={loading} onClick={() => void refresh(true)} aria-label="Refresh harnesses">↻</Button></div>
     {(error || failure) && <Notice tone="error" role="alert">{failure || error}</Notice>}
-    {!loading && !rows.some(canExecute) && <Notice>Set up a harness below to start a conversation.</Notice>}
+    {loading && rows.length === 0 && <p role="status">Checking execution engines…</p>}
+    {!loading && rows.length === 0 && !error && <Notice>No harnesses are registered on this target.</Notice>}
+    {!loading && rows.length > 0 && !rows.some(canExecute) && <Notice>Enable or set up a harness below to start a conversation.</Notice>}
     <div className="pkg-harnesses-list">
-      {ordered.map((row, index) => <article className={`pkg-harnesses-row${dragged === row.identity.id ? " dragging" : ""}`} key={row.identity.id} draggable={!busy} onDragStart={(event: DragEvent<HTMLElement>) => { setDragged(row.identity.id); event.dataTransfer.setData("text/plain", row.identity.id); }} onDragEnd={() => setDragged(undefined)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const id = event.dataTransfer.getData("text/plain") || dragged; if (id) move(id, index); setDragged(undefined); }}>
-        <button type="button" className="pkg-harnesses-row-main" onClick={() => openDetail(row.identity.id)}><span className="pkg-harnesses-drag" aria-hidden="true">⠿</span><span><ProviderLogo providerID={row.identity.id} providerName={row.identity.name} size="regular" /><span><strong>{row.identity.name}</strong><small>{row.identity.integration}{row.identity.version ? ` · ${row.identity.version}` : ""}</small></span></span><span className="pkg-harnesses-status">{availabilityLabel(row)}</span></button>
-        <MoveControls label={row.identity.name} index={index} count={ordered.length} onMove={(next) => move(row.identity.id, next)} />
-        <div className="pkg-harnesses-availability"><span><strong>Available for new sessions</strong><small>Existing conversations are unaffected.</small></span><Switch label={`Allow ${row.identity.name} for new sessions`} checked={row.policy.enabled} disabled={busy} onChange={(enabled) => toggle(row.identity.id, enabled)} /></div>
-        {setupLabel(row) && <div className="pkg-harnesses-setup-actions">
-          {(!row.availability.installed ? row.setup?.installCommand : row.setup?.signInCommand) && <Button size="sm" disabled={!projectId} onClick={() => setSetup({ row, command: (!row.availability.installed ? row.setup?.installCommand : row.setup?.signInCommand)!, label: !row.availability.installed ? "Install" : "Sign in to" })}>{setupLabel(row)}</Button>}
-          {row.setup?.setupUrl && <a href={row.setup.setupUrl} target="_blank" rel="noreferrer">Open setup guide</a>}
-        </div>}
-      </article>)}
+      {ordered.map((row, index) => {
+        const sections = sectionsFor(row.identity.id);
+        return <article className={`pkg-harnesses-row${dragged === row.identity.id ? " dragging" : ""}`} data-enabled={row.policy.enabled} key={row.identity.id} onClick={(event) => { if (!(event.target as HTMLElement).closest("button, a, input, label, [role=switch]")) openDetail(row.identity.id); }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const id = event.dataTransfer.getData("text/plain") || dragged; if (id) move(id, index); setDragged(undefined); }}>
+          <span className="pkg-harnesses-drag" aria-hidden="true" draggable={!busy} onDragStart={(event: DragEvent<HTMLElement>) => { setDragged(row.identity.id); event.dataTransfer.setData("text/plain", row.identity.id); }} onDragEnd={() => setDragged(undefined)}>⠿</span>
+          <button type="button" className="pkg-harnesses-row-main" onClick={() => openDetail(row.identity.id)}><ProviderLogo providerID={row.identity.id} providerName={row.identity.name} size="regular" /><span><strong>{row.identity.name}</strong><small>{row.identity.integration}{row.identity.version ? ` · ${row.identity.version}` : ""}</small><small>{integrationLabel(row)}</small></span></button>
+          <div className="pkg-harnesses-row-state"><span className="pkg-harnesses-status" data-state={row.availability.state}>{availabilityLabel(row)}</span><span>{routingLabel(row, rows)}</span>{pendingLabel(row) && <small>{pendingLabel(row)}</small>}</div>
+          <div className="pkg-harnesses-row-toggle"><Switch label={`Allow ${row.identity.name} for new sessions`} checked={row.policy.enabled} disabled={busy} onChange={(enabled) => toggle(row.identity.id, enabled)} /></div>
+          <div className="pkg-harnesses-chips">{summaryFacts(row).map((fact) => explain(fact))}</div>
+          <div className="pkg-harnesses-row-actions"><Button variant="ghost" size="sm" onClick={() => openDetail(row.identity.id, sections[0]?.id)}>{sections.length ? "Configure" : "Details"} ›</Button><span className="pkg-harnesses-reorder"><MoveControls label={row.identity.name} index={index} count={ordered.length} onMove={(next) => move(row.identity.id, next)} /></span></div>
+          {setupActions(row)}
+        </article>;
+      })}
     </div>
-    {setup && <Dialog title={`${setup.label} ${setup.row.identity.name}`} onClose={() => setSetup(undefined)}><div className="pkg-harnesses pkg-harnesses-command-review"><p>Run this native command on the selected project target:</p><pre>{setup.command}</pre><Button busy={busy} onClick={() => void runSetup()}>Run command</Button></div></Dialog>}
+    <p className="pkg-harnesses-help">Enabled harnesses can be selected for new sessions. Manual-only harnesses are excluded from Auto. Existing conversations keep their current harness.</p>
+    {dialogs}
   </div>;
 }
 
@@ -478,7 +511,7 @@ function SwitchMarker({ event }: { event: SessionEvent }) {
 
 export default defineWebPackage((host) => () => {
   const off = [
-    host.settings.registerPage({ id: "harnesses", packageId: "harness-runtime", label: "Harnesses", group: "Engineering", order: 15, component: () => <HarnessSettings host={host}/> }),
+    host.settings.registerPage({ id: "harnesses", packageId: "harness-runtime", label: "Harnesses", group: "Engineering", order: 15, component: ({ settingsTarget }) => <HarnessSettings host={host} settingsTarget={settingsTarget}/> }),
     host.slots.register({ id: "harnesses.model-tabs", slot: "modelPicker.header", order: 10, render: (props) => <HarnessTabs host={host} spaceId={props.spaceId as string | undefined} projectId={props.projectId as string | undefined} sessionId={props.sessionId as string | undefined} harnessSelection={props.harnessSelection as HarnessSelection | undefined} resolvedHarnessId={props.resolvedHarnessId as string | undefined} transition={props.harnessTransition as HarnessTransition | undefined} pendingHarnessSelection={props.pendingHarnessSelection as HarnessSelection | undefined} onSelectHarness={props.onSelectHarness as ((selection: HarnessSelection) => void) | undefined} projectHarnessDefault={props.projectHarnessDefault as HarnessSelection | null | undefined} effortControl={props.executionEffortControl as ReactNode} phoneLayout={props.phoneLayout === true} /> }),
     host.slots.register({ id: "harnesses.transition", slot: "composer.execution", order: 10, render: (props) => <HarnessTransitionStatus host={host} sessionId={props.sessionId as string | undefined} resolvedHarnessId={props.resolvedHarnessId as string | undefined} transition={props.harnessTransition as HarnessTransition | undefined} /> }),
     host.slots.register({ id: "harnesses.switch-marker", slot: "session.timeline.event", meta: { eventTypes: ["harness/switched"] }, render: (props) => <SwitchMarker event={props.event as SessionEvent} /> }),

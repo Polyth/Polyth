@@ -25,6 +25,8 @@ import {
   SERVER_CAPABILITY_IDS,
   type AgentRuntime,
   type Disposable,
+  type HarnessConfigurationMetadata,
+  type HarnessContext,
   type HarnessProvider,
   type PackageDescriptorDto,
   type RemoteHost,
@@ -125,7 +127,7 @@ import { createWsGateway, type WsGateway } from "./ws.ts";
 import { createTrackWorkflow, type TrackWorkflow, type TrackWorkflowDeps } from "./tracks.ts";
 import { createRouteRegistry } from "./routeRegistry.ts";
 import { createPackageLifecycle } from "./packageLifecycle.ts";
-import { createDeferredConfigApplier, createOpenCodePendingService, physicalRestartKeysFor } from "./opencodePending.ts";
+import { createDeferredConfigApplier, createOpenCodePendingService, inspectOpenCodeConfiguration, physicalRestartKeysFor } from "./opencodePending.ts";
 import { agentSessionRoutes, type AgentGoalService } from "./routes/agentSessions.ts";
 import { runtimeEpochRoutes } from "./routes/runtimeEpoch.ts";
 import { runtimeDiagnosticsRoutes } from "./routes/runtimeDiagnostics.ts";
@@ -1616,6 +1618,11 @@ export async function boot(opts: BootOptions = {}) {
     restart: (state, keys) => restartRuntimeEntries(state as RuntimeRestartState | undefined, keys),
   });
   const configApplier = createDeferredConfigApplier(directConfigApplier, pendingOpenCode);
+  provideService(
+    "opencode.configuration-status",
+    (context: HarnessContext): HarnessConfigurationMetadata | undefined =>
+      inspectOpenCodeConfiguration(pendingOpenCode, context),
+  );
   const secureSafe = createSecureSafeService({
     dataDir,
     onChanged: () => refreshSafeBehavior(),

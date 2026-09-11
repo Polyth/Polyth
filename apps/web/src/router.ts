@@ -25,7 +25,10 @@ export function parseAppUrl(pathname: string, search = ""): AppLocation {
 /** Settings deep-link used by package OAuth callbacks (`/?settings=plugins`). */
 export function settingsPageFromSearch(search = ""): string | null {
   const page = new URLSearchParams(search.startsWith("?") || search.length === 0 ? search : `?${search}`).get("settings");
-  if (!page || !/^[a-z][a-z0-9-]*$/i.test(page)) return null;
+  // A page may carry a bounded page-local target, for example
+  // `harnesses/opencode/roles`. The settings host validates the segments and
+  // routes the target to the owning page.
+  if (!page || !/^[a-z][a-z0-9-]*(?:\/[a-z][a-z0-9-]*){0,2}$/i.test(page)) return null;
   return page;
 }
 

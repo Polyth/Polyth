@@ -59,6 +59,7 @@ export {
 } from "./delivery.ts";
 import type {
     AgentRuntime,
+    HarnessCapabilitySupport,
     HarnessAvailabilityState,
     HarnessContext,
     HarnessProbe,
@@ -138,6 +139,19 @@ export function createHarnessRegistry() {
             return { harnessId: provider.descriptor.id, installed: false, authenticated: "unknown" as const, healthy: false, message: "Harness probe failed" };
         }
     };
+    const capabilitySupportOne = async (provider: HarnessProvider, context: HarnessContext): Promise<HarnessCapabilitySupport | undefined> => {
+        try {
+            // Provisioner support is the canonical, process-free projection
+            // used by snapshots; it must not start a runtime or discover native
+            // state (see the public contract).
+            return provider.provisioner ? await provider.provisioner.support(context) : undefined;
+        }
+        catch {
+            // Capability support is advisory metadata. A broken optional
+            // projection must not hide the harness availability snapshot.
+            return undefined;
+        }
+    };
     return {
         configurePolicy(read: typeof policy) { policy = read; },
         register(provider: HarnessProvider) {
@@ -211,6 +225,14 @@ export function createHarnessRegistry() {
                     const lastGoodAtStart = entry.lastGood;
                     const checkedAt = Date.now();
                     const probe = knownProbe ?? await probeOne(provider, context);
+                    const capabilitySupport = await capabilitySupportOne(provider, context);
+                    let inspectedConfiguration;
+                    try {
+                        inspectedConfiguration = await provider.inspectConfiguration?.(context);
+                    }
+                    catch {
+                        inspectedConfiguration = undefined;
+                    }
                     let discovery;
                     let discoveryError: unknown;
                     if (detail && provider.discover) {
@@ -267,19 +289,34 @@ export function createHarnessRegistry() {
                                 ...(provider.descriptor.setupUrl ? { setupUrl: provider.descriptor.setupUrl } : {}),
                             } }
                             : {}),
-                        ...(discovery?.capabilities ?? retained?.capabilities
-                            ? { capabilities: discovery?.capabilities ?? retained?.capabilities }
+                        ...(discovery?.capabilities ?? retained?.capabilities ?? provider.staticFeatures
+                            ? { capabilities: discovery?.capabilities ?? retained?.capabilities ?? provider.staticFeatures }
+                            : {}),
+                        ...(capabilitySupport ?? retained?.capabilitySupport
+                            ? { capabilitySupport: capabilitySupport ?? retained?.capabilitySupport }
                             : {}),
                         ...(discoveredCatalog ?? retained?.catalog
                             ? { catalog: discoveredCatalog ?? retained?.catalog }
                             : {}),
-                        ...(discovery?.controls || discovery?.restartRequired !== undefined || discovery?.pendingChanges !== undefined
-                            ? { configuration: {
-                                controls: discovery.controls ?? [],
-                                ...(discovery.restartRequired !== undefined ? { restartRequired: discovery.restartRequired } : {}),
-                                ...(discovery.pendingChanges !== undefined ? { pendingChanges: discovery.pendingChanges } : {}),
-                            } }
-                            : retained?.configuration ? { configuration: retained.configuration } : {}),
+                        ...(() => {
+                            const discoveredConfiguration = discovery?.controls
+                                || discovery?.restartRequired !== undefined
+                                || discovery?.pendingChanges !== undefined
+                                ? {
+                                    controls: discovery.controls ?? [],
+                                    ...(discovery.restartRequired !== undefined ? { restartRequired: discovery.restartRequired } : {}),
+                                    ...(discovery.pendingChanges !== undefined ? { pendingChanges: discovery.pendingChanges } : {}),
+                                }
+                                : undefined;
+                            const inspected = inspectedConfiguration
+                                && (inspectedConfiguration.restartRequired !== undefined || inspectedConfiguration.pendingChanges !== undefined)
+                                ? { controls: retained?.configuration?.controls ?? [], ...inspectedConfiguration }
+                                : undefined;
+                            const configuration = discoveredConfiguration
+                                ? { ...inspected, ...discoveredConfiguration }
+                                : inspected ?? retained?.configuration;
+                            return configuration ? { configuration } : {};
+                        })(),
                         context: {
                             spaceId: context.spaceId,
                             projectId: context.projectId,

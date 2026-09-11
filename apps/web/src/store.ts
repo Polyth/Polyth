@@ -11,6 +11,7 @@ import type {
   SessionEvent,
   SessionProjection,
 } from "@polyth/contracts";
+import type { SettingsNavigationTarget } from "@polyth/web-sdk";
 import { createModelCache, emptyModel, type RenderModel } from "./reduce.ts";
 import { isPlaceholderTitle, titleFromPrompt } from "./format.ts";
 import { firstUserText } from "./utils.ts";
@@ -521,16 +522,29 @@ export function openPalette(mode: PaletteMode): void {
 }
 
 // Settings deep-link: "Change shortcut…" and similar commands land on a page.
-let pendingSettingsPage: string | null = null;
-export function openSettingsPage(pageId: string): void {
-  pendingSettingsPage = pageId;
+export interface PendingSettingsNavigation {
+  pageId: string;
+  target?: SettingsNavigationTarget;
+}
+let pendingSettingsNavigation: PendingSettingsNavigation | null = null;
+export function openSettingsPage(pageId: string, target?: SettingsNavigationTarget): void {
+  pendingSettingsNavigation = { pageId, ...(target ? { target } : {}) };
   set({ overlay: "settings" });
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new window.CustomEvent("polyth:settings-page", {
+      detail: pendingSettingsNavigation,
+    }));
+  }
 }
 /** One-shot read by SettingsView on mount. */
 export function consumePendingSettingsPage(): string | null {
-  const v = pendingSettingsPage;
-  pendingSettingsPage = null;
-  return v;
+  return consumePendingSettingsNavigation()?.pageId ?? null;
+}
+/** One-shot settings route, including an optional page-local target. */
+export function consumePendingSettingsNavigation(): PendingSettingsNavigation | null {
+  const value = pendingSettingsNavigation;
+  pendingSettingsNavigation = null;
+  return value;
 }
 export function setRailPlugin(railPlugin: RailPlugin | null): void {
   // Contextual surfaces persist globally (F17). Workspace panes go through

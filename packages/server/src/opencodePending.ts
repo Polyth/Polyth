@@ -1,5 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import type {
+  HarnessConfigurationMetadata,
+  HarnessContext,
   OpenCodePendingChangeDto,
   OpenCodePendingChangeKind,
   OpenCodePendingResponseDto,
@@ -41,6 +43,16 @@ export interface OpenCodePendingService {
   }): void;
   list(): OpenCodePendingResponseDto;
   applyAndRestart(): Promise<{ applied: number; restarted: number }>;
+}
+
+/** Read the deployment-global queue only in its local-trusted scope. */
+export function inspectOpenCodeConfiguration(
+  pending: Pick<OpenCodePendingService, "list">,
+  context: HarnessContext,
+): HarnessConfigurationMetadata | undefined {
+  if (context.remote || context.space?.deployment !== "local-trusted") return undefined;
+  const count = pending.list().count;
+  return { pendingChanges: count, restartRequired: count > 0 };
 }
 
 /** A batch restarts only the union of its tasks' `restartKeys` when every

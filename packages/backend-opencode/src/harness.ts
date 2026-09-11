@@ -54,11 +54,13 @@ export function createOpenCodeHarness(
      * It is consulted only when project-aware discovery fails; execution and
      * native-history paths always remain on the primary runtime. */
     discoveryFallback?: (context: HarnessContext, primaryError: unknown) => Promise<AgentRuntime>,
+    inspectConfiguration?: HarnessProvider["inspectConfiguration"],
 ): HarnessProvider {
     return {
         descriptor: { id: "opencode", name: "OpenCode", integration: "HTTP / SSE", priority: 0, setupUrl: "https://opencode.ai/docs/", installCommand: "npm install -g opencode-ai" },
         runtimeLifetime: "workspace",
         staticFeatures: CAPABILITIES,
+        ...(inspectConfiguration ? { inspectConfiguration } : {}),
         async probe(context) {
             if (context.remote)
                 return { harnessId: "opencode", installed: true, authenticated: "unknown", healthy: true };

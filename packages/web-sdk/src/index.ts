@@ -355,6 +355,18 @@ export interface SettingsSearchItem {
   ownerPackageId?: string;
 }
 
+/** Optional target within a settings page. Page owners interpret the fields
+ * they support; the host only carries the target through navigation. */
+export interface SettingsNavigationTarget {
+  itemId?: string;
+  sectionId?: string;
+}
+
+export interface SettingsPageRedirect {
+  pageId: string;
+  target?: SettingsNavigationTarget;
+}
+
 export type SettingsPageGroup = "Workspace" | "Engineering" | "Customize" | "System";
 
 export interface ProjectContextItem {
@@ -392,7 +404,10 @@ export interface SettingsPageDefinition {
   group: SettingsPageGroup;
   icon?: string;
   order?: number;
-  component: ComponentType;
+  /** Keep compatibility aliases addressable without showing another nav row. */
+  nav?: boolean;
+  redirect?: SettingsPageRedirect;
+  component: ComponentType<{ settingsTarget?: SettingsNavigationTarget }>;
   settingsItems?: SettingsSearchItem[];
 }
 
@@ -503,7 +518,7 @@ export interface WebPackageHost {
   };
   navigation: {
     setActiveView(view: string): void;
-    openSettingsPage(pageId: string): void;
+    openSettingsPage(pageId: string, target?: SettingsNavigationTarget): void;
     openWorkspacePane(surfaceId: string, resource?: string): boolean;
     closeWorkspacePane(): void;
     openRailSurface(surfaceId: string): void;

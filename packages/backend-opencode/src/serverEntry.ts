@@ -1,4 +1,4 @@
-import { deriveProviderStatus, type AgentRuntime, type HarnessContext, type HarnessProvider, type HarnessRegistry, type ModelDescriptor, type RouteRequest, type SpaceContext } from "@polyth/contracts";
+import { deriveProviderStatus, type AgentRuntime, type HarnessConfigurationMetadata, type HarnessContext, type HarnessProvider, type HarnessProvisioningQuery, type HarnessRegistry, type ModelDescriptor, type RouteRequest, type SpaceContext } from "@polyth/contracts";
 import {
   localOnlyRemoteAccess,
   serverServiceKey,
@@ -125,6 +125,21 @@ export default function registerPackage(host: ServerPackageHost) {
       || (primaryError as { code?: string })?.code !== "outcome-unknown"
     ) throw primaryError;
     return openCodeRuntime(context.space);
+  }, async (context) => {
+    const queueStatus = host.services.get(serverServiceKey<(target: HarnessContext) => HarnessConfigurationMetadata | undefined>("opencode.configuration-status"));
+    const queued = queueStatus?.(context);
+    if (queued) return queued;
+    // Hosted and remote targets cannot read the local deployment-global queue.
+    // Fall back to the scoped capability records, still without constructing
+    // OpenCode, so pending state remains Space/project isolated.
+    const query = host.services.get(serverServiceKey<HarnessProvisioningQuery>("harness.provisioning"));
+    if (!query) return {};
+    const records = query.status(context, "opencode").flatMap((row) => row.records);
+    const pending = records.filter((record) => record.status === "pending" || record.status === "pending-restart");
+    return {
+      pendingChanges: pending.length,
+      restartRequired: pending.some((record) => record.status === "pending-restart"),
+    };
   });
   const applier = host.services.get(serverServiceKey<BackendConfigApplier>("plugins.config"));
   if (applier && typeof applier.applyBehavior === "function" && typeof applier.applyMcp === "function") {

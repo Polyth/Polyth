@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createConfigApplier } from "@polyth/backend-opencode";
-import { createDeferredConfigApplier, createOpenCodePendingService, physicalRestartKeysFor, restartScopeFor, type PendingTask } from "../src/opencodePending.ts";
+import { createDeferredConfigApplier, createOpenCodePendingService, inspectOpenCodeConfiguration, physicalRestartKeysFor, restartScopeFor, type PendingTask } from "../src/opencodePending.ts";
 import { opencodePendingRoutes } from "../src/routes/opencodePending.ts";
 import type { RouteRequest } from "../src/http.ts";
 import type { SpaceContext } from "@polyth/contracts";
@@ -392,6 +392,48 @@ test("OpenCode pending restart routes are local-trusted only", async () => {
   const localGet = await call("local-trusted", "GET", "/api/opencode/pending");
   assert.equal(await localGet.run(), true);
   assert.equal(localGet.status(), 200);
+});
+
+test("OpenCode configuration status applies the queue gate and reports an explicit empty state", () => {
+  const local: SpaceContext = {
+    spaceId: "spc_local",
+    spaceSlug: "local",
+    userId: "usr_local",
+    role: "owner",
+    deployment: "local-trusted",
+    storageDir: "/tmp/space-local",
+  };
+  const foreign: SpaceContext = {
+    ...local,
+    spaceId: "spc_foreign",
+    spaceSlug: "foreign",
+    userId: "usr_foreign",
+    deployment: "server-trusted",
+    storageDir: "/tmp/space-foreign",
+  };
+  let listCalls = 0;
+  const pending = {
+    list: () => {
+      listCalls += 1;
+      return { changes: [], count: 0 };
+    },
+  };
+  const context = (space: SpaceContext, remote = false) => ({
+    space,
+    spaceId: space.spaceId,
+    projectId: "project",
+    cwd: "/work/project",
+    remote,
+  });
+
+  assert.deepEqual(inspectOpenCodeConfiguration(pending, context(local)), {
+    pendingChanges: 0,
+    restartRequired: false,
+  });
+  assert.equal(listCalls, 1);
+  assert.equal(inspectOpenCodeConfiguration(pending, context(foreign)), undefined);
+  assert.equal(inspectOpenCodeConfiguration(pending, context(local, true)), undefined);
+  assert.equal(listCalls, 1, "denied contexts must not inspect the deployment-global queue");
 });
 
 test("OpenCode pending routes decline SPA requests before resolving Space", async () => {

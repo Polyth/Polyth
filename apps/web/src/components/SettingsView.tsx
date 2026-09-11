@@ -7,7 +7,7 @@ import {
   Fragment, useEffect, useMemo, useRef, useState,
   type ReactNode, type TouchEvent as ReactTouchEvent,
 } from "react";
-import { consumePendingSettingsPage, setOverlay } from "../store.ts";
+import { consumePendingSettingsNavigation, setOverlay, type PendingSettingsNavigation } from "../store.ts";
 import { listSlots } from "../slots.ts";
 import { isPackageEnabled, subscribePackages } from "../packages/registry.ts";
 import SlotHost, { useSlotVersion } from "./slots/SlotHost.ts";
@@ -35,6 +35,7 @@ import { tapFeedback } from "../haptics.ts";
 import { isEdgeBackSwipe, type GesturePoint } from "../mobileGestures.ts";
 import { Button, IconButton, TextInput } from "./ui/index.ts";
 import { BackIcon, CloseIcon } from "./ui/icons.ts";
+import type { SettingsNavigationTarget } from "@polyth/web-sdk";
 
 interface PageDef {
   id: string;
@@ -42,7 +43,19 @@ interface PageDef {
   group: "Workspace" | "Engineering" | "Customize" | "System";
   icon?: string;
   nav?: boolean;
-  render: () => ReactNode;
+  redirect?: { pageId: string; target?: SettingsNavigationTarget };
+  render: (settingsTarget?: SettingsNavigationTarget) => ReactNode;
+}
+
+function normalizeSettingsNavigation(navigation: PendingSettingsNavigation): PendingSettingsNavigation {
+  const parts = navigation.pageId.split("/");
+  if (parts.length >= 2 && parts.length <= 3 && parts[0] && parts[1]) {
+    return {
+      pageId: parts[0],
+      target: { itemId: parts[1], ...(parts[2] ? { sectionId: parts[2] } : {}) },
+    };
+  }
+  return navigation;
 }
 
 type MobileStage = "nav" | "page";
@@ -123,9 +136,17 @@ function SettingsNavIcon({ pageId, icon }: { pageId: string; icon?: string }) {
 export default function SettingsView({ onClose = () => setOverlay(null) }: { onClose?: () => void }) {
   const prefs = usePrefs();
   const mobile = useMobileSettings();
-  // Deep link (e.g. "Change shortcut…" palette rows land on the Shortcuts page).
-  const [active, setActive] = useState(() => consumePendingSettingsPage() ?? "general");
-  const [mobileStage, setMobileStage] = useState<MobileStage>("nav");
+  // Deep links may carry a page-local item and section target.
+  const [initialNavigation] = useState(() =>
+    normalizeSettingsNavigation(consumePendingSettingsNavigation() ?? { pageId: "general" }),
+  );
+  const [active, setActive] = useState(() => initialNavigation.pageId);
+  const [settingsTarget, setSettingsTarget] = useState<SettingsNavigationTarget | undefined>(
+    () => initialNavigation.target,
+  );
+  const [mobileStage, setMobileStage] = useState<MobileStage>(() =>
+    initialNavigation.target ? "page" : "nav",
+  );
   const [filter, setFilter] = useState("");
   const [cursor, setCursor] = useState(0);
   const paneRef = useRef<HTMLDivElement>(null);
@@ -183,6 +204,8 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
         group?: unknown;
         icon?: unknown;
         pageId?: unknown;
+        nav?: unknown;
+        redirect?: unknown;
       } | undefined;
       const group = meta?.group;
       return {
@@ -194,7 +217,11 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
           ? group
           : "Customize",
         ...(typeof meta?.icon === "string" ? { icon: meta.icon } : {}),
-        render: () => <>{item.render({ prefs })}</>,
+        ...(meta?.nav === false ? { nav: false } : {}),
+        ...(meta?.redirect && typeof meta.redirect === "object" && typeof (meta.redirect as { pageId?: unknown }).pageId === "string"
+          ? { redirect: meta.redirect as { pageId: string; target?: SettingsNavigationTarget } }
+          : {}),
+        render: (settingsTarget) => <>{item.render({ prefs, settingsTarget })}</>,
       };
     });
     const groupOrder = ["Workspace", "Engineering", "Customize", "System"];
@@ -202,6 +229,14 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
       (a, b) => groupOrder.indexOf(a.group) - groupOrder.indexOf(b.group),
     );
   }, [prefs, visibleSlotItems]);
+
+  useEffect(() => {
+    const redirect = pages.find((page) => page.id === active)?.redirect;
+    if (!redirect || !pages.some((page) => page.id === redirect.pageId)) return;
+    setActive(redirect.pageId);
+    setSettingsTarget(redirect.target);
+    if (mobile) setMobileStage("page");
+  }, [active, mobile, pages]);
 
   // First visit to a package's settings page auto-opens its tour (unless the
   // user skipped it, skipped all onboardings, or already saw it this session).
@@ -212,9 +247,18 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
 
   useEffect(() => {
     const navigate = (event: Event) => {
-      const pageId = (event as CustomEvent<unknown>).detail;
-      if (typeof pageId !== "string" || !pages.some((page) => page.id === pageId)) return;
-      setActive(pageId);
+      const detail = (event as CustomEvent<unknown>).detail;
+      const navigation = normalizeSettingsNavigation(
+        typeof detail === "string"
+          ? { pageId: detail }
+          : detail && typeof detail === "object" && typeof (detail as { pageId?: unknown }).pageId === "string"
+            ? detail as PendingSettingsNavigation
+            : { pageId: "" },
+      );
+      if (!pages.some((page) => page.id === navigation.pageId)) return;
+      consumePendingSettingsNavigation();
+      setActive(navigation.pageId);
+      setSettingsTarget(navigation.target);
       if (mobile) setMobileStage("page");
       setFilter("");
       setCursor(0);
@@ -267,6 +311,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
 
   const gotoItem = (hit: SettingsSearchHit) => {
     setActive(hit.item.pageId);
+    setSettingsTarget(undefined);
     if (mobile) setMobileStage("page");
     setFilter("");
     setCursor(0);
@@ -285,6 +330,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
 
   const gotoPage = (id: string) => {
     setActive(id);
+    setSettingsTarget(undefined);
     if (mobile) setMobileStage("page");
     setFilter("");
     setCursor(0);
@@ -394,6 +440,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
                     aria-current={current.id === p.id ? "page" : undefined}
                     onClick={() => {
                       setActive(p.id);
+                      setSettingsTarget(undefined);
                       if (mobile) setMobileStage("page");
                     }}
                   >
@@ -446,7 +493,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
           <div className="modal-body settings-pane-body" ref={paneRef}>
             {/* A page that throws must not white-screen the whole app —
                 Settings renders outside App's main view boundary. */}
-            <ViewErrorBoundary resetKey={current.id} inline>{current.render()}</ViewErrorBoundary>
+            <ViewErrorBoundary resetKey={`${current.id}:${settingsTarget?.itemId ?? ""}:${settingsTarget?.sectionId ?? ""}`} inline>{current.render(settingsTarget)}</ViewErrorBoundary>
           </div>
         </div>
       </div>

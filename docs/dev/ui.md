@@ -274,13 +274,22 @@ host.capabilities.register({
 - `registerPage` contributes a page into the Settings modal
   (`settings.pages` slot under the hood). `group` is one of
   `"Workspace" | "Engineering" | "Customize" | "System"`; `order` sorts
-  within the group; `component` is a plain React component.
+  within the group; `component` is a plain React component. A compatibility
+  route may set `nav: false` and `redirect: { pageId, target? }` so an older
+  page id lands on the canonical page without composing a second surface.
 - `registerItems([{ id, pageId, label, description, keywords, focusTarget }])`
   adds item-level search rows that deep-link to the page and focus the row
   (the row's element carries `data-settings-item={focusTarget}`).
 - Pages are enabled/disabled with their package; the settings page you add is
   the surface for the feature's browser/server preferences — preferences
   still persist per the rules in `README.md` §2.
+
+Harness-specific sections contribute to `settings.harness.detail` with
+`harnessId`, `sectionId`, and `label` metadata. Their `order` controls navigation;
+`handlesPendingChanges: true` identifies the section that reviews and applies
+pending configuration. Harnesses renders these contributions and derives its
+capability matrix from cheap `HarnessSnapshot` metadata. Native discovery is
+requested only for the selected harness detail.
 
 ### 4.6 Web reducers (`host.reducers.register`)
 
@@ -359,7 +368,9 @@ is no classification question.
 - `host.store` exposes the shell's render state: `getSnapshot()`,
   `subscribe(listener)`, `select(selector)`. Prefer `select` for reactive
   reads; the snapshot shape is `WebStoreSnapshot` in the web-sdk.
-- `host.navigation` — `setActiveView(view)` for built-in shell navigation, `openSettingsPage(pageId)`,
+- `host.navigation` — `setActiveView(view)` for built-in shell navigation,
+  `openSettingsPage(pageId, target?)` (where a page-local target may carry
+  `itemId` and `sectionId`),
   `openWorkspacePane(surfaceId, resource?)`, `closeWorkspacePane()`,
   `openRailSurface(surfaceId)`, `setOverlay(overlay | null)`.
 - `host.ui.icons` — the canonical icon map (`apps/web/src/icons.tsx`);
