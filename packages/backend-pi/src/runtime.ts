@@ -3,6 +3,7 @@ import { isAbsolute, join } from "node:path";
 import type {
   AgentRuntime,
   HarnessContext,
+  JsonObject,
   ModelDescriptor,
   MutationOutcome,
   RuntimeCapabilities,
@@ -46,6 +47,9 @@ export const PI_CAPABILITIES: RuntimeCapabilities = {
 
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
   value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+
+const asJsonObject = (value: unknown): JsonObject =>
+  (asRecord(value) as JsonObject | undefined) ?? {};
 
 const modelDescriptor = (value: PiRpcModel): ModelDescriptor | undefined => {
   const providerID = typeof value.provider === "string" && value.provider.trim() ? value.provider : undefined;
@@ -151,7 +155,7 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc): AgentRunti
         });
       }
     } catch {
-      // Telemetry must never turn a completed native turn into a failed one.
+      // Telemetry is auxiliary and must never turn a completed native turn into a failure.
     }
   };
 
@@ -221,7 +225,7 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc): AgentRunti
     if (type === "tool_execution_start" && activeOperationId) {
       const callId = typeof event.toolCallId === "string" ? event.toolCallId : "pi-tool";
       const tool = typeof event.toolName === "string" ? event.toolName : "tool";
-      emit({ type: "tool/started", callId, tool, input: asRecord(event.args) ?? {} });
+      emit({ type: "tool/started", callId, tool, input: asJsonObject(event.args) });
       return;
     }
 
@@ -236,6 +240,8 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc): AgentRunti
       return;
     }
 
+    // `agent_end` is deliberately not terminal: Pi may still retry, compact,
+    // or consume queued continuations. `agent_settled` is the native idle proof.
     if (type === "agent_settled") settleActiveTurn();
   };
 
@@ -271,7 +277,7 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc): AgentRunti
         }
       }
     } catch {
-      // The model catalog itself is still authoritative if optional variant discovery fails.
+      // The model catalog itself remains authoritative if optional variant discovery fails.
     }
     return catalog;
   };
@@ -302,10 +308,12 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc): AgentRunti
   const createSession: NonNullable<AgentRuntime["createSessionOperation"]> = async (canonical, operationId) => {
     const outcome = await mutation(operationId, async () => {
       const result = await rpc.request<{ cancelled?: boolean }>({ type: "new_session" }, 30_000);
-      if (result?.cancelled) throw Object.assign(new Error("Pi cancelled creation of the native session"), { code: "runtime-rejected" });
-      if (canonical.title?.trim()) {
-        await rpc.request({ type: "set_session_name", name: canonical.title.trim() }, 10_000);
+      if (result?.cancelled) {
+        throw Object.assign(new Error("Pi cancelled creation of the native session"), { code: "runtime-rejected" });
       }
+
+      // Capture and persist the native identity before any cosmetic follow-up.
+      // A failed title write must never make an already-created session ambiguous.
       const state = await currentState();
       if (!state.sessionFile) {
         throw Object.assign(new Error("Pi did not expose a persistent session file"), { code: "runtime-rejected" });
@@ -313,6 +321,10 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc): AgentRunti
       nativeId = state.sessionFile;
       createOperationId = operationId;
       await rpc.receipt(operationId, nativeId);
+
+      if (canonical.title?.trim()) {
+        await rpc.request({ type: "set_session_name", name: canonical.title.trim() }, 10_000).catch(() => undefined);
+      }
       return { backendSessionId: nativeId };
     });
     return outcome.kind === "confirmed" ? { ...outcome, receipt: nativeId } : outcome;
@@ -425,6 +437,8 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc): AgentRunti
       lastError = "";
       order++;
       try {
+        // Pi's correlated prompt response is the admission receipt. All later
+        // failures are represented by native events and the settled terminal.
         await rpc.request({
           type: "prompt",
           message: delivered.text,
@@ -446,14 +460,14 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc): AgentRunti
     async abort() {
       await rpc.request({ type: "clear_queue" }, 10_000).catch(() => undefined);
       abortRequested = true;
+      // Upstream guarantees this response is sent only once the session is idle.
       await rpc.request({ type: "abort" }, 60_000);
     },
     async abortOperation(_sessionId, operationId) {
-      const outcome = await mutation(operationId, async () => {
+      return mutation(operationId, async () => {
         await runtime.abort(context.sessionId ?? "");
         return {};
       });
-      return outcome;
     },
     replyPermission: async () => {
       throw Object.assign(new Error("Pi permission bridge is not exposed by this adapter"), { code: "unsupported" });
