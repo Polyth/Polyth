@@ -8,6 +8,7 @@ import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from 
 import { createCodexRuntime, CODEX_CAPABILITIES, type Thread } from "./index.ts";
 import { createCodexProvisioner } from "./provisioner.ts";
 const exec = promisify(execFile);
+const windowsShim = (command: string) => process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
 
 const resolveCodexBinary = async () => {
     const requested = process.env.POLYTH_CODEX_BIN?.trim() || "codex";
@@ -47,7 +48,7 @@ export default function registerPackage(host: ServerPackageHost) {
             try {
                 const command = await resolveCodexBinary();
                 const env = await harnessExecutableChildEnv(command);
-                const version = (await exec(command, ["--version"], { timeout: 5000, maxBuffer: 4096, env })).stdout.trim();
+                const version = (await exec(command, ["--version"], { timeout: 5000, maxBuffer: 4096, env, shell: windowsShim(command) })).stdout.trim();
                 // Authentication and catalog inspection happen only when detail
                 // discovery is requested; the cheap probe must not create a thread.
                 return { harnessId: "codex", installed: true, authenticated: "unknown", healthy: true, state: "unknown", version };
