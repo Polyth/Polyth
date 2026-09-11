@@ -2,13 +2,15 @@
 // in the main composer, which keeps the queued item's original position.
 import { type DragEvent as ReactDragEvent, useCallback, useEffect, useMemo, useState } from "react";
 import type { QueueItemDto } from "@polyth/contracts";
+import { queuePausedAfterUserInterrupt } from "@polyth/session/queue-pause";
 import { api } from "@polyth/session/web-api";
 import { useStore } from "../store.ts";
 import { announce } from "./a11y/live.tsx";
 import { tr } from "../i18n/index.ts";
+import Button from "./ui/Button.tsx";
 import IconButton from "./ui/IconButton.tsx";
 import Icon from "./ui/Icon.tsx";
-import { DeleteIcon, DragHandleIcon, EditIcon, EnterIcon } from "./ui/icons.ts";
+import { DeleteIcon, DragHandleIcon, EditIcon, EnterIcon, PauseIcon, PlayIcon } from "./ui/icons.ts";
 
 const QUEUE_DRAG_TYPE = "application/x-polyth-queued-message";
 
@@ -59,7 +61,8 @@ export default function QueuedMessageList({
     return () => { scope.alive = false; scope.request++; };
   }, [scope]);
   // queue/* events bump the model version; refetch on any event activity
-  const eventCount = useStore((s) => (s.events[sessionId] ?? []).length);
+  const events = useStore((s) => s.events[sessionId]);
+  const eventCount = events?.length ?? 0;
 
   const refresh = useCallback(async () => {
     const request = ++scope.request;
@@ -76,6 +79,9 @@ export default function QueuedMessageList({
   useEffect(() => { refresh(); }, [refresh, eventCount]);
 
   const visibleItems = items.filter((item) => item.sessionId === sessionId && item.id !== editingId);
+  const resumable = visibleItems.find((item) => !item.heldForReview) ?? null;
+  const queuePaused = resumable !== null
+    && queuePausedAfterUserInterrupt(events ?? [], items);
   if (visibleItems.length === 0 && !error) return null;
 
   const persistOrder = async (next: QueueItemDto[], movedId: string) => {
@@ -154,6 +160,31 @@ export default function QueuedMessageList({
   return (
     <div className="queue-list" role="list" aria-label={tr("queuedmessagelist.valueQueuedMessages", { length: visibleItems.length })}>
       {error && <div role="alert">{error}</div>}
+      {queuePaused && resumable && (
+        <div className="queue-chip" role="status" aria-live="polite">
+          <span className="queue-grip" aria-hidden="true">
+            <Icon icon={PauseIcon} size="sm" />
+          </span>
+          <span className="queue-text">
+            {tr("queuedmessagelist.valueQueuedMessages", { length: visibleItems.length })}
+          </span>
+          <div
+            className="queue-actions"
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <Button
+              size="sm"
+              variant="ghost"
+              iconStart={PlayIcon}
+              busy={busyId === resumable.id}
+              disabled={busyId !== null || !onSteer}
+              onClick={() => void steer(resumable)}
+            >
+              {tr("common.resume")}
+            </Button>
+          </div>
+        </div>
+      )}
       {visibleItems.map((item) => {
         const n = item.position + 1;
         const busy = busyId !== null;

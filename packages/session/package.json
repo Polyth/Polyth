@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
+    ".": "./src/root.ts",
     "./web-api": "./src/webApiAccountScoped.ts",
-    "./next-action": "./src/nextAction.ts"
+    "./next-action": "./src/nextAction.ts",
+    "./queue-pause": "./src/queuePause.ts"
   },
   "dependencies": {
     "@polyth/contracts": "0.1.0",
