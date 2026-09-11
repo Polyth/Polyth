@@ -328,6 +328,42 @@ test("edit tool results derive changed files and a new prompt clears the turn su
   assert.deepEqual(model.changedFiles, []);
 });
 
+test("a turn claims only what its own successful tool calls wrote", () => {
+  // A rejected or failed edit changed nothing on disk, so it must not appear
+  // in the turn's summary even though the call carried a path.
+  const failed = buildModel([
+    ev("tool/call", { callId: "ok", tool: "write", input: { path: "src/written.ts" } }),
+    ev("tool/result", { callId: "ok", tool: "write", output: "done" }),
+    ev("tool/call", { callId: "denied", tool: "write", input: { path: "src/refused.ts" } }),
+    ev("tool/error", { callId: "denied", tool: "write", error: "permission denied" }),
+  ]);
+  assert.deepEqual(failed.changedFiles, ["src/written.ts"]);
+
+  // Two agents working the same repository at once. Each session's summary is
+  // derived from its own log, so neither can claim the other's file.
+  const a = buildModel([
+    ev("tool/call", { callId: "a", tool: "edit", input: { path: "src/a.ts" } }),
+    ev("tool/result", { callId: "a", tool: "edit", output: "done" }),
+  ]);
+  const b = buildModel([
+    ev("tool/call", { callId: "b", tool: "edit", input: { path: "src/b.ts" } }),
+    ev("tool/result", { callId: "b", tool: "edit", output: "done" }),
+  ]);
+  assert.deepEqual(a.changedFiles, ["src/a.ts"]);
+  assert.deepEqual(b.changedFiles, ["src/b.ts"]);
+
+  // Touching the same file twice keeps its first-touch position.
+  const repeat = buildModel([
+    ev("tool/call", { callId: "1", tool: "write", input: { path: "src/first.ts" } }),
+    ev("tool/result", { callId: "1", tool: "write", output: "done" }),
+    ev("tool/call", { callId: "2", tool: "write", input: { path: "src/second.ts" } }),
+    ev("tool/result", { callId: "2", tool: "write", output: "done" }),
+    ev("tool/call", { callId: "3", tool: "write", input: { path: "src/first.ts" } }),
+    ev("tool/result", { callId: "3", tool: "write", output: "done" }),
+  ]);
+  assert.deepEqual(repeat.changedFiles, ["src/first.ts", "src/second.ts"]);
+});
+
 test("pending-change source lists session tool paths independently of leftover git dirt", () => {
   assert.deepEqual(extractChangedFiles("read_file", { path: "src/a.ts" }), []);
   assert.deepEqual(extractChangedFiles("write", { filePath: "./src/a.ts" }, { changedFiles: ["src/a.ts", "src/b.ts"] }), [
