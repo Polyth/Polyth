@@ -104,8 +104,8 @@ export function registerAcpProfile(host: ServerPackageHost, profile: RegisteredA
                 // advertisement before sending any native session request.
                 provisioner: createAcpProvisioner(profile.descriptor.id, true),
                 async discover(context) {
-                    if (context.remote || process.platform !== "linux") {
-                        throw Object.assign(new Error("Local Linux runtimes are supported"), { code: "unsupported" });
+                    if (context.remote) {
+                        throw Object.assign(new Error("Local execution only"), { code: "unsupported" });
                     }
                     const key = contextKey(context);
                     const catalogEntry = catalogs.get(key) ?? {};
@@ -141,8 +141,8 @@ export function registerAcpProfile(host: ServerPackageHost, profile: RegisteredA
                     };
                 },
                 async createRuntime(context) {
-                    if (!context.space || context.remote || process.platform !== "linux")
-                        throw Object.assign(new Error("Local Linux Space context required"), { code: "unsupported" });
+                    if (!context.space || context.remote)
+                        throw Object.assign(new Error("Local Space context required"), { code: "unsupported" });
                     const connection = await connectAcp(profile, context, stateFile(context));
                     try {
                         configureAcpClientRequestHandling(connection.rpc, profile.clientRequest);
@@ -164,8 +164,15 @@ export function registerAcpProfile(host: ServerPackageHost, profile: RegisteredA
                     }
                 },
                 async releaseExecution(context, binding, operationId) {
-                    if (!context.space || context.remote || process.platform !== "linux")
-                        return { kind: "rejected", code: "unsupported", message: "Local Linux Space context required" };
+                    if (!context.space || context.remote)
+                        return { kind: "rejected", code: "unsupported", message: "Local Space context required" };
+                    if (process.platform !== "linux") {
+                        return {
+                            kind: "rejected",
+                            code: "unsupported",
+                            message: `Crash-safe cross-harness switching currently requires Linux; ${profile.descriptor.name} can still be used normally`,
+                        };
+                    }
                     return releaseProcessExecution(stateFile(context), binding, operationId);
                 },
             });
