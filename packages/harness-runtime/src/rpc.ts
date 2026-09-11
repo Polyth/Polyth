@@ -171,7 +171,14 @@ export async function createStdioRpc(options: {
             void authority.close().catch(() => { });
         }
     });
-    await new Promise<void>((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
+    try {
+        await new Promise<void>((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
+    }
+    catch (error) {
+        await authority.close().catch(() => { });
+        disconnected();
+        throw error;
+    }
     return {
         authorityId: authority.authorityId,
         generation: authority.generation,
@@ -196,6 +203,9 @@ export async function createStdioRpc(options: {
         },
         notify: (method, params) => send({ jsonrpc: "2.0", method, params }),
         onNotification: (cb) => { notifications.push(cb); }, onRequest: (cb) => { requests = cb; }, onClose: (cb) => { closes.push(cb); },
-        async close() { await authority.close(); disconnected(); },
+        async close() {
+            try { await authority.close(); }
+            finally { disconnected(); }
+        },
     };
 }
