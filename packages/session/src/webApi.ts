@@ -1038,8 +1038,11 @@ export const api = {
   // active session's worktree, not the project root (UX-FIXTURE-VISUAL P0).
   filesTree: (projectId: string, relPath?: string, hidden?: boolean, sessionId?: string) =>
     jfetch<FileEntry[]>(`/api/files/tree?projectId=${encodeURIComponent(projectId)}${relPath ? `&path=${encodeURIComponent(relPath)}` : ""}${hidden ? "&hidden=true" : ""}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`),
-  filesRead: (projectId: string, relPath: string, sessionId?: string) =>
-    jfetch<FileReadResult>(`/api/files/read?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(relPath)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`),
+  /** `editable` asks for the file's complete contents (up to the editable cap)
+   *  instead of the cheaper preview slice — pass it whenever the result will
+   *  back a buffer that can be saved. */
+  filesRead: (projectId: string, relPath: string, sessionId?: string, opts?: { editable?: boolean }) =>
+    jfetch<FileReadResult>(`/api/files/read?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(relPath)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}${opts?.editable ? "&editable=true" : ""}`),
   filesWrite: (projectId: string, relPath: string, content: string, baseRevision?: string, sessionId?: string) =>
     jfetch<{ ok: true; revision: string }>(`/api/files/write`, json("POST", {
       projectId, path: relPath, content,

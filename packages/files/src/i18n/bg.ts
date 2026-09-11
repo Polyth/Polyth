@@ -40,7 +40,7 @@ export const bg: FilesMessages = {
   "editor.filepane.saveValueS": "Запазване ( {MOD} S)",
   "editor.filepane.savingRecreatesItYourBufferIsPreserved": "Запазването го пресъздава; вашият буфер се запазва.",
   "editor.filepane.showValue": "Покажи {value}",
-  "editor.filepane.truncatedFileExceeds512KbReadOnly": "Съкратен — файлът надвишава 512 KB. Само за четене.",
+  "editor.filepane.truncatedFileExceeds512KbReadOnly": "Съкратен — файлът надвишава 8 MB. Само за четене.",
   "editor.filepane.unsavedChanges": "Незапазени промени",
   "editor.filepane.valueMode": "Режим {previewName}",
   "editor.filepane.wrapLines": "Линии за обвиване ✓",

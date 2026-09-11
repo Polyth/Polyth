@@ -36,8 +36,8 @@ export const fileResourceProvider: ResourceProvider = {
     label: baseOf(ref.locator),
     kind: fileKindOf(ref.locator),
   }),
-  read: async (ref) => {
-    const got = await api.filesRead(ref.projectId, ref.locator, ref.sessionId ?? undefined);
+  read: async (ref, opts) => {
+    const got = await api.filesRead(ref.projectId, ref.locator, ref.sessionId ?? undefined, opts);
     return {
       content: got.content,
       revision: got.revision,

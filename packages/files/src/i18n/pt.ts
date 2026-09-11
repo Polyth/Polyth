@@ -40,7 +40,7 @@ export const pt: FilesMessages = {
   "editor.filepane.saveValueS": "Guardar ( {MOD} S)",
   "editor.filepane.savingRecreatesItYourBufferIsPreserved": "Ao guardar, o conteúdo é recriado; o seu buffer é preservado.",
   "editor.filepane.showValue": "Exibir {value}",
-  "editor.filepane.truncatedFileExceeds512KbReadOnly": "Ficheiro truncado — excede 512 KB. Apenas leitura.",
+  "editor.filepane.truncatedFileExceeds512KbReadOnly": "Ficheiro truncado — excede 8 MB. Apenas leitura.",
   "editor.filepane.unsavedChanges": "Alterações não guardadas",
   "editor.filepane.valueMode": "Modo {previewName}",
   "editor.filepane.wrapLines": "Linhas de enrolamento ✓",

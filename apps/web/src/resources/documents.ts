@@ -25,6 +25,11 @@ import {
 import { getResourceProvider, subscribeProviderUnload } from "./providers.ts";
 
 const AUTOSAVE_MS = 1_500;
+/** Every read in this module backs a buffer that `saveSession` can write back,
+ *  so it must be the file's complete contents. A preview-sized slice here
+ *  would either truncate the save or (as it does for a file past the editable
+ *  cap) make the document read-only — never a silent partial write. */
+const EDITABLE_READ = { editable: true } as const;
 
 interface Session {
   ref: ResourceRef;
@@ -339,7 +344,7 @@ async function loadSession(session: Session): Promise<void> {
     session.status = "loading";
     notify(session);
     try {
-      const got = await provider.read(readRef);
+      const got = await provider.read(readRef, EDITABLE_READ);
       if (!isCurrentSession(session, refKey, epoch)) return;
       session.saved = got.content;
       session.checkpoint = got.content;
@@ -423,7 +428,7 @@ async function reloadSession(session: Session): Promise<void> {
     const epoch = session.observationEpoch;
     const readRef = session.ref;
     try {
-      const got = await provider.read(readRef);
+      const got = await provider.read(readRef, EDITABLE_READ);
       if (!isCurrentSession(session, refKey, epoch)) return;
       session.saved = got.content;
       session.checkpoint = got.content;

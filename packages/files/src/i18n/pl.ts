@@ -40,7 +40,7 @@ export const pl: FilesMessages = {
   "editor.filepane.saveValueS": "Zapisz ( {MOD} S)",
   "editor.filepane.savingRecreatesItYourBufferIsPreserved": "Zapisanie spowoduje ponowne utworzenie pliku, a bufor zostanie zachowany.",
   "editor.filepane.showValue": "Pokaż {value}",
-  "editor.filepane.truncatedFileExceeds512KbReadOnly": "Ucięty — rozmiar pliku przekracza 512 KB. Tylko do odczytu.",
+  "editor.filepane.truncatedFileExceeds512KbReadOnly": "Ucięty — rozmiar pliku przekracza 8 MB. Tylko do odczytu.",
   "editor.filepane.unsavedChanges": "Niezapisane zmiany",
   "editor.filepane.valueMode": "tryb {previewName}",
   "editor.filepane.wrapLines": "Zawijaj linie ✓",

@@ -40,7 +40,7 @@ export const zhCN: FilesMessages = {
   "editor.filepane.saveValueS": "保存（ {MOD} S）",
   "editor.filepane.savingRecreatesItYourBufferIsPreserved": "保存操作会重新创建缓冲区；您的缓冲区内容将被保留。",
   "editor.filepane.showValue": "显示{value}",
-  "editor.filepane.truncatedFileExceeds512KbReadOnly": "文件已截断——文件超过 512 KB。只读。",
+  "editor.filepane.truncatedFileExceeds512KbReadOnly": "文件已截断——文件超过 8 MB。只读。",
   "editor.filepane.unsavedChanges": "未保存的更改",
   "editor.filepane.valueMode": "{previewName}模式",
   "editor.filepane.wrapLines": "环绕线 ✓",

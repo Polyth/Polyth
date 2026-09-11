@@ -42,7 +42,7 @@ export const en = {
   "editor.filepane.saveValueS": "Save ({MOD}S)",
   "editor.filepane.savingRecreatesItYourBufferIsPreserved": "Saving recreates it; your buffer is preserved.",
   "editor.filepane.showValue": "Show {value}",
-  "editor.filepane.truncatedFileExceeds512KbReadOnly": "Truncated — file exceeds 512 KB. Read-only.",
+  "editor.filepane.truncatedFileExceeds512KbReadOnly": "Truncated — file exceeds 8 MB. Read-only.",
   "editor.filepane.unsavedChanges": "Unsaved changes",
   "editor.filepane.valueMode": "{previewName} mode",
   "editor.filepane.wrapLines": "Wrap lines ✓",

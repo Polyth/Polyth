@@ -40,7 +40,7 @@ export const ar: FilesMessages = {
   "editor.filepane.saveValueS": "حفظ ( {MOD} S)",
   "editor.filepane.savingRecreatesItYourBufferIsPreserved": "يؤدي الحفظ إلى إعادة إنشائه؛ ويتم الحفاظ على المخزن المؤقت الخاص بك.",
   "editor.filepane.showValue": "عرض {value}",
-  "editor.filepane.truncatedFileExceeds512KbReadOnly": "ملف مختصر - يتجاوز حجم الملف 512 كيلوبايت. للقراءة فقط.",
+  "editor.filepane.truncatedFileExceeds512KbReadOnly": "ملف مختصر - يتجاوز حجم الملف 8 ميغابايت. للقراءة فقط.",
   "editor.filepane.unsavedChanges": "التغييرات غير المحفوظة",
   "editor.filepane.valueMode": "وضع {previewName}",
   "editor.filepane.wrapLines": "خطوط الالتفاف ✓",
