@@ -1,17 +1,28 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { registerAcpProfile } from "@polyth/backend-acp";
+import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/harness-runtime/executable-discovery";
 import type { ServerPackageHost } from "@polyth/plugins";
 const exec = promisify(execFile);
+
+const resolveFxBinary = async () => {
+    const report = await discoverHarnessExecutable(process.env.POLYTH_FX_BIN?.trim() || "fx");
+    if (!report.hit) throw Object.assign(new Error("fx CLI was not found"), { code: "not-installed" });
+    const env = await harnessExecutableChildEnv(report.hit.executablePath);
+    process.env.PATH = env.PATH;
+    return { command: report.hit.executablePath, env };
+};
+
 export default function registerPackage(host: ServerPackageHost) {
     return registerAcpProfile(host, {
         descriptor: { "id": "fx", "name": "fx", "integration": "ACP v1", "autoSelect": false, "priority": 40, "setupUrl": "https://fx.sh/docs/using-fx/acp", "signInCommand": "fx login" },
         command: "fx", args: ["acp"],
         async probe(context) {
-            if (context.remote || process.platform !== "linux")
-                return { harnessId: "fx", installed: false, authenticated: "unknown", healthy: false };
+            if (context.remote)
+                return { harnessId: "fx", installed: false, authenticated: "unknown", healthy: false, message: "Local execution only" };
             try {
-                const version = (await exec("fx", ["--version"], { timeout: 5000, maxBuffer: 4096 })).stdout.trim();
+                const { command, env } = await resolveFxBinary();
+                const version = (await exec(command, ["--version"], { timeout: 5000, maxBuffer: 4096, env })).stdout.trim();
                 // Installation alone is not proof of authentication. The profile is
                 // offered for explicit selection but excluded from automatic routing
                 // until a native auth/status contract is verified.
