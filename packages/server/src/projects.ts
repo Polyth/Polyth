@@ -2,7 +2,7 @@
 // Writes are atomic (tmp + rename). A corrupt on-disk file is never overwritten
 // with defaults on load — boot with an empty in-memory registry and leave the
 // file untouched until a deliberate user write succeeds.
-import { readFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
 import { atomicWriteSync } from "@polyth/plugins";
 import { createHash, randomUUID } from "node:crypto";
 import { basename, dirname, resolve } from "node:path";
@@ -91,6 +91,10 @@ export function createProjectService(
 ): ProjectRegistry {
   const file = `${dataDir}/projects.json`;
   let items: StoredProject[] = [];
+  // An unreadable registry means the in-memory list is empty because we could
+  // not read it, not because there are no projects. The first write would
+  // otherwise replace the user's entire project registry with `[]`.
+  let unreadable = false;
   try {
     const parsed = JSON.parse(readFileSync(file, "utf8")) as StoredProject[];
     items = parsed;
@@ -98,12 +102,29 @@ export function createProjectService(
     // Missing file = first run. Anything else (corrupt JSON, unreadable) keeps
     // empty in-memory state and does NOT rewrite the file with defaults.
     if ((err as NodeJS.ErrnoException).code !== "ENOENT" && existsSync(file)) {
+      unreadable = true;
       console.warn("[polyth] projects.json is unreadable; starting with an empty registry (file left untouched)");
     }
   }
 
   const persist = () => {
     mkdirSync(dirname(file), { recursive: true });
+    if (unreadable) {
+      // Keep whatever we could not parse: it is the only copy of the user's
+      // project registry, and a human can still recover paths from it. Move it
+      // aside once, then write normally from here on.
+      const quarantine = `${file}.unreadable-${Date.now()}`;
+      try {
+        renameSync(file, quarantine);
+        console.warn(`[polyth] preserved the unreadable project registry at ${quarantine}`);
+      } catch (error) {
+        throw Object.assign(
+          new Error("the project registry is unreadable and could not be preserved; refusing to overwrite it"),
+          { code: "conflict", cause: error },
+        );
+      }
+      unreadable = false;
+    }
     atomicWriteSync(file, JSON.stringify(items, null, 2));
   };
   // `spaceId` is threaded through the private helpers rather than read from a

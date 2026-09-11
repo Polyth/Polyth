@@ -12,6 +12,38 @@ import { testTenancy } from "./support/spaces.ts";
 const pngDataUrl = `data:image/png;base64,${Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).toString("base64")}`;
 const svgDataUrl = (svg: string) => `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
 
+// An unreadable registry means "we could not read the projects", never "there
+// are no projects". Booting empty is survivable; writing that emptiness back
+// over the only copy of the user's registry is not.
+test("an unreadable project registry is preserved instead of overwritten", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-projects-"));
+  const root = join(dir, "workspace");
+  mkdirSync(root);
+  const file = join(dir, "projects.json");
+  writeFileSync(file, '[{"id":"kept","path":"/somewhere","name":"Important"} <<< truncated');
+
+  const projects = createProjectService(dir);
+  assert.deepEqual(await projects.list(), [], "an unreadable registry starts empty in memory");
+  assert.equal(
+    readFileSync(file, "utf8").includes("Important"),
+    true,
+    "loading never rewrites the file",
+  );
+
+  // The first write is what used to destroy it.
+  await projects.add(root, "New");
+
+  const quarantined = readdirSync(dir).filter((name) => name.startsWith("projects.json.unreadable-"));
+  assert.equal(quarantined.length, 1, "the unreadable registry is moved aside, not deleted");
+  assert.match(readFileSync(join(dir, quarantined[0]!), "utf8"), /Important/);
+  assert.equal((await projects.list()).length, 1);
+  assert.doesNotMatch(readFileSync(file, "utf8"), /Important/);
+
+  // Only the first write quarantines; later writes are ordinary.
+  await projects.add(join(dir, "workspace"), "Again");
+  assert.equal(readdirSync(dir).filter((name) => name.startsWith("projects.json.unreadable-")).length, 1);
+});
+
 test("project appearance accepts safe uploaded PNG and standard SVG icons", async () => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-projects-"));
   const root = join(dir, "workspace");
