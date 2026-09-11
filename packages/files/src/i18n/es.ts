@@ -40,7 +40,7 @@ export const es: FilesMessages = {
   "editor.filepane.saveValueS": "Guardar ( {MOD} S)",
   "editor.filepane.savingRecreatesItYourBufferIsPreserved": "Al guardar, se recrea; el búfer se conserva.",
   "editor.filepane.showValue": "Mostrar {value}",
-  "editor.filepane.truncatedFileExceeds512KbReadOnly": "Truncado: el archivo supera los 512 KB. Solo lectura.",
+  "editor.filepane.truncatedFileExceeds512KbReadOnly": "Truncado: el archivo supera los 8 MB. Solo lectura.",
   "editor.filepane.unsavedChanges": "Cambios no guardados",
   "editor.filepane.valueMode": "Modo {previewName}",
   "editor.filepane.wrapLines": "Líneas de envoltura ✓",

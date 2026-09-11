@@ -66,6 +66,10 @@ export interface AgentSessionRouteDeps {
   capabilities?: () => string[];
   goals?: () => AgentGoalService | undefined;
   version?: string;
+  /** Private notification-recipient registration after a durable session write. */
+  onSessionCreated?: (sessionId: string, space: { userId: string; spaceId: string }, parentSessionId?: string) => Promise<void>;
+  onSessionsImported?: (sessionIds: readonly string[], space: { userId: string; spaceId: string }) => Promise<void>;
+  onSessionForked?: (parentSessionId: string, sessionId: string, space: { userId: string; spaceId: string }) => Promise<void>;
 }
 
 const invalid = (message: string): never => {
@@ -326,6 +330,9 @@ export function agentSessionRoutes(deps: AgentSessionRouteDeps): RouteHandler {
     // services, so no branch of this large surface can reach another tenant.
     const space = rc.space;
     const { sessions, projects } = deps.spaces(space);
+    const recordNotificationRecipient = async (work: (() => Promise<void>) | undefined): Promise<void> => {
+      try { await work?.(); } catch { console.warn("[polyth] notification recipient registration failed"); }
+    };
 
   const context = async (sessionId: string) => {
     const session = await sessions.snapshot(sessionId);
@@ -398,7 +405,11 @@ export function agentSessionRoutes(deps: AgentSessionRouteDeps): RouteHandler {
         return invalid("ids must be a non-empty array of strings");
       }
       if (input.ids.length > MAX_IMPORT_BATCH) return invalid(`at most ${MAX_IMPORT_BATCH} sessions per import`);
-      json(200, await sessions.importBackendSessions(input.projectId, input.ids as string[]));
+      const imported = await sessions.importBackendSessions(input.projectId, input.ids as string[]);
+      await recordNotificationRecipient(deps.onSessionsImported
+        ? () => deps.onSessionsImported!(imported.map((session) => session.id), space)
+        : undefined);
+      json(200, imported);
       return true;
     }
 
@@ -479,6 +490,9 @@ export function agentSessionRoutes(deps: AgentSessionRouteDeps): RouteHandler {
         ...(worktreePath !== undefined ? { worktreePath } : {}),
       };
       const ref = await sessions.create(createInput);
+      await recordNotificationRecipient(deps.onSessionCreated
+        ? () => deps.onSessionCreated!(ref.id, space, parentId)
+        : undefined);
       let sendResult: unknown;
       if (input.message !== undefined) {
         const message = typeof input.message === "string"
@@ -647,6 +661,9 @@ export function agentSessionRoutes(deps: AgentSessionRouteDeps): RouteHandler {
         return invalid("atSeq must be a positive integer");
       }
       const result = await sessions.fork(sessionId, atSeq);
+      await recordNotificationRecipient(deps.onSessionForked
+        ? () => deps.onSessionForked!(sessionId, result.id, space)
+        : undefined);
       json(201, { ...result, links: sessionLinks(result.id) });
       return true;
     }

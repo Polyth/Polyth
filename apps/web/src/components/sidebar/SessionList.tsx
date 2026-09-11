@@ -41,6 +41,7 @@ import { errorFeedback, successFeedback, tapFeedback } from "../../haptics.ts";
 import { horizontalDistance, SESSION_SWIPE_REVEAL, type GesturePoint } from "../../mobileGestures.ts";
 import { useShiftArmed } from "../../useShiftArmed.ts";
 import { useShellMode } from "../../responsiveShell.ts";
+import { useInlineRename } from "../input/inlineRename.ts";
 
 const INITIAL_VISIBLE_SESSIONS = 6;
 const INLINE_LABEL_LIMIT = 6;
@@ -303,6 +304,12 @@ function SessionRow({
     }
   };
 
+  const renameKeys = useInlineRename({
+    editing: renaming,
+    commit: () => void doRename(),
+    cancel: () => { setTitle(s.title); setRenaming(false); },
+  });
+
   const toggleLabel = async (labelId: string) => {
     const cur = s.labelIds ?? [];
     const next = cur.includes(labelId) ? cur.filter((x) => x !== labelId) : [...cur, labelId];
@@ -421,11 +428,7 @@ function SessionRow({
           autoFocus
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          onBlur={() => void doRename()}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void doRename();
-            else if (e.key === "Escape") { setTitle(s.title); setRenaming(false); }
-          }}
+          {...renameKeys}
         />
       ) : (
         <button
@@ -683,12 +686,16 @@ export default function SessionList({
     hydratedRef.current = true;
     if (projectSessions.length === 0) void refreshSessions(projectId);
   }, [projectId]);
+  // Worktrees appear and disappear outside this sidebar — created by the Git
+  // UI, by an agent, by a shell. The server bumps this project's topology
+  // revision when that happens, so the list re-reads without a reload.
+  const worktreeTopology = useStore((st) => st.worktreeTopology[projectId] ?? 0);
   const reloadOrg = () => {
     void api.listLabels().then(setLabels);
     void api.listWorktrees(projectId).then(setWorktrees);
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(reloadOrg, [projectId]);
+  useEffect(reloadOrg, [projectId, worktreeTopology]);
 
   const onChanged = () => {
     void refreshSessions(projectId);

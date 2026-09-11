@@ -45,6 +45,7 @@ const STATUS: Record<string, number> = {
   "agent-paused": 409,
   "stale-frame": 409,
   conflict: 409,
+  "context-closed": 410,
   "blocked-scheme": 403,
   "blocked-credentials": 403,
   "blocked-private": 403,

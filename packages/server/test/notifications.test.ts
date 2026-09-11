@@ -37,7 +37,7 @@ test("malformed JSON, unsupported version, invalid rows, and duplicate ids fail 
   writeFileSync(file, "{ not json");
   assert.deepEqual(await createNotificationStore({ file }).list(), { items: [], unread: 0 });
 
-  writeFileSync(file, JSON.stringify({ version: 2, items: [input(1)] }));
+  writeFileSync(file, JSON.stringify({ version: 1, items: [input(1)] }));
   assert.deepEqual(await createNotificationStore({ file }).list(), { items: [], unread: 0 });
 
   const good: NotificationRecord = {
@@ -45,18 +45,19 @@ test("malformed JSON, unsupported version, invalid rows, and duplicate ids fail 
     title: "t", body: "b", ts: 5, read: false,
   };
   writeFileSync(file, JSON.stringify({
-    version: 1,
+    version: 2,
     items: [
-      good,
-      { ...good, id: "id-1" },                       // duplicate id → discarded
-      { ...good, id: "id-2", kind: "explosion" },    // unknown kind → discarded
-      { ...good, id: "id-3", ts: "soon" },           // bad ts → discarded
-      { ...good, id: "id-3b", ts: 5.5 },             // cursor must be an integer
-      { ...good, id: "" },                           // empty id → discarded
+      { record: good, recipient: { userId: "__isolated_test__", spaceId: "__isolated_test__" } },
+      { record: { ...good, id: "id-1" }, recipient: { userId: "__isolated_test__", spaceId: "__isolated_test__" } },
+      { record: { ...good, id: "id-2", kind: "explosion" }, recipient: { userId: "__isolated_test__", spaceId: "__isolated_test__" } },
+      { record: { ...good, id: "id-3", ts: "soon" }, recipient: { userId: "__isolated_test__", spaceId: "__isolated_test__" } },
+      { record: { ...good, id: "id-3b", ts: 5.5 }, recipient: { userId: "__isolated_test__", spaceId: "__isolated_test__" } },
+      { record: { ...good, id: "" }, recipient: { userId: "__isolated_test__", spaceId: "__isolated_test__" } },
       "garbage",                                     // non-object → discarded
-      { ...good, id: "id-out-of-order", ts: 4 },      // would break oldest-first cursor order
-      { ...good, id: "id-4", ts: 6, read: true },
+      { record: { ...good, id: "id-out-of-order", ts: 4 }, recipient: { userId: "__isolated_test__", spaceId: "__isolated_test__" } },
+      { record: { ...good, id: "id-4", ts: 6, read: true }, recipient: { userId: "__isolated_test__", spaceId: "__isolated_test__" } },
     ],
+    recipients: [],
   }));
   const loaded = await createNotificationStore({ file }).list();
   assert.deepEqual(loaded.items.map((r) => r.id), ["id-1", "id-4"]);
@@ -80,9 +81,9 @@ test("timestamps are strictly increasing under a fixed clock; 250 adds retain th
   }
 
   // Disk and reload retain exactly the newest 200 in oldest-first order.
-  const onDisk = JSON.parse(readFileSync(file, "utf8")) as { version: number; items: NotificationRecord[] };
-  assert.equal(onDisk.version, 1);
-  assert.deepEqual(onDisk.items.map((r) => r.id), items.map((r) => r.id));
+  const onDisk = JSON.parse(readFileSync(file, "utf8")) as { version: number; items: Array<{ record: NotificationRecord }> };
+  assert.equal(onDisk.version, 2);
+  assert.deepEqual(onDisk.items.map((r) => r.record.id), items.map((r) => r.id));
   const reloaded = await createNotificationStore({ file }).list();
   assert.deepEqual(reloaded.items.map((r) => r.id), items.map((r) => r.id));
 
@@ -177,8 +178,8 @@ test("concurrent add/read/clear serialize without resurrecting an older snapshot
   const { items, unread } = await store.list();
   assert.equal(items.length, 1);
   assert.equal(unread, 1);
-  const onDisk = JSON.parse(readFileSync(file, "utf8")) as { items: NotificationRecord[] };
-  assert.deepEqual(onDisk.items.map((r) => r.id), items.map((r) => r.id));
+  const onDisk = JSON.parse(readFileSync(file, "utf8")) as { items: Array<{ record: NotificationRecord }> };
+  assert.deepEqual(onDisk.items.map((r) => r.record.id), items.map((r) => r.id));
 });
 
 test("failed persistence never publishes a non-durable add, read, or clear in memory", async () => {
@@ -236,6 +237,7 @@ function routeHarness(store: NotificationStore) {
       url,
       path: url.pathname, method,
       body: async () => body,
+      space: { userId: "__isolated_test__", spaceId: "__isolated_test__" },
       json: (code: number, b: unknown) => { status = code; payload = b; },
     } as unknown as RouteRequest;
     const handled = await routes(rc);
@@ -331,4 +333,38 @@ test("unmatched paths and methods fall through to the next handler", async () =>
   assert.equal((await call("GET", "/api/notifications/read")).handled, false);
   assert.equal((await call("POST", "/api/notifications")).handled, false);
   assert.equal((await call("GET", "/api/other")).handled, false);
+});
+
+test("records, ids, recipient policies, and revocation are account/Space scoped", async () => {
+  const allowed = new Set(["usr_a\0sp_a", "usr_b\0sp_b"]);
+  const store = createNotificationStore({
+    file: tmpFile(),
+    hasAccess: (account) => allowed.has(`${account.userId}\0${account.spaceId}`),
+  });
+  const a = { userId: "usr_a", spaceId: "sp_a" };
+  const b = { userId: "usr_b", spaceId: "sp_b" };
+  const one = await store.add(a, input(1, { sessionId: "ses_same", projectId: "prj_same" }));
+  const two = await store.add(b, input(2, { sessionId: "ses_same", projectId: "prj_same" }));
+  assert.ok(one && two);
+  assert.deepEqual((await store.list(a)).items.map((row) => row.id), [one.id]);
+  assert.deepEqual((await store.list(b)).items.map((row) => row.id), [two.id]);
+  assert.equal(await store.get(b, one.id), undefined);
+  assert.deepEqual(await store.read(b, [one.id]), { updated: 0, unread: 1 });
+  assert.deepEqual(await store.read(a, [two.id]), { updated: 0, unread: 1 });
+  assert.deepEqual(await store.clear(a), { cleared: 1, unread: 0 });
+  assert.deepEqual((await store.list(b)).items.map((row) => row.id), [two.id]);
+  assert.deepEqual(await store.readAll(a), { updated: 0, unread: 0 });
+  assert.deepEqual(await store.readAll(b), { updated: 1, unread: 0 });
+  assert.equal(await store.registerSessionRecipient("ses_same", a), true);
+  assert.equal(await store.registerSessionRecipient("ses_same", b), true);
+  assert.deepEqual(await store.recipientForSession("ses_same", { spaceId: "sp_a" }), a);
+  assert.deepEqual(await store.recipientForSession("ses_same", { spaceId: "sp_b" }), b);
+  allowed.delete("usr_a\0sp_a");
+  assert.deepEqual(await store.list(a), { items: [], unread: 0 });
+  assert.equal(await store.get(a, one.id), undefined);
+  assert.equal(await store.recipientForSession("ses_same", { spaceId: "sp_a" }), undefined);
+
+  assert.deepEqual(await store.removeAccount(b.userId), { cleared: 1, recipients: 1 });
+  assert.deepEqual(await store.list(b), { items: [], unread: 0 });
+  assert.equal(await store.recipientForSession("ses_same", { spaceId: "sp_b" }), undefined);
 });

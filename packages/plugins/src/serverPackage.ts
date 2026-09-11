@@ -75,6 +75,9 @@ export interface ServerBroadcast {
   notification?(record: NotificationRecord): void;
   pluginChanged?(packageId: string): void;
   packageChanged?(pkg: PackageDescriptorDto): void;
+  /** One repository's worktree topology changed. Scoped to the affected
+   *  project so clients refetch that topology and nothing else. */
+  worktreesChanged?(projectId: string): void;
 }
 
 /** Per-project agent-runtime pool (structural mirror of the server's pool). */

@@ -84,6 +84,10 @@ export type { SessionRetentionSummary } from "./retention.ts";
 /** Unresolved-request counters derived from durable events (never cached). */
 export interface AttentionCounts { questions: number; permissions: number; unread: number }
 
+/** Atomic queue admission result. Callers must publish queue events only when
+ * `created` is true; duplicate client tokens return their original row. */
+export interface QueueEnqueueResult { item: QueueItemDto; created: boolean }
+
 export interface SearchHit { sessionId: string; field: "message"; snippet: string }
 
 export interface PinnedMessageContext {
@@ -226,7 +230,7 @@ export interface Store extends SessionPersistence {
     input: RuntimeRestartRecoveryInput,
   ): Promise<RuntimeRestartRecoveryResult | undefined>;
   // -- durable delivery queue (WP3) --
-  enqueue(sessionId: string, text: string, delivery: DeliveryMode, attachments?: AttachmentRef[]): Promise<QueueItemDto>;
+  enqueue(sessionId: string, text: string, delivery: DeliveryMode, attachments?: AttachmentRef[], clientOperationId?: string): Promise<QueueEnqueueResult>;
   queueList(sessionId: string): Promise<QueueItemDto[]>;
   /** Updates only the queued text; delivery, attachments, position, and timestamps stay unchanged. */
   queueEdit(sessionId: string, queueId: string, text: string): Promise<QueueItemDto | undefined>;
@@ -1008,12 +1012,13 @@ export function createStore(dbPath: string): Store {
     sessionId: string,
     mutationKind: RuntimeMutationKind,
     replay: ReplayPolicy = { kind: "never" },
+    clientOperationId?: string,
   ): DurableOperation {
     assertReplayPolicy(replay);
     const next = prep(
       "SELECT COALESCE(MAX(ordinal), 0) + 1 AS next FROM runtime_operations WHERE session_id = ?",
     ).get(sessionId) as { next: number };
-    const operationId = randomUUID();
+    const operationId = clientOperationId ?? randomUUID();
     const now = Date.now();
     prep(
       `INSERT INTO runtime_operations (
@@ -1035,13 +1040,14 @@ export function createStore(dbPath: string): Store {
 
   const mutationStateData = (
     operation: DurableOperation,
-    extra: { code?: string; message?: string } = {},
+    extra: { code?: string; message?: string; clientRequestFingerprint?: string } = {},
   ): JsonObject => ({
     operationId: operation.operationId,
     ordinal: operation.ordinal,
     mutationKind: operation.mutationKind,
     ...(extra.code ? { code: extra.code } : {}),
     ...(extra.message ? { message: extra.message } : {}),
+    ...(extra.clientRequestFingerprint ? { clientRequestFingerprint: extra.clientRequestFingerprint } : {}),
   });
 
   function appendMutationState(
@@ -1054,7 +1060,7 @@ export function createStore(dbPath: string): Store {
       | "mutation/uncertainty-recorded"
       | "mutation/nonapplication-confirmed"
       | "mutation/fenced",
-    extra: { code?: string; message?: string } = {},
+    extra: { code?: string; message?: string; clientRequestFingerprint?: string } = {},
   ): SessionEvent | undefined {
     const tombstoned = prep(
       `SELECT 1 AS one FROM deletion_tombstones
@@ -1071,16 +1077,49 @@ export function createStore(dbPath: string): Store {
 
   async function prepareOperation(input: PrepareOperationInput): Promise<PreparedOperationResult> {
     return transaction(() => {
+      const existing = input.clientOperationId ? operationRow(input.clientOperationId) : undefined;
+      if (existing) {
+        const operation = rowToOperation(existing);
+        const owner = operation.ownerEventSeq === undefined ? undefined : prep(
+          "SELECT * FROM events WHERE session_id = ? AND seq = ?",
+        ).get(operation.sessionId, operation.ownerEventSeq) as unknown as Row | undefined;
+        const sameIntent = owner !== undefined
+          && owner.type === input.intentEvent.type
+          && owner.ignorable === (input.intentEvent.ignorable ? 1 : 0)
+          && owner.data === JSON.stringify(input.intentEvent.data);
+        if (operation.sessionId !== input.sessionId
+          || operation.mutationKind !== input.mutationKind
+          || !sameIntent) {
+          throw Object.assign(new Error("client operation id is already bound to another mutation"), {
+            code: "client-operation-conflict",
+          });
+        }
+        const prepared = prep(
+          "SELECT * FROM events WHERE session_id = ? AND type = 'mutation/prepared' AND json_extract(data, '$.operationId') = ? ORDER BY seq LIMIT 1",
+        ).get(operation.sessionId, operation.operationId) as unknown as Row | undefined;
+        if (!prepared) throw Object.assign(new Error("durable operation has no preparation event"), { code: "corrupt-operation" });
+        const preparedData = JSON.parse(prepared.data) as { clientRequestFingerprint?: unknown };
+        if (input.clientRequestFingerprint
+          && preparedData.clientRequestFingerprint !== input.clientRequestFingerprint) {
+          throw Object.assign(new Error("client operation id is already bound to another request"), {
+            code: "client-operation-conflict",
+          });
+        }
+        return { operation, intentEvent: rowToEvent(owner), stateEvent: rowToEvent(prepared) };
+      }
       const operation = insertPreparedOperation(
         input.sessionId,
         input.mutationKind,
         input.replay ?? { kind: "never" },
+        input.clientOperationId,
       );
       const intentEvent = appendInputInTransaction(input.sessionId, input.intentEvent);
       prep("UPDATE runtime_operations SET owner_event_seq = ? WHERE operation_id = ?")
         .run(intentEvent.seq, operation.operationId);
       const updated = rowToOperation(operationRow(operation.operationId)!);
-      const stateEvent = appendMutationState(updated, "mutation/prepared");
+      const stateEvent = appendMutationState(updated, "mutation/prepared", {
+        ...(input.clientRequestFingerprint ? { clientRequestFingerprint: input.clientRequestFingerprint } : {}),
+      });
       if (!stateEvent) {
         throw Object.assign(new Error("session is deletion-tombstoned"), {
           code: "tombstoned",
@@ -2039,21 +2078,35 @@ export function createStore(dbPath: string): Store {
     };
   };
 
-  async function enqueue(sessionId: string, text: string, delivery: DeliveryMode, attachments?: AttachmentRef[]): Promise<QueueItemDto> {
-    const queueId = randomUUID();
+  async function enqueue(sessionId: string, text: string, delivery: DeliveryMode, attachments?: AttachmentRef[], clientOperationId?: string): Promise<QueueEnqueueResult> {
+    const queueId = clientOperationId ?? randomUUID();
     const createdAt = Date.now();
-    const position = transaction(() => {
+    const result = transaction(() => {
+      if (clientOperationId) {
+        const existing = prep("SELECT * FROM session_queue WHERE queue_id = ?").get(queueId) as unknown as QueueRow | undefined;
+        if (existing) {
+          const same = existing.session_id === sessionId
+            && existing.text === text
+            && existing.delivery === delivery
+            && (existing.attachments ?? null) === (attachments?.length ? JSON.stringify(attachments) : null);
+          if (!same) throw Object.assign(new Error("client operation id is already bound to another queue admission"), { code: "client-operation-conflict" });
+          return { item: rowToQueueItem(existing), created: false };
+        }
+      }
       const row = prep("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM session_queue WHERE session_id = ?")
         .get(sessionId) as { next: number };
       prep(
         "INSERT INTO session_queue (queue_id, session_id, position, text, delivery, created_at, attachments) VALUES (?, ?, ?, ?, ?, ?, ?)",
       ).run(queueId, sessionId, Number(row.next), text, delivery, createdAt, attachments?.length ? JSON.stringify(attachments) : null);
-      return Number(row.next);
+      return {
+        item: {
+          id: queueId, sessionId, position: Number(row.next), text, delivery, createdAt,
+          ...(attachments?.length ? { attachments } : {}),
+        } satisfies QueueItemDto,
+        created: true,
+      };
     });
-    return {
-      id: queueId, sessionId, position, text, delivery, createdAt,
-      ...(attachments?.length ? { attachments } : {}),
-    };
+    return result;
   }
 
   function queueList(sessionId: string): Promise<QueueItemDto[]> {

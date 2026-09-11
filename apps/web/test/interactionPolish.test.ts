@@ -106,6 +106,8 @@ test("P1 mobile refinements remain wired to their visible surfaces", async () =>
   assert.match(sidebar, /className=\{`pull-refresh/, "the project/session picker supports pull-to-refresh");
   assert.match(settings, /isEdgeBackSwipe/, "settings supports the mobile back gesture");
   assert.match(models, /className="model-row-provider-logo"/, "mobile model rows identify providers");
+  assert.match(models, /onBack=\{\(\) => closeDetails\(true\)\}/,
+    "phone model details return focus to their originating information control");
   assert.match(folder, /className="folder-path mono"/, "the full-screen project picker keeps search/path entry");
   assert.match(empty, /aria-busy=\{busy \|\| undefined\}/, "settings empty states distinguish loading");
   assert.match(haptics, /navigator\.vibrate\(PATTERNS\[kind\]\)/, "key touch outcomes use bounded native haptics");

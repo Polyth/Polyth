@@ -8,26 +8,27 @@ import { buildPushPayload } from "../push.ts";
 export function pushRoutes(push: PushService): RouteHandler {
   return async (rc) => {
     const { path, method } = rc;
+    const account = { userId: rc.space.userId, spaceId: rc.space.spaceId };
     if (!path.startsWith("/api/push/")) return false;
 
     if (path === "/api/push/key" && method === "GET") {
-      rc.json(200, { publicKey: push.publicKey(), subscriptions: push.count() });
+      rc.json(200, { publicKey: push.publicKey(), subscriptions: push.count(account) });
       return true;
     }
     if (path === "/api/push/subscribe" && method === "POST") {
       const b = await rc.body();
-      push.subscribe(b);
-      rc.json(200, { ok: true, subscriptions: push.count() });
+      push.subscribe(account, b);
+      rc.json(200, { ok: true, subscriptions: push.count(account) });
       return true;
     }
     if (path === "/api/push/subscribe" && method === "DELETE") {
       const b = await rc.body();
-      const removed = push.unsubscribe(String(b.endpoint ?? ""));
-      rc.json(200, { ok: removed, subscriptions: push.count() });
+      const removed = push.unsubscribe(account, String(b.endpoint ?? ""));
+      rc.json(200, { ok: removed, subscriptions: push.count(account) });
       return true;
     }
     if (path === "/api/push/test" && method === "POST") {
-      const r = await push.send(buildPushPayload("completed", {
+      const r = await push.send(account, buildPushPayload("completed", {
         sessionId: "",
         sessionTitle: "Test notification",
         statusText: "push is working",

@@ -155,12 +155,10 @@ test("delete removes a session whose worktree disappeared without constructing a
   const { sessions, store } = makeService(fake, async () => {
     throw Object.assign(new Error("Runtime workspace/cwd no longer exists"), { code: "unavailable" });
   });
-  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  const id = "missing-worktree";
   const missingWorktree = join(tmpdir(), "polyth-delete-missing-worktree");
-  const projection = await store.projection(id);
-  assert.ok(projection);
   await store.upsertProjection({
-    ...projection,
+    id, projectId: "p1", title: "T", status: "idle", createdAt: 1, updatedAt: 1,
     backendSessionId: "be_missing-worktree",
     worktreePath: missingWorktree,
     worktreeState: "missing",

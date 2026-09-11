@@ -2,12 +2,15 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { api } from "@polyth/session/web-api";
 import { consumeAuthPrefetch } from "./authPrefetch.ts";
-import { init, navigateBackInApp, openNativeAppPath, reconnectSync } from "./init.ts";
+import { init, navigateBackInApp, openNativeAppPath, setSyncForeground } from "./init.ts";
+import { flushClientPersistence } from "./clientPersistence.ts";
+import { initializeClientReliabilityContext } from "./reliabilityContext.ts";
 import { exposeSlots } from "./slots.ts";
 import { exposeSurfaces } from "./surfaces.ts";
 import { exposeCapabilities } from "./capabilities.ts";
 import { installShell } from "./shell.ts";
 import { installCommandSlotBridge } from "./commandBridge.ts";
+import { installNativeConnectionCommands } from "./nativeConnections.ts";
 import { applySettingsToDom } from "./settings.ts";
 import { applyUiSettings } from "./uiPrefs.ts";
 import { setNativeKeyboardInset, startMobileViewport } from "./mobileViewport.ts";
@@ -36,6 +39,7 @@ import { isWorkspaceSurface, listSurfaces } from "./surfaces.ts";
 import { installNativeMobileIntegration } from "@polyth/mobile/native";
 import { handleNativeBack } from "./nativeMobile.ts";
 import { applyBackgroundToDom } from "./backgrounds.ts";
+import { openPendingNativePushAfterHydration, reconcileNativePushForeground } from "./nativePush.ts";
 
 applySettingsToDom(getState().settings);
 applyUiSettings();
@@ -88,16 +92,16 @@ installNativeMobileIntegration({
     );
   },
   openDeepLink: openNativeAppPath,
-  openPairingLink: () => {
-    // Pairing links are retained in the mobile pending-pair store for the
-    // connection screen. The connected app does not start pairing itself.
+  setForeground: (active) => {
+    setSyncForeground(active);
+    void reconcileNativePushForeground(active).catch(() => undefined);
   },
-  reconnect: reconnectSync,
   setKeyboardInset: setNativeKeyboardInset,
 });
 // Palette commands + keyboard shortcuts: one install, synced with the
 // capability registry from then on (UX-PERSONAS: search sees every tool).
 installShell();
+installNativeConnectionCommands();
 installCommandSlotBridge();
 
 // F16: init() loads REST data and opens /ws — it must not run until the
@@ -108,7 +112,7 @@ const bootOnce = (): void => {
   booted = true;
   void bootPackages().catch((error: unknown) =>
     console.error("[polyth] web package boot failed", error));
-  init();
+  void init().then(openPendingNativePushAfterHydration).catch(() => undefined);
 };
 
 function Root() {
@@ -120,7 +124,15 @@ function Root() {
     // main.tsx started this fetch before the app graph downloaded; falling
     // back to a fresh call covers re-mounts (locale switches remount Root).
     void (consumeAuthPrefetch() ?? api.authStatus())
-      .then((s) => { if (!cancelled) setPhase(s.required && !s.authorized ? "locked" : "ready"); })
+      .then(async (s) => {
+        // Account restoration above must finish before the trusted native
+        // connection namespace selects its app-owned persistence backend.
+        if (!s.required || s.authorized) {
+          await initializeClientReliabilityContext();
+          await reconcileNativePushForeground(true).catch(() => undefined);
+        }
+        if (!cancelled) setPhase(s.required && !s.authorized ? "locked" : "ready");
+      })
       // Status unreachable → proceed; init()'s own error banner reports it.
       .catch(() => { if (!cancelled) setPhase("ready"); });
     // Mid-session 401 (session revoked / password newly set) re-locks the UI.
@@ -132,13 +144,27 @@ function Root() {
     };
   }, []);
 
+  useEffect(() => {
+    const flush = () => { void flushClientPersistence().catch((error) => {
+      console.warn("[polyth] client recovery metadata was not fully persisted", error);
+    }); };
+    window.addEventListener("pagehide", flush);
+    return () => window.removeEventListener("pagehide", flush);
+  }, []);
+
   useEffect(() => { if (phase === "ready") bootOnce(); }, [phase]);
 
   if (phase === "checking") return null;
   if (phase === "locked") {
     // After a mid-session revoke the store/WS state is stale — reload for a
     // clean slate; on the initial lock just proceed into the normal boot.
-    return <LockScreen key={locale} onUnlocked={() => { if (booted) location.reload(); else setPhase("ready"); }} />;
+    return <LockScreen key={locale} onUnlocked={() => {
+      if (booted) {
+        location.reload();
+        return;
+      }
+      void initializeClientReliabilityContext().then(() => setPhase("ready"));
+    }} />;
   }
   return <App key={locale} />;
 }

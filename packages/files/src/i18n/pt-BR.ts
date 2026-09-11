@@ -40,7 +40,7 @@ export const ptBR: FilesMessages = {
   "editor.filepane.saveValueS": "Salvar ( {MOD} S)",
   "editor.filepane.savingRecreatesItYourBufferIsPreserved": "Ao salvar, o conteúdo é recriado; seu buffer é preservado.",
   "editor.filepane.showValue": "Exibir {value}",
-  "editor.filepane.truncatedFileExceeds512KbReadOnly": "Arquivo truncado — excede 512 KB. Somente leitura.",
+  "editor.filepane.truncatedFileExceeds512KbReadOnly": "Arquivo truncado — excede 8 MB. Somente leitura.",
   "editor.filepane.unsavedChanges": "Alterações não salvas",
   "editor.filepane.valueMode": "Modo {previewName}",
   "editor.filepane.wrapLines": "Linhas de enrolamento ✓",

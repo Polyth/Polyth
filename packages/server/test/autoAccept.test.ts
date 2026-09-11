@@ -431,7 +431,7 @@ test("error stop + open permission → waiting → resolve → failed; queue sta
   fake.emit(id, { type: "turn/stopped", reason: "error", error: "boom" });
   await flush();
   assert.equal((await store.projection(id))?.status, "waiting");
-  const interrupt = await store.enqueue(id, "late interrupt", "interrupt");
+  const interrupt = (await store.enqueue(id, "late interrupt", "interrupt")).item;
   const queued = await store.queueList(id);
   await store.queueReorder(id, [interrupt.id, ...queued.filter((item) => item.id !== interrupt.id).map((item) => item.id)]);
 

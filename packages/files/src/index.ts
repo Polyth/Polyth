@@ -7,13 +7,22 @@ export { browseHost, mkdirHost, resolveHostPath, isBlockedHostPath } from "./bro
 export type { BrowseEntry, BrowseOptions, BrowseResult } from "./browse.ts";
 
 const MAX_READ = 512 * 1024;
+const MAX_EDIT = 8 * 1024 * 1024;
 const BINARY_SCAN = 8 * 1024;
 const MAX_RAW = 20 * 1024 * 1024;
 
 /** Shared binary cap: raw serving, uploads, and message attachments (F2). */
 export const MAX_RAW_BYTES = MAX_RAW;
-/** Text-read cap shared with the remote implementation (see remote.ts). */
+/** Preview cap: how much text a browse/hover/inline read serves by default.
+ *  Shared with the remote implementation (see remote.ts). This is a transfer
+ *  cost decision, not a data boundary — a caller that is going to EDIT asks
+ *  for `editable` and gets MAX_EDIT_BYTES instead. */
 export const MAX_READ_BYTES = MAX_READ;
+/** Editable cap. A document opened for editing must hold the file's complete
+ *  contents, because that buffer is what a save writes back; a truncated
+ *  buffer would silently delete the tail. Files past this cap stay `truncated`
+ *  (and therefore read-only) rather than risk that. */
+export const MAX_EDIT_BYTES = MAX_EDIT;
 /** NUL-scan length shared with the remote implementation (see remote.ts). */
 export const BINARY_SCAN_BYTES = BINARY_SCAN;
 
@@ -22,6 +31,12 @@ export interface FileEntry {
   path: string;
   dir: boolean;
   size?: number;
+}
+
+export interface FileReadOptions {
+  /** Read for an editable document: serve up to MAX_EDIT_BYTES instead of the
+   *  preview cap, so the caller's buffer is the whole file. */
+  editable?: boolean;
 }
 
 export interface FileReadResult {
@@ -90,7 +105,7 @@ export interface SearchOptions {
 
 export interface FileService {
   tree(root: string, opts?: { path?: string; hidden?: boolean }): Promise<FileEntry[]>;
-  read(root: string, rel: string): Promise<FileReadResult>;
+  read(root: string, rel: string, opts?: FileReadOptions): Promise<FileReadResult>;
   stat(root: string, rel: string): Promise<FileStatResult>;
   readRaw(root: string, rel: string): Promise<FileRawResult>;
   write(root: string, rel: string, content: string, opts?: WriteOptions): Promise<{ revision: string }>;
@@ -141,8 +156,9 @@ export function createFileService(): FileService {
       return out;
     },
 
-    async read(root, rel) {
+    async read(root, rel, opts) {
       const abs = await resolveInside(root, rel, { allowAbsolute: true });
+      const cap = opts?.editable ? MAX_EDIT : MAX_READ;
       const fh = await open(abs, "r");
       try {
         const st = await fh.stat();
@@ -155,9 +171,9 @@ export function createFileService(): FileService {
             return { path: posix(rel), content: "", truncated: false, tooLarge: true, revision };
           }
         }
-        if (st.size > MAX_READ) {
-          const buf = Buffer.alloc(MAX_READ);
-          await fh.read(buf, 0, MAX_READ, 0);
+        if (st.size > cap) {
+          const buf = Buffer.alloc(cap);
+          await fh.read(buf, 0, cap, 0);
           return { path: posix(rel), content: buf.toString("utf8"), truncated: true, revision };
         }
         const content = await readFile(abs, "utf8");

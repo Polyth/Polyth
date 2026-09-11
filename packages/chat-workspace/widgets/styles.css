@@ -6,7 +6,7 @@
   position: relative;
   container-type: inline-size;
   padding-bottom: var(--safe-bottom);
-  background: transparent;
+  background: var(--raised);
 }
 
 .chat-workspace-tabstrip {

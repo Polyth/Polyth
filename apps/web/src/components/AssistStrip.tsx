@@ -36,13 +36,17 @@ export default function AssistStrip() {
         <span className="assist-recap-text">{assist.recap}</span>
         <button className="assist-dismiss" aria-label={tr("assiststrip.dismissRecap")} title={tr("assiststrip.dismiss")} onClick={dismiss}>{tr("assiststrip.message")}</button>
       </div>
-      <button
-        className="assist-chip"
-        title={tr("assiststrip.fillTheComposerWithThisSuggestionDoes")}
-        onClick={() => { requestComposerInsert(assist.suggestion); dismiss(); }}
-      >
-        <span aria-hidden>↳</span> {assist.suggestion}
-      </button>
+      {/* A finished task has no honest follow-up. The recap stands alone
+          rather than carrying an invented next step. */}
+      {assist.suggestion ? (
+        <button
+          className="assist-chip"
+          title={tr("assiststrip.fillTheComposerWithThisSuggestionDoes")}
+          onClick={() => { requestComposerInsert(assist.suggestion!); dismiss(); }}
+        >
+          <span aria-hidden>↳</span> {assist.suggestion}
+        </button>
+      ) : null}
     </div>
   );
 }

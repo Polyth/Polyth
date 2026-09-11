@@ -204,7 +204,9 @@ export function workspaceRoutes(deps: {
     }
     if (path === "/api/files/read" && method === "GET") {
       const fs = await filesFor(query("projectId"));
-      json(200, await fs.read(await rootOfQuery(), query("path") ?? ""));
+      json(200, await fs.read(await rootOfQuery(), query("path") ?? "", {
+        editable: query("editable") === "true",
+      }));
       return true;
     }
     if (path === "/api/files/write" && method === "POST") {

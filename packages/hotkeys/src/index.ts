@@ -48,7 +48,20 @@ export interface KeyEventLike {
   ctrlKey: boolean;
   shiftKey: boolean;
   altKey: boolean;
+  /** Native KeyboardEvent.getModifierState. Optional so plain literals and
+   *  test fixtures remain valid event-likes. */
+  getModifierState?(key: string): boolean;
 }
+
+/** AltGraph is how several keyboard layouts type ordinary characters — `@`,
+ *  `{`, `\` — and browsers report it as ctrlKey+altKey. Treating that as a
+ *  `mod+alt` shortcut would swallow the character the user is typing. Ask the
+ *  event when it can answer; the ctrl+alt reading is only a fallback for
+ *  event-likes that cannot. */
+const isAltGraph = (e: KeyEventLike): boolean =>
+  typeof e.getModifierState === "function"
+    ? e.getModifierState("AltGraph")
+    : e.ctrlKey && e.altKey && !e.metaKey;
 
 const MODIFIER_KEYS = new Set(["meta", "control", "ctrl", "shift", "alt", "os"]);
 const NAMED_KEYS = new Set([
@@ -78,6 +91,7 @@ export function normalizeCombo(raw: string): string | null {
 export function comboFromEvent(e: KeyEventLike): string | null {
   const key = e.key.toLowerCase();
   if (MODIFIER_KEYS.has(key)) return null;
+  if (isAltGraph(e)) return null;
   return [
     e.metaKey || e.ctrlKey ? "mod" : "",
     e.shiftKey ? "shift" : "",

@@ -21,6 +21,12 @@ const api = createApiTransport({
 const errorText = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
 
+type PairingOffer = PairingOfferDto & {
+  qrModules?: boolean[][];
+  numericCode?: string;
+  numericExpiresAt?: string;
+};
+
 const PROFILE_OPTIONS: Array<{ value: GrantProfileId; label: string }> = [
   { value: "observe", label: "Observe" },
   { value: "interact", label: "Interact" },
@@ -52,6 +58,13 @@ function transportLabel(value?: string): string {
   return "Offline";
 }
 
+function secondsUntil(value: string | undefined, now: number): number | null {
+  if (!value) return null;
+  const expires = Date.parse(value);
+  if (!Number.isFinite(expires)) return null;
+  return Math.max(0, Math.ceil((expires - now) / 1_000));
+}
+
 function QrMatrix({ modules, payload }: { modules: boolean[][]; payload: string }) {
   return (
     <div className="pkg-tunnel-qr" role="img" aria-label="Pairing QR code">
@@ -73,8 +86,9 @@ export default function LinkPage() {
   const [pairingOpen, setPairingOpen] = useState(false);
   const [label, setLabel] = useState("");
   const [profile, setProfile] = useState<GrantProfileId>("interact");
-  const [offer, setOffer] = useState<(PairingOfferDto & { qrModules?: boolean[][] }) | null>(null);
+  const [offer, setOffer] = useState<PairingOffer | null>(null);
   const [pairing, setPairing] = useState<PairingStateDto | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const pairingIdRef = useRef<string | null>(null);
   pairingIdRef.current = offer?.pairing.id ?? null;
 
@@ -94,6 +108,13 @@ export default function LinkPage() {
   }, []);
 
   useEffect(() => { void reload(); }, [reload]);
+
+  useEffect(() => {
+    if (!offer?.numericExpiresAt) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, [offer?.numericExpiresAt]);
 
   useEffect(() => {
     const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -148,13 +169,31 @@ export default function LinkPage() {
     return () => clearInterval(timer);
   }, [offer?.pairing.id, reload]);
 
+  const createPairing = async (): Promise<PairingOffer> => {
+    return api.post<PairingOffer>("/api/tunnel/pairing", { label, profile });
+  };
+
   const startPairing = async () => {
     setBusy(true);
     setError("");
     try {
-      const created = await api.post<PairingOfferDto & { qrModules?: boolean[][] }>("/api/tunnel/pairing", {
-        label, profile,
-      });
+      const created = await createPairing();
+      setOffer(created);
+      setPairing(created.pairing as unknown as PairingStateDto);
+    } catch (cause) {
+      setError(errorText(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const regeneratePairing = async () => {
+    if (!offer) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.delete(`/api/tunnel/pairing/${offer.pairing.id}`);
+      const created = await createPairing();
       setOffer(created);
       setPairing(created.pairing as unknown as PairingStateDto);
     } catch (cause) {
@@ -209,10 +248,11 @@ export default function LinkPage() {
 
   const phrase = pairing?.safetyPhrase ?? null;
   const canAllow = Boolean(pairing?.deviceConfirmed) && pairing?.state !== "committed";
+  const numericSeconds = secondsUntil(offer?.numericExpiresAt, now);
 
   return (
     <div className="pkg-tunnel">
-      <PageHead title="Polyth Link" blurb="Pair a phone with a short-lived QR code when the host binary is installed and the endpoint is bound. The QR never contains a password." />
+      <PageHead title="Polyth Link" blurb="Pair a phone with a short-lived QR or six-digit code. Both bootstrap the same pinned Polyth Link trust flow; the code is never sent as a plaintext credential." />
       {error && <div className="pkg-tunnel-error" role="alert">{error}</div>}
       <section className="pkg-tunnel-status">
         <div>
@@ -235,7 +275,7 @@ export default function LinkPage() {
         <Button disabled={!status?.hostProcessReady} onClick={() => void rotate()}>Rotate host identity</Button>
       </div>
       {devices.length === 0 ? (
-        <EmptyState title="No paired devices" body="Create a QR code, scan it from the Polyth mobile app, then compare the four words on both screens." />
+        <EmptyState title="No paired devices" body="Create a pairing invitation, then scan the QR or enter its six-digit code in the Polyth mobile app. Compare the four words before allowing the device." />
       ) : (
         <ul className="pkg-tunnel-devices">
           {devices.map((device) => (
@@ -258,7 +298,8 @@ export default function LinkPage() {
           onClose={() => { void reject(); }}
           footer={offer ? (
             <>
-              <Button onClick={() => void reject()}>Reject</Button>
+              <Button disabled={busy} onClick={() => void regeneratePairing()}>Generate new code</Button>
+              <Button disabled={busy} onClick={() => void reject()}>Reject</Button>
               <Button variant="primary" disabled={!canAllow || busy} onClick={() => void approve()}>
                 Allow device
               </Button>
@@ -266,7 +307,7 @@ export default function LinkPage() {
           ) : (
             <>
               <Button onClick={() => setPairingOpen(false)}>Cancel</Button>
-              <Button variant="primary" busy={busy} onClick={() => void startPairing()}>Create QR</Button>
+              <Button variant="primary" busy={busy} onClick={() => void startPairing()}>Create invitation</Button>
             </>
           )}
         >
@@ -277,7 +318,7 @@ export default function LinkPage() {
                 <TextInput value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Optional" />
               </label>
               <Select label="Access profile" value={profile} options={PROFILE_OPTIONS} onChange={(value) => setProfile(value as GrantProfileId)} />
-              <p>Tickets use the host’s currently bound transport policy. Default access is Interact. Full remote control still cannot manage pairing, grants, or host identity.</p>
+              <p>Default access is Interact. Full remote control still cannot manage pairing, grants, or host identity.</p>
             </div>
           )}
           {offer && (
@@ -285,6 +326,22 @@ export default function LinkPage() {
               {offer.qrModules && offer.qrModules.length > 0
                 ? <QrMatrix modules={offer.qrModules} payload={offer.qrPayload} />
                 : <code className="pkg-tunnel-code">{offer.qrPayload}</code>}
+              {offer.numericCode && (
+                <div className="pkg-tunnel-numeric">
+                  <span>Or enter this code on your phone</span>
+                  <div>
+                    <strong>{offer.numericCode}</strong>
+                    <CopyButton text={offer.numericCode.replace(/\s+/g, "")} label="Copy pairing code" />
+                  </div>
+                  <span>
+                    {numericSeconds === null
+                      ? "Short-lived pairing code"
+                      : numericSeconds > 0
+                        ? `Expires in ${numericSeconds}s`
+                        : "Code expired — generate a new code"}
+                  </span>
+                </div>
+              )}
               {phrase ? (
                 <ol className="pkg-tunnel-phrase">
                   {phrase.map((word) => <li key={word}>{word}</li>)}

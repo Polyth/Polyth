@@ -6,8 +6,8 @@
 //
 // Geometry rules that make the sheet keyboard-safe:
 //   * height is capped against --visual-vh (mobileViewport.ts), never 100vh;
-//   * the panel sits above --keyboard-inset, so the keyboard can never cover
-//     it (§21, §47);
+//   * --visual-vh is already the visible band, so the keyboard is never
+//     subtracted or offset a second time (§21, §47);
 //   * the search field is NEVER autofocused (§25) — opening a sheet must not
 //     summon the keyboard; focus starts on the sheet itself.
 import {

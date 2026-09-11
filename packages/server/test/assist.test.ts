@@ -64,6 +64,13 @@ test("pure helpers: word cap, freshness, reply parsing", () => {
   assert.equal(parseAssistReply("just one line"), null);
   assert.equal(parseAssistReply(""), null);
 
+  // "Nothing to suggest" is a legitimate answer, not a failed one: the recap
+  // survives and the suggestion is structurally absent, never an empty chip.
+  assert.deepEqual(parseAssistReply("Recap: shipped the fix."), { recap: "shipped the fix." });
+  assert.deepEqual(parseAssistReply("Recap: shipped the fix.\nSuggestion: none"), { recap: "shipped the fix." });
+  assert.deepEqual(parseAssistReply("Recap: shipped the fix.\nSuggestion: N/A"), { recap: "shipped the fix." });
+  assert.match(buildAssistPrompt("T"), /Suggestion: none/);
+
   // an over-long recap is hard-capped even if the model ignored the limit
   const long = parseAssistReply(`Recap: ${"word ".repeat(40)}\nSuggestion: do x`);
   assert.equal(long!.recap.split(/\s+/).length, RECAP_MAX_WORDS); // ellipsis rides the last word
@@ -75,9 +82,12 @@ test("pure helpers: word cap, freshness, reply parsing", () => {
   assert.match(buildAssistPrompt("T"), /<conversation>\nT\n<\/conversation>/);
   assert.match(buildNotePrompt("T"), /project note/);
 
-  const next = buildNextActionPrompt({ user: "Fix the retry path", assistant: "I found the missing await." });
-  assert.match(next, /LATEST USER MESSAGE:\nFix the retry path/);
-  assert.match(next, /LATEST ASSISTANT RESPONSE:\nI found the missing await/);
+  const next = buildNextActionPrompt([
+    { user: "Fix the retry path", assistant: "I found the missing await.", attachments: [], userSeq: 1, assistantSeq: 2 },
+  ]);
+  assert.match(next, /RECENT CONVERSATION:\nUser: Fix the retry path/);
+  assert.match(next, /Assistant: I found the missing await/);
+  assert.match(next, /An empty answer is a correct answer/);
   assert.equal(sanitizeNextActionReply("```\nSuggestion: Add a regression test.\n```"), "Add a regression test.");
   assert.equal(sanitizeNextActionReply(`"${"x".repeat(900)}"`).length, 800);
   assert.equal(sanitizeNextActionReply("Improved prompt: Fix it."), "Fix it.");
@@ -96,7 +106,7 @@ const completedExchangeEvents = () => [
   { id: "e7", sessionId: "s1", seq: 7, time: 7, type: "turn/stopped", data: { turnId: "t1", reason: "completed" }, v: 1, ignorable: true },
 ] as unknown as import("@polyth/contracts").SessionEvent[];
 
-test("manual next-action service sends only the latest completed exchange and returns an ephemeral suggestion", async () => {
+test("manual next-action service sends the recent completed exchanges without tool noise", async () => {
   const prompts: string[] = [];
   const svc = createManualSuggestionService({
     latestSeq: async () => 7,
@@ -107,7 +117,35 @@ test("manual next-action service sends only the latest completed exchange and re
   assert.equal(prompts.length, 1);
   assert.match(prompts[0]!, /latest prompt/);
   assert.match(prompts[0]!, /latest answer/);
-  assert.doesNotMatch(prompts[0]!, /older prompt|older answer|tool-only/);
+  // The preceding exchange is what a short closing message refers to, so it
+  // belongs in the context. Raw tool output still never does.
+  assert.match(prompts[0]!, /older prompt/);
+  assert.match(prompts[0]!, /older answer/);
+  assert.doesNotMatch(prompts[0]!, /tool-only/);
+});
+
+// The failure this guards against: the user says "looks good", the assistant
+// says "glad it worked", and a suggestion built from that pair alone has no
+// idea what the session was actually doing.
+test("a trivial closing exchange does not bury the work the suggestion needs", async () => {
+  const events = [
+    { id: "e1", sessionId: "s1", seq: 1, time: 1, type: "user/message", data: { text: "Add retry to the upload path" }, v: 1 },
+    { id: "e2", sessionId: "s1", seq: 2, time: 2, type: "assistant/message", data: { text: "Added exponential backoff to uploadChunk." }, v: 1 },
+    { id: "e3", sessionId: "s1", seq: 3, time: 3, type: "user/message", data: { text: "looks good" }, v: 1 },
+    { id: "e4", sessionId: "s1", seq: 4, time: 4, type: "turn/started", data: { turnId: "t2" }, v: 1, ignorable: true },
+    { id: "e5", sessionId: "s1", seq: 5, time: 5, type: "assistant/message", data: { text: "Glad it works." }, v: 1 },
+    { id: "e6", sessionId: "s1", seq: 6, time: 6, type: "turn/stopped", data: { turnId: "t2", reason: "completed" }, v: 1, ignorable: true },
+  ] as unknown as import("@polyth/contracts").SessionEvent[];
+  const prompts: string[] = [];
+  const svc = createManualSuggestionService({
+    latestSeq: async () => 6,
+    events: async () => events,
+    complete: async (_id, prompt) => { prompts.push(prompt); return ""; },
+  });
+  // An honest empty answer is passed through rather than turned into a CTA.
+  assert.deepEqual(await svc.generate("s1"), { suggestion: "", atSeq: 6 });
+  assert.match(prompts[0]!, /Add retry to the upload path/);
+  assert.match(prompts[0]!, /exponential backoff to uploadChunk/);
 });
 
 test("manual suggestion improves a draft without paying to load conversation context", async () => {

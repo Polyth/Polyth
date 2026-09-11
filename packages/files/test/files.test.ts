@@ -56,6 +56,48 @@ test("read truncates over 512KB", async () => {
   });
 });
 
+// A file past the preview cap used to be unopenable for editing: the read was
+// abbreviated, `truncated` made the document read-only, and saving was refused.
+// An editable read serves the whole file, so a round-trip through the editor
+// buffer is byte-for-byte except for the intended edit.
+test("editable read serves whole file and survives an edit round-trip", async () => {
+  await withRoot(async (root) => {
+    const line = "the quick brown fox jumps over the lazy dog\r\n";
+    const original = line.repeat(6_000); // ~264 KB … well past 512KB below
+    const big = `HEAD\r\n${original.repeat(2)}TAIL\r\n`;
+    assert.ok(big.length > 512 * 1024, "fixture must exceed the preview cap");
+    await writeFile(path.join(root, "big.txt"), big);
+
+    const preview = await files.read(root, "big.txt");
+    assert.equal(preview.truncated, true);
+    assert.equal(preview.content.length, 512 * 1024);
+
+    const full = await files.read(root, "big.txt", { editable: true });
+    assert.equal(full.truncated, false);
+    assert.equal(full.content, big);
+
+    // Edit near the beginning AND near the end, then save the whole buffer.
+    const edited = full.content.replace("HEAD\r\n", "HEADER\r\n").replace("TAIL\r\n", "TAILING\r\n");
+    await files.write(root, "big.txt", edited, { baseRevision: full.revision });
+
+    const after = await readFile(path.join(root, "big.txt"), "utf8");
+    assert.equal(after, edited);
+    assert.ok(after.startsWith("HEADER\r\n"), "leading edit applied");
+    assert.ok(after.endsWith("TAILING\r\n"), "trailing edit applied and tail not lost");
+    assert.ok(after.includes("\r\n") && !/(?<!\r)\n/.test(after), "CRLF line endings preserved");
+  });
+});
+
+test("editable read still truncates past the editable cap", async () => {
+  await withRoot(async (root) => {
+    const huge = "y".repeat(8 * 1024 * 1024 + 10);
+    await writeFile(path.join(root, "huge.txt"), huge);
+    const got = await files.read(root, "huge.txt", { editable: true });
+    assert.equal(got.truncated, true);
+    assert.equal(got.content.length, 8 * 1024 * 1024);
+  });
+});
+
 test("read detects binary via NUL in first 8KB", async () => {
   await withRoot(async (root) => {
     await writeFile(path.join(root, "blob.bin"), Buffer.from([0x00, 0x01, 0x02, 0x03]));

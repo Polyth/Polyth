@@ -88,6 +88,38 @@ test("safe-area utilities cover every viewport edge", async () => {
   );
 });
 
+test("package mobile chrome consumes canonical safe-area variables", async () => {
+  const [chat, browser, terminal] = await Promise.all([
+    read("../../../packages/chat-workspace/widgets/styles.css"),
+    read("../../../packages/browser/widgets/styles.css"),
+    read("../../../packages/terminal/widgets/styles.css"),
+  ]);
+
+  for (const css of [chat, browser, terminal]) {
+    assert.doesNotMatch(css, /env\(safe-area-inset-/);
+  }
+  assert.match(chat, /\.chat-workspace\s*\{[^}]*padding-bottom:\s*var\(--safe-bottom\)/s);
+  assert.match(browser, /padding-left:\s*max\(var\(--space-2\), var\(--safe-left\)\)/);
+  assert.match(browser, /padding-right:\s*max\(var\(--space-2\), var\(--safe-right\)\)/);
+  assert.match(terminal, /max\(var\(--space-1\), var\(--safe-bottom\)\)/);
+});
+
+test("chat workspace narrow dropdown beats its default hidden state", async () => {
+  const css = await read("../../../packages/chat-workspace/widgets/styles.css");
+  const defaultRule = css.indexOf(".chat-workspace-tab-active-dropdown {\n  display: none;");
+  const narrowRule = css.indexOf("@container (max-width: 420px)");
+  const visibleRule = css.indexOf(".chat-workspace-tab-active-dropdown {\n    display: inline-flex;", narrowRule);
+
+  assert.ok(defaultRule >= 0 && narrowRule > defaultRule && visibleRule > narrowRule);
+});
+
+test("haptics are local feedback, not a reduced-motion side effect", async () => {
+  const haptics = await read("../src/haptics.ts");
+
+  assert.match(haptics, /typeof navigator\.vibrate !== "function"/);
+  assert.doesNotMatch(haptics, /reduceAnimations|prefers-reduced-motion|desktopLowResource/);
+});
+
 test("latest-message control remains a full coarse-pointer target", async () => {
   const css = await readWebStyles();
   assert.match(
@@ -142,11 +174,11 @@ test("375px chat keeps a safe-area-aware floating shell and docked composer", as
   assert.doesNotMatch(contract, /session-bottom-nav/, "the obsolete bottom navigation is removed");
 });
 
-test("active mobile composition immediately obscures project and settings surfaces", async () => {
+test("only active chat composition obscures competing mobile surfaces", async () => {
   const css = await readWebStyles();
   const state = ":has(.composer-mobile.composer-input-active)";
 
-  assert.ok(css.includes(state), "keyboard geometry and focused-composer fallback share one visibility state");
+  assert.ok(css.includes(state), "focused chat composition owns the competing-surface visibility state");
   assert.match(
     css,
     /:is\(\.sidebar\.open, \.rail-fullscreen, \.panel-sheet, \.settings-scrim\)\s*\{[\s\S]*?transition:[\s\S]*?opacity var\(--motion-fast\)[\s\S]*?transform var\(--motion-fast\)/,
@@ -154,9 +186,40 @@ test("active mobile composition immediately obscures project and settings surfac
   );
   assert.match(
     css,
-    /body:not\(:has\(\.term-mobile-input:focus\)\):is\([\s\S]*?\[data-keyboard="open"\],[\s\S]*?:has\(\.composer-mobile\.composer-input-active\)[\s\S]*?\)\s*:is\(\.sidebar\.open, \.rail-fullscreen, \.panel-sheet, \.settings-scrim\),[\s\S]*?visibility:\s*hidden;[\s\S]*?pointer-events:\s*none;[\s\S]*?opacity:\s*0;/,
-    "the panels become immediately invisible and inert while composing",
+    /body:has\(\.composer-mobile\.composer-input-active\)\s*:is\(\.sidebar\.open, \.rail-fullscreen, \.panel-sheet, \.settings-scrim\),[\s\S]*?visibility:\s*hidden;[\s\S]*?pointer-events:\s*none;[\s\S]*?opacity:\s*0;/,
+    "competing panels become immediately invisible and inert while composing",
   );
+  const ownership = css.slice(css.indexOf("/* Mobile COMPOSER focus owns the chat band."));
+  assert.doesNotMatch(
+    ownership.slice(0, ownership.indexOf("/* Agent execution language")),
+    /\[data-keyboard="open"\]/,
+    "a keyboard inside Settings or an editor never hides its owning surface",
+  );
+});
+
+test("shared mobile sheets consume the visible viewport exactly once", async () => {
+  const css = await readWebStyles();
+  assert.match(css, /\.sheet-backdrop\s*\{[^}]*top:\s*var\(--visual-offset, 0px\)[^}]*height:\s*var\(--visual-vh, 100dvh\)/s,
+    "the sheet backdrop follows the visual viewport instead of the covered layout viewport");
+  const start = css.indexOf(".sheet {");
+  const sheet = css.slice(start, css.indexOf("@keyframes sheet-rise", start));
+
+  assert.match(sheet, /max-height:\s*calc\(var\(--visual-vh, 100dvh\)/);
+  assert.doesNotMatch(sheet, /(?:height|margin-bottom):[^;]*--keyboard-inset/,
+    "native resize and visualViewport already removed the covered keyboard band");
+});
+
+test("late dictation finals remain owned by their originating composer", async () => {
+  const voice = await read("../../../packages/dictation/widgets/voice.tsx");
+  const stop = voice.slice(voice.indexOf("const stop = () =>"), voice.indexOf("const startBrowser ="));
+
+  assert.match(stop, /const generation = startGeneration\.current/);
+  assert.match(stop, /const originScope = originScopeRef\.current/);
+  assert.match(stop, /composerScopeKey\(\) !== originScope/);
+  assert.ok(stop.indexOf("streamRef.current = null") > stop.indexOf(".then((text)"),
+    "the provider stream remains cancellable until finalization settles");
+  assert.ok(stop.indexOf("requestComposerInsert") > stop.indexOf("composerScopeKey() !== originScope"),
+    "insertion follows the generation and project/session scope checks");
 });
 
 test("phone and coarse-pointer standalone controls share the 44px hit-box floor", async () => {
@@ -187,7 +250,7 @@ test("phone touch targets and bottom sheets retain audit geometry", async () => 
   assert.match(css, /\.sheet-search-clear\s*\{[^}]*width:\s*var\(--tap\)[^}]*height:\s*var\(--tap\)/s);
   // P2-W3A: config chips (model/agent/effort) share one phone touch box.
   assert.match(css, /\.composer-mobile \.composer-config \.config-chip,[\s\S]*?\.composer-mobile \.composer-config \.picker-chip\s*\{[^}]*min-height:\s*var\(--tap\)/);
-  assert.match(css, /\.panel-sheet \.rail-body\s*\{[^}]*padding-bottom:\s*calc\(10px \+ env\(safe-area-inset-bottom, 0px\)\)/s);
-  assert.match(css, /\.package-tour-skips\s*\{[^}]*padding:[^;]*env\(safe-area-inset-bottom, 0px\)/s);
+  assert.match(css, /\.panel-sheet \.rail-body\s*\{[^}]*padding-bottom:\s*calc\(10px \+ var\(--safe-bottom\)\)/s);
+  assert.match(css, /\.package-tour-skips\s*\{[^}]*padding:[^;]*var\(--safe-bottom\)/s);
   assert.match(css, /@media \(max-width: 960px\)[\s\S]*?\.pane-tab-close\s*\{[^}]*min-width:\s*var\(--tap\)[^}]*min-height:\s*var\(--tap\)/s);
 });

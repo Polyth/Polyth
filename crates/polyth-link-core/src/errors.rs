@@ -12,6 +12,7 @@ pub enum LinkError {
     PairingStorageFailed,
     HostIdentityMismatch,
     HostIdentityCorrupt,
+    HostIdentityUnavailable,
     HostIdentityRotated,
     DeviceUnknown,
     DeviceRevoked,
@@ -20,6 +21,8 @@ pub enum LinkError {
     RelayUnreachable,
     DirectUnreachable,
     TransportUnavailable,
+    TransportCancelled,
+    TransportTimeout,
     TransportOutcomeUnknown,
     TransportProtocolError,
     TransportVersionUnsupported,
@@ -47,6 +50,7 @@ impl LinkError {
             Self::PairingStorageFailed => "pairing-storage-failed",
             Self::HostIdentityMismatch => "host-identity-mismatch",
             Self::HostIdentityCorrupt => "host-identity-corrupt",
+            Self::HostIdentityUnavailable => "host-identity-unavailable",
             Self::HostIdentityRotated => "host-identity-rotated",
             Self::DeviceUnknown => "device-unknown",
             Self::DeviceRevoked => "device-revoked",
@@ -55,6 +59,8 @@ impl LinkError {
             Self::RelayUnreachable => "relay-unreachable",
             Self::DirectUnreachable => "direct-unreachable",
             Self::TransportUnavailable => "transport-unavailable",
+            Self::TransportCancelled => "transport-cancelled",
+            Self::TransportTimeout => "transport-timeout",
             Self::TransportOutcomeUnknown => "transport-outcome-unknown",
             Self::TransportProtocolError => "transport-protocol-error",
             Self::TransportVersionUnsupported => "transport-version-unsupported",
@@ -77,6 +83,7 @@ impl LinkError {
             Self::RelayUnreachable
                 | Self::DirectUnreachable
                 | Self::TransportUnavailable
+                | Self::TransportTimeout
                 | Self::RequestRateLimited
         )
     }
@@ -96,7 +103,10 @@ impl LinkError {
                 "This Polyth host identity changed. Pair again with a new QR code."
             }
             Self::HostIdentityCorrupt => {
-                "This Polyth host identity file is unreadable. Follow identity recovery."
+                "This Polyth host identity is unreadable. Pair again after recovery."
+            }
+            Self::HostIdentityUnavailable => {
+                "This device no longer has the secure identity for this Polyth host. Pair again."
             }
             Self::DeviceUnknown => "This device is not paired.",
             Self::DeviceRevoked => "This device was revoked.",
@@ -106,6 +116,8 @@ impl LinkError {
             Self::RelayUnreachable => "The encrypted relay is unreachable.",
             Self::DirectUnreachable => "A direct path is unavailable.",
             Self::TransportUnavailable => "The secure connection is unavailable.",
+            Self::TransportCancelled => "The secure connection was cancelled.",
+            Self::TransportTimeout => "The secure connection timed out.",
             Self::TransportOutcomeUnknown => "The request may or may not have reached the host.",
             Self::TransportProtocolError | Self::TransportVersionUnsupported => {
                 "This Polyth Link version is not compatible."
@@ -156,11 +168,18 @@ mod tests {
 
     #[test]
     fn codes_are_stable_and_secret_free() {
-        for error in [LinkError::PairingInvalid, LinkError::HostIdentityCorrupt] {
+        for error in [
+            LinkError::PairingInvalid,
+            LinkError::HostIdentityCorrupt,
+            LinkError::HostIdentityUnavailable,
+        ] {
             assert!(!error.code().contains("key"));
             assert!(!error.user_message().contains("hmac"));
         }
         assert!(LinkError::RelayUnreachable.retryable());
+        assert!(LinkError::TransportTimeout.retryable());
+        assert!(!LinkError::TransportCancelled.retryable());
         assert!(!LinkError::DeviceRevoked.retryable());
+        assert!(!LinkError::HostIdentityUnavailable.retryable());
     }
 }

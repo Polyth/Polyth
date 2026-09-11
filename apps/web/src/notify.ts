@@ -12,6 +12,7 @@ import {
 } from "./notifications.ts";
 import { isNativeMobile } from "@polyth/mobile/runtime";
 import {
+  nativePushLocalProjectionEnabled,
   requestNativeNotificationPermission,
   showNativeLocalNotification,
 } from "@polyth/mobile/native";
@@ -46,6 +47,10 @@ function beep(): void {
 
 function showNative(spec: NotificationSpec): void {
   if (isNativeMobile()) {
+    // Remote push owns the OS projection only after its native controller has
+    // confirmed the active trusted connection/account mapping. Browser and
+    // local-native fallback continue unchanged for every other context.
+    if (nativePushLocalProjectionEnabled()) return;
     let id = 17;
     for (const character of spec.key) id = (id * 31 + character.charCodeAt(0)) & 0x7fffffff;
     void showNativeLocalNotification({

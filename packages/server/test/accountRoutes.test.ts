@@ -27,6 +27,7 @@ async function call(
   path: string,
   body: Record<string, unknown> = {},
   token?: string,
+  onAccountRemoved?: (userId: string) => Promise<void>,
 ) {
   const req = request(token ? `polyth_auth=${token}` : undefined);
   const ingress = publicHttpIngress(req);
@@ -45,7 +46,7 @@ async function call(
     body: async () => body,
     json: (code: number, value: unknown) => { status = code; payload = value; },
   } as unknown as RouteRequest;
-  assert.equal(await authRoutes(auth)(rc), true);
+  assert.equal(await authRoutes(auth, onAccountRemoved ? { onAccountRemoved } : {})(rc), true);
   return { status, payload: payload as Record<string, unknown> };
 }
 
@@ -102,4 +103,21 @@ test("removing a secondary credential invalidates its paired principal", () => {
 
   assert.equal(auth.removeAccount("usr_alice"), true);
   assert.equal(auth.resolve(req, ingress).authenticated, false);
+});
+
+test("account route purges scoped delivery authority before removing the credential", async () => {
+  const auth = createAuthService({ file: tempFile(), ownerUserId: "usr_owner" });
+  auth.setPassword("usr_owner", "owner-password");
+  auth.setPassword("usr_alice", "alice-password");
+  const owner = auth.login("owner-password", "127.0.0.1", "Owner", "usr_owner");
+  assert.ok(owner.ok);
+  if (!owner.ok) return;
+  const purged: string[] = [];
+  const removed = await call(auth, "DELETE", "/api/auth/accounts/usr_alice", {}, owner.token, async (userId) => {
+    assert.equal(auth.hasCredential(userId), true, "cleanup retains authenticated authority until it commits");
+    purged.push(userId);
+  });
+  assert.equal(removed.status, 200);
+  assert.deepEqual(purged, ["usr_alice"]);
+  assert.equal(auth.hasCredential("usr_alice"), false);
 });

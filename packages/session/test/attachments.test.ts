@@ -28,7 +28,7 @@ const refs: AttachmentRef[] = [
 
 test("queue round-trip preserves attachments; text-only rows stay clean", async () => {
   const store = tmpStore();
-  const withAtt = await store.enqueue("s1", "look at these", "queue", refs);
+  const withAtt = (await store.enqueue("s1", "look at these", "queue", refs)).item;
   await store.enqueue("s1", "plain", "queue");
 
   assert.deepEqual(withAtt.attachments, refs);

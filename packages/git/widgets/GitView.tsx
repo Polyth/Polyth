@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isManagedIsolationBranch } from "@polyth/contracts";
 import { api, errorCodeOf, errorChangesOf, type GitBranches, type GitFileEntry, type GitGraphEntry, type GitStash, type GitStatus, type Worktree } from "@polyth/session/web-api";
 import { layoutGraph, type GraphRow } from "./git/graph.ts";
@@ -282,6 +282,10 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
   const sessionId = useStore((state) => state.activeSessionId);
   const settings = useStore((state) => state.settings);
   const diffPath = useStore((state) => state.gitDiffPath);
+  // This project's worktree topology revision. It moves when a worktree is
+  // created or removed anywhere — here, by an agent, by a shell — and nothing
+  // else moves it, so another project's churn never refetches this one.
+  const worktreeTopology = useStore((state) => (state.activeProjectId && state.worktreeTopology[state.activeProjectId]) || 0);
   const status = useGitStatus(projectId, true, sessionId);
   const prefs = useGitPrefs();
   const [tab, setTab] = useState<GitTab>("changes");
@@ -374,6 +378,16 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
     setMobileDetail(false);
     void refresh(true);
   }, [refresh]);
+
+  // A topology change re-reads the lists but must not disturb the pane: the
+  // open diff, the commit selection and the mobile detail view all survive,
+  // because a worktree appearing elsewhere is not a reason to lose your place.
+  const topologyHydrated = useRef(false);
+  useEffect(() => {
+    if (!topologyHydrated.current) { topologyHydrated.current = true; return; }
+    void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [worktreeTopology]);
 
   useEffect(() => {
     setComments(projectId ? loadComments(projectId) : []);

@@ -40,7 +40,7 @@ export const uk: FilesMessages = {
   "editor.filepane.saveValueS": "Зберегти ( {MOD} S)",
   "editor.filepane.savingRecreatesItYourBufferIsPreserved": "Збереження відтворює його; ваш буфер зберігається.",
   "editor.filepane.showValue": "Показати {value}",
-  "editor.filepane.truncatedFileExceeds512KbReadOnly": "Обрізано — файл перевищує 512 КБ. Тільки для читання.",
+  "editor.filepane.truncatedFileExceeds512KbReadOnly": "Обрізано — файл перевищує 8 МБ. Тільки для читання.",
   "editor.filepane.unsavedChanges": "Незбережені зміни",
   "editor.filepane.valueMode": "Режим {previewName}",
   "editor.filepane.wrapLines": "Лінії обгортання ✓",

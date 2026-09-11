@@ -10,6 +10,7 @@ import {
   assertRelative,
   BINARY_SCAN_BYTES,
   fold,
+  MAX_EDIT_BYTES,
   MAX_READ_BYTES,
   MAX_RAW_BYTES,
   rawMimeOf,
@@ -130,12 +131,13 @@ export function createRemoteFileService(host: RemoteHost): FileService {
       return out;
     },
 
-    async read(root, rel): Promise<FileReadResult> {
+    async read(root, rel, opts): Promise<FileReadResult> {
       const st = await this.stat(root, rel);
       if (st.kind !== "file") throw new Error(`Not a file: ${rel}`);
-      const truncated = st.size > MAX_READ_BYTES;
+      const cap = opts?.editable ? MAX_EDIT_BYTES : MAX_READ_BYTES;
+      const truncated = st.size > cap;
       const body = truncated
-        ? `head -c ${MAX_READ_BYTES} -- ${shq(rel)} | base64`
+        ? `head -c ${cap} -- ${shq(rel)} | base64`
         : `base64 < ${shq(rel)}`;
       const encoded = await collect(host, `cd -- ${shq(root)} && ${body}`);
       const buf = Buffer.from(encoded.replace(/\s+/g, ""), "base64");

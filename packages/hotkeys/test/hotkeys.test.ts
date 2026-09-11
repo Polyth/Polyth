@@ -32,6 +32,31 @@ test("defaults match the current shell bindings", () => {
   assert.ok(HOTKEY_ACTIONS.every((action) => action.pluginName.length > 0));
 });
 
+// AltGraph is how several layouts type ordinary characters (`@`, `{`, `\`),
+// and browsers report it as ctrlKey+altKey. Reading that as a `mod+alt`
+// shortcut swallows the character the user is typing into the composer.
+test("AltGraph types a character instead of firing a mod+alt shortcut", () => {
+  const altGraph = (key: string, supported = true) => ({
+    ...ev(key, { ctrl: true, alt: true }),
+    ...(supported ? { getModifierState: (name: string) => name === "AltGraph" } : {}),
+  });
+
+  assert.equal(comboFromEvent(altGraph("2")), null);
+  assert.equal(comboFromEvent(altGraph("q")), null);
+  assert.equal(matchAction({ ...DEFAULT_KEYMAP, palette: "mod+alt+q" }, altGraph("q")), null);
+
+  // Events that cannot answer fall back to reading ctrl+alt as AltGraph.
+  assert.equal(comboFromEvent(altGraph("2", false)), null);
+
+  // A real Ctrl+Alt press, where the browser says AltGraph is not down,
+  // still resolves normally.
+  const realCtrlAlt = { ...ev("q", { ctrl: true, alt: true }), getModifierState: () => false };
+  assert.equal(comboFromEvent(realCtrlAlt), "mod+alt+q");
+
+  // Ordinary shortcuts are untouched.
+  assert.equal(comboFromEvent({ ...ev("k", { meta: true }), getModifierState: () => false }), "mod+k");
+});
+
 test("normalizeCombo orders modifiers and rejects junk", () => {
   assert.equal(normalizeCombo("Shift+Mod+E"), "mod+shift+e");
   assert.equal(normalizeCombo("cmd+K"), "mod+k");

@@ -1,12 +1,24 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mobileDeepLinkPath, normalizePolythHost, isPairingDeepLink } from "../src/runtime.ts";
+import {
+  isPairingDeepLink,
+  isPolythLinkLoopbackOrigin,
+  mobileDeepLinkPath,
+  normalizePolythHost,
+} from "../src/runtime.ts";
 
 test("normalizes a Polyth host without retaining paths or credentials", () => {
   assert.equal(normalizePolythHost("polyth.example.test:4400/path?x=1"), "http://polyth.example.test:4400");
   assert.equal(normalizePolythHost("https://polyth.example.test/"), "https://polyth.example.test");
   assert.throws(() => normalizePolythHost("ftp://polyth.example.test"), /HTTP or HTTPS/);
   assert.throws(() => normalizePolythHost("https://name:secret@polyth.example.test"), /credentials/);
+});
+
+test("recognizes only the authenticated Rust proxy origin as ephemeral loopback", () => {
+  assert.equal(isPolythLinkLoopbackOrigin("http://127.0.0.1:49152"), true);
+  assert.equal(isPolythLinkLoopbackOrigin("https://127.0.0.1:49152"), false);
+  assert.equal(isPolythLinkLoopbackOrigin("http://localhost:49152"), false);
+  assert.equal(isPolythLinkLoopbackOrigin("http://192.168.1.10:4400"), false);
 });
 
 test("maps native session and project links to canonical app paths", () => {

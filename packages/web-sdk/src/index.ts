@@ -266,7 +266,10 @@ export type ResourceStat =
 export interface ResourceProvider {
   scheme: string;
   describe(ref: ResourceRef): ResourceDescriptor;
-  read(ref: ResourceRef): Promise<ResourceContent>;
+  /** `opts.editable` means the caller will hold the result in a saveable
+   *  buffer, so the provider must serve complete contents rather than a
+   *  cheaper preview slice. Providers that never abbreviate ignore it. */
+  read(ref: ResourceRef, opts?: { editable?: boolean }): Promise<ResourceContent>;
   write?(ref: ResourceRef, content: string, baseRevision?: string): Promise<ResourceWriteResult>;
   rename?(ref: ResourceRef, to: string): Promise<ResourceRef>;
   remove?(ref: ResourceRef): Promise<void>;

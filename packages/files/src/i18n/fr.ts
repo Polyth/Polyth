@@ -40,7 +40,7 @@ export const fr: FilesMessages = {
   "editor.filepane.saveValueS": "Sauvegarder ( {MOD} S)",
   "editor.filepane.savingRecreatesItYourBufferIsPreserved": "L'enregistrement le recrée; votre tampon est préservé.",
   "editor.filepane.showValue": "Afficher {value}",
-  "editor.filepane.truncatedFileExceeds512KbReadOnly": "Tronqué — fichier dépassant 512 Ko. Lecture seule.",
+  "editor.filepane.truncatedFileExceeds512KbReadOnly": "Tronqué — fichier dépassant 8 Mo. Lecture seule.",
   "editor.filepane.unsavedChanges": "Modifications non enregistrées",
   "editor.filepane.valueMode": "{previewName} mode",
   "editor.filepane.wrapLines": "Lignes d'enroulement ✓",

@@ -404,19 +404,7 @@ export default function EditorView() {
                       {e.dir ? <FolderGlyph /> : <FileTypeGlyph type={fileTypeKeyOf(e.name)} />}
                     </span>
                     <span className="ft-name">{e.name}</span>
-                    {!e.dir && (
-                      <button
-                        className="ft-at"
-                        title={tr("editorview.addValueToChat", { path: e.path })}
-                        aria-label={tr("editorview.addValueToChat", { path: e.path })}
-                        onClick={(ev) => {
-                          ev.stopPropagation();
-                          attachPath(e.path);
-                        }}
-                      >
-                        @
-                      </button>
-                    )}
+                    {!e.dir && <FileRowActions projectId={projectId} path={e.path} onOpen={() => openFile(e.path)} />}
                   </div>
                 );
               })}

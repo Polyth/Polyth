@@ -201,7 +201,7 @@ test("Claude query receives overlay systemPrompt append and mcpServers", async (
     await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, randomUUID());
     assert.deepEqual(options.systemPrompt, { type: "preset", preset: "claude_code", append: "Be brief." });
     assert.deepEqual(options.mcpServers, { ping: { command: "node", args: ["x"] } });
-    assert.deepEqual(options.disallowedTools, ["Agent", "Task", "AskUserQuestion"]);
+    assert.deepEqual(options.disallowedTools, ["Agent", "Task"]);
     await rt.dispose();
 });
 

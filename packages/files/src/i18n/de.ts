@@ -40,7 +40,7 @@ export const de: FilesMessages = {
   "editor.filepane.saveValueS": "Speichern ( {MOD} S)",
   "editor.filepane.savingRecreatesItYourBufferIsPreserved": "Beim Speichern wird der Puffer wiederhergestellt; er bleibt erhalten.",
   "editor.filepane.showValue": "Zeige {value}",
-  "editor.filepane.truncatedFileExceeds512KbReadOnly": "Gekürzt – die Datei ist größer als 512 KB. Schreibgeschützt.",
+  "editor.filepane.truncatedFileExceeds512KbReadOnly": "Gekürzt – die Datei ist größer als 8 MB. Schreibgeschützt.",
   "editor.filepane.unsavedChanges": "Ungespeicherte Änderungen",
   "editor.filepane.valueMode": "{previewName} -Modus",
   "editor.filepane.wrapLines": "Wickellinien ✓",

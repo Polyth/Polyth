@@ -26,6 +26,7 @@ import {
   type GitService,
 } from "./index.ts";
 import { registerGitHandoffSources } from "./handoffSources.ts";
+import { createWorktreeTopologyWatch } from "./worktreeTopology.ts";
 import { createIsolationService, type IsolationService } from "./sessionIntegration.ts";
 
 const COMMIT_PROMPT_VERSION = 2;
@@ -156,8 +157,18 @@ export function gitRoutes(deps: {
    *  handoff still sends the prompt, it just skips the marker event. */
   append?: (sessionId: string, type: string, data: JsonObject) => Promise<unknown>;
   remote?: { host(connectionId: string): RemoteHost };
+  /** Announce that one project's worktree topology changed. Optional so
+   *  minimal deployments and existing test fakes stay valid. */
+  worktreesChanged?: (projectId: string) => void;
 }): RouteHandler {
   const { git } = deps;
+  const topology = createWorktreeTopologyWatch((projectId) => deps.worktreesChanged?.(projectId));
+  /** Announce a topology change this server just made, and record it so the
+   *  next observation does not announce the same change a second time. */
+  const announceTopology = async (projectId: string, root: string): Promise<void> => {
+    await topology.settle(projectId, root);
+    deps.worktreesChanged?.(projectId);
+  };
   const projectRootOf = async (projectId: string | null | undefined): Promise<string> => {
     if (!projectId) throw Object.assign(new Error("projectId required"), { code: "invalid-path" });
     const project = await deps.projects.get(String(projectId));
@@ -215,6 +226,14 @@ export function gitRoutes(deps: {
 
     if (path === "/api/git/status" && method === "GET") {
       const root = await rootOf(query("projectId"), query("sessionId"));
+      // Status is the Git interaction the UI makes most often, so it is where
+      // an externally created or removed worktree is cheapest to notice. The
+      // fingerprint is always taken on the project checkout, never on `root`,
+      // which may be a session's own worktree.
+      if (query("projectId")) {
+        void topology.observe(query("projectId")!, await projectRootOf(query("projectId")))
+          .catch(() => undefined);
+      }
       if (!(await git.isRepo(root))) {
         json(200, { branch: null, ahead: 0, behind: 0, staged: [], unstaged: [], untracked: [], conflicted: [], clean: true, isRepo: false });
         return true;
@@ -266,6 +285,13 @@ export function gitRoutes(deps: {
     }
     if (path === "/api/worktrees" && method === "GET") {
       const root = await projectRootOf(query("projectId"));
+      // Reading the list is also observing it: one client asking tells every
+      // other open surface that the topology moved. The refetch that answer
+      // provokes observes an unchanged fingerprint, so this cannot loop.
+      await topology.observe(query("projectId")!, root);
+      // A failed listing throws. It must never be flattened into "no
+      // worktrees" — an empty list and an unreadable repository are different
+      // answers, and only one of them is safe to act on.
       const worktrees = (await git.isRepo(root)) ? await git.worktrees.list(root) : [];
       const visible = await Promise.all(worktrees.map(async (worktree) => {
         if (isManagedBranch(worktree.branch)) return null;
@@ -409,11 +435,16 @@ export function gitRoutes(deps: {
             code: "invalid-input",
           });
         }
-        json(200, await git.worktrees.create(root, {
+        const created = await git.worktrees.create(root, {
           branch,
           ...(input.path ? { path: String(input.path) } : {}),
           ...(input.base ? { base: String(input.base) } : {}),
-        }));
+        });
+        // Git has accepted the topology change and the checkout is complete —
+        // `worktree add` does not return until it is. Announce before
+        // responding so other open surfaces converge with the caller's.
+        await announceTopology(projectId, root);
+        json(200, created);
         return true;
       }
       case "/api/worktrees/remove": {
@@ -439,6 +470,7 @@ export function gitRoutes(deps: {
           force,
           ...(ownedBranch ? { ownedBranch } : {}),
         }) ?? {};
+        await announceTopology(projectId, root);
         let metadataCleanupFailed = false;
         try {
           await deps.sessions.markWorktreeMissing?.(projectId, worktreePath);
@@ -623,6 +655,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         remote: { host: (connectionId) => host.services.require<{ host(id: string): RemoteHost }>(serverServiceKey("ssh")).host(connectionId) },
         commitMessage,
         append,
+        worktreesChanged: (projectId) => host.broadcast.worktreesChanged?.(projectId),
       });
       const isolationHandler = isolationRoutes({ isolation });
       await isolation.recoverAll();
