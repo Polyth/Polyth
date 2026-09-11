@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { registerAcpProfile, type AcpProfile } from "@polyth/backend-acp";
+import { registerAcpProfile } from "@polyth/backend-acp";
 import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/backend-acp/executable-discovery";
+import type { RegisteredAcpProfile } from "@polyth/backend-acp/profile";
 import type { ServerPackageHost } from "@polyth/plugins";
 import { cursorModelDiscoverySupport } from "./version.ts";
 const exec = promisify(execFile);
@@ -71,7 +72,7 @@ export const cursorClientRequest = (method: string) => {
 };
 
 export default function registerPackage(host: ServerPackageHost) {
-    const profile: AcpProfile = {
+    const profile: RegisteredAcpProfile = {
         descriptor: {
             id: "cursor",
             name: "Cursor",
