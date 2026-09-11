@@ -57,6 +57,25 @@ test("desktop discovery checks documented user install locations beyond inherite
   assert.equal(report.hit?.executablePath, executable);
 });
 
+test("Windows discovery honors PATHEXT command shims", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "polyth-harness-win-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const binDir = join(root, "npm");
+  await mkdir(binDir, { recursive: true });
+  const shim = join(binDir, "polyth-test-agent.CMD");
+  await writeFile(shim, "@echo off\r\n", "utf8");
+
+  const report = await discoverHarnessExecutable("polyth-test-agent", {
+    platform: "win32",
+    env: { PATH: binDir, PATHEXT: ".EXE;.CMD" },
+    home: root,
+    loginShellProbe: false,
+  });
+
+  assert.equal(report.hit?.stage, "path");
+  assert.equal(report.hit?.executablePath, shim);
+});
+
 test("child environment pins the exact discovered CLI directory first", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "polyth-harness-env-"));
   t.after(() => rm(root, { recursive: true, force: true }));
