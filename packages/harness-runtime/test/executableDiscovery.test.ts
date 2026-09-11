@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import test from "node:test";
 import {
   discoverHarnessExecutable,
+  harnessExecutableChildEnv,
   mergeHarnessSearchPaths,
 } from "../src/executableDiscovery.ts";
 
@@ -39,8 +40,7 @@ test("discovers a harness inherited from the desktop process PATH", async (t) =>
 test("desktop discovery checks documented user install locations beyond inherited PATH", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "polyth-harness-home-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const directory = process.platform === "win32" ? join(".local", "bin") : join(".local", "bin");
-  const executable = await fixture(root, directory, "polyth-test-agent");
+  const executable = await fixture(root, join(".local", "bin"), "polyth-test-agent");
 
   const report = await discoverHarnessExecutable("polyth-test-agent", {
     env: {
@@ -55,6 +55,22 @@ test("desktop discovery checks documented user install locations beyond inherite
 
   assert.equal(report.hit?.stage, "well-known");
   assert.equal(report.hit?.executablePath, executable);
+});
+
+test("child environment pins the exact discovered CLI directory first", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "polyth-harness-env-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const executable = await fixture(root, "resolved", "polyth-test-agent");
+  const inherited = join(root, "inherited");
+  await mkdir(inherited, { recursive: true });
+
+  const env = await harnessExecutableChildEnv(executable, {
+    env: { PATH: inherited },
+    loginShellProbe: false,
+  });
+
+  assert.equal(env.PATH?.split(delimiter)[0], dirname(executable));
+  assert.equal(env.PATH?.split(delimiter)[1], inherited);
 });
 
 test("search path merge is stable and removes duplicates", () => {
