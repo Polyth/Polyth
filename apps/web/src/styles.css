@@ -275,17 +275,11 @@ body[data-shift-held] :focus-visible {
   box-shadow: none;
 }
 
-/* Edit triggers float over their zone: hidden controls never consume layout. */
+/* Edit triggers have no resting footprint. A hovered Shift zone promotes its
+   trigger back into normal flow, so it uses adjacent flexible space instead
+   of painting over an existing action. */
 .customize-zone { position: relative; }
-.zone-edit-button {
-  position: absolute;
-  z-index: var(--z-popover);
-  inset-block-start: var(--space-1);
-  inset-inline-end: var(--space-1);
-  background: var(--material-glass);
-  border-color: var(--material-glass-border);
-  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
-}
+.customize-zone > .zone-edit-button { position: absolute; }
 @media (hover: hover) and (pointer: fine) {
   .zone-customize-trigger {
     visibility: hidden;
@@ -301,10 +295,25 @@ body[data-shift-held] :focus-visible {
   }
   body[data-shift-held] .customize-zone:hover .zone-customize-trigger,
   body[data-ui-editing] .zone-customize-trigger,
-  .zone-customize-trigger.force-visible {
+  .zone-customize-trigger.force-visible,
+  .zone-customize-trigger[aria-expanded="true"] {
     visibility: visible;
     opacity: 1;
     pointer-events: auto;
+  }
+  body[data-shift-held] .customize-zone:hover > .zone-edit-button,
+  body[data-ui-editing] .customize-zone > .zone-edit-button,
+  .customize-zone > .zone-edit-button[aria-expanded="true"] {
+    position: static;
+  }
+  /* The new-chat hero already has genuine empty space around its centered
+     content. Keep its control in that space rather than reflowing the hero. */
+  body[data-shift-held] .hero-body:hover > .zone-edit-button,
+  body[data-ui-editing] .hero-body > .zone-edit-button,
+  .hero-body > .zone-edit-button[aria-expanded="true"] {
+    position: absolute;
+    inset-block-start: var(--space-3);
+    inset-inline-end: var(--space-3);
   }
   body[data-shift-held] .customize-zone:hover [draggable="true"],
   body[data-ui-editing] [draggable="true"] { cursor: grab; }
@@ -4573,7 +4582,7 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 /* Header actions are compact controls regardless of viewport width. Their
    accessible names remain on the button; labels belong in tooltips and menus. */
 .placed-mini-widget { display: contents; }
-.placed-mini-widget[data-widget-editing="true"] {
+.placed-mini-widget[data-widget-editing="true"]:not(:empty) {
   display: inline-flex; align-items: center; cursor: grab;
 }
 .placed-slot-widget { min-width: 0; }
@@ -11875,8 +11884,20 @@ html[data-font] body :is(
   flex: 0 0 var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-4)));
   min-height: 0;
   overflow-x: hidden;
-  overflow-y: auto;
+  overflow-y: hidden;
 }
+.rail-icon-scroll {
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.rail-icon-scroll::-webkit-scrollbar { display: none; }
 
 /* ---- scroll area strategy ----------------------------------------------------
    Native scrolling, contained overscroll, stable gutter. Apply to any panel
@@ -11919,7 +11940,7 @@ html[data-font] body :is(
     min-height: 0;
     padding-block: var(--space-2);
     overflow-x: hidden;
-    overflow-y: auto;
+    overflow-y: hidden;
   }
   .app-shell:not(:has(.railbar-open)) :is(
     .timeline,
@@ -12225,11 +12246,99 @@ html[data-font] body :is(
   .agent-status-dock-icon > i { animation: none; }
 }
 
-/* =================== end P1-W2 core UI primitives ======================== */
+/* All conversation chrome shares one horizontal frame. Keeping the inset on
+   the conversation itself makes the timeline, composer, and above-composer
+   status resilient to the compact shell seam and the tablet launcher lane. */
+.focus-conversation {
+  --conversation-frame-inline-start: max(var(--gutter), calc((100% - var(--chat-measure)) / 2));
+  --conversation-frame-inline-end: max(var(--gutter), calc((100% - var(--chat-measure)) / 2));
+}
+.timeline,
+.composer-chat {
+  padding-inline-start: var(--conversation-frame-inline-start);
+  padding-inline-end: var(--conversation-frame-inline-end);
+}
+.agent-status-dock {
+  width: min(
+    var(--chat-measure),
+    calc(100% - var(--conversation-frame-inline-start) - var(--conversation-frame-inline-end))
+  );
+  margin-inline-start: var(--conversation-frame-inline-start);
+  margin-inline-end: var(--conversation-frame-inline-end);
+}
+@media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
+  .focus-conversation {
+    --conversation-frame-inline-start: var(--conversation-chrome-inset);
+    --conversation-frame-inline-end: var(--conversation-chrome-inset);
+  }
+}
+@media (max-width: 620px) {
+  .focus-conversation {
+    --conversation-frame-inline-start: max(var(--conversation-inset), var(--safe-left), var(--safe-right));
+    --conversation-frame-inline-end: max(var(--conversation-inset), var(--safe-left), var(--safe-right));
+  }
+  .mobile-session-floats {
+    inset-inline:
+      max(var(--conversation-inset), var(--safe-left))
+      max(var(--conversation-inset), var(--safe-right));
+  }
+}
+@container app-shell (min-width: 961px) and (max-width: 1400px) {
+  .app-shell:not(:has(.railbar-open)) .focus-conversation {
+    --conversation-frame-inline-end: calc(
+      max(var(--gutter), (100% - var(--chat-measure)) / 2)
+      + var(--control-h-sm) + var(--space-5)
+    );
+  }
+}
+@media (min-width: 961px) {
+  /* The header is a sibling of .app-shell, so mirror the same frame using the
+     live sidebar/pane dimensions published by Header and ContextRail. */
+  .app > .header.header-chat {
+    --conversation-frame-inline-start: calc(
+      var(--sidebar-inline-size, 0px) + var(--space-2)
+      + max(
+        var(--gutter),
+        calc((100% - var(--sidebar-inline-size, 0px) - var(--space-2) - var(--workspace-pane-inline-size, 0px) - var(--chat-measure)) / 2)
+      )
+    );
+    --conversation-frame-inline-end: calc(
+      var(--workspace-pane-inline-size, 0px)
+      + max(
+        var(--gutter),
+        calc((100% - var(--sidebar-inline-size, 0px) - var(--space-2) - var(--workspace-pane-inline-size, 0px) - var(--chat-measure)) / 2)
+      )
+    );
+  }
+  .desktop-session-status {
+    left: max(
+      calc(var(--header-leading-inline-end, 0px) + var(--space-2)),
+      var(--conversation-frame-inline-start)
+    );
+    right: max(
+      calc(var(--header-trailing-inline-size, 0px) + var(--space-2)),
+      var(--conversation-frame-inline-end)
+    );
+    max-width: var(--chat-measure);
+  }
+}
+@media (min-width: 961px) and (max-width: 1400px) {
+  .app > .header.header-chat {
+    --conversation-frame-inline-end: calc(
+      var(--workspace-pane-inline-size, 0px)
+      + max(
+        var(--gutter),
+        calc((100% - var(--sidebar-inline-size, 0px) - var(--space-2) - var(--workspace-pane-inline-size, 0px) - var(--chat-measure)) / 2)
+      )
+      + var(--control-h-sm) + var(--space-5)
+    );
+  }
+  .desktop-session-status {
+    max-width: calc(var(--chat-measure) - var(--control-h-sm) - var(--space-5));
+  }
+}
 
-/* Shift customization controls are overlays, never flex/grid participants.
-   Keep this late so rail button geometry cannot override their positioning. */
-.customize-zone > .zone-edit-button { position: absolute; }
+/* =================== end P1-W2 core UI primitives ======================== */
 
 /* ==================== browser-local workspace backgrounds ================= */
 .background-settings-hint {

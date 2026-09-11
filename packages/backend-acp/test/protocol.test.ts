@@ -30,6 +30,53 @@ test("ACP admission requires prompt evidence; cancellation has no fictional ackn
     assert.equal(snap.acceptedOperations?.[0]?.operationId, "submit");
     assert.doesNotMatch(JSON.stringify(events), /private reasoning/);
 });
+
+test("ACP keeps the final answer after tool activity in its own assistant part", async () => {
+    const f = fakeRpc();
+    let finish!: (value: unknown) => void;
+    f.handle(async (method) => {
+        if (method === "session/new") return { sessionId: "native" };
+        if (method === "session/prompt") return new Promise((resolve) => { finish = resolve; });
+        return {};
+    });
+    const rt = createAcpRuntime(context, f.rpc, "cursor");
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+
+    const admission = rt.startTurnOperation!({ sessionId: "canonical", text: "task" }, "submit");
+    f.emit("session/update", {
+        sessionId: "native",
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "I will inspect." } },
+    });
+    assert.equal((await admission).kind, "confirmed");
+    f.emit("session/update", {
+        sessionId: "native",
+        update: { sessionUpdate: "tool_call", toolCallId: "read", kind: "read", title: "Read file" },
+    });
+    f.emit("session/update", {
+        sessionId: "native",
+        update: { sessionUpdate: "tool_call_update", toolCallId: "read", kind: "read", status: "completed" },
+    });
+    f.emit("session/update", {
+        sessionId: "native",
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Final answer." } },
+    });
+    finish({ stopReason: "end_turn" });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(events.filter((event) => event.type === "assistant/message"), [
+        { type: "assistant/message", partId: "submit", text: "I will inspect." },
+        { type: "assistant/message", partId: "submit:1", text: "Final answer." },
+    ]);
+    assert.deepEqual(
+        events.filter((event) => event.type === "assistant/message" || event.type === "tool/started")
+            .map((event) => event.type),
+        ["assistant/message", "tool/started", "assistant/message"],
+    );
+    await rt.dispose();
+});
+
 test("ACP permissions map native option ids; a lost admitted prompt records a terminal error", async () => {
     const f = fakeRpc();
     let rejectPrompt!: (reason: unknown) => void;

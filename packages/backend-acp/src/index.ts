@@ -227,6 +227,8 @@ export function createAcpRuntime(
     let createId = "";
     let turnId = "";
     let text = "";
+    let messagePartId = "";
+    let messagePartOrdinal = 0;
     let resolveAdmission: ((outcome: MutationOutcome<{ admissionId: string }>) => void) | undefined;
     let promptWatchdog: ReturnType<typeof setTimeout> | undefined;
     let lastTitle = "";
@@ -270,6 +272,19 @@ export function createAcpRuntime(
     const endpoint = { authorityId: rpc.authorityId, generation: rpc.generation, continuity: "generation-only" as const, url: "stdio:", location: { directory: context.cwd }, control: { kind: "owned" as const, instanceToken: rpc.authorityId }, config: { kind: "read-only" as const }, authentication: { kind: "none" as const } };
     const emit = (event: RuntimeEvent) => { for (const cb of listeners)
         cb(context.sessionId!, event); };
+    const currentMessagePartId = () => {
+        if (!messagePartId) {
+            messagePartId = messagePartOrdinal === 0 ? turnId : `${turnId}:${messagePartOrdinal}`;
+        }
+        return messagePartId;
+    };
+    const finishMessagePart = () => {
+        if (!text || !messagePartId) return;
+        emit({ type: "assistant/message", partId: messagePartId, text });
+        text = "";
+        messagePartId = "";
+        messagePartOrdinal++;
+    };
     const clearPromptWatchdog = () => {
         if (promptWatchdog) clearTimeout(promptWatchdog);
         promptWatchdog = undefined;
@@ -391,11 +406,18 @@ export function createAcpRuntime(
         if (!active) return;
         if (update.sessionUpdate === "agent_message_chunk" && update.content?.type === "text") {
             markAccepted();
+            const partId = currentMessagePartId();
             text += update.content.text;
-            emit({ type: "assistant/chunk", partId: turnId, text: update.content.text });
+            emit({ type: "assistant/chunk", partId, text: update.content.text });
         }
         if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
             markAccepted();
+            // ACP exposes visible prose as chunks but has no message-final
+            // notification. A new tool call is the observable boundary
+            // between the preceding progress prose and any later final
+            // answer. Finalize that part before publishing the tool so the
+            // timeline can keep the eventual post-tool part as the answer.
+            if (update.sessionUpdate === "tool_call") finishMessagePart();
             if (update.status === "completed" || update.status === "failed")
                 emit(update.status === "failed" ? { type: "tool/error", callId: update.toolCallId, tool: update.kind ?? "tool", error: "Tool failed" } : { type: "tool/result", callId: update.toolCallId, tool: update.kind ?? "tool", output: (update.content ?? []).flatMap((c: any) => c.type === "content" && c.content?.type === "text" ? [c.content.text] : []).join("\n") });
             else if (update.sessionUpdate === "tool_call")
@@ -690,6 +712,8 @@ export function createAcpRuntime(
             active = true;
             turnId = operationId;
             text = "";
+            messagePartId = "";
+            messagePartOrdinal = 0;
             order++;
             return new Promise((resolve) => {
                 resolveAdmission = resolve;
@@ -700,8 +724,7 @@ export function createAcpRuntime(
                     if (!active || turnId !== operationId) return;
                     clearPromptWatchdog();
                     markAccepted();
-                    if (text)
-                        emit({ type: "assistant/message", partId: turnId, text });
+                    finishMessagePart();
                     active = false;
                     order++;
                     emit({ type: "turn/stopped", turnId, reason: result.stopReason === "cancelled" ? "aborted" : "completed" });

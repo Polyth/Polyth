@@ -951,32 +951,34 @@ export default function ContextRail() {
             className="rail-icon-col plugin-strip customize-zone"
             aria-label={tr("contextrail.workspacePanels")}
           >
-            {railButtons.map((s) => (
-            <button
-              key={s.id}
-              className={`rail-icon strip-btn ${s.active ? "active" : ""}`}
-              title={s.title}
-              aria-label={s.title}
-              aria-pressed={s.active}
-              draggable={customizeActive && capabilityIds.has(s.id)}
-              onDragStart={(event) => {
-                event.dataTransfer.effectAllowed = "move";
-                setDragCapability(event.dataTransfer, s.id);
-              }}
-              onDragOver={(event) => {
-                if (customizeActive && event.dataTransfer.types.includes(CAPABILITY_MIME)) event.preventDefault();
-              }}
-              onDrop={(event) => dropRailButton(event, s.id)}
-              {...(s.presentation ? { "data-pane-launcher": s.id } : {})}
-              onClick={s.activate}
-            >
-              <s.icon />
-              <Badge n={s.badge} />
-            </button>
-            ))}
-            {/* Widget-areas (WA3): widgets placed into the "Right rail" area
-                render below the built-in tier launchers. */}
-            <SlotHost slot="workspace.rail" context={{ editing: false }} customizable />
+            <div className="rail-icon-scroll">
+              {railButtons.map((s) => (
+                <button
+                  key={s.id}
+                  className={`rail-icon strip-btn ${s.active ? "active" : ""}`}
+                  title={s.title}
+                  aria-label={s.title}
+                  aria-pressed={s.active}
+                  draggable={customizeActive && capabilityIds.has(s.id)}
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = "move";
+                    setDragCapability(event.dataTransfer, s.id);
+                  }}
+                  onDragOver={(event) => {
+                    if (customizeActive && event.dataTransfer.types.includes(CAPABILITY_MIME)) event.preventDefault();
+                  }}
+                  onDrop={(event) => dropRailButton(event, s.id)}
+                  {...(s.presentation ? { "data-pane-launcher": s.id } : {})}
+                  onClick={s.activate}
+                >
+                  <s.icon />
+                  <Badge n={s.badge} />
+                </button>
+              ))}
+              {/* Widget-areas (WA3): widgets placed into the "Right rail" area
+                  render below the built-in tier launchers. */}
+              <SlotHost slot="workspace.rail" context={{ editing: false }} customizable />
+            </div>
             <CustomizeZoneButton
               slot="workspace.rail"
               className="rail-icon strip-btn rail-customize"

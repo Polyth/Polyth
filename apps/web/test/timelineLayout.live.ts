@@ -657,14 +657,19 @@ test("new-chat spawn status stays above the still-mounted composer", async () =>
       const dock = document.querySelector<HTMLElement>(".conversation-composer-dock")!;
       const status = dock.querySelector<HTMLElement>(".agent-status-dock--status")!;
       const composer = dock.querySelector<HTMLElement>(".composer")!;
+      const composerCard = composer.querySelector<HTMLElement>(".composer-card")!;
       const send = composer.querySelector<HTMLButtonElement>(".send")!;
       const timelineRect = timeline.getBoundingClientRect();
       const statusRect = status.getBoundingClientRect();
-      const composerRect = composer.getBoundingClientRect();
+      const composerRect = composerCard.getBoundingClientRect();
       return {
         statusBeforeComposer: [...dock.children].indexOf(status) < [...dock.children].indexOf(composer),
         statusAboveComposer: statusRect.bottom <= composerRect.top + 1,
         timelineAboveStatus: timelineRect.bottom <= statusRect.top + 1,
+        statusLeft: statusRect.left,
+        statusRight: statusRect.right,
+        composerLeft: composerRect.left,
+        composerRight: composerRect.right,
         composerVisible: composerRect.width > 0 && composerRect.height > 0,
         inputMounted: composer.querySelector("[data-composer-input]") !== null,
         composerBusy: composer.getAttribute("aria-busy"),
@@ -676,6 +681,8 @@ test("new-chat spawn status stays above the still-mounted composer", async () =>
     assert.equal(geometry.statusBeforeComposer, true, "spawn status followed the composer in DOM order");
     assert.equal(geometry.statusAboveComposer, true, "spawn status was not visually above the composer");
     assert.equal(geometry.timelineAboveStatus, true, "timeline extended underneath the spawn status");
+    assert.ok(Math.abs(geometry.statusLeft - geometry.composerLeft) <= 1, `spawn status and composer left edges are not aligned (${geometry.statusLeft} vs ${geometry.composerLeft})`);
+    assert.ok(Math.abs(geometry.statusRight - geometry.composerRight) <= 1, `spawn status and composer right edges are not aligned (${geometry.statusRight} vs ${geometry.composerRight})`);
     assert.equal(geometry.composerVisible, true, "composer disappeared while spawning");
     assert.equal(geometry.inputMounted, true, "composer input unmounted while spawning");
     assert.equal(geometry.composerBusy, "true", "composer did not expose its busy state");

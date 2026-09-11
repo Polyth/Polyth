@@ -309,7 +309,24 @@ export function groupActivity(messages: RenderMessage[]): Array<RenderMessage | 
   const flush = () => {
     if (segment.length === 0) return;
     const last = segment.at(-1)!;
-    const finalIndex = last.kind === "assistant" && last.text.trim() !== "" ? segment.length - 1 : -1;
+    let finalIndex = last.kind === "assistant" && last.text.trim() !== "" ? segment.length - 1 : -1;
+    if (finalIndex < 0) {
+      // Older ACP turns used one part for prose both before and after tools.
+      // The reducer keeps that part at its first-chunk position, but its
+      // assistant/message completion is later than the tools it ultimately
+      // answered. Recover that terminal answer without rewriting history.
+      finalIndex = segment.findLastIndex((candidate, candidateIndex) => {
+        if (candidate.kind !== "assistant" || !candidate.finalized
+          || candidate.text.trim() === "" || candidate.completedAt === undefined) return false;
+        return segment.every((item, itemIndex) => {
+          if (itemIndex === candidateIndex) return true;
+          const endedAt = item.kind === "tool"
+            ? item.finishTime ?? item.time
+            : item.kind === "assistant" ? item.completedAt ?? item.time : item.time;
+          return candidate.completedAt! > endedAt;
+        });
+      });
+    }
     const final = finalIndex >= 0 ? segment[finalIndex] as AssistantMsg : undefined;
     const activity: ActivityItem[] = [];
     for (let index = 0; index < segment.length; index++) {

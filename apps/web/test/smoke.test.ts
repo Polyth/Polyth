@@ -1031,6 +1031,21 @@ test("groupActivity keeps technical work together and the terminal answer separa
   const stillWorking = groupActivity([{ ...answer, id: "progress", text: "Checking" }, tool]);
   assert.equal(stillWorking.length, 1);
   assert.equal(stillWorking[0]?.kind, "activity", "assistant prose before a trailing tool is activity, not a final answer");
+
+  const legacyAcpAnswer = {
+    ...answer,
+    id: "legacy-acp-answer",
+    partId: "legacy-acp-answer",
+    eventSeq: 5,
+    time: 100,
+    completedAt: 400,
+  };
+  const legacyGrouped = groupActivity([legacyAcpAnswer, tool]);
+  assert.equal(legacyGrouped.length, 2);
+  const legacyActivity = legacyGrouped[0];
+  assert.ok(legacyActivity && legacyActivity.kind === "activity");
+  assert.deepEqual(legacyActivity.items, [tool]);
+  assert.equal(legacyGrouped[1], legacyAcpAnswer, "a late-finalized legacy ACP part remains a visible answer");
 });
 
 test("draft helpers persist per session and remove empty drafts", () => {

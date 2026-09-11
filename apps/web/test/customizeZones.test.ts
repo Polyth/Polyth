@@ -52,11 +52,12 @@ test("bare Shift ignores text editing and disarms as soon as typing starts", asy
   }
 });
 
-test("Shift highlights only the hovered zone while Edit exposes every zone", async () => {
-  const [styles, composer, header, customize, hero] = await Promise.all([
+test("Shift exposes editors without a resting gap or content overlap", async () => {
+  const [styles, composer, header, rail, customize, hero] = await Promise.all([
     read("../src/styles.css"),
     read("../src/components/Composer.tsx"),
     read("../src/components/Header.tsx"),
+    read("../src/components/ContextRail.tsx"),
     read("../src/components/CustomizeZoneButton.tsx"),
     read("../src/components/mobile/HeroWidgets.tsx"),
   ]);
@@ -66,6 +67,11 @@ test("Shift highlights only the hovered zone while Edit exposes every zone", asy
   assert.match(styles, /body\[data-shift-held\] \.customize-zone:hover \.zone-customize-trigger/);
   assert.match(styles, /body\[data-ui-editing\] \.zone-customize-trigger/);
   assert.match(styles, /\.customize-zone > \.zone-edit-button\s*\{[^}]*position:\s*absolute;/s);
+  assert.match(styles, /body\[data-shift-held\] \.customize-zone:hover > \.zone-edit-button[\s\S]*position:\s*static;/);
+  assert.match(styles, /\.placed-mini-widget\s*\{[^}]*display:\s*contents;/s);
+  assert.match(styles, /\.placed-mini-widget\[data-widget-editing="true"\]:not\(:empty\)\s*\{[^}]*display:\s*inline-flex;/s);
+  assert.match(styles, /\.rail-icon-scroll\s*\{[^}]*overflow-y:\s*auto;/s);
+  assert.match(rail, /className="rail-icon-scroll"[\s\S]*<CustomizeZoneButton/);
 
   const actions = composer.indexOf('className="composer-actions customize-zone"');
   const trailing = composer.indexOf('slot="composer.trailing"');
