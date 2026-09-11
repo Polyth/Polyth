@@ -14,7 +14,7 @@
     "serverEntry": "./src/serverEntry.ts",
     "descriptor": {
       "name": "Pi harness",
-      "description": "Pi through its native JSONL RPC protocol",
+      "description": "Detect Pi and report native RPC integration readiness",
       "core": false,
       "enabled": true,
       "icon": "command",
