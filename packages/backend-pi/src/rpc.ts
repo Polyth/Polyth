@@ -6,6 +6,7 @@ import {
 
 const MAX_LINE_BYTES = 8 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 30_000;
+const BLOCKING_EXTENSION_UI_METHODS = new Set(["select", "confirm", "input", "editor"]);
 
 export interface PiRpcState {
   model?: PiRpcModel | null;
@@ -130,6 +131,17 @@ export async function createPiRpc(options: {
     void authority.close().catch(() => undefined);
   };
 
+  const writeRecord = (value: Record<string, unknown>): boolean => {
+    if (closed) return false;
+    try {
+      stdin.write(`${JSON.stringify(value)}\n`);
+      return true;
+    } catch {
+      protocolFailure();
+      return false;
+    }
+  };
+
   const handleLine = (lineBytes: Buffer) => {
     if (lineBytes.length === 0) return;
     const raw = lineBytes.at(-1) === 13 ? lineBytes.subarray(0, -1) : lineBytes;
@@ -157,6 +169,20 @@ export async function createPiRpc(options: {
       } else {
         entry.resolve(message.data);
       }
+      return;
+    }
+
+    // Pi extensions can request interactive UI from an RPC client. Polyth does
+    // not expose those dialogs yet, so blocking requests must be explicitly
+    // cancelled; silently ignoring them would leave the native agent waiting
+    // forever. Fire-and-forget notifications/status/title requests need no ack.
+    if (
+      message.type === "extension_ui_request"
+      && typeof message.id === "string"
+      && typeof message.method === "string"
+      && BLOCKING_EXTENSION_UI_METHODS.has(message.method)
+    ) {
+      writeRecord({ type: "extension_ui_response", id: message.id, cancelled: true });
       return;
     }
 
@@ -217,12 +243,10 @@ export async function createPiRpc(options: {
           resolve: (value) => resolve(value as T),
           reject,
         });
-        try {
-          stdin.write(`${JSON.stringify({ ...command, id })}\n`);
-        } catch (error) {
+        if (!writeRecord({ ...command, id })) {
           pending.delete(id);
           if (timer) clearTimeout(timer);
-          reject(error instanceof Error ? error : new Error(String(error)));
+          reject(Object.assign(new Error("Pi RPC command could not be written"), { code: "outcome-unknown" }));
         }
       });
     },
@@ -235,8 +259,11 @@ export async function createPiRpc(options: {
       return { dispose: () => closes.delete(callback) };
     },
     async close() {
-      await authority.close();
-      disconnected();
+      try {
+        await authority.close();
+      } finally {
+        disconnected();
+      }
     },
   };
 }
