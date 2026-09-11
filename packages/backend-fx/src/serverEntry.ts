@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { registerAcpProfile } from "@polyth/backend-acp";
-import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/harness-runtime/executable-discovery";
+import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/backend-acp/executable-discovery";
 import type { ServerPackageHost } from "@polyth/plugins";
 const exec = promisify(execFile);
 
