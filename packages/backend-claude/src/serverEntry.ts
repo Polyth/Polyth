@@ -2,13 +2,30 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { HarnessProvider, HarnessRegistry } from "@polyth/contracts";
-import { createProcessAuthority, releaseProcessExecution } from "@polyth/harness-runtime";
+import { releaseProcessExecution } from "@polyth/harness-runtime";
+import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/harness-runtime/executable-discovery";
+import { createHarnessProcessAuthority } from "@polyth/harness-runtime/process-authority";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { claudeAuthFingerprint, createClaudeRuntime, discoverClaudeModels, invalidateClaudeModelCache, CLAUDE_CAPABILITIES } from "./index.ts";
 import { createClaudeProvisioner } from "./provisioner.ts";
 const exec = promisify(execFile);
 // Optional SDK is loaded only by this package, never a server boot prerequisite.
 const loadSdk = () => import("@anthropic-ai/claude-agent-sdk");
+
+const resolveClaudeBinary = async () => {
+    const requested = process.env.POLYTH_CLAUDE_BIN?.trim() || "claude";
+    const report = await discoverHarnessExecutable(requested);
+    if (!report.hit) {
+        throw Object.assign(new Error(`Claude Code CLI was not found (${report.searched.slice(0, 8).join(", ") || "no searchable locations"})`), { code: "not-installed" });
+    }
+    const env = await harnessExecutableChildEnv(report.hit.executablePath);
+    // The Agent SDK accepts the configured command name itself. Keep the
+    // process environment wide enough that a GUI-launched desktop resolves the
+    // exact CLI discovered from a login shell / well-known install directory.
+    process.env.PATH = env.PATH;
+    return report.hit.executablePath;
+};
+
 export default function registerPackage(host: ServerPackageHost) {
     const registry = host.services.require(serverServiceKey<HarnessRegistry>("harnesses"));
     let lastAuthenticated: boolean | undefined;
@@ -20,8 +37,8 @@ export default function registerPackage(host: ServerPackageHost) {
         descriptor: { id: "claude", name: "Claude Code", integration: "Agent SDK", priority: 20, setupUrl: "https://code.claude.com/docs/en/setup", installCommand: "curl -fsSL https://claude.ai/install.sh | bash", signInCommand: "claude auth login" },
         staticFeatures: CLAUDE_CAPABILITIES,
         async probe(context) {
-            if (context.remote || process.platform !== "linux")
-                return { harnessId: "claude", installed: false, healthy: false, authenticated: "unknown", message: "Local Linux runtimes are supported" };
+            if (context.remote)
+                return { harnessId: "claude", installed: false, healthy: false, authenticated: "unknown", message: "Local execution only" };
             try {
                 await loadSdk();
             }
@@ -29,9 +46,10 @@ export default function registerPackage(host: ServerPackageHost) {
                 return { harnessId: "claude", installed: false, healthy: false, authenticated: "unknown", message: "Optional Claude Agent SDK dependency is unavailable" };
             }
             try {
-                const command = process.env.POLYTH_CLAUDE_BIN ?? "claude";
-                const version = (await exec(command, ["--version"], { timeout: 5000, maxBuffer: 4096 })).stdout.trim();
-                const authenticated = await exec(command, ["auth", "status", "--json"], { timeout: 5000, maxBuffer: 8192 }).then(({ stdout }) => JSON.parse(stdout).loggedIn === true).catch(() => false);
+                const command = await resolveClaudeBinary();
+                const env = await harnessExecutableChildEnv(command);
+                const version = (await exec(command, ["--version"], { timeout: 5000, maxBuffer: 4096, env })).stdout.trim();
+                const authenticated = await exec(command, ["auth", "status", "--json"], { timeout: 5000, maxBuffer: 8192, env }).then(({ stdout }) => JSON.parse(stdout).loggedIn === true).catch(() => false);
                 // A sign-in/out flips what the account can list, so the cached
                 // cold catalog must not survive it.
                 if (lastAuthenticated !== undefined && lastAuthenticated !== authenticated) {
@@ -47,14 +65,15 @@ export default function registerPackage(host: ServerPackageHost) {
         // Model discovery does not need a conversation: the Agent SDK reports
         // the catalog from its `initialize` control response.
         async discover(context) {
-            if (context.remote || process.platform !== "linux") {
-                throw Object.assign(new Error("Local Linux runtimes are supported"), { code: "unsupported" });
+            if (context.remote) {
+                throw Object.assign(new Error("Local execution only"), { code: "unsupported" });
             }
+            const command = await resolveClaudeBinary();
             const sdk = await loadSdk();
             const models = await discoverClaudeModels({
                 query: sdk.query as Parameters<typeof discoverClaudeModels>[0]["query"],
                 cwd: context.cwd,
-                executable: process.env.POLYTH_CLAUDE_BIN ?? "claude",
+                executable: command,
                 authFingerprint: claudeAuthFingerprint(),
             });
             return {
@@ -65,9 +84,10 @@ export default function registerPackage(host: ServerPackageHost) {
             };
         },
         async createRuntime(context) {
-            if (!context.space || context.remote || process.platform !== "linux")
-                throw Object.assign(new Error("Local Linux Space context required"), { code: "unsupported" });
-            const authority = await createProcessAuthority(stateFile(context));
+            if (!context.space || context.remote)
+                throw Object.assign(new Error("Local Space context required"), { code: "unsupported" });
+            await resolveClaudeBinary();
+            const authority = await createHarnessProcessAuthority(stateFile(context));
             try {
                 return await createClaudeRuntime(context, await loadSdk(), authority);
             }
@@ -77,8 +97,15 @@ export default function registerPackage(host: ServerPackageHost) {
             }
         },
         async releaseExecution(context, binding, operationId) {
-            if (!context.space || context.remote || process.platform !== "linux")
-                return { kind: "rejected", code: "unsupported", message: "Local Linux Space context required" };
+            if (!context.space || context.remote)
+                return { kind: "rejected", code: "unsupported", message: "Local Space context required" };
+            if (process.platform !== "linux") {
+                return {
+                    kind: "rejected",
+                    code: "unsupported",
+                    message: "Crash-safe cross-harness switching currently requires Linux; this Claude runtime can still be used normally",
+                };
+            }
             return releaseProcessExecution(stateFile(context), binding, operationId);
         },
         provisioner: createClaudeProvisioner({
