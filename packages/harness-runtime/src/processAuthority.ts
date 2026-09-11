@@ -5,8 +5,8 @@ import { createProcessAuthority } from "./authority.ts";
 export interface HarnessProcessAuthority {
   readonly authorityId: string;
   readonly generation: number;
-  readonly receipts: Readonly<Record<string, string>>;
-  readonly releasedAuthorities: readonly { authorityId: string; generation: number }[];
+  readonly receipts: Record<string, string>;
+  readonly releasedAuthorities: { authorityId: string; generation: number }[];
   /** True only when Polyth can recover and prove release after its own restart. */
   readonly durable: boolean;
   spawn(command: string, args: string[], options?: SpawnOptions): ChildProcess;
