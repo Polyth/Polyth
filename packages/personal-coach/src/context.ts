@@ -1,5 +1,5 @@
 import { buildCoachHome } from "./home.ts";
-import type { CoachEvent, CoachStore } from "./index.ts";
+import type { CoachCommitment, CoachEvent, CoachStore } from "./index.ts";
 
 export const COACH_CONTEXT_MAX_CHARS = 12_000;
 
@@ -7,6 +7,15 @@ const clip = (value: string | undefined, max: number): string | undefined => {
   if (!value) return undefined;
   return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
 };
+
+const commitmentFact = (item: CoachCommitment) => ({
+  id: item.id,
+  goalId: item.goalId,
+  title: clip(item.title, 240),
+  plannedFor: item.plannedFor,
+  dueAt: item.dueAt,
+  estimateMinutes: item.estimateMinutes,
+});
 
 const compactEvent = (event: CoachEvent) => ({
   seq: event.seq,
@@ -28,7 +37,7 @@ export function buildCoachContext(
   const maxChars = Math.max(2_000, Math.min(opts.maxChars ?? COACH_CONTEXT_MAX_CHARS, COACH_CONTEXT_MAX_CHARS));
   const home = buildCoachHome(store, { ...(opts.now !== undefined ? { now: opts.now } : {}) });
   const state = {
-    schema: "polyth.personal-coach.context.v1",
+    schema: "polyth.personal-coach.context.v2",
     generatedAt: opts.now ?? Date.now(),
     date: home.date,
     reviewDue: home.reviewDue,
@@ -44,29 +53,37 @@ export function buildCoachContext(
       title: clip(goal.title, 240),
       desiredOutcome: clip(goal.desiredOutcome, 500),
       why: clip(goal.why, 500),
-      priority: goal.priority,
+      // The user's visible concept is "primary goal", not a 1-3 number.
+      primary: goal.priority === 3,
       targetAt: goal.targetAt,
     })),
+    // Today, overdue and upcoming stay separate here for the same reason they
+    // are separate in the UI: a future commitment is not today's work, and the
+    // model must not infer otherwise from a flattened list.
     today: {
-      mainFocusId: home.today.mainFocus?.id,
-      commitments: home.today.commitments.map((item) => ({
-        id: item.id,
-        goalId: item.goalId,
-        title: clip(item.title, 240),
-        plannedFor: item.plannedFor,
-        dueAt: item.dueAt,
-        estimateMinutes: item.estimateMinutes,
-      })),
-      overdueCount: home.today.overdueCount,
-      overflowCount: home.today.overflowCount,
-      dueRoutines: home.today.dueRoutines.map((routine) => ({
-        id: routine.id,
-        goalId: routine.goalId,
-        title: clip(routine.title, 240),
-        cadence: routine.cadence,
-        preferredMinuteOfDay: routine.preferredMinuteOfDay,
+      focusId: home.today.focus?.id,
+      total: home.today.total,
+      actions: home.today.actions.map(commitmentFact),
+      routines: home.today.routines.map((due) => ({
+        id: due.routine.id,
+        goalId: due.routine.goalId,
+        title: clip(due.routine.title, 240),
+        cadence: due.routine.cadence,
+        preferredMinuteOfDay: due.routine.preferredMinuteOfDay,
+        status: due.status ?? "open",
       })),
     },
+    attention: {
+      overdueTotal: home.attention.overdueTotal,
+      overdue: home.attention.overdue.map(commitmentFact),
+      overloaded: home.attention.overloaded,
+    },
+    upcoming: {
+      total: home.upcoming.total,
+      next: home.upcoming.next ? commitmentFact(home.upcoming.next) : undefined,
+      items: home.upcoming.items.map(commitmentFact),
+    },
+    pendingSuggestions: home.suggestionCount,
     recentCheckIns: store.listCheckIns({ limit: 3 }).map((item) => ({
       energy: item.energy,
       focus: item.focus,
@@ -109,7 +126,7 @@ export function buildCoachContext(
     activeGoals: state.activeGoals.slice(0, 3).map((goal) => ({
       id: goal.id,
       title: goal.title,
-      priority: goal.priority,
+      primary: goal.primary,
       targetAt: goal.targetAt,
     })),
     today: state.today,
@@ -126,7 +143,7 @@ export function buildCoachContext(
     reviewDue: state.reviewDue,
     onboardingState: state.preferences.onboardingState,
     activeGoalCount: state.activeGoals.length,
-    todayCommitmentCount: state.today.commitments.length,
+    todayCommitmentCount: state.today.total,
     omitted: true,
     hint: "Use Personal Coach tools to read focused current state.",
   });

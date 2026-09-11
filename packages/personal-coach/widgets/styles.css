@@ -1,21 +1,22 @@
+/*
+ * Coach owns only its own content. Every colour, radius, spacing step and font
+ * below is a host token — there is no second design system here, and nothing
+ * in this file assumes a viewport width. `container-type: inline-size` on the
+ * root means the same markup composes correctly at ~320px, inside a ~620px
+ * docked pane on a large monitor, and across a wide desktop workspace.
+ */
 .personal-coach-root {
   container-type: inline-size;
   color: var(--text);
   font-family: var(--ui-font-family);
-  min-width: 0;
+  min-inline-size: 0;
 }
 
-.personal-coach-root :is(h2, h3, p) { margin: 0; }
-
-.personal-coach-root.coach-home {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-5);
-  padding-block-end: var(--space-5);
-}
+.personal-coach-root :is(h2, h3, p, ul) { margin: 0; }
+.personal-coach-root ul { padding-inline-start: 1.1em; }
 
 .personal-coach-root .coach-loading {
-  min-height: 120px;
+  min-block-size: 120px;
   display: grid;
   place-items: center;
   color: var(--muted);
@@ -23,22 +24,22 @@
 }
 
 .personal-coach-root .coach-inline-error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--red);
   border-radius: var(--radius-card);
   color: var(--red);
   font-size: var(--font-meta);
+  overflow-wrap: anywhere;
 }
 
-.personal-coach-root .coach-focus-section,
-.personal-coach-root .coach-section {
-  display: grid;
-  gap: var(--space-3);
-}
+/* ---- shared vocabulary ---------------------------------------------------- */
 
-.personal-coach-root .coach-section-label,
-.personal-coach-root .coach-widget-label,
-.personal-coach-root .coach-kicker {
+.personal-coach-root .coach-kicker,
+.personal-coach-root .coach-widget-label {
   color: var(--muted);
   font-size: var(--font-meta);
   font-weight: 650;
@@ -46,228 +47,345 @@
   text-transform: uppercase;
 }
 
-.personal-coach-root .coach-focus {
-  display: grid;
-  gap: var(--space-2);
-  padding: var(--space-4);
-  background: var(--surface-overlay);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-surface);
+.personal-coach-root .coach-meta {
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  overflow-wrap: anywhere;
 }
 
-.personal-coach-root .coach-focus h2 {
-  max-width: 28ch;
-  font-size: clamp(var(--subheader-font-size), 5cqi, var(--font-title));
-  line-height: 1.15;
-  letter-spacing: -0.02em;
-}
-
-.personal-coach-root .coach-focus-meta,
-.personal-coach-root .coach-row-actions,
-.personal-coach-root .coach-checkin-summary,
-.personal-coach-root .coach-widget-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-}
-
-.personal-coach-root .coach-focus-meta,
-.personal-coach-root .coach-meta,
 .personal-coach-root .coach-quiet {
   color: var(--muted);
   font-size: var(--font-meta);
+  line-height: 1.6;
 }
 
-.personal-coach-root .coach-attention,
-.personal-coach-root .coach-insight {
-  display: grid;
-  gap: var(--space-1);
-  padding: var(--space-3);
-  background: var(--surface-overlay);
-  border-left: 2px solid var(--amber);
-  border-radius: var(--radius-card);
+.personal-coach-root .coach-lead {
+  color: var(--text);
+  line-height: 1.55;
+  max-inline-size: 62ch;
 }
 
-.personal-coach-root .coach-attention span,
-.personal-coach-root .coach-insight p {
-  color: var(--text-dim);
-  font-size: var(--font-meta);
-  line-height: var(--font-meta-lh);
-}
-
-.personal-coach-root .coach-review-due {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  background: var(--surface-overlay);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-card);
-}
-
-.personal-coach-root .coach-review-due > div {
-  min-width: 0;
-  display: grid;
-  gap: var(--space-1);
-}
-
-.personal-coach-root .coach-review-due span {
-  color: var(--text-dim);
-  font-size: var(--font-meta);
-  line-height: var(--font-meta-lh);
-}
-
-.personal-coach-root .coach-section-head,
-.personal-coach-root .coach-routine-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
-.personal-coach-root .coach-section-head h3 {
-  font-size: var(--subheader-font-size);
-}
-
-.personal-coach-root .coach-list,
-.personal-coach-root .coach-goal-list,
-.personal-coach-root .coach-routine-list {
-  display: grid;
-  gap: var(--space-1);
-}
-
-.personal-coach-root .coach-commitment,
-.personal-coach-root .coach-goal-row,
-.personal-coach-root .coach-routine-row {
-  min-width: 0;
-  padding: var(--space-2) 0;
-}
-
-.personal-coach-root .coach-commitment {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  border-bottom: 1px solid var(--border-soft);
-}
-
-.personal-coach-root .coach-commitment:last-child { border-bottom: 0; }
-
-.personal-coach-root .coach-commitment-copy,
-.personal-coach-root .coach-goal-row > div {
-  min-width: 0;
-  display: grid;
-  gap: var(--space-1);
-}
-
-.personal-coach-root .coach-commitment-copy strong,
-.personal-coach-root .coach-goal-row strong,
-.personal-coach-root .coach-widget-focus {
-  overflow-wrap: anywhere;
-  line-height: 1.35;
-}
-
-.personal-coach-root .coach-goal-row {
-  display: grid;
-  grid-template-columns: 8px minmax(0, 1fr);
-  gap: var(--space-3);
-  align-items: start;
-}
-
-.personal-coach-root .coach-goal-mark {
-  width: 6px;
-  height: 6px;
-  margin-top: 0.48em;
+.personal-coach-root .coach-badge {
+  align-self: center;
+  padding: 1px var(--space-2);
   border-radius: var(--radius-round);
-  background: var(--accent);
+  background: var(--accent-wash);
+  color: var(--accent);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  white-space: nowrap;
 }
+.personal-coach-root .coach-badge--quiet {
+  background: var(--surface-overlay);
+  color: var(--muted);
+  text-transform: capitalize;
+}
+
+.personal-coach-root .coach-stack {
+  display: grid;
+  gap: var(--space-5);
+  align-content: start;
+  min-inline-size: 0;
+}
+
+/* ---- panels --------------------------------------------------------------- */
+
+.personal-coach-root .coach-panel {
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+  padding: var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-surface);
+  background: var(--surface-overlay);
+  min-inline-size: 0;
+}
+.personal-coach-root .coach-panel--accent {
+  border-color: var(--accent-line);
+  background: var(--accent-wash);
+}
+/* The panel is a grid, so a lone button would stretch the full width and read
+   as a banner rather than an action. */
+.personal-coach-root .coach-panel > .ui-btn { justify-self: start; }
+.personal-coach-root .coach-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+.personal-coach-root .coach-panel-head h3 {
+  font-size: var(--subheader-font-size);
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+/* ---- focus ---------------------------------------------------------------- */
+
+.personal-coach-root .coach-focus {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-surface);
+  background: var(--accent-wash);
+  min-inline-size: 0;
+}
+.personal-coach-root .coach-focus h2 {
+  max-inline-size: 30ch;
+  font-size: clamp(var(--subheader-font-size), 4.2cqi, var(--font-title));
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.personal-coach-root .coach-focus--clear {
+  border-color: var(--border-soft);
+  background: var(--surface-overlay);
+}
+/* Today's focus reads top-down: kicker, title, meta, then its actions. The
+   controls stay under the text rather than drifting to the far edge of a wide
+   workspace. */
+.personal-coach-root .coach-focus .coach-row-actions {
+  margin-block-start: var(--space-3);
+  justify-content: flex-start;
+}
+
+/* ---- rows ----------------------------------------------------------------- */
+
+.personal-coach-root .coach-list {
+  display: grid;
+  gap: var(--space-1);
+  min-inline-size: 0;
+}
+
+.personal-coach-root .coach-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-2);
+  border-radius: var(--radius-control);
+  min-block-size: var(--hit-min);
+  min-inline-size: 0;
+  box-sizing: border-box;
+}
+.personal-coach-root .coach-row + .coach-row { border-block-start: 1px solid var(--border-soft); }
+.personal-coach-root .coach-row--quiet .coach-row-title { font-weight: 500; }
+
+.personal-coach-root .coach-row-copy {
+  display: grid;
+  gap: 2px;
+  /* Grow into the space the action cluster does not need, and be allowed to
+     shrink to zero so long words wrap instead of forcing the row wider. Without
+     `flex-grow` the copy collapses toward min-content and a Ukrainian or German
+     title wraps one character per line. */
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  text-align: start;
+}
+.personal-coach-root .coach-row-title {
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.personal-coach-root .coach-row-tags {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+.personal-coach-root .coach-row-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* A whole goal row is one control; it must still read and focus like a row. */
+.personal-coach-root .coach-row--button {
+  inline-size: 100%;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.personal-coach-root .coach-row--button:hover { background: var(--elevated); }
+.personal-coach-root .coach-row--button:focus-visible,
+.personal-coach-root .coach-scale-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.personal-coach-root .coach-routine--done .coach-row-title,
+.personal-coach-root .coach-routine--skipped .coach-row-title { color: var(--muted); }
+.personal-coach-root .coach-routine--done .coach-row-title { text-decoration: line-through; }
+
+/* ---- check-in ------------------------------------------------------------- */
 
 .personal-coach-root .coach-checkin {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
-  gap: var(--space-3);
+  display: flex;
   align-items: end;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  min-inline-size: 0;
+}
+.personal-coach-root .coach-checkin--recorded { align-items: center; gap: var(--space-3); }
+
+.personal-coach-root .coach-scale { display: grid; gap: var(--space-1); }
+.personal-coach-root .coach-scale-label { color: var(--text-dim); font-size: var(--font-meta); }
+.personal-coach-root .coach-scale-options { display: flex; gap: var(--space-1); }
+.personal-coach-root .coach-scale-option {
+  min-inline-size: var(--hit-min);
+  min-block-size: var(--hit-min);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--elevated);
+  color: var(--text-dim);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.personal-coach-root .coach-scale-option.selected {
+  border-color: var(--accent-line);
+  background: var(--accent-wash);
+  color: var(--accent);
+  font-weight: 650;
 }
 
-.personal-coach-root .coach-checkin label {
-  min-width: 0;
+/* ---- overview ------------------------------------------------------------- */
+
+.personal-coach-root .coach-overview {
   display: grid;
-  grid-template-columns: auto minmax(56px, 1fr) 1.5em;
+  gap: var(--space-5);
+  align-content: start;
+  min-inline-size: 0;
+}
+.personal-coach-root .coach-overview-head { display: grid; gap: var(--space-1); }
+.personal-coach-root .coach-overview-head h2 {
+  font-size: var(--subheader-font-size);
+  font-weight: 650;
+}
+
+/* Desktop density: panels flow into as many columns as the container affords,
+   and collapse to one without a breakpoint of their own. */
+.personal-coach-root .coach-grid {
+  display: grid;
+  gap: var(--space-4);
+  /* Rows in these panels carry an action cluster, so a column narrower than
+     this reads as cramped rather than dense. 1280px lands on three columns. */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  align-items: start;
+  min-inline-size: 0;
+}
+
+/* ---- goal detail ---------------------------------------------------------- */
+
+.personal-coach-root .coach-detail-head {
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.personal-coach-root .coach-detail-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.personal-coach-root .coach-goal-head { display: grid; gap: var(--space-2); }
+.personal-coach-root .coach-goal-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.personal-coach-root .coach-goal-title h2 {
+  font-size: clamp(var(--subheader-font-size), 4cqi, var(--font-title));
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.personal-coach-root .coach-review-empty { display: grid; gap: var(--space-1); }
+
+/* ---- sidebar navigation entry --------------------------------------------- */
+/* Scoped like the rest of Coach: the row carries `.personal-coach-root` so the
+   package never defines an unscoped global class in the shell. */
+
+.personal-coach-root.coach-nav { display: block; }
+.personal-coach-root .coach-nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  inline-size: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  min-block-size: var(--hit-min);
+  box-sizing: border-box;
+  cursor: pointer;
+}
+.personal-coach-root .coach-nav-item:hover { background: var(--elevated); }
+.personal-coach-root .coach-nav-item.active { background: var(--accent-wash); color: var(--accent); }
+.personal-coach-root .coach-nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.personal-coach-root .coach-nav-glyph {
+  display: grid;
+  place-items: center;
+  inline-size: 1.6em;
+  block-size: 1.6em;
+  flex-shrink: 0;
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+}
+.personal-coach-root .coach-nav-copy { display: grid; gap: 1px; min-inline-size: 0; }
+.personal-coach-root .coach-nav-title { font-weight: 600; }
+.personal-coach-root .coach-nav-status {
   color: var(--text-dim);
   font-size: var(--font-meta);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.personal-coach-root .coach-checkin input[type="range"] {
-  min-width: 56px;
-  accent-color: var(--accent);
-}
-
-.personal-coach-root .coach-footer {
-  display: flex;
-  justify-content: flex-start;
-  padding-top: var(--space-1);
-}
+/* ---- dashboard widgets ---------------------------------------------------- */
 
 .personal-coach-root.coach-widget {
-  height: 100%;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
+  display: grid;
   gap: var(--space-2);
-  padding: var(--space-3);
+  align-content: start;
+  min-inline-size: 0;
 }
-
 .personal-coach-root .coach-widget-focus {
   font-size: var(--subheader-font-size);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
+.personal-coach-root .coach-widget-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
 
-.personal-coach-root .coach-widget-empty {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-
-.personal-coach-root .coach-widget .coach-list {
-  overflow: auto;
-}
-
-.personal-coach-root .coach-widget .coach-commitment--compact {
-  padding-block: var(--space-1);
-}
-
-.personal-coach-root .coach-checkin--condensed {
-  grid-template-columns: 1fr;
-  align-items: stretch;
-}
-
-.personal-coach-root .coach-checkin-summary--condensed {
-  justify-content: space-between;
-}
-
-@container (max-width: 420px) {
-  .personal-coach-root .coach-commitment,
-  .personal-coach-root .coach-review-due {
+/* ---- narrow containers ----------------------------------------------------- */
+/* Width comes from the container, so a narrow docked pane on a 27" monitor
+   gets exactly the same treatment as a phone. */
+@container (max-width: 460px) {
+  .personal-coach-root .coach-row {
     align-items: flex-start;
     flex-direction: column;
+    gap: var(--space-2);
   }
-
   .personal-coach-root .coach-row-actions {
     align-self: stretch;
-    justify-content: flex-end;
+    justify-content: flex-start;
   }
-
-  .personal-coach-root .coach-checkin {
-    grid-template-columns: 1fr;
-    align-items: stretch;
-  }
+  .personal-coach-root .coach-row--button { flex-direction: row; align-items: center; }
+  .personal-coach-root .coach-panel { padding: var(--space-3); }
+  .personal-coach-root .coach-focus { padding: var(--space-4); }
+  .personal-coach-root .coach-checkin { gap: var(--space-3); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .personal-coach-root * { scroll-behavior: auto; }
+  .personal-coach-root * { transition: none !important; scroll-behavior: auto; }
 }

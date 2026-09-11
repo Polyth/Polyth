@@ -80,7 +80,7 @@ test("Coach session prepares scoped capabilities and injects model-visible bound
     async create(input: { projectId: string; title?: string }) {
       createdProjectId = input.projectId;
       assert.equal(preparedProjectId, input.projectId, "capabilities must be registered before session materialization");
-      assert.equal(input.title, "Coach · Today");
+      assert.equal(input.title, "Coach");
       return { id: "coach-session" };
     },
   } as unknown as SessionService;

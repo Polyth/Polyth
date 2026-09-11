@@ -1,7 +1,9 @@
 import { useEffect, useId, useState, type ChangeEvent } from "react";
 import type { CoachSetupPreferences } from "./journeyApi.ts";
 import { useCoach } from "./store.ts";
-import { GoalsPanel, PlansPanel, type CoachUiProps } from "./CoachDetails.tsx";
+import GoalsPanel from "./GoalsPanel.tsx";
+import ReviewPanel from "./ReviewPanel.tsx";
+import type { CoachUiProps } from "./parts.tsx";
 
 const localTimeZone = (): string => {
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; }
@@ -86,6 +88,7 @@ export default function CoachSetup(props: CoachUiProps) {
   const [step, setStep] = useState<"direction" | "plan" | "preferences">(state === "started" || snapshot.home!.activeGoals.length > 0 ? "plan" : "direction");
   const [text, setText] = useState("");
   const [review, setReview] = useState(false);
+  const [goalId, setGoalId] = useState<string | null>(null);
   const id = useId();
   useEffect(() => { if (state === "started") setStep((current) => current === "direction" ? "plan" : current); }, [state]);
   const busy = snapshot.busy.has("talk") || snapshot.busy.has("setup");
@@ -96,7 +99,7 @@ export default function CoachSetup(props: CoachUiProps) {
     {step === "direction" && <form className="coach-form" onSubmit={(event) => {
       event.preventDefault();
       if (text.trim() && !busy) {
-        if (state === "started") void client.talk("Coach · Direction", text.trim());
+        if (state === "started") void client.talk(text.trim());
         else void client.start(text.trim(), localTimeZone());
       }
     }}>
@@ -114,7 +117,7 @@ export default function CoachSetup(props: CoachUiProps) {
     {step === "plan" && <div className="coach-form">
       <div className="coach-intro"><h2>Start small. Make it yours.</h2><p>Keep one useful goal and a next step. You can create them yourself or review Coach's suggestions.</p></div>
       <div className="coach-actions"><Button size="sm" variant="primary" busy={snapshot.busy.has("talk")} onClick={() => void client.talk()}>{state === "started" ? "Continue with Coach" : "Help me choose"}</Button><Button size="sm" variant="ghost" onClick={() => setReview(!review)}>{review ? "Show my goals" : "Review suggestions"}</Button></div>
-      {review ? <PlansPanel {...props} /> : <GoalsPanel {...props} />}
+      {review ? <ReviewPanel {...props} /> : <GoalsPanel {...props} selectedGoalId={goalId} onSelectGoal={setGoalId} />}
       <Button variant="primary" disabled={busy} onClick={() => setStep("preferences")}>Choose preferences</Button>
       <p className="coach-meta">A formal plan is optional. You can also leave this empty and add a goal later.</p>
     </div>}

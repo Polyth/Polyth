@@ -23,10 +23,6 @@ import {
   type CoachOnboardingCapabilitySet,
   type CoachScheduleService,
 } from "./onboarding.ts";
-import {
-  registerCoachPlanCapabilities,
-  type CoachPlanCapabilitySet,
-} from "./planCapabilities.ts";
 import { personalCoachProposalRoutes } from "./proposalRoutes.ts";
 import { personalCoachReminderRoutes } from "./reminderRoutes.ts";
 import { personalCoachResetRoute } from "./resetRoute.ts";
@@ -63,9 +59,10 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     store: CoachStore,
   ): Promise<void> => {
     if (capabilities.has(projectId)) return;
-    const plans = await service.proposalReviewForWorkspaceProject(projectId, space.spaceId);
-    // A concurrent first Coach session may have opened the same review store
-    // while the await above was in flight. Registration stays exactly once.
+    // Open the review store once here so the proposal tables are ready before
+    // the first proposal card is rendered. A concurrent first Coach session may
+    // have registered while the await was in flight; registration stays once.
+    await service.proposalReviewForWorkspaceProject(projectId, space.spaceId);
     if (capabilities.has(projectId)) return;
     const registry = host.services.require(
       serverServiceKey<AgentCapabilityContributionRegistry>("harness.capabilities"),
@@ -117,18 +114,9 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         );
       },
     });
-    const planTools: CoachPlanCapabilitySet = registerCoachPlanCapabilities({
-      registry,
-      space,
-      projectId,
-      store,
-      plans,
-      onProposalCreated: publishProposal,
-    });
     capabilities.set(projectId, {
-      ids: [...main.ids, ...onboarding.ids, ...insights.ids, ...planTools.ids],
+      ids: [...main.ids, ...onboarding.ids, ...insights.ids],
       async dispose() {
-        await planTools.dispose();
         await insights.dispose();
         await onboarding.dispose();
         await main.dispose();

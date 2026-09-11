@@ -7,6 +7,7 @@ export interface CoachProfileDto {
   challengeAssumptions: boolean;
   onboardingState: "new" | "started" | "complete";
   updatedAt: number;
+  onboardingCompletedAt?: number;
 }
 
 export interface CoachSettingsDto {
@@ -118,42 +119,65 @@ export interface CoachProposalDecisionDto {
   application?: CoachProposalApplicationDto;
 }
 
-export interface CoachPlanDto {
-  id: string;
-  goalId?: string;
-  title: string;
-  currentRevision: number;
+export type CoachOccurrenceStatusDto = "done" | "skipped";
+
+export interface CoachDueRoutineDto {
+  routine: CoachRoutineDto;
+  dateKey: string;
+  /** Absent means the day is still open. */
+  status?: CoachOccurrenceStatusDto;
+}
+
+export interface CoachRoutineOccurrenceDto {
+  routineId: string;
+  dateKey: string;
+  status: CoachOccurrenceStatusDto;
+  reason?: string;
   createdAt: number;
-  updatedAt: number;
 }
 
-export interface CoachPlanDetailDto extends CoachPlanDto {
-  revisions: Array<{
-    revision: number;
-    summary: string;
-    patch: Record<string, unknown>;
-    sourceProposalId?: string;
-    createdAt: number;
-  }>;
-}
-
+/**
+ * Today, attention and upcoming are separate concepts on the wire, so no
+ * component has to guess whether an action belongs to the day it is rendering.
+ */
 export interface CoachHomeDto {
   revision: number;
   date: string;
   profile: CoachProfileDto;
-  activeGoals: CoachGoalDto[];
   today: {
-    mainFocus?: CoachCommitmentDto;
-    commitments: CoachCommitmentDto[];
-    overflowCount: number;
-    overdueCount: number;
-    dueRoutines: CoachRoutineDto[];
+    focus?: CoachCommitmentDto;
+    actions: CoachCommitmentDto[];
+    total: number;
+    routines: CoachDueRoutineDto[];
   };
-  nextAction?: CoachCommitmentDto;
-  lastCheckIn?: CoachCheckInDto;
+  attention: {
+    overdue: CoachCommitmentDto[];
+    overdueTotal: number;
+    overloaded: boolean;
+  };
+  upcoming: {
+    next?: CoachCommitmentDto;
+    items: CoachCommitmentDto[];
+    total: number;
+  };
+  activeGoals: CoachGoalDto[];
+  activeGoalTotal: number;
+  checkIn?: CoachCheckInDto;
   insight?: CoachInsightDto;
-  attention?: { kind: "overdue" | "overloaded"; count: number };
+  suggestionCount: number;
   reviewDue: boolean;
+}
+
+export interface CoachSessionOptions {
+  resume?: boolean;
+  text?: string;
+  timeZone?: string;
+}
+
+export interface CoachSessionReply {
+  sessionId: string;
+  resumed?: boolean;
+  startError?: string;
 }
 
 export interface CoachApi {
@@ -166,14 +190,13 @@ export interface CoachApi {
   completeCommitment(id: string): Promise<CoachCommitmentDto>;
   skipCommitment(id: string, reason?: string): Promise<CoachCommitmentDto>;
   recordCheckIn(input: { energy: number; focus: number; note?: string }): Promise<CoachCheckInDto>;
-  createSession(title?: string): Promise<{ sessionId: string }>;
+  createSession(title?: string, options?: CoachSessionOptions): Promise<CoachSessionReply>;
   insight(id: string): Promise<CoachInsightDto>;
   setInsightStatus(id: string, action: "accept" | "reject" | "forget"): Promise<CoachInsightDto>;
   proposal(id: string): Promise<CoachProposalDto>;
   acceptProposal(id: string): Promise<CoachProposalDecisionDto>;
   rejectProposal(id: string): Promise<CoachProposalDecisionDto>;
-  plans(): Promise<CoachPlanDto[]>;
-  plan(id: string): Promise<CoachPlanDetailDto>;
+  resolveRoutineDay(id: string, action: "done" | "skip" | "reopen", reason?: string): Promise<unknown>;
 }
 
 export function createCoachApi(): CoachApi {
@@ -196,16 +219,20 @@ export function createCoachApi(): CoachApi {
       reason ? { reason } : {},
     ),
     recordCheckIn: (input) => api.post<CoachCheckInDto>("/api/personal-coach/checkins", input),
-    createSession: (title) => api.post<{ sessionId: string }>(
+    createSession: (title, options) => api.post<CoachSessionReply>(
       "/api/personal-coach/session",
-      title ? { title } : {},
+      { ...(title ? { title } : {}), ...options },
     ),
     insight: (id) => api.get<CoachInsightDto>(insightPath(id)),
     setInsightStatus: (id, action) => api.post<CoachInsightDto>(`${insightPath(id)}/${action}`, {}),
     proposal: (id) => api.get<CoachProposalDto>(proposalPath(id)),
     acceptProposal: (id) => api.post<CoachProposalDecisionDto>(`${proposalPath(id)}/accept`, {}),
     rejectProposal: (id) => api.post<CoachProposalDecisionDto>(`${proposalPath(id)}/reject`, {}),
-    plans: async () => (await api.get<{ plans: CoachPlanDto[] }>("/api/personal-coach/plans")).plans,
-    plan: (id) => api.get<CoachPlanDetailDto>(`/api/personal-coach/plans/${encodeURIComponent(id)}`),
+    // The local day is resolved server-side from the Coach time zone, so a
+    // stale tab or a travelling device can never resolve the wrong day.
+    resolveRoutineDay: (id, action, reason) => api.post<unknown>(
+      `/api/personal-coach/routines/${encodeURIComponent(id)}/${action}`,
+      reason ? { reason } : {},
+    ),
   };
 }

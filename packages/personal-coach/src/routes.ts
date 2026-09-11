@@ -11,7 +11,7 @@ import type {
   CoachStore,
   CoachTone,
 } from "./index.ts";
-import { buildCoachHome, isCoachTimeZone } from "./home.ts";
+import { buildCoachHome, isCoachTimeZone, localDateAt } from "./home.ts";
 
 export interface CoachStoreResolver {
   forSpace(space: SpaceContext): CoachStore;
@@ -103,7 +103,19 @@ export function personalCoachRoutes(service: CoachStoreResolver): RouteHandler {
       }));
       return true;
     }
-    let match = path.match(/^\/api\/personal-coach\/goals\/([^/]+)$/);
+    let match = path.match(/^\/api\/personal-coach\/goals\/([^/]+)\/primary$/);
+    if (match && method === "POST") {
+      // "Primary goal" is the visible name of the top priority band. Making a
+      // goal primary is a first-class user decision, not a hidden number.
+      json(200, store.setPrimaryGoal(decodeURIComponent(match[1]!)));
+      return true;
+    }
+    if (path === "/api/personal-coach/goals/primary" && method === "DELETE") {
+      store.setPrimaryGoal(null);
+      json(200, { goals: store.listGoals("active") });
+      return true;
+    }
+    match = path.match(/^\/api\/personal-coach\/goals\/([^/]+)$/);
     if (match && method === "PATCH") {
       const input = await request.body();
       const areaId = input.areaId === null ? null : optionalString(input.areaId);
@@ -183,6 +195,39 @@ export function personalCoachRoutes(service: CoachStoreResolver): RouteHandler {
           ? { preferredMinuteOfDay: Number(input.preferredMinuteOfDay) }
           : {}),
       }));
+      return true;
+    }
+    match = path.match(/^\/api\/personal-coach\/routines\/([^/]+)\/(done|skip|reopen)$/);
+    if (match && method === "POST") {
+      const routineId = decodeURIComponent(match[1]!);
+      const action = match[2]!;
+      const input = await request.body();
+      // The day is resolved from the Coach time zone on the server. A client
+      // clock or a stale tab can never resolve the wrong calendar day.
+      const dateKey = optionalString(input.date)
+        ?? localDateAt(Date.now(), store.profile().timeZone).key;
+      if (action === "reopen") {
+        store.clearRoutineOccurrence(routineId, dateKey);
+        json(200, { routineId, dateKey });
+        return true;
+      }
+      json(200, store.setRoutineOccurrence({
+        routineId,
+        dateKey,
+        status: action === "done" ? "done" : "skipped",
+        ...(optionalString(input.reason) ? { reason: optionalString(input.reason)! } : {}),
+      }));
+      return true;
+    }
+    if (path === "/api/personal-coach/routine-occurrences" && method === "GET") {
+      json(200, {
+        occurrences: store.listRoutineOccurrences({
+          ...(url.searchParams.get("routineId") ? { routineId: url.searchParams.get("routineId")! } : {}),
+          ...(queryNumber(url.searchParams.get("limit")) !== undefined
+            ? { limit: queryNumber(url.searchParams.get("limit"))! }
+            : {}),
+        }),
+      });
       return true;
     }
     match = path.match(/^\/api\/personal-coach\/routines\/([^/]+)$/);

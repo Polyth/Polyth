@@ -31,6 +31,9 @@ export interface CoachProfile {
   challengeAssumptions: boolean;
   onboardingState: CoachOnboardingState;
   updatedAt: number;
+  /** When setup was actually completed. The semantic anchor for "first weekly
+   *  review is due"; editing tone/initiative/timezone must never move it. */
+  onboardingCompletedAt?: number;
 }
 
 export interface CoachArea {
@@ -93,6 +96,19 @@ export interface CoachRoutine {
   updatedAt: number;
 }
 
+export type CoachOccurrenceStatus = "done" | "skipped";
+
+/** One acted-on routine day. Rows exist only for days the user actually
+ *  resolved — a routine never materializes an infinite future task list. */
+export interface CoachRoutineOccurrence {
+  routineId: string;
+  /** Local calendar day in the Coach time zone, `YYYY-MM-DD`. */
+  dateKey: string;
+  status: CoachOccurrenceStatus;
+  reason?: string;
+  createdAt: number;
+}
+
 export interface CoachCheckIn {
   id: string;
   energy: number;
@@ -143,10 +159,30 @@ export interface CoachEvent {
   createdAt: number;
 }
 
+/** A half-open local-day window in epoch milliseconds. */
+export interface CoachDayWindow {
+  start: number;
+  end: number;
+}
+
+/**
+ * Semantic buckets for open commitments. These are different concepts, not
+ * filters over one list: `overdue` is replanning work, `today` is what the day
+ * actually holds, `upcoming` is future or deliberately unscheduled work.
+ * A commitment belongs to exactly one bucket.
+ */
+export type CoachCommitmentBucket = "overdue" | "today" | "upcoming";
+
 export interface CoachStore {
   revision(): number;
   profile(): CoachProfile;
   updateProfile(patch: Partial<Pick<CoachProfile, "tone" | "initiative" | "timeZone" | "challengeAssumptions" | "onboardingState">>): CoachProfile;
+
+  /** Canonical "Ask Coach" session for this Space, or undefined when none has
+   *  been established. Scheduled and other special-purpose sessions never
+   *  become this target. */
+  canonicalSessionId(): string | undefined;
+  setCanonicalSessionId(sessionId: string | null): void;
 
   listAreas(): CoachArea[];
   getArea(id: string): CoachArea | undefined;
@@ -172,6 +208,10 @@ export interface CoachStore {
     priority?: 1 | 2 | 3;
     targetAt?: number | null;
   }): CoachGoal;
+  /** Make one goal the user's primary goal, demoting any previous one. This is
+   *  the only writer of the top priority band, so server ordering and the
+   *  visible "Primary" control cannot drift apart. */
+  setPrimaryGoal(id: string | null): CoachGoal | undefined;
 
   listMilestones(goalId: string): CoachMilestone[];
   createMilestone(input: { goalId: string; title: string; dueAt?: number; sortOrder?: number }): CoachMilestone;
@@ -184,6 +224,11 @@ export interface CoachStore {
     to?: number;
     limit?: number;
   }): CoachCommitment[];
+  /** Bounded, indexed read of one semantic bucket, ordered primary-goal first
+   *  then soonest. Home never loads the whole open working set to pick three. */
+  listBucket(bucket: CoachCommitmentBucket, day: CoachDayWindow, limit: number): CoachCommitment[];
+  /** Exact size of the same bucket, so the UI can show "+N" without the list. */
+  countBucket(bucket: CoachCommitmentBucket, day: CoachDayWindow): number;
   getCommitment(id: string): CoachCommitment | undefined;
   createCommitment(input: {
     goalId?: string;
@@ -215,6 +260,18 @@ export interface CoachStore {
     status?: CoachRoutineStatus;
   }): CoachRoutine;
 
+  getRoutineOccurrence(routineId: string, dateKey: string): CoachRoutineOccurrence | undefined;
+  listRoutineOccurrences(input: { dateKeys?: readonly string[]; routineId?: string; limit?: number }): CoachRoutineOccurrence[];
+  /** Resolve one routine day. Re-resolving the same day replaces its status
+   *  rather than appending a second occurrence. */
+  setRoutineOccurrence(input: {
+    routineId: string;
+    dateKey: string;
+    status: CoachOccurrenceStatus;
+    reason?: string;
+  }): CoachRoutineOccurrence;
+  clearRoutineOccurrence(routineId: string, dateKey: string): void;
+
   recordCheckIn(input: { energy: number; focus: number; note?: string }): CoachCheckIn;
   listCheckIns(input?: { since?: number; limit?: number }): CoachCheckIn[];
 
@@ -227,13 +284,14 @@ export interface CoachStore {
 
   createProposal(input: { type: CoachProposalType; payload: JsonObject; reason?: string; sourceSessionId?: string }): CoachProposal;
   listProposals(status?: CoachProposalStatus): CoachProposal[];
+  countProposals(status: CoachProposalStatus): number;
   setProposalStatus(id: string, status: CoachProposalStatus): CoachProposal;
 
   listEvents(input?: { sinceSeq?: number; entityType?: string; entityId?: string; limit?: number }): CoachEvent[];
   close(): void;
 }
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const TITLE_MAX = 240;
 const SHORT_TEXT_MAX = 2_000;
 const REFLECTION_MAX = 8_000;
@@ -304,6 +362,50 @@ const validateCadence = (value: CoachRoutineCadence): CoachRoutineCadence => {
   throw err("invalid-input", "unsupported cadence kind");
 };
 
+const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/;
+
+const dateKeyOf = (value: unknown, name: string): string => {
+  if (typeof value !== "string" || !DATE_KEY.test(value)) {
+    throw err("invalid-input", `${name} must be a YYYY-MM-DD local date`);
+  }
+  return value;
+};
+
+/**
+ * One SQL definition of the three semantic buckets, shared by the bounded list
+ * and its exact count so a "+N more" badge can never disagree with the rows
+ * above it. `COALESCE(due_at, planned_for)` is the effective time of a
+ * commitment: a deadline outranks a plan, and an item with neither is
+ * deliberately unscheduled rather than late.
+ */
+function bucketPredicate(
+  bucket: CoachCommitmentBucket,
+  day: CoachDayWindow,
+): { where: string; args: number[] } {
+  const start = optionalTime(day.start, "day.start")!;
+  const end = optionalTime(day.end, "day.end")!;
+  if (end <= start) throw err("invalid-input", "day window must end after it starts");
+  const effective = "COALESCE(c.due_at, c.planned_for)";
+  // Explicit NULL guards: SQL three-valued logic would otherwise turn
+  // `NOT (… OR NULL)` into NULL and silently drop every commitment that has
+  // only one of the two times set.
+  const inDay = "((c.planned_for IS NOT NULL AND c.planned_for >= ? AND c.planned_for < ?)"
+    + " OR (c.due_at IS NOT NULL AND c.due_at >= ? AND c.due_at < ?))";
+  if (bucket === "overdue") {
+    return { where: `c.status = 'open' AND ${effective} IS NOT NULL AND ${effective} < ?`, args: [start] };
+  }
+  if (bucket === "today") {
+    return {
+      where: `c.status = 'open' AND ${effective} >= ? AND ${inDay}`,
+      args: [start, start, end, start, end],
+    };
+  }
+  return {
+    where: `c.status = 'open' AND (${effective} IS NULL OR (${effective} >= ? AND NOT ${inDay}))`,
+    args: [start, start, end, start, end],
+  };
+}
+
 interface ProfileRow {
   tone: string;
   initiative: string;
@@ -311,6 +413,15 @@ interface ProfileRow {
   challenge_assumptions: number;
   onboarding_state: string;
   updated_at: number;
+  onboarding_completed_at: number | null;
+}
+
+interface OccurrenceRow {
+  routine_id: string;
+  date_key: string;
+  status: string;
+  reason: string | null;
+  created_at: number;
 }
 
 interface AreaRow {
@@ -386,6 +497,15 @@ const profileOf = (r: ProfileRow): CoachProfile => ({
   challengeAssumptions: Boolean(r.challenge_assumptions),
   onboardingState: r.onboarding_state as CoachOnboardingState,
   updatedAt: Number(r.updated_at),
+  ...(r.onboarding_completed_at !== null ? { onboardingCompletedAt: Number(r.onboarding_completed_at) } : {}),
+});
+
+const occurrenceOf = (r: OccurrenceRow): CoachRoutineOccurrence => ({
+  routineId: r.routine_id,
+  dateKey: r.date_key,
+  status: r.status as CoachOccurrenceStatus,
+  ...(r.reason ? { reason: r.reason } : {}),
+  createdAt: Number(r.created_at),
 });
 
 const areaOf = (r: AreaRow): CoachArea => ({ id: r.id, title: r.title, status: r.status as CoachAreaStatus, sortOrder: Number(r.sort_order), createdAt: Number(r.created_at), updatedAt: Number(r.updated_at) });
@@ -405,6 +525,8 @@ export function createCoachStore(file: string, opts: { now?: () => number } = {}
   const now = opts.now ?? Date.now;
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
+
+  db.exec("PRAGMA busy_timeout = 2000");
 
   const version = Number((db.prepare("PRAGMA user_version").get() as unknown as { user_version: number }).user_version);
   if (version > SCHEMA_VERSION) {
@@ -546,6 +668,79 @@ export function createCoachStore(file: string, opts: { now?: () => number } = {}
     `);
   }
 
+  // v1 -> v2. A fresh database runs the same step the upgrade path runs, so
+  // "new install" and "existing install" converge on one schema. Additive
+  // only: nothing is dropped and no row is rewritten except the backfill of an
+  // anchor that previously had no column to live in.
+  //
+  // The proposal-application and plan tables were previously created ad hoc by
+  // proposals.ts on every open. They move here so one module owns schema.
+  if (version < 2) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(`
+        ALTER TABLE coach_profile ADD COLUMN onboarding_completed_at INTEGER;
+        ALTER TABLE coach_meta ADD COLUMN canonical_session_id TEXT;
+
+        CREATE TABLE IF NOT EXISTS coach_routine_occurrences (
+          routine_id TEXT NOT NULL REFERENCES coach_routines(id) ON DELETE CASCADE,
+          date_key TEXT NOT NULL,
+          status TEXT NOT NULL,
+          reason TEXT,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (routine_id, date_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_coach_routine_occurrences_date
+          ON coach_routine_occurrences(date_key, routine_id);
+
+        CREATE TABLE IF NOT EXISTS coach_proposal_applications (
+          proposal_id TEXT PRIMARY KEY REFERENCES coach_proposals(id) ON DELETE CASCADE,
+          entity_type TEXT NOT NULL,
+          entity_id TEXT NOT NULL,
+          applied_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS coach_plans (
+          id TEXT PRIMARY KEY,
+          goal_id TEXT REFERENCES coach_goals(id) ON DELETE SET NULL,
+          title TEXT NOT NULL,
+          current_revision INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS coach_plan_revisions (
+          plan_id TEXT NOT NULL REFERENCES coach_plans(id) ON DELETE CASCADE,
+          revision INTEGER NOT NULL,
+          summary TEXT NOT NULL,
+          patch TEXT NOT NULL,
+          source_proposal_id TEXT REFERENCES coach_proposals(id) ON DELETE SET NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (plan_id, revision)
+        );
+        CREATE INDEX IF NOT EXISTS idx_coach_plan_revisions_proposal
+          ON coach_plan_revisions(source_proposal_id);
+
+        -- Today / overdue / upcoming all order and filter on the effective
+        -- time of a commitment. One expression index serves every bucket.
+        CREATE INDEX IF NOT EXISTS idx_coach_commitments_open_when
+          ON coach_commitments(status, COALESCE(due_at, planned_for), created_at);
+
+        -- An already-onboarded Space has no recorded completion instant. Its
+        -- last profile write is the closest honest approximation and is only
+        -- ever used as the review anchor of last resort.
+        UPDATE coach_profile
+          SET onboarding_completed_at = updated_at
+          WHERE onboarding_state = 'complete' AND updated_at > 0;
+
+        PRAGMA user_version = 2;
+      `);
+      db.exec("COMMIT");
+    } catch (cause) {
+      try { db.exec("ROLLBACK"); } catch { /* preserve the original failure */ }
+      db.close();
+      throw cause;
+    }
+  }
+
   const transaction = <T>(fn: () => T): T => {
     db.exec("BEGIN IMMEDIATE");
     try {
@@ -613,10 +808,28 @@ export function createCoachStore(file: string, opts: { now?: () => number } = {}
       const onboardingState = patch.onboardingState === undefined ? before.onboardingState : enumValue(patch.onboardingState, "onboardingState", ["new", "started", "complete"] as const);
       const challenge = patch.challengeAssumptions ?? before.challengeAssumptions;
       return mutate("profile.updated", "profile", "profile", {}, (at) => {
-        db.prepare("UPDATE coach_profile SET tone = ?, initiative = ?, time_zone = ?, challenge_assumptions = ?, onboarding_state = ?, updated_at = ? WHERE id = 1")
-          .run(tone, initiative, timeZone, challenge ? 1 : 0, onboardingState, at);
+        // The completion instant is stamped once, on the transition into
+        // "complete". Later tone/initiative/timezone edits leave it alone, so
+        // changing a preference can never postpone the first weekly review.
+        const completedAt = onboardingState === "complete"
+          ? before.onboardingCompletedAt ?? at
+          : null;
+        db.prepare("UPDATE coach_profile SET tone = ?, initiative = ?, time_zone = ?, challenge_assumptions = ?, onboarding_state = ?, updated_at = ?, onboarding_completed_at = ? WHERE id = 1")
+          .run(tone, initiative, timeZone, challenge ? 1 : 0, onboardingState, at, completedAt);
         return store.profile();
       });
+    },
+
+    canonicalSessionId() {
+      const row = db.prepare("SELECT canonical_session_id FROM coach_meta WHERE id = 1")
+        .get() as unknown as { canonical_session_id: string | null };
+      return row.canonical_session_id ?? undefined;
+    },
+    setCanonicalSessionId(sessionId) {
+      const value = sessionId === null ? null : requiredText(sessionId, "sessionId", 200);
+      // Pure pointer bookkeeping: no revision bump and no audit event, so
+      // opening a chat never looks like a change to the user's plan.
+      db.prepare("UPDATE coach_meta SET canonical_session_id = ? WHERE id = 1").run(value);
     },
 
     listAreas() {
@@ -688,6 +901,23 @@ export function createCoachStore(file: string, opts: { now?: () => number } = {}
         return goalOf(mustGoal(id));
       });
     },
+    setPrimaryGoal(id) {
+      if (id === null) {
+        return mutate("goal.primary-cleared", "goal", "primary", {}, (at) => {
+          db.prepare("UPDATE coach_goals SET priority = 2, updated_at = ? WHERE priority = 3").run(at);
+          return undefined;
+        });
+      }
+      const current = goalOf(mustGoal(id));
+      if (current.status !== "active") throw err("conflict", "only an active goal can be the primary goal");
+      return mutate("goal.primary-set", "goal", id, { title: current.title }, (at) => {
+        // Exactly one goal holds the top band. Demote first so a crash cannot
+        // leave two primaries behind — both statements share one transaction.
+        db.prepare("UPDATE coach_goals SET priority = 2, updated_at = ? WHERE priority = 3 AND id <> ?").run(at, id);
+        db.prepare("UPDATE coach_goals SET priority = 3, updated_at = ? WHERE id = ?").run(at, id);
+        return goalOf(mustGoal(id));
+      });
+    },
 
     listMilestones(goalId) {
       mustGoal(goalId);
@@ -729,6 +959,28 @@ export function createCoachStore(file: string, opts: { now?: () => number } = {}
       args.push(limit);
       const sql = `SELECT * FROM coach_commitments${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY CASE WHEN planned_for IS NULL THEN 1 ELSE 0 END, planned_for ASC, created_at ASC LIMIT ?`;
       return (db.prepare(sql).all(...args) as unknown as CommitmentRow[]).map(commitmentOf);
+    },
+    listBucket(bucket, day, limit) {
+      const bounded = intRange(limit, "limit", 1, LIMIT_MAX);
+      const { where, args } = bucketPredicate(bucket, day);
+      // Primary goal first, then soonest, then oldest — the same order the
+      // UI presents, so "the first three" never needs a client-side sort over
+      // the whole open set.
+      const sql = `SELECT c.* FROM coach_commitments c
+        LEFT JOIN coach_goals g ON g.id = c.goal_id
+        WHERE ${where}
+        ORDER BY COALESCE(g.priority, 0) DESC,
+                 COALESCE(c.due_at, c.planned_for) IS NULL,
+                 COALESCE(c.due_at, c.planned_for) ASC,
+                 c.created_at ASC
+        LIMIT ?`;
+      return (db.prepare(sql).all(...args, bounded) as unknown as CommitmentRow[]).map(commitmentOf);
+    },
+    countBucket(bucket, day) {
+      const { where, args } = bucketPredicate(bucket, day);
+      const row = db.prepare(`SELECT COUNT(*) AS n FROM coach_commitments c WHERE ${where}`)
+        .get(...args) as unknown as { n: number };
+      return Number(row.n);
     },
     getCommitment(id) {
       const row = db.prepare("SELECT * FROM coach_commitments WHERE id = ?").get(id) as unknown as CommitmentRow | undefined;
@@ -829,6 +1081,53 @@ export function createCoachStore(file: string, opts: { now?: () => number } = {}
       });
     },
 
+    getRoutineOccurrence(routineId, dateKey) {
+      const row = db.prepare("SELECT * FROM coach_routine_occurrences WHERE routine_id = ? AND date_key = ?")
+        .get(routineId, dateKeyOf(dateKey, "dateKey")) as unknown as OccurrenceRow | undefined;
+      return row ? occurrenceOf(row) : undefined;
+    },
+    listRoutineOccurrences(input) {
+      const limit = intRange(input.limit ?? 60, "limit", 1, LIMIT_MAX);
+      const where: string[] = [];
+      const args: Array<string | number> = [];
+      if (input.routineId) { where.push("routine_id = ?"); args.push(requiredText(input.routineId, "routineId", 200)); }
+      if (input.dateKeys) {
+        const keys = input.dateKeys.map((key) => dateKeyOf(key, "dateKey"));
+        if (keys.length === 0) return [];
+        where.push(`date_key IN (${keys.map(() => "?").join(", ")})`);
+        args.push(...keys);
+      }
+      args.push(limit);
+      const sql = `SELECT * FROM coach_routine_occurrences${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY date_key DESC, created_at DESC LIMIT ?`;
+      return (db.prepare(sql).all(...args) as unknown as OccurrenceRow[]).map(occurrenceOf);
+    },
+    setRoutineOccurrence(input) {
+      mustRoutine(input.routineId);
+      const dateKey = dateKeyOf(input.dateKey, "dateKey");
+      const status = enumValue(input.status, "status", ["done", "skipped"] as const);
+      const reason = optionalText(input.reason, "reason", REASON_MAX);
+      return mutate(`routine.${status}`, "routine", input.routineId, {
+        dateKey,
+        ...(reason ? { reason } : {}),
+      }, (at) => {
+        // One row per routine-day: re-resolving replaces, never appends.
+        db.prepare(`INSERT INTO coach_routine_occurrences (routine_id, date_key, status, reason, created_at)
+          VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(routine_id, date_key) DO UPDATE SET status = excluded.status, reason = excluded.reason, created_at = excluded.created_at`)
+          .run(input.routineId, dateKey, status, reason ?? null, at);
+        return occurrenceOf(db.prepare("SELECT * FROM coach_routine_occurrences WHERE routine_id = ? AND date_key = ?")
+          .get(input.routineId, dateKey) as unknown as OccurrenceRow);
+      });
+    },
+    clearRoutineOccurrence(routineId, dateKey) {
+      mustRoutine(routineId);
+      const key = dateKeyOf(dateKey, "dateKey");
+      if (!db.prepare("SELECT 1 AS ok FROM coach_routine_occurrences WHERE routine_id = ? AND date_key = ?").get(routineId, key)) return;
+      mutate("routine.reopened", "routine", routineId, { dateKey: key }, () => {
+        db.prepare("DELETE FROM coach_routine_occurrences WHERE routine_id = ? AND date_key = ?").run(routineId, key);
+      });
+    },
+
     recordCheckIn(input) {
       const id = randomUUID();
       const energy = intRange(input.energy, "energy", 1, 5);
@@ -909,6 +1208,11 @@ export function createCoachStore(file: string, opts: { now?: () => number } = {}
         ? db.prepare("SELECT * FROM coach_proposals WHERE status = ? ORDER BY updated_at DESC").all(status)
         : db.prepare("SELECT * FROM coach_proposals ORDER BY updated_at DESC").all()) as unknown as ProposalRow[];
       return rows.map(proposalOf);
+    },
+    countProposals(status) {
+      const value = enumValue(status, "status", ["pending", "accepted", "rejected", "expired"] as const);
+      const row = db.prepare("SELECT COUNT(*) AS n FROM coach_proposals WHERE status = ?").get(value) as unknown as { n: number };
+      return Number(row.n);
     },
     setProposalStatus(id, status) {
       const row = db.prepare("SELECT * FROM coach_proposals WHERE id = ?").get(id) as unknown as ProposalRow | undefined;

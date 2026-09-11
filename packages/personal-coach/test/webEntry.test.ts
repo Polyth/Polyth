@@ -28,3 +28,24 @@ test("Personal Coach web entry stays browser-safe and excludes the SQLite store"
     "the browser graph must never include node:sqlite",
   );
 });
+
+test("the Coach workspace resolves shared primitives through host.ui only", async () => {
+  // The workspace, its panels, the rows, the proposal/insight cards and the
+  // sidebar entry take every primitive from `host.ui.components`. The settings
+  // page is the one deliberate exception: `PageHead`, `Switch` and
+  // `confirmAlert` have no package-facing equivalent yet and every other
+  // package's settings page imports them the same way.
+  const root = resolve(import.meta.dirname, "../../..");
+  const result = await build({
+    entryPoints: [resolve(import.meta.dirname, "../widgets/CoachWorkspace.tsx")],
+    bundle: true,
+    platform: "browser",
+    format: "esm",
+    outdir: resolve(root, ".polyth-build-test"),
+    write: false,
+    metafile: true,
+    logLevel: "silent",
+  });
+  const shellImports = Object.keys(result.metafile.inputs).filter((input) => input.includes("apps/web/src"));
+  assert.deepEqual(shellImports, []);
+});

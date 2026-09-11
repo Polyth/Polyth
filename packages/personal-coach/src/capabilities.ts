@@ -14,7 +14,7 @@ Rules:
 - Treat durable Coach state and tool results as the source of truth; do not pretend chat history is durable state.
 - Prefer one useful next action over long task lists. Do not create synthetic productivity scores or guilt/streak pressure.
 - Never mark a commitment complete unless the user explicitly states it is complete or directly asks you to mark it complete.
-- Strategic changes to goals, commitments, routines, or plans that you initiate must be created as proposals rather than silently applied.
+- Strategic changes to goals, commitments, or routines that you initiate must be created as proposals rather than silently applied. Use coach_propose_routine for anything the user wants to repeat on a schedule; there is no opaque "plan patch".
 - A user-explicit low-risk operation such as "mark X done", "move X to tomorrow", a check-in, or a reflection may use the corresponding deterministic tool directly.
 - Insights are hypotheses. Tie them to evidence and allow the user to disagree.
 - Ask only questions that materially change the plan. Avoid turning every interaction into a questionnaire.
@@ -314,29 +314,61 @@ export function registerCoachCapabilities(input: {
   );
 
   tool(
-    "coach_propose_plan_change",
-    "Create a pending strategic plan/routine change for explicit user approval rather than applying it silently.",
+    "coach_propose_routine",
+    "Create a pending routine proposal — a repeating commitment such as a weekday morning workout. The routine only exists once the user approves the proposal.",
     objectSchema({
-      summary: text("Short human-readable change summary"),
-      changes: { type: "object", description: "Structured proposed changes" },
-      reason: text("Evidence/reason for suggesting the change"),
-    }, ["summary", "changes"]),
+      title: text("What the user repeats, phrased as they said it"),
+      cadence: {
+        type: "object",
+        description: "One of {\"kind\":\"daily\"}, {\"kind\":\"weekly\",\"days\":[1,2,3,4,5]} with Sunday=0, or {\"kind\":\"interval\",\"everyDays\":3}",
+      },
+      preferredMinuteOfDay: number("Optional local time of day as minutes after midnight, e.g. 360 for 06:00"),
+      goalId: text("Optional goal this routine serves"),
+      reason: text("Why this routine is appropriate now"),
+    }, ["title", "cadence"]),
     true,
     async (value, ctx) => {
-      const changes = value.changes;
-      if (!changes || typeof changes !== "object" || Array.isArray(changes)) {
-        throw Object.assign(new Error("changes must be an object"), { code: "invalid-input" });
+      const cadence = value.cadence;
+      if (!cadence || typeof cadence !== "object" || Array.isArray(cadence)) {
+        throw Object.assign(new Error("cadence must be an object"), { code: "invalid-input" });
       }
+      const payload: JsonObject = { title: String(value.title ?? ""), cadence: cadence as JsonObject };
+      const goalId = optionalString(value.goalId);
+      const preferred = optionalNumber(value.preferredMinuteOfDay);
+      if (goalId) payload.goalId = goalId;
+      if (preferred !== undefined) payload.preferredMinuteOfDay = preferred;
       const proposal = store.createProposal({
-        type: "plan-change",
-        payload: {
-          summary: String(value.summary ?? ""),
-          changes: changes as JsonObject,
-        },
+        type: "routine",
+        payload,
         ...(optionalString(value.reason) ? { reason: optionalString(value.reason)! } : {}),
         ...(ctx.sessionId ? { sourceSessionId: ctx.sessionId } : {}),
       });
       return proposalOutput(proposal, ctx);
+    },
+  );
+
+  tool(
+    "coach_resolve_routine_day",
+    "Record that the user completed or skipped one routine on one local day, when they explicitly say so. This does not change the routine itself.",
+    objectSchema({
+      routineId: text("Routine id"),
+      date: text("Local day as YYYY-MM-DD"),
+      status: text("done or skipped"),
+      reason: text("Optional short reason the user gave"),
+    }, ["routineId", "date", "status"]),
+    true,
+    (value) => {
+      const status = String(value.status ?? "");
+      if (status !== "done" && status !== "skipped") {
+        throw Object.assign(new Error("status must be done or skipped"), { code: "invalid-input" });
+      }
+      const occurrence = store.setRoutineOccurrence({
+        routineId: String(value.routineId ?? ""),
+        dateKey: String(value.date ?? ""),
+        status,
+        ...(optionalString(value.reason) ? { reason: optionalString(value.reason)! } : {}),
+      });
+      return jsonOutput(occurrence, { entityId: occurrence.routineId });
     },
   );
 

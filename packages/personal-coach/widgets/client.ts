@@ -1,4 +1,4 @@
-import type { CoachApi, CoachHomeDto } from "./api.ts";
+import type { CoachApi, CoachCommitmentDto, CoachHomeDto } from "./api.ts";
 import type { CoachJourneyApi, CoachSessionOptions, CoachSessionReply, CoachSetupPreferences } from "./journeyApi.ts";
 
 export interface CoachClientSnapshot {
@@ -18,26 +18,88 @@ export interface CoachClient {
   complete(id: string): Promise<void>;
   skip(id: string, reason?: string): Promise<void>;
   checkIn(energy: number, focus: number): Promise<void>;
-  talk(title?: string, text?: string): Promise<void>;
+  /** Open (or continue) the one Coach conversation, optionally with context. */
+  talk(context?: string): Promise<void>;
   start(text: string, timeZone: string): Promise<boolean>;
   finishSetup(input: CoachSetupPreferences): Promise<boolean>;
   reschedule(id: string, plannedFor: number): Promise<boolean>;
+  resolveRoutine(id: string, action: "done" | "skip" | "reopen", reason?: string): Promise<boolean>;
   dispose(): void;
 }
 
-function withoutCommitment(home: CoachHomeDto, id: string): CoachHomeDto {
-  const commitments = home.today.commitments.filter((item) => item.id !== id);
-  const today: CoachHomeDto["today"] = { ...home.today, commitments };
-  if (today.mainFocus?.id === id) {
-    if (commitments[0]) today.mainFocus = commitments[0];
-    else delete today.mainFocus;
+type CommitmentBucket = "today" | "overdue" | "upcoming";
+const BUCKETS: readonly CommitmentBucket[] = ["today", "overdue", "upcoming"];
+
+/** The three semantic lists as flat arrays, so one optimistic path serves all
+ *  of them instead of Today having rollback and the other two silently not. */
+function bucketList(home: CoachHomeDto, bucket: CommitmentBucket): CoachCommitmentDto[] {
+  if (bucket === "today") return home.today.actions;
+  if (bucket === "overdue") return home.attention.overdue;
+  return [...(home.upcoming.next ? [home.upcoming.next] : []), ...home.upcoming.items];
+}
+
+function withBucket(
+  home: CoachHomeDto,
+  bucket: CommitmentBucket,
+  items: CoachCommitmentDto[],
+  totalDelta: number,
+): CoachHomeDto {
+  if (bucket === "today") {
+    // Focus is always today's first action. Completing the focus promotes the
+    // next one; emptying the day shows the honest empty state rather than
+    // reaching into upcoming work for something to display.
+    const today = { ...home.today, actions: items, total: Math.max(items.length, home.today.total + totalDelta) };
+    if (items[0]) today.focus = items[0];
+    else delete today.focus;
+    return { ...home, today };
   }
-  const next: CoachHomeDto = { ...home, today };
-  if (next.nextAction?.id === id) {
-    if (commitments[0]) next.nextAction = commitments[0];
-    else delete next.nextAction;
+  if (bucket === "overdue") {
+    return {
+      ...home,
+      attention: {
+        ...home.attention,
+        overdue: items,
+        overdueTotal: Math.max(items.length, home.attention.overdueTotal + totalDelta),
+      },
+    };
   }
-  return next;
+  const [next, ...rest] = items;
+  const upcoming = {
+    ...home.upcoming,
+    items: rest,
+    total: Math.max(items.length, home.upcoming.total + totalDelta),
+  };
+  if (next) upcoming.next = next;
+  else delete upcoming.next;
+  return { ...home, upcoming };
+}
+
+interface CommitmentSlot {
+  bucket: CommitmentBucket;
+  index: number;
+  item: CoachCommitmentDto;
+}
+
+function locate(home: CoachHomeDto, id: string): CommitmentSlot | undefined {
+  for (const bucket of BUCKETS) {
+    const items = bucketList(home, bucket);
+    const index = items.findIndex((item) => item.id === id);
+    if (index >= 0) return { bucket, index, item: items[index]! };
+  }
+  return undefined;
+}
+
+function removeCommitment(home: CoachHomeDto, slot: CommitmentSlot): CoachHomeDto {
+  const items = bucketList(home, slot.bucket).filter((item) => item.id !== slot.item.id);
+  return withBucket(home, slot.bucket, items, -1);
+}
+
+function restoreCommitment(home: CoachHomeDto, slot: CommitmentSlot): CoachHomeDto {
+  const items = bucketList(home, slot.bucket);
+  if (items.some((item) => item.id === slot.item.id)) return home;
+  const next = [...items];
+  next.splice(Math.min(slot.index, next.length), 0, slot.item);
+  return withBucket(home, slot.bucket, next, 1);
 }
 
 export function createCoachClient(input: {
@@ -80,30 +142,21 @@ export function createCoachClient(input: {
   const mutateCommitment = async (id: string, run: () => Promise<unknown>, action: string) => {
     const before = snapshot.home;
     if (!before || disposed || snapshot.busy.has(`commitment:${id}`)) return;
-    publish({ ...snapshot, home: withoutCommitment(before, id), error: undefined });
+    // The row may have been rendered from Today, from overdue attention, or
+    // from Next up. Optimism and rollback follow wherever it actually lives.
+    const slot = locate(before, id);
+    if (slot) publish({ ...snapshot, home: removeCommitment(before, slot), error: undefined });
     setBusy(`commitment:${id}`, true);
     try { await run(); await reconcile(); }
     catch (cause) {
       // Roll back only this row, not a newer check-in or another mutation.
       const current = snapshot.home;
-      const original = before.today.commitments.find((item) => item.id === id);
-      if (current && original && !current.today.commitments.some((item) => item.id === id)) {
-        const commitments = [...current.today.commitments];
-        const index = Math.min(before.today.commitments.indexOf(original), commitments.length);
-        commitments.splice(index, 0, original);
-        publish({ ...snapshot, home: {
-          ...current,
-          today: { ...current.today, commitments,
-            ...(before.today.mainFocus?.id === id ? { mainFocus: original } : {}),
-          },
-          ...(before.nextAction?.id === id ? { nextAction: original } : {}),
-        } });
-      }
+      if (current && slot) publish({ ...snapshot, home: restoreCommitment(current, slot) });
       fail(action, cause);
     } finally { setBusy(`commitment:${id}`, false); }
   };
 
-  const launch = async (title?: string, options: CoachSessionOptions = { resume: true }): Promise<boolean> => {
+  const launch = async (options: CoachSessionOptions, title?: string): Promise<boolean> => {
     if (disposed || snapshot.busy.has("talk")) return false;
     const navigation = input.navigationToken?.();
     publish({ ...snapshot, error: undefined, talkStage: "starting" });
@@ -146,18 +199,17 @@ export function createCoachClient(input: {
       if (disposed || snapshot.busy.has("checkin")) return;
       setBusy("checkin", true);
       try {
-        const lastCheckIn = await input.api.recordCheckIn({ energy, focus });
-        if (snapshot.home) publish({ ...snapshot, home: { ...snapshot.home, lastCheckIn }, error: undefined });
+        const checkIn = await input.api.recordCheckIn({ energy, focus });
+        if (snapshot.home) publish({ ...snapshot, home: { ...snapshot.home, checkIn }, error: undefined });
       } catch (cause) { fail("Save check-in", cause); }
       finally { setBusy("checkin", false); }
     },
-    async talk(title, text) {
-      await launch(title, title || text ? {
-        resume: false,
-        text: text ?? "Let's review the past week. Read my Coach context, help me reflect on what happened, and propose only evidence-backed adjustments.",
-      } : { resume: true });
+    // One resumable Coach conversation. Context travels as the message the user
+    // is effectively sending, never as a second competing session.
+    async talk(context) {
+      await launch({ resume: true, ...(context ? { text: context } : {}) });
     },
-    start: (text, timeZone) => launch(undefined, { resume: true, text, timeZone }),
+    start: (text, timeZone) => launch({ resume: true, text, timeZone }),
     async finishSetup(preferences) {
       if (disposed || snapshot.busy.has("setup")) return false;
       setBusy("setup", true);
@@ -180,6 +232,17 @@ export function createCoachClient(input: {
         await reconcile();
         return true;
       } catch (cause) { fail("Move commitment", cause); return false; }
+      finally { setBusy(key, false); }
+    },
+    async resolveRoutine(id, action, reason) {
+      const key = `routine:${id}`;
+      if (disposed || snapshot.busy.has(key)) return false;
+      setBusy(key, true);
+      try {
+        await input.api.resolveRoutineDay(id, action, reason);
+        await reconcile();
+        return true;
+      } catch (cause) { fail("Update routine", cause); return false; }
       finally { setBusy(key, false); }
     },
     dispose() { disposed = true; listeners.clear(); },

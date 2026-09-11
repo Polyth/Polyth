@@ -7,7 +7,10 @@ import type { CoachJourneyApi, CoachSessionReply } from "../widgets/journeyApi.t
 const home = (): CoachHomeDto => ({
   revision: 1, date: "2026-09-10",
   profile: { tone: "balanced", initiative: "balanced", timeZone: "Europe/Kyiv", challengeAssumptions: false, onboardingState: "new", updatedAt: 1 },
-  activeGoals: [], today: { commitments: [], overflowCount: 0, overdueCount: 0, dueRoutines: [] }, reviewDue: false,
+  today: { actions: [], total: 0, routines: [] },
+  attention: { overdue: [], overdueTotal: 0, overloaded: false },
+  upcoming: { items: [], total: 0 },
+  activeGoals: [], activeGoalTotal: 0, suggestionCount: 0, reviewDue: false,
 });
 const friendlyError = (action: string, cause: unknown) => `${action}: ${cause instanceof Error ? cause.message : String(cause)}`;
 function api(overrides: Partial<CoachJourneyApi> = {}): CoachJourneyApi {

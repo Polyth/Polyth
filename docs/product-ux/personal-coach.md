@@ -480,3 +480,105 @@ For each wave:
 - record source-inspected/tested/live/device evidence separately.
 
 The guiding implementation rule is: reuse existing Polyth seams, delete unnecessary complexity, and choose the smallest correct diff that preserves security, tenancy and user-visible behavior.
+
+## v2 — workspace redesign (schema version 2)
+
+This section supersedes the earlier parts of this document wherever they
+disagree. It records what shipped, not what was planned.
+
+### Information architecture
+
+`Today | Goals | Plan` is replaced by:
+
+```
+Coach
+  ├── Overview   desktop-first summary
+  ├── Today      the day, plus attention and routines
+  ├── Goals      list and a real goal-detail surface
+  └── Review     only advertises itself when it holds something
+```
+
+`Plan` is gone as a product area. It carried no independent value: a plan was a
+title plus revision summaries over opaque JSON patches. Pending proposals,
+a due weekly review and evidence-backed insights now live under Review.
+
+Existing `coach_plans` / `coach_plan_revisions` rows and pending `plan-change`
+proposals are **kept and still applicable** — the concept is withdrawn from the
+product surface and from the agent toolset, not deleted from anyone's database.
+
+### Today semantics
+
+`home.today.mainFocus ?? home.nextAction` allowed a future commitment to render
+as today's primary action. The projection now keeps three separate concepts and
+a commitment belongs to exactly one:
+
+| Bucket | Meaning | SQL predicate on `COALESCE(due_at, planned_for)` |
+| --- | --- | --- |
+| `attention.overdue` | needs replanning | `< start of local day` |
+| `today` | what the day holds | `>= start` and planned-or-due falls inside the day |
+| `upcoming` | future, or deliberately unscheduled | everything else, `NULL` included |
+
+`today.focus` is `today.actions[0]` and nothing else. An empty day renders
+"You're clear today"; the next future item appears only under *Next up*.
+
+Each bucket is one bounded indexed query plus one exact `COUNT(*)`, so Home
+never loads the open working set to decide the first few rows.
+
+### Schema version 2
+
+Additive migration, run identically by a fresh database and an upgrade, so both
+converge on one schema (`packages/personal-coach/test/migration.test.ts` starts
+from a real v1 database with user rows in it).
+
+- `coach_profile.onboarding_completed_at` — the semantic anchor for "the first
+  weekly review is due". Editing tone, initiative, time zone or the challenge
+  preference must never postpone a review, which `profile.updatedAt` did.
+  Backfilled from `updated_at` for already-onboarded Spaces.
+- `coach_meta.canonical_session_id` — the one conversation "Ask Coach" resumes.
+- `coach_routine_occurrences (routine_id, date_key, status, reason, created_at)`
+  — one row per *acted-on* routine day. A routine still materializes no future
+  tasks; only Done/Skip writes a row, and re-resolving a day replaces it.
+- `idx_coach_commitments_open_when` — expression index over
+  `COALESCE(due_at, planned_for)`, serving all three buckets.
+- `coach_proposal_applications`, `coach_plans`, `coach_plan_revisions` moved out
+  of `proposals.ts` (which created them ad hoc on every open) into this
+  migration. One module owns schema; the proposal store now fails closed if it
+  is handed a database that never ran it.
+
+### Goals
+
+The hidden numeric `priority` gains a visible interaction model: the top band is
+the user's **primary goal**, set through `POST /goals/:id/primary` and cleared
+through `DELETE /goals/primary`. `setPrimaryGoal` is the only writer of that
+band and demotes the previous holder in the same transaction, so server ordering
+and the visible control cannot drift apart.
+
+A goal's *next action* is unscheduled by default. "Next action toward a goal"
+and "commitment for today" are different things, and creating the former no
+longer stamps `Date.now()`.
+
+### Conversation policy
+
+One canonical Coach session per Space, recorded in `coach_meta`. Contextual asks
+("about this goal", "discuss this suggestion") continue that conversation with a
+context-carrying message instead of spawning `Coach · <topic>` children that
+compete to be the latest session. Scheduled check-ins and reviews still create
+their own sessions and are explicitly never adopted as the resume target. An
+install predating the pointer adopts its most recent Coach chat once. The same
+text is never admitted twice for one Space, including after an uncertain
+admission.
+
+### Navigation
+
+Coach appears in the primary sidebar through the existing `app.nav` slot, above
+"add project", with one short status line (overdue count, pending suggestions,
+weekly review, today's focus, next routine, or "clear today"). No new navigation
+abstraction, no Git or worktree semantics, and no visible hidden project.
+
+### Agent capabilities
+
+- removed: `coach_propose_plan_change`, `coach_list_plans`,
+  `coach_propose_plan_revision`;
+- added: `coach_propose_routine` (typed routine proposal — "a light morning
+  workout on weekdays at 06:00" becomes a routine, not a plan patch) and
+  `coach_resolve_routine_day`.

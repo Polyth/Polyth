@@ -62,6 +62,28 @@ test("weekly review becomes due after seven local days and a weekly reflection r
   store.close();
 });
 
+test("editing coaching preferences never postpones the first weekly review", () => {
+  let clock = Date.parse("2026-09-01T12:00:00Z");
+  const store = fresh(() => clock);
+  store.updateProfile({ timeZone: "Europe/Kyiv", onboardingState: "complete" });
+  const completedAt = store.profile().onboardingCompletedAt;
+  assert.equal(completedAt, clock, "the completion instant is stamped on the transition");
+
+  // Six days later the user changes tone, initiative, timezone and the
+  // challenge preference. Under the old `profile.updatedAt` anchor each of
+  // these pushed the first review a further week away.
+  clock = Date.parse("2026-09-07T12:00:00Z");
+  store.updateProfile({ tone: "direct" });
+  store.updateProfile({ initiative: "proactive" });
+  store.updateProfile({ challengeAssumptions: true });
+  store.updateProfile({ timeZone: "Europe/Warsaw" });
+  assert.equal(store.profile().onboardingCompletedAt, completedAt, "the anchor is stamped once");
+
+  clock = Date.parse("2026-09-08T12:00:00Z");
+  assert.equal(buildCoachHome(store, { now: clock }).reviewDue, true);
+  store.close();
+});
+
 test("insight tool requires recent durable evidence and weekly review tool persists the review", async () => {
   const store = fresh();
   const reflection = store.recordReflection({ text: "Morning focus worked twice this week." });

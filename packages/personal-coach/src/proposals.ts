@@ -171,33 +171,13 @@ export function createCoachProposalReviewStore(file: string, opts: { now?: () =>
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
   db.exec("PRAGMA busy_timeout = 2000");
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS coach_proposal_applications (
-      proposal_id TEXT PRIMARY KEY REFERENCES coach_proposals(id) ON DELETE CASCADE,
-      entity_type TEXT NOT NULL,
-      entity_id TEXT NOT NULL,
-      applied_at INTEGER NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS coach_plans (
-      id TEXT PRIMARY KEY,
-      goal_id TEXT REFERENCES coach_goals(id) ON DELETE SET NULL,
-      title TEXT NOT NULL,
-      current_revision INTEGER NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS coach_plan_revisions (
-      plan_id TEXT NOT NULL REFERENCES coach_plans(id) ON DELETE CASCADE,
-      revision INTEGER NOT NULL,
-      summary TEXT NOT NULL,
-      patch TEXT NOT NULL,
-      source_proposal_id TEXT REFERENCES coach_proposals(id) ON DELETE SET NULL,
-      created_at INTEGER NOT NULL,
-      PRIMARY KEY (plan_id, revision)
-    );
-    CREATE INDEX IF NOT EXISTS idx_coach_plan_revisions_proposal
-      ON coach_plan_revisions(source_proposal_id);
-  `);
+  // Schema is owned by the versioned migration in ./index.ts. This store only
+  // reads and writes tables that migration guarantees, so there is no second
+  // place where the shape of a Coach database can be decided.
+  if (!db.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = 'coach_proposal_applications'").get()) {
+    db.close();
+    throw fail("unsupported-schema", "coach database is missing proposal tables; open it through createCoachStore first");
+  }
 
   const transaction = <T>(fn: () => T): T => {
     db.exec("BEGIN IMMEDIATE");

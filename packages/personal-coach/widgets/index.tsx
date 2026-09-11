@@ -6,10 +6,11 @@ import type { SessionEvent } from "@polyth/contracts";
 import { defineWebPackage } from "@polyth/web-sdk";
 import { createCoachApi } from "./api.ts";
 import { createCoachJourneyApi } from "./journeyApi.ts";
+import CoachNavItem from "./CoachNavItem.tsx";
 import CoachWorkspace from "./CoachWorkspace.tsx";
 import {
+  AttentionWidget,
   CheckInWidget,
-  CommitmentsWidget,
   GoalWidget,
   NextActionWidget,
   TodayWidget,
@@ -18,10 +19,12 @@ import CoachSettingsPage from "./CoachSettingsPage.tsx";
 import InsightCard from "./InsightCard.tsx";
 import ProposalCard from "./ProposalCard.tsx";
 import { createCoachClient } from "./store.ts";
+import { t } from "./strings.ts";
 
 export default defineWebPackage((host) => () => {
   const api = createCoachJourneyApi(createCoachApi());
   const errorText = host.errors.friendly;
+  const ui = host.ui.components;
   const client = createCoachClient({
     api,
     openSession: host.conversation.openSession,
@@ -32,6 +35,8 @@ export default defineWebPackage((host) => () => {
     },
   });
 
+  // Refresh follows normal client lifecycle — focus and opening the surface.
+  // There is no Coach poller and no visible Refresh button.
   const onFocus = () => { if (document.visibilityState !== "hidden") void client.refresh(); };
   window.addEventListener("focus", onFocus);
   const isOpen = () => {
@@ -45,36 +50,64 @@ export default defineWebPackage((host) => () => {
     wasOpen = open;
   });
 
+  const openCoach = () => {
+    void client.refresh();
+    host.navigation.openWorkspacePane("personal-coach");
+  };
+
+  const coachProps = {
+    api, client, ui,
+    friendlyError: errorText,
+    openSettings: () => host.navigation.openSettingsPage("personal-coach"),
+  };
+
   const off = [
     host.surfaces.register({
       id: "personal-coach",
-      title: "Personal Coach",
-      description: "Focus, commitments, and progress that persist across chats.",
+      title: t("coach.workspace.title"),
+      description: "Decide, commit, act and review — durable across chats.",
       capabilityId: "personal-coach",
       order: 34,
-      component: () => createElement(CoachWorkspace, {
-        api, client, ui: host.ui.components, friendlyError: errorText,
-        openSettings: () => host.navigation.openSettingsPage("personal-coach"),
-      }),
+      component: () => createElement(CoachWorkspace, coachProps),
       presentation: {
         kind: "workspace",
-        defaultRatio: 0.4,
-        minWidth: 320,
-        minHeight: 280,
-        preferredMaxWidth: 620,
+        // Coach is the surface the user works in, with the conversation as its
+        // companion rather than the other way round: it takes the majority of
+        // the workspace on a wide screen and the host keeps Chat above its
+        // floor. Below `minWidth` the host promotes it to full screen, which is
+        // what a phone and a narrow window get.
+        defaultRatio: 0.62,
+        minWidth: 380,
+        minHeight: 320,
+        preferredMaxWidth: 1280,
         keepAlive: true,
         escape: "close",
         dock: "side",
       },
     }),
+    // Coach lives in the same primary navigation as the user's workspaces, so
+    // it is never something to hunt for under Settings → Packages. The existing
+    // `app.nav` seam carries it; no navigation rewrite and no fake Git project.
+    host.slots.register({
+      id: "personal-coach.nav",
+      slot: "app.nav",
+      order: 0,
+      render: (props) => createElement(CoachNavItem, {
+        client,
+        expanded: props.expanded !== false,
+        onOpen: openCoach,
+        isActive: () => host.store.getSnapshot().railPlugin === "personal-coach",
+        subscribe: host.store.subscribe,
+      }),
+    }),
     host.capabilities.register({
       id: "personal-coach",
-      label: "Coach",
+      label: t("coach.workspace.title"),
       plainDescription: "Keep durable goals and commitments, then focus on what matters now.",
-      keywords: ["coach", "goals", "commitments", "today", "focus"],
+      keywords: ["coach", "goals", "commitments", "today", "focus", "routines", "review"],
       standardTier: "primary",
       standardRank: 16,
-      open: () => { void client.refresh(); host.navigation.openWorkspacePane("personal-coach"); },
+      open: openCoach,
       available: () => true,
     }),
     host.settings.registerPage({
@@ -106,7 +139,7 @@ export default defineWebPackage((host) => () => {
           id: "personal-coach-data",
           pageId: "personal-coach",
           label: "Reset Coach state",
-          description: "Clear durable goals, plans, check-ins, reflections, and insights.",
+          description: "Clear durable goals, routines, check-ins, reflections, and insights.",
           keywords: ["coach", "reset", "data", "forget", "clear", "privacy"],
           focusTarget: "personal-coach-data",
         },
@@ -118,8 +151,8 @@ export default defineWebPackage((host) => () => {
       widgets: [
         {
           id: "personal-coach.today",
-          title: "Today",
-          description: "Your main focus and the next useful action.",
+          title: t("coach.tab.today"),
+          description: "Today's focus and one deterministic action.",
           defaultSlot: "workspace.main",
           supportedSlots: ["workspace.main", "workspace.right", "workspace.bottom"],
           defaultSize: { w: 6, h: 3 },
@@ -127,12 +160,12 @@ export default defineWebPackage((host) => () => {
           scope: "global",
           recommended: true,
           defaultVisible: false,
-          render: () => createElement(TodayWidget, { client }),
+          render: () => createElement(TodayWidget, { client, ui }),
         },
         {
           id: "personal-coach.next-action",
-          title: "Next Action",
-          description: "One useful thing to do next.",
+          title: t("coach.upcoming.title"),
+          description: "What is queued after today.",
           defaultSlot: "workspace.right",
           supportedSlots: ["workspace.main", "workspace.right", "workspace.bottom"],
           defaultSize: { w: 3, h: 2 },
@@ -140,35 +173,35 @@ export default defineWebPackage((host) => () => {
           scope: "global",
           recommended: true,
           defaultVisible: false,
-          render: () => createElement(NextActionWidget, { client }),
+          render: () => createElement(NextActionWidget, { client, ui }),
         },
         {
-          id: "personal-coach.commitments",
-          title: "Commitments",
-          description: "Today’s concrete promises, kept deliberately small.",
+          id: "personal-coach.attention",
+          title: t("coach.attention.title"),
+          description: "Overdue work and suggestions waiting for review.",
           defaultSlot: "workspace.right",
           supportedSlots: ["workspace.main", "workspace.right", "workspace.bottom"],
-          defaultSize: { w: 5, h: 4 },
-          minSize: { w: 3, h: 3 },
+          defaultSize: { w: 3, h: 2 },
+          minSize: { w: 2, h: 2 },
           scope: "global",
           defaultVisible: false,
-          render: () => createElement(CommitmentsWidget, { client }),
+          render: () => createElement(AttentionWidget, { client, ui }),
         },
         {
           id: "personal-coach.goal",
-          title: "Goal",
-          description: "The highest-priority active goal without synthetic progress scores.",
+          title: t("coach.goals.title"),
+          description: "The primary goal, without synthetic progress scores.",
           defaultSlot: "workspace.right",
           supportedSlots: ["workspace.main", "workspace.right", "workspace.bottom"],
           defaultSize: { w: 4, h: 2 },
           minSize: { w: 3, h: 2 },
           scope: "global",
           defaultVisible: false,
-          render: () => createElement(GoalWidget, { client }),
+          render: () => createElement(GoalWidget, { client, ui }),
         },
         {
           id: "personal-coach.check-in",
-          title: "Check-in",
+          title: t("coach.checkin.title"),
           description: "A lightweight energy and focus check-in with no model call.",
           defaultSlot: "workspace.right",
           supportedSlots: ["workspace.main", "workspace.right", "workspace.bottom"],
@@ -176,7 +209,7 @@ export default defineWebPackage((host) => () => {
           minSize: { w: 3, h: 2 },
           scope: "global",
           defaultVisible: false,
-          render: () => createElement(CheckInWidget, { client }),
+          render: () => createElement(CheckInWidget, { client, ui }),
         },
       ],
     }),
@@ -187,8 +220,7 @@ export default defineWebPackage((host) => () => {
       meta: { eventTypes: ["coach/proposal-created"] },
       render: (props) => createElement(ProposalCard, {
         event: props.event as SessionEvent,
-        api,
-        client,
+        api, client, ui,
         friendlyError: errorText,
       }),
     }),
@@ -199,8 +231,7 @@ export default defineWebPackage((host) => () => {
       meta: { eventTypes: ["coach/insight-created"] },
       render: (props) => createElement(InsightCard, {
         event: props.event as SessionEvent,
-        api,
-        client,
+        api, client, ui,
         friendlyError: errorText,
       }),
     }),

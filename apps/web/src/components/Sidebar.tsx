@@ -875,16 +875,19 @@ export default function Sidebar() {
               />
             </div>
           )}
+          {/* Contributed navigation belongs with the workspaces it sits beside,
+              not underneath the "add project" affordance. A package workspace
+              (Personal Coach) is a peer of a project here, never a project. */}
+          <SlotHost
+            slot="app.nav"
+            context={{ projectId: activeProjectId, sessionId: activeSessionId, expanded }}
+          />
           {registry.status === "ready" && projects.length > 0 && query.trim() === "" && (
             <button className="sidebar-add-project" onClick={() => setOverlay("project-picker")}>
               <Icon.plus />
               <span>{tr("sidebar.addProject")}</span>
             </button>
           )}
-          <SlotHost
-            slot="app.nav"
-            context={{ projectId: activeProjectId, sessionId: activeSessionId, expanded }}
-          />
         </div>
         <SlotHost
           slot="sidebar.footer"

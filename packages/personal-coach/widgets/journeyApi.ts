@@ -1,8 +1,10 @@
 import { createApiTransport } from "@polyth/web-sdk";
 import type {
   CoachApi, CoachCommitmentDto, CoachGoalDto, CoachProfileDto,
-  CoachProposalDto,
+  CoachProposalDto, CoachRoutineDto,
 } from "./api.ts";
+
+export type { CoachSessionOptions, CoachSessionReply } from "./api.ts";
 
 export interface CoachSetupPreferences {
   confirm: true;
@@ -17,41 +19,39 @@ export interface CoachSetupPreferences {
   weeklyMinuteOfDay: number;
 }
 
-export interface CoachSessionOptions {
-  resume?: boolean;
-  text?: string;
-  timeZone?: string;
-}
-export interface CoachSessionReply {
-  sessionId: string;
-  resumed?: boolean;
-  startError?: string;
-}
-
 /** Extends the existing transport; no duplicate state, polling or chat engine. */
 export interface CoachJourneyApi extends CoachApi {
-  createSession(title?: string, options?: CoachSessionOptions): Promise<CoachSessionReply>;
   finishSetup(input: CoachSetupPreferences): Promise<CoachProfileDto>;
-  goals(): Promise<CoachGoalDto[]>;
+  goals(status?: CoachGoalDto["status"]): Promise<CoachGoalDto[]>;
   createGoal(input: { title: string; desiredOutcome?: string }): Promise<CoachGoalDto>;
-  updateGoal(id: string, patch: Partial<Pick<CoachGoalDto, "title" | "desiredOutcome" | "status">>): Promise<CoachGoalDto>;
+  updateGoal(id: string, patch: Partial<Pick<CoachGoalDto, "title" | "desiredOutcome" | "why" | "status">>): Promise<CoachGoalDto>;
+  setPrimaryGoal(id: string): Promise<CoachGoalDto>;
+  clearPrimaryGoal(): Promise<unknown>;
   commitments(goalId?: string): Promise<CoachCommitmentDto[]>;
-  createCommitment(input: { title: string; goalId?: string; plannedFor: number }): Promise<CoachCommitmentDto>;
+  /**
+   * `plannedFor` is optional on purpose. A next action toward a goal is not the
+   * same thing as a commitment for today, and the UI must be able to express
+   * "unscheduled" instead of silently stamping the current time.
+   */
+  createCommitment(input: { title: string; goalId?: string; plannedFor?: number }): Promise<CoachCommitmentDto>;
   rescheduleCommitment(id: string, plannedFor: number): Promise<CoachCommitmentDto>;
+  routines(): Promise<CoachRoutineDto[]>;
   proposals(): Promise<CoachProposalDto[]>;
 }
 
 export function createCoachJourneyApi(base: CoachApi): CoachJourneyApi {
   const api = createApiTransport();
+  const goalPath = (id: string) => `/api/personal-coach/goals/${encodeURIComponent(id)}`;
   return {
     ...base,
-    createSession: (title, options) => api.post<CoachSessionReply>("/api/personal-coach/session", {
-      ...(title ? { title } : {}), ...options,
-    }),
     finishSetup: (input) => api.post<CoachProfileDto>("/api/personal-coach/setup", input),
-    goals: async () => (await api.get<{ goals: CoachGoalDto[] }>("/api/personal-coach/goals")).goals,
+    goals: async (status) => (await api.get<{ goals: CoachGoalDto[] }>(
+      `/api/personal-coach/goals${status ? `?status=${encodeURIComponent(status)}` : ""}`,
+    )).goals,
     createGoal: (input) => api.post<CoachGoalDto>("/api/personal-coach/goals", input),
-    updateGoal: (id, patch) => api.patch<CoachGoalDto>(`/api/personal-coach/goals/${encodeURIComponent(id)}`, patch),
+    updateGoal: (id, patch) => api.patch<CoachGoalDto>(goalPath(id), patch),
+    setPrimaryGoal: (id) => api.post<CoachGoalDto>(`${goalPath(id)}/primary`, {}),
+    clearPrimaryGoal: () => api.delete<unknown>("/api/personal-coach/goals/primary"),
     commitments: async (goalId) => (await api.get<{ commitments: CoachCommitmentDto[] }>(
       `/api/personal-coach/commitments?status=open&limit=100${goalId ? `&goalId=${encodeURIComponent(goalId)}` : ""}`,
     )).commitments,
@@ -59,6 +59,9 @@ export function createCoachJourneyApi(base: CoachApi): CoachJourneyApi {
     rescheduleCommitment: (id, plannedFor) => api.post<CoachCommitmentDto>(
       `/api/personal-coach/commitments/${encodeURIComponent(id)}/reschedule`, { plannedFor },
     ),
+    routines: async () => (await api.get<{ routines: CoachRoutineDto[] }>(
+      "/api/personal-coach/routines?status=active",
+    )).routines,
     proposals: async () => (await api.get<{ proposals: CoachProposalDto[] }>("/api/personal-coach/proposals?status=pending")).proposals,
   };
 }

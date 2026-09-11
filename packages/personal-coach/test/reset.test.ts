@@ -21,7 +21,9 @@ test("reset clears durable Coach state while preserving user preferences", () =>
   });
   const goal = store.createGoal({ title: "Private goal", priority: 3 });
   store.createCommitment({ goalId: goal.id, title: "Do something", plannedFor: 5000 });
-  store.createRoutine({ goalId: goal.id, title: "Practice", cadence: { kind: "daily" } });
+  const routine = store.createRoutine({ goalId: goal.id, title: "Practice", cadence: { kind: "daily" } });
+  store.setRoutineOccurrence({ routineId: routine.id, dateKey: "2026-09-10", status: "done" });
+  store.setCanonicalSessionId("session-before-reset");
   const reflection = store.recordReflection({ text: "A private reflection" });
   const evidence = store.listEvents({ entityType: "reflection", entityId: reflection.id })[0]!;
   store.createInsight({ statement: "Possible private pattern", confidence: "low", evidence: [{ eventSeq: evidence.seq }] });
@@ -44,6 +46,10 @@ test("reset clears durable Coach state while preserving user preferences", () =>
   assert.equal(store.listInsights().length, 0);
   assert.equal(store.listProposals().length, 0);
   assert.equal(reviews.listPlans().length, 0);
+  assert.equal(store.listRoutineOccurrences({}).length, 0, "routine history is Coach state and is cleared");
+  // The next "Ask Coach" must start fresh: resuming a chat whose injected
+  // context describes deleted goals would be worse than no chat at all.
+  assert.equal(store.canonicalSessionId(), undefined);
   assert.deepEqual(store.profile(), {
     tone: "direct",
     initiative: "proactive",

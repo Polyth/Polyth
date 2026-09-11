@@ -33,6 +33,7 @@ export function resetCoachData(file: string, opts: { now?: () => number } = {}):
     clear("coach_plans");
     clear("coach_milestones");
     clear("coach_commitments");
+    clear("coach_routine_occurrences");
     clear("coach_routines");
     clear("coach_insights");
     clear("coach_proposals");
@@ -44,8 +45,10 @@ export function resetCoachData(file: string, opts: { now?: () => number } = {}):
 
     // Keep tone/initiative/timezone/challenge preference: reset means "what
     // Coach knows and plans", not "forget how I configured the UI".
-    db.prepare("UPDATE coach_profile SET onboarding_state = 'new', updated_at = ? WHERE id = 1").run(at);
-    db.prepare("UPDATE coach_meta SET revision = revision + 1 WHERE id = 1").run();
+    db.prepare("UPDATE coach_profile SET onboarding_state = 'new', onboarding_completed_at = NULL, updated_at = ? WHERE id = 1").run(at);
+    // The next "Ask Coach" starts a fresh conversation: a reset must not resume
+    // a chat whose context describes state that no longer exists.
+    db.prepare("UPDATE coach_meta SET revision = revision + 1, canonical_session_id = NULL WHERE id = 1").run();
     db.prepare("INSERT INTO coach_events (event_type, entity_type, entity_id, payload, created_at) VALUES ('coach.reset', 'coach', 'state', ?, ?)")
       .run(JSON.stringify({ preservedPreferences: true }), at);
     const revision = Number(

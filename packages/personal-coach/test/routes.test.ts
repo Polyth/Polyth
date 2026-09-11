@@ -183,3 +183,106 @@ test("unrelated routes are not claimed", async () => {
   assert.equal(handled, false);
   h.close();
 });
+
+test("a goal next action can be created unscheduled and later moved to today", async () => {
+  const h = harness();
+  const ctx = space("unscheduled");
+  const goal = (await invoke(h.route, ctx, "/api/personal-coach/goals", "POST", { title: "Learn Rust" })).value as { id: string };
+  const action = (await invoke(h.route, ctx, "/api/personal-coach/commitments", "POST", {
+    goalId: goal.id,
+    title: "Read chapter 1",
+  })).value as { id: string; plannedFor?: number };
+  // "Next action toward a goal" is not "a commitment for today": creating one
+  // must not silently stamp it with the current time.
+  assert.equal(action.plannedFor, undefined);
+
+  const home = (await invoke(h.route, ctx, "/api/personal-coach/home", "GET")).value as {
+    today: { total: number }; upcoming: { total: number; next?: { id: string } };
+  };
+  assert.equal(home.today.total, 0);
+  assert.equal(home.upcoming.next?.id, action.id);
+
+  // Moving it to today is an explicit user choice.
+  await invoke(h.route, ctx, `/api/personal-coach/commitments/${action.id}/reschedule`, "POST", { plannedFor: Date.now() });
+  const after = (await invoke(h.route, ctx, "/api/personal-coach/home", "GET")).value as { today: { total: number; focus?: { id: string } } };
+  assert.equal(after.today.total, 1);
+  assert.equal(after.today.focus?.id, action.id);
+  h.close();
+});
+
+test("primary goal is a single explicit choice that drives server ordering", async () => {
+  const h = harness();
+  const ctx = space("primary");
+  const first = (await invoke(h.route, ctx, "/api/personal-coach/goals", "POST", { title: "First" })).value as { id: string };
+  const second = (await invoke(h.route, ctx, "/api/personal-coach/goals", "POST", { title: "Second" })).value as { id: string };
+
+  await invoke(h.route, ctx, `/api/personal-coach/goals/${first.id}/primary`, "POST");
+  let goals = (await invoke(h.route, ctx, "/api/personal-coach/goals?status=active", "GET")).value as { goals: Array<{ id: string; priority: number }> };
+  assert.equal(goals.goals[0]?.id, first.id);
+
+  await invoke(h.route, ctx, `/api/personal-coach/goals/${second.id}/primary`, "POST");
+  goals = (await invoke(h.route, ctx, "/api/personal-coach/goals?status=active", "GET")).value as { goals: Array<{ id: string; priority: number }> };
+  assert.equal(goals.goals[0]?.id, second.id, "the new primary leads the list");
+  assert.equal(goals.goals.filter((goal) => goal.priority === 3).length, 1, "exactly one goal is primary");
+
+  await invoke(h.route, ctx, "/api/personal-coach/goals/primary", "DELETE");
+  goals = (await invoke(h.route, ctx, "/api/personal-coach/goals?status=active", "GET")).value as { goals: Array<{ id: string; priority: number }> };
+  assert.equal(goals.goals.some((goal) => goal.priority === 3), false);
+  h.close();
+});
+
+test("a due routine can be completed, skipped and reopened for one local day", async () => {
+  const h = harness();
+  const ctx = space("routines");
+  const routine = (await invoke(h.route, ctx, "/api/personal-coach/routines", "POST", {
+    title: "Morning workout",
+    cadence: { kind: "daily" },
+    preferredMinuteOfDay: 360,
+  })).value as { id: string };
+
+  const dueStatus = async (): Promise<string | undefined> => {
+    const home = (await invoke(h.route, ctx, "/api/personal-coach/home", "GET")).value as {
+      today: { routines: Array<{ routine: { id: string }; status?: string }> };
+    };
+    return home.today.routines.find((due) => due.routine.id === routine.id)?.status;
+  };
+  assert.equal(await dueStatus(), undefined);
+
+  await invoke(h.route, ctx, `/api/personal-coach/routines/${routine.id}/done`, "POST");
+  assert.equal(await dueStatus(), "done");
+
+  await invoke(h.route, ctx, `/api/personal-coach/routines/${routine.id}/skip`, "POST", { reason: "Travelling" });
+  assert.equal(await dueStatus(), "skipped");
+
+  const history = (await invoke(h.route, ctx, "/api/personal-coach/routine-occurrences", "GET")).value as {
+    occurrences: Array<{ status: string; reason?: string }>;
+  };
+  assert.equal(history.occurrences.length, 1, "one row per routine-day, never an append-only pile");
+  assert.equal(history.occurrences[0]?.reason, "Travelling");
+
+  await invoke(h.route, ctx, `/api/personal-coach/routines/${routine.id}/reopen`, "POST");
+  assert.equal(await dueStatus(), undefined);
+  h.close();
+});
+
+test("routine occurrences are Space-scoped and reject a malformed day", async () => {
+  const h = harness();
+  const mine = space("tenant-a");
+  const foreign = space("tenant-b");
+  const routine = (await invoke(h.route, mine, "/api/personal-coach/routines", "POST", {
+    title: "Evening review",
+    cadence: { kind: "daily" },
+  })).value as { id: string };
+
+  // A known-valid id from another Space must not resolve here, and the failure
+  // must not confirm that it exists somewhere else.
+  await assert.rejects(
+    invoke(h.route, foreign, `/api/personal-coach/routines/${routine.id}/done`, "POST"),
+    (error: { code?: string }) => error.code === "not-found",
+  );
+  await assert.rejects(
+    invoke(h.route, mine, `/api/personal-coach/routines/${routine.id}/done`, "POST", { date: "yesterday" }),
+    (error: { code?: string }) => error.code === "invalid-input",
+  );
+  h.close();
+});

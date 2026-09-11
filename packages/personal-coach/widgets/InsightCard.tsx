@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { SessionEvent } from "@polyth/contracts";
-import Button from "../../../apps/web/src/components/ui/Button.tsx";
 import type { CoachApi, CoachInsightDto } from "./api.ts";
+import type { CoachUi } from "./parts.tsx";
 import type { CoachClient } from "./store.ts";
 
 interface InsightEventData {
@@ -21,13 +21,16 @@ export default function InsightCard({
   event,
   api,
   client,
+  ui,
   friendlyError,
 }: {
   event: SessionEvent;
   api: CoachApi;
   client: CoachClient;
+  ui: CoachUi;
   friendlyError(action: string, cause: unknown): string;
 }) {
+  const { Button } = ui;
   const data = event.data as InsightEventData;
   const insightId = typeof data.insightId === "string" ? data.insightId : "";
   const fallbackStatement = typeof data.statement === "string" ? data.statement : "Coach noticed a possible pattern.";
