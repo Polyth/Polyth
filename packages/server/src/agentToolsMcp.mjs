@@ -9,10 +9,11 @@ import { request as httpsRequest } from "node:https";
 const url = process.env.POLYTH_AGENT_TOOLS_URL ?? "";
 const token = process.env.POLYTH_AGENT_TOOLS_TOKEN ?? "";
 const capabilityIds = new Map();
+const pending = new Map();
 
 const output = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
 
-function call(method, body) {
+function call(method, body, signal) {
   return new Promise((resolve, reject) => {
     const target = new URL(url);
     const payload = body ? JSON.stringify(body) : undefined;
@@ -21,6 +22,7 @@ function call(method, body) {
       port: target.port,
       path: target.pathname,
       method,
+      signal,
       headers: {
         authorization: `Bearer ${token}`,
         ...(payload ? { "content-type": "application/json", "content-length": Buffer.byteLength(payload) } : {}),
@@ -46,7 +48,7 @@ function call(method, body) {
   });
 }
 
-async function handle(message) {
+async function handle(message, signal) {
   if (!message || message.jsonrpc !== "2.0" || !message.method) return null;
   if (message.method === "initialize") {
     return {
@@ -58,7 +60,7 @@ async function handle(message) {
   if (message.method === "notifications/initialized" || message.method === "initialized") return undefined;
   if (message.method === "ping") return {};
   if (message.method === "tools/list") {
-    const listed = await call("GET");
+    const listed = await call("GET", undefined, signal);
     const tools = Array.isArray(listed.tools) ? listed.tools : [];
     capabilityIds.clear();
     for (const tool of tools) capabilityIds.set(tool.name, tool.id);
@@ -72,8 +74,8 @@ async function handle(message) {
   }
   if (message.method === "tools/call") {
     const name = message.params?.name;
-    if (!capabilityIds.has(name)) await handle({ jsonrpc: "2.0", method: "tools/list" });
-    const result = await call("POST", { id: capabilityIds.get(name) ?? name, arguments: message.params?.arguments ?? {} });
+    if (!capabilityIds.has(name)) await handle({ jsonrpc: "2.0", method: "tools/list" }, signal);
+    const result = await call("POST", { id: capabilityIds.get(name) ?? name, arguments: message.params?.arguments ?? {} }, signal);
     if (result.error) {
       return { content: [{ type: "text", text: result.error.message ?? "tool failed" }], isError: true };
     }
@@ -87,8 +89,17 @@ rl.on("line", async (line) => {
   let message;
   try { message = JSON.parse(line); } catch { return; }
   if (!message?.method) return;
+  if (message.method === "notifications/cancelled") {
+    pending.get(message.params?.requestId)?.abort();
+    return;
+  }
+  const controller = new AbortController();
+  if (message.id !== undefined) {
+    pending.get(message.id)?.abort();
+    pending.set(message.id, controller);
+  }
   try {
-    const result = await handle(message);
+    const result = await handle(message, controller.signal);
     if (result === undefined || message.id === undefined) return;
     output({ jsonrpc: "2.0", id: message.id, result });
   } catch (error) {
@@ -98,5 +109,10 @@ rl.on("line", async (line) => {
       id: message.id,
       error: { code: -32601, message: error instanceof Error ? error.message : "tool bridge failed" },
     });
+  } finally {
+    if (pending.get(message.id) === controller) pending.delete(message.id);
   }
 });
+const abortPending = () => { for (const request of pending.values()) request.abort(); };
+rl.on("close", abortPending);
+process.stdout.on("error", abortPending);

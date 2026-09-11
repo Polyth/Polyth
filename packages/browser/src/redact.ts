@@ -28,3 +28,19 @@ export function redactObservationText(text: string, opts: RedactOptions = {}): s
   if (out.length > cap) out = `${out.slice(0, cap)}\n…[truncated]`;
   return out;
 }
+
+/** Safe URL form for browser runtime events and durable metadata. URL
+ * credentials, queries, and fragments may contain bearer material even when
+ * the surrounding URL looks innocuous. */
+export function redactUrl(raw: string, maxChars = 500): string {
+  try {
+    const url = new URL(raw);
+    url.username = "";
+    url.password = "";
+    if (url.search) url.search = "?[redacted]";
+    if (url.hash) url.hash = "#[redacted]";
+    return redactObservationText(url.toString(), { maxChars });
+  } catch {
+    return redactObservationText(raw, { maxChars });
+  }
+}

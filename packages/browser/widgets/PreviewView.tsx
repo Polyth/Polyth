@@ -104,6 +104,7 @@ export default function PreviewView() {
   const [frame, setFrame] = useState<{ revision: number; src: string } | null>(null);
   const [agentPaused, setAgentPaused] = useState(false);
   const [agentController, setAgentController] = useState<"user" | "agent" | null>(null);
+  const [currentAgentAction, setCurrentAgentAction] = useState<string | null>(null);
   const [activity, setActivity] = useState<string[]>([]);
   const [consoleLines, setConsoleLines] = useState<Array<{ at: number; level: string; message: string }>>([]);
   const [snapshotText, setSnapshotText] = useState("");
@@ -112,6 +113,7 @@ export default function PreviewView() {
   const [customHeight, setCustomHeight] = useState("");
   const [imageRect, setImageRect] = useState<ImageRect>({ left: 0, top: 0, width: 0, height: 0 });
   const [captureBusy, setCaptureBusy] = useState(false);
+  const [controlBusy, setControlBusy] = useState(false);
   const [connection, setConnection] = useState<BrowserConnection>("idle");
   const [approval, setApproval] = useState<ApprovalRequest | null>(null);
   const [approvalError, setApprovalError] = useState("");
@@ -144,12 +146,15 @@ export default function PreviewView() {
   const resizeInFlight = useRef(false);
   const resizeQueued = useRef<{ width: number; height: number } | null>(null);
   const addedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const agentTargetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const agentTargetHighlightRef = useRef(false);
   const generationRef = useRef(0);
   const focusUrlRef = useRef("");
   const contextModeRef = useRef<ContextMode>("off");
   const highlightAddedRef = useRef(false);
   const paneResizeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const viewportRef = useRef(browser?.viewport);
+  const visibleRef = useRef(visible);
   const approvalDescriptionId = useId();
   const frameStatusId = useId();
   const drawerId = useId();
@@ -159,10 +164,20 @@ export default function PreviewView() {
   const agentActing = agentController === "agent";
   const youHaveControl = agentPaused && !agentActing;
   viewportRef.current = browser?.viewport;
+  visibleRef.current = visible;
   followPaneRef.current = viewportMode === "responsive";
   contextModeRef.current = contextMode;
   highlightAddedRef.current = highlightAdded;
   useEffect(() => { remoteFocusRef.current = remoteFocus; }, [remoteFocus]);
+
+  const clearAgentTargetHighlight = () => {
+    agentTargetHighlightRef.current = false;
+    if (agentTargetTimer.current) {
+      clearTimeout(agentTargetTimer.current);
+      agentTargetTimer.current = null;
+    }
+    setHighlight(null);
+  };
 
   useEffect(() => {
     const root = rootRef.current;
@@ -195,6 +210,12 @@ export default function PreviewView() {
   }, []);
 
   useEffect(() => {
+    setBrowser((current) => {
+      if (!current) return current;
+      if (projectId && current.projectId !== projectId) return null;
+      if (activeSessionId && current.sessionId !== activeSessionId) return null;
+      return current;
+    });
     if (!projectId) {
       setBrowser(null);
       return;
@@ -207,7 +228,11 @@ export default function PreviewView() {
         const matching = activeSessionId
           ? sessions.find((session) => session.sessionId === activeSessionId)
           : undefined;
-        const next = matching ?? sessions.at(-1) ?? null;
+        // A session-linked browser belongs to exactly one canonical session.
+        // While the permission gate is resolving, the blank browser may not
+        // exist yet; keep polling for that exact link instead of showing a
+        // different browser from the same project.
+        const next = activeSessionId ? matching ?? null : sessions.at(-1) ?? null;
         setBrowser((current) => current?.id === next?.id ? current : next);
         if (next) revisionRef.current = 0;
       } catch (cause) {
@@ -244,19 +269,25 @@ export default function PreviewView() {
           type: "browser/subscribe",
           browserSessionId: browser.id,
           afterRevision: revisionRef.current,
+          visible: visibleRef.current,
         }));
       };
       ws.onmessage = (m) => {
+        if (closed) return;
         try {
           const msg = JSON.parse(String(m.data)) as {
             type: string; revision?: number; mime?: string; data?: string;
-            event?: { kind: string; message?: string; url?: string; actor?: string };
+            event?: {
+              kind: string; message?: string; url?: string; actor?: string;
+              targetRect?: { x: number; y: number; width: number; height: number };
+            };
           };
           if (msg.type === "browser/frame" && msg.data) {
             const revision = msg.revision ?? 0;
             if (revision !== revisionRef.current
               && contextModeRef.current !== "select"
-              && !highlightAddedRef.current) {
+              && !highlightAddedRef.current
+              && !agentTargetHighlightRef.current) {
               setHighlight(null);
             }
             revisionRef.current = revision;
@@ -264,14 +295,42 @@ export default function PreviewView() {
           } else if (msg.type === "browser/event" && msg.event) {
             const e = msg.event;
             setActivity((prev) => [...prev.slice(-99), `${e.kind}${e.actor ? ` (${e.actor})` : ""}${e.url ? ` ${e.url}` : ""}${e.message ? ` — ${e.message}` : ""}`]);
+            if ((e.kind === "action" || e.kind === "target") && e.actor === "agent") {
+              if (e.kind === "action") {
+                const labels: Record<string, string> = {
+                  click: tr("previewview.actionClick"), type: tr("previewview.typingIntoThePage"),
+                  scroll: tr("previewview.actionScroll"), navigate: tr("previewview.actionNavigate"),
+                  wait: tr("previewview.actionWait"), back: tr("common.back"),
+                  forward: tr("previewview.forward"), reload: tr("previewview.reload"), inspect: tr("previewview.inspect"),
+                };
+                setCurrentAgentAction(labels[e.message?.replace(/^target /, "") ?? ""] ?? tr("previewview.agentControlling"));
+              }
+              if (e.targetRect && browser.viewport.width > 0 && browser.viewport.height > 0) {
+                agentTargetHighlightRef.current = true;
+                setHighlight(elementHighlightRect(e.targetRect, browser.viewport));
+                if (agentTargetTimer.current) clearTimeout(agentTargetTimer.current);
+                agentTargetTimer.current = setTimeout(() => {
+                  agentTargetHighlightRef.current = false;
+                  agentTargetTimer.current = null;
+                  setHighlight(null);
+                }, 2400);
+              }
+            }
             if (e.kind === "controller") {
               setAgentController(e.actor === "agent" || e.actor === "user" ? e.actor : null);
             }
             if (e.kind === "agent-paused") setAgentPaused(true);
             if (e.kind === "agent-resumed") setAgentPaused(false);
+            if (e.kind === "crash") {
+              setFrame(null);
+              setBrowser((current) => current ? { ...current, status: "failed" } : current);
+              setAgentController(null);
+              setCurrentAgentAction(null);
+            }
             if (e.kind === "navigation" || e.kind === "closed") {
               setRemoteFocus(false);
-              setHighlight(null);
+              clearAgentTargetHighlight();
+              setCurrentAgentAction(null);
               focusUrlRef.current = "";
               void api.browserGet(browser.id).then(setBrowser).catch(() => setBrowser(null));
             }
@@ -289,10 +348,25 @@ export default function PreviewView() {
     return () => {
       closed = true;
       if (retry) clearTimeout(retry);
+      clearAgentTargetHighlight();
       wsRef.current?.close();
       setConnection("idle");
     };
   }, [browser?.id]);
+
+  // Kept-alive workbench surfaces stay connected while hidden so canonical
+  // browser state remains current, but hidden panes must stop counting as a
+  // visible viewer for screencast pacing.
+  useEffect(() => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !browser) return;
+    ws.send(JSON.stringify({
+      type: "browser/subscribe",
+      browserSessionId: browser.id,
+      afterRevision: revisionRef.current,
+      visible,
+    }));
+  }, [visible, browser?.id]);
 
   useEffect(() => {
     if (browser?.viewport) {
@@ -341,12 +415,18 @@ export default function PreviewView() {
     generationRef.current += 1;
     const stored = recalledViewportMode(browser.id);
     const fromDto = browser.viewportMode;
+    followPaneRef.current = (fromDto ?? stored) === "responsive";
     setViewportMode(fromDto ?? stored);
     setAgentPaused(browser.agentPaused === true);
     setAgentController(browser.controller ?? null);
+    setCurrentAgentAction(null);
+    setControlBusy(false);
     return () => {
       generationRef.current += 1;
       if (addedTimer.current) clearTimeout(addedTimer.current);
+      if (agentTargetTimer.current) clearTimeout(agentTargetTimer.current);
+      agentTargetTimer.current = null;
+      agentTargetHighlightRef.current = false;
       if (scrollRaf.current) cancelAnimationFrame(scrollRaf.current);
     };
   }, [browser?.id]);
@@ -354,6 +434,7 @@ export default function PreviewView() {
   const clearContextUi = () => {
     setContextMode("off");
     setContextPickerOpen(false);
+    clearAgentTargetHighlight();
     setHighlight(null);
     setHighlightAdded(false);
     annotationDragStart.current = null;
@@ -373,6 +454,7 @@ export default function PreviewView() {
     setOperation("open");
     setError("");
     try {
+      if (browser?.status === "failed") await api.browserClose(browser.id);
       const dto = await api.browserCreate({
         projectId,
         ...(activeSessionId ? { sessionId: activeSessionId } : {}),
@@ -408,6 +490,7 @@ export default function PreviewView() {
   const closeBrowser = async () => {
     if (!browser || operation) return;
     setOperation("close");
+    clearAgentTargetHighlight();
     setError("");
     try {
       await api.browserClose(browser.id);
@@ -432,6 +515,7 @@ export default function PreviewView() {
       return;
     }
     setOperation("navigate");
+    clearAgentTargetHighlight();
     setError("");
     try {
       const navigation = await api.browserNavigate(browser.id, requestedUrl, "user");
@@ -453,7 +537,7 @@ export default function PreviewView() {
     setOperation("approve");
     setApprovalError("");
     try {
-      await api.browserApprove(approval.url);
+      await api.browserApprove(approval.url, browser.id);
       const navigation = await api.browserNavigate(browser.id, approval.url, "user");
       if (isApprovalResponse(navigation)) {
         setApprovalError(navigation.approval.message);
@@ -470,6 +554,7 @@ export default function PreviewView() {
 
   const act = async (action: Parameters<typeof api.browserAction>[1]) => {
     if (!browser || operation) return { ok: false as const, result: null };
+    clearAgentTargetHighlight();
     setOperation(action.kind);
     setError("");
     try {
@@ -487,6 +572,7 @@ export default function PreviewView() {
   /** Frame interactions (scroll/click/type/press) must not lock the chrome. */
   const actLive = async (action: Parameters<typeof api.browserAction>[1]) => {
     if (!browser) return { ok: false as const, result: null, session: null };
+    clearAgentTargetHighlight();
     const gen = generationRef.current;
     try {
       const { session, result } = await api.browserAction(browser.id, action, "user");
@@ -857,11 +943,15 @@ export default function PreviewView() {
   };
 
   const setAgentControl = async (paused: boolean) => {
-    if (!browser || operation) return;
-    setOperation(paused ? "pause" : "resume");
+    if (!browser || controlBusy) return;
+    clearAgentTargetHighlight();
+    const browserId = browser.id;
+    const generation = generationRef.current;
+    setControlBusy(true);
     setError("");
     try {
-      await api.browserPauseAgent(browser.id, paused);
+      await api.browserPauseAgent(browserId, paused);
+      if (generationRef.current !== generation) return;
       setAgentPaused(paused);
     } catch (cause) {
       setError(friendlyError(
@@ -869,7 +959,7 @@ export default function PreviewView() {
         cause,
       ));
     } finally {
-      setOperation(null);
+      if (generationRef.current === generation) setControlBusy(false);
     }
   };
 
@@ -1536,7 +1626,7 @@ export default function PreviewView() {
                         {tr("previewview.addedToMessage")}
                       </div>
                     )}
-                    {(agentActing || youHaveControl || connection === "reconnecting") && (
+                    {browser && (
                       <div className="browser-frame-hud">
                         {connection === "reconnecting" && (
                           <span className="browser-frame-hud-status">
@@ -1546,18 +1636,25 @@ export default function PreviewView() {
                         )}
                         {agentActing && (
                           <>
-                            <span className="browser-frame-hud-status">{tr("previewview.agentControlling")}</span>
+                            <span className="browser-frame-hud-status browser-current-action" title={currentAgentAction ?? undefined}>
+                              {currentAgentAction ?? tr("previewview.agentControlling")}
+                            </span>
                             {!agentPaused && (
-                              <Button size="sm" variant="ghost" iconStart={PauseIcon} disabled={busy} onClick={() => void setAgentControl(true)}>
+                              <Button size="sm" variant="ghost" iconStart={PauseIcon} disabled={controlBusy} onClick={() => void setAgentControl(true)}>
                                 {tr("previewview.takeControl")}
                               </Button>
                             )}
                           </>
                         )}
+                        {!agentActing && !agentPaused && (
+                          <Button size="sm" variant="ghost" iconStart={PauseIcon} disabled={controlBusy} onClick={() => void setAgentControl(true)}>
+                            {tr("previewview.takeControl")}
+                          </Button>
+                        )}
                         {youHaveControl && (
                           <>
                             <span className="browser-frame-hud-status">{tr("previewview.youHaveControl")}</span>
-                            <Button size="sm" variant="ghost" iconStart={PlayIcon} disabled={busy} onClick={() => void setAgentControl(false)}>
+                            <Button size="sm" variant="ghost" iconStart={PlayIcon} disabled={controlBusy} onClick={() => void setAgentControl(false)}>
                               {tr("previewview.resumeAgent")}
                             </Button>
                           </>
@@ -1574,6 +1671,8 @@ export default function PreviewView() {
                 <EmptyState
                   title={tr("previewview.browserStopped")}
                   description={tr("previewview.theControlledBrowserCouldNot")}
+                  actionLabel={tr("previewview.openBrowser")}
+                  onAction={() => void openBrowser()}
                   mark={<Icon icon={ShieldIcon} size="lg" />}
                 />
               ) : (

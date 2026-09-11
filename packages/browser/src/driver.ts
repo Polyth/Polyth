@@ -46,7 +46,15 @@ export interface DriverPage {
   resize(viewport: { width: number; height: number }): Promise<void>;
   emulateColorScheme(colorScheme: BrowserColorScheme): Promise<void>;
   inspect(selector: string): Promise<JsonObject>;
+  /** Return viewport bounds for a semantic target without mutating the page. */
+  targetRect?(target: BrowserTarget): Promise<{ x: number; y: number; width: number; height: number } | null>;
   screenshot(): Promise<{ data: Uint8Array; mime: string }>;
+  /** Start/stop a live CDP screencast. Frames are acknowledged by the driver
+   *  and delivered through this callback; the service applies its own pacing
+   *  and newest-only retention. */
+  startScreencast?(opts: { quality: number; maxWidth: number; maxHeight: number }): Promise<void>;
+  stopScreencast?(): Promise<void>;
+  onFrame?(cb: (frame: DriverFrame) => void): () => void;
   /** Optional clipped screenshot for area context crops. */
   screenshotClip?(clip: { x: number; y: number; width: number; height: number }): Promise<{ data: Uint8Array; mime: string }>;
   /** Elements and visible text intersecting a viewport pixel rectangle. */
@@ -68,6 +76,13 @@ export interface DriverPage {
   close(): Promise<void>;
 }
 
+export interface DriverFrame {
+  data: Uint8Array;
+  mime: string;
+  width?: number;
+  height?: number;
+}
+
 export interface DriverOpenOptions {
   width: number;
   height: number;
@@ -75,6 +90,8 @@ export interface DriverOpenOptions {
   colorScheme: BrowserColorScheme;
   /** Called for every navigation hop (incl. redirects); throw to block. */
   guardNavigation: (url: string) => Promise<void>;
+  /** Called for every HTTP(S) subresource and WebSocket egress. */
+  guardNetworkEgress?: (url: string) => Promise<void>;
 }
 
 export interface BrowserDriver {

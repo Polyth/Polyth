@@ -99,6 +99,13 @@ export function createPackageActivation(
         return track(host.reducers.register(eventType, reducer));
       },
     },
+    sessions: {
+      ...host.sessions,
+      subscribeEvents: (listener) => {
+        if (disposed) return reject("sessions.subscribeEvents");
+        return track(host.sessions.subscribeEvents(listener));
+      },
+    },
     workbench: {
       ...host.workbench,
       profiles: {

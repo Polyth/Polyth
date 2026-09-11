@@ -1,6 +1,10 @@
 import type { BrowserMessages } from "./en.ts";
 
 export const uk: BrowserMessages = {
+  "previewview.actionClick": "Натискання",
+  "previewview.actionScroll": "Прокручування",
+  "previewview.actionNavigate": "Відкриття сторінки",
+  "previewview.actionWait": "Очікування сторінки",
   "browserpreview.couldnTDecodeTheCurrentBrowserFrame": "Не вдалося декодувати поточний фрейм браузера.",
   "browserpreview.couldnTEncodeTheBrowserCapture": "Не вдалося закодувати запис браузера.",
   "browserpreview.couldnTPrepareTheBrowserCapture": "Не вдалося підготувати запис браузера.",
@@ -34,6 +38,12 @@ export const uk: BrowserMessages = {
   "previewview.browserStopped": "Припинено браузер",
   "previewview.browserTools": "Інструменти браузера",
   "previewview.browserUnavailable": "English, Українська, Français...",
+  "previewview.browserVisibility": "Видимість браузера",
+  "previewview.browserVisibilityDescription": "Виберіть, чи залишати активність агента в браузері у фоні, чи відкривати браузер автоматично.",
+  "previewview.background": "У фоні",
+  "previewview.autoShow": "Показувати автоматично",
+  "previewview.browserIdle": "Бездіяльний",
+  "previewview.viewBrowser": "Переглянути браузер",
   "previewview.browserValue": "Браузер: {value}",
   "previewview.browsingDataWillBeCleared": "Придбання даних буде очищено",
   "previewview.cancelOriginApproval": "Скасування затвердження походження",
@@ -113,7 +123,7 @@ export const uk: BrowserMessages = {
   "previewview.reconnectingToBrowser": "Відключення до браузера",
   "previewview.reload": "Перезавантажити",
   "previewview.resume": "Продовжити",
-  "previewview.resumeAgent": "Агент з резюме",
+  "previewview.resumeAgent": "Повернути керування агенту",
   "previewview.rev": "оборот",
   "previewview.runningValue": "працює · {host}",
   "previewview.schemeDark": "Схема: темна",

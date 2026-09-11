@@ -214,6 +214,7 @@ let state: AppState = {
 };
 
 const listeners = new Set<() => void>();
+const sessionEventListeners = new Set<(event: SessionEvent) => void>();
 
 export function getState(): AppState {
   return state;
@@ -224,6 +225,13 @@ export function subscribeStore(cb: () => void): () => void {
   return () => {
     listeners.delete(cb);
   };
+}
+
+/** Package-facing event notification. Durable history remains in `state.events`;
+ * this callback only tells package UI that new canonical facts were accepted. */
+export function subscribeSessionEvents(cb: (event: SessionEvent) => void): () => void {
+  sessionEventListeners.add(cb);
+  return () => { sessionEventListeners.delete(cb); };
 }
 
 function refreshTitle(): void {
@@ -994,8 +1002,14 @@ export function applyEvent(ev: SessionEvent): void {
 }
 
 /** Batch ingestion: one store update — and one listener/render pass — per
- *  call regardless of batch size. Session open and WS bursts land here. */
-export function applyEvents(evs: readonly SessionEvent[]): void {
+ *  call regardless of batch size. Session open and WS bursts land here.
+ *  `notifySessionEvents` is reserved for live delivery: callers hydrating
+ *  durable history leave package observers quiet so replay cannot trigger a
+ *  new surface reveal. */
+export function applyEvents(
+  evs: readonly SessionEvent[],
+  options: { notifySessionEvents?: boolean; notifyEventKeys?: ReadonlySet<string> } = {},
+): void {
   if (evs.length === 0) return;
   const bySession = new Map<string, SessionEvent[]>();
   for (const ev of evs) {
@@ -1005,10 +1019,20 @@ export function applyEvents(evs: readonly SessionEvent[]): void {
   }
   let next: Record<string, SessionEvent[]> | null = null;
   let nextSessions: SessionProjection[] | null = null;
+  const acceptedEvents: SessionEvent[] = [];
   for (const [sessionId, incoming] of bySession) {
     const list = state.events[sessionId] ?? EMPTY_EVENTS;
     const merged = mergeEvents(list, incoming);
     if (merged === list) continue;
+    const batchSeqs = new Set<number>();
+    for (const event of incoming) {
+      const position = seqLowerBound(list, event.seq);
+      const alreadyStored = position < list.length && list[position]!.seq === event.seq;
+      if (!alreadyStored && !batchSeqs.has(event.seq)) {
+        batchSeqs.add(event.seq);
+        acceptedEvents.push(event);
+      }
+    }
     next ??= { ...state.events };
     next[sessionId] = merged;
     // Persist the prompt-derived title into the session record as soon as the
@@ -1026,6 +1050,19 @@ export function applyEvents(evs: readonly SessionEvent[]): void {
     }
   }
   if (next) set(nextSessions ? { events: next, sessions: nextSessions } : { events: next });
+  if (next && options.notifySessionEvents !== false) {
+    for (const event of acceptedEvents) {
+      if (options.notifyEventKeys && !options.notifyEventKeys.has(`${event.sessionId}:${event.seq}`)) continue;
+      for (const listener of [...sessionEventListeners]) {
+        try {
+          listener(event);
+        } catch {
+          // Package observers are presentation-only and must not interrupt
+          // canonical event ingestion or the remaining observers.
+        }
+      }
+    }
+  }
 }
 
 export function lastSeq(sessionId: string): number {

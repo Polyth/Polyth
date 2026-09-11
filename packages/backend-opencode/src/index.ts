@@ -38,7 +38,6 @@ import type {
   RuntimeEvent,
   RuntimeObservation,
 } from "@polyth/contracts";
-import type { OpenCodeBrowserToolConfig } from "./browserTool.ts";
 import {
   admitTranslateTurn,
   asOcEvent,
@@ -88,7 +87,6 @@ export interface OpenCodeAdapterOptions {
   dataDir?: string;
   runtimeDir?: string;
   stateFile?: string;
-  browserTool?: OpenCodeBrowserToolConfig;
   protocol?: ProtocolSelection;
   configTargetId?: string;
   startupDeadlineMs?: number;
@@ -132,19 +130,6 @@ export {
 export type { StagedProviderOp } from "./customProvider.ts";
 export { createProviderHttpClient } from "./providerHttp.ts";
 export type { ProviderHttpClient, ProviderHttpTransport } from "./providerHttp.ts";
-export {
-  BROWSER_TOOL_PATH,
-  createBrowserToolBridge,
-  createBrowserToolPluginSource,
-  prepareBrowserToolEnvironment,
-  resolveBrowserToolAction,
-} from "./browserTool.ts";
-export type {
-  BrowserToolBridge,
-  BrowserToolRegistration,
-  OpenCodeBrowserToolConfig,
-} from "./browserTool.ts";
-
 export {
   createRemoteOpenCodeRuntime,
   installRemoteOpenCode,
@@ -1112,7 +1097,6 @@ export const createOpenCodeRuntime = async (
     configDir: opts.configDir ?? opts.dataDir,
     runtimeDir: opts.runtimeDir,
     stateFile: opts.stateFile,
-    browserTool: opts.browserTool,
     configTargetId: opts.configTargetId
       ?? (opts.configDir ?? opts.dataDir
         ? `opencode-config:${resolve((opts.configDir ?? opts.dataDir)!)}`

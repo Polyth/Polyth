@@ -6,6 +6,7 @@ import { WebSocket } from "ws";
 import type { AuthPrincipal, SessionEvent, SessionService } from "@polyth/contracts";
 import { GRANT_PROFILE_PRESETS, REMOTE_CAPABILITY } from "@polyth/contracts";
 import { PairedSocketRegistry } from "@polyth/plugins";
+import { isDictationAudioFrame, decodeDictationAudioFrame, encodeDictationAudioFrame } from "../../dictation/src/wire.ts";
 import { attachWs } from "../src/ws.ts";
 
 const proj = {
@@ -63,6 +64,7 @@ function connect(port: number, headers?: Record<string, string>): Promise<{
 test("paired core.sessions.read cannot subscribe to browser frames or send dictation audio", async () => {
   const server = createServer((_req, res) => { res.statusCode = 404; res.end(); });
   const dictation = {
+    decodeAudioFrame: (value: ArrayBuffer | ArrayBufferView) => isDictationAudioFrame(value) ? decodeDictationAudioFrame(value) : null,
     get: () => ({ id: "d1" }),
     push: async () => ({ ack: 1, duplicate: false }),
   };
@@ -89,7 +91,7 @@ test("paired core.sessions.read cannot subscribe to browser frames or send dicta
     const browserDenied = await next();
     assert.equal(browserDenied.type, "error");
     assert.equal(browserDenied.code, "forbidden");
-    ws.send(JSON.stringify({ type: "dictation/audio", dictationId: "d1", seq: 1, pcm: "" }));
+    ws.send(encodeDictationAudioFrame({ dictationId: "d1", seq: 1, sampleRate: 16_000, channels: 1, payload: new Uint8Array([0, 0]) }));
     const dictationDenied = await next();
     assert.equal(dictationDenied.type, "error");
     assert.equal(dictationDenied.code, "forbidden");

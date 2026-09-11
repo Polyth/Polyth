@@ -1474,8 +1474,8 @@ export const api = {
     jfetch<Array<{ at: number; level: string; message: string }>>(`/api/browser/sessions/${encodeURIComponent(id)}/console`).catch(
       (): Array<{ at: number; level: string; message: string }> => [],
     ),
-  browserApprove: (origin: string) =>
-    jfetch<{ origins: string[] }>(`/api/browser/approvals`, json("POST", { origin })),
+  browserApprove: (origin: string, browserSessionId: string) =>
+    jfetch<{ origins: string[] }>(`/api/browser/approvals`, json("POST", { origin, browserSessionId })),
 
   // ---- streaming dictation (WP15; audio itself travels over /ws) ---------------
   dictationCapability: () =>

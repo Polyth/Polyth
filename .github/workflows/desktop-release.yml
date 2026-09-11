@@ -149,6 +149,26 @@ jobs:
       - name: Install workspace dependencies
         run: npm ci
 
+      - name: Install pinned Playwright Chromium
+        if: matrix.arch != 'universal'
+        run: npx playwright-core install chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: 0
+
+      - name: Install pinned Playwright Chromium for macOS x64
+        if: matrix.arch == 'universal'
+        run: npx playwright-core install chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: 0
+          PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac14
+
+      - name: Install pinned Playwright Chromium for macOS arm64
+        if: matrix.arch == 'universal'
+        run: npx playwright-core install chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: 0
+          PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac14-arm64
+
       - name: Install both esbuild binaries for universal macOS
         if: matrix.arch == 'universal'
         shell: bash
@@ -162,6 +182,32 @@ jobs:
         run: npm run build:desktop
         env:
           POLYTH_MAC_UNIVERSAL: ${{ matrix.arch == 'universal' && '1' || '' }}
+
+      - name: Stage pinned Playwright Chromium
+        if: matrix.arch != 'universal'
+        run: npm run desktop:stage-chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: 0
+          POLYTH_TARGET_PLATFORM: ${{ matrix.platform }}
+          POLYTH_TARGET_ARCH: ${{ matrix.arch }}
+
+      - name: Stage pinned Playwright Chromium for macOS x64
+        if: matrix.arch == 'universal'
+        run: npm run desktop:stage-chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: 0
+          PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac14
+          POLYTH_TARGET_PLATFORM: darwin
+          POLYTH_TARGET_ARCH: x64
+
+      - name: Stage pinned Playwright Chromium for macOS arm64
+        if: matrix.arch == 'universal'
+        run: npm run desktop:stage-chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: 0
+          PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac14-arm64
+          POLYTH_TARGET_PLATFORM: darwin
+          POLYTH_TARGET_ARCH: arm64
 
       - name: Download pinned OpenCode
         if: matrix.arch != 'universal'

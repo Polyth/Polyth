@@ -85,9 +85,12 @@ const bindingOf = (
 export function createAgentToolBridge(opts: {
   executor(id: string): ToolExecutor | undefined;
   contribution?(id: string): { descriptor: AgentCapabilityDescriptor; execute?: ToolExecutor } | undefined;
+  resolveSession?: (grant: AgentToolGrant) => Promise<string | undefined>;
+  requested?: (tool: Extract<AgentCapabilityDescriptor, { kind: "tool" }>, grant: AgentToolGrant) => Promise<void>;
   authorize?: (
     tool: Extract<AgentCapabilityDescriptor, { kind: "tool" }>,
     grant: AgentToolGrant,
+    signal?: AbortSignal,
   ) => AgentToolAuthz | Promise<AgentToolAuthz>;
 }): AgentToolBridge {
   const grants = new Map<string, AgentToolGrant>();
@@ -191,49 +194,93 @@ export function createAgentToolBridge(opts: {
         rc.json(403, { error: { code: "stale-capability", message: "tool grant no longer matches the registered capability" } });
         return true;
       }
-      const decision = await (opts.authorize ?? defaultAuthorize)(descriptor, grant);
-      if (decision === "deny") {
-        rc.json(403, { error: { code: "forbidden", message: "tool is not permitted" } });
-        return true;
-      }
-      if (decision === "permission-required") {
-        rc.json(403, { error: { code: "permission-required", message: "Polyth authorization is required before this tool can run" } });
-        return true;
-      }
-      // Authorization may wait for a person. Re-resolve the token and the
-      // contribution after that wait so package disable/reload or grant
-      // revocation cannot execute the stale function captured above.
-      const liveGrant = grantFor(token);
-      const liveBinding = liveGrant?.bindings.find((item) => item.id === id);
-      const liveContribution = opts.contribution?.(id);
-      const liveDescriptor = liveContribution?.descriptor.kind === "tool"
-        ? liveContribution.descriptor
-        : undefined;
-      const liveExecute = liveContribution?.execute;
-      if (!liveGrant || !liveBinding || !liveDescriptor || !liveExecute) {
-        rc.json(404, { error: { code: "not-found", message: "tool is not available" } });
-        return true;
-      }
-      if (!matchesBinding(liveBinding, liveDescriptor)) {
-        rc.json(403, { error: { code: "stale-capability", message: "tool grant no longer matches the registered capability" } });
-        return true;
-      }
-      // A native MCP client can time out or disappear while a human decides.
-      // Never perform a newly authorized mutation after its response channel
-      // has already gone away.
-      if (rc.req.aborted || rc.res?.destroyed) return true;
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      rc.req.once?.("aborted", abort);
+      rc.res?.once?.("close", abort);
       try {
-        const result = await liveExecute((body.arguments ?? {}) as JsonObject, {
-          sessionId: liveGrant.sessionId ?? "",
-          projectId: liveGrant.projectId,
-          cwd: liveGrant.cwd,
-          spaceId: liveGrant.spaceId,
-        });
-        rc.json(200, result);
-      } catch (error) {
-        rc.json(400, { error: { code: "tool-failed", message: (error as Error).message } });
+        const sessionId = opts.resolveSession ? await opts.resolveSession(grant) : grant.sessionId;
+        if (opts.resolveSession && !sessionId) {
+          rc.json(403, { error: { code: "session-unavailable", message: "No unambiguous active Polyth session owns this request" } });
+          return true;
+        }
+        const scopedGrant = { ...grant, ...(sessionId ? { sessionId } : {}) };
+        if (controller.signal.aborted || rc.req.aborted || rc.res?.destroyed) return true;
+        await opts.requested?.(descriptor, scopedGrant);
+        const decision = await (opts.authorize ?? defaultAuthorize)(descriptor, scopedGrant, controller.signal);
+        if (decision === "deny") {
+          rc.json(403, { error: { code: "forbidden", message: "tool is not permitted" } });
+          return true;
+        }
+        if (decision === "permission-required") {
+          rc.json(403, { error: { code: "permission-required", message: "Polyth authorization is required before this tool can run" } });
+          return true;
+        }
+        // Authorization may wait for a person. Re-resolve the token and the
+        // contribution after that wait so package disable/reload or grant
+        // revocation cannot execute the stale function captured above.
+        const liveGrant = grantFor(token);
+        const liveBinding = liveGrant?.bindings.find((item) => item.id === id);
+        const liveContribution = opts.contribution?.(id);
+        const liveDescriptor = liveContribution?.descriptor.kind === "tool"
+          ? liveContribution.descriptor
+          : undefined;
+        const liveExecute = liveContribution?.execute;
+        if (!liveGrant || !liveBinding || !liveDescriptor || !liveExecute) {
+          rc.json(404, { error: { code: "not-found", message: "tool is not available" } });
+          return true;
+        }
+        if (liveContribution !== contribution || !matchesBinding(liveBinding, liveDescriptor)) {
+          rc.json(403, { error: { code: "stale-capability", message: "tool grant no longer matches the registered capability" } });
+          return true;
+        }
+        // A native MCP client can time out or disappear while a human decides.
+        // Never perform a newly authorized mutation after its response channel
+        // has already gone away.
+        if (controller.signal.aborted || rc.req.aborted || rc.res?.destroyed) return true;
+        if (opts.resolveSession && await opts.resolveSession(scopedGrant) !== sessionId) {
+          rc.json(403, { error: { code: "session-unavailable", message: "The requesting Polyth session is no longer active" } });
+          return true;
+        }
+        // Session resolution is asynchronous too: fence the final await before
+        // handing execution to a package that may have been disabled meanwhile.
+        if (controller.signal.aborted || rc.req.aborted || rc.res?.destroyed) return true;
+        if (grantFor(token) !== liveGrant || opts.contribution?.(id) !== liveContribution
+          || !matchesBinding(liveBinding, liveDescriptor)) {
+          rc.json(403, { error: { code: "stale-capability", message: "tool grant is no longer active" } });
+          return true;
+        }
+        try {
+          const result = await liveExecute((body.arguments ?? {}) as JsonObject, {
+            sessionId: sessionId ?? "",
+            signal: controller.signal,
+            projectId: liveGrant.projectId,
+            cwd: liveGrant.cwd,
+            spaceId: liveGrant.spaceId,
+          });
+          rc.json(200, result);
+        } catch (error) {
+          rc.json(400, { error: { code: "tool-failed", message: (error as Error).message } });
+        }
+        return true;
+      } finally {
+        rc.req.off?.("aborted", abort);
+        rc.res?.off?.("close", abort);
       }
-      return true;
     },
   };
+}
+
+/** JSON Schema writeOnly fields are execution inputs, never audit content. */
+export function redactToolInput(input: JsonObject, schema: JsonObject): JsonObject {
+  const visit = (value: unknown, definition: unknown): unknown => {
+    if (!definition || typeof definition !== "object" || Array.isArray(definition)) return value;
+    const rule = definition as Record<string, unknown>;
+    if (rule.writeOnly === true) return "[redacted]";
+    if (Array.isArray(value)) return value.map((item) => visit(item, rule.items));
+    if (!value || typeof value !== "object") return value;
+    const properties = rule.properties as Record<string, unknown> | undefined;
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, visit(item, properties?.[key])]));
+  };
+  return visit(input, schema) as JsonObject;
 }

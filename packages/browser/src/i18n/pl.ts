@@ -1,6 +1,10 @@
 import type { BrowserMessages } from "./en.ts";
 
 export const pl: BrowserMessages = {
+  "previewview.actionClick": "Klikanie",
+  "previewview.actionScroll": "Przewijanie",
+  "previewview.actionNavigate": "Otwieranie strony",
+  "previewview.actionWait": "Oczekiwanie na stronę",
   "browserpreview.couldnTDecodeTheCurrentBrowserFrame": "Nie udało się zdekodować bieżącej ramki przeglądarki.",
   "browserpreview.couldnTEncodeTheBrowserCapture": "Nie udało się zakodować przechwytu przeglądarki.",
   "browserpreview.couldnTPrepareTheBrowserCapture": "Nie udało się przygotować przechwytywania przeglądarki.",
@@ -34,6 +38,12 @@ export const pl: BrowserMessages = {
   "previewview.browserStopped": "Przeglądarka zatrzymała się",
   "previewview.browserTools": "Narzędzia do przeglądania",
   "previewview.browserUnavailable": "Przeglądarka niedostępna",
+  "previewview.browserVisibility": "Widoczność przeglądarki",
+  "previewview.browserVisibilityDescription": "Wybierz, czy aktywność agenta w przeglądarce pozostaje w tle, czy przeglądarka otwiera się automatycznie.",
+  "previewview.background": "W tle",
+  "previewview.autoShow": "Pokaż automatycznie",
+  "previewview.browserIdle": "Bezczynna",
+  "previewview.viewBrowser": "Wyświetl przeglądarkę",
   "previewview.browserValue": "Przeglądarka: {value}",
   "previewview.browsingDataWillBeCleared": "Przeglądanie danych zostanie wyczyszczone",
   "previewview.cancelOriginApproval": "Anuluj zatwierdzenie pochodzenia",
@@ -113,7 +123,7 @@ export const pl: BrowserMessages = {
   "previewview.reconnectingToBrowser": "Odtwarzanie do przeglądarki",
   "previewview.reload": "Wczytaj ponownie",
   "previewview.resume": "Wznów",
-  "previewview.resumeAgent": "Agent CV",
+  "previewview.resumeAgent": "Wróć do agenta",
   "previewview.rev": "obrót silnika",
   "previewview.runningValue": "uruchomiony · {host}",
   "previewview.schemeDark": "Schemat: ciemny",

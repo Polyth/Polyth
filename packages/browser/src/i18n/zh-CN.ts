@@ -1,6 +1,10 @@
 import type { BrowserMessages } from "./en.ts";
 
 export const zhCN: BrowserMessages = {
+  "previewview.actionClick": "正在点击",
+  "previewview.actionScroll": "正在滚动",
+  "previewview.actionNavigate": "正在打开页面",
+  "previewview.actionWait": "正在等待页面",
   "browserpreview.couldnTDecodeTheCurrentBrowserFrame": "无法解码当前浏览器框架。",
   "browserpreview.couldnTEncodeTheBrowserCapture": "无法对浏览器捕获的内容进行编码。",
   "browserpreview.couldnTPrepareTheBrowserCapture": "无法准备浏览器捕获。",
@@ -34,6 +38,12 @@ export const zhCN: BrowserMessages = {
   "previewview.browserStopped": "浏览器已停止",
   "previewview.browserTools": "浏览器工具",
   "previewview.browserUnavailable": "浏览器无法使用",
+  "previewview.browserVisibility": "浏览器可见性",
+  "previewview.browserVisibilityDescription": "选择代理的浏览器活动是在后台运行，还是自动打开浏览器。",
+  "previewview.background": "后台",
+  "previewview.autoShow": "自动显示",
+  "previewview.browserIdle": "空闲",
+  "previewview.viewBrowser": "查看浏览器",
   "previewview.browserValue": "浏览器： {value}",
   "previewview.browsingDataWillBeCleared": "浏览数据将被清除",
   "previewview.cancelOriginApproval": "取消原产地核准",
@@ -113,7 +123,7 @@ export const zhCN: BrowserMessages = {
   "previewview.reconnectingToBrowser": "正在重新连接到浏览器",
   "previewview.reload": "重新加载",
   "previewview.resume": "继续",
-  "previewview.resumeAgent": "简历代理",
+  "previewview.resumeAgent": "返回代理",
   "previewview.rev": "修订",
   "previewview.runningValue": "正在运行· {host}",
   "previewview.schemeDark": "方案：深色",

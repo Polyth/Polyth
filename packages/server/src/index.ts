@@ -5,7 +5,7 @@
 // own services, and publishes them in the shared service registry
 // (serverServiceKey). This file only composes infrastructure (session store,
 // runtime pool, HTTP/WS gateway) plus the few genuinely cross-cutting seams
-// (session service wiring, track workflow, browser-tool bridge).
+// (session service wiring and track workflow).
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, realpathSync, rmSync } from "node:fs";
@@ -39,7 +39,6 @@ import {
   type SessionService,
 } from "@polyth/contracts";
 import {
-  createBrowserToolBridge,
   createConfigApplier,
   createOpenCodeRuntime,
   createRemoteOpenCodeRuntime,
@@ -100,7 +99,7 @@ import { createBehaviorService } from "./behavior.ts";
 import { createClientSettings } from "./clientSettings.ts";
 import { createMcpConfigService, mcpEntriesFromBackendConfig } from "./mcp.ts";
 import { createCapabilityProvisioningController, reconcilePinnedHarness } from "./capabilityProvisioning.ts";
-import { AGENT_TOOLS_PATH, createAgentToolBridge } from "./agentTools.ts";
+import { AGENT_TOOLS_PATH, createAgentToolBridge, redactToolInput } from "./agentTools.ts";
 import { createSecureSafeService, secureSafeBehaviorSection } from "./secureSafe.ts";
 import { createModelVisibilityService } from "./modelVisibility.ts";
 import { createVoiceSettings } from "./voice.ts";
@@ -671,15 +670,9 @@ export async function boot(opts: BootOptions = {}) {
     connectionId?: string,
   ): string => `opencode:${connectionId ?? "local"}:${projectId}:${cwd}`;
 
-  // The bridge is created after package discovery (it consumes the browser
-  // package's service) but the pool only spawns runtimes after boot completes.
-  let browserToolBridge: ReturnType<typeof createBrowserToolBridge> | null = null;
-
   const spawnRuntime = async (projectId: string, cwd: string): Promise<AgentRuntime> => {
     // Remote-bound projects run `opencode serve` ON the remote host through
-    // the SSH transport (one multiplexed channel + one forwarded port). The
-    // browser-tool bridge is a local loopback endpoint the remote cannot
-    // reach, so it is not registered for remote runtimes.
+    // the SSH transport (one multiplexed channel + one forwarded port).
     const remoteBinding = (await projects.get(projectId))?.remote;
     if (remoteBinding?.kind === "ssh") {
       const ssh = svc<SshTransportService>("ssh");
@@ -706,10 +699,8 @@ export async function boot(opts: BootOptions = {}) {
     }
     const project = await projects.get(projectId);
     const spaceId = project ? spaceGateway.resolveInternal(project.spaceId).spaceId : undefined;
-    const browserTool = browserToolBridge?.register({ projectId, cwd });
-    try {
-      const localStateKey = openCodeRuntimeId(projectId, cwd);
-      const runtime = await createOpenCodeRuntime({
+    const localStateKey = openCodeRuntimeId(projectId, cwd);
+    return createOpenCodeRuntime({
         projectId, cwd, sessionIdMap,
         ...(spaceId ? { spaceId } : {}),
         ...(opts.opencode?.port ? { port: opts.opencode.port } : {}),
@@ -730,24 +721,7 @@ export async function boot(opts: BootOptions = {}) {
           ? { probeDeadlineMs: opts.opencode.probeDeadlineMs }
           : {}),
         configTargetId: localConfigTargetId,
-        ...(browserTool ? {
-          browserTool: {
-            endpoint: `http://127.0.0.1:${port}/internal/opencode/browser-tool`,
-            token: browserTool.token,
-            pluginDirectory: `${dataDir}/opencode-tools`,
-          },
-        } : {}),
       });
-      const dispose = runtime.dispose.bind(runtime);
-      runtime.dispose = async () => {
-        browserTool?.dispose();
-        await dispose();
-      };
-      return runtime;
-    } catch (error) {
-      browserTool?.dispose();
-      throw error;
-    }
   };
 
   // Stable facade per pool key. Neither queries nor mutations destructively
@@ -1692,10 +1666,18 @@ export async function boot(opts: BootOptions = {}) {
   }
   let requestAgentToolPermission:
     RuntimeEpochSessionService["requestAgentToolPermission"] | undefined;
+  let resolveAgentToolSession: RuntimeEpochSessionService["resolveAgentToolSession"] | undefined;
   const agentTools = createAgentToolBridge({
     executor: (id) => capabilityContributions.executor(id),
     contribution: (id) => capabilityContributions.contribution(id),
-    authorize: async (tool, grant) => {
+    resolveSession: (grant) => resolveAgentToolSession?.(grant) ?? Promise.resolve(undefined),
+    requested: async (tool, grant) => {
+      const event = await store.append(grant.sessionId!, "package-tool/requested", {
+        toolId: tool.id, toolName: tool.name, owner: tool.owner,
+      }, { ignorable: true, producerPlugin: tool.owner });
+      broadcast.event(event);
+    },
+    authorize: async (tool, grant, signal) => {
       const ownerAllowed = (() => {
         if (tool.owner === "polyth") return true;
         try {
@@ -1739,6 +1721,7 @@ export async function boot(opts: BootOptions = {}) {
           cwd: grant.cwd,
           ...(grant.harnessId ? { harnessId: grant.harnessId } : {}),
           ...(grant.sessionId ? { sessionId: grant.sessionId } : {}),
+          signal,
           toolId: tool.id,
           toolName: tool.name,
           owner: tool.owner,
@@ -2020,24 +2003,6 @@ export async function boot(opts: BootOptions = {}) {
     console.log(`[polyth] discovered server packages: ${discoveredPackages.join(", ")}`);
   }
 
-  // --- browser-tool bridge: only backend-opencode may talk to the OpenCode
-  // process, so the bridge is composed here from the browser package's service.
-  const browserForBridge = svc<Parameters<typeof createBrowserToolBridge>[0]["browser"]>("browser");
-  if (browserForBridge) {
-    browserToolBridge = createBrowserToolBridge({
-      browser: browserForBridge,
-      canonicalSessionId: (backendSessionId) => {
-        for (const [canonical, backend] of sessionIdMap) {
-          if (backend === backendSessionId) return canonical;
-        }
-        return undefined;
-      },
-    });
-    provideService("browser.tool-bridge", browserToolBridge);
-  } else {
-    console.error("[polyth] browser package unavailable; agent browser tool disabled");
-  }
-
   // --- session service composition. Package-owned dependencies come from the
   // registry; optional seams degrade honestly when a package failed to load.
   const gitService = svc<TrackWorkflowDeps["git"]>("git");
@@ -2094,7 +2059,13 @@ export async function boot(opts: BootOptions = {}) {
   };
 
   const sessions = createSessionService({
-    store, projects, runtimes, broadcast, queue: store, org: store, profiles: store, behavior, secureSafe,
+    store,
+    redactToolInput: (toolName, input) => {
+      const descriptor = capabilityContributions.list().map((item) => item.descriptor).find((item) =>
+        item.kind === "tool" && (item.name === toolName || toolName.endsWith(`__${item.name}`) || toolName.endsWith(`_${item.name}`)));
+      return descriptor?.kind === "tool" ? redactToolInput(input, descriptor.inputSchema) : input;
+    },
+    projects, runtimes, broadcast, queue: store, org: store, profiles: store, behavior, secureSafe,
     harnesses: {
       staticFeatures: (harnessId) =>
         harnesses.providers().find((provider) => provider.descriptor.id === harnessId)?.staticFeatures,
@@ -2211,6 +2182,7 @@ export async function boot(opts: BootOptions = {}) {
     },
   });
   requestAgentToolPermission = sessions.requestAgentToolPermission.bind(sessions);
+  resolveAgentToolSession = sessions.resolveAgentToolSession.bind(sessions);
   sessionsImpl = sessions;
   reconcileRuntimeForConfigRestart = (sessionId, runtime, expected) =>
     sessions.reconcileForRuntimeRestart(sessionId, runtime, expected);

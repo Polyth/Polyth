@@ -5,7 +5,6 @@ import type {
   Disposable,
   BrowserAction,
   BrowserContextCaptureInput,
-  BrowserTarget,
   JsonObject,
   RemoteAccessPolicy,
   RouteHandler,
@@ -27,14 +26,13 @@ import {
   createProfileRegistry,
   demoWeb,
   findChromiumExecutable,
-  redactObservationText,
   type BrowserArtifactStore,
   type BrowserService,
   type ProfileRegistry,
 } from "./index.ts";
+import { createBrowserAgentTool } from "./agentTool.ts";
 import { originOf } from "./policy.ts";
 import { isBrowserArtifactId } from "./artifacts.ts";
-import { createBrowserAgentTool } from "./agentTool.ts";
 
 const STATUS: Record<string, number> = {
   "not-found": 404,
@@ -57,37 +55,13 @@ const STATUS: Record<string, number> = {
   "profile-locked": 409,
 };
 
-const targetText = (target: BrowserTarget): string => {
-  if ("selector" in target) return target.selector;
-  if ("text" in target) return `text "${target.text}"`;
-  if ("role" in target) return `${target.role}${target.name ? ` "${target.name}"` : ""}`;
-  return `(${target.point.x},${target.point.y})`;
-};
-
-const summarize = (action: BrowserAction): string => {
-  switch (action.kind) {
-    case "click": return `click ${targetText(action.target)}`;
-    case "point": return `point at ${targetText(action.target)}`;
-    case "type": return `type into ${targetText(action.target)} (${action.text.length} chars${action.submit ? ", submit" : ""})`;
-    case "press": return `press ${action.key}`;
-    case "scroll": return action.target ? `scroll to ${targetText(action.target)}` : `scroll ${action.x ?? 0},${action.y ?? 0}`;
-    case "select": return `select ${action.value} in ${targetText(action.target)}`;
-    case "wait": return `wait ${action.condition}${action.value ? ` ${action.value}` : ""}`;
-    case "back": return "go back";
-    case "forward": return "go forward";
-    case "reload": return "reload";
-    case "resize": return `resize to ${action.viewport.width}×${action.viewport.height}`;
-    case "color-scheme": return `emulate ${action.colorScheme} color scheme`;
-    case "inspect": return `inspect ${action.selector}`;
-  }
-};
-
 export function browserRoutes(deps: {
   browser: BrowserService;
   profiles?: ProfileRegistry;
   append: (sessionId: string, type: string, data: JsonObject) => Promise<SessionEvent>;
   shotsDir: string;
   artifacts: BrowserArtifactStore;
+  canAccess?: (projectId: string, sessionId?: string) => Promise<boolean>;
 }): RouteHandler {
   const { browser, profiles, append, artifacts } = deps;
 
@@ -178,6 +152,14 @@ export function browserRoutes(deps: {
 
   return async ({ path, method, url, body, json, res }) => {
     try {
+      const ownedId = path.match(/^\/api\/browser\/sessions\/([^/]+)/)?.[1];
+      if (ownedId && deps.canAccess) {
+        const owned = browser.get(ownedId);
+        if (!owned || !await deps.canAccess(owned.projectId, owned.sessionId)) {
+          json(404, { error: "not-found" });
+          return true;
+        }
+      }
       if (path === "/api/browser/capability" && method === "GET") {
         json(200, browser.capability());
         return true;
@@ -213,23 +195,39 @@ export function browserRoutes(deps: {
         return true;
       }
       if (path === "/api/browser/approvals" && method === "GET") {
-        json(200, { origins: browser.approvals() });
+        const id = url.searchParams.get("browserSessionId") ?? "";
+        const session = browser.get(id);
+        if (!session || (deps.canAccess && !await deps.canAccess(session.projectId, session.sessionId))) {
+          json(404, { error: "not-found" }); return true;
+        }
+        json(200, { origins: browser.approvals(id) });
         return true;
       }
       if (path === "/api/browser/approvals" && method === "POST") {
         const input = await body();
-        browser.approveOrigin(String(input.origin ?? ""));
-        json(200, { origins: browser.approvals() });
+        const id = String(input.browserSessionId ?? "");
+        const session = browser.get(id);
+        if (!session || (deps.canAccess && !await deps.canAccess(session.projectId, session.sessionId))) {
+          json(404, { error: "not-found" }); return true;
+        }
+        browser.approveOrigin(String(input.origin ?? ""), id);
+        json(200, { origins: browser.approvals(id) });
         return true;
       }
       if (path === "/api/browser/sessions" && method === "GET") {
         const projectId = url.searchParams.get("projectId");
-        const all = browser.list();
-        json(200, projectId ? all.filter((session) => session.projectId === projectId) : all);
+        const all = browser.list().filter((session) => !projectId || session.projectId === projectId);
+        const visible = await Promise.all(all.map(async (session) =>
+          !deps.canAccess || await deps.canAccess(session.projectId, session.sessionId) ? session : null));
+        json(200, visible.filter(Boolean));
         return true;
       }
       if (path === "/api/browser/sessions" && method === "POST") {
         const input = await body();
+        if (deps.canAccess && !await deps.canAccess(String(input.projectId ?? ""), typeof input.sessionId === "string" ? input.sessionId : undefined)) {
+          json(404, { error: "not-found" });
+          return true;
+        }
         const viewport = input.viewport as { width?: number; height?: number } | undefined;
         const colorScheme = input.colorScheme === "light"
           || input.colorScheme === "dark"
@@ -290,35 +288,11 @@ export function browserRoutes(deps: {
         const input = await body();
         const actor = input.actor === "agent" ? "agent" as const : "user" as const;
         const target = String(input.url ?? "");
-        const linked = browser.get(id)?.sessionId;
-        if (linked) {
-          await append(linked, "browser/action-requested", {
-            browserSessionId: id,
-            actor,
-            actionSummary: `navigate ${target}`,
-          });
-        }
         try {
           const session = await browser.navigate(id, target, actor);
-          if (linked) {
-            await append(linked, "browser/action-completed", {
-              browserSessionId: id,
-              actor,
-              url: session.url,
-              title: session.title,
-            });
-          }
           json(200, session);
         } catch (error) {
           const failure = error as Error & { code?: string };
-          if (linked) {
-            await append(linked, "browser/action-failed", {
-              browserSessionId: id,
-              actor,
-              code: failure.code ?? "internal",
-              message: failure.message,
-            });
-          }
           // A user navigation that needs approval is an expected product flow,
           // not a failed transport request. Keep the durable failed-action
           // record, but let the client open its approval dialog without a
@@ -350,36 +324,11 @@ export function browserRoutes(deps: {
           json(400, { error: "invalid-input", message: "action required" });
           return true;
         }
-        const linked = browser.get(id)?.sessionId;
-        if (linked) {
-          await append(linked, "browser/action-requested", {
-            browserSessionId: id,
-            actor,
-            actionSummary: redactObservationText(summarize(action), { maxChars: 300 }),
-          });
-        }
         try {
           const { actionId, session, result } = await browser.action(id, action, actor);
-          if (linked) {
-            await append(linked, "browser/action-completed", {
-              browserSessionId: id,
-              actionId,
-              actor,
-              url: session.url,
-              title: session.title,
-            });
-          }
           json(200, { actionId, session, ...(result ? { result } : {}) });
         } catch (error) {
           const failure = error as Error & { code?: string };
-          if (linked) {
-            await append(linked, "browser/action-failed", {
-              browserSessionId: id,
-              actor,
-              code: failure.code ?? "internal",
-              message: failure.message,
-            });
-          }
           json(STATUS[failure.code ?? ""] ?? 500, {
             error: failure.code ?? "internal",
             message: failure.message,
@@ -416,13 +365,6 @@ export function browserRoutes(deps: {
           accessibilityDigest: observation.accessibilityDigest ?? "",
           ...(screenshotRef ? { screenshotRef } : {}),
         };
-        const linked = browser.get(id)?.sessionId;
-        if (linked) {
-          await append(linked, "browser/observation", {
-            browserSessionId: id,
-            ...payload,
-          });
-        }
         json(200, {
           ...payload,
           ...(observation.screenshot ? {
@@ -538,7 +480,9 @@ export default async function registerPackage(host: ServerPackageHost): Promise<
   });
   const browser = createBrowserService({
     driver,
-    unavailableReason: "browser engine unavailable: no Chromium executable found (set POLYTH_CHROMIUM_PATH)",
+    unavailableReason: "Browser engine unavailable. Install a supported desktop build or configure Chromium for development.",
+    allowPublicOrigins: true,
+    append: (sessionId, type, data) => host.events.append(sessionId, type, data, { ignorable: true, producerPlugin: "browser" }),
   });
   host.services.provide(serverServiceKey<BrowserService>("browser"), browser);
   host.services.provide(serverServiceKey<ProfileRegistry>("browser.profiles"), profiles);
@@ -548,35 +492,29 @@ export default async function registerPackage(host: ServerPackageHost): Promise<
     remoteAccess: BROWSER_REMOTE_ACCESS,
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
-      // The bridge is composition-root-owned (only backend-opencode may talk
-      // to the OpenCode process); it is published after package load.
-      const bridge = host.services.require(
-        serverServiceKey<{ route: RouteHandler }>("browser.tool-bridge"),
-      );
-      const capabilities = host.services.require(
-        serverServiceKey<AgentCapabilityContributionRegistry>("harness.capabilities"),
-      );
+      const capabilities = host.services.require(serverServiceKey<AgentCapabilityContributionRegistry>("harness.capabilities"));
       agentTool = capabilities.register("browser", createBrowserAgentTool(browser));
-      const browserRoute = browserRoutes({
-        browser,
-        profiles,
-        append: (sessionId, type, data) => host.events.append(
-          sessionId,
-          type,
-          data,
-          { ignorable: true, producerPlugin: "review" },
-        ),
-        shotsDir: join(host.storageDir, "browser-shots"),
-        artifacts: createBrowserArtifactStore(join(host.storageDir, "browser-artifacts")),
-      });
-      routes ??= async (request) => {
-        if (await bridge.route(request)) return true;
-        return browserRoute(request);
+      routes = async (request) => {
+        const scoped = host.forSpace(request.space);
+        const storage = host.spaceStorage(request.space);
+        return browserRoutes({
+          browser, profiles,
+          canAccess: async (projectId, sessionId) => {
+            try {
+              if (!await scoped.projects.get(projectId)) return false;
+              return !sessionId || (await scoped.sessions.snapshot(sessionId)).projectId === projectId;
+            } catch { return false; }
+          },
+          append: (sessionId, type, data) => host.events.append(sessionId, type, data, { ignorable: true, producerPlugin: "browser" }),
+          shotsDir: storage.path("browser-shots"),
+          artifacts: createBrowserArtifactStore(storage.path("browser-artifacts")),
+        })(request);
       };
     },
     async onDisable() {
       agentTool?.dispose();
       agentTool = undefined;
+      routes = null;
       await browser.closeAll();
       await profiles.closeAll();
     },

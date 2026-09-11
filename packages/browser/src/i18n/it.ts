@@ -1,6 +1,10 @@
 import type { BrowserMessages } from "./en.ts";
 
 export const it: BrowserMessages = {
+  "previewview.actionClick": "Clic in corso",
+  "previewview.actionScroll": "Scorrimento",
+  "previewview.actionNavigate": "Apertura della pagina",
+  "previewview.actionWait": "In attesa della pagina",
   "browserpreview.couldnTDecodeTheCurrentBrowserFrame": "Impossibile decodificare il frame corrente del browser.",
   "browserpreview.couldnTEncodeTheBrowserCapture": "Impossibile codificare la schermata acquisita dal browser.",
   "browserpreview.couldnTPrepareTheBrowserCapture": "Impossibile preparare la cattura del browser.",
@@ -34,6 +38,12 @@ export const it: BrowserMessages = {
   "previewview.browserStopped": "Browser fermato",
   "previewview.browserTools": "Strumenti del browser",
   "previewview.browserUnavailable": "Browser non disponibile",
+  "previewview.browserVisibility": "Visibilità del browser",
+  "previewview.browserVisibilityDescription": "Scegli se l’attività del browser dell’agente resta in background o apre automaticamente il browser.",
+  "previewview.background": "In background",
+  "previewview.autoShow": "Mostra automaticamente",
+  "previewview.browserIdle": "Inattivo",
+  "previewview.viewBrowser": "Visualizza browser",
   "previewview.browserValue": "Browser: {value}",
   "previewview.browsingDataWillBeCleared": "I dati di navigazione saranno cancellati",
   "previewview.cancelOriginApproval": "Annulla approvazione di origine",
@@ -113,7 +123,7 @@ export const it: BrowserMessages = {
   "previewview.reconnectingToBrowser": "Ricollegamento al browser",
   "previewview.reload": "Ricarica",
   "previewview.resume": "Riprendi",
-  "previewview.resumeAgent": "Agente di curriculum",
+  "previewview.resumeAgent": "Torna all’agente",
   "previewview.rev": "rev",
   "previewview.runningValue": "in esecuzione · {host}",
   "previewview.schemeDark": "Schema: scuro",

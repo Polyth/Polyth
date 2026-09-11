@@ -35,14 +35,15 @@ function makeHarness() {
       return page;
     },
   };
-  const browser = createBrowserService({
-    driver: spied,
-    allowedOrigins: () => ["http://127.0.0.1:5173"],
-  });
   const append = async (sessionId: string, type: string, data: JsonObject): Promise<SessionEvent> => {
     calls.push({ kind: "append", type, data });
     return { sessionId, seq: ++seq, ts: Date.now(), type, data } as unknown as SessionEvent;
   };
+  const browser = createBrowserService({
+    driver: spied,
+    append,
+    allowedOrigins: () => ["http://127.0.0.1:5173"],
+  });
   const routes = browserRoutes({
     browser,
     append,
@@ -68,10 +69,11 @@ function makeHarness() {
 }
 
 test("action-requested appends before the driver acts; completed after", async () => {
-  const { calls, call } = makeHarness();
+  const { browser, calls, call } = makeHarness();
   const created = await call("POST", "/api/browser/sessions", { projectId: "p1", sessionId: "sess1", url: HOME });
   assert.equal(created.status, 200);
   const id = (created.payload as { id: string }).id;
+  browser.setViewerVisible(id, true);
   calls.length = 0;
 
   const acted = await call("POST", `/api/browser/sessions/${id}/actions`, {
@@ -83,11 +85,11 @@ test("action-requested appends before the driver acts; completed after", async (
   assert.deepEqual(kinds, ["browser/action-requested", "acted", "browser/action-completed"]);
   const requested = calls[0]!.data!;
   assert.equal(requested.actor, "agent");
-  assert.match(String(requested.actionSummary), /click a#next/);
+  assert.match(String(requested.actionSummary), /click/);
 });
 
 test("create and action routes apply viewport and color-scheme emulation", async () => {
-  const { calls, call } = makeHarness();
+  const { browser, calls, call } = makeHarness();
   const created = await call("POST", "/api/browser/sessions", {
     projectId: "p1",
     sessionId: "sess1",
@@ -111,7 +113,7 @@ test("create and action routes apply viewport and color-scheme emulation", async
   });
   assert.equal(recolored.status, 200);
   assert.equal((recolored.payload as { session: { colorScheme: string } }).session.colorScheme, "light");
-  assert.match(String(calls[0]?.data?.actionSummary), /light color scheme/);
+  assert.match(String(calls[0]?.data?.actionSummary), /color-scheme light/);
 
   const revision = (recolored.payload as { session: { revision: number } }).session.revision;
   calls.length = 0;
@@ -121,13 +123,14 @@ test("create and action routes apply viewport and color-scheme emulation", async
   });
   assert.equal(pointed.status, 200);
   assert.equal((pointed.payload as { result: { selector: string } }).result.selector, "main");
-  assert.match(String(calls[0]?.data?.actionSummary), /point at/);
+  assert.match(String(calls[0]?.data?.actionSummary), /point/);
 });
 
-test("screenshot observation logs the persisted ref before returning UI-only pixels", async () => {
-  const { calls, call } = makeHarness();
+test("observation audit retains metadata without DOM text or pixels", async () => {
+  const { browser, calls, call } = makeHarness();
   const created = await call("POST", "/api/browser/sessions", { projectId: "p1", sessionId: "sess1", url: HOME });
   const id = (created.payload as { id: string }).id;
+  browser.setViewerVisible(id, true);
   calls.length = 0;
 
   const obs = await call("POST", `/api/browser/sessions/${id}/observe`, { includeScreenshot: true });
@@ -141,7 +144,7 @@ test("screenshot observation logs the persisted ref before returning UI-only pix
   };
   const text = String(response.text);
   assert.ok(!text.includes("sk-12345678abc"));
-  assert.equal(String(appended!.data!.text), text); // logged exactly what was returned
+  assert.equal("text" in appended!.data!, false, "DOM text is not persisted as routine browser audit");
   assert.match(response.screenshotRef ?? "", /\.webp$/);
   assert.equal(response.screenshot?.mime, "image/webp");
   assert.ok(response.screenshot?.data);
@@ -149,9 +152,10 @@ test("screenshot observation logs the persisted ref before returning UI-only pix
 });
 
 test("failed actions append action-failed with the policy code", async () => {
-  const { calls, call } = makeHarness();
+  const { browser, calls, call } = makeHarness();
   const created = await call("POST", "/api/browser/sessions", { projectId: "p1", sessionId: "sess1", url: HOME });
   const id = (created.payload as { id: string }).id;
+  browser.setViewerVisible(id, true);
   calls.length = 0;
 
   const nav = await call("POST", `/api/browser/sessions/${id}/navigate`, { url: "http://93.184.216.34/", actor: "agent" });
@@ -179,15 +183,16 @@ test("user navigation returns approval state without a transport failure", async
   assert.equal(pending.approval.origin, "http://93.184.216.34");
   assert.match(pending.approval.message, /needs.*approval/);
 
-  const approved = await call("POST", "/api/browser/approvals", { origin: "93.184.216.34" });
+  const approved = await call("POST", "/api/browser/approvals", { origin: "93.184.216.34", browserSessionId: id });
   assert.equal(approved.status, 200);
   assert.deepEqual(approved.payload, { origins: ["http://93.184.216.34"] });
 });
 
 test("browser sessions without a linked polyth session append nothing", async () => {
-  const { calls, call } = makeHarness();
+  const { browser, calls, call } = makeHarness();
   const created = await call("POST", "/api/browser/sessions", { projectId: "p1", url: HOME });
   const id = (created.payload as { id: string }).id;
+  browser.setViewerVisible(id, true);
   calls.length = 0;
   await call("POST", `/api/browser/sessions/${id}/actions`, { actor: "user", action: { kind: "press", key: "Enter" } });
   await call("POST", `/api/browser/sessions/${id}/observe`, {});
@@ -379,4 +384,22 @@ test("frame endpoint supports afterRevision resume and 204 when caught up", asyn
   const rev = (f1.payload as { revision: number }).revision;
   const caught = await call("GET", `/api/browser/sessions/${id}/frame`, {}, `?afterRevision=${rev}`);
   assert.equal(caught.status, 204);
+});
+
+test("HTTP ownership checks reject known foreign project and session IDs before mutation", async () => {
+  const browser = createBrowserService({ driver: createFakeDriver({ pages: {} }) });
+  const foreign = await browser.create({ projectId: "foreign", sessionId: "foreign-session" });
+  const routes = browserRoutes({ browser, canAccess: async (projectId, sessionId) => projectId === "owned" && (!sessionId || sessionId === "own-session"), append: async () => { throw new Error("must not append"); }, shotsDir: "/tmp/unused-browser-shots", artifacts: createBrowserArtifactStore("/tmp/unused-browser-artifacts") });
+  const call = async (method: string, path: string, body: unknown = {}) => {
+    let status = 0; let payload: unknown;
+    await routes({ path, method, url: new URL(`http://x${path}`), body: async () => body, json: (code: number, value: unknown) => { status = code; payload = value; } } as never);
+    return { status, payload };
+  };
+  try {
+    assert.equal((await call("POST", `/api/browser/sessions/${foreign.id}/navigate`, { url: HOME })).status, 404);
+    assert.equal((await call("POST", "/api/browser/sessions", { projectId: "owned", sessionId: "foreign-session" })).status, 404);
+    assert.equal((await call("POST", "/api/browser/approvals", { browserSessionId: foreign.id, origin: HOME })).status, 404);
+    assert.deepEqual((await call("GET", "/api/browser/sessions")).payload, []);
+    assert.equal(browser.get(foreign.id)?.url, "about:blank");
+  } finally { await browser.closeAll(); }
 });

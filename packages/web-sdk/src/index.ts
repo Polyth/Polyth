@@ -458,7 +458,7 @@ export interface HandoffTargetRegistration {
  * through this bounded component handle.
  */
 export type WebUiComponent<Props extends object = Record<string, unknown>> = ComponentType<Props>;
-export interface WebButtonProps extends Pick<ButtonHTMLAttributes<HTMLButtonElement>, "type"> { children?: ReactNode; className?: string; size?: "sm" | "md" | "lg"; variant?: "primary" | "ghost" | "quiet" | "danger"; busy?: boolean; disabled?: boolean; title?: string; iconStart?: () => ReactNode; onClick?: () => void; "aria-pressed"?: boolean; }
+export interface WebButtonProps extends Pick<ButtonHTMLAttributes<HTMLButtonElement>, "type"> { children?: ReactNode; className?: string; size?: "sm" | "md" | "lg"; variant?: "primary" | "ghost" | "quiet" | "danger"; busy?: boolean; disabled?: boolean; title?: string; "aria-label"?: string; iconStart?: () => ReactNode; onClick?: () => void; "aria-pressed"?: boolean; }
 export interface WebInputProps extends Pick<InputHTMLAttributes<HTMLInputElement>, "autoComplete" | "required" | "type"> { value?: string; placeholder?: string; className?: string; disabled?: boolean; "aria-label"?: string; onChange?: (event: ChangeEvent<HTMLInputElement>) => void; onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void; }
 export interface WebEmptyStateProps { title: string; description?: string; actionLabel?: string; onAction?: () => void; }
 
@@ -508,6 +508,11 @@ export interface WebPackageHost {
   };
   sessions: {
     upsert(session: SessionProjection): void;
+    /** Observe newly ingested canonical events. Events are delivered after
+     * the host store accepts them and are never a substitute for durable
+     * session history. Package UI uses this for presentation-only reactions
+     * such as revealing a surface before a tool's permission/mutation. */
+    subscribeEvents(listener: (event: SessionEvent) => void): Unregister;
   };
   /** Canonical composer/session handoff. Package UI never reaches into the
    * shell store or composer event bus directly. */

@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { JsonObject, SessionEvent } from "@polyth/contracts";
 import { buildModel, cloneModel, createModelCache, reduceEvent } from "../src/reduce.ts";
-import { applyEvent, applyEvents, getState, lastSeq, seedSessionCache, subscribeStore, upsertSession } from "../src/store.ts";
+import { applyEvent, applyEvents, getState, lastSeq, seedSessionCache, subscribeSessionEvents, subscribeStore, upsertSession } from "../src/store.ts";
 import { titleFromPrompt } from "../src/format.ts";
 
 function mk(sessionId: string, seq: number, type = "user/message", data: JsonObject = {}): SessionEvent {
@@ -71,6 +71,28 @@ test("applyEvents applies a multi-session batch with a single notification", () 
   assert.equal(notified, 1);
   assert.deepEqual(seqs("ing-a"), [1, 2, 3]);
   assert.deepEqual(seqs("ing-b"), [1]);
+});
+
+test("canonical event subscribers run after accepted history is visible", () => {
+  const received: string[] = [];
+  const unsub = subscribeSessionEvents((event) => {
+    received.push(event.type);
+    assert.ok((getState().events[event.sessionId] ?? []).some((candidate) => candidate.id === event.id));
+  });
+  applyEvents([mk("event-sub", 1, "package-tool/requested", { toolId: "browser.polyth-browser" })]);
+  unsub();
+  assert.deepEqual(received, ["package-tool/requested"]);
+});
+
+test("canonical event subscribers ignore replays, isolate failures, and skip hydration", () => {
+  const received: number[] = [];
+  const throwing = subscribeSessionEvents(() => { throw new Error("observer failure"); });
+  const recording = subscribeSessionEvents((event) => { received.push(event.seq); });
+  applyEvents([mk("event-live", 1), mk("event-live", 1), mk("event-live", 2)]);
+  applyEvents([mk("event-hydrated", 1)], { notifySessionEvents: false });
+  throwing();
+  recording();
+  assert.deepEqual(received, [1, 2]);
 });
 
 test("duplicates inside one batch are dropped", () => {

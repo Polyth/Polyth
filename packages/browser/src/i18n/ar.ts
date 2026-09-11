@@ -1,6 +1,10 @@
 import type { BrowserMessages } from "./en.ts";
 
 export const ar: BrowserMessages = {
+  "previewview.actionClick": "جارٍ النقر",
+  "previewview.actionScroll": "جارٍ التمرير",
+  "previewview.actionNavigate": "جارٍ فتح الصفحة",
+  "previewview.actionWait": "في انتظار الصفحة",
   "browserpreview.couldnTDecodeTheCurrentBrowserFrame": "تعذر فك تشفير إطار المتصفح الحالي.",
   "browserpreview.couldnTEncodeTheBrowserCapture": "تعذر ترميز لقطة المتصفح.",
   "browserpreview.couldnTPrepareTheBrowserCapture": "تعذر إعداد عملية التقاط المتصفح.",
@@ -34,6 +38,12 @@ export const ar: BrowserMessages = {
   "previewview.browserStopped": "توقف (بروزر)",
   "previewview.browserTools": "أدوات الحشد",
   "previewview.browserUnavailable": "Browser unavailable",
+  "previewview.browserVisibility": "Browser visibility",
+  "previewview.browserVisibilityDescription": "Choose whether agent browser activity stays in the background or opens Browser automatically.",
+  "previewview.background": "Background",
+  "previewview.autoShow": "Auto-show",
+  "previewview.browserIdle": "Idle",
+  "previewview.viewBrowser": "View browser",
   "previewview.browserValue": "المتصفح: {value}",
   "previewview.browsingDataWillBeCleared": "سيتم تطهير البيانات",
   "previewview.cancelOriginApproval": "الموافقة على الأصل الإنجيلي",
@@ -113,7 +123,7 @@ export const ar: BrowserMessages = {
   "previewview.reconnectingToBrowser": "إعادة الاتصال بالبائعين",
   "previewview.reload": "إعادة التحميل",
   "previewview.resume": "استئناف",
-  "previewview.resumeAgent": "وكيل سير ذاتية",
+  "previewview.resumeAgent": "العودة إلى الوكيل",
   "previewview.rev": "القس",
   "previewview.runningValue": "تشغيل · {host}",
   "previewview.schemeDark": "المخطط: داكن",

@@ -1,6 +1,10 @@
 import type { BrowserMessages } from "./en.ts";
 
 export const de: BrowserMessages = {
+  "previewview.actionClick": "Klicken",
+  "previewview.actionScroll": "Scrollen",
+  "previewview.actionNavigate": "Seite öffnen",
+  "previewview.actionWait": "Auf Seite warten",
   "browserpreview.couldnTDecodeTheCurrentBrowserFrame": "Der aktuelle Browser-Frame konnte nicht dekodiert werden.",
   "browserpreview.couldnTEncodeTheBrowserCapture": "Die Browseraufnahme konnte nicht kodiert werden.",
   "browserpreview.couldnTPrepareTheBrowserCapture": "Die Browseraufnahme konnte nicht vorbereitet werden.",
@@ -34,6 +38,12 @@ export const de: BrowserMessages = {
   "previewview.browserStopped": "Browser gestoppt",
   "previewview.browserTools": "Browser-Tools",
   "previewview.browserUnavailable": "Browser nicht verfügbar",
+  "previewview.browserVisibility": "Browsersichtbarkeit",
+  "previewview.browserVisibilityDescription": "Wählen Sie, ob Browseraktivitäten des Agenten im Hintergrund bleiben oder automatisch geöffnet werden.",
+  "previewview.background": "Hintergrund",
+  "previewview.autoShow": "Automatisch anzeigen",
+  "previewview.browserIdle": "Inaktiv",
+  "previewview.viewBrowser": "Browser anzeigen",
   "previewview.browserValue": "Browser: {value}",
   "previewview.browsingDataWillBeCleared": "Browserdaten werden gelöscht",
   "previewview.cancelOriginApproval": "Genehmigung für die Annullierung von Ursprungserzeugnissen",
@@ -113,7 +123,7 @@ export const de: BrowserMessages = {
   "previewview.reconnectingToBrowser": "Wiederverbindung zum Browser",
   "previewview.reload": "Neu laden",
   "previewview.resume": "Fortsetzen",
-  "previewview.resumeAgent": "Lebenslaufagent",
+  "previewview.resumeAgent": "Zum Agenten zurückkehren",
   "previewview.rev": "rev",
   "previewview.runningValue": "läuft · {host}",
   "previewview.schemeDark": "Schema: dunkel",

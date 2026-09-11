@@ -9,12 +9,13 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "node --experimental-strip-types build.ts",
+    "stage:chromium": "node stage-chromium.mjs",
     "download:opencode": "node download-opencode.mjs",
     "start": "electron .",
-    "dist": "npm run build && electron-builder --publish never",
-    "dist:linux": "npm run build && electron-builder --linux AppImage --publish never",
-    "dist:mac": "npm run build && electron-builder --mac dmg zip --publish never",
-    "dist:win": "npm run build && electron-builder --win nsis --publish never"
+    "dist": "npm run build && npm run stage:chromium && electron-builder --publish never",
+    "dist:linux": "npm run build && npm run stage:chromium && electron-builder --linux AppImage --publish never",
+    "dist:mac": "npm run build && npm run stage:chromium && electron-builder --mac dmg zip --publish never",
+    "dist:win": "npm run build && npm run stage:chromium && electron-builder --win nsis --publish never"
   },
   "dependencies": {
     "electron-updater": "6.8.9",
@@ -40,7 +41,8 @@
       "dist/**/*",
       "build/icon.png",
       "opencode.json",
-      "package.json"
+      "package.json",
+      "!**/node_modules/playwright-core/.local-browsers/**/*"
     ],
     "extraResources": [
       {
@@ -50,6 +52,13 @@
       {
         "from": "../web/dist",
         "to": "web",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "resources/chromium",
+        "to": "chromium",
         "filter": [
           "**/*"
         ]
@@ -110,7 +119,7 @@
       "icon": "build/icon.png",
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-      "x64ArchFiles": "{**/node_modules/{esbuild,@esbuild/*,node-pty/prebuilds/*}/**,**/Resources/opencode/darwin-*/opencode}",
+      "x64ArchFiles": "{**/node_modules/{esbuild,@esbuild/*,node-pty/prebuilds/*}/**,**/Resources/opencode/darwin-*/opencode,**/Resources/chromium/**}",
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Polyth uses the microphone only when you start dictation."
       }

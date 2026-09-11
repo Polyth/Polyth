@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { lstat, mkdir, realpath, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import type {
   AgentCapabilityContribution,
@@ -33,7 +33,7 @@ const VIEWPORTS = {
 } as const;
 
 const DESCRIPTION =
-  "Open, read, and interact with a page in Polyth's controlled in-app browser. Use browser.open first, then browser.snapshot before clicking or typing. The browser is an isolated project-scoped Chromium context, not the user's personal browser.";
+  "Open, read, and interact with a page in Polyth's controlled in-app browser. Use browser.open first, then browser.snapshot before clicking or typing. The browser is an isolated session-scoped Chromium context, not the user's personal browser.";
 
 const inputSchema: JsonObject = {
   type: "object",
@@ -49,7 +49,7 @@ const inputSchema: JsonObject = {
         selector: { type: "string", description: "CSS selector returned by browser.snapshot" },
         text: { type: "string", description: "Visible label for browser.click" },
         exact: { type: "boolean" },
-        value: { type: "string", description: "Text for browser.type" },
+        value: { type: "string", writeOnly: true, description: "Text for browser.type (omitted from Polyth tool history)" },
         submit: { type: "boolean" },
         direction: { type: "string", enum: ["up", "down", "top", "bottom"] },
         viewport: { type: "string", enum: ["mobile", "tablet", "desktop", "fill"] },
@@ -130,7 +130,9 @@ export function createBrowserAgentTool(
   browser: BrowserService,
   now: () => Date = () => new Date(),
 ): AgentCapabilityContribution {
-  const execute = async (input: JsonObject, ctx: ToolExecutionContext): Promise<{ output: string; metadata?: JsonObject }> => {
+  const flights = new Map<string, Promise<unknown>>();
+  const run = async (input: JsonObject, ctx: ToolExecutionContext): Promise<{ output: string; metadata?: JsonObject }> => {
+    if (!ctx.sessionId) throw invalid("An active canonical Polyth session is required for Browser.");
     if (ctx.signal?.aborted) throw Object.assign(new Error("browser action aborted"), { code: "aborted" });
     const action = resolveAction(input.action);
     const parameters = object(input.parameters);
@@ -140,9 +142,7 @@ export function createBrowserAgentTool(
     }
     const candidates = browser.list().filter((session) =>
       session.projectId === ctx.projectId && session.status !== "closed");
-    let session = candidates.find((candidate) => candidate.sessionId === ctx.sessionId)
-      ?? candidates.at(-1)
-      ?? null;
+    let session = candidates.find((candidate) => candidate.sessionId === ctx.sessionId) ?? null;
 
     if (action === "browser.open") {
       const rawUrl = text(parameters.url);
@@ -152,29 +152,31 @@ export function createBrowserAgentTool(
       if (url.protocol !== "http:" && url.protocol !== "https:") throw invalid("url must use http or https");
       const nextViewport = viewport(parameters.viewport, false);
       const nextScheme = colorScheme(parameters.colorScheme, false);
+      const existing = session !== null;
       if (!session) {
         session = await browser.create({
           projectId: ctx.projectId,
           ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}),
-          url: url.toString(),
+          actor: "agent",
           ...(nextViewport ? { viewport: nextViewport } : {}),
           ...(nextScheme ? { colorScheme: nextScheme } : {}),
         });
-      } else {
-        if (browser.agentPaused(session.id)) throw Object.assign(new Error("agent control is paused for this browser session"), { code: "agent-paused" });
-        if (nextViewport) session = (await browser.action(session.id, { kind: "resize", viewport: nextViewport }, "agent")).session;
-        if (nextScheme) session = (await browser.action(session.id, { kind: "color-scheme", colorScheme: nextScheme }, "agent")).session;
-        session = await browser.navigate(session.id, url.toString(), "agent");
       }
+      if (ctx.signal?.aborted) throw Object.assign(new Error("browser action aborted"), { code: "aborted" });
+      if (browser.agentPaused(session.id)) throw Object.assign(new Error("agent control is paused for this browser session"), { code: "agent-paused" });
+      if (existing && nextViewport) session = (await browser.action(session.id, { kind: "resize", viewport: nextViewport }, "agent")).session;
+      if (existing && nextScheme) session = (await browser.action(session.id, { kind: "color-scheme", colorScheme: nextScheme }, "agent")).session;
+      session = await browser.navigate(session.id, url.toString(), "agent");
       return { output: JSON.stringify(publicSession(session)), metadata: { action } };
     }
 
-    if (!session) throw invalid("No controlled browser is open for this project. Call browser.open first.");
+    if (!session) throw invalid("No controlled browser is open for this session. Call browser.open first.");
+    if (ctx.signal?.aborted) throw Object.assign(new Error("browser action aborted"), { code: "aborted" });
     if (browser.agentPaused(session.id)) throw Object.assign(new Error("agent control is paused for this browser session"), { code: "agent-paused" });
 
     if (action === "browser.snapshot") {
       const selector = text(parameters.selector);
-      const observation = await browser.observe(session.id, selector ? { selector } : undefined);
+      const observation = await browser.observe(session.id, { actor: "agent", ...(selector ? { selector } : {}) });
       const errors = browser.console(session.id).filter((entry) => entry.level === "error").slice(-20).map((entry) => entry.message);
       return {
         output: JSON.stringify({
@@ -189,7 +191,7 @@ export function createBrowserAgentTool(
     }
 
     if (action === "browser.capture") {
-      const observation = await browser.observe(session.id, { includeScreenshot: true });
+      const observation = await browser.observe(session.id, { includeScreenshot: true, actor: "agent" });
       if (!observation.screenshot) throw new Error("the browser returned no screenshot");
       const extension = observation.screenshot.mime.includes("png")
         ? "png" : observation.screenshot.mime.includes("webp") ? "webp" : "jpg";
@@ -198,8 +200,17 @@ export function createBrowserAgentTool(
       const absolutePath = resolve(ctx.cwd, relativePath);
       const bounded = relative(resolve(ctx.cwd), absolutePath);
       if (bounded.startsWith("..") || resolve(ctx.cwd, bounded) !== absolutePath) throw new Error("screenshot path escaped the project");
-      await mkdir(resolve(ctx.cwd, ".polyth", "screenshots"), { recursive: true });
-      await writeFile(absolutePath, observation.screenshot.data);
+      // Check each parent before creating the next: a project-controlled
+      // .polyth symlink must never redirect captures outside the workspace.
+      const root = await realpath(ctx.cwd);
+      for (const part of [".polyth", ".polyth/screenshots"]) {
+        const dir = resolve(root, part);
+        try { await mkdir(dir); } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        }
+        if ((await lstat(dir)).isSymbolicLink() || await realpath(dir) !== dir) throw invalid("Screenshot directory must stay inside the project");
+      }
+      await writeFile(absolutePath, observation.screenshot.data, { flag: "wx", mode: 0o600 });
       const path = relativePath.split("\\").join("/");
       return {
         output: JSON.stringify({
@@ -243,13 +254,21 @@ export function createBrowserAgentTool(
     };
   };
 
+  const execute = (input: JsonObject, ctx: ToolExecutionContext) => {
+    const key = `${ctx.spaceId ?? ""}:${ctx.projectId}:${ctx.sessionId}`;
+    const next = (flights.get(key) ?? Promise.resolve()).catch(() => undefined).then(() => run(input, ctx));
+    flights.set(key, next);
+    void next.finally(() => { if (flights.get(key) === next) flights.delete(key); }).catch(() => undefined);
+    return next;
+  };
+
   return {
     descriptor: {
       id: "browser.polyth-browser",
       kind: "tool",
       owner: "browser",
       scope: "project",
-      revision: "1",
+      revision: "2",
       name: "polyth_browser",
       description: DESCRIPTION,
       inputSchema,

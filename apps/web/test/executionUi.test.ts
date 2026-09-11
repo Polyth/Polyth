@@ -1062,3 +1062,29 @@ test("approval is always action-required: intent, target, risk, and decisions vi
     container.remove();
   }
 });
+
+test("browser approval names the browser and its bounded capabilities", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(createElement(PermissionBanner, {
+      permissions: [{
+        sessionId: "session-browser",
+        requestId: "permission-browser",
+        permission: "package-tool",
+        tool: "polyth_browser",
+        patterns: ["browser.polyth-browser"],
+        status: "pending",
+        time: 1,
+      }],
+    })));
+    assert.match(container.querySelector(".permission-request-title")?.textContent ?? "", /Agent wants to use Browser/);
+    assert.match(container.querySelector(".permission-browser-capabilities")?.textContent ?? "", /read visible content/i);
+    assert.equal(container.querySelector(".permission-request-tool"), null);
+    assert.match(container.querySelector(".perm-actions")?.textContent ?? "", /Allow once.*Always.*Deny/s);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});

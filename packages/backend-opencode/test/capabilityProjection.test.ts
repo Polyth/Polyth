@@ -123,6 +123,57 @@ test("OpenCode projects package-owned MCP descriptors from the canonical plan", 
   });
 });
 
+test("browser capability uses the generic agent-tools MCP projection", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "polyth-opencode-browser-capability-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const context = contextAt(root);
+  const provisioner = createOpenCodeProvisioner(applier([]));
+  const browser = descriptor({
+    id: "browser.polyth-browser",
+    kind: "tool",
+    scope: "project",
+    projectId: context.projectId,
+    name: "polyth_browser",
+    description: "Drive the project-scoped controlled browser.",
+    inputSchema: { type: "object" },
+    trust: "device",
+    mutating: true,
+  });
+  const genericAgentTools = {
+    id: "polyth.agent-tools",
+    kind: "mcp-server" as const,
+    owner: "polyth",
+    scope: "project" as const,
+    projectId: context.projectId,
+    revision: "agent-tools-revision",
+    name: "polyth-agent-tools",
+    enabled: true,
+    transport: { kind: "stdio" as const, command: "node", args: ["agentToolsMcp.mjs"], envKeys: ["POLYTH_AGENT_TOOLS_URL", "POLYTH_AGENT_TOOLS_TOKEN"] },
+  };
+  const plan = planHarnessCapabilities(
+    "opencode",
+    [browser, genericAgentTools],
+    await provisioner.support(context),
+    context,
+  );
+  const result = await provisioner.apply(context, plan, {
+    mcpSecrets: (id) => id === "polyth.agent-tools"
+      ? { POLYTH_AGENT_TOOLS_URL: "http://127.0.0.1:4400/internal/agent-tools", POLYTH_AGENT_TOOLS_TOKEN: "test-token" }
+      : {},
+  });
+
+  assert.equal(plan.items.find((item) => item.capability.id === browser.id)?.mode, "mcp");
+  assert.equal(result.records.find((record) => record.capabilityId === browser.id)?.status, "pending");
+  const overlay = peekOpenCodeLaunchOverlay(context);
+  assert.ok(overlay);
+  assert.ok(overlay.capabilityIds.includes(browser.id));
+  const config = JSON.parse(overlay.configContent) as { mcp?: Record<string, { command?: string[]; environment?: Record<string, string> }> };
+  assert.deepEqual(config.mcp?.["polyth-agent-tools"]?.command, ["node", "agentToolsMcp.mjs"]);
+  assert.match(config.mcp?.["polyth-agent-tools"]?.environment?.POLYTH_AGENT_TOOLS_URL ?? "", /^(?:\{env:POLYTH_MCP_[a-f0-9]+_POLYTH_AGENT_TOOLS_URL\}|\{file:[^}]+\})$/);
+  assert.match(config.mcp?.["polyth-agent-tools"]?.environment?.POLYTH_AGENT_TOOLS_TOKEN ?? "", /^(?:\{env:POLYTH_MCP_[a-f0-9]+_POLYTH_AGENT_TOOLS_TOKEN\}|\{file:[^}]+\})$/);
+  assert.doesNotMatch(JSON.stringify(config), /test-token/);
+});
+
 test("OpenCode launch overlay leaves user text config untouched", () => {
   const overlay = {
     configContent: JSON.stringify({ mcp: { polyth: { type: "local" } } }),

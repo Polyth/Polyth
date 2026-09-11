@@ -1,6 +1,10 @@
 import type { BrowserMessages } from "./en.ts";
 
 export const bg: BrowserMessages = {
+  "previewview.actionClick": "Натискане",
+  "previewview.actionScroll": "Превъртане",
+  "previewview.actionNavigate": "Отваряне на страница",
+  "previewview.actionWait": "Изчакване на страница",
   "browserpreview.couldnTDecodeTheCurrentBrowserFrame": "Не можа да се декодира текущата рамка на браузъра.",
   "browserpreview.couldnTEncodeTheBrowserCapture": "Не можа да се кодира заснемането от браузъра.",
   "browserpreview.couldnTPrepareTheBrowserCapture": "Не можа да се подготви заснемането от браузъра.",
@@ -34,6 +38,12 @@ export const bg: BrowserMessages = {
   "previewview.browserStopped": "Браузърът спря",
   "previewview.browserTools": "Инструменти за четящо устройство",
   "previewview.browserUnavailable": "Браузърът не е на разположение",
+  "previewview.browserVisibility": "Видимост на браузъра",
+  "previewview.browserVisibilityDescription": "Изберете дали активността на агента да остава на заден план или браузърът да се отваря автоматично.",
+  "previewview.background": "На заден план",
+  "previewview.autoShow": "Автоматично показване",
+  "previewview.browserIdle": "В покой",
+  "previewview.viewBrowser": "Преглед на браузъра",
   "previewview.browserValue": "Браузър: {value}",
   "previewview.browsingDataWillBeCleared": "Данните за четенето ще бъдат изчистени",
   "previewview.cancelOriginApproval": "Отказ на одобрение на произход",
@@ -113,7 +123,7 @@ export const bg: BrowserMessages = {
   "previewview.reconnectingToBrowser": "Връщане към браузъра",
   "previewview.reload": "Презареждане",
   "previewview.resume": "Продължаване",
-  "previewview.resumeAgent": "Агент за автобиографии",
+  "previewview.resumeAgent": "Връщане към агента",
   "previewview.rev": "оборот",
   "previewview.runningValue": "стартирано · {host}",
   "previewview.schemeDark": "Схема: тъмна",

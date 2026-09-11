@@ -11,6 +11,7 @@ import {
   createBrowserService, createFakeDriver, redactObservationText,
   type BrowserDriver, type BrowserFrame, type FakeWeb,
 } from "../src/index.ts";
+import type { JsonObject } from "@polyth/contracts";
 
 const HOME = "http://127.0.0.1:5173/";
 
@@ -51,15 +52,29 @@ test("create + navigate share one context; frames carry increasing revisions", a
   const frames: BrowserFrame[] = [];
   svc.onFrame((f) => frames.push(f));
   const s = await svc.create({ projectId: "p1", sessionId: "sess1", url: HOME });
+  svc.setViewerVisible(s.id, true);
+  await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(s.status, "ready");
   assert.equal(s.url, HOME);
   assert.equal(s.title, "App");
-  assert.ok(s.revision >= 1);
+  assert.ok((svc.get(s.id)?.revision ?? 0) >= 1);
   const { session: after } = await svc.action(s.id, { kind: "click", target: { selector: "a#next" } }, "agent");
   assert.equal(after.url, `${HOME}next`);
   assert.ok(after.revision > s.revision);
   assert.ok(frames.length >= 2);
   assert.ok(frames[frames.length - 1]!.revision === after.revision);
+  await svc.close(s.id);
+});
+
+test("agent target geometry is emitted before click mutation", async () => {
+  const svc = service();
+  const events: Array<{ kind: string; targetRect?: { x: number; y: number; width: number; height: number } }> = [];
+  svc.onEvent((event) => events.push(event));
+  const s = await svc.create({ projectId: "p1", url: HOME });
+  svc.setViewerVisible(s.id, true);
+  await svc.action(s.id, { kind: "click", target: { selector: "a#next" } }, "agent");
+  const target = events.find((event) => event.kind === "action" && event.targetRect);
+  assert.deepEqual(target?.targetRect, { x: 0, y: 0, width: 240, height: 80 });
   await svc.close(s.id);
 });
 
@@ -74,6 +89,7 @@ test("history, device resizing, color scheme, scoped observations, and inspect m
     allowedOrigins: () => ["http://127.0.0.1:5173"],
   });
   const s = await svc.create({ projectId: "p1", url: HOME, colorScheme: "dark" });
+  svc.setViewerVisible(s.id, true);
   assert.equal(s.colorScheme, "dark");
   const clicked = await svc.action(s.id, { kind: "click", target: { text: "Next", exact: true } }, "agent");
   assert.equal(clicked.session.url, `${HOME}next`);
@@ -102,6 +118,7 @@ test("history, device resizing, color scheme, scoped observations, and inspect m
 test("user and agent actions serialize on one queue with unique action ids", async () => {
   const svc = service();
   const s = await svc.create({ projectId: "p1", url: HOME });
+  svc.setViewerVisible(s.id, true);
   const [a, b] = await Promise.all([
     svc.action(s.id, { kind: "type", target: { selector: "input#q" }, text: "one" }, "user"),
     svc.action(s.id, { kind: "type", target: { selector: "input#q" }, text: "two" }, "agent"),
@@ -116,6 +133,7 @@ test("user and agent actions serialize on one queue with unique action ids", asy
 test("stale point coordinates are rejected before touching the page", async () => {
   const svc = service();
   const s = await svc.create({ projectId: "p1", url: HOME });
+  svc.setViewerVisible(s.id, true);
   const staleRevision = s.revision;
   await svc.action(s.id, { kind: "click", target: { selector: "a#next" } }, "user"); // bumps revision
   await assert.rejects(
@@ -131,6 +149,7 @@ test("stale point coordinates are rejected before touching the page", async () =
 test("agent pause blocks agent but not user; resume restores", async () => {
   const svc = service();
   const s = await svc.create({ projectId: "p1", url: HOME });
+  svc.setViewerVisible(s.id, true);
   svc.pauseAgent(s.id, true);
   await assert.rejects(
     () => svc.navigate(s.id, `${HOME}next`, "agent"),
@@ -147,6 +166,7 @@ test("downloads are denied and surfaced as events", async () => {
   const events: string[] = [];
   svc.onEvent((e) => events.push(e.kind));
   const s = await svc.create({ projectId: "p1", url: HOME });
+  svc.setViewerVisible(s.id, true);
   await assert.rejects(
     () => svc.navigate(s.id, `${HOME}download`, "user"),
     (e: Error & { code?: string }) => e.code === "download-blocked",
@@ -155,7 +175,7 @@ test("downloads are denied and surfaced as events", async () => {
   await svc.close(s.id);
 });
 
-test("redirect hops re-run policy; private-network hops land", async () => {
+test("redirect hops re-run policy and private-network hops are blocked", async () => {
   const svc = createBrowserService({
     driver: createFakeDriver({
       pages: {
@@ -167,8 +187,11 @@ test("redirect hops re-run policy; private-network hops land", async () => {
     allowedOrigins: () => ["http://127.0.0.1:5173"],
   });
   const s = await svc.create({ projectId: "p1", url: HOME });
-  const after = await svc.navigate(s.id, `${HOME}evil`, "user");
-  assert.equal(after.url, "http://169.254.169.254/latest/meta-data");
+  svc.setViewerVisible(s.id, true);
+  await assert.rejects(
+    () => svc.navigate(s.id, `${HOME}evil`, "user"),
+    (e: Error & { code?: string }) => e.code === "blocked-private",
+  );
   await svc.close(s.id);
 });
 
@@ -179,6 +202,7 @@ test("observations and console lines are redacted; password values never appear"
     if (event.message) runtimeMessages.push(event.message);
   });
   const s = await svc.create({ projectId: "p1", url: HOME });
+  svc.setViewerVisible(s.id, true);
   await svc.navigate(s.id, `${HOME}next`, "user");
   const obs = await svc.observe(s.id);
   assert.ok(!obs.text.includes("sk-verysecret123"));
@@ -199,6 +223,8 @@ test("observations and console lines are redacted; password values never appear"
 test("latestFrame supports reconnect-at-revision (newest only)", async () => {
   const svc = service();
   const s = await svc.create({ projectId: "p1", url: HOME });
+  svc.setViewerVisible(s.id, true);
+  await new Promise((resolve) => setTimeout(resolve, 0));
   const rev1 = svc.get(s.id)!.revision;
   assert.ok(svc.latestFrame(s.id, 0));
   assert.equal(svc.latestFrame(s.id, rev1), null); // caller already has it
@@ -206,6 +232,84 @@ test("latestFrame supports reconnect-at-revision (newest only)", async () => {
   const resumed = svc.latestFrame(s.id, rev1);
   assert.ok(resumed);
   assert.ok(resumed!.revision > rev1);
+  await svc.close(s.id);
+});
+
+test("live screencast starts for a visible viewer and pauses when hidden", async () => {
+  const svc = service();
+  const frames: BrowserFrame[] = [];
+  const subscription = svc.onFrame((frame) => frames.push(frame));
+  const s = await svc.create({ projectId: "p1", url: HOME });
+  const before = frames.length;
+  svc.setViewerVisible(s.id, true);
+  await new Promise((resolve) => setTimeout(resolve, 140));
+  assert.ok(frames.length > before, "visible viewer receives live frames");
+  const latest = frames.at(-1)!;
+  assert.equal(svc.latestFrame(s.id)?.revision, latest.revision);
+  svc.setViewerVisible(s.id, false);
+  const hiddenCount = frames.length;
+  await new Promise((resolve) => setTimeout(resolve, 140));
+  assert.equal(frames.length, hiddenCount, "hidden viewer stops the live stream");
+  subscription.dispose();
+  await svc.close(s.id);
+});
+
+test("agent mutations run in the background without a visible viewer", async () => {
+  const svc = service();
+  const s = await svc.create({ projectId: "p1", url: HOME });
+  const before = svc.get(s.id)?.revision;
+  const result = await svc.action(s.id, { kind: "click", target: { selector: "#target" } }, "agent");
+  assert.equal(result.session.id, s.id);
+  assert.ok((svc.get(s.id)?.revision ?? 0) > (before ?? 0), "hidden background mutations invalidate prior frame targets");
+  await svc.close(s.id);
+});
+
+test("canonical browser append records bounded redacted lifecycle facts", async () => {
+  const records: Array<{ sessionId: string; type: string; data: JsonObject }> = [];
+  const svc = service({
+    append: async (sessionId, type, data) => { records.push({ sessionId, type, data }); },
+  });
+  const s = await svc.create({ projectId: "p1", sessionId: "canonical-1", url: `${HOME}?token=secret` });
+  await svc.action(s.id, { kind: "type", target: { selector: "input#q" }, text: "secret typed value" }, "user");
+  await svc.observe(s.id);
+  assert.ok(records.some((record) => record.type === "browser/action-requested"));
+  assert.ok(records.some((record) => record.type === "browser/action-completed"));
+  const serialized = JSON.stringify(records);
+  assert.doesNotMatch(serialized, /secret typed value/);
+  assert.doesNotMatch(serialized, /token=secret/);
+  assert.match(serialized, /\[redacted\]/);
+  await svc.close(s.id);
+});
+
+test("failed type audit omits submitted values from driver errors", async () => {
+  const records: Array<{ type: string; data: JsonObject }> = [];
+  const base = createFakeDriver(web());
+  const driver: BrowserDriver = {
+    engine: base.engine,
+    close: () => base.close(),
+    open: async (options) => {
+      const page = await base.open(options);
+      return {
+        ...page,
+        type: async () => { throw new Error("fill failed for short-secret"); },
+      };
+    },
+  };
+  const svc = createBrowserService({
+    driver,
+    allowedOrigins: () => ["http://127.0.0.1:5173"],
+    append: async (_sessionId, type, data) => { records.push({ type, data }); },
+  });
+  const s = await svc.create({ projectId: "p1", sessionId: "audit-failure", url: HOME });
+  await assert.rejects(() => svc.action(s.id, {
+    kind: "type",
+    target: { selector: "input#q" },
+    text: "short-secret",
+  }, "user"));
+  const failed = records.find((record) => record.type === "browser/action-failed");
+  assert.ok(failed);
+  assert.equal(failed.data.message, "browser type failed");
+  assert.doesNotMatch(JSON.stringify(failed.data), /short-secret/);
   await svc.close(s.id);
 });
 
@@ -284,7 +388,7 @@ test("in-page click to unapproved public origin auto-follows and records approva
   const s = await svc.create({ projectId: "p1", url: HOME });
   const { session: after } = await svc.action(s.id, { kind: "click", target: { selector: "a#ext" } }, "user");
   assert.equal(after.url, EXAMPLE);
-  assert.ok(svc.approvals().includes("https://example.com"));
+  assert.ok(svc.approvals(s.id).includes("https://example.com"));
   await svc.close(s.id);
 });
 
@@ -295,11 +399,11 @@ test("navigate() to a new public origin still requires explicit approval", async
     () => svc.navigate(s.id, EXAMPLE, "user"),
     (e: Error & { code?: string }) => e.code === "approval-required",
   );
-  assert.ok(!svc.approvals().includes("https://example.com"));
+  assert.ok(!svc.approvals(s.id).includes("https://example.com"));
   await svc.close(s.id);
 });
 
-test("in-page hops to loopback and private networks open without approval", async () => {
+test("in-page hops to listed loopback and private networks open without approval", async () => {
   const svc = createBrowserService({
     driver: createFakeDriver({
       pages: {
@@ -311,7 +415,7 @@ test("in-page hops to loopback and private networks open without approval", asyn
         "http://10.0.0.5/": { title: "Private", text: "landed" },
       },
     }),
-    allowedOrigins: () => ["http://127.0.0.1:5173"],
+    allowedOrigins: () => ["http://127.0.0.1:5173", "http://127.0.0.1:9999", "http://10.0.0.5"],
     resolve: async () => ["93.184.216.34"],
   });
   const s = await svc.create({ projectId: "p1", url: HOME });
@@ -348,6 +452,7 @@ test("agent pause blocks already-queued agent work including navigation", async 
     allowedOrigins: () => ["http://127.0.0.1:5173"],
   });
   const s = await svc.create({ projectId: "p1", url: HOME });
+  svc.setViewerVisible(s.id, true);
   const controllers: Array<string | undefined> = [];
   svc.onEvent((e) => {
     if (e.kind === "controller") controllers.push(e.actor);
@@ -476,5 +581,23 @@ test("resize stores an explicit viewport mode", async () => {
     mode: "custom",
   }, "user");
   assert.equal(custom.session.viewportMode, "custom");
+  await svc.close(s.id);
+});
+
+test("agent-created contexts keep a fixed viewport through background control", async () => {
+  const svc = service();
+  const s = await svc.create({ projectId: "p1", actor: "agent", url: HOME });
+  assert.equal(s.viewportMode, "custom");
+  const resized = await svc.action(s.id, {
+    kind: "resize",
+    viewport: { width: 900, height: 700 },
+  }, "agent");
+  assert.equal(resized.session.viewportMode, "custom");
+  const responsive = await svc.action(s.id, {
+    kind: "resize",
+    viewport: { width: 900, height: 700 },
+    mode: "responsive",
+  }, "agent");
+  assert.equal(responsive.session.viewportMode, "responsive");
   await svc.close(s.id);
 });

@@ -12,7 +12,8 @@ import { tr } from "../../../apps/web/src/i18n/index.ts";
 
 type AlwaysScope = "session" | "project";
 
-function modeIcon(permission: string) {
+function modeIcon(permission: string, browser = false) {
+  if (browser) return <Icon.globe />;
   const p = permission.toLowerCase();
   if (/bash|shell|terminal|exec/.test(p)) return <Icon.term />;
   if (/edit|write|patch/.test(p)) return <Icon.pencil />;
@@ -26,7 +27,12 @@ function PermissionRow({ p }: { p: PendingPermission }) {
   const scopes = p.allowedScopes ?? ["once", "session", "project"];
   const canAlways = scopes.includes("session") || scopes.includes("project");
   const risk = p.preview?.risk;
-  const title = p.preview?.title ?? p.permission;
+  const isBrowser = p.permission === "package-tool"
+    && (p.tool === "polyth_browser"
+      || p.tool === "browser.polyth-browser"
+      || p.tool?.startsWith("browser.") === true
+      || p.patterns.some((pattern) => pattern === "browser.polyth-browser"));
+  const title = isBrowser ? tr("permissionbanner.agentWantsToUseBrowser") : p.preview?.title ?? p.permission;
   // The preview is server-built and secret-redacted; raw patterns are the
   // fallback for old events. Either way the target is visible pre-decision.
   const lines = p.preview !== undefined && p.preview.lines.length > 0 ? p.preview.lines : p.patterns;
@@ -36,9 +42,9 @@ function PermissionRow({ p }: { p: PendingPermission }) {
   return (
     <div className="perm-row permission-request">
       <div className="permission-request-head">
-        <span className="permission-mode-icon" aria-hidden="true">{modeIcon(p.permission)}</span>
+        <span className="permission-mode-icon" aria-hidden="true">{modeIcon(p.permission, isBrowser)}</span>
         <strong className="permission-request-title">{title}</strong>
-        {p.tool !== undefined && p.tool !== title && (
+        {!isBrowser && p.tool !== undefined && p.tool !== title && (
           <span className="permission-request-tool">{tr("permissionbanner.viaValue", { tool: p.tool })}</span>
         )}
         {risk !== undefined && (
@@ -50,6 +56,11 @@ function PermissionRow({ p }: { p: PendingPermission }) {
           </Badge>
         )}
       </div>
+      {isBrowser && (
+        <p className="permission-browser-capabilities">
+          {tr("permissionbanner.browserActionCapabilities")}
+        </p>
+      )}
       {lines.length > 0 && (
         <div className="permission-preview">
           {lines.map((line, index) => (

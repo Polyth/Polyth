@@ -26,7 +26,10 @@ function stubSessions(overrides: Partial<SessionService> = {}): SessionService {
 function mockBrowser() {
   const frames = new Set<(frame: BrowserFrame) => void>();
   const events = new Set<(event: BrowserRuntimeEvent) => void>();
+  const visible = new Map<string, boolean>();
   const browser = {
+    get: (id: string) => ({ id, projectId: "p1", status: "ready" }),
+    setViewerVisible: (id: string, value: boolean) => { visible.set(id, value); },
     latestFrame: () => null,
     onFrame(cb: (frame: BrowserFrame) => void) {
       frames.add(cb);
@@ -38,7 +41,7 @@ function mockBrowser() {
     },
   } as unknown as BrowserService;
   return {
-    browser,
+    browser, visible,
     frameCount: () => frames.size,
     eventCount: () => events.size,
     emitFrame(frame: BrowserFrame) {
@@ -250,4 +253,44 @@ test("closed gateway does not reach disposed backing services", async () => {
     gateway.close();
     server.close();
   }
+});
+
+test("browser visibility counts all viewers and refuses a known foreign Space browser", async () => {
+  const { server, port } = await listen();
+  const fixture = mockBrowser();
+  fixture.browser.get = (id) => ({ id, projectId: id === "foreign" ? "foreign-project" : "p1", sessionId: "s1", status: "ready" }) as never;
+  const spaces = {
+    cookieName: "space",
+    resolve: () => ({ spaceId: "a" }),
+    services: () => ({ sessions: stubSessions() }),
+    guard: {
+      assertProject: (_ctx: unknown, id: string) => { if (id !== "p1") throw new Error("not-found"); },
+      assertSession: (_ctx: unknown, id: string) => { if (id !== "s1") throw new Error("not-found"); },
+    },
+  };
+  const gateway = createWsGateway(stubSessions(), fixture.browser, undefined, spaces as never);
+  gateway.attach(server);
+  const a = await connect(port);
+  const b = await connect(port);
+  const subscribe = async (ws: WebSocket, id: string, visible = true) => {
+    ws.send(JSON.stringify({ type: "browser/subscribe", browserSessionId: id, visible }));
+    await new Promise<void>((r) => { ws.once("pong", () => r()); ws.ping(); });
+  };
+  try {
+    await subscribe(a.ws, "foreign");
+    const denied = await a.next();
+    assert.equal(denied.type, "error");
+    assert.equal(fixture.visible.has("foreign"), false);
+    await subscribe(a.ws, "b1");
+    await subscribe(b.ws, "b1");
+    assert.equal(fixture.visible.get("b1"), true);
+    await subscribe(a.ws, "b1", false);
+    assert.equal(fixture.visible.get("b1"), true, "the other client still sees Browser");
+    await subscribe(b.ws, "b1", false);
+    assert.equal(fixture.visible.get("b1"), false);
+    fixture.emitFrame({ browserSessionId: "b1", revision: 1, mime: "image/jpeg", data: new Uint8Array([1]) });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(a.messages.filter((m) => m.type === "browser/frame").length, 0);
+    assert.equal(b.messages.filter((m) => m.type === "browser/frame").length, 0);
+  } finally { a.ws.close(); b.ws.close(); gateway.close(); server.close(); }
 });

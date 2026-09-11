@@ -510,6 +510,7 @@ function startSync(): void {
   // one store update per paint. The timeout keeps hidden/background windows
   // ingesting when requestAnimationFrame is paused.
   let pending: SessionEvent[] = [];
+  let pendingLiveKeys = new Set<string>();
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
   let flushFrame: number | null = null;
   const flush = (): void => {
@@ -518,8 +519,10 @@ function startSync(): void {
     flushTimer = null;
     flushFrame = null;
     const batch = pending;
+    const liveKeys = pendingLiveKeys;
     pending = [];
-    if (batch.length > 0) store.applyEvents(batch);
+    pendingLiveKeys = new Set<string>();
+    if (batch.length > 0) store.applyEvents(batch, { notifyEventKeys: liveKeys });
   };
   const scheduleFlush = (): void => {
     if (flushTimer !== null || flushFrame !== null) return;
@@ -529,9 +532,11 @@ function startSync(): void {
   sync.onEvent((msg) => {
     if (msg.type === "event") {
       pending.push(msg.event);
+      pendingLiveKeys.add(`${msg.event.sessionId}:${msg.event.seq}`);
       scheduleFlush();
     } else if (msg.type === "events") {
-      // Batched gap-fill frame: the whole chunk joins one store update.
+      // Batched gap-fill frames are replayed history. They join the store
+      // update but must not trigger package presentation reactions.
       pending.push(...msg.events);
       scheduleFlush();
     } else if (msg.type === "projection") {
@@ -611,7 +616,7 @@ function requestSessionTail(sessionId: string, passive: boolean): Promise<Sessio
       const active = store.getState().activeSessionId;
       if (active) store.touchSessionCache(active);
       store.touchSessionCache(sessionId);
-      store.applyEvents(events);
+      store.applyEvents(events, { notifySessionEvents: false });
       store.ensureEventCache(sessionId);
       hydratedSessions.add(sessionId);
       markSessionPerformance("messages_ingested", sessionId);
@@ -656,8 +661,8 @@ async function reconcileSession(sessionId: string, afterSeq: number, generation:
   }
   // The LRU may have evicted this session while REST was in flight. Restore
   // the immutable cached base before its unbounded suffix so no gap appears.
-  store.applyEvents(cachedBase);
-  store.applyEvents(events);
+  store.applyEvents(cachedBase, { notifySessionEvents: false });
+  store.applyEvents(events, { notifySessionEvents: false });
   store.ensureEventCache(sessionId);
   hydratedSessions.add(sessionId);
   prefetchedSessions.delete(sessionId);
@@ -674,7 +679,7 @@ export async function loadOlderEvents(sessionId: string, chunk = BACKFILL_CHUNK)
   try {
     const older = await api.getEvents(sessionId, 0, { beforeSeq: oldest, limit: chunk });
     if (older.length === 0) return false;
-    store.applyEvents(older);
+    store.applyEvents(older, { notifySessionEvents: false });
     return true;
   } finally {
     backfillInFlight.delete(sessionId);

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createAgentToolBridge, AGENT_TOOLS_PATH } from "../src/agentTools.ts";
+import { createAgentToolBridge, AGENT_TOOLS_PATH, redactToolInput } from "../src/agentTools.ts";
 import { createCapabilityContributionRegistry } from "@polyth/harness-runtime";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
@@ -345,4 +345,64 @@ test("agent-tools MCP publishes native tool names and maps calls back to capabil
     child.kill();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+test("tool intent precedes authorization and execution uses the resolved canonical session", async () => {
+  const registry = createCapabilityContributionRegistry();
+  const order: string[] = [];
+  const descriptor = { id: "browser.polyth-browser", owner: "browser", kind: "tool", name: "polyth_browser", scope: "project", revision: "1", description: "Browser", inputSchema: {}, trust: "device", mutating: true } as const;
+  registry.register("browser", { descriptor, execute: async (_input, ctx) => { order.push(`execute:${ctx.sessionId}`); return { output: "ok" }; } });
+  let decision: "allow" | "deny" = "deny";
+  const bridge = createAgentToolBridge({
+    executor: (id) => registry.executor(id), contribution: (id) => registry.contribution(id),
+    resolveSession: async () => "canonical",
+    requested: async (_tool, grant) => { order.push(`requested:${grant.sessionId}`); },
+    authorize: async () => { order.push("permission"); return decision; },
+  });
+  const grant = bridge.mint({ spaceId: "a", projectId: "p", cwd: "/tmp", tools: [registry.contribution(descriptor.id)!.descriptor as typeof descriptor] });
+  const rc = { path: AGENT_TOOLS_PATH, method: "POST", ingress: { kind: "public-http", loopback: true }, req: { headers: { authorization: `Bearer ${grant.token}` } }, body: async () => ({ id: descriptor.id }), json: () => {} };
+  await bridge.route(rc as never);
+  assert.deepEqual(order, ["requested:canonical", "permission"]);
+  order.length = 0;
+  decision = "allow";
+  await bridge.route(rc as never);
+  assert.deepEqual(order, ["requested:canonical", "permission", "execute:canonical"]);
+});
+
+test("disconnect or same-revision package reload during permission cannot execute a stale tool", async () => {
+  const { EventEmitter } = await import("node:events");
+  for (const reason of ["disconnect", "reload", "session-ended"] as const) {
+    const registry = createCapabilityContributionRegistry();
+    let executed = false;
+    const descriptor = { id: "browser.polyth-browser", owner: "browser", kind: "tool", name: "polyth_browser", scope: "project", revision: "1", description: "Browser", inputSchema: {}, trust: "device", mutating: true } as const;
+    const contribution = { descriptor, execute: async () => { executed = true; return { output: "bad" }; } };
+    const registration = registry.register("browser", contribution);
+    let approve!: (value: "allow") => void;
+    let active = true;
+    const bridge = createAgentToolBridge({
+      executor: (id) => registry.executor(id), contribution: (id) => registry.contribution(id),
+      resolveSession: async () => active ? "canonical" : undefined,
+      authorize: () => new Promise((resolve) => { approve = resolve; }),
+    });
+    const grant = bridge.mint({ spaceId: "a", projectId: "p", cwd: "/tmp", tools: [registry.contribution(descriptor.id)!.descriptor as typeof descriptor] });
+    const res = new EventEmitter();
+    const pending = bridge.route({ path: AGENT_TOOLS_PATH, method: "POST", ingress: { kind: "public-http", loopback: true }, req: { headers: { authorization: `Bearer ${grant.token}` } }, res, body: async () => ({ id: descriptor.id }), json: () => {} } as never);
+    for (let i = 0; i < 100 && !approve; i++) await new Promise((r) => setTimeout(r, 1));
+    assert.ok(approve, "authorization was reached");
+    if (reason === "disconnect") res.emit("close");
+    if (reason === "reload") { registration.dispose(); registry.register("browser", { ...contribution }); }
+    if (reason === "session-ended") active = false;
+    approve("allow");
+    await pending;
+    assert.equal(executed, false, reason);
+    assert.equal(res.listenerCount("close"), 0);
+  }
+});
+
+
+test("write-only tool inputs are redacted without changing the execution input", () => {
+  const input = { parameters: { selector: "#password", value: "private-password" }, action: "browser.type" };
+  const output = redactToolInput(input, { properties: { parameters: { properties: { value: { writeOnly: true } } } } });
+  assert.deepEqual(output, { parameters: { selector: "#password", value: "[redacted]" }, action: "browser.type" });
+  assert.equal(input.parameters.value, "private-password");
 });

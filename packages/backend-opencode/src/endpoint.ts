@@ -22,10 +22,6 @@ import type {
   RuntimeLocation,
 } from "@polyth/contracts";
 import { openCodeChildSearchPath } from "./binaryDiscovery.ts";
-import {
-  prepareBrowserToolEnvironment,
-  type OpenCodeBrowserToolConfig,
-} from "./browserTool.ts";
 import { applyOpenCodeLaunchOverlay, peekOpenCodeLaunchOverlay } from "./provisioner.ts";
 import { verifyOpenCodeCapabilities } from "./capabilityDelivery.ts";
 import {
@@ -495,7 +491,6 @@ export interface OwnedLocalEndpointOptions {
   /** @deprecated Use configDir. */
   dataDir?: string;
   runtimeDir?: string;
-  browserTool?: OpenCodeBrowserToolConfig;
   configTargetId?: string;
   authorityId?: string;
   usernameEnv?: string;
@@ -570,9 +565,6 @@ const startLocalChildOnce = async (
   let child: ChildProcess;
   try {
     env = applyOpenCodeLaunchOverlay(env, overlay);
-    if (options.browserTool) {
-      env = await prepareBrowserToolEnvironment(options.browserTool, env);
-    }
     // The token is not an OpenCode credential. It lets child wrappers and
     // diagnostics identify the exact Polyth-owned instance.
     env.POLYTH_OPENCODE_INSTANCE_TOKEN = instanceToken;

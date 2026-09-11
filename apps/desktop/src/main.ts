@@ -37,6 +37,7 @@ import type {
 } from "./types.ts";
 import { assertUpdaterCapability } from "./updaterCapability.ts";
 import { resolveUpdaterChannel } from "./updaterChannel.ts";
+import { stagedChromiumExecutable } from "./chromiumResource.ts";
 
 declare const __POLYTH_OPENCODE_VERSION__: string;
 const { autoUpdater } = electronUpdater;
@@ -684,6 +685,17 @@ const startServer = async (): Promise<void> => {
   const linkHost = linkHostPath();
   if (linkHost && existsSync(linkHost)) process.env.POLYTH_LINK_HOST = linkHost;
   if (app.isPackaged) process.env.POLYTH_RESOURCES_DIR ??= process.resourcesPath;
+  const bundledChromium = stagedChromiumExecutable(process.resourcesPath, process.platform, process.arch);
+  if (app.isPackaged) {
+    process.env.POLYTH_REQUIRE_BUNDLED_CHROMIUM = "1";
+    if (bundledChromium) process.env.POLYTH_CHROMIUM_PATH = bundledChromium;
+    else {
+      // A packaged build must never reach out to an ambient user/system
+      // browser. The browser capability remains honestly unavailable instead.
+      delete process.env.POLYTH_CHROMIUM_PATH;
+      log("Staged Chromium is missing; browser capability will report unavailable");
+    }
+  }
   serverLifecycle = await boot({
     port,
     hostname: "127.0.0.1",

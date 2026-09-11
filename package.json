@@ -18,6 +18,7 @@
     "prebuild:web": "npm run build:supervisor",
     "build:web": "node --experimental-strip-types apps/web/buildPackages.ts && node --experimental-strip-types apps/web/build.ts",
     "build:desktop": "npm run build:web && npm --workspace @polyth/desktop run build",
+    "desktop:stage-chromium": "npm --workspace @polyth/desktop run stage:chromium",
     "build": "npm run build:web",
     "prestart": "node scripts/check-node.mjs && npm run build:supervisor",
     "start": "node --experimental-strip-types packages/server/src/index.ts",

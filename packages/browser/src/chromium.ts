@@ -5,7 +5,9 @@
 import { access } from "node:fs/promises";
 import { constants } from "node:fs";
 import type { BrowserTarget, JsonObject } from "@polyth/contracts";
-import type { BrowserDriver, DriverNav, DriverPage, DriverPageEvent } from "./driver.ts";
+import type { BrowserDriver, DriverFrame, DriverNav, DriverPage, DriverPageEvent } from "./driver.ts";
+import { isInternalBrowserUrl } from "./policy.ts";
+import { redactUrl } from "./redact.ts";
 
 export const CHROMIUM_CANDIDATE_PATHS = [
   "/usr/bin/chromium",
@@ -35,6 +37,7 @@ const executable = async (path: string): Promise<string | null> => {
 export async function findChromiumExecutable(env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
   const configured = env.POLYTH_CHROMIUM_PATH?.trim();
   if (configured) return executable(configured);
+  if (env.POLYTH_REQUIRE_BUNDLED_CHROMIUM === "1") return null;
   for (const path of CHROMIUM_CANDIDATE_PATHS) {
     const found = await executable(path);
     if (found) return found;
@@ -160,13 +163,24 @@ export function createChromiumDriver(executablePath: string): BrowserDriver {
   let browserP: Promise<import("playwright-core").Browser> | null = null;
   const launch = async (): Promise<import("playwright-core").Browser> => {
     if (!browserP) {
-      browserP = import("playwright-core").then((pw) =>
+      const pending = import("playwright-core").then((pw) =>
         pw.chromium.launch({
           executablePath,
           headless: true,
           args: ["--disable-extensions", "--disable-background-networking", "--no-default-browser-check"],
         }),
       );
+      browserP = pending;
+      // A rejected launch must not poison every later open attempt. Likewise,
+      // a disconnected Chromium process is no longer an owned live authority
+      // and the next open must launch a replacement process.
+      void pending.then((browser) => {
+        browser.on("disconnected", () => {
+          if (browserP === pending) browserP = null;
+        });
+      }, () => {
+        if (browserP === pending) browserP = null;
+      });
     }
     return browserP;
   };
@@ -215,32 +229,167 @@ export function createChromiumDriver(executablePath: string): BrowserDriver {
       const page = await context.newPage();
       mainPage = page;
       const listeners = new Set<(ev: DriverPageEvent) => void>();
+      const frameCbs = new Set<(frame: DriverFrame) => void>();
+      let screencastOn = false;
+      let cdp: import("playwright-core").CDPSession | null = null;
+      let blockedNavigation: Error | null = null;
+
+      // Playwright's route.continue() follows subresource redirects without
+      // re-entering the route handler. CDP Fetch response-stage interception
+      // is the only reliable place to validate the Location before Chromium
+      // opens the next hop.
+      const installHopGuard = async (): Promise<void> => {
+        try {
+          const session = await context.newCDPSession(page);
+          let mainFrameId: string | undefined;
+          try {
+            await session.send("Page.enable");
+            const tree = await session.send("Page.getFrameTree") as { frameTree: { frame: { id: string } } };
+            mainFrameId = tree.frameTree.frame.id;
+          } catch { /* page may already be closing */ }
+          session.on("Page.frameNavigated", (event: { frame: { id: string; parentId?: string } }) => {
+            if (!event.frame.parentId) mainFrameId = event.frame.id;
+          });
+          session.on("Fetch.requestPaused", (event: {
+            requestId: string;
+            request: { url: string };
+            resourceType?: string;
+            frameId?: string;
+            responseStatusCode?: number;
+            responseHeaders?: Array<{ name: string; value: string }>;
+          }) => {
+            void (async () => {
+              const status = event.responseStatusCode;
+              if (!(status && status >= 300 && status < 400)) {
+                await session.send("Fetch.continueRequest", { requestId: event.requestId }).catch(() => {});
+                return;
+              }
+              const location = event.responseHeaders?.find((header) => header.name.toLowerCase() === "location")?.value;
+              if (!location) {
+                await session.send("Fetch.continueRequest", { requestId: event.requestId }).catch(() => {});
+                return;
+              }
+              let next: string;
+              try { next = new URL(location, event.request.url).href; } catch {
+                await session.send("Fetch.failRequest", { requestId: event.requestId, errorReason: "BlockedByClient" }).catch(() => {});
+                return;
+              }
+              const topLevel = event.resourceType === "Document"
+                && Boolean(event.frameId && mainFrameId && event.frameId === mainFrameId);
+              try {
+                if (next.startsWith("http://") || next.startsWith("https://")) {
+                  if (topLevel) await opts.guardNavigation(next);
+                  else if (opts.guardNetworkEgress) await opts.guardNetworkEgress(next);
+                  else throw new Error("network egress guard unavailable");
+                } else if (!isInternalBrowserUrl(next)) {
+                  throw new Error(`scheme ${new URL(next).protocol} is not allowed`);
+                }
+                await session.send("Fetch.continueRequest", { requestId: event.requestId }).catch(() => {});
+              } catch (error) {
+                if (topLevel) blockedNavigation = error as Error;
+                emit({ kind: topLevel ? "navigation" : "network", url: redactUrl(next), message: `blocked: ${String((error as Error).message ?? error)}` });
+                await session.send("Fetch.failRequest", { requestId: event.requestId, errorReason: "BlockedByClient" }).catch(() => {});
+              }
+            })();
+          });
+          await session.send("Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Response" }] });
+          page.on("close", () => { void session.detach().catch(() => {}); });
+        } catch (error) {
+          // Without response-stage interception, Playwright's route.continue
+          // can follow a redirect without re-entering the route handler. A
+          // controlled context must refuse to start rather than run with that
+          // redirect gap.
+          throw error;
+        }
+      };
+      try {
+        await installHopGuard();
+      } catch (error) {
+        await context.close().catch(() => {});
+        throw error;
+      }
       const emit = (ev: DriverPageEvent) => { for (const l of [...listeners]) l(ev); };
 
-      // Policy on every main-frame hop, including redirects: the guard throws
-      // and the request aborts, so a rebinding redirect never connects.
-      await page.route("**/*", async (route) => {
+      // Policy on every HTTP hop in every page, including redirects, nested
+      // frames and popups. A context route is required here; a page route
+      // would leave popup and iframe requests outside the controlled boundary.
+      await context.route("**/*", async (route) => {
         const req = route.request();
-        if (!req.isNavigationRequest() || req.frame() !== page.mainFrame()) {
+        const networkUrl = /^https?:\/\//i.test(req.url());
+        if (!networkUrl) {
           await route.continue();
           return;
         }
+        let topLevel = false;
+        if (req.isNavigationRequest()) {
+          try {
+            const frame = req.frame();
+            topLevel = !frame || frame.parentFrame() === null;
+          } catch { topLevel = true; }
+        }
         try {
-          await opts.guardNavigation(req.url());
-          await route.continue();
+          let requestPage: import("playwright-core").Page | null = null;
+          try { requestPage = req.frame()?.page() ?? null; } catch { /* unattached popup */ }
+          // The response-stage hop guard is attached to the resident page.
+          // Popup documents are closed after discovery, so deny their nested
+          // requests before route.continue() could follow an unguarded
+          // redirect in that short window.
+          if (!topLevel && requestPage && requestPage !== page) {
+            throw new Error("popup subresources are blocked in the controlled browser");
+          }
+          if (topLevel && (() => {
+            try { return req.frame()?.page() !== page; } catch { return true; }
+          })()) {
+            await opts.guardNavigation(req.url());
+            // Fetch one hop so Chromium cannot follow a redirect before the
+            // next destination has passed the same top-level policy guard.
+            const response = await route.fetch({ maxRedirects: 0, timeout: 10_000 });
+            const location = response.headers()["location"];
+            if (location) {
+              const next = new URL(location, req.url()).href;
+              await opts.guardNavigation(next);
+            }
+            await route.fulfill({ response });
+          } else if (topLevel) {
+            await opts.guardNavigation(req.url());
+            await route.continue();
+          } else {
+            if (!opts.guardNetworkEgress) throw new Error("network egress guard unavailable");
+            await opts.guardNetworkEgress(req.url());
+            await route.continue();
+          }
         } catch (err) {
-          emit({ kind: "navigation", url: req.url(), message: `blocked: ${String((err as Error).message)}` });
+          if (topLevel) blockedNavigation = err as Error;
+          emit({ kind: topLevel ? "navigation" : "network", url: redactUrl(req.url()), message: `blocked: ${String((err as Error).message)}` });
           await route.abort("blockedbyclient");
         }
+      });
+      if (typeof context.routeWebSocket !== "function") {
+        await context.close().catch(() => {});
+        throw new Error("WebSocket interception unavailable in controlled browser");
+      }
+      await context.routeWebSocket("**/*", async (webSocket) => {
+          try {
+            const raw = new URL(webSocket.url());
+            if (raw.protocol === "ws:") raw.protocol = "http:";
+            else if (raw.protocol === "wss:") raw.protocol = "https:";
+            else throw new Error(`scheme ${raw.protocol} is not allowed`);
+            if (!opts.guardNetworkEgress) throw new Error("network egress guard unavailable");
+            await opts.guardNetworkEgress(raw.href);
+            webSocket.connectToServer();
+          } catch (error) {
+            emit({ kind: "network", url: redactUrl(webSocket.url()), message: `blocked: ${String((error as Error).message)}` });
+            await webSocket.close({ code: 1008, reason: "blocked by browser policy" }).catch(() => {});
+          }
       });
       page.on("console", (msg) => emit({ kind: "console", level: msg.type(), message: msg.text() }));
       page.on("pageerror", (e) => emit({ kind: "console", level: "error", message: String(e) }));
       page.on("download", (dl) => {
-        emit({ kind: "download-blocked", url: dl.url(), message: "downloads are blocked" });
+        emit({ kind: "download-blocked", url: redactUrl(dl.url()), message: "downloads are blocked" });
         void dl.cancel().catch(() => {});
       });
       page.on("framenavigated", (frame) => {
-        if (frame === page.mainFrame()) emit({ kind: "navigation", url: frame.url() });
+        if (frame === page.mainFrame()) emit({ kind: "navigation", url: redactUrl(frame.url()) });
       });
       page.on("crash", () => emit({ kind: "crash", message: "page crashed" }));
 
@@ -268,7 +417,16 @@ export function createChromiumDriver(executablePath: string): BrowserDriver {
 
       const driverPage: DriverPage = {
         async goto(url) {
-          await page.goto(url, { waitUntil: "domcontentloaded" });
+          blockedNavigation = null;
+          await page.goto(url, { waitUntil: "domcontentloaded" }).catch((error) => {
+            if (blockedNavigation) throw blockedNavigation;
+            throw error;
+          });
+          if (blockedNavigation) {
+            const failure = blockedNavigation;
+            blockedNavigation = null;
+            throw failure;
+          }
           await refreshTitle();
           return nav();
         },
@@ -421,9 +579,74 @@ export function createChromiumDriver(executablePath: string): BrowserDriver {
             };
           }, selector);
         },
+        async targetRect(target) {
+          if ("point" in target) {
+            return { x: target.point.x, y: target.point.y, width: 1, height: 1 };
+          }
+          const loc = locate(target);
+          if (!loc) return null;
+          const box = await loc.boundingBox();
+          if (!box) return null;
+          return {
+            x: Math.round(box.x),
+            y: Math.round(box.y),
+            width: Math.round(box.width),
+            height: Math.round(box.height),
+          };
+        },
         async screenshot() {
           const data = await page.screenshot({ type: "jpeg", quality: 60 });
           return { data: new Uint8Array(data), mime: "image/jpeg" };
+        },
+        async startScreencast(options) {
+          if (screencastOn) await driverPage.stopScreencast?.();
+          screencastOn = true;
+          try {
+            const session = await context.newCDPSession(page);
+            cdp = session;
+            // Wire the listener before starting the stream. Keep the session
+            // in the closure so a late frame from an old hide/show generation
+            // can never be acknowledged on, or published through, a new CDP
+            // session.
+            session.on("Page.screencastFrame", (params: {
+              data: string;
+              metadata?: { deviceWidth?: number; deviceHeight?: number };
+              sessionId: number;
+            }) => {
+              void session.send("Page.screencastFrameAck", { sessionId: params.sessionId }).catch(() => {});
+              if (!screencastOn || cdp !== session) return;
+              for (const cb of [...frameCbs]) cb({
+                data: new Uint8Array(Buffer.from(params.data, "base64")),
+                mime: "image/jpeg",
+                ...(params.metadata?.deviceWidth ? { width: params.metadata.deviceWidth } : {}),
+                ...(params.metadata?.deviceHeight ? { height: params.metadata.deviceHeight } : {}),
+              });
+            });
+            await session.send("Page.startScreencast", {
+              format: "jpeg",
+              quality: options.quality,
+              maxWidth: options.maxWidth,
+              maxHeight: options.maxHeight,
+              everyNthFrame: 1,
+            });
+          } catch (error) {
+            screencastOn = false;
+            cdp = null;
+            throw error;
+          }
+        },
+        async stopScreencast() {
+          screencastOn = false;
+          const active = cdp;
+          cdp = null;
+          if (active) {
+            try { await active.send("Page.stopScreencast"); } catch { /* page already gone */ }
+            try { await active.detach(); } catch { /* session already gone */ }
+          }
+        },
+        onFrame(cb) {
+          frameCbs.add(cb);
+          return () => { frameCbs.delete(cb); };
         },
         async screenshotClip(clip) {
           const safe = {
@@ -513,6 +736,14 @@ export function createChromiumDriver(executablePath: string): BrowserDriver {
         },
         async close() {
           listeners.clear();
+          screencastOn = false;
+          const active = cdp;
+          cdp = null;
+          if (active) {
+            try { await active.send("Page.stopScreencast"); } catch { /* page already gone */ }
+            try { await active.detach(); } catch { /* page already gone */ }
+          }
+          frameCbs.clear();
           // context teardown wipes cookies/storage/temp state for this session
           await context.close().catch(() => {});
         },

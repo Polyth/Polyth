@@ -178,6 +178,9 @@ export interface RuntimeEpochSessionService extends RestartSafetySessionService 
    * that currently owns execution. Project-scoped native runtimes do not put a
    * session id in their MCP configuration, so the owner is resolved from live
    * Polyth occupancy and ambiguous/idle calls fail closed. */
+  resolveAgentToolSession(input: {
+    spaceId: string; projectId: string; cwd: string; harnessId?: string; sessionId?: string;
+  }): Promise<string | undefined>;
   requestAgentToolPermission(input: {
     spaceId: string;
     projectId: string;
@@ -187,6 +190,7 @@ export interface RuntimeEpochSessionService extends RestartSafetySessionService 
     toolId: string;
     toolName: string;
     owner: string;
+    signal?: AbortSignal;
   }): Promise<"allow" | "deny" | "permission-required">;
   /** Complete the durable runtime epoch after Phase 4 has protocol-confirmed a
    * fresh session-reset. This never creates or hydrates a backend session. */
@@ -324,6 +328,8 @@ export type ExpandInput = (
 
 export function createSessionService(deps: {
   store: SessionPersistence;
+  /** Package schemas can omit write-only inputs from canonical native tool events. */
+  redactToolInput?: (toolName: string, input: JsonObject) => JsonObject;
   projects: ProjectService;
   permissions: PermissionService;
   runtimes: RuntimePool;
@@ -2666,6 +2672,9 @@ export function createSessionService(deps: {
       runtimeEventSeq?: number;
     } = {},
   ) => {
+    if (deps.redactToolInput && "tool" in ev && "input" in ev && ev.input && typeof ev.input === "object") {
+      ev = { ...ev, input: deps.redactToolInput(ev.tool, ev.input) };
+    }
     const persist = options.persist ?? appendAndBroadcast;
     const sideEffects = options.sideEffects ?? true;
     const runtimeEventSeq = options.runtimeEventSeq;
@@ -5741,7 +5750,11 @@ export function createSessionService(deps: {
   };
 
   const service: RuntimeEpochSessionService = {
+    async resolveAgentToolSession(input) {
+      return (await activeAgentToolSession(input))?.id;
+    },
     async requestAgentToolPermission(input) {
+      if (input.signal?.aborted) return "deny";
       const projection = await activeAgentToolSession(input);
       if (!projection) return "permission-required";
       const automatic = await automaticPermissionResolution(
@@ -5753,11 +5766,29 @@ export function createSessionService(deps: {
 
       const requestId = `pkg_${randomUUID()}`;
       return new Promise<"allow" | "deny">((resolveDecision) => {
+        const finish = (decision: "allow" | "deny") => {
+          input.signal?.removeEventListener("abort", abort);
+          resolveDecision(decision);
+        };
+        const abort = () => {
+          if (!pendingAgentToolPermissions.delete(requestId)) return;
+          finish("deny");
+          void withSessionLock(projection.id, async () => {
+            const facts = await logFacts(projection.id);
+            if (!facts.openPermissions.has(requestId)) return;
+            await appendAndBroadcast(projection.id, "permission/expired", { requestId }, { ignorable: true });
+            await settleAfterLastRequest(projection.id);
+            await closeParentRequestMirror(projection.id, requestId, "permission", { reply: "reject" });
+          }).catch(() => undefined);
+        };
         pendingAgentToolPermissions.set(requestId, {
           sessionId: projection.id,
-          resolve: resolveDecision,
+          resolve: finish,
         });
+        input.signal?.addEventListener("abort", abort, { once: true });
+        if (input.signal?.aborted) abort();
         void withSessionLock(projection.id, async () => {
+          if (input.signal?.aborted) return;
           // Policy can change while this request waits behind another session
           // transition. Re-evaluate before publishing a human-needed prompt.
           const resolution = await automaticPermissionResolution(
@@ -5767,7 +5798,7 @@ export function createSessionService(deps: {
           );
           if (resolution) {
             pendingAgentToolPermissions.delete(requestId);
-            resolveDecision(resolution.reply === "reject" ? "deny" : "allow");
+            finish(resolution.reply === "reject" ? "deny" : "allow");
             return;
           }
           const event = await appendAndBroadcast(projection.id, "permission/requested", {
@@ -5796,7 +5827,7 @@ export function createSessionService(deps: {
           }
         }).catch(() => {
           if (!pendingAgentToolPermissions.delete(requestId)) return;
-          resolveDecision("deny");
+          finish("deny");
         });
       });
     },

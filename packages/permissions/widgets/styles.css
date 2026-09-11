@@ -53,6 +53,13 @@
   white-space: nowrap;
 }
 
+.perm-banner .permission-browser-capabilities {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
 .perm-banner .permission-mode-icon {
   display: grid;
   width: var(--icon-md);

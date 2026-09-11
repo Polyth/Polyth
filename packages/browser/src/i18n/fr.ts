@@ -1,6 +1,10 @@
 import type { BrowserMessages } from "./en.ts";
 
 export const fr: BrowserMessages = {
+  "previewview.actionClick": "Clic en cours",
+  "previewview.actionScroll": "Défilement",
+  "previewview.actionNavigate": "Ouverture de la page",
+  "previewview.actionWait": "En attente de la page",
   "browserpreview.couldnTDecodeTheCurrentBrowserFrame": "Impossible de décoder le cadre actuel du navigateur.",
   "browserpreview.couldnTEncodeTheBrowserCapture": "Impossible d'encoder la capture du navigateur.",
   "browserpreview.couldnTPrepareTheBrowserCapture": "Impossible de préparer la capture du navigateur.",
@@ -34,6 +38,12 @@ export const fr: BrowserMessages = {
   "previewview.browserStopped": "Le navigateur s'est arrêté",
   "previewview.browserTools": "Outils du navigateur",
   "previewview.browserUnavailable": "Navigateur non disponible",
+  "previewview.browserVisibility": "Visibilité du navigateur",
+  "previewview.browserVisibilityDescription": "Choisissez si l’activité du navigateur de l’agent reste en arrière-plan ou ouvre automatiquement le navigateur.",
+  "previewview.background": "Arrière-plan",
+  "previewview.autoShow": "Afficher automatiquement",
+  "previewview.browserIdle": "Inactif",
+  "previewview.viewBrowser": "Voir le navigateur",
   "previewview.browserValue": "Navigateur: {value}",
   "previewview.browsingDataWillBeCleared": "Les données de navigation seront effacées",
   "previewview.cancelOriginApproval": "Annuler l'approbation d'origine",
@@ -113,7 +123,7 @@ export const fr: BrowserMessages = {
   "previewview.reconnectingToBrowser": "Reconnecter au navigateur",
   "previewview.reload": "Recharger",
   "previewview.resume": "Reprendre",
-  "previewview.resumeAgent": "Agent de CV",
+  "previewview.resumeAgent": "Revenir à l’agent",
   "previewview.rev": "tour",
   "previewview.runningValue": "course à pied · {host}",
   "previewview.schemeDark": "Schéma: sombre",

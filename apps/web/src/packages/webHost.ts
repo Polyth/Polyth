@@ -42,6 +42,7 @@ import {
   setOverlay,
   setRailPlugin,
   startNewSession,
+  subscribeSessionEvents,
   subscribeStore,
   upsertSession,
 } from "../store.ts";
@@ -207,6 +208,7 @@ export const webPackageHost: WebPackageHost = {
   },
   sessions: {
     upsert: upsertSession,
+    subscribeEvents: subscribeSessionEvents,
   },
   conversation: {
     insert: (text) => {

@@ -29,6 +29,25 @@ The exact OpenCode release and SHA-256 digests are locked in
 Packaged binaries live under `resources/opencode/<platform>-<arch>/`; the server always
 receives that absolute path and never falls back to the system `PATH`.
 
+Controlled browser packaging uses the same explicit resource boundary. Before creating
+a desktop artifact, `npm --workspace @polyth/desktop run stage:chromium` copies the
+already-installed Chromium selected by the pinned `playwright-core` into
+`resources/chromium/<platform>-<arch>/` and records its version and executable path.
+The staging command never downloads a browser; release runners must provision the
+matching Playwright browser before this step. The desktop release workflow installs
+the Chromium revision selected by `playwright-core` into a hermetic cache, then stages
+it. Universal macOS jobs install and stage both `mac14` and `mac14-arm64` browser
+trees; Windows ARM uses Playwright's supported x64 Chromium under the platform's
+compatibility layer. Both macOS trees remain in the universal app so startup can
+select the matching process architecture; the electron-builder `x64ArchFiles`
+rule treats these architecture-specific Chromium binaries as resources and does
+not try to lipo them. Packaged startup points
+`POLYTH_CHROMIUM_PATH` at that resource and reports the browser capability as
+unavailable when the resource is missing. Electron's renderer CDP is not reused:
+connecting to the app's debugging endpoint would expose the trusted desktop renderer
+and its windows to the browser tool, while a dedicated Chromium process preserves the
+browser service's isolated context and URL policy.
+
 ## Release and updates
 
 `.github/workflows/desktop-release.yml` builds x64 and arm64 AppImages, a universal

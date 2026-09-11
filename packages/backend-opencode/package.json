@@ -7,7 +7,6 @@
     "./plugin": "./src/plugin.ts"
   },
   "dependencies": {
-    "@polyth/browser": "0.1.0",
     "@polyth/contracts": "0.1.0",
     "@polyth/outbound": "0.1.0",
     "@polyth/plugins": "0.1.0",

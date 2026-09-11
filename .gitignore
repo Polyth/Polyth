@@ -43,3 +43,6 @@ _inbox/
 AuthKey_*.p8
 google-play-service-account.json
 play-console-service-account.json
+
+# Build-time staged controlled browser binaries
+/apps/desktop/resources/chromium/

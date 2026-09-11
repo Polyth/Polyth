@@ -71,6 +71,7 @@ function harness(opts: { permission?: "allow" | "deny" | "ask"; dir?: string } =
   };
   const fake = fakeRuntime();
   const sessions = createSessionService({
+    redactToolInput: opts.redactToolInput,
     store, projects, permissions, broadcast, queue: store,
     runtimes: { forProject: async () => fake.rt },
     autoAccept: createAutoAcceptStore(join(dir, "auto-accept.json")),
@@ -551,4 +552,41 @@ test("child auto-accept never creates a duplicate parent permission path", async
     && (e.data as { requestId?: string }).requestId === "per_mirror"), false);
   assert.notEqual((await store.projection(parent))?.status, "waiting");
   await store.close();
+});
+
+test("a disconnected package tool expires its permission and never receives a late approval", async () => {
+  const { sessions, store } = harness();
+  const { id } = await sessions.create({ projectId: "p1", title: "Browser" });
+  await sessions.send(id, { text: "open browser" });
+  await flush();
+  const controller = new AbortController();
+  const grant = { spaceId: "space-a", projectId: "p1", cwd: (await store.projection(id))?.runtimeBinding?.location.directory ?? "", harnessId: "opencode" };
+  assert.equal(await sessions.resolveAgentToolSession(grant), id);
+  const pending = sessions.requestAgentToolPermission({ ...grant, toolId: "browser.polyth-browser", toolName: "polyth_browser", owner: "browser", signal: controller.signal });
+  await flush();
+  const request = (await store.events(id)).find((e) => e.type === "permission/requested")!;
+  assert.ok(request);
+  controller.abort();
+  assert.equal(await pending, "deny");
+  await flush();
+  const requestId = (request.data as { requestId: string }).requestId;
+  assert.ok((await store.events(id)).some((e) => e.type === "permission/expired" && (e.data as { requestId: string }).requestId === requestId));
+  await assert.rejects(sessions.replyPermission(id, requestId, "once"), /already resolved|not found/);
+});
+
+
+test("native tool write-only inputs are removed before persistence and broadcast", async () => {
+  const { sessions, store, fake, broadcasts } = harness({ redactToolInput: (_tool, input) => ({ ...input, value: "[redacted]" }) });
+  const { id } = await sessions.create({ projectId: "p1", title: "Browser" });
+  await sessions.send(id, { text: "type in browser" });
+  await flush();
+  fake.emit(id, { type: "tool/started", callId: "browser-call", tool: "polyth_browser", input: { value: "private-password" } });
+  await flush();
+  const event = (await store.events(id)).find((item) => item.type === "tool/started");
+  assert.ok(event);
+  assert.ok(!JSON.stringify(event).includes("private-password"));
+  assert.ok(JSON.stringify(event).includes("[redacted]"));
+  assert.ok(!JSON.stringify(broadcasts).includes("private-password"));
+  fake.emit(id, { type: "tool/result", callId: "browser-call", tool: "polyth_browser", output: "done" });
+  await flush();
 });

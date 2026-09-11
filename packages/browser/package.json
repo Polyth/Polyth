@@ -18,7 +18,7 @@
       "enabled": true,
       "settingsGroup": "Engineering",
       "icon": "globe",
-      "hasSettings": false
+      "hasSettings": true
     }
   },
   "dependencies": {

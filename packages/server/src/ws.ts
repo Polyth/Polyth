@@ -66,6 +66,7 @@ interface Sub {
   windowCount: number;
   browserSessionId: string | null;
   browserAfterRevision: number;
+  browserVisible: boolean;
   pendingFrame: BrowserFrame | null;
   chatTabId: string | null;
   chatAfterRevision: number;
@@ -120,11 +121,32 @@ export function createWsGateway(
   const inSpace = (sub: Sub, owner: () => string | undefined): boolean =>
     sub.spaceId === null || !spaces || owner() === sub.spaceId;
 
+  const canViewBrowser = (sub: Sub, id: string): boolean => {
+    const dto = browser?.get(id);
+    if (!dto) return false;
+    if (!spaces) return true;
+    if (!sub.spaceId) return false;
+    try {
+      spaces.guard.assertProject({ spaceId: sub.spaceId }, dto.projectId);
+      if (dto.sessionId) spaces.guard.assertSession({ spaceId: sub.spaceId }, dto.sessionId);
+      return true;
+    } catch { return false; }
+  };
+  const syncBrowserVisibility = (id: string | null): void => {
+    if (!id || !browser?.get(id)) return;
+    const visible = [...clients].some(([ws, sub]) =>
+      ws.readyState === WebSocket.OPEN && sub.browserSessionId === id && sub.browserVisible
+      && canViewBrowser(sub, id)
+      && allowWsCapability(liveWsPrincipal(sub.principal, sub.refreshPrincipal), REMOTE_CAPABILITY.browserUse));
+    browser.setViewerVisible(id, visible);
+  };
+
   const currentPrincipal = (ws: WebSocket, sub: Sub): AuthPrincipal | null => {
     const live = liveWsPrincipal(sub.principal, sub.refreshPrincipal);
     if (!live) {
       closeWs(ws);
       clients.delete(ws);
+      syncBrowserVisibility(sub.browserSessionId);
       return null;
     }
     sub.principal = live;
@@ -207,6 +229,7 @@ export function createWsGateway(
   const deliverFrame = (ws: WebSocket, sub: Sub, frame: BrowserFrame): void => {
     const live = currentPrincipal(ws, sub);
     if (!allowWsCapability(live, REMOTE_CAPABILITY.browserUse)) return;
+    if (!sub.browserVisible || !canViewBrowser(sub, frame.browserSessionId)) return;
     if (frame.revision <= sub.browserAfterRevision) return;
     if (ws.readyState !== WebSocket.OPEN) return;
     if (ws.bufferedAmount > FRAME_HIGH_WATER) {
@@ -219,6 +242,7 @@ export function createWsGateway(
   };
 
   const flusher = setInterval(() => {
+    for (const id of new Set([...clients.values()].map((sub) => sub.browserSessionId))) syncBrowserVisibility(id);
     for (const [ws, sub] of clients) {
       if (sub.pendingFrame && ws.bufferedAmount <= FRAME_HIGH_WATER) deliverFrame(ws, sub, sub.pendingFrame);
       if (sub.pendingChatFrame && ws.bufferedAmount <= FRAME_HIGH_WATER) deliverChatFrame(ws, sub, sub.pendingChatFrame);
@@ -238,7 +262,7 @@ export function createWsGateway(
       for (const [ws, sub] of clients) {
         if (sub.browserSessionId === event.browserSessionId) {
           const live = currentPrincipal(ws, sub);
-          if (!allowWsCapability(live, REMOTE_CAPABILITY.browserUse)) continue;
+          if (!allowWsCapability(live, REMOTE_CAPABILITY.browserUse) || !canViewBrowser(sub, event.browserSessionId)) continue;
           send(ws, { type: "browser/event", browserSessionId: event.browserSessionId, event });
         }
       }
@@ -289,7 +313,7 @@ export function createWsGateway(
       sessionId: null, afterSeq: 0, caughtUp: true,
       busy: false, pendingSubscribe: null, snapshotScope: null, liveBuffer: [],
       windowStart: Date.now(), windowCount: 0,
-      browserSessionId: null, browserAfterRevision: 0, pendingFrame: null,
+      browserSessionId: null, browserAfterRevision: 0, browserVisible: false, pendingFrame: null,
       chatTabId: null, chatAfterRevision: 0, chatPopupRevisions: new Map(), chatVisible: true, pendingChatFrame: null,
       audioCount: 0,
       principal: resolution.principal,
@@ -300,6 +324,7 @@ export function createWsGateway(
     ws.on("close", () => {
       attachAuth.pairedSockets?.unbind(ws);
       clients.delete(ws);
+      syncBrowserVisibility(sub.browserSessionId);
     });
     ws.on("message", async (raw) => {
       if (closed) return;
@@ -415,7 +440,16 @@ export function createWsGateway(
       }
       if (msg.type === "browser/subscribe" && browser) {
         if (!requireCap(ws, sub, REMOTE_CAPABILITY.browserUse)) return;
-        sub.browserSessionId = msg.browserSessionId ?? null;
+        const nextId = msg.browserSessionId ?? null;
+        if (nextId && !canViewBrowser(sub, nextId)) {
+          send(ws, { type: "error", code: "not-found", message: "browser session not found" });
+          return;
+        }
+        const previousId = sub.browserSessionId;
+        sub.browserSessionId = nextId;
+        sub.browserVisible = msg.visible !== false && nextId !== null;
+        syncBrowserVisibility(previousId);
+        syncBrowserVisibility(nextId);
         sub.browserAfterRevision = Number(msg.afterRevision ?? 0);
         sub.pendingFrame = null;
         if (sub.browserSessionId) {
@@ -613,7 +647,9 @@ export function createWsGateway(
       for (const ws of clients.keys()) {
         try { ws.terminate(); } catch { /* already closing */ }
       }
+      const browserIds = new Set([...clients.values()].map((sub) => sub.browserSessionId));
       clients.clear();
+      for (const id of browserIds) syncBrowserVisibility(id);
       wss.close();
     },
   };

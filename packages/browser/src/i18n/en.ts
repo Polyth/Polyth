@@ -3,6 +3,11 @@
  * in this directory is checked against these keys.
  */
 export const en = {
+  "previewview.actionClick": "Clicking",
+  "previewview.actionScroll": "Scrolling",
+  "previewview.actionNavigate": "Opening page",
+  "previewview.actionWait": "Waiting for page",
+
   "browserpreview.couldnTDecodeTheCurrentBrowserFrame": "Couldn’t decode the current browser frame.",
   "browserpreview.couldnTEncodeTheBrowserCapture": "Couldn’t encode the browser capture.",
   "browserpreview.couldnTPrepareTheBrowserCapture": "Couldn’t prepare the browser capture.",
@@ -45,6 +50,12 @@ export const en = {
   "previewview.browserStopped": "Browser stopped",
   "previewview.browserTools": "Browser tools",
   "previewview.browserUnavailable": "Browser unavailable",
+  "previewview.browserVisibility": "Browser visibility",
+  "previewview.browserVisibilityDescription": "Choose whether agent browser activity stays in the background or opens Browser automatically.",
+  "previewview.background": "Background",
+  "previewview.autoShow": "Auto-show",
+  "previewview.browserIdle": "Idle",
+  "previewview.viewBrowser": "View browser",
   "previewview.browserValue": "Browser: {value}",
   "previewview.browsingDataWillBeCleared": "Browsing data will be cleared",
   "previewview.cancelOriginApproval": "Cancel origin approval",
@@ -129,7 +140,7 @@ export const en = {
   "previewview.reconnectingToBrowser": "Reconnecting to browser",
   "previewview.reload": "Reload",
   "previewview.resume": "Resume",
-  "previewview.resumeAgent": "Resume agent",
+  "previewview.resumeAgent": "Return to agent",
   "previewview.rev": "rev",
   "previewview.runningValue": "running · {host}",
   "previewview.schemeDark": "Scheme: dark",

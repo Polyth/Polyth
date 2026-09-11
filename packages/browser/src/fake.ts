@@ -1,7 +1,7 @@
 // In-memory fake driver: deterministic pages, redirects, downloads, password
 // fields, console noise. Tests and the POLYTH_FAKE_BROWSER demo mode use it.
 import type { BrowserTarget, JsonObject } from "@polyth/contracts";
-import type { BrowserDriver, DriverNav, DriverPage, DriverPageEvent, DriverObservation } from "./driver.ts";
+import type { BrowserDriver, DriverFrame, DriverNav, DriverPage, DriverPageEvent, DriverObservation } from "./driver.ts";
 
 export interface FakePage {
   title: string;
@@ -42,6 +42,9 @@ export function createFakeDriver(web: FakeWeb): BrowserDriver {
       let viewport = { width: opts.width, height: opts.height };
       let colorScheme = opts.colorScheme;
       let closed = false;
+      let screencastOn = false;
+      let frameTimer: ReturnType<typeof setInterval> | null = null;
+      const frameCbs = new Set<(frame: DriverFrame) => void>();
       const emit = (ev: DriverPageEvent) => { for (const l of [...listeners]) l(ev); };
 
       const pageOf = (url: string): FakePage =>
@@ -154,10 +157,40 @@ export function createFakeDriver(web: FakeWeb): BrowserDriver {
             styles: { display: "block", position: "static", colorScheme },
           };
         },
+        async targetRect(target) {
+          if ("point" in target) {
+            return { x: target.point.x, y: target.point.y, width: 1, height: 1 };
+          }
+          return { x: 0, y: 0, width: Math.min(240, viewport.width), height: Math.min(80, viewport.height) };
+        },
         async screenshot() {
           // deterministic bytes derived from the current URL (no real pixels)
           const data = new TextEncoder().encode(`frame:${nav().url}:${index}`);
           return { data, mime: "image/webp" };
+        },
+        async startScreencast() {
+          if (screencastOn) return;
+          screencastOn = true;
+          frameTimer = setInterval(() => {
+            if (!screencastOn) return;
+            const frame: DriverFrame = {
+              data: new TextEncoder().encode(`stream:${nav().url}:${Date.now()}`),
+              mime: "image/jpeg",
+              width: viewport.width,
+              height: viewport.height,
+            };
+            for (const cb of [...frameCbs]) cb(frame);
+          }, 50);
+          frameTimer.unref?.();
+        },
+        async stopScreencast() {
+          screencastOn = false;
+          if (frameTimer) clearInterval(frameTimer);
+          frameTimer = null;
+        },
+        onFrame(cb) {
+          frameCbs.add(cb);
+          return () => { frameCbs.delete(cb); };
         },
         async screenshotClip(clip) {
           const data = new TextEncoder().encode(
@@ -205,7 +238,13 @@ export function createFakeDriver(web: FakeWeb): BrowserDriver {
           listeners.add(cb);
           return () => { listeners.delete(cb); };
         },
-        close: async () => { closed = true; listeners.clear(); },
+        close: async () => {
+          closed = true;
+          listeners.clear();
+          frameCbs.clear();
+          if (frameTimer) clearInterval(frameTimer);
+          frameTimer = null;
+        },
       };
       return page;
     },
