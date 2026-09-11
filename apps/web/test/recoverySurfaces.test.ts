@@ -9,17 +9,17 @@ import {
   subscribeSendFailures,
 } from "../src/sendFailure.ts";
 
-test("failed-send state records only unavailable admission failures", () => {
+test("failed-send state distinguishes authoritative retry from unknown admission", () => {
   clearSendFailure("session-recovery");
   let notifications = 0;
   const off = subscribeSendFailures(() => { notifications += 1; });
   try {
     assert.equal(isUnavailableSendError(new Error("HTTP 503 Service Unavailable")), true);
     assert.equal(isUnavailableSendError(new Error("HTTP 500 Internal Server Error")), false);
-    assert.equal(reportSendFailure("session-recovery", new Error("HTTP 503 — unavailable"))?.kind, "unavailable");
+    assert.equal(reportSendFailure("session-recovery", Object.assign(new Error("HTTP 503 — unavailable"), { status: 503 }))?.kind, "unknown");
     assert.deepEqual(getSendFailure("session-recovery"), {
       sessionId: "session-recovery",
-      kind: "unavailable",
+      kind: "unknown",
     });
     clearSendFailure("session-recovery");
     assert.equal(getSendFailure("session-recovery"), null);
@@ -36,7 +36,8 @@ test("recovery surfaces preserve drafts and never auto-send a failed turn", asyn
   const banner = await readFile(new URL("../src/components/RuntimeEpochBanner.tsx", import.meta.url), "utf8");
 
   assert.match(composer, /<Notice[\s\S]*?className="composer-send-failure"[\s\S]*?role="alert"/);
-  assert.match(composer, /saveDraft\(targetSessionId, t\)/);
+  assert.match(composer, /Checking whether this was applied/);
+  assert.match(composer, /failedSend\?\.kind === "unknown"/);
   assert.match(timeline, /applyComposerSeed\(sessionId, `turn-failed:\$\{turn\.turnId\}`/);
   assert.match(timeline, /requestComposerReplace\(draft\.text\)/);
   assert.doesNotMatch(timeline, /sendMessage\(lastUser/);

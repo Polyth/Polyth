@@ -5,6 +5,18 @@ import type { AuthStatusDto } from "@polyth/session/web-api";
 import { setActiveBrowserAccount } from "./accountStorage.ts";
 
 let inflight: Promise<AuthStatusDto> | null = null;
+let accountScopeResolved = false;
+
+export function isBrowserAccountScopeResolved(): boolean {
+  return accountScopeResolved;
+}
+
+/** Record an account identity learned from an authenticated server response.
+ * Remembered browser state alone is never enough to unlock persistent records. */
+export function acceptAuthenticatedBrowserAccount(accountId: string): void {
+  setActiveBrowserAccount(accountId);
+  accountScopeResolved = true;
+}
 
 export function prefetchAuthStatus(): Promise<AuthStatusDto> {
   if (inflight) return inflight;
@@ -20,7 +32,7 @@ export function prefetchAuthStatus(): Promise<AuthStatusDto> {
           if (!accountsResponse.ok) return;
           const state = await accountsResponse.json() as { currentAccountId?: unknown };
           if (typeof state.currentAccountId === "string" && state.currentAccountId) {
-            setActiveBrowserAccount(state.currentAccountId);
+            acceptAuthenticatedBrowserAccount(state.currentAccountId);
           }
         })
         .catch(() => undefined);

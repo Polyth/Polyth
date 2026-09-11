@@ -209,8 +209,9 @@ test("queued messages hand editing to the composer and drag-reorder through the 
     assert.equal(grip.tagName, "SPAN");
     assert.equal(grip.getAttribute("draggable"), "true");
     assert.equal(container.querySelector(".queue-chip")?.getAttribute("draggable"), null);
-    assert.equal(container.querySelector(".queue-more"), null);
-    assert.equal(container.querySelector("[role='menu']"), null);
+    const reorder = container.querySelector<HTMLButtonElement>(".queue-reorder");
+    assert.ok(reorder, "a named menu provides non-drag queue ordering");
+    assert.equal(reorder.getAttribute("aria-label"), "Reorder queued message 1");
 
     const edit = container.querySelector<HTMLElement>(".queue-edit");
     assert.ok(edit, "edit is a pencil on the row");
@@ -218,7 +219,7 @@ test("queued messages hand editing to the composer and drag-reorder through the 
     await act(async () => { click(edit); });
     assert.equal(editing?.id, "q1", "the parent composer owns the edit buffer");
     assert.equal(container.querySelector("textarea"), null, "queue rows never render an inline editor");
-    assert.equal(container.querySelectorAll(".reorder-control").length, 0, "queued rows reorder by dragging, not arrows");
+    assert.equal(container.querySelectorAll(".reorder-control").length, 0, "reorder stays in the shared action menu");
     await act(async () => {
       root.render(createElement(QueuedMessageList, {
         sessionId: "s1",
@@ -235,6 +236,21 @@ test("queued messages hand editing to the composer and drag-reorder through the 
       }));
     });
 
+    const reorderAfterEditing = container.querySelector<HTMLButtonElement>(".queue-reorder");
+    assert.ok(reorderAfterEditing);
+    await act(async () => { click(reorderAfterEditing); });
+    const moveDown = [...document.body.querySelectorAll<HTMLElement>("[role='menuitem']")]
+      .find((element) => element.textContent?.includes("Move queued message 1 down"));
+    assert.ok(moveDown, "the reorder menu exposes a move-down action");
+    await act(async () => {
+      click(moveDown);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    assert.deepEqual(mutations.at(-1), {
+      path: "/api/sessions/s1/queue/order",
+      body: { ids: ["q2", "q1", "q3"] },
+    });
+
     const chips = [...container.querySelectorAll<HTMLElement>(".queue-chip")];
     const sourceGrip = chips[0]!.querySelector<HTMLElement>(".queue-grip");
     assert.ok(sourceGrip);
@@ -246,11 +262,11 @@ test("queued messages hand editing to the composer and drag-reorder through the 
     });
     assert.deepEqual(mutations.at(-1), {
       path: "/api/sessions/s1/queue/order",
-      body: { ids: ["q2", "q3", "q1"] },
+      body: { ids: ["q1", "q3", "q2"] },
     });
     assert.deepEqual(
       [...container.querySelectorAll(".queue-text")].map((element) => element.textContent),
-      ["second", "third", "first"],
+      ["first", "third", "second"],
     );
     const held = [...container.querySelectorAll<HTMLElement>(".queue-chip")]
       .find((chip) => chip.textContent?.includes("third"));

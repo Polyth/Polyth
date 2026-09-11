@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 
 use iroh::address_lookup::AddrFilter;
@@ -8,6 +8,7 @@ use iroh::{
 };
 
 use crate::errors::LinkError;
+use crate::numeric_wire::POLYTH_NUMERIC_ALPN;
 use crate::ticket::{PairingTicket, POLYTH_LINK_ALPN};
 use crate::transport::TransportPolicy;
 
@@ -17,7 +18,10 @@ pub async fn bind_link_endpoint(
 ) -> Result<Endpoint, LinkError> {
     let mut builder = Endpoint::builder(presets::N0)
         .secret_key(secret)
-        .alpns(vec![POLYTH_LINK_ALPN.as_bytes().to_vec()])
+        .alpns(vec![
+            POLYTH_LINK_ALPN.as_bytes().to_vec(),
+            POLYTH_NUMERIC_ALPN.as_bytes().to_vec(),
+        ])
         .max_tls_tickets(0);
     builder = match policy {
         TransportPolicy::AirGapped => builder.relay_mode(RelayMode::Disabled),
@@ -50,6 +54,25 @@ pub fn endpoint_addr_from_ticket(ticket: &PairingTicket) -> Result<EndpointAddr,
                 addr = addr.with_ip_addr(socket);
             }
         }
+    }
+    Ok(addr)
+}
+
+pub fn endpoint_addr_from_discovery(
+    endpoint_id: &str,
+    direct_addresses: &[String],
+    fallback_port: Option<u16>,
+) -> Result<EndpointAddr, LinkError> {
+    let id = EndpointId::from_str(endpoint_id).map_err(|_| LinkError::PairingInvalid)?;
+    let mut addr = EndpointAddr::new(id);
+    for item in direct_addresses.iter().take(16) {
+        let socket = if let Ok(socket) = SocketAddr::from_str(item) {
+            socket
+        } else {
+            let ip = IpAddr::from_str(item).map_err(|_| LinkError::PairingInvalid)?;
+            SocketAddr::new(ip, fallback_port.ok_or(LinkError::PairingInvalid)?)
+        };
+        addr = addr.with_ip_addr(socket);
     }
     Ok(addr)
 }
@@ -117,5 +140,29 @@ mod tests {
         ticket.candidates[0].direct_addresses = Some(vec!["not-an-addr".into()]);
         assert!(endpoint_addr_from_ticket(&ticket).is_err());
         let _ = encode_pairing_ticket(&ticket);
+    }
+
+    #[test]
+    fn discovery_addr_is_pinned_to_endpoint_identity_and_bounded_candidates() {
+        let endpoint = "aa".repeat(32);
+        let addr = endpoint_addr_from_discovery(
+            &endpoint,
+            &["192.168.1.10".into(), "[fd00::10]:4433".into()],
+            Some(4433),
+        )
+        .unwrap();
+        assert_eq!(addr.id.to_string(), endpoint);
+        assert_eq!(addr.ip_addrs().count(), 2);
+    }
+
+    #[test]
+    fn discovery_addr_rejects_unparseable_candidates() {
+        let endpoint = "aa".repeat(32);
+        assert!(endpoint_addr_from_discovery(
+            &endpoint,
+            &["https://evil.example/".into()],
+            Some(4433),
+        )
+        .is_err());
     }
 }

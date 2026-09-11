@@ -12,7 +12,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
 import { Window } from "happy-dom";
-import type { SessionIsolation, SessionProjection, WorkspaceLabel } from "@polyth/contracts";
+import type {
+  SessionIsolation,
+  SessionIsolationIdentity,
+  SessionProjection,
+  WorkspaceLabel,
+} from "@polyth/contracts";
 import { readFile } from "node:fs/promises";
 
 const dom = new Window();
@@ -334,7 +339,7 @@ test("pinned chats are first across worktrees and their menu offers Unpin", asyn
   }
 });
 
-const gitIsolation = (over: Partial<SessionIsolation> = {}): SessionIsolation => ({
+const gitIsolation = (over: Partial<SessionIsolationIdentity> = {}): SessionIsolation => ({
   kind: "git-worktree",
   worktreePath: "/repo-isolated",
   worktreeBranch: "polyth/isolate/abc",

@@ -162,9 +162,13 @@ export const CORE_REMOTE_ACCESS: RemoteAccessPolicy = {
     // it already reads project paths through /api/projects.
     { methods: ["GET"], path: "/api/runtime/diagnostics", capability: REMOTE_CAPABILITY.coreSessionsRead, mutation: false },
     { methods: ["GET"], path: "/api/notifications", capability: REMOTE_CAPABILITY.coreNotificationsRead, mutation: false },
+    { methods: ["GET"], path: "/api/notifications/:id", capability: REMOTE_CAPABILITY.coreNotificationsRead, mutation: false },
     { methods: ["POST"], path: "/api/notifications/read", capability: REMOTE_CAPABILITY.coreNotificationsRead, mutation: true },
     { methods: ["POST"], path: "/api/notifications/read-all", capability: REMOTE_CAPABILITY.coreNotificationsRead, mutation: true },
     { methods: ["POST"], path: "/api/notifications/clear", capability: REMOTE_CAPABILITY.coreNotificationsRead, mutation: true },
+    { methods: ["GET"], path: "/api/native-push", capability: REMOTE_CAPABILITY.coreNotificationsRead, mutation: false },
+    { methods: ["POST"], path: "/api/native-push", capability: REMOTE_CAPABILITY.coreNotificationsRead, mutation: true },
+    { methods: ["DELETE"], path: "/api/native-push", capability: REMOTE_CAPABILITY.coreNotificationsRead, mutation: true },
     { methods: ["GET"], path: "/api/packages", capability: REMOTE_CAPABILITY.coreSessionsRead, mutation: false },
     { methods: ["GET"], path: "/api/folders", capability: REMOTE_CAPABILITY.coreProjectsRead, mutation: false },
     { methods: ["GET"], path: "/api/labels", capability: REMOTE_CAPABILITY.coreProjectsRead, mutation: false },

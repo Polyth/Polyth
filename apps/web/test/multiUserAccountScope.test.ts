@@ -8,7 +8,8 @@ import {
   activeBrowserAccountId,
   setActiveBrowserAccount,
 } from "../src/accountStorage.ts";
-import { consumeAuthPrefetch, prefetchAuthStatus } from "../src/authPrefetch.ts";
+import { consumeAuthPrefetch, isBrowserAccountScopeResolved, prefetchAuthStatus } from "../src/authPrefetch.ts";
+import { loginAccount } from "../src/accounts.ts";
 
 class MemoryStorage {
   private values = new Map<string, string>();
@@ -46,6 +47,23 @@ test("browser-local state is isolated by active account", () => {
     assert.equal(accountStorageGet("polyth.test"), "alice");
   } finally {
     restore();
+  }
+});
+
+test("a successful first login establishes the authenticated persistence namespace", async () => {
+  const restoreStorage = installStorage();
+  const previousFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (input) => {
+      assert.equal(String(input), "/api/auth/login");
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    };
+    assert.deepEqual(await loginAccount("Alice", "secret"), { ok: true });
+    assert.equal(activeBrowserAccountId(), "usr_alice");
+    assert.equal(isBrowserAccountScopeResolved(), true);
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreStorage();
   }
 });
 

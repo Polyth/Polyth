@@ -2,7 +2,7 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import { readFile } from "node:fs/promises";
 import { existsSync, statSync, unlinkSync, mkdirSync } from "node:fs";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { constants as zlibConstants, gzip, gzipSync } from "node:zlib";
 import { extname, join, normalize, resolve, sep, dirname } from "node:path";
 import {
@@ -69,6 +69,26 @@ const RECOVERY_CONFLICT_CODES = new Set([
   "outcome-unknown",
   "stale-evidence",
 ]);
+const CLIENT_OPERATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const clientOperationId = (value: unknown): string | undefined => {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !CLIENT_OPERATION_ID.test(value)) {
+    throw Object.assign(new Error("clientOperationId must be a UUID"), { code: "invalid-input" });
+  }
+  return value.toLowerCase();
+};
+
+/** The renderer's UUID is not a global authority. Fold the authenticated
+ * account (from the resolved SpaceContext, never the body) into the durable
+ * record key so an identical token from another account cannot alias it. */
+export const accountScopedClientOperationId = (operationId: string, userId: string): string => {
+  const digest = createHash("sha256").update(userId).update("\0").update(operationId).digest();
+  digest[6] = (digest[6]! & 0x0f) | 0x40;
+  digest[8] = (digest[8]! & 0x3f) | 0x80;
+  const hex = digest.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+};
 
 const harnessSelectionInput = (value: unknown): HarnessSelection | undefined => {
   if (value === undefined) return undefined;
@@ -258,6 +278,11 @@ export interface HttpDeps {
   /** Optional request drain/fence. When set, new requests stop at shutdown
    *  and late handlers cannot keep using live services after dispose. */
   admission?: HttpAdmission;
+  /** Private notification routing metadata, written after a durable session. */
+  notificationRecipients?: {
+    created(sessionId: string, account: { userId: string; spaceId: string }): Promise<void>;
+    forked(parentSessionId: string, sessionId: string, account: { userId: string; spaceId: string }): Promise<void>;
+  };
 }
 
 // Public even when a password is set: the SPA lock screen must be able to
@@ -538,6 +563,9 @@ async function dispatchHttp(
       }
 
       const requireCapability = (capability: string) => requirePrincipalCapability(principal, capability);
+      const recordNotificationRecipient = async (work: (() => Promise<void>) | undefined): Promise<void> => {
+        try { await work?.(); } catch { console.warn("[polyth] notification recipient registration failed"); }
+      };
 
       if (path === "/api/health" && method === "GET") {
         return json(res, 200, { ok: true, version: deps.version, capabilities: deps.capabilities() });
@@ -572,6 +600,9 @@ async function dispatchHttp(
           ...(b.agent ? { agent: String(b.agent) } : {}),
           ...(b.worktreePath ? { worktreePath: String(b.worktreePath) } : {}),
         });
+        await recordNotificationRecipient(deps.notificationRecipients
+          ? () => deps.notificationRecipients!.created(ref.id, space().ctx)
+          : undefined);
         return json(res, 200, ref);
       }
       m = path.match(/^\/api\/sessions\/([^/]+)$/);
@@ -603,14 +634,30 @@ async function dispatchHttp(
           : undefined;
         return json(res, 200, await space().sessions.events(m[1]!, afterSeq, page));
       }
+      m = path.match(/^\/api\/sessions\/([^/]+)\/client-mutations\/([^/]+)$/);
+      if (m && method === "GET") {
+        const status = space().sessions.clientMutationStatus;
+        if (!status) throw Object.assign(new Error("client mutation status unavailable"), { code: "unsupported" });
+        const requestedOperationId = clientOperationId(decodeURIComponent(m[2]!));
+        if (!requestedOperationId) throw Object.assign(new Error("clientOperationId is required"), { code: "invalid-input" });
+        return json(res, 200, await status(
+          m[1]!,
+          accountScopedClientOperationId(requestedOperationId, space().ctx.userId),
+        ));
+      }
       m = path.match(/^\/api\/sessions\/([^/]+)\/message$/);
       if (m && method === "POST") {
         const b = await loadBody();
         const delivery = b.delivery;
         const harness = harnessSelectionInput(b.harness);
         const validCommand = b.command !== undefined ? parseTurnCommand(b.command) : undefined;
+        const requestedOperationId = clientOperationId(b.clientOperationId);
+        const operationId = requestedOperationId
+          ? accountScopedClientOperationId(requestedOperationId, space().ctx.userId)
+          : undefined;
         return json(res, 200, await space().sessions.send(m[1]!, {
           text: String(b.text ?? ""),
+          ...(operationId ? { clientOperationId: operationId } : {}),
           ...(validCommand ? { command: validCommand } : {}),
           ...(b.autoTitle === true ? { autoTitle: true } : {}),
           // sanitized + existence-checked inside the session service (F2)
@@ -669,7 +716,11 @@ async function dispatchHttp(
       m = path.match(/^\/api\/sessions\/([^/]+)\/fork$/);
       if (m && method === "POST") {
         const b = await loadBody();
-        return json(res, 200, await space().sessions.fork(m[1]!, b.atSeq === undefined ? undefined : Number(b.atSeq)));
+        const forked = await space().sessions.fork(m[1]!, b.atSeq === undefined ? undefined : Number(b.atSeq));
+        await recordNotificationRecipient(deps.notificationRecipients
+          ? () => deps.notificationRecipients!.forked(m[1]!, forked.id, space().ctx)
+          : undefined);
+        return json(res, 200, forked);
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/rewind$/);
       if (m && method === "POST") {

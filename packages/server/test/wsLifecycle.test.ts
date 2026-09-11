@@ -55,6 +55,7 @@ function mockBrowser() {
 
 interface WsMsg {
   type: string;
+  code?: string;
   event?: SessionEvent;
   events?: SessionEvent[];
   sessions?: Array<{ id: string }>;
@@ -182,9 +183,63 @@ test("close removes upgrade claims; attach after close does not leak them", asyn
   }
 });
 
-test("repeated close is harmless and boot/shutdown cycles do not accumulate listeners", async () => {
+test("canonical bufferedAmount high-water closes for resync while visual frames stay latest-wins", async () => {
+  const { server, port } = await listen();
   const browser = mockBrowser();
-  for (let i = 0; i < 5; i++) {
+  const gateway = createWsGateway(stubSessions(), browser.browser, undefined, undefined, undefined, {
+    frameHighWater: 0,
+    bufferedAmount: () => 1,
+  });
+  gateway.attach(server);
+  let ws: WebSocket | undefined;
+  try {
+    const client = await connect(port);
+    ws = client.ws;
+    client.ws.send(JSON.stringify({ type: "browser/subscribe", browserSessionId: "b1", afterRevision: 0 }));
+    await new Promise<void>((res) => { client.ws.once("pong", () => res()); client.ws.ping(); });
+    browser.emitFrame({ browserSessionId: "b1", revision: 1, mime: "image/jpeg", data: new Uint8Array([1]) });
+    assert.equal((await client.next()).type, "browser/frame", "visual frame bypasses canonical slow-reader close and remains coalescible");
+
+    const closed = once(client.ws, "close");
+    gateway.event({ id: "e1", sessionId: "s1", seq: 1, time: 1, type: "test/event", data: {}, v: 1 });
+    const [code, reason] = await closed as [number, Buffer];
+    assert.equal(code, 1013);
+    assert.match(String(reason), /^resync-required:/);
+  } finally {
+    ws?.terminate();
+    gateway.close();
+    server.close();
+  }
+});
+
+test("oversized canonical frames surface a typed terminal error before close when safe", async () => {
+  const { server, port } = await listen();
+  const gateway = createWsGateway(stubSessions(), undefined, undefined, undefined, undefined, {
+    maxCanonicalFrameBytes: 1,
+  });
+  gateway.attach(server);
+  let ws: WebSocket | undefined;
+  try {
+    const client = await connect(port);
+    ws = client.ws;
+    const closed = once(client.ws, "close");
+    gateway.event({ id: "e1", sessionId: "s1", seq: 1, time: 1, type: "test/event", data: {}, v: 1 });
+    assert.deepEqual({ type: (await client.next()).type, code: client.messages.at(-1)?.code }, {
+      type: "error", code: "canonical-frame-too-large",
+    });
+    const [code, reason] = await closed as [number, Buffer];
+    assert.equal(code, 1009);
+    assert.match(String(reason), /^resync-required:/);
+  } finally {
+    ws?.terminate();
+    gateway.close();
+    server.close();
+  }
+});
+
+test("repeated close is harmless across 100 boot/shutdown cycles without accumulating listeners", async () => {
+  const browser = mockBrowser();
+  for (let i = 0; i < 100; i++) {
     const { server, port } = await listen();
     const gateway = createWsGateway(stubSessions(), browser.browser);
     gateway.attach(server);

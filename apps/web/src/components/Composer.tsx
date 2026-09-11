@@ -51,7 +51,7 @@ import SlotHost from "./slots/SlotHost.ts";
 import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 import { dragKind, dropIntoSession } from "../dnd.ts";
 import {
-  addAttachment, attachText, attachUpload, clearAttachments, isLargeTextPaste, pendingAttachments, removeAttachment, seedAttachments, takeAttachments, usePendingAttachments,
+  addAttachment, attachNativeStagedUpload, attachText, attachUpload, clearAttachments, isLargeTextPaste, pendingAttachments, recoverNativeStagedUploads, removeAttachment, seedAttachments, usePendingAttachments,
 } from "../attachments.ts";
 import {
   attachGithubLink,
@@ -144,7 +144,10 @@ import SessionContextBar, {
 import { Button, CheckIcon, GlassDock, IconButton, Menu, MoreIcon, Notice, QueueIcon, SendIcon, StopIcon } from "./ui/index.ts";
 import { getSendFailure, subscribeSendFailures } from "../sendFailure.ts";
 import { isNativeMobile } from "@polyth/mobile/runtime";
-import { pickNativeFiles } from "@polyth/mobile/native";
+import { pickNativeFiles, readNativeStagedFile, removeNativeStagedFile } from "@polyth/mobile/native";
+import { adoptServerDraft, loadScopedDraftRecord, scopedDraftCacheKey, updateScopedDraftRecord } from "../draftRecord.ts";
+import { flushClientPersistence, type PersistenceScope } from "../clientPersistence.ts";
+import { clientPersistenceScope } from "../reliabilityContext.ts";
 
 // Per-project command/snippet catalog cache: the composer remounts on every
 // session change (including a fresh spawn), and each mount refetched both
@@ -586,12 +589,14 @@ export default function Composer({
   // IME-safe input: the DOM owns live text; `text` tracks committed edits only.
   const inputRef = useRef<TextInputHandle>(null);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
+  const sessionScopeKeyRef = useRef(scopedDraftCacheKey(session?.id ?? null));
   const [text, setText] = useState(() => (
     session?.id ? loadDraft(session.id) : newSessionIntent?.draft ?? ""
   ));
   const [queueEdit, setQueueEdit] = useState<QueueEdit | null>(null);
   const [queueEditStarting, setQueueEditStarting] = useState(false);
   const [queueEditSaving, setQueueEditSaving] = useState(false);
+  const [sendPending, setSendPending] = useState(false);
   const [queuedItems, setQueuedItems] = useState<QueueItemDto[]>([]);
   const [steeringQueuedId, setSteeringQueuedId] = useState<string | null>(null);
   const steeringQueuedBySessionRef = useRef(new Map<string, string>());
@@ -727,6 +732,7 @@ export default function Composer({
   const flushComposerDraft = useCallback(() => {
     const id = sessionIdRef.current;
     if (id === null) return;
+    if (scopedDraftCacheKey(id) !== sessionScopeKeyRef.current) return;
     const editing = queueEditRef.current;
     const nav = promptHistoryNavRef.current;
     const live = nav.isBrowsing()
@@ -753,20 +759,19 @@ export default function Composer({
       if (editing?.sessionId === outgoing) void api.queueEditCancel(outgoing, editing.id).catch(() => {});
     }
     sessionIdRef.current = session?.id ?? null;
+    sessionScopeKeyRef.current = scopedDraftCacheKey(session?.id ?? null);
     setPendingLargePaste(null);
-    // Prefer server-synced draft from the projection (cross-client sync);
-    // fall back to localStorage for offline / fast local edits.
     const serverDraft = session?.draft;
-    const localDraft = session?.id ? loadDraft(session.id) : "";
+    const localDraft = session?.id
+      ? (serverDraft !== undefined || session.draftUpdatedAt !== undefined
+        ? adoptServerDraft(session.id, serverDraft ?? "", session.draftUpdatedAt).text
+        : loadDraft(session.id))
+      : "";
     const t = session?.id
-      ? (serverDraft !== undefined && serverDraft !== localDraft ? serverDraft : localDraft || serverDraft || "")
+      ? localDraft
       : newSessionIntent?.draft ?? "";
     setText(t);
     inputRef.current?.replaceText(t);
-    // If server draft differs from local, update localStorage to match.
-    if (session?.id && serverDraft !== undefined && serverDraft !== localDraft) {
-      saveDraft(session.id, serverDraft);
-    }
     promptHistoryNav.reset();
     setCfg(loadComposerConfig(session?.id ?? null));
     setAcToken(null);
@@ -825,9 +830,12 @@ export default function Composer({
     const id = session?.id;
     if (!id || queueEdit?.sessionId === id) return;
     if (promptHistoryNavRef.current.isBrowsing()) return;
-    const t = setTimeout(() => saveDraft(id, text), 250);
+    const scopeKey = scopedDraftCacheKey(id);
+    const t = setTimeout(() => {
+      if (scopedDraftCacheKey(id) === scopeKey) saveDraft(id, text);
+    }, 250);
     return () => clearTimeout(t);
-  }, [session?.id, text, queueEdit]);
+  }, [session?.id, text, queueEdit, activeProjectId]);
 
   // Apply server-side draft updates from other clients when the composer is
   // empty (user hasn't started typing). Active local edits always win — the
@@ -835,16 +843,20 @@ export default function Composer({
   const lastServerDraftRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     const serverDraft = session?.draft;
-    if (serverDraft === undefined) return;
-    if (serverDraft === lastServerDraftRef.current) return;
-    lastServerDraftRef.current = serverDraft;
-    // Only apply if the composer is empty (no local work in progress).
-    if (!text && serverDraft) {
-      setText(serverDraft);
-      inputRef.current?.replaceText(serverDraft);
-      if (session?.id) saveDraft(session.id, serverDraft);
+    if (!session?.id || (serverDraft === undefined && session.draftUpdatedAt === undefined)) return;
+    const fingerprint = `${session.draftUpdatedAt ?? "legacy"}\0${serverDraft ?? ""}`;
+    if (fingerprint === lastServerDraftRef.current) return;
+    lastServerDraftRef.current = fingerprint;
+    const reconciled = adoptServerDraft(session.id, serverDraft ?? "", session.draftUpdatedAt);
+    if (reconciled.conflict) {
+      setUiError("This draft also changed on another client. Your local draft was preserved.");
+      return;
     }
-  }, [session?.draft, session?.id, text]);
+    if (reconciled.text !== text) {
+      setText(reconciled.text);
+      inputRef.current?.replaceText(reconciled.text);
+    }
+  }, [session?.draft, session?.draftUpdatedAt, session?.id, text]);
 
   // Drag-and-drop: tree paths and desktop files become attachment pills.
   const [dropHint, setDropHint] = useState<"path" | "files" | null>(null);
@@ -860,6 +872,17 @@ export default function Composer({
     projectId: string;
     sessionId: string | null;
   } | null>(null);
+  useEffect(() => {
+    if (!isNativeMobile() || !activeProjectId) return;
+    const target = session?.id ?? null;
+    void recoverNativeStagedUploads(activeProjectId, target, {
+      read: readNativeStagedFile,
+      remove: removeNativeStagedFile,
+    }).then((results) => {
+      const failed = results.find((result) => !result.ok);
+      if (failed && !failed.ok) setUiError(failed.reason);
+    });
+  }, [activeProjectId, session?.id]);
   const attachFiles = useCallback((files: File[]) => {
     const projectId = getState().activeProjectId;
     if (!projectId || files.length === 0) return;
@@ -902,12 +925,32 @@ export default function Composer({
       fileInputRef.current?.click();
       return;
     }
-    void pickNativeFiles().then((result) => {
-      if (result.status === "picked") attachFiles(result.files);
+    const projectId = getState().activeProjectId;
+    if (!projectId) return;
+    const target = sessionIdRef.current;
+    const pickerScope = scopedDraftCacheKey(target);
+    void pickNativeFiles().then(async (result) => {
+      if (result.status === "picked") {
+        if (scopedDraftCacheKey(target) !== pickerScope) {
+          await Promise.all(result.metadata.map((metadata) => removeNativeStagedFile(metadata)));
+          setUiError("Attachment context changed while the picker was open. Choose the files again.");
+          return;
+        }
+        for (const metadata of result.metadata) {
+          const attached = await attachNativeStagedUpload(projectId, target, metadata, {
+            read: readNativeStagedFile,
+            remove: removeNativeStagedFile,
+          });
+          if (!attached.ok) setUiError(tr("composer.couldNotAttachValue", {
+            name: metadata.name,
+            reason: attached.reason,
+          }));
+        }
+      }
       else if (result.status === "denied" || result.status === "failed") setUiError(result.message);
       // Native cancellation is a normal no-op and keeps the draft untouched.
     });
-  }, [attachFiles]);
+  }, []);
 
   const onPaste = useCallback((e: ClipboardEvent<HTMLTextAreaElement>) => {
     const projectId = getState().activeProjectId;
@@ -1056,14 +1099,12 @@ export default function Composer({
       if (typeof detail !== "string") return;
       e.preventDefault();
       insert(detail);
-      inputRef.current?.focus();
     };
     const replace = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (typeof detail !== "string") return;
       e.preventDefault();
       replaceText(detail);
-      inputRef.current?.focus();
     };
     window.addEventListener(COMPOSER_INSERT, handler);
     window.addEventListener(COMPOSER_REPLACE, replace);
@@ -1087,10 +1128,11 @@ export default function Composer({
     }
     const target = sessionIdRef.current;
     if (!target || target !== item.sessionId) return;
+    const targetScope = scopedDraftCacheKey(target);
     setQueueEditStarting(true);
     void api.queueEditStart(target, item.id)
       .then((reserved) => {
-        if (sessionIdRef.current !== target) {
+        if (sessionIdRef.current !== target || scopedDraftCacheKey(target) !== targetScope) {
           void api.queueEditCancel(target, reserved.id);
           return;
         }
@@ -1214,13 +1256,14 @@ export default function Composer({
     override?: string,
     deliveryOverride?: "steer" | "queue" | "interrupt",
   ) => {
-    if (creatingSession) return;
+    if (creatingSession || sendPending || failedSend?.kind === "unknown") return;
     if (session?.status === "epoch-pending" && session.runtimeControl === "borrowed") return;
     const t = (override ?? inputRef.current?.getText() ?? text).trim();
     const target = sessionIdRef.current;
     if (queueEdit) {
       if (!target || target !== queueEdit.sessionId || !t || queueEditSaving) return;
       const editing = queueEdit;
+      const targetScope = scopedDraftCacheKey(target);
       setQueueEditSaving(true);
       const save = deliveryOverride === "interrupt"
         ? api.queueSendNow(target, editing.id, t)
@@ -1230,7 +1273,7 @@ export default function Composer({
           // The server updates the existing queue row, so it retains its
           // position and delivery metadata instead of becoming a new message.
           if (queueEditRef.current?.id === editing.id) setQueueEdit(null);
-          if (sessionIdRef.current !== target) return;
+          if (sessionIdRef.current !== target || scopedDraftCacheKey(target) !== targetScope) return;
           setText(editing.draftBefore);
           inputRef.current?.replaceText(editing.draftBefore);
           saveDraft(target, editing.draftBefore);
@@ -1263,10 +1306,15 @@ export default function Composer({
     if (command === null && profileMissing) return;
     // Capture the target session at send time — project/session switches must
     // never reroute a send (delivery admission handles active turns server-side).
-    // Pills leave the draft the moment the message leaves the composer.
+    // Keep text/pills in the scoped draft until admission is authoritative.
+    // This costs one brief pending state and survives response loss/process kill
+    // without inventing a second client mutation ledger.
     const recalled = promptHistoryNav.takeDisplayedForSend();
-    const atts = command === null ? (recalled ?? takeAttachments(target)) : [];
-    if (command === null && recalled) clearAttachments(target);
+    const atts = command === null ? (recalled ?? pendingAttachments(target)) : [];
+    const nativeStagedAtSend = command === null
+      ? loadScopedDraftRecord(target).nativeStaged ?? []
+      : [];
+    const draftRevisionAtSend = draftRevisionRef.current;
     const delivery = working ? deliveryOverride ?? getUiSettings().followUpBehavior : undefined;
     const cfgSent = cfg;
     const selectedProfileId = cfgSent.profile.kind === "id"
@@ -1317,15 +1365,39 @@ export default function Composer({
     // New-session creation already commits its harness before the first turn.
     // Only an existing session needs the staged submit-time route.
     const submittedHarness = target ? cfgSent.harness : undefined;
-    const deliver = (targetSessionId: string) => command !== null
-      ? api.runShell(targetSessionId, command).then(() => {
+    type StagedDraft = { revision: number; scopeKey: string; scope: PersistenceScope };
+    const reliabilityScopeAtSend = clientPersistenceScope(activeProjectId ? { projectId: activeProjectId } : {});
+    const stageTargetDraft = (targetSessionId: string, capturedScope: PersistenceScope): StagedDraft => {
+      const scopeKey = scopedDraftCacheKey(targetSessionId, capturedScope);
+      const staged = updateScopedDraftRecord(targetSessionId, {
+        text: t,
+        dirty: true,
+        attachments: atts,
+        nativeStaged: nativeStagedAtSend,
+        conflict: undefined,
+      }, capturedScope);
+      return { revision: staged.revision, scopeKey, scope: capturedScope };
+    };
+    const deliver = (targetSessionId: string, stagedDraft?: StagedDraft) => {
+      const deliveryScope = stagedDraft?.scope
+        ?? stagedRevisions.get(targetSessionId)?.scope
+        ?? { ...reliabilityScopeAtSend, sessionId: targetSessionId };
+      if (command !== null) return Promise.resolve().then(() => {
+        if (scopedDraftCacheKey(targetSessionId) !== scopedDraftCacheKey(targetSessionId, deliveryScope)) {
+          throw Object.assign(new Error("client context changed before command admission"), {
+            code: "client-context-changed",
+            status: 409,
+          });
+        }
+        return api.runShell(targetSessionId, command);
+      }).then(() => {
           promptHistoryNav.reload();
         }).catch(
           (err) => setUiError(tr("composer.couldNotRunShellCommand", {
             reason: err instanceof Error ? err.message : String(err),
           })),
-        )
-      : sendMessage(
+        );
+      return sendMessage(
           t,
           sentModel,
           cfgSent.agent,
@@ -1337,20 +1409,36 @@ export default function Composer({
             ...(delivery ? { delivery } : {}),
             dismissPending: true,
             ...(wire !== undefined ? { agentProfileId: wire } : {}),
+            reliabilityScope: deliveryScope,
           },
         ).then((ok) => {
           if (!ok) {
-            // Admission failures remove attachment pills optimistically below;
-            // put them back, and restore the exact draft only when the user
-            // has not already started a replacement while the request ran.
-            for (const attachment of atts) addAttachment(targetSessionId, attachment);
-            if (getState().activeSessionId === targetSessionId
-              && !(inputRef.current?.getText() ?? "").trim()) {
-              setText(t);
-              inputRef.current?.replaceText(t);
-              saveDraft(targetSessionId, t);
-            }
             return;
+          }
+          const sentDraft = stagedDraft ?? stagedRevisions.get(targetSessionId);
+          if (!sentDraft) return;
+          const sentRecord = loadScopedDraftRecord(targetSessionId, sentDraft.scope);
+          if (sentRecord.revision === sentDraft.revision) {
+            updateScopedDraftRecord(targetSessionId, {
+              text: "",
+              dirty: true,
+              attachments: [],
+              conflict: undefined,
+            }, sentDraft.scope);
+            syncDraftToServer(targetSessionId, "", sentDraft.scope);
+          }
+          const stillCurrent = scopedDraftCacheKey(targetSessionId) === sentDraft.scopeKey;
+          if (stillCurrent && getState().activeSessionId === targetSessionId
+            && draftRevisionRef.current === draftRevisionAtSend) {
+            setText("");
+            inputRef.current?.replaceText("");
+          }
+          if (stillCurrent) {
+            const currentAttachments = pendingAttachments(targetSessionId);
+            if (currentAttachments.length === atts.length
+              && currentAttachments.every((attachment, index) => attachment.id === atts[index]?.id)) {
+              clearAttachments(targetSessionId);
+            }
           }
           promptHistoryNav.reload();
           // The server recorded the sent configuration in the projection and
@@ -1359,8 +1447,15 @@ export default function Composer({
           consumeComposerConfig(target, cfgSent);
           if (sessionIdRef.current === target) setCfg(loadComposerConfig(target));
         });
+    };
+    const stagedRevisions = new Map<string, StagedDraft>();
     if (target) {
-      void deliver(target);
+      if (command === null) stagedRevisions.set(target, stageTargetDraft(target, {
+        ...reliabilityScopeAtSend,
+        sessionId: target,
+      }));
+      setSendPending(true);
+      void deliver(target).finally(() => setSendPending(false));
     } else if (activeProjectId) {
       const spawnHarnessId = creationHarness?.mode === "pinned"
         ? creationHarness.harnessId
@@ -1370,6 +1465,16 @@ export default function Composer({
         ...(routeCatalog.harnessName ? { harnessName: routeCatalog.harnessName } : {}),
       });
       void (async () => {
+        const scopeStillCurrent = () => scopedDraftCacheKey(null) === scopedDraftCacheKey(null, reliabilityScopeAtSend)
+          && getState().activeProjectId === activeProjectId;
+        const assertScopeStillCurrent = () => {
+          if (!scopeStillCurrent()) {
+            throw Object.assign(new Error("client context changed during session creation"), {
+              code: "client-context-changed",
+              status: 409,
+            });
+          }
+        };
         let created: string;
         if (newSessionTarget.kind === "new-worktree") {
           created = await startIsolatedSession(activeProjectId, {
@@ -1393,6 +1498,7 @@ export default function Composer({
               undefined,
               newSessionTarget.base,
             )).path;
+            assertScopeStillCurrent();
           }
           created = await createSession(activeProjectId, {
             harness: creationHarness,
@@ -1403,13 +1509,32 @@ export default function Composer({
             precache: true,
           });
         }
+        assertScopeStillCurrent();
         bindSessionSpawn(spawnRequestId, created);
-        clearNewSessionDraft(activeProjectId);
+        let createdDraft: StagedDraft | undefined;
+        if (command === null) {
+          createdDraft = stageTargetDraft(created, {
+            ...reliabilityScopeAtSend,
+            projectId: activeProjectId,
+            sessionId: created,
+          });
+          // Once session creation is authoritative, transfer the fresh draft
+          // durably before clearing its project-scoped recovery record.
+          await flushClientPersistence();
+        }
+        clearNewSessionDraft(activeProjectId, reliabilityScopeAtSend);
         clearDraftExecutionConfig(activeProjectId);
-        if (newSessionAutoApprove) await api.autoAcceptSet(created, "on");
-        if (newSessionGoal) await api.goalAttach(created, t);
+        if (newSessionAutoApprove) {
+          assertScopeStillCurrent();
+          await api.autoAcceptSet(created, "on");
+        }
+        if (newSessionGoal) {
+          assertScopeStillCurrent();
+          await api.goalAttach(created, t);
+        }
+        assertScopeStillCurrent();
         await flushNewSessionHandoffImport(activeProjectId, created, t);
-        await deliver(created);
+        await deliver(created, createdDraft);
         setNewSessionAutoApprove(false);
         setNewSessionGoal(false);
       })()
@@ -1422,7 +1547,8 @@ export default function Composer({
           const current = getState();
           if (current.sessionSpawn?.requestId === spawnRequestId
             && current.activeProjectId === activeProjectId
-            && current.activeSessionId === null) {
+            && current.activeSessionId === null
+            && scopedDraftCacheKey(null) === scopedDraftCacheKey(null, reliabilityScopeAtSend)) {
             startNewSession(activeProjectId, {
               draft: t,
               ...(newSessionIntent?.title ? { title: newSessionIntent.title } : {}),
@@ -1433,19 +1559,17 @@ export default function Composer({
         })
         .finally(() => finishSessionSpawn(spawnRequestId));
     }
-    setText("");
-    inputRef.current?.replaceText("");
-    promptHistoryNav.reset();
-    if (target) {
-      saveDraft(target, "");
-      syncDraftToServer(target, ""); // clear server draft on send
+    if (!target || command !== null) {
+      setText("");
+      inputRef.current?.replaceText("");
+      promptHistoryNav.reset();
     }
     setAcToken(null);
     acTokenRef.current = null;
     selectedCommandRef.current = undefined;
   }, [
     text, attachments, cfg, profileMissing, noModels, runtimeUnavailable, working, activeProjectId, queueEdit, queueEditSaving,
-    emptySteerItem, steerQueuedItem, promptHistoryNav,
+    emptySteerItem, steerQueuedItem, promptHistoryNav, sendPending, failedSend,
     session?.model, session?.status, session?.runtimeControl, preferredModel,
     sessionDefaults.defaultThinking, chatModels, creatingSession, newSessionTarget,
     newSessionAutoApprove, newSessionGoal, newSessionIntent, commandCatalog,
@@ -1783,11 +1907,12 @@ export default function Composer({
     if (goalAttachBusy) return;
     const target = sessionIdRef.current;
     if (!target || target !== session.id) return;
+    const targetScope = scopedDraftCacheKey(target);
     setGoalAttachBusy(true);
     void api.goalAttach(target, objective)
       .then(() => {
         // A session switch mid-attach must not clear a different composer.
-        if (sessionIdRef.current !== target) return;
+        if (sessionIdRef.current !== target || scopedDraftCacheKey(target) !== targetScope) return;
         setText("");
         inputRef.current?.replaceText("");
         saveDraft(target, "");
@@ -1938,6 +2063,8 @@ export default function Composer({
   const borrowedEpochPending = session?.status === "epoch-pending"
     && session.runtimeControl === "borrowed";
   const sendDisabled = creatingSession
+    || sendPending
+    || failedSend?.kind === "unknown"
     || queueEditSaving
     || borrowedEpochPending
     || (queueEdit ? !text.trim() : (!text.trim() && attachments.length === 0))
@@ -1970,8 +2097,12 @@ export default function Composer({
           tone="warning"
           className="composer-send-failure"
           role="alert"
-          actions={<Button size="sm" onClick={() => send()}>{tr("common.retry")}</Button>}
-        >{tr("composer.sendUnavailableDraftPreserved")}</Notice>
+          {...(failedSend.kind === "unknown"
+            ? {}
+            : { actions: <Button size="sm" onClick={() => send()}>{tr("common.retry")}</Button> })}
+        >{failedSend.kind === "unknown"
+          ? "Checking whether this was applied…"
+          : tr("composer.sendUnavailableDraftPreserved")}</Notice>
       )}
       {/* Widget-areas (WA4): the uncommitted-changes bar area, above the box. */}
       <SlotHost slot="composer.pending" context={slotContext} customizable />

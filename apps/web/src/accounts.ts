@@ -1,8 +1,8 @@
 import {
   activeBrowserAccountId,
   normalizeAccountId,
-  setActiveBrowserAccount,
 } from "./accountStorage.ts";
+import { acceptAuthenticatedBrowserAccount } from "./authPrefetch.ts";
 
 export interface AccountChoice {
   id: string;
@@ -51,7 +51,7 @@ export async function loginAccount(account: string, password: string): Promise<A
   const accountId = normalizeAccountId(account);
   const response = await fetch("/api/auth/login", json("POST", { accountId, password }));
   if (response.ok) {
-    setActiveBrowserAccount(accountId);
+    acceptAuthenticatedBrowserAccount(accountId);
     return { ok: true };
   }
   const body = await response.json().catch(() => ({})) as {

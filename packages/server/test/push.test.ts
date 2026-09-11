@@ -338,3 +338,38 @@ test("notifier binds pending request identity and quick answers to attention pus
     { title: "No", answers: { choice: "No" } },
   ]);
 });
+
+test("web-push endpoint reassignment is account-exclusive and scoped", async () => {
+  const delivered: string[] = [];
+  const activeAccounts = new Set(["usr_alice\0sp_a", "usr_bob\0sp_b"]);
+  const service = createPushService({
+    file: join(mkdtempSync(join(tmpdir(), "polyth-push-scope-")), "push.json"),
+    hasAccess: (account) => activeAccounts.has(`${account.userId}\0${account.spaceId}`),
+    fetchFn: (async (url) => {
+      delivered.push(String(url));
+      return { ok: true, status: 201 } as Response;
+    }) as typeof fetch,
+  });
+  const browser = browserKeys();
+  const subscription = { endpoint: "https://push.example.test/shared", keys: { p256dh: browser.p256dh, auth: b64u(browser.authSecret) } };
+  const alice = { userId: "usr_alice", spaceId: "sp_a" };
+  const bob = { userId: "usr_bob", spaceId: "sp_b" };
+  service.subscribe(alice, subscription);
+  service.subscribe(bob, subscription);
+  assert.equal(service.count(alice), 0);
+  assert.equal(service.count(bob), 1);
+  assert.equal(service.unsubscribe(alice, subscription.endpoint), false);
+  assert.equal(service.count(alice), 0);
+  assert.equal(service.count(bob), 1);
+  const payload = buildPushPayload("completed", { sessionId: "ses_1", sessionTitle: "Done" });
+  assert.deepEqual(await service.send(alice, payload), { sent: 0, dropped: 0 });
+  assert.deepEqual(await service.send(bob, payload), { sent: 1, dropped: 0 });
+  assert.deepEqual(delivered, [subscription.endpoint]);
+  activeAccounts.delete("usr_bob\0sp_b");
+  assert.equal(service.count(bob), 0, "removed accounts lose their destination immediately");
+  assert.deepEqual(await service.send(bob, payload), { sent: 0, dropped: 0 });
+  assert.deepEqual(delivered, [subscription.endpoint]);
+  assert.equal(service.removeAccount(bob.userId), 1);
+  activeAccounts.add("usr_bob\0sp_b");
+  assert.equal(service.count(bob), 0, "recreating a stable account id cannot adopt the old endpoint");
+});

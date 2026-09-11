@@ -8,6 +8,7 @@ import type {
   AutoAcceptSetting,
   BulkSessionResult,
   ClientSettingsDto,
+  ClientMutationStatusDto,
   PromptHistoryDto,
   DictationSessionDto,
   ForkResult,
@@ -49,7 +50,7 @@ import type {
   RuntimeSession,
   SecureSafeCreateInput,
   SecureSafeEntryDto,
-  SendResult,
+  SendResult, DraftSaveResult,
   SessionDebugDto,
   SessionEvent,
   SessionFolderDto,
@@ -638,10 +639,12 @@ export const api = {
       + (page?.beforeSeq !== undefined ? `&beforeSeq=${page.beforeSeq}` : "")
       + (page?.limit !== undefined ? `&limit=${page.limit}` : "")
       + (page?.prefetch !== undefined ? `&prefetch=${page.prefetch ? "1" : "0"}` : "")),
+  clientMutationStatus: (id: string, clientOperationId: string) =>
+    jfetch<ClientMutationStatusDto>(`/api/sessions/${encodeURIComponent(id)}/client-mutations/${encodeURIComponent(clientOperationId)}`),
 
   // agentProfileId: string selects a profile, null explicitly clears the
   // session's stored profile, omitted inherits it (UX-COMPOSER-DISC).
-  sendMessage: (id: string, body: { text: string; command?: { id: string; args?: string }; autoTitle?: boolean; attachments?: AttachmentRef[]; model?: JsonObject; agent?: string; harness?: HarnessSelection; delivery?: string; dismissPending?: boolean; agentProfileId?: string | null }) =>
+  sendMessage: (id: string, body: { text: string; clientOperationId?: string; command?: { id: string; args?: string }; autoTitle?: boolean; attachments?: AttachmentRef[]; model?: JsonObject; agent?: string; harness?: HarnessSelection; delivery?: string; dismissPending?: boolean; agentProfileId?: string | null }) =>
     jfetch<SendResult>(`/api/sessions/${id}/message`, json("POST", body)),
   runtimeFeatures: (id: string) =>
     jfetch<RuntimeFeaturesDto>(`/api/harnesses/sessions/${encodeURIComponent(id)}/features`),
@@ -661,8 +664,11 @@ export const api = {
   /** Advance the user's read cursor so navigator unread bold clears. */
   markSessionRead: (id: string, seq: number) =>
     jfetch<{ ok: true }>(`/api/sessions/${id}/read`, json("POST", { seq })),
-  saveDraft: (id: string, text: string) =>
-    jfetch<{ ok: true }>(`/api/sessions/${id}/draft`, json("PATCH", { text })),
+  saveDraft: (id: string, text: string, expectedDraftUpdatedAt?: number | null) =>
+    jfetch<DraftSaveResult>(`/api/sessions/${id}/draft`, json("PATCH", {
+      text,
+      ...(expectedDraftUpdatedAt !== undefined ? { expectedDraftUpdatedAt } : {}),
+    })),
 
   // ---- delivery queue (WP3) -------------------------------------------------
   queueList: (id: string) =>

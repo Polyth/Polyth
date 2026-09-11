@@ -655,11 +655,11 @@ test("runtime eviction is blocked by a queued message and a live stream", async 
 test("fenced operations and held review drafts do not pin a runtime forever", async () => {
   const harness = await lifecycleHarness();
   try {
-    const item = await harness.store.enqueue(
+    const item = (await harness.store.enqueue(
       harness.projection.id,
       "uncertain turn",
       "queue",
-    );
+    )).item;
     const reserved = await harness.store.reserveQueueHead({
       sessionId: harness.projection.id,
       mutationKind: "turn-submit",

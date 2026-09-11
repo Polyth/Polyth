@@ -12,10 +12,19 @@ export interface PairingAttempt {
   state: string;
 }
 
+export interface NumericPairingInput {
+  hostEndpointId: string;
+  addresses: string[];
+  port?: number | null;
+  code: string;
+  label: string;
+}
+
 export interface ConnectionMetadata {
   id: string;
   hostEndpointId: string;
   hostLabel: string;
+  pairingState?: "prepared" | "active" | "revoked";
   lastUsedAt: number;
   lastTransport?: "direct" | "relay";
   revoked?: boolean;
@@ -28,13 +37,19 @@ export interface ProxyLaunch {
   connectionId: string;
 }
 
+export type ConnectionRecovery =
+  | { state: "connected"; launch: ProxyLaunch }
+  | { state: "needs-pairing"; connectionId: string };
+
 export interface PolythLinkNative {
   parsePairingTicket(raw: string): Promise<PairingPreview>;
   beginPairing(raw: string, label: string): Promise<PairingAttempt>;
-    confirmPairing(attemptId: string): Promise<ProxyLaunch>;
+  beginNumericPairing(input: NumericPairingInput): Promise<PairingAttempt>;
+  confirmPairing(attemptId: string): Promise<ProxyLaunch>;
   cancelPairing(attemptId: string): Promise<void>;
   listConnections(): Promise<ConnectionMetadata[]>;
   connect(connectionId: string): Promise<ProxyLaunch>;
+  recoverConnection(connectionId: string): Promise<ConnectionRecovery>;
   disconnect(connectionId: string): Promise<void>;
   forgetConnection(connectionId: string): Promise<void>;
   getStatus(connectionId: string): Promise<{ state: string; transport?: "direct" | "relay"; error?: string }>;
@@ -46,10 +61,12 @@ class MissingNativeCore implements PolythLinkNative {
   }
   parsePairingTicket() { return Promise.reject(this.fail()); }
   beginPairing() { return Promise.reject(this.fail()); }
+  beginNumericPairing() { return Promise.reject(this.fail()); }
   confirmPairing() { return Promise.reject(this.fail()); }
   cancelPairing() { return Promise.reject(this.fail()); }
   async listConnections() { return []; }
   connect() { return Promise.reject(this.fail()); }
+  recoverConnection() { return Promise.reject(this.fail()); }
   disconnect() { return Promise.resolve(); }
   forgetConnection() { return Promise.resolve(); }
   getStatus() { return Promise.resolve({ state: "unavailable", error: "host-identity-unavailable" }); }

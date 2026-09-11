@@ -11,6 +11,7 @@ import { readFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { atomicWriteSync } from "@polyth/plugins";
 import type { JsonObject, NotificationKind, SessionProjection } from "@polyth/contracts";
+import type { NotificationAccount } from "./notifications.ts";
 
 // ---- base64url helpers ---------------------------------------------------------
 
@@ -227,17 +228,37 @@ export interface PushSubscriptionDto {
 
 export interface PushService {
   publicKey(): string;
+  subscribe(account: NotificationAccount, raw: unknown): PushSubscriptionDto;
+  /** Isolated legacy test seam; persisted rows still receive an owner. */
   subscribe(raw: unknown): PushSubscriptionDto;
+  unsubscribe(account: NotificationAccount, endpoint: string): boolean;
   unsubscribe(endpoint: string): boolean;
+  count(account: NotificationAccount): number;
   count(): number;
+  /** Internal account-deletion hook. */
+  removeAccount(userId: string): number;
   /** Encrypt + POST to every subscription; dead endpoints (404/410) drop. */
+  send(account: NotificationAccount, payload: PushPayload): Promise<{ sent: number; dropped: number }>;
   send(payload: PushPayload): Promise<{ sent: number; dropped: number }>;
+}
+
+interface StoredPushSubscription extends PushSubscriptionDto {
+  recipient: NotificationAccount;
 }
 
 interface PushFile {
   vapid: VapidKeys;
-  subs: PushSubscriptionDto[];
+  subs: StoredPushSubscription[];
 }
+
+const LEGACY_TEST_ACCOUNT: NotificationAccount = { userId: "__isolated_test__", spaceId: "__isolated_test__" };
+const sameAccount = (left: NotificationAccount, right: NotificationAccount): boolean =>
+  left.userId === right.userId && left.spaceId === right.spaceId;
+const validAccount = (value: unknown): value is NotificationAccount => {
+  if (!value || typeof value !== "object") return false;
+  const raw = value as { userId?: unknown; spaceId?: unknown };
+  return typeof raw.userId === "string" && raw.userId.length > 0 && typeof raw.spaceId === "string" && raw.spaceId.length > 0;
+};
 
 const isHttpsOrLoopback = (endpoint: string): boolean => {
   try {
@@ -253,9 +274,12 @@ export function createPushService(opts: {
   file: string;
   contact?: string;
   fetchFn?: typeof fetch;
+  /** Durable Space membership check for subscription mutation and delivery. */
+  hasAccess?: (account: NotificationAccount) => boolean;
 }): PushService {
   const contact = opts.contact ?? "mailto:polyth@localhost";
   const fetchFn = opts.fetchFn ?? fetch;
+  const hasAccess = opts.hasAccess ?? (() => true);
 
   let state: PushFile | null = null;
   try {
@@ -263,10 +287,12 @@ export function createPushService(opts: {
     if (raw.vapid?.publicKey && raw.vapid.privateJwk) {
       state = {
         vapid: raw.vapid,
+        // Legacy global subscriptions have no owner and are deliberately
+        // discarded rather than assigned to the installation owner.
         subs: Array.isArray(raw.subs)
-          ? raw.subs.filter((s): s is PushSubscriptionDto =>
+          ? raw.subs.filter((s): s is StoredPushSubscription =>
               !!s && typeof s.endpoint === "string" &&
-              typeof s.keys?.p256dh === "string" && typeof s.keys?.auth === "string")
+              typeof s.keys?.p256dh === "string" && typeof s.keys?.auth === "string" && validAccount(s.recipient))
           : [],
       };
     }
@@ -291,7 +317,10 @@ export function createPushService(opts: {
   return {
     publicKey: () => ensure().vapid.publicKey,
 
-    subscribe(raw) {
+    subscribe(first: NotificationAccount | unknown, second?: unknown) {
+      const account = second === undefined ? LEGACY_TEST_ACCOUNT : first as NotificationAccount;
+      const raw = second === undefined ? first : second;
+      if (!validAccount(account) || !hasAccess(account)) throw Object.assign(new Error("subscription account is invalid"), { code: "invalid-input" });
       const r = raw as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } };
       const endpoint = typeof r?.endpoint === "string" ? r.endpoint : "";
       const p256dh = typeof r?.keys?.p256dh === "string" ? r.keys.p256dh : "";
@@ -303,29 +332,52 @@ export function createPushService(opts: {
         throw Object.assign(new Error("subscription keys are malformed"), { code: "invalid-input" });
       }
       const s = ensure();
-      const sub: PushSubscriptionDto = { endpoint, keys: { p256dh, auth } };
+      const sub: StoredPushSubscription = { endpoint, keys: { p256dh, auth }, recipient: { ...account } };
+      // A browser push endpoint is one delivery destination, never a shared
+      // credential. An authenticated re-subscribe atomically transfers it to
+      // the current account; scoped unsubscribe still cannot remove another
+      // account's current row.
       s.subs = [...s.subs.filter((x) => x.endpoint !== endpoint), sub];
       save();
-      return sub;
+      return { endpoint: sub.endpoint, keys: sub.keys };
     },
 
-    unsubscribe(endpoint) {
+    unsubscribe(first: NotificationAccount | string, second?: string) {
+      const account = second === undefined ? LEGACY_TEST_ACCOUNT : first as NotificationAccount;
+      const endpoint = second === undefined ? first as string : second;
+      if (!validAccount(account) || !hasAccess(account)) return false;
       const s = ensure();
       const before = s.subs.length;
-      s.subs = s.subs.filter((x) => x.endpoint !== endpoint);
+      s.subs = s.subs.filter((x) => !(x.endpoint === endpoint && sameAccount(x.recipient, account)));
       if (s.subs.length !== before) save();
       return s.subs.length !== before;
     },
 
-    count: () => ensure().subs.length,
+    count: (account?: NotificationAccount) => {
+      const owner = account ?? LEGACY_TEST_ACCOUNT;
+      return validAccount(owner) && hasAccess(owner) ? ensure().subs.filter((sub) => sameAccount(sub.recipient, owner)).length : 0;
+    },
 
-    async send(payload) {
+    removeAccount(userId) {
+      if (typeof userId !== "string" || !userId) return 0;
       const s = ensure();
-      if (s.subs.length === 0) return { sent: 0, dropped: 0 };
+      const before = s.subs.length;
+      s.subs = s.subs.filter((sub) => sub.recipient.userId !== userId);
+      if (s.subs.length !== before) save();
+      return before - s.subs.length;
+    },
+
+    async send(first: NotificationAccount | PushPayload, second?: PushPayload) {
+      const account = second === undefined ? LEGACY_TEST_ACCOUNT : first as NotificationAccount;
+      const payload = second === undefined ? first as PushPayload : second;
+      if (!validAccount(account) || !hasAccess(account)) return { sent: 0, dropped: 0 };
+      const s = ensure();
+      const owned = s.subs.filter((sub) => sameAccount(sub.recipient, account));
+      if (owned.length === 0) return { sent: 0, dropped: 0 };
       const plaintext = Buffer.from(JSON.stringify(payload));
       let sent = 0;
       const dead: string[] = [];
-      await Promise.all(s.subs.map(async (sub) => {
+      await Promise.all(owned.map(async (sub) => {
         try {
           const res = await fetchFn(sub.endpoint, {
             method: "POST",
@@ -343,7 +395,7 @@ export function createPushService(opts: {
         } catch { /* transient network failure: keep the subscription */ }
       }));
       if (dead.length) {
-        s.subs = s.subs.filter((x) => !dead.includes(x.endpoint));
+        s.subs = s.subs.filter((x) => !(sameAccount(x.recipient, account) && dead.includes(x.endpoint)));
         save();
       }
       return { sent, dropped: dead.length };

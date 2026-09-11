@@ -1059,6 +1059,9 @@ export interface SessionRef { id: string }
 export interface TurnRef { turnId: string }
 export interface UserTurnInput {
   text: string;
+  /** Opaque client UUID reused only to recover this exact session admission.
+   * The durable operation ledger validates its session, kind, and intent. */
+  clientOperationId?: string;
   command?: { id: string; args?: string };
   /** Keep this model-visible prompt out of ordinary user chat bubbles. */
   githubConflictResolution?: boolean;
@@ -1508,7 +1511,8 @@ export interface SessionProjection {
   /** Per-session composer draft text, persisted server-side so it syncs
    *  across clients. Cleared on send. */
   draft?: string;
-  /** Timestamp (ms) of the last draft write; last-write-wins on conflicts. */
+  /** Timestamp (ms) of the last authoritative draft write; clients use it as
+   * a compare-and-set witness and preserve unordered local/server variants. */
   draftUpdatedAt?: number;
 }
 
@@ -1608,6 +1612,9 @@ export interface SessionService {
   create(input: CreateSessionInput): Promise<SessionRef>;
   /** Result carries turnId for admitted turns or queueId+queued for deferred delivery. */
   send(sessionId: string, input: UserTurnInput): Promise<SendResult>;
+  /** Read-only recovery view for one account-scoped client admission token.
+   * It projects the existing durable operation/queue authorities. */
+  clientMutationStatus?(sessionId: string, clientOperationId: string): Promise<ClientMutationStatusDto>;
   abort(sessionId: string): Promise<void>;
   /** Drop a pending rate-limit auto-resume (projection.resume). No-op when
    *  nothing is scheduled. */
@@ -1688,10 +1695,21 @@ export interface SessionService {
   /** User-confirmed borrowed/external runtime replacement. Never auto-epochs. */
   confirmBorrowedRuntimeEpoch?(sessionId: string): Promise<SessionProjection>;
   /** Persist a per-session composer draft server-side (synced via projection). */
-  saveDraft?(sessionId: string, text: string): Promise<void>;
+  saveDraft?(sessionId: string, text: string, expectedDraftUpdatedAt?: number | null): Promise<DraftSaveResult>;
   /** Advance the user's read cursor (highest seen event seq) and broadcast the
    *  updated attention so navigator unread bold reflects what was viewed. */
   markRead?(sessionId: string, seq: number): Promise<void>;
+}
+
+/** Authoritative draft-write receipt. A conflict means no projection mutation. */
+export interface DraftSaveResult { draftUpdatedAt: number }
+
+export interface ClientMutationStatusDto {
+  state: DurableOperationState | "queued" | "absent";
+  mutationKind?: RuntimeMutationKind | "queue-admission";
+  updatedAt?: number;
+  code?: string;
+  message?: string;
 }
 
 export interface SessionOrganizePatch {
@@ -2477,6 +2495,12 @@ export interface CanonicalEventInput {
 export interface PrepareOperationInput {
   sessionId: string;
   mutationKind: RuntimeMutationKind;
+  /** Optional client-provided UUID. Reuse is accepted only for the exact
+   * durable session/kind/intent already recorded in this store. */
+  clientOperationId?: string;
+  /** Hash of the exact client request bound to a client operation id. It is
+   * persisted in the existing mutation/prepared event, not a second ledger. */
+  clientRequestFingerprint?: string;
   /** Every generic preparation has one owning intent event in the same
    * transaction. Queue, create, response, and deletion use specialized APIs. */
   intentEvent: CanonicalEventInput;

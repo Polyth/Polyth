@@ -11,6 +11,8 @@ pub mod identity;
 pub mod limits;
 pub mod local_proxy;
 pub mod net;
+pub mod numeric_pairing;
+pub mod numeric_wire;
 pub mod pairing;
 pub mod protocol;
 pub mod proxy;
@@ -25,6 +27,11 @@ pub mod ws_local;
 pub use errors::{ErrorClass, LinkError};
 pub use identity::{HostIdentity, IdentityError};
 pub use limits::Limits;
+pub use numeric_pairing::{
+    normalize_code, NumericClientFinish, NumericClientLogin, NumericClientRequest, NumericPairing,
+    NumericPairingCode, NumericPairingRedeemed, NumericServerChallenge,
+};
+pub use numeric_wire::{NumericWireMessage, POLYTH_NUMERIC_ALPN};
 pub use pairing::{HostPairing, PairingEvent};
 pub use ticket::{decode_invite_secret, parse_pairing_ticket, PairingTicket, POLYTH_LINK_ALPN};
 pub use transport::TransportPolicy;

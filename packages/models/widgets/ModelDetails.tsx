@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import type { ModelDescriptor } from "@polyth/contracts";
 import {
   BackIcon,
@@ -20,6 +20,7 @@ export function ModelDetails({
   usage,
   onUse,
   onBack,
+  focusBack = false,
 }: {
   model: ModelDescriptor;
   selected: boolean;
@@ -27,7 +28,13 @@ export function ModelDetails({
   usage?: number;
   onUse: () => void;
   onBack: () => void;
+  /** Phone details replace the list inside its modal sheet. */
+  focusBack?: boolean;
 }) {
+  const detailsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (focusBack) detailsRef.current?.querySelector<HTMLButtonElement>(".model-details-back")?.focus();
+  }, [focusBack]);
   const presentation = modelDetailsPresentation(model);
   const percent = selected && usage && model.context
     ? Math.min(100, Math.round((usage / model.context) * 100))
@@ -57,7 +64,7 @@ export function ModelDetails({
       : []),
   ];
   return (
-    <div className="model-details">
+    <div ref={detailsRef} className="model-details">
       <Button type="button" className="model-details-back" size="sm" variant="ghost" iconStart={BackIcon} onClick={onBack}>
         {tr("common.back")}
       </Button>

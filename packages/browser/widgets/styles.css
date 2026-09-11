@@ -3,7 +3,7 @@
   container: browser-preview / inline-size;
   flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column;
   overflow: hidden; background: var(--sunken);
-  padding-bottom: env(safe-area-inset-bottom, 0);
+  padding-bottom: var(--safe-bottom);
 }
 .browser-chrome {
   flex: none; border-bottom: 1px solid var(--surface-divider); background: var(--panel);
@@ -30,8 +30,8 @@
 .browser-toolbar {
   display: flex; flex-direction: column; gap: 0;
   padding: 6px 8px;
-  padding-left: max(8px, env(safe-area-inset-left, 0));
-  padding-right: max(8px, env(safe-area-inset-right, 0));
+  padding-left: max(var(--space-2), var(--safe-left));
+  padding-right: max(var(--space-2), var(--safe-right));
 }
 .browser-navigation-row {
   width: 100%; min-width: 0; display: flex; align-items: center; gap: 5px;

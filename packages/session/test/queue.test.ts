@@ -36,6 +36,21 @@ test("enqueue keeps FIFO order and dispatch pops in order", async () => {
   }
 });
 
+test("client queue admission returns its atomic created result", async () => {
+  const store = createStore(join(freshDir(), "q.db"));
+  try {
+    const token = "d2719d26-743e-4f7f-8cb0-55c3e5ad5d7b";
+    const first = await store.enqueue("s1", "once", "queue", undefined, token);
+    const duplicate = await store.enqueue("s1", "once", "queue", undefined, token);
+    assert.equal(first.created, true);
+    assert.equal(duplicate.created, false);
+    assert.equal(duplicate.item.id, first.item.id);
+    assert.equal((await store.queueList("s1")).length, 1);
+  } finally {
+    await store.close();
+  }
+});
+
 test("queue order survives store reopen (restart)", async () => {
   const dir = freshDir();
   const dbPath = join(dir, "q.db");
@@ -57,9 +72,9 @@ test("queue order survives store reopen (restart)", async () => {
 test("queueReorder validates an exact permutation", async () => {
   const store = createStore(join(freshDir(), "q.db"));
   try {
-    const a = await store.enqueue("s1", "a", "queue");
-    const b = await store.enqueue("s1", "b", "queue");
-    const c = await store.enqueue("s1", "c", "queue");
+    const a = (await store.enqueue("s1", "a", "queue")).item;
+    const b = (await store.enqueue("s1", "b", "queue")).item;
+    const c = (await store.enqueue("s1", "c", "queue")).item;
 
     // wrong count
     await assert.rejects(() => store.queueReorder("s1", [a.id, b.id]), /permutation/);
@@ -88,7 +103,7 @@ test("queueEdit persists text while preserving queue metadata", async () => {
   let queueId = "";
   {
     const store = createStore(dbPath);
-    const item = await store.enqueue("s1", "before", "steer", [attachment]);
+    const item = (await store.enqueue("s1", "before", "steer", [attachment])).item;
     queueId = item.id;
     const edited = await store.queueEdit("s1", item.id, "after");
     assert.deepEqual(edited, { ...item, text: "after" });
@@ -111,7 +126,7 @@ test("queueEdit persists text while preserving queue metadata", async () => {
 test("queueRemove removes only the owning session's item", async () => {
   const store = createStore(join(freshDir(), "q.db"));
   try {
-    const a = await store.enqueue("s1", "a", "queue");
+    const a = (await store.enqueue("s1", "a", "queue")).item;
     assert.equal(await store.queueRemove("other-session", a.id), false);
     assert.equal(await store.queueRemove("s1", a.id), true);
     assert.equal(await store.queueRemove("s1", a.id), false);

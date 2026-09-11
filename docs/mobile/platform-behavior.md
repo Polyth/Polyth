@@ -74,16 +74,30 @@ a partial intent handler.
 
 ## Notifications
 
-Local notifications are a foundation, not a production push system:
+Mobile push is a native-controller and relay flow. Permission is requested only
+from the explicit Mobile push notifications setting, never at startup or
+pairing. Android requests `POST_NOTIFICATIONS` only on Android 13+; a fresh
+install remains actionable until that request has been made. iOS registers APNs
+only after authorization. The native controller keeps provider tokens and relay
+manage capabilities in secure native storage, while web content receives only
+semantic state and a short-lived claim.
 
-- permission is requested only from the existing notification preference
-  action;
-- already-derived completion/failure notifications can be scheduled locally;
-- notification taps deep-link to the owning session; and
-- the existing bounded/redacted notification text is reused.
+Provider data is strictly limited to version, subscription id, notification
+UUID, kind, and opaque tag. Receipt validates and displays an OS notification
+but never writes navigation state. A user tap persists one bounded trusted
+connection/account/notification mapping, returns to the bundled Connection Hub,
+and reconnects that saved server before the authenticated server looks up the
+canonical notification. It never turns provider data into a URL or assumes a
+session/project. Exact foreground mapping suppresses the OS alert so canonical
+WebSocket/in-app delivery wins; a different trusted server/account retains its
+OS notification.
 
-There is no APNs/FCM registration, production push credential flow, or remote
-notification relay in this wave.
+The app uses `polyth_activity` for completed/subagent activity and
+`polyth_attention` for failed/question/permission events. Existing local and
+browser notifications remain the fallback when native push is unavailable or
+not successfully claimed. APNs/FCM provider delivery, signing, Firebase
+configuration, and device lifecycle behavior remain external-verification work;
+the repository tests do not make provider calls.
 
 ## Platform identity
 

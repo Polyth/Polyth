@@ -3,12 +3,12 @@
 // broadcast and folded into projections. Live context occupancy and native
 // command catalogs stay in session-scoped memory and are overlaid onto client
 // projections; they are not durable history.
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { continuityWorkspace } from "./continuityWorkspace.ts";
 import type {
-  AgentProfile, AgentRuntime, AttachmentRef, AttachmentModality, AutoAcceptSetting, CanonicalEventInput, ChildSnapshotResult, ClientSettingsDto, ContextWindowState, CreateSessionInput, DeliveryMode,
+  AgentProfile, AgentRuntime, AttachmentRef, AttachmentModality, AutoAcceptSetting, CanonicalEventInput, ChildSnapshotResult, ClientMutationStatusDto, ClientSettingsDto, ContextWindowState, CreateSessionInput, DeliveryMode,
   Disposable, DurableOperation, HarnessSelection, HarnessTransition, ForkDraft, ForkResult, JsonObject, ModelRef, MutationOutcome, NotificationRecord,
   PersistedRuntimeBinding,
   InstalledPluginDto, ModelDescriptor, PackageDescriptorDto, QueueItemDto, RateLimitRetry, RateLimitRetryHint, RuntimeEvent,
@@ -66,13 +66,31 @@ const QUIET_DISPATCH_ERRORS = new Set([
   "epoch-pending",
 ]);
 
+const canonicalClientValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(canonicalClientValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, child]) => child !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, child]) => [key, canonicalClientValue(child)]),
+    );
+  }
+  return value;
+};
+
+const fingerprintClientAdmission = (input: UserTurnInput): string =>
+  createHash("sha256")
+    .update(JSON.stringify(canonicalClientValue(input)))
+    .digest("hex");
+
 export interface Broadcaster {
   event(ev: SessionEvent): void;
   projection(p: SessionProjection): void;
   /** NTF-01: unfiltered notification-centre fan-out. Optional so existing
    *  fakes stay valid; inbox records never pass through appendAndBroadcast
    *  or any session reducer. */
-  notification?(record: NotificationRecord): void;
+  notification?(record: NotificationRecord, recipient?: { userId: string; spaceId: string }): void;
   pluginChanged?(packageId: string): void;
   packageChanged?(pkg: PackageDescriptorDto): void;
   /** Server-persisted client preferences changed on another device. */
@@ -86,7 +104,7 @@ export interface Broadcaster {
 
 /** Durable FIFO delivery queue (implemented by @polyth/session's Store). */
 export interface QueueStore {
-  enqueue(sessionId: string, text: string, delivery: DeliveryMode, attachments?: AttachmentRef[]): Promise<QueueItemDto>;
+  enqueue(sessionId: string, text: string, delivery: DeliveryMode, attachments?: AttachmentRef[], clientOperationId?: string): Promise<{ item: QueueItemDto; created: boolean }>;
   queueList(sessionId: string): Promise<QueueItemDto[]>;
   queueEdit(sessionId: string, queueId: string, text: string): Promise<QueueItemDto | undefined>;
   queueReorder(sessionId: string, ids: string[]): Promise<QueueItemDto[]>;
@@ -469,6 +487,7 @@ export function createSessionService(deps: {
   // implementation is assigned after the epoch helpers are declared; callers
   // can safely request recovery during attach/reconciliation.
   let recoverOwnedEpochIfPending: (sessionId: string) => Promise<void> = async () => {};
+  let recoverOwnedEpochIfPendingUnderLock: (sessionId: string) => Promise<void> = async () => {};
   // Last redacted endpoint seen during normal attach/bind. debug() reads this
   // instead of calling endpoint(), which can restart a dead owned instance.
   const attachedEndpoint = new WeakMap<AgentRuntime, SessionDebugEndpointDto>();
@@ -910,6 +929,25 @@ export function createSessionService(deps: {
     } finally {
       release();
       if (chains.get(sessionId) === current) chains.delete(sessionId);
+    }
+  };
+  // A client operation UUID is its admission identity. Serialize the complete
+  // direct-or-queue decision for that token so concurrent HTTP requests cannot
+  // both pass the optimistic lookup and bind one UUID to two side effects.
+  const clientAdmissionChains = new Map<string, Promise<void>>();
+  const withClientAdmissionLock = async <T>(operationId: string, fn: () => Promise<T>): Promise<T> => {
+    const previous = clientAdmissionChains.get(operationId) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolveCurrent) => {
+      release = resolveCurrent;
+    });
+    clientAdmissionChains.set(operationId, current);
+    await previous;
+    try {
+      return await fn();
+    } finally {
+      release();
+      if (clientAdmissionChains.get(operationId) === current) clientAdmissionChains.delete(operationId);
     }
   };
 
@@ -4248,10 +4286,13 @@ export function createSessionService(deps: {
 
   const enqueueMessage = async (
     sessionId: string, text: string, delivery: DeliveryMode, fallbackReason?: string,
-    attachments?: AttachmentRef[], sourceOperationId?: string,
+    attachments?: AttachmentRef[], sourceOperationId?: string, clientOperationId?: string,
+    clientRequestFingerprint?: string,
   ): Promise<SendResult> => {
     if (!deps.queue) throw Object.assign(new Error("delivery queue unavailable"), { code: "unsupported" });
-    const item = await deps.queue.enqueue(sessionId, text, delivery, attachments);
+    const admission = await deps.queue.enqueue(sessionId, text, delivery, attachments, clientOperationId);
+    const item = admission.item;
+    if (!admission.created) return { queueId: item.id, queued: true };
     if (fallbackReason) {
       await appendAndBroadcast(sessionId, "delivery/fallback-queued", { queueId: item.id, reason: fallbackReason }, { ignorable: true });
     }
@@ -4259,6 +4300,7 @@ export function createSessionService(deps: {
       queueId: item.id, text, delivery,
       ...(attachments?.length ? { attachments: attachments as unknown as JsonObject[] } : {}),
       ...(sourceOperationId ? { sourceOperationId } : {}),
+      ...(clientOperationId && clientRequestFingerprint ? { clientRequestFingerprint } : {}),
     }, { ignorable: true });
     return { queueId: item.id, queued: true };
   };
@@ -4362,6 +4404,7 @@ export function createSessionService(deps: {
   const admitTurnCoreUnfenced = async (
     sessionId: string, proj: SessionProjection, rt: AgentRuntime, input: UserTurnInput,
     reserved?: { operation: DurableOperation; queueId: string },
+    clientRequestFingerprint?: string,
   ): Promise<SendResult> => {
     if ((await store.projection(sessionId))?.harnessTransition) {
       throw Object.assign(new Error("harness switch is pending"), { code: "conflict" });
@@ -4572,15 +4615,29 @@ export function createSessionService(deps: {
           event.type === "user/message" && event.seq === source?.ownerEventSeq);
       }
     }
-    if (!operation) {
-      const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
-        sessionId,
-        mutationKind: "turn-submit",
-        intentEvent: { type: "user/message", data: messageData },
-      }));
-      operation = prepared.operation;
-      message = prepared.intentEvent;
-    } else if (!message) {
+      if (!operation) {
+        const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
+          sessionId,
+          mutationKind: "turn-submit",
+          ...(input.clientOperationId ? { clientOperationId: input.clientOperationId } : {}),
+          ...(clientRequestFingerprint ? { clientRequestFingerprint } : {}),
+          intentEvent: { type: "user/message", data: messageData },
+        }));
+        operation = prepared.operation;
+        message = prepared.intentEvent;
+        // A replayed admission may name a durable terminal/unknown operation.
+        // It never reaches the runtime again: server reconciliation remains the
+        // only authority for an uncertain prior side effect.
+        if (input.clientOperationId && operation.state !== "prepared") {
+          if (operation.state === "confirmed") return {};
+          if (operation.state === "unknown") {
+            throw outcomeError({ kind: "unknown", operationId: operation.operationId, message: operation.message ?? "admission outcome is unknown" });
+          }
+          throw Object.assign(new Error(operation.message ?? "prior admission was rejected"), {
+            code: operation.code ?? "client-operation-rejected",
+          });
+        }
+      } else if (!message) {
       // The queue reservation is the transactionally-owned durable intent.
       // The model-visible message still lands before the claimed network call.
       message = await appendAndBroadcast(sessionId, "user/message", messageData);
@@ -4689,8 +4746,9 @@ export function createSessionService(deps: {
   const admitTurnCore = (
     sessionId: string, proj: SessionProjection, rt: AgentRuntime, input: UserTurnInput,
     reserved?: { operation: DurableOperation; queueId: string },
+    clientRequestFingerprint?: string,
   ): Promise<SendResult> => {
-    const admit = () => admitTurnCoreUnfenced(sessionId, proj, rt, input, reserved);
+    const admit = () => admitTurnCoreUnfenced(sessionId, proj, rt, input, reserved, clientRequestFingerprint);
     return deps.admission ? deps.admission.admit(admit) : admit();
   };
 
@@ -4699,6 +4757,7 @@ export function createSessionService(deps: {
   const admitTurn = (
     sessionId: string, proj: SessionProjection, rt: AgentRuntime, input: UserTurnInput,
     reserved?: { operation: DurableOperation; queueId: string },
+    clientRequestFingerprint?: string,
   ): Promise<SendResult> =>
     withSessionLock(sessionId, async () => {
       let current = (await store.projection(sessionId)) ?? proj;
@@ -4706,7 +4765,18 @@ export function createSessionService(deps: {
       const active = turnActive(sessionId);
       if (current.harnessTransition) {
         current = await finishHarnessSwitchUnderLock(sessionId);
-        if (current.harnessTransition) return enqueueMessage(sessionId, input.text, "queue", "harness-switch", input.attachments);
+        if (current.harnessTransition) {
+          return enqueueMessage(
+            sessionId,
+            input.text,
+            "queue",
+            "harness-switch",
+            input.attachments,
+            undefined,
+            input.clientOperationId,
+            clientRequestFingerprint,
+          );
+        }
         rt = await ensureWired(sessionId, current);
       }
       let stoppedTurnRecorded = hasPersistedStoppedTurn(await store.events(sessionId));
@@ -4746,9 +4816,12 @@ export function createSessionService(deps: {
           delivery,
           reason,
           input.attachments,
+          undefined,
+          input.clientOperationId,
+          clientRequestFingerprint,
         );
       }
-      return admitTurnCore(sessionId, current, rt, input, reserved);
+      return admitTurnCore(sessionId, current, rt, input, reserved, clientRequestFingerprint);
     });
 
   // F14 import half: one scan shared by browse/import/sync — backend sessions
@@ -5305,18 +5378,22 @@ export function createSessionService(deps: {
   };
 
   const ownedEpochRecoveryFlights = new Map<string, Promise<void>>();
+  recoverOwnedEpochIfPendingUnderLock = async (sessionId: string): Promise<void> => {
+    const projection = await store.projection(sessionId);
+    if (
+      !projection
+      || projection.status !== "epoch-pending"
+      || projection.runtimeControl !== "owned"
+    ) return;
+    await recoverFreshRuntimeEpochUnderLock(sessionId);
+  };
   recoverOwnedEpochIfPending = (sessionId: string): Promise<void> => {
     const existing = ownedEpochRecoveryFlights.get(sessionId);
     if (existing) return existing;
-    const flight = withSessionLock(sessionId, async () => {
-      const projection = await store.projection(sessionId);
-      if (
-        !projection
-        || projection.status !== "epoch-pending"
-        || projection.runtimeControl !== "owned"
-      ) return;
-      await recoverFreshRuntimeEpochUnderLock(sessionId);
-    }).catch((error) => {
+    const flight = withSessionLock(
+      sessionId,
+      () => recoverOwnedEpochIfPendingUnderLock(sessionId),
+    ).catch((error) => {
       // Keep the durable pending state when a fresh runtime cannot be created;
       // a later runtime event or send can retry the same recovery path.
       console.error(`[polyth] automatic runtime epoch recovery failed for ${sessionId}`, error);
@@ -5758,6 +5835,35 @@ export function createSessionService(deps: {
     async resolveAgentToolSession(input) {
       return (await activeAgentToolSession(input))?.id;
     },
+    async clientMutationStatus(sessionId, operationId): Promise<ClientMutationStatusDto> {
+      const projection = await store.projection(sessionId);
+      if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      const operation = await durable.operation(operationId);
+      if (operation) {
+        // Do not disclose whether a token belongs to another session.
+        if (operation.sessionId !== sessionId) return { state: "absent" };
+        return {
+          state: operation.state,
+          mutationKind: operation.mutationKind,
+          updatedAt: operation.updatedAt,
+          ...(operation.code ? { code: operation.code } : {}),
+          ...(operation.message ? { message: operation.message } : {}),
+        };
+      }
+      const queued = deps.queue
+        ? (await deps.queue.queueList(sessionId)).find((item) => item.id === operationId)
+        : undefined;
+      if (queued) return { state: "queued", mutationKind: "queue-admission", updatedAt: queued.createdAt };
+      // A queue row is removed when dispatch completes, but its canonical
+      // admission/user event remains the durable proof that a lost response
+      // must not cause the client to submit the same text again.
+      const admitted = (await store.events(sessionId)).find((event) =>
+        (event.type === "queue/enqueued" || event.type === "user/message")
+        && (event.data as { queueId?: unknown }).queueId === operationId);
+      return admitted
+        ? { state: "confirmed", mutationKind: "queue-admission", updatedAt: admitted.time }
+        : { state: "absent" };
+    },
     async requestAgentToolPermission(input) {
       if (input.signal?.aborted) return "deny";
       const projection = await activeAgentToolSession(input);
@@ -5836,7 +5942,6 @@ export function createSessionService(deps: {
         });
       });
     },
-
     async switchHarness(sessionId, selection, timing = "after-turn") {
       return withSessionLock(sessionId, async () => {
         let projection = await store.projection(sessionId);
@@ -6212,12 +6317,64 @@ export function createSessionService(deps: {
     },
 
     async send(sessionId, input: UserTurnInput): Promise<SendResult> {
+      const execute = async (): Promise<SendResult> => {
+      const clientRequestFingerprint = input.clientOperationId
+        ? fingerprintClientAdmission(input)
+        : undefined;
+      if (input.clientOperationId) {
+        const prior = await durable.operation(input.clientOperationId);
+        if (prior) {
+          const prepared = (await store.events(prior.sessionId)).find((event) =>
+            event.type === "mutation/prepared"
+            && (event.data as { operationId?: unknown }).operationId === prior.operationId);
+          const priorFingerprint = (prepared?.data as { clientRequestFingerprint?: unknown } | undefined)
+            ?.clientRequestFingerprint;
+          if (prior.sessionId !== sessionId
+            || prior.mutationKind !== "turn-submit"
+            || priorFingerprint !== clientRequestFingerprint) {
+            throw Object.assign(new Error("client operation id is already bound to another mutation"), {
+              code: "client-operation-conflict",
+            });
+          }
+          if (prior.state === "confirmed") return {};
+          if (prior.state === "prepared" || prior.state === "executing" || prior.state === "unknown") {
+            throw outcomeError({
+              kind: "unknown",
+              operationId: prior.operationId,
+              message: prior.message ?? "admission outcome is unresolved",
+            });
+          }
+          throw Object.assign(new Error(prior.message ?? `prior admission is ${prior.state}`), {
+            code: prior.code ?? `client-operation-${prior.state}`,
+          });
+        }
+      }
       let proj = await store.projection(sessionId);
       if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
       assertIsolationExecutable(proj);
       if (input.autoResume !== true) await clearResume(sessionId, "user");
       let stoppedTurnRecorded = hasPersistedStoppedTurn(await store.events(sessionId));
       const delivery: DeliveryMode = input.delivery ?? "normal";
+      // Queue admission can bind this same client UUID to its durable queue
+      // row. Steer/interrupt are live/destructive and therefore never replay.
+      if (input.clientOperationId && delivery !== "normal" && delivery !== "queue") {
+        throw Object.assign(new Error("client operation identity cannot replay steer or interrupt"), { code: "invalid-input" });
+      }
+      if (input.clientOperationId) {
+        const priorQueueAdmission = (await store.events(sessionId)).findLast((event) =>
+          event.type === "queue/enqueued"
+          && (event.data as { queueId?: unknown }).queueId === input.clientOperationId);
+        if (priorQueueAdmission) {
+          const priorFingerprint = (priorQueueAdmission.data as { clientRequestFingerprint?: unknown })
+            .clientRequestFingerprint;
+          if (priorFingerprint !== clientRequestFingerprint) {
+            throw Object.assign(new Error("client operation id is already bound to another queue admission"), {
+              code: "client-operation-conflict",
+            });
+          }
+          return { queueId: input.clientOperationId, queued: true };
+        }
+      }
       // Attachments are prepared (existence-checked, `_inbox/*` materialized
       // into the session's execution root) before any state changes (rewind
       // reset, queueing, admission) so a bad ref can never dirty the durable
@@ -6274,7 +6431,18 @@ export function createSessionService(deps: {
       }
       if (proj.harnessTransition) {
         proj = await withSessionLock(sessionId, () => finishHarnessSwitchUnderLock(sessionId));
-        if (proj.harnessTransition) return enqueueMessage(sessionId, input.text, "queue", "harness-switch", input.attachments);
+        if (proj.harnessTransition) {
+          return enqueueMessage(
+            sessionId,
+            input.text,
+            "queue",
+            "harness-switch",
+            input.attachments,
+            undefined,
+            input.clientOperationId,
+            clientRequestFingerprint,
+          );
+        }
       }
       if (!proj.harnessTransition && proj.runtimeLeg && proj.status === "idle" && !turnActive(sessionId)
         && !await blockingOperation(sessionId) && proj.runtimeLeg.bootstrap !== "continuity"
@@ -6371,6 +6539,13 @@ export function createSessionService(deps: {
         && !replaceUnknown
         && admissionBarrier?.state === "blocked"
       ) {
+        if (input.clientOperationId) {
+          const prior = await durable.operation(input.clientOperationId);
+          if (prior?.state === "unknown") throw outcomeError({
+            kind: "unknown", operationId: prior.operationId, message: prior.message ?? "admission outcome is unknown",
+          });
+          throw Object.assign(new Error("direct admission is blocked by reconciliation"), { code: "conflict" });
+        }
         return enqueueMessage(
           sessionId,
           input.text,
@@ -6605,10 +6780,30 @@ export function createSessionService(deps: {
       const active = turnActive(sessionId);
 
       if (active && deps.queue) {
-        if (delivery === "queue") return enqueueMessage(sessionId, input.text, "queue", undefined, input.attachments);
+        if (delivery === "queue") {
+          return enqueueMessage(
+            sessionId,
+            input.text,
+            "queue",
+            undefined,
+            input.attachments,
+            undefined,
+            input.clientOperationId,
+            clientRequestFingerprint,
+          );
+        }
         if (delivery === "normal") {
           // idle race: the turn started between the client's check and admission
-          return enqueueMessage(sessionId, input.text, "queue", "turn-active", input.attachments);
+          return enqueueMessage(
+            sessionId,
+            input.text,
+            "queue",
+            "turn-active",
+            input.attachments,
+            undefined,
+            input.clientOperationId,
+            clientRequestFingerprint,
+          );
         }
         if (delivery === "steer") {
           const caps = await rt.capabilities().catch(() => null);
@@ -6675,7 +6870,8 @@ export function createSessionService(deps: {
         }
         if (delivery === "interrupt") {
           // enqueue at the head, then abort; turn/stopped(aborted) dispatches it
-          const item = await deps.queue.enqueue(sessionId, input.text, "interrupt", input.attachments);
+          const admission = await deps.queue.enqueue(sessionId, input.text, "interrupt", input.attachments);
+          const item = admission.item;
           const rest = await deps.queue.queueList(sessionId);
           const ids = [item.id, ...rest.filter((i) => i.id !== item.id).map((i) => i.id)];
           if (ids.length > 1) await deps.queue.queueReorder(sessionId, ids);
@@ -6729,13 +6925,26 @@ export function createSessionService(deps: {
               { code: "session-not-idle" },
             );
           }
-          const res = await enqueueMessage(sessionId, input.text, delivery === "steer" ? "steer" : "queue", undefined, input.attachments);
+          const res = await enqueueMessage(
+            sessionId,
+            input.text,
+            delivery === "steer" ? "steer" : "queue",
+            undefined,
+            input.attachments,
+            undefined,
+            input.clientOperationId,
+            clientRequestFingerprint,
+          );
           void dispatchQueue(sessionId);
           return res;
         }
       }
 
-      return admitTurn(sessionId, proj, rt, input);
+      return admitTurn(sessionId, proj, rt, input, undefined, clientRequestFingerprint);
+      };
+      return input.clientOperationId
+        ? withClientAdmissionLock(input.clientOperationId, execute)
+        : execute();
     },
 
     async queueList(sessionId) {
@@ -7975,18 +8184,26 @@ export function createSessionService(deps: {
       return { setting, effective: await effectiveAutoAccept(sessionId) };
     },
 
-    async saveDraft(sessionId, text) {
-      const proj = await store.projection(sessionId);
-      if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
-      const now = Date.now();
-      // Last-write-wins: only overwrite if incoming timestamp is newer (or absent).
-      if (proj.draftUpdatedAt && proj.draftUpdatedAt > now) return;
-      await applyProjection(sessionId, (current) => ({
-        ...current,
-        draft: text || undefined,
-        draftUpdatedAt: text ? now : undefined,
-        updatedAt: now,
-      }));
+    async saveDraft(sessionId, text, expectedDraftUpdatedAt) {
+      return withSessionLock(sessionId, async () => {
+        const proj = await store.projection(sessionId);
+        if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        const currentStamp = proj.draftUpdatedAt ?? null;
+        if (expectedDraftUpdatedAt !== undefined && expectedDraftUpdatedAt !== currentStamp) {
+          throw Object.assign(new Error("draft changed on another client"), { code: "draft-conflict" });
+        }
+        const now = Math.max(Date.now(), (currentStamp ?? 0) + 1);
+        const next = await applyProjection(sessionId, (current) => ({
+          ...current,
+          draft: text || undefined,
+          // Retain a clear's timestamp: it is the authoritative ordering
+          // witness needed to reject a stale writer after a remote clear.
+          draftUpdatedAt: now,
+          updatedAt: now,
+        }));
+        if (!next) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        return { draftUpdatedAt: next.draftUpdatedAt! };
+      });
     },
   };
 

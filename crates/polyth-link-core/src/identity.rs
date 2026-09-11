@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use iroh::SecretKey;
 use sha2::{Digest, Sha256};
@@ -58,6 +60,57 @@ impl HostIdentity {
     pub fn path(&self) -> &Path {
         &self.path
     }
+}
+
+static MEMORY_IDENTITIES: OnceLock<Mutex<HashMap<PathBuf, [u8; SECRET_LEN]>>> = OnceLock::new();
+
+fn memory_identities() -> &'static Mutex<HashMap<PathBuf, [u8; SECRET_LEN]>> {
+    MEMORY_IDENTITIES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Scoped, memory-only identity override for trusted native adapters.
+///
+/// Mobile callers keep the durable secret in Keychain/Keystore and install it
+/// only while the shared Rust client opens a pairing/reconnect operation. The
+/// normal CLI path never uses this seam and continues to use the identity file.
+pub struct MemoryIdentityGuard {
+    path: PathBuf,
+}
+
+impl Drop for MemoryIdentityGuard {
+    fn drop(&mut self) {
+        if let Ok(mut identities) = memory_identities().lock() {
+            if let Some(mut bytes) = identities.remove(&self.path) {
+                bytes.zeroize();
+            }
+        }
+    }
+}
+
+pub fn use_memory_identity(
+    path: impl AsRef<Path>,
+    secret: &[u8],
+) -> Result<MemoryIdentityGuard, IdentityError> {
+    let bytes: [u8; SECRET_LEN] = secret.try_into().map_err(|_| IdentityError::Corrupt)?;
+    let path = path.as_ref().to_path_buf();
+    let mut identities = memory_identities().lock().map_err(|_| IdentityError::Io)?;
+    if identities.contains_key(&path) {
+        return Err(IdentityError::Io);
+    }
+    identities.insert(path.clone(), bytes);
+    Ok(MemoryIdentityGuard { path })
+}
+
+fn memory_identity(path: &Path) -> Result<Option<HostIdentity>, IdentityError> {
+    let identities = memory_identities().lock().map_err(|_| IdentityError::Io)?;
+    let Some(bytes) = identities.get(path) else {
+        return Ok(None);
+    };
+    let secret = SecretKey::from_bytes(bytes);
+    Ok(Some(HostIdentity {
+        secret,
+        path: path.to_path_buf(),
+    }))
 }
 
 fn checksum(secret: &[u8; 32]) -> [u8; CHECKSUM_LEN] {
@@ -162,6 +215,9 @@ fn generate_secret() -> SecretKey {
 /// Corrupt, truncated, permission, or checksum errors fail closed.
 pub fn load_or_create(path: impl AsRef<Path>) -> Result<HostIdentity, IdentityError> {
     let path = path.as_ref().to_path_buf();
+    if let Some(identity) = memory_identity(&path)? {
+        return Ok(identity);
+    }
     match read_exact_path(&path) {
         Ok(bytes) => {
             let mut secret_bytes = decode(&bytes)?;
@@ -211,6 +267,9 @@ pub fn load_or_create(path: impl AsRef<Path>) -> Result<HostIdentity, IdentityEr
 
 pub fn load_existing(path: impl AsRef<Path>) -> Result<HostIdentity, IdentityError> {
     let path = path.as_ref().to_path_buf();
+    if let Some(identity) = memory_identity(&path)? {
+        return Ok(identity);
+    }
     let bytes = read_exact_path(&path)?;
     let mut secret_bytes = decode(&bytes)?;
     let secret = SecretKey::from_bytes(&secret_bytes);
@@ -282,6 +341,32 @@ mod tests {
             let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
             assert_eq!(mode, 0o600);
         }
+    }
+
+    #[test]
+    fn memory_identity_never_materializes_on_disk() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("identity");
+        let secret = SecretKey::generate().to_bytes();
+        let expected = SecretKey::from_bytes(&secret).public().to_string();
+        {
+            let _guard = use_memory_identity(&path, &secret).unwrap();
+            assert_eq!(load_or_create(&path).unwrap().endpoint_id(), expected);
+            assert_eq!(load_existing(&path).unwrap().endpoint_id(), expected);
+            assert!(!path.exists());
+        }
+        assert!(matches!(load_existing(&path), Err(IdentityError::NotFound)));
+    }
+
+    #[test]
+    fn memory_identity_is_exclusive_per_path() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("identity");
+        let secret = SecretKey::generate().to_bytes();
+        let guard = use_memory_identity(&path, &secret).unwrap();
+        assert!(use_memory_identity(&path, &secret).is_err());
+        drop(guard);
+        assert!(use_memory_identity(&path, &secret).is_ok());
     }
 
     #[test]

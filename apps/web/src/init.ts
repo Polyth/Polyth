@@ -11,7 +11,7 @@ import type { AttachmentRef, HarnessSelection, JsonObject, ModelRef, Project, Pr
 import { suggestWorktreeBranch } from "./worktreeSessions.ts";
 import { installPushDeepLinks, registerServiceWorker } from "./push.ts";
 import { notificationCentre } from "./notificationCentre.ts";
-import { applyComposerSeed } from "./drafts.ts";
+import { applyComposerSeed, hydrateComposerDraft } from "./drafts.ts";
 import { forkSeedKey, rewindSeedKey } from "./messageActions.ts";
 import {
   getSessionDefaults,
@@ -25,6 +25,10 @@ import { desktopBridge } from "./desktopBridge.ts";
 import { clearSendFailure, reportSendFailure } from "./sendFailure.ts";
 import { markSessionPerformance } from "./sessionPerformance.ts";
 import { shouldRefreshRuntimeFeatures } from "./runtimeFeaturesSync.ts";
+import { flushClientPersistence, type PersistenceScope } from "./clientPersistence.ts";
+import { hydrateLocalMutationIntent, reconcileLocalMutationIntent, submitDirectPrompt } from "./mutationIntent.ts";
+import { isNativeMobile, isPolythLinkLoopbackOrigin, returnToMobileConnectionHub } from "@polyth/mobile/runtime";
+import { scopedDraftCacheKey } from "./draftRecord.ts";
 
 let sync: SyncClient | null = null;
 let syncStatus: SyncStatus = "disconnected";
@@ -34,6 +38,10 @@ let lastProject: string | null | undefined;
 let branchFetchedFor: string | null = null;
 let runtimeCatalogHydrated = false;
 let runtimeCatalogPolicy: "browser" | "pending" | "project" | "interaction" = "browser";
+let nativeProxyProbe: Promise<void> | null = null;
+let nativeProxyProbeFailures = 0;
+let nativeProxyFirstFailureAt = 0;
+let returningToConnectionHub = false;
 let openSessionGeneration = 0;
 const hydratedSessions = new Set<string>();
 const runtimeFeaturesInFlight = new Map<string, Promise<void>>();
@@ -130,10 +138,78 @@ export function reconnectSync(): void {
   sync?.reconnect();
 }
 
+/** Native/browser lifecycle hint. It suppresses retry work but never claims
+ * authentication or reachability; the next socket handshake remains truth. */
+export function setSyncForeground(isForeground: boolean): void {
+  sync?.setRetryHints({ foreground: isForeground });
+  if (!isForeground) void flushClientPersistence().catch(() => undefined);
+}
+
 function publishSyncStatus(status: SyncStatus): void {
-  if (status === syncStatus) return;
-  syncStatus = status;
-  for (const listener of [...syncStatusListeners]) listener();
+  if (status !== syncStatus) {
+    syncStatus = status;
+    for (const listener of [...syncStatusListeners]) listener();
+  }
+  if (status === "connected") {
+    nativeProxyProbeFailures = 0;
+    nativeProxyFirstFailureAt = 0;
+  } else if (status === "reconnecting") {
+    void verifyNativeLoopbackProxy();
+  }
+}
+
+function verifyNativeLoopbackProxy(): Promise<void> {
+  if (!isNativeMobile() || !isPolythLinkLoopbackOrigin(location.origin)
+    || returningToConnectionHub) return Promise.resolve();
+  if (nativeProxyProbe) return nativeProxyProbe;
+  nativeProxyProbe = (async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1_500);
+    try {
+      const response = await fetch("/__polyth/client-context", {
+        credentials: "include",
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`local proxy context: HTTP ${response.status}`);
+      const value = await response.json() as { protocolVersion?: unknown; connectionScope?: unknown };
+      if (value.protocolVersion !== 1 || typeof value.connectionScope !== "string" || !value.connectionScope) {
+        throw new Error("local proxy context is invalid");
+      }
+      nativeProxyProbeFailures = 0;
+      nativeProxyFirstFailureAt = 0;
+    } catch {
+      const now = Date.now();
+      if (nativeProxyProbeFailures === 0) nativeProxyFirstFailureAt = now;
+      nativeProxyProbeFailures += 1;
+      // Give the native foreground controller time to restore a suspended
+      // transport. Persistent local HTTP failure is distinct from a healthy
+      // proxy whose remote /ws leg is temporarily unreachable.
+      if (nativeProxyProbeFailures >= 2
+        && now - nativeProxyFirstFailureAt >= 3_000
+        && syncStatus === "reconnecting"
+        && (typeof document === "undefined" || document.visibilityState !== "hidden")) {
+        returningToConnectionHub = true;
+        await flushClientPersistence().catch(() => undefined);
+        await returnToMobileConnectionHub(`${location.pathname}${location.search}${location.hash}`);
+      }
+    } finally {
+      clearTimeout(timeout);
+      nativeProxyProbe = null;
+    }
+  })();
+  return nativeProxyProbe;
+}
+
+async function reconcileClientMutation(sessionId: string, hydrate = false): Promise<void> {
+  const scopeKey = scopedDraftCacheKey(sessionId);
+  if (hydrate) await hydrateLocalMutationIntent(sessionId);
+  const outcome = await reconcileLocalMutationIntent(sessionId);
+  if (outcome === "unknown") {
+    reportSendFailure(sessionId, Object.assign(new Error("mutation outcome remains unknown"), { code: "outcome-unknown" }), scopeKey);
+  } else if (outcome === "applied" || outcome === "not-applied") {
+    clearSendFailure(sessionId, scopeKey);
+  }
 }
 
 function fetchBranch(projectId: string, sessionId: string | null): void {
@@ -236,7 +312,7 @@ function startUrlSync(): void {
   });
 }
 
-export function init(): void {
+export function init(): Promise<void> {
   // PWA installability is independent from the opt-in push subscription.
   // Auth has already succeeded before init(), so register without prompting.
   void registerServiceWorker().catch((err) => console.warn("service worker registration failed", err));
@@ -244,7 +320,7 @@ export function init(): void {
   // independently and publish as soon as each settles. Awaiting a combined
   // Promise.all/allSettled before publishing any result is forbidden — a slow
   // or failed catalog request can never delay, erase, or roll back projects.
-  void refreshProjects("initial");
+  const initialHydration = refreshProjects("initial");
   const desktop = desktopBridge();
   if (desktop) {
     runtimeCatalogPolicy = "pending";
@@ -305,6 +381,7 @@ export function init(): void {
       fetchBranch(s.activeProjectId, s.activeSessionId);
     }
   });
+  return initialHydration;
 }
 
 // ---- project registry hydration (UX-ONBOARDING) ------------------------------
@@ -360,9 +437,10 @@ async function restoreSelectionAfterReady(): Promise<void> {
   if (!bootRestored) {
     bootRestored = true;
     const fromUrl = parseAppUrl(location.pathname, location.search);
+    const restoredNavigation = await store.hydrateClientNavigation();
     const initial = resolveActiveProjectId(projects, {
       urlProjectId: fromUrl.projectId ?? null,
-      savedProjectId: localStorage.getItem("polyth.activeProjectId"),
+      savedProjectId: restoredNavigation?.projectId ?? null,
     });
     if (initial) store.activateProject(initial);
     if (fromUrl.sessionId) {
@@ -375,12 +453,19 @@ async function restoreSelectionAfterReady(): Promise<void> {
         store.setUiError(tr("init.sessionLinkCouldNotOpen"));
       }
     } else if (initial) {
-      const savedSession = localStorage.getItem("polyth.activeSessionId");
+      const project = projects.find((candidate) => candidate.id === initial);
+      const savedSession = restoredNavigation?.projectId === initial
+        && restoredNavigation.spaceId === (project?.spaceId ?? "default")
+        ? restoredNavigation.sessionId
+        : undefined;
       if (savedSession) {
         await refreshSessions(initial);
         if (store.getState().sessions.some((session) => session.id === savedSession)) {
           await openSession(savedSession, { showChat: false }).catch(() => {});
         }
+      } else {
+        const restored = await store.hydrateNewSessionDraft(initial);
+        if (restored) store.startNewSession(initial, restored);
       }
     }
     startUrlSync();
@@ -505,7 +590,16 @@ async function refreshAgents(): Promise<void> {
 function startSync(): void {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   sync = new SyncClient();
+  sync.setRetryHints({
+    online: typeof navigator === "undefined" || navigator.onLine !== false,
+    foreground: typeof document === "undefined" || document.visibilityState !== "hidden",
+  });
   sync.onStatus(publishSyncStatus);
+  window.addEventListener("online", () => sync?.setRetryHints({ online: true }));
+  window.addEventListener("offline", () => sync?.setRetryHints({ online: false }));
+  document.addEventListener("visibilitychange", () => {
+    setSyncForeground(document.visibilityState !== "hidden");
+  });
   // Frame-batched ingestion: streaming and gap-fill bursts fold into at most
   // one store update per paint. The timeout keeps hidden/background windows
   // ingesting when requestAnimationFrame is paused.
@@ -566,6 +660,10 @@ function startSync(): void {
       // interface scale, …). Echoes of this device's own change are dropped by
       // revision inside settingsSync.
       applyRemoteClientSettings(msg.settings);
+    } else if (msg.type === "error") {
+      // Protocol/record failures are authoritative server messages. Surface
+      // them instead of translating the following close into a generic retry.
+      store.setUiError(msg.message);
     }
   });
   // Gap-fill on every successful (re)connect; merge-by-id makes the race with
@@ -578,6 +676,8 @@ function startSync(): void {
     // A reconnect after backend churn is the moment an empty model catalog
     // becomes fetchable again — heal it now instead of waiting out a backoff.
     recheckRuntimeCatalog();
+    const activeSessionId = store.getState().activeSessionId;
+    if (activeSessionId) void reconcileClientMutation(activeSessionId);
   });
   void initPluginBridge(sync).then(() => {
     const page = settingsPageFromSearch(location.search);
@@ -789,8 +889,16 @@ export async function openSession(
   // metadata and the append-only suffix revalidate. A first open remains in
   // the loading state so an incomplete WS fragment can never masquerade as the
   // full log.
-    if (useCachedView) {
+  if (useCachedView) {
     if (cachedSession.projectId !== before.activeProjectId) store.activateProject(cachedSession.projectId);
+    const hydrationClaim = store.getState();
+    await hydrateComposerDraft(cachedSessionId);
+    if (generation !== openSessionGeneration) return;
+    const afterHydration = store.getState();
+    if (afterHydration.activeProjectId !== hydrationClaim.activeProjectId
+      || afterHydration.activeSessionId !== hydrationClaim.activeSessionId
+      || afterHydration.newSessionIntent !== hydrationClaim.newSessionIntent) return;
+    void reconcileClientMutation(cachedSessionId, true);
     store.activateSession(cachedSessionId);
     void loadRuntimeFeaturesForSession(cachedSessionId);
     if (opts.showChat !== false) store.showSessionChat();
@@ -851,6 +959,14 @@ export async function openSession(
     maybeSeedFromReplay(resolvedSessionId);
     if (!userNavigatedAway()) {
       if (session.projectId !== store.getState().activeProjectId) store.activateProject(session.projectId);
+      const hydrationClaim = store.getState();
+      await hydrateComposerDraft(resolvedSessionId);
+      if (generation !== openSessionGeneration) return;
+      const afterHydration = store.getState();
+      if (afterHydration.activeProjectId !== hydrationClaim.activeProjectId
+        || afterHydration.activeSessionId !== hydrationClaim.activeSessionId
+        || afterHydration.newSessionIntent !== hydrationClaim.newSessionIntent) return;
+      void reconcileClientMutation(resolvedSessionId, true);
       store.activateSession(resolvedSessionId);
       void loadRuntimeFeaturesForSession(resolvedSessionId);
       if (opts.showChat !== false) store.showSessionChat();
@@ -1194,6 +1310,8 @@ export interface SendOptions {
   attachments?: AttachmentRef[];
   /** Exact native command selected by the composer catalog. */
   command?: { id: string; args?: string };
+  /** Captured reliability namespace for async create-then-send flows. */
+  reliabilityScope?: PersistenceScope;
   /** Browser-staged harness route, committed only with this submission. */
   harness?: HarnessSelection;
 }
@@ -1203,6 +1321,8 @@ export interface SendOptions {
 export async function sendMessage(text: string, model?: JsonObject, agent?: string, opts?: SendOptions): Promise<boolean> {
   const id = opts?.targetSessionId ?? store.getState().activeSessionId;
   if (!id) return false;
+  const capturedScope = opts?.reliabilityScope;
+  const failureScopeKey = scopedDraftCacheKey(id, capturedScope);
   // The server records an auto title with the first admitted user message.
   // Keeping this durable prevents later projection broadcasts, refreshes, and
   // reconnects from restoring the "New session" placeholder.
@@ -1211,7 +1331,7 @@ export async function sendMessage(text: string, model?: JsonObject, agent?: stri
     && !!session
     && isPlaceholderTitle(session.title, session.id);
   try {
-    await api.sendMessage(id, {
+    const body = {
       text, model, agent, ...(autoTitle ? { autoTitle: true } : {}),
       ...(opts?.command ? { command: opts.command } : {}),
       ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
@@ -1221,13 +1341,27 @@ export async function sendMessage(text: string, model?: JsonObject, agent?: stri
       // Explicit null must reach the wire (it clears the stored profile);
       // only an omitted field means "inherit".
       ...(opts?.agentProfileId !== undefined ? { agentProfileId: opts.agentProfileId } : {}),
-    });
-    clearSendFailure(id);
+    };
+    if (!opts?.delivery || opts.delivery === "normal" || opts.delivery === "queue") {
+      await submitDirectPrompt(id, {
+        ...body,
+        ...(opts?.delivery ? { delivery: opts.delivery as "normal" | "queue" } : {}),
+      }, capturedScope);
+    } else {
+      if (capturedScope && scopedDraftCacheKey(id) !== failureScopeKey) {
+        throw Object.assign(new Error("session context changed before admission"), {
+          code: "client-context-changed",
+          status: 409,
+        });
+      }
+      await api.sendMessage(id, { ...body, delivery: opts.delivery });
+    }
+    clearSendFailure(id, failureScopeKey);
     return true;
   } catch (err) {
     console.error("send message failed", err);
-    reportSendFailure(id, err);
-    store.setUiError(friendlyError(tr("common.error"), err));
+    const failure = reportSendFailure(id, err, failureScopeKey);
+    if (failure?.kind !== "unknown") store.setUiError(friendlyError(tr("common.error"), err));
     return false;
   }
 }

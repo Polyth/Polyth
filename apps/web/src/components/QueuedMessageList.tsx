@@ -10,7 +10,8 @@ import { tr } from "../i18n/index.ts";
 import Button from "./ui/Button.tsx";
 import IconButton from "./ui/IconButton.tsx";
 import Icon from "./ui/Icon.tsx";
-import { DeleteIcon, DragHandleIcon, EditIcon, EnterIcon, PauseIcon, PlayIcon } from "./ui/icons.ts";
+import Menu from "./ui/Menu.tsx";
+import { DeleteIcon, DragHandleIcon, EditIcon, EnterIcon, MoreIcon, PauseIcon, PlayIcon } from "./ui/icons.ts";
 
 const QUEUE_DRAG_TYPE = "application/x-polyth-queued-message";
 
@@ -121,6 +122,14 @@ export default function QueuedMessageList({
     void persistOrder(moveQueuedItem(items, sourceId, targetId), sourceId);
   };
 
+  const move = (item: QueueItemDto, delta: -1 | 1) => {
+    if (item.heldForReview) return;
+    const index = items.findIndex((candidate) => candidate.id === item.id);
+    const target = items[index + delta];
+    if (!target) return;
+    void persistOrder(moveQueuedItem(items, item.id, target.id), item.id);
+  };
+
   const remove = async (id: string) => {
     if (scope.busy) return;
     scope.busy = true;
@@ -188,6 +197,7 @@ export default function QueuedMessageList({
       {visibleItems.map((item) => {
         const n = item.position + 1;
         const busy = busyId !== null;
+        const itemIndex = items.findIndex((candidate) => candidate.id === item.id);
         const reorderLabel = tr("queuedmessagelist.reorderQueuedMessageValue", { value: n });
         return (
           <div
@@ -227,6 +237,36 @@ export default function QueuedMessageList({
               className="queue-actions"
               onPointerDown={(event) => event.stopPropagation()}
             >
+              {!item.heldForReview && (
+                <Menu
+                  label={reorderLabel}
+                  entries={[
+                    {
+                      id: "up",
+                      label: tr("queuedmessagelist.moveQueuedMessageValueUp", { value: n }),
+                      disabled: busy || itemIndex <= 0,
+                      onSelect: () => move(item, -1),
+                    },
+                    {
+                      id: "down",
+                      label: tr("queuedmessagelist.moveQueuedMessageValueDown", { value: n }),
+                      disabled: busy || itemIndex >= items.length - 1,
+                      onSelect: () => move(item, 1),
+                    },
+                  ]}
+                >
+                  {(trigger) => (
+                    <IconButton
+                      {...trigger}
+                      className="queue-reorder"
+                      icon={MoreIcon}
+                      label={reorderLabel}
+                      size="sm"
+                      disabled={busy}
+                    />
+                  )}
+                </Menu>
+              )}
               {!item.heldForReview && (
                 <IconButton
                   className="queue-steer"
