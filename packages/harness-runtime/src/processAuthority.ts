@@ -85,10 +85,13 @@ const createPortableAuthority = (): HarnessProcessAuthority => {
     durable: false,
     spawn(command, args, options = {}) {
       if (child) throw Object.assign(new Error("Authority already owns a process"), { code: "conflict" });
-      const { shell: _shell, detached: _detached, stdio: _stdio, ...spawnOptions } = options;
+      const { detached: _detached, stdio: _stdio, ...spawnOptions } = options;
       child = spawn(command, args, {
         ...spawnOptions,
-        shell: false,
+        // Windows npm shims are .cmd files and require cmd.exe. Callers opt in
+        // only for an exact, already-discovered executable path; no prompt or
+        // project text ever becomes part of this command line.
+        shell: options.shell ?? false,
         // A dedicated POSIX process group lets explicit disposal terminate the
         // normal descendant tree. Windows uses taskkill /T instead.
         detached: process.platform !== "win32",
