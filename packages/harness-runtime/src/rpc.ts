@@ -46,8 +46,6 @@ export interface RpcPeer {
     close(): Promise<void>;
     readonly authorityId: string;
     readonly generation: number;
-    /** Crash-recoverable release proof is available only on durable authorities. */
-    readonly durable: boolean;
     readonly releasedAuthorities: readonly {
         authorityId: string;
         generation: number;
@@ -177,7 +175,6 @@ export async function createStdioRpc(options: {
     return {
         authorityId: authority.authorityId,
         generation: authority.generation,
-        durable: authority.durable,
         releasedAuthorities: authority.releasedAuthorities,
         get receipts() { return authority.receipts; },
         receipt: authority.receipt,
