@@ -1,4 +1,4 @@
-import { createProcessAuthority } from "./authority.ts";
+import { createHarnessProcessAuthority } from "./processAuthority.ts";
 
 const RPC_TEXT_LIMIT = 500;
 const SENSITIVE_RPC_KEY = /(?:authorization|cookie|credential|password|passphrase|private.?key|secret|token|api.?key)/i;
@@ -46,6 +46,8 @@ export interface RpcPeer {
     close(): Promise<void>;
     readonly authorityId: string;
     readonly generation: number;
+    /** Crash-recoverable release proof is available only on durable authorities. */
+    readonly durable: boolean;
     readonly releasedAuthorities: readonly {
         authorityId: string;
         generation: number;
@@ -63,7 +65,7 @@ export async function createStdioRpc(options: {
     stableAuthority?: boolean;
     env?: NodeJS.ProcessEnv;
 }): Promise<RpcPeer> {
-    const authority = await createProcessAuthority(options.stateFile, options.stableAuthority);
+    const authority = await createHarnessProcessAuthority(options.stateFile, options.stableAuthority);
     const child = authority.spawn(options.command, options.args, { cwd: options.cwd, env: options.env ?? process.env });
     let closed = false;
     let nextId = 0;
@@ -173,7 +175,10 @@ export async function createStdioRpc(options: {
     });
     await new Promise<void>((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
     return {
-        authorityId: authority.authorityId, generation: authority.generation, releasedAuthorities: authority.releasedAuthorities,
+        authorityId: authority.authorityId,
+        generation: authority.generation,
+        durable: authority.durable,
+        releasedAuthorities: authority.releasedAuthorities,
         get receipts() { return authority.receipts; },
         receipt: authority.receipt,
         request<T>(method: string, params: unknown, timeoutMs = 20000): Promise<T> {
