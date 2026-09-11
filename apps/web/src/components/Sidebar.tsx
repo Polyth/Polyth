@@ -42,6 +42,7 @@ import SpaceSwitcher from "./SpaceSwitcher.tsx";
 import { tr } from "../i18n/index.ts";
 import { confirmAlert } from "../alerts.ts";
 import { errorFeedback, tapFeedback } from "../haptics.ts";
+import { useInlineRename } from "./input/inlineRename.ts";
 import {
   PULL_REFRESH_DISTANCE, pullRefreshDistance, type GesturePoint,
 } from "../mobileGestures.ts";
@@ -299,6 +300,13 @@ export default function Sidebar() {
       setUiError(friendlyError(tr("common.error"), e));
     }
   };
+
+  // One rename field is open at a time, so one handler pair serves every row.
+  const projectRenameKeys = useInlineRename({
+    editing: renamingProject,
+    commit: () => { if (renamingProject) void saveProjectName(renamingProject); },
+    cancel: () => setRenamingProject(null),
+  });
 
   // The persisted list keeps every known project so filtered-out ones hold
   // their slot; only the visible order is what the user rearranges.
@@ -685,11 +693,7 @@ export default function Sidebar() {
                   autoFocus
                   value={projectName}
                   onChange={(e) => setProjectName(e.target.value)}
-                  onBlur={() => void saveProjectName(p.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void saveProjectName(p.id);
-                    else if (e.key === "Escape") setRenamingProject(null);
-                  }}
+                  {...projectRenameKeys}
                 />
               </div>
             ) : (
