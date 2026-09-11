@@ -2,12 +2,8 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { HarnessContext, HarnessProvider, HarnessRegistry } from "@polyth/contracts";
-import {
-    createStdioRpc,
-    discoverHarnessExecutable,
-    harnessExecutableChildEnv,
-    releaseProcessExecution,
-} from "@polyth/harness-runtime";
+import { createStdioRpc, releaseProcessExecution } from "@polyth/harness-runtime";
+import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/harness-runtime/executable-discovery";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { createCodexRuntime, CODEX_CAPABILITIES, type Thread } from "./index.ts";
 import { createCodexProvisioner } from "./provisioner.ts";
