@@ -23,7 +23,7 @@ Windows discovery honours `PATHEXT` and common npm/pnpm/Scoop/Chocolatey/Windows
 
 Discovery portability and crash-safe switching are deliberately separate guarantees.
 
-- **Linux:** Codex, Claude and ACP-family runtimes use the existing durable Polyth process authority. The bundled supervisor, release receipts, `/proc` identity and optional systemd user scope provide the evidence required by cross-harness switching and crash recovery.
+- **Linux:** Codex, Claude, ACP-family and Pi runtimes use the existing durable Polyth process authority. The bundled supervisor, release receipts, `/proc` identity and optional systemd user scope provide the evidence required by cross-harness switching and crash recovery.
 - **macOS / Windows:** local runtimes use a portable owned-process lifecycle. Normal execution and explicit disposal are supported; POSIX process groups or Windows `taskkill /T` clean up the owned tree. This lifecycle is **not durable release evidence across a Polyth crash**.
 - Therefore non-Linux execution is supported, but cross-harness switching remains blocked whenever the safe-switch algorithm requires a durable release proof. Polyth must never turn best-effort process termination into a fictional proof.
 
@@ -38,21 +38,37 @@ Discovery portability and crash-safe switching are deliberately separate guarant
 | fx | Shared desktop CLI resolver | Linux / macOS / Windows | No | ACP v1. Authentication remains native/unknown until connection. |
 | Grok Build | Shared desktop CLI resolver | Linux / macOS / Windows where the native CLI supports ACP | No | Native `grok agent stdio` ACP profile; authentication is verified by native initialization rather than credential-file inspection. |
 | OMP / oh-my-pi | Shared desktop CLI resolver | Linux / macOS / Windows where the native CLI supports ACP | No | Native `omp acp` profile. |
-| Pi | Shared desktop CLI resolver | Not yet | No | Pi is surfaced as `incompatible` when installed because its native RPC protocol still needs an `AgentRuntime` translator. It is never mislabeled as absent. |
+| Pi | Shared desktop CLI resolver | Linux / macOS / Windows | No | Native `pi --mode rpc` JSONL adapter. `sessionFile` is the durable native conversation identity; prompt admission uses correlated responses and terminal completion uses `agent_settled`. |
 
-Generic ACP infrastructure does not scan arbitrary executables and guess protocols. A harness becomes runnable only through a package/profile that declares and verifies its native invocation contract.
+Generic ACP infrastructure does not scan arbitrary executables and guess protocols. A harness becomes runnable only through a package/profile that declares and verifies its native invocation contract. Pi is intentionally separate from ACP because its native RPC protocol has different framing, session and settlement semantics.
+
+## Pi native RPC boundary
+
+Polyth uses Pi's documented strict JSONL RPC rather than parsing terminal output or pretending it is ACP:
+
+- LF-delimited JSON records are parsed with bounded buffering; malformed or oversized records close the authority instead of being guessed through.
+- The correlated `prompt` response is native admission evidence. A lost response stays outcome-unknown and is never replayed speculatively.
+- `sessionFile` from `get_state` is the native backend-session identity. `switch_session` must resolve to that exact path before a persisted leg is considered reattached.
+- `message_update` text deltas stream into canonical assistant chunks; `message_end` is authoritative for the completed assistant message.
+- Native tool start/end events map to canonical tool events.
+- `agent_end` is not treated as terminal because Pi may still retry, compact or process queued continuations. Only `agent_settled` closes the canonical turn.
+- `abort` is stronger than generic ACP cancellation: Pi responds only after the session is idle, so Polyth can confirm the abort operation rather than returning an invented acknowledgement.
+- Native model and thinking-level selection use `set_model` and `set_thinking_level`; available models/levels come from Pi itself.
+- The current adapter supports native images. Other attachment modalities remain explicitly unsupported rather than being silently coerced.
+
+The upstream project is `earendil-works/pi`; the current CLI package is `@earendil-works/pi-coding-agent`.
 
 ## Catalog bootstrap
 
 The existing Models package remains responsible for warming enabled harness catalogs during shell bootstrap, unless low-resource mode explicitly disables eager discovery. Roster metadata is process-free; detailed catalog discovery may open a temporary native metadata connection but does not create or bind a canonical execution leg.
 
-Cursor, fx, Grok Build and OMP remain excluded from automatic routing while their native authentication state cannot be positively established by a cheap probe. Installation alone is not treated as authentication.
+Cursor, fx, Grok Build, OMP and Pi remain excluded from automatic routing while their native authentication/readiness state cannot be positively established by the cheap installation probe. Detailed Pi discovery uses its native configured-model catalog; explicit selection is available when that catalog is ready.
 
 ## Failure semantics
 
 - Missing CLI: `not-installed`.
-- Installed but native sign-in required: `auth-required` when the native detail path can prove it.
-- Installed but adapter/protocol not implemented: `incompatible` (currently Pi).
+- Installed but native sign-in/configuration required: `auth-required` when the native detail path can prove it.
+- Installed but a verified protocol contract is unavailable: `incompatible`; no current first-party desktop harness intentionally ships in this state.
 - Probe/detail failure after a previously healthy snapshot: existing degraded/stale snapshot semantics apply.
 - Unsupported durable release on macOS/Windows: ordinary execution remains available, but a cross-harness switch is rejected with an explicit safety reason.
 
