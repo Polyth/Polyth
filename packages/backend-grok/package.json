@@ -1,0 +1,24 @@
+{
+  "name": "@polyth/backend-grok",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@polyth/backend-acp": "0.1.0",
+    "@polyth/harness-runtime": "0.1.0",
+    "@polyth/plugins": "0.1.0"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "descriptor": {
+      "name": "Grok Build harness",
+      "description": "Grok Build through its native ACP stdio agent",
+      "core": false,
+      "enabled": true,
+      "icon": "assist",
+      "hasSettings": false
+    }
+  }
+}

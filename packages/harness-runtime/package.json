@@ -5,7 +5,9 @@
   "exports": {
     ".": "./src/public.ts",
     "./features": "./src/features.ts",
-    "./capability-text": "./src/capabilityText.ts"
+    "./capability-text": "./src/capabilityText.ts",
+    "./executable-discovery": "./src/executableDiscovery.ts",
+    "./process-authority": "./src/processAuthority.ts"
   },
   "dependencies": {
     "@polyth/contracts": "0.1.0",

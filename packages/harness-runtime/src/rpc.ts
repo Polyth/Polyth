@@ -1,4 +1,4 @@
-import { createProcessAuthority } from "./authority.ts";
+import { createHarnessProcessAuthority } from "./processAuthority.ts";
 
 const RPC_TEXT_LIMIT = 500;
 const SENSITIVE_RPC_KEY = /(?:authorization|cookie|credential|password|passphrase|private.?key|secret|token|api.?key)/i;
@@ -63,7 +63,7 @@ export async function createStdioRpc(options: {
     stableAuthority?: boolean;
     env?: NodeJS.ProcessEnv;
 }): Promise<RpcPeer> {
-    const authority = await createProcessAuthority(options.stateFile, options.stableAuthority);
+    const authority = await createHarnessProcessAuthority(options.stateFile, options.stableAuthority);
     const child = authority.spawn(options.command, options.args, { cwd: options.cwd, env: options.env ?? process.env });
     let closed = false;
     let nextId = 0;
@@ -171,9 +171,18 @@ export async function createStdioRpc(options: {
             void authority.close().catch(() => { });
         }
     });
-    await new Promise<void>((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
+    try {
+        await new Promise<void>((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
+    }
+    catch (error) {
+        await authority.close().catch(() => { });
+        disconnected();
+        throw error;
+    }
     return {
-        authorityId: authority.authorityId, generation: authority.generation, releasedAuthorities: authority.releasedAuthorities,
+        authorityId: authority.authorityId,
+        generation: authority.generation,
+        releasedAuthorities: authority.releasedAuthorities,
         get receipts() { return authority.receipts; },
         receipt: authority.receipt,
         request<T>(method: string, params: unknown, timeoutMs = 20000): Promise<T> {
@@ -194,6 +203,9 @@ export async function createStdioRpc(options: {
         },
         notify: (method, params) => send({ jsonrpc: "2.0", method, params }),
         onNotification: (cb) => { notifications.push(cb); }, onRequest: (cb) => { requests = cb; }, onClose: (cb) => { closes.push(cb); },
-        async close() { await authority.close(); disconnected(); },
+        async close() {
+            try { await authority.close(); }
+            finally { disconnected(); }
+        },
     };
 }

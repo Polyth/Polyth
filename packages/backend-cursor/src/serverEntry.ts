@@ -1,6 +1,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { registerAcpProfile } from "@polyth/backend-acp";
+import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/backend-acp/executable-discovery";
+import type { RegisteredAcpProfile } from "@polyth/backend-acp/profile";
 import type { ServerPackageHost } from "@polyth/plugins";
 import { cursorModelDiscoverySupport } from "./version.ts";
 const exec = promisify(execFile);
@@ -37,6 +39,15 @@ const methodMissing = (error: unknown) =>
     (error as { rpcCode?: number }).rpcCode === -32601
     || /method not found/i.test((error as { message?: string }).message ?? "");
 
+const resolveCursorBinary = async () => {
+    const report = await discoverHarnessExecutable(process.env.POLYTH_CURSOR_BIN?.trim() || "agent");
+    if (!report.hit) throw Object.assign(new Error("Cursor Agent CLI was not found"), { code: "not-installed" });
+    const env = await harnessExecutableChildEnv(report.hit.executablePath);
+    process.env.PATH = env.PATH;
+    return { command: report.hit.executablePath, env };
+};
+const windowsShim = (command: string) => process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
+
 // Cursor blocks session/prompt until these extension requests receive valid
 // nested outcomes. Decline unsupported UI explicitly instead of stranding the turn.
 export const cursorClientRequest = (method: string) => {
@@ -61,7 +72,7 @@ export const cursorClientRequest = (method: string) => {
 };
 
 export default function registerPackage(host: ServerPackageHost) {
-    return registerAcpProfile(host, {
+    const profile: RegisteredAcpProfile = {
         descriptor: {
             id: "cursor",
             name: "Cursor",
@@ -75,7 +86,7 @@ export default function registerPackage(host: ServerPackageHost) {
         },
         // `agent acp` has no --model flag (verified: it is accepted and
         // ignored). Model selection goes through the ACP session API only.
-        command: "agent", args: ["acp"],
+        command: process.env.POLYTH_CURSOR_BIN?.trim() || "agent", args: ["acp"],
         initializeClientMeta: { parameterizedModelPicker: true },
         clientRequest: cursorClientRequest,
         async discoverModels(connection) {
@@ -91,10 +102,12 @@ export default function registerPackage(host: ServerPackageHost) {
         probeModelControls: false,
         supportsModelDiscovery: cursorModelDiscoverySupport,
         async probe(context) {
-            if (context.remote || process.platform !== "linux")
-                return { harnessId: "cursor", installed: false, authenticated: "unknown", healthy: false };
+            if (context.remote)
+                return { harnessId: "cursor", installed: false, authenticated: "unknown", healthy: false, message: "Local execution only" };
             try {
-                const version = (await exec("agent", ["--version"], { timeout: 5000, maxBuffer: 4096 })).stdout.trim();
+                const { command, env } = await resolveCursorBinary();
+                profile.command = command;
+                const version = (await exec(command, ["--version"], { timeout: 5000, maxBuffer: 4096, env, shell: windowsShim(command) })).stdout.trim();
                 // Installation alone is not proof of authentication. The profile is
                 // offered for explicit selection but excluded from automatic routing
                 // until a native auth/status contract is verified.
@@ -104,6 +117,7 @@ export default function registerPackage(host: ServerPackageHost) {
                 return { harnessId: "cursor", installed: false, authenticated: "unknown", healthy: false };
             }
         },
-    });
+    };
+    return registerAcpProfile(host, profile);
 }
 export { cursorModelDiscoverySupport };

@@ -1,11 +1,9 @@
 {
-  "name": "@polyth/backend-acp",
+  "name": "@polyth/backend-pi",
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./executable-discovery": "./src/executableDiscovery.ts",
-    "./profile": "./src/profile.ts"
+    ".": "./src/index.ts"
   },
   "dependencies": {
     "@polyth/contracts": "0.1.0",
@@ -15,11 +13,11 @@
   "polyth": {
     "serverEntry": "./src/serverEntry.ts",
     "descriptor": {
-      "name": "ACP harnesses",
-      "description": "Shared Agent Client Protocol transport and runtime",
+      "name": "Pi harness",
+      "description": "Detect Pi and report native RPC integration readiness",
       "core": false,
       "enabled": true,
-      "icon": "network",
+      "icon": "command",
       "hasSettings": false
     }
   }

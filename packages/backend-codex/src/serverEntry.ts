@@ -3,12 +3,26 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { HarnessContext, HarnessProvider, HarnessRegistry } from "@polyth/contracts";
 import { createStdioRpc, releaseProcessExecution } from "@polyth/harness-runtime";
+import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/harness-runtime/executable-discovery";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { createCodexRuntime, CODEX_CAPABILITIES, type Thread } from "./index.ts";
 import { createCodexProvisioner } from "./provisioner.ts";
 const exec = promisify(execFile);
+const windowsShim = (command: string) => process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
+
+const resolveCodexBinary = async () => {
+    const requested = process.env.POLYTH_CODEX_BIN?.trim() || "codex";
+    const report = await discoverHarnessExecutable(requested);
+    if (!report.hit) {
+        throw Object.assign(new Error(`Codex CLI was not found (${report.searched.slice(0, 8).join(", ") || "no searchable locations"})`), { code: "not-installed" });
+    }
+    return report.hit.executablePath;
+};
+
 export async function connectCodex(context: HarnessContext, stateFile?: string) {
-    const rpc = await createStdioRpc({ command: process.env.POLYTH_CODEX_BIN ?? "codex", args: ["app-server"], cwd: context.cwd, stateFile, stableAuthority: true });
+    const command = await resolveCodexBinary();
+    const env = await harnessExecutableChildEnv(command);
+    const rpc = await createStdioRpc({ command, args: ["app-server"], cwd: context.cwd, stateFile, stableAuthority: true, env });
     try {
         await rpc.request("initialize", { clientInfo: { name: "polyth", title: "Polyth", version: "0.1.0" } });
         rpc.notify("initialized", {});
@@ -29,18 +43,19 @@ export default function registerPackage(host: ServerPackageHost) {
         descriptor: { id: "codex", name: "Codex", integration: "App Server", priority: 10, setupUrl: "https://developers.openai.com/codex/cli/", installCommand: "npm install -g @openai/codex", signInCommand: "codex login" },
         staticFeatures: CODEX_CAPABILITIES,
         async probe(context) {
-            if (context.remote || process.platform !== "linux")
-                return { harnessId: "codex", installed: false, authenticated: "unknown", healthy: false, message: "This adapter currently supports local Linux runtimes" };
-            let version: string;
+            if (context.remote)
+                return { harnessId: "codex", installed: false, authenticated: "unknown", healthy: false, message: "Local execution only" };
             try {
-                version = (await exec(process.env.POLYTH_CODEX_BIN ?? "codex", ["--version"], { timeout: 5000, maxBuffer: 4096 })).stdout.trim();
+                const command = await resolveCodexBinary();
+                const env = await harnessExecutableChildEnv(command);
+                const version = (await exec(command, ["--version"], { timeout: 5000, maxBuffer: 4096, env, shell: windowsShim(command) })).stdout.trim();
+                // Authentication and catalog inspection happen only when detail
+                // discovery is requested; the cheap probe must not create a thread.
+                return { harnessId: "codex", installed: true, authenticated: "unknown", healthy: true, state: "unknown", version };
             }
             catch {
                 return { harnessId: "codex", installed: false, authenticated: "unknown", healthy: false };
             }
-            // Version detection stays cheap and process-free. Authentication
-            // and catalog inspection happen only when Codex detail is opened.
-            return { harnessId: "codex", installed: true, authenticated: "unknown", healthy: true, state: "unknown", version };
         },
         async discover(context) {
             const runtime = await createCodexRuntime(context, await connectCodex(context));
@@ -55,13 +70,20 @@ export default function registerPackage(host: ServerPackageHost) {
             }
         },
         async createRuntime(context) {
-            if (!context.space || context.remote || process.platform !== "linux")
+            if (!context.space || context.remote)
                 throw Object.assign(new Error("Local Space context required"), { code: "unsupported" });
             return createCodexRuntime(context, await connectCodex(context, stateFile(context)));
         },
         async releaseExecution(context, binding, operationId) {
-            if (!context.space || context.remote || process.platform !== "linux")
-                return { kind: "rejected", code: "unsupported", message: "Local Linux Space context required" };
+            if (!context.space || context.remote)
+                return { kind: "rejected", code: "unsupported", message: "Local Space context required" };
+            if (process.platform !== "linux") {
+                return {
+                    kind: "rejected",
+                    code: "unsupported",
+                    message: "Crash-safe cross-harness switching currently requires Linux; this Codex runtime can still be used normally",
+                };
+            }
             return releaseProcessExecution(stateFile(context), binding, operationId);
         },
         provisioner: createCodexProvisioner(),
