@@ -289,6 +289,8 @@ export const harnessExecutableChildEnv = async (
   const login = await probeHarnessLoginShellPath(options).catch(() => undefined);
   return {
     ...env,
-    PATH: mergeHarnessSearchPaths(login?.entries, inherited, [binaryDirectory]).join(delimiter),
+    // The resolved directory must win over shell aliases/shims with the same
+    // command name so probe and execution can never select different CLIs.
+    PATH: mergeHarnessSearchPaths([binaryDirectory], login?.entries, inherited).join(delimiter),
   };
 };
