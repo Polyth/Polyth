@@ -10,7 +10,7 @@ import { configureAcpCapabilityDelivery } from "./capabilityDelivery.ts";
 type AcpClientRequestResult =
     | { handled: false }
     | { handled: true; result: unknown };
-type RegisteredAcpProfile = AcpProfile & {
+export type RegisteredAcpProfile = AcpProfile & {
     clientRequest?(
         method: string,
         params: unknown,
