@@ -683,12 +683,16 @@ export default function SessionList({
     hydratedRef.current = true;
     if (projectSessions.length === 0) void refreshSessions(projectId);
   }, [projectId]);
+  // Worktrees appear and disappear outside this sidebar — created by the Git
+  // UI, by an agent, by a shell. The server bumps this project's topology
+  // revision when that happens, so the list re-reads without a reload.
+  const worktreeTopology = useStore((st) => st.worktreeTopology[projectId] ?? 0);
   const reloadOrg = () => {
     void api.listLabels().then(setLabels);
     void api.listWorktrees(projectId).then(setWorktrees);
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(reloadOrg, [projectId]);
+  useEffect(reloadOrg, [projectId, worktreeTopology]);
 
   const onChanged = () => {
     void refreshSessions(projectId);

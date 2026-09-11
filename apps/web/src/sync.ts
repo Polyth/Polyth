@@ -16,6 +16,8 @@ export type SyncInbound =
   | { type: "package/changed"; package: PackageDescriptorDto }
   /** Server-persisted client preferences changed on another device. */
   | { type: "client-settings/changed"; settings: ClientSettingsDto }
+  /** One project's git worktree topology changed (here, or underneath us). */
+  | { type: "worktrees/changed"; projectId: string }
   | { type: "error"; code: string; message: string };
 
 export type SyncListener = (msg: SyncInbound) => void;
@@ -85,6 +87,9 @@ export function isSyncInbound(raw: unknown): raw is SyncInbound {
     return !!s
       && typeof s.revision === "number"
       && typeof s.settings === "object" && s.settings !== null && !Array.isArray(s.settings);
+  }
+  if (m.type === "worktrees/changed") {
+    return typeof m.projectId === "string" && m.projectId.length > 0;
   }
   return m.type === "error" && typeof m.code === "string" && typeof m.message === "string";
 }

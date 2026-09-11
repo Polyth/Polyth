@@ -554,6 +554,11 @@ function startSync(): void {
       // NTF-01: global inbox rows bypass the session event batch entirely —
       // they are derived state, never part of any session's log or reducer.
       notificationCentre.append(msg.notification);
+    } else if (msg.type === "worktrees/changed") {
+      // One repository's worktree topology moved. Bump only that project so
+      // the surfaces listing its worktrees re-read; every other project's
+      // list is untouched.
+      store.bumpWorktreeTopology(msg.projectId);
     } else if (msg.type === "package/changed") {
       reconcilePackage(msg.package);
     } else if (msg.type === "client-settings/changed") {

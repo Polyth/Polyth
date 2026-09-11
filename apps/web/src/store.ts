@@ -181,6 +181,11 @@ export interface AppState {
   gitDiffPath: string | null;
   /** Server-resolved runtime feature surface keyed by session id. */
   runtimeFeatures: Record<string, RuntimeFeaturesState | undefined>;
+  /** Per-project git worktree topology revision. The server bumps one project
+   *  when its worktrees change — created here, by an agent, by a shell, or by
+   *  another app — and surfaces that list worktrees re-read on the change.
+   *  Keyed by project so one repository's change never refetches another's. */
+  worktreeTopology: Record<string, number>;
 }
 
 let state: AppState = {
@@ -211,6 +216,7 @@ let state: AppState = {
   editorLocation: null,
   gitDiffPath: null,
   runtimeFeatures: {},
+  worktreeTopology: {},
 };
 
 const listeners = new Set<() => void>();
@@ -238,6 +244,23 @@ function refreshTitle(): void {
   if (typeof document === "undefined") return;
   const project = state.projectRegistry.projects.find((p) => p.id === state.activeProjectId);
   document.title = project?.name ? `${project.name} — ${state.settings.productName}` : state.settings.productName;
+}
+
+/** Note that one project's worktree topology moved. Surfaces that list
+ *  worktrees depend on `worktreeTopology[projectId]` and refetch when it
+ *  changes; nothing is cached here, so a stale list can never be served. */
+export function bumpWorktreeTopology(projectId: string): void {
+  if (!projectId) return;
+  set({
+    worktreeTopology: {
+      ...state.worktreeTopology,
+      [projectId]: (state.worktreeTopology[projectId] ?? 0) + 1,
+    },
+  });
+}
+
+export function worktreeTopologyRevision(projectId: string | null | undefined): number {
+  return (projectId && state.worktreeTopology[projectId]) || 0;
 }
 
 function set(patch: Partial<AppState>): void {

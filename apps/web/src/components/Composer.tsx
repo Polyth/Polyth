@@ -197,6 +197,9 @@ function useComposerLocation(session: SessionProjection | null): {
 } {
   const projects = useStore((state) => state.projectRegistry.projects);
   const projectId = useStore((state) => state.activeProjectId);
+  // Re-read the branch/worktree choices when this project's worktrees change
+  // anywhere — the Git UI, an agent, a shell.
+  const worktreeTopology = useStore((state) => (projectId && state.worktreeTopology[projectId]) || 0);
   const newSessionIntent = useStore((state) => state.newSessionIntent);
   const branch = useStore((state) => state.gitBranch);
   const project = projects.find((candidate) => candidate.id === projectId) ?? null;
@@ -252,7 +255,7 @@ function useComposerLocation(session: SessionProjection | null): {
         if (active) setBranchLoading(false);
       });
     return () => { active = false; };
-  }, [projectId, session?.id, session?.worktreePath, session?.branch, newSessionIntent?.worktreePath, branch]);
+  }, [projectId, session?.id, session?.worktreePath, session?.branch, newSessionIntent?.worktreePath, branch, worktreeTopology]);
 
   // Fired when the branch picker opens: fetch the remote (best effort) and
   // re-read the branch list so server-only branches become selectable. Runs

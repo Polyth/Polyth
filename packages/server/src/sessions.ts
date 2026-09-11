@@ -77,6 +77,11 @@ export interface Broadcaster {
   packageChanged?(pkg: PackageDescriptorDto): void;
   /** Server-persisted client preferences changed on another device. */
   clientSettingsChanged?(settings: ClientSettingsDto): void;
+  /** One repository's worktree topology changed — created or removed by this
+   *  server, or discovered to have changed underneath it (an agent, a shell,
+   *  another app). Carries only the affected project so a client refetches
+   *  that topology and nothing else. */
+  worktreesChanged?(projectId: string): void;
 }
 
 /** Durable FIFO delivery queue (implemented by @polyth/session's Store). */

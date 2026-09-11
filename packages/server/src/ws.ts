@@ -623,6 +623,18 @@ export function createWsGateway(
         send(ws, { type: "package/changed", package: pkg });
       }
     },
+    worktreesChanged(projectId: string) {
+      if (closed) return;
+      for (const [ws, sub] of clients) {
+        const live = currentPrincipal(ws, sub);
+        if (!allowWsCapability(live, REMOTE_CAPABILITY.gitRead)) continue;
+        if (sub.spaceId !== null && spaces) {
+          try { spaces.guard.assertProject({ spaceId: sub.spaceId }, projectId); }
+          catch { continue; } // Not this tenant's project — its existence stays unknown.
+        }
+        send(ws, { type: "worktrees/changed", projectId });
+      }
+    },
     clientSettingsChanged(settings: ClientSettingsDto) {
       if (closed) return;
       for (const [ws, sub] of clients) {

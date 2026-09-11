@@ -525,6 +525,7 @@ export async function boot(opts: BootOptions = {}) {
     pluginChanged: (packageId) => live?.pluginChanged?.(packageId),
     packageChanged: (pkg) => live?.packageChanged?.(pkg),
     clientSettingsChanged: (settings) => live?.clientSettingsChanged?.(settings),
+    worktreesChanged: (projectId) => live?.worktreesChanged?.(projectId),
   };
   const packageRegistry = createPackageRegistry({
     file: `${dataDir}/packages.json`,
