@@ -399,6 +399,18 @@ export function createChromiumDriver(executablePath: string): BrowserDriver {
         try { lastTitle = await page.title(); } catch { /* navigating */ }
       };
 
+      const isContextClosed = (error: unknown): boolean => {
+        const msg = String(error ?? "").toLowerCase();
+        return msg.includes("closed") || msg.includes("target page") || msg.includes("context");
+      };
+
+      const wrapContextError = (error: unknown): Error => {
+        if (isContextClosed(error)) {
+          return Object.assign(new Error("browser context has closed"), { code: "context-closed" });
+        }
+        return error as Error;
+      };
+
       const locate = (target: BrowserTarget) => {
         if ("selector" in target) return page.locator(target.selector).first();
         if ("text" in target) {
@@ -418,10 +430,12 @@ export function createChromiumDriver(executablePath: string): BrowserDriver {
       const driverPage: DriverPage = {
         async goto(url) {
           blockedNavigation = null;
-          await page.goto(url, { waitUntil: "domcontentloaded" }).catch((error) => {
+          try {
+            await page.goto(url, { waitUntil: "domcontentloaded" });
+          } catch (error) {
             if (blockedNavigation) throw blockedNavigation;
-            throw error;
-          });
+            throw wrapContextError(error);
+          }
           if (blockedNavigation) {
             const failure = blockedNavigation;
             blockedNavigation = null;
@@ -431,49 +445,73 @@ export function createChromiumDriver(executablePath: string): BrowserDriver {
           return nav();
         },
         async back() {
-          await page.goBack({ waitUntil: "domcontentloaded" }).catch(() => null);
-          await refreshTitle();
-          return nav();
+          try {
+            await page.goBack({ waitUntil: "domcontentloaded" }).catch(() => null);
+            await refreshTitle();
+            return nav();
+          } catch (error) {
+            throw wrapContextError(error);
+          }
         },
         async forward() {
-          await page.goForward({ waitUntil: "domcontentloaded" }).catch(() => null);
-          await refreshTitle();
-          return nav();
+          try {
+            await page.goForward({ waitUntil: "domcontentloaded" }).catch(() => null);
+            await refreshTitle();
+            return nav();
+          } catch (error) {
+            throw wrapContextError(error);
+          }
         },
         async reload() {
-          await page.reload({ waitUntil: "domcontentloaded" });
-          await refreshTitle();
-          return nav();
+          try {
+            await page.reload({ waitUntil: "domcontentloaded" });
+            await refreshTitle();
+            return nav();
+          } catch (error) {
+            throw wrapContextError(error);
+          }
         },
         async stop() {
           // CDP "Page.stopLoading" equivalent: best effort via escape key nav abort
           await page.evaluate(() => window.stop()).catch(() => {});
         },
         async click(target) {
-          const loc = locate(target);
-          if (loc) { await loc.click(); }
-          else if ("point" in target) { await page.mouse.click(target.point.x, target.point.y); }
-          await refreshTitle();
-          return await page.evaluate(describeHit, { focusedOnly: true }) as JsonObject;
+          try {
+            const loc = locate(target);
+            if (loc) { await loc.click(); }
+            else if ("point" in target) { await page.mouse.click(target.point.x, target.point.y); }
+            await refreshTitle();
+            return await page.evaluate(describeHit, { focusedOnly: true }) as JsonObject;
+          } catch (error) {
+            throw wrapContextError(error);
+          }
         },
         async point(point) {
           return await page.evaluate(describeHit, { x: point.x, y: point.y }) as JsonObject;
         },
         async type(target, text, submit) {
-          const loc = locate(target);
-          if (loc) {
-            await loc.fill(text);
-            if (submit) await loc.press("Enter");
-          } else if ("point" in target) {
-            await page.mouse.click(target.point.x, target.point.y);
-            await page.keyboard.type(text);
-            if (submit) await page.keyboard.press("Enter");
+          try {
+            const loc = locate(target);
+            if (loc) {
+              await loc.fill(text);
+              if (submit) await loc.press("Enter");
+            } else if ("point" in target) {
+              await page.mouse.click(target.point.x, target.point.y);
+              await page.keyboard.type(text);
+              if (submit) await page.keyboard.press("Enter");
+            }
+            await refreshTitle();
+          } catch (error) {
+            throw wrapContextError(error);
           }
-          await refreshTitle();
         },
         async press(key) {
-          await page.keyboard.press(key);
-          return await page.evaluate(describeHit, { focusedOnly: true }) as JsonObject;
+          try {
+            await page.keyboard.press(key);
+            return await page.evaluate(describeHit, { focusedOnly: true }) as JsonObject;
+          } catch (error) {
+            throw wrapContextError(error);
+          }
         },
         async textRange(start, end) {
           return page.evaluate(({ a, b }) => {
@@ -539,7 +577,11 @@ export function createChromiumDriver(executablePath: string): BrowserDriver {
           else if (condition === "selector" && value) await page.waitForSelector(value, { timeout: timeoutMs ?? 10_000 });
         },
         async resize(viewport) {
-          await page.setViewportSize(viewport);
+          try {
+            await page.setViewportSize(viewport);
+          } catch (error) {
+            throw wrapContextError(error);
+          }
         },
         async emulateColorScheme(colorScheme) {
           await page.emulateMedia({ colorScheme });
