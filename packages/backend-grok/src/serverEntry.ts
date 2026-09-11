@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { registerAcpProfile } from "@polyth/backend-acp";
+import { registerAcpProfile, type AcpProfile } from "@polyth/backend-acp";
 import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/harness-runtime/executable-discovery";
 import type { ServerPackageHost } from "@polyth/plugins";
 const exec = promisify(execFile);
@@ -12,9 +12,10 @@ const resolveGrokBinary = async () => {
     process.env.PATH = env.PATH;
     return { command: report.hit.executablePath, env };
 };
+const windowsShim = (command: string) => process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
 
 export default function registerPackage(host: ServerPackageHost) {
-    return registerAcpProfile(host, {
+    const profile: AcpProfile = {
         descriptor: {
             id: "grok",
             name: "Grok Build",
@@ -24,14 +25,15 @@ export default function registerPackage(host: ServerPackageHost) {
             setupUrl: "https://docs.x.ai/build/cli/headless-scripting",
             installCommand: "curl -fsSL https://x.ai/cli/install.sh | bash",
         },
-        command: "grok",
+        command: process.env.POLYTH_GROK_BIN?.trim() || "grok",
         args: ["agent", "stdio"],
         async probe(context) {
             if (context.remote)
                 return { harnessId: "grok", installed: false, authenticated: "unknown", healthy: false, message: "Local execution only" };
             try {
                 const { command, env } = await resolveGrokBinary();
-                const version = await exec(command, ["version"], { timeout: 5000, maxBuffer: 4096, env })
+                profile.command = command;
+                const version = await exec(command, ["version"], { timeout: 5000, maxBuffer: 4096, env, shell: windowsShim(command) })
                     .then(({ stdout, stderr }) => (stdout || stderr).trim())
                     .catch(() => undefined);
                 return {
@@ -47,5 +49,6 @@ export default function registerPackage(host: ServerPackageHost) {
                 return { harnessId: "grok", installed: false, authenticated: "unknown", healthy: false };
             }
         },
-    });
+    };
+    return registerAcpProfile(host, profile);
 }
