@@ -15,6 +15,8 @@ export interface HarnessProcessAuthority {
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+const windowsCommandShim = (command: string): boolean =>
+  process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
 
 const posixGroupAlive = (pid: number): boolean => {
   try {
@@ -88,10 +90,10 @@ const createPortableAuthority = (): HarnessProcessAuthority => {
       const { detached: _detached, stdio: _stdio, ...spawnOptions } = options;
       child = spawn(command, args, {
         ...spawnOptions,
-        // Windows npm shims are .cmd files and require cmd.exe. Callers opt in
-        // only for an exact, already-discovered executable path; no prompt or
-        // project text ever becomes part of this command line.
-        shell: options.shell ?? false,
+        // Windows npm shims are .cmd/.bat files and require cmd.exe. The
+        // executable itself was already resolved by Polyth; prompts and project
+        // text never become part of this command line.
+        shell: windowsCommandShim(command) || options.shell || false,
         // A dedicated POSIX process group lets explicit disposal terminate the
         // normal descendant tree. Windows uses taskkill /T instead.
         detached: process.platform !== "win32",
