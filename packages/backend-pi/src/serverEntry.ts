@@ -89,8 +89,8 @@ export default function registerPackage(host: ServerPackageHost) {
     async discover(context) {
       if (context.remote) throw Object.assign(new Error("Local execution only"), { code: "unsupported" });
       const rpc = await connectPi(context, { ephemeral: true });
+      const runtime = createPiRuntime(context, rpc);
       try {
-        const runtime = createPiRuntime(context, rpc);
         const [models, capabilities] = await Promise.all([runtime.models(), runtime.capabilities()]);
         return {
           state: models.length ? "ready" as const : "auth-required" as const,
@@ -100,7 +100,7 @@ export default function registerPackage(host: ServerPackageHost) {
           ...(!models.length ? { message: "Pi is installed but no configured models are available" } : {}),
         };
       } finally {
-        await rpc.close().catch(() => undefined);
+        await runtime.dispose();
       }
     },
     async createRuntime(context) {
