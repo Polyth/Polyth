@@ -127,7 +127,7 @@ test("Pi maps catalog, model selection, streaming text, tools and settled termin
     context: 200_000,
   });
 
-  const commands = await runtime.commands!();
+  const commands = await runtime.commands!("canonical");
   assert.equal(commands[0]?.id, "native:pi:review");
 
   const admitted = await runtime.startTurnOperation!(
