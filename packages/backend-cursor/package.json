@@ -8,6 +8,7 @@
   "dependencies": {
     "@polyth/backend-acp": "0.1.0",
     "@polyth/contracts": "0.1.0",
+    "@polyth/harness-runtime": "0.1.0",
     "@polyth/plugins": "0.1.0"
   },
   "polyth": {
