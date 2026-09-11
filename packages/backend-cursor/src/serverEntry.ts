@@ -45,6 +45,7 @@ const resolveCursorBinary = async () => {
     process.env.PATH = env.PATH;
     return { command: report.hit.executablePath, env };
 };
+const windowsShim = (command: string) => process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
 
 // Cursor blocks session/prompt until these extension requests receive valid
 // nested outcomes. Decline unsupported UI explicitly instead of stranding the turn.
@@ -70,7 +71,7 @@ export const cursorClientRequest = (method: string) => {
 };
 
 export default function registerPackage(host: ServerPackageHost) {
-    return registerAcpProfile(host, {
+    const profile = {
         descriptor: {
             id: "cursor",
             name: "Cursor",
@@ -84,10 +85,10 @@ export default function registerPackage(host: ServerPackageHost) {
         },
         // `agent acp` has no --model flag (verified: it is accepted and
         // ignored). Model selection goes through the ACP session API only.
-        command: "agent", args: ["acp"],
+        command: process.env.POLYTH_CURSOR_BIN?.trim() || "agent", args: ["acp"],
         initializeClientMeta: { parameterizedModelPicker: true },
         clientRequest: cursorClientRequest,
-        async discoverModels(connection) {
+        async discoverModels(connection: Parameters<NonNullable<Parameters<typeof registerAcpProfile>[1]["discoverModels"]>>[0]) {
             try {
                 return cursorModels(await connection.rpc.request("cursor/list_available_models", {}, 10_000));
             } catch (error) {
@@ -99,21 +100,23 @@ export default function registerPackage(host: ServerPackageHost) {
         // to session metadata. Do not mutate every model row during discovery.
         probeModelControls: false,
         supportsModelDiscovery: cursorModelDiscoverySupport,
-        async probe(context) {
+        async probe(context: Parameters<Parameters<typeof registerAcpProfile>[1]["probe"]>[0]) {
             if (context.remote)
-                return { harnessId: "cursor", installed: false, authenticated: "unknown", healthy: false, message: "Local execution only" };
+                return { harnessId: "cursor", installed: false, authenticated: "unknown" as const, healthy: false, message: "Local execution only" };
             try {
                 const { command, env } = await resolveCursorBinary();
-                const version = (await exec(command, ["--version"], { timeout: 5000, maxBuffer: 4096, env })).stdout.trim();
+                profile.command = command;
+                const version = (await exec(command, ["--version"], { timeout: 5000, maxBuffer: 4096, env, shell: windowsShim(command) })).stdout.trim();
                 // Installation alone is not proof of authentication. The profile is
                 // offered for explicit selection but excluded from automatic routing
                 // until a native auth/status contract is verified.
-                return { harnessId: "cursor", installed: true, authenticated: "unknown", healthy: true, version, message: "Native sign-in status is not available" };
+                return { harnessId: "cursor", installed: true, authenticated: "unknown" as const, healthy: true, version, message: "Native sign-in status is not available" };
             }
             catch {
-                return { harnessId: "cursor", installed: false, authenticated: "unknown", healthy: false };
+                return { harnessId: "cursor", installed: false, authenticated: "unknown" as const, healthy: false };
             }
         },
-    });
+    };
+    return registerAcpProfile(host, profile);
 }
 export { cursorModelDiscoverySupport };
