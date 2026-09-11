@@ -44,6 +44,9 @@ import backendCodex from "../../../packages/backend-codex/src/serverEntry.ts";
 import backendCursor from "../../../packages/backend-cursor/src/serverEntry.ts";
 
 import backendFx from "../../../packages/backend-fx/src/serverEntry.ts";
+import backendGrok from "../../../packages/backend-grok/src/serverEntry.ts";
+import backendOmp from "../../../packages/backend-omp/src/serverEntry.ts";
+import backendPi from "../../../packages/backend-pi/src/serverEntry.ts";
 
 import backendOpencode from "../../../packages/backend-opencode/src/serverEntry.ts";
 
@@ -67,6 +70,9 @@ export const desktopServerPackages = [
   entry("backend-codex", {"name": "Codex harness", "description": "Native Codex App Server execution", "core": false, "enabled": true, "icon": "code", "hasSettings": false}, backendCodex),
   entry("backend-cursor", {"name": "Cursor harness", "description": "Cursor through shared ACP", "core": false, "enabled": true, "icon": "pointer", "hasSettings": false}, backendCursor),
   entry("backend-fx", {"name": "fx harness", "description": "fx through shared ACP", "core": false, "enabled": true, "icon": "command", "hasSettings": false}, backendFx),
+  entry("backend-grok", {"name": "Grok Build harness", "description": "Grok Build through its native ACP stdio agent", "core": false, "enabled": true, "icon": "assist", "hasSettings": false}, backendGrok),
+  entry("backend-omp", {"name": "OMP harness", "description": "oh-my-pi through its native ACP transport", "core": false, "enabled": true, "icon": "command", "hasSettings": false}, backendOmp),
+  entry("backend-pi", {"name": "Pi harness", "description": "Detect Pi and report native RPC integration readiness", "core": false, "enabled": true, "icon": "command", "hasSettings": false}, backendPi),
   entry("backend-opencode", {"name": "OpenCode harness", "description": "Managed OpenCode HTTP and SSE runtime", "core": true, "enabled": true, "icon": "terminal", "hasSettings": false}, backendOpencode),
   entry("browser", { name: "Browser", description: "A shared internal browser for users, agents, and element context.", core: false, enabled: true, settingsGroup: "Engineering", icon: "globe", hasSettings: false }, browser),
   entry("chat-workspace", { name: "Chat Workspace", description: "Use the AI chats you already have, directly alongside your work.", core: false, enabled: true, settingsGroup: "Workspace", icon: "chat", hasSettings: true }, chatWorkspace),
