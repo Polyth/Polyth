@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { registerAcpProfile } from "@polyth/backend-acp";
+import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/harness-runtime/executable-discovery";
 import type { ServerPackageHost } from "@polyth/plugins";
 import { cursorModelDiscoverySupport } from "./version.ts";
 const exec = promisify(execFile);
@@ -36,6 +37,14 @@ const cursorModels = (result: unknown) => {
 const methodMissing = (error: unknown) =>
     (error as { rpcCode?: number }).rpcCode === -32601
     || /method not found/i.test((error as { message?: string }).message ?? "");
+
+const resolveCursorBinary = async () => {
+    const report = await discoverHarnessExecutable(process.env.POLYTH_CURSOR_BIN?.trim() || "agent");
+    if (!report.hit) throw Object.assign(new Error("Cursor Agent CLI was not found"), { code: "not-installed" });
+    const env = await harnessExecutableChildEnv(report.hit.executablePath);
+    process.env.PATH = env.PATH;
+    return { command: report.hit.executablePath, env };
+};
 
 // Cursor blocks session/prompt until these extension requests receive valid
 // nested outcomes. Decline unsupported UI explicitly instead of stranding the turn.
@@ -91,10 +100,11 @@ export default function registerPackage(host: ServerPackageHost) {
         probeModelControls: false,
         supportsModelDiscovery: cursorModelDiscoverySupport,
         async probe(context) {
-            if (context.remote || process.platform !== "linux")
-                return { harnessId: "cursor", installed: false, authenticated: "unknown", healthy: false };
+            if (context.remote)
+                return { harnessId: "cursor", installed: false, authenticated: "unknown", healthy: false, message: "Local execution only" };
             try {
-                const version = (await exec("agent", ["--version"], { timeout: 5000, maxBuffer: 4096 })).stdout.trim();
+                const { command, env } = await resolveCursorBinary();
+                const version = (await exec(command, ["--version"], { timeout: 5000, maxBuffer: 4096, env })).stdout.trim();
                 // Installation alone is not proof of authentication. The profile is
                 // offered for explicit selection but excluded from automatic routing
                 // until a native auth/status contract is verified.
