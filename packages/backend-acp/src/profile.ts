@@ -143,6 +143,13 @@ export function registerAcpProfile(host: ServerPackageHost, profile: RegisteredA
                 async createRuntime(context) {
                     if (!context.space || context.remote)
                         throw Object.assign(new Error("Local Space context required"), { code: "unsupported" });
+                    // Persisted native routes deliberately bypass automatic
+                    // re-selection. Re-probe here anyway: package probes own
+                    // executable resolution/PATH widening for desktop launches.
+                    const availability = await probeProfile(context);
+                    if (!availability.installed || !availability.healthy) {
+                        throw Object.assign(new Error(availability.message ?? `${profile.descriptor.name} is unavailable`), { code: "runtime-unavailable" });
+                    }
                     const connection = await connectAcp(profile, context, stateFile(context));
                     try {
                         configureAcpClientRequestHandling(connection.rpc, profile.clientRequest);
