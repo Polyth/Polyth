@@ -9,12 +9,13 @@ import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from 
 import { claudeAuthFingerprint, createClaudeRuntime, discoverClaudeModels, invalidateClaudeModelCache, CLAUDE_CAPABILITIES } from "./index.ts";
 import { createClaudeProvisioner } from "./provisioner.ts";
 const exec = promisify(execFile);
+const configuredClaudeBinary = process.env.POLYTH_CLAUDE_BIN?.trim();
 const windowsShim = (command: string) => process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
 // Optional SDK is loaded only by this package, never a server boot prerequisite.
 const loadSdk = () => import("@anthropic-ai/claude-agent-sdk");
 
 const resolveClaudeBinary = async () => {
-    const requested = process.env.POLYTH_CLAUDE_BIN?.trim() || "claude";
+    const requested = configuredClaudeBinary || "claude";
     const report = await discoverHarnessExecutable(requested);
     if (!report.hit) {
         throw Object.assign(new Error(`Claude Code CLI was not found (${report.searched.slice(0, 8).join(", ") || "no searchable locations"})`), { code: "not-installed" });
@@ -22,8 +23,9 @@ const resolveClaudeBinary = async () => {
     const command = report.hit.executablePath;
     const env = await harnessExecutableChildEnv(command);
     // The SDK reads this existing Polyth override when it constructs its query.
-    // Persist the exact discovered path so a later runtime cannot resolve a
-    // different `claude` than the one whose version/auth we just verified.
+    // Persist the exact discovered path for execution, but keep the user's
+    // original override separately so a later refresh may rediscover a moved
+    // default installation instead of treating our own cached path as intent.
     process.env.POLYTH_CLAUDE_BIN = command;
     process.env.PATH = env.PATH;
     return command;
