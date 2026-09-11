@@ -4,7 +4,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./executable-discovery": "./src/executableDiscovery.ts"
+    "./executable-discovery": "./src/executableDiscovery.ts",
+    "./profile": "./src/profile.ts"
   },
   "dependencies": {
     "@polyth/contracts": "0.1.0",
