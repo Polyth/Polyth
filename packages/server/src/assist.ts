@@ -5,7 +5,11 @@
 // suggestion), so ANY new event makes it stale. Hard settings switch: disabled
 // means nothing is generated at all. One flight per session bounds token spend.
 import type { SessionAssist } from "@polyth/contracts";
-import { latestCompletedExchange } from "@polyth/session/next-action";
+import {
+  recentCompletedConversationContext,
+  renderConversationContext,
+  type ConversationExchange,
+} from "@polyth/session/next-action";
 import type { SessionEvent } from "@polyth/contracts";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { atomicWriteSync } from "@polyth/plugins";
@@ -82,9 +86,16 @@ export function isFresh(assist: { atSeq: number } | undefined, latestSeq: number
 export function buildAssistPrompt(transcript: string): string {
   return [
     "You are reviewing a coding-assistant conversation that just went idle.",
-    `Output EXACTLY two lines and nothing else:`,
+    "Output EXACTLY two lines and nothing else:",
     `Recap: <what happened, at most ${RECAP_MAX_WORDS} words>`,
-    "Suggestion: <ONE concrete next prompt the user could send, imperative, one sentence>",
+    "Suggestion: <ONE concrete next prompt the user could send, imperative, one sentence — or the single word none>",
+    "",
+    "Write `Suggestion: none` when the task is finished, the user closed the",
+    "conversation, or nothing in the conversation grounds a next step. A recap",
+    "with no suggestion is a complete and correct answer. Never invent work to",
+    "fill the line: no \"add tests\" when the tests already passed, no",
+    "\"implement it\" after it was implemented, no new requirements, no",
+    "speculative cleanup, and no choice the user already made.",
     "Do not use tools. Do not wrap the answer in code fences.",
     "",
     "<conversation>",
@@ -93,8 +104,14 @@ export function buildAssistPrompt(transcript: string): string {
   ].join("\n");
 }
 
-/** Tolerant two-line parse; null when the model reply is unusable. */
-export function parseAssistReply(raw: string): { recap: string; suggestion: string } | null {
+/** A declined suggestion is structurally absent, never an empty call to
+ *  action — the UI must be able to tell "nothing to suggest" from "the model
+ *  produced an unusable line". */
+const NO_SUGGESTION = /^(none|no suggestion|n\/a|-{1,2})\.?$/i;
+
+/** Tolerant two-line parse; null when the model reply is unusable. A missing
+ *  or explicitly declined suggestion still yields a usable recap. */
+export function parseAssistReply(raw: string): { recap: string; suggestion?: string } | null {
   const lines = raw.replace(/^```[a-z]*\n?|```$/g, "").split("\n").map((l) => l.trim()).filter(Boolean);
   let recap = "";
   let suggestion = "";
@@ -109,8 +126,13 @@ export function parseAssistReply(raw: string): { recap: string; suggestion: stri
     recap = lines[0]!;
     suggestion = lines[1]!;
   }
-  if (!recap || !suggestion) return null;
-  return { recap: capWords(recap, RECAP_MAX_WORDS), suggestion };
+  // A lone UNLABELLED line stays unusable: it is as likely to be a refusal or
+  // a stray sentence as a recap. Only an explicit `Recap:` stands alone.
+  if (!recap) return null;
+  const capped = capWords(recap, RECAP_MAX_WORDS);
+  return NO_SUGGESTION.test(suggestion) || !suggestion
+    ? { recap: capped }
+    : { recap: capped, suggestion };
 }
 
 export function buildNotePrompt(transcript: string): string {
@@ -142,11 +164,14 @@ export const PROMPT_IMPROVEMENT_OUTPUT_MAX_CHARS = 4_000;
 const capChars = (text: string, max: number): string =>
   text.length <= max ? text : text.slice(0, max).trimEnd();
 
-/** Plain-text, two-message prompt for the explicit composer action. */
-export function buildNextActionPrompt(input: { user: string; assistant: string }): string {
+/** Plain-text prompt for the explicit composer action, over the recent
+ *  completed exchanges rather than the last one alone — a closing "yes" or
+ *  "looks good" must not erase the work it refers to. */
+export function buildNextActionPrompt(context: readonly ConversationExchange[]): string {
   return [
     "You generate the single best next message the user could send to a coding agent.",
-    "Based only on the latest user message and the assistant's latest response, produce ONE immediately sendable next user message that moves the current task forward.",
+    "Based only on the recent conversation below, produce ONE immediately sendable next user message that moves the current task forward.",
+    "The exchanges are ordered oldest to newest; the newest one is the user's current intent, and the earlier ones are there to explain what a short closing message refers to.",
     "",
     "Rules:",
     "- Return only the message itself.",
@@ -166,13 +191,12 @@ export function buildNextActionPrompt(input: { user: string; assistant: string }
     "- Match the user's concise/direct tone where it can be inferred.",
     "- Keep the message concise but complete enough to send without editing.",
     "",
-    "If no useful next action can reasonably be inferred, return an empty string.",
+    "- Do not propose work that the conversation shows is already finished.",
     "",
-    "LATEST USER MESSAGE:",
-    capChars(input.user, NEXT_ACTION_CONTEXT_MAX_CHARS),
+    "If the task is complete, the user has closed the conversation, or no grounded next action exists, return an empty string. An empty answer is a correct answer; never invent a follow-up to fill the space.",
     "",
-    "LATEST ASSISTANT RESPONSE:",
-    capChars(input.assistant, NEXT_ACTION_CONTEXT_MAX_CHARS),
+    "RECENT CONVERSATION:",
+    capChars(renderConversationContext(context), NEXT_ACTION_CONTEXT_MAX_CHARS),
   ].join("\n");
 }
 
@@ -230,9 +254,9 @@ export function createManualSuggestionService(deps: {
         if (draft.trim()) {
           prompt = buildPromptImprovementPrompt(draft);
         } else {
-          const exchange = latestCompletedExchange(await deps.events(sessionId));
-          if (exchange === null) throw Object.assign(new Error("no-completed-exchange"), { code: "no-completed-exchange" });
-          prompt = buildNextActionPrompt(exchange);
+          const context = recentCompletedConversationContext(await deps.events(sessionId));
+          if (context.length === 0) throw Object.assign(new Error("no-completed-exchange"), { code: "no-completed-exchange" });
+          prompt = buildNextActionPrompt(context);
         }
         if ((await deps.latestSeq(sessionId)) !== atSeq) fail("stale");
         const raw = await deps.complete(sessionId, prompt, userId);

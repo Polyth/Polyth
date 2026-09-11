@@ -9,6 +9,24 @@ export interface CompletedExchange {
   assistantSeq: number;
 }
 
+/** Compact descriptors for what the user attached to a message. The content is
+ *  deliberately absent — an assistant utility needs to know a screenshot or a
+ *  file was part of the ask, not to re-read it. */
+function attachmentDescriptors(event: SessionEvent): string[] {
+  const raw = (event.data as { attachments?: unknown }).attachments;
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const ref = item as { name?: unknown; path?: unknown; mime?: unknown; kind?: unknown };
+    const label = [ref.name, ref.path].find((value) => typeof value === "string" && value) as string | undefined;
+    const kind = [ref.kind, ref.mime].find((value) => typeof value === "string" && value) as string | undefined;
+    if (label) out.push(kind ? `${label} (${kind})` : label);
+    else if (kind) out.push(kind);
+  }
+  return out;
+}
+
 function eventText(event: SessionEvent, role: "user" | "assistant"): string {
   const data = event.data as { text?: unknown; recoveryContext?: unknown };
   const text = String(data.text ?? "");
@@ -65,4 +83,97 @@ export function latestCompletedExchange(events: readonly SessionEvent[]): Comple
   if (visible.slice(assistantAt + 1).some((event) =>
     event.type === "user/message" || event.type === "turn/started")) return null;
   return exchangeFor(assistantAt, assistantAt);
+}
+
+// -------------------------------------------------- recent completed context
+
+export interface ConversationExchange extends CompletedExchange {
+  /** Compact descriptors of what the user attached, if anything. */
+  attachments: string[];
+}
+
+export interface RecentContextOptions {
+  /** How many completed exchanges to keep, newest first. */
+  maxExchanges?: number;
+  /** Total character budget across the kept exchanges. */
+  maxChars?: number;
+}
+
+const DEFAULT_MAX_EXCHANGES = 3;
+const DEFAULT_MAX_CHARS = 12_000;
+
+const exchangeCost = (exchange: ConversationExchange): number =>
+  exchange.user.length + exchange.assistant.length + exchange.attachments.join("").length;
+
+/**
+ * The recent COMPLETED user → assistant exchanges, oldest first.
+ *
+ * Assistant utilities that reason about "what just happened" cannot use the
+ * last exchange alone: a conversation routinely ends with "yes", "do that" or
+ * "looks good", and the work those words refer to lives one or two exchanges
+ * back. Nor can they use an arbitrary transcript tail, which is mostly tool
+ * noise and is bounded by nothing meaningful.
+ *
+ * Bounded by both exchange count and characters, and deterministic, so the
+ * same log always produces the same context. When the budget binds, the
+ * OLDEST exchanges are dropped — recent user intent is what matters most —
+ * but the newest exchange is always kept even if it exceeds the budget alone.
+ */
+export function recentCompletedConversationContext(
+  events: readonly SessionEvent[],
+  opts: RecentContextOptions = {},
+): ConversationExchange[] {
+  // The newest exchange is only usable once its turn has finished; that
+  // judgement (turn markers, imported logs, an active turn) already lives in
+  // latestCompletedExchange, so reuse it rather than re-deriving it here.
+  const newest = latestCompletedExchange(events);
+  if (!newest) return [];
+
+  const visible = effectiveHistory(events).events
+    .filter((event) =>
+      !event.ignorable
+      && (event.type === "user/message" || event.type === "assistant/message")
+      && event.seq <= newest.assistantSeq);
+
+  // Pair each user message with the last assistant reply before the next one.
+  const pairs: ConversationExchange[] = [];
+  for (let i = 0; i < visible.length; i += 1) {
+    const userEvent = visible[i]!;
+    if (userEvent.type !== "user/message") continue;
+    let assistantEvent: SessionEvent | undefined;
+    for (let j = i + 1; j < visible.length && visible[j]!.type !== "user/message"; j += 1) {
+      if (eventText(visible[j]!, "assistant")) assistantEvent = visible[j]!;
+    }
+    if (!assistantEvent) continue;
+    const user = eventText(userEvent, "user");
+    const assistant = eventText(assistantEvent, "assistant");
+    const attachments = attachmentDescriptors(userEvent);
+    if (!assistant || (!user && attachments.length === 0)) continue;
+    pairs.push({
+      user,
+      assistant,
+      attachments,
+      userSeq: userEvent.seq,
+      assistantSeq: assistantEvent.seq,
+    });
+  }
+
+  const maxExchanges = Math.max(1, opts.maxExchanges ?? DEFAULT_MAX_EXCHANGES);
+  const maxChars = Math.max(1, opts.maxChars ?? DEFAULT_MAX_CHARS);
+  const kept = pairs.slice(-maxExchanges);
+  let total = kept.reduce((sum, exchange) => sum + exchangeCost(exchange), 0);
+  while (kept.length > 1 && total > maxChars) {
+    total -= exchangeCost(kept.shift()!);
+  }
+  return kept;
+}
+
+/** Render the context as the plain transcript an assistant utility reads. */
+export function renderConversationContext(context: readonly ConversationExchange[]): string {
+  return context.map((exchange) => {
+    const lines = [`User: ${exchange.user}`];
+    if (exchange.attachments.length > 0) lines.push(`(attached: ${exchange.attachments.join(", ")})`);
+    lines.push(`Assistant: ${exchange.assistant}`);
+    return lines.join("\n");
+  }).join("\n\n");
 }
