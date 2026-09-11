@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { registerAcpProfile } from "@polyth/backend-acp";
+import { registerAcpProfile, type AcpProfile } from "@polyth/backend-acp";
 import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/backend-acp/executable-discovery";
 import type { ServerPackageHost } from "@polyth/plugins";
 import { cursorModelDiscoverySupport } from "./version.ts";
@@ -71,7 +71,7 @@ export const cursorClientRequest = (method: string) => {
 };
 
 export default function registerPackage(host: ServerPackageHost) {
-    const profile = {
+    const profile: AcpProfile = {
         descriptor: {
             id: "cursor",
             name: "Cursor",
@@ -88,7 +88,7 @@ export default function registerPackage(host: ServerPackageHost) {
         command: process.env.POLYTH_CURSOR_BIN?.trim() || "agent", args: ["acp"],
         initializeClientMeta: { parameterizedModelPicker: true },
         clientRequest: cursorClientRequest,
-        async discoverModels(connection: Parameters<NonNullable<Parameters<typeof registerAcpProfile>[1]["discoverModels"]>>[0]) {
+        async discoverModels(connection) {
             try {
                 return cursorModels(await connection.rpc.request("cursor/list_available_models", {}, 10_000));
             } catch (error) {
@@ -100,9 +100,9 @@ export default function registerPackage(host: ServerPackageHost) {
         // to session metadata. Do not mutate every model row during discovery.
         probeModelControls: false,
         supportsModelDiscovery: cursorModelDiscoverySupport,
-        async probe(context: Parameters<Parameters<typeof registerAcpProfile>[1]["probe"]>[0]) {
+        async probe(context) {
             if (context.remote)
-                return { harnessId: "cursor", installed: false, authenticated: "unknown" as const, healthy: false, message: "Local execution only" };
+                return { harnessId: "cursor", installed: false, authenticated: "unknown", healthy: false, message: "Local execution only" };
             try {
                 const { command, env } = await resolveCursorBinary();
                 profile.command = command;
@@ -110,10 +110,10 @@ export default function registerPackage(host: ServerPackageHost) {
                 // Installation alone is not proof of authentication. The profile is
                 // offered for explicit selection but excluded from automatic routing
                 // until a native auth/status contract is verified.
-                return { harnessId: "cursor", installed: true, authenticated: "unknown" as const, healthy: true, version, message: "Native sign-in status is not available" };
+                return { harnessId: "cursor", installed: true, authenticated: "unknown", healthy: true, version, message: "Native sign-in status is not available" };
             }
             catch {
-                return { harnessId: "cursor", installed: false, authenticated: "unknown" as const, healthy: false };
+                return { harnessId: "cursor", installed: false, authenticated: "unknown", healthy: false };
             }
         },
     };
