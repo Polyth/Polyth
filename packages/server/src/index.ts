@@ -116,7 +116,11 @@ import {
 import { assistRoutes } from "./routes/assist.ts";
 import { promptHistoryRoutes } from "./routes/promptHistory.ts";
 import { oneShot } from "./oneshot.ts";
-import { createSmallModelService } from "./smallModel.ts";
+import {
+  createSmallModelService,
+  smallModelExecutionRoute,
+  smallModelPreference,
+} from "./smallModel.ts";
 import { createWsGateway, type WsGateway } from "./ws.ts";
 import { createTrackWorkflow, type TrackWorkflow, type TrackWorkflowDeps } from "./tracks.ts";
 import { createRouteRegistry } from "./routeRegistry.ts";
@@ -1931,22 +1935,9 @@ export async function boot(opts: BootOptions = {}) {
   // the settings route) so small-model generation can honour the model the user
   // picked in Settings → Sessions → Small Model, not just POLYTH_SMALL_MODEL.
   const clientSettings = createClientSettings({ file: `${dataDir}/client-settings.json` });
-  const resolveSmallModel = (): ({ providerID: string; modelID: string } & { harnessId?: string }) | undefined => {
-    const raw = (clientSettings.get().settings as {
-      sessionDefaults?: { smallModel?: { harnessId?: unknown; providerID?: unknown; modelID?: unknown } };
-    }).sessionDefaults?.smallModel;
-    if (
-      raw && typeof raw.providerID === "string" && raw.providerID
-      && typeof raw.modelID === "string" && raw.modelID
-    ) {
-      return {
-        providerID: raw.providerID,
-        modelID: raw.modelID,
-        ...(typeof raw.harnessId === "string" && raw.harnessId ? { harnessId: raw.harnessId } : {}),
-      };
-    }
-    return smallModel();
-  };
+  const resolveSmallModel = (userId?: string): ({ providerID: string; modelID: string } & { harnessId?: string }) | undefined =>
+    (userId ? smallModelPreference(clientSettings.get(userId).settings) : undefined)
+    ?? smallModel();
 
   const packageSpaces = () =>
     spaceGateway.store.allSpaces().map((space) => ({
@@ -2245,18 +2236,18 @@ export async function boot(opts: BootOptions = {}) {
     sessionId: string,
     prompt: string,
     maxOutputTokens = 1_024,
+    userId?: string,
   ): Promise<string> => {
     const proj = await store.projection(sessionId);
     const project = proj ? await projects.get(proj.projectId) : null;
     // Prefer the configured small model, then the session's own known-good
     // model. Direct provider transport is tried first with a session fallback.
-    const configuredSmallModel = resolveSmallModel();
-    const model = configuredSmallModel ?? proj?.model ?? undefined;
-    const rt = await runtimes.forProject(proj?.projectId ?? "__default__", project?.path, configuredSmallModel?.harnessId);
+    const route = smallModelExecutionRoute(resolveSmallModel(userId), proj);
+    const rt = await runtimes.forProject(proj?.projectId ?? "__default__", project?.path, route.harnessId);
     const { text } = await smallModels.complete(rt, {
       cwd: project?.path ?? process.cwd(),
       prompt,
-      ...(model ? { model } : {}),
+      ...(route.model ? { model: route.model } : {}),
       maxOutputTokens,
       timeoutMs: 90_000,
     });
@@ -2401,11 +2392,11 @@ export async function boot(opts: BootOptions = {}) {
       settings: assistSettings,
       projection: (sessionId) => store.projection(sessionId),
       latestSeq: (sessionId) => store.latestSeq(sessionId),
-      suggestion: (sessionId, draft) => manualSuggestion.generate(sessionId, draft),
+      suggestion: (space, sessionId, draft) => manualSuggestion.generate(sessionId, draft, space.userId),
       improve: async (space, projectId, draft) => {
         const project = await spaceServices(space).projects.get(projectId);
         if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
-        const model = resolveSmallModel();
+        const model = resolveSmallModel(space.userId);
         const runtime = await runtimes.forProject(projectId, project.path, model?.harnessId);
         const { text } = await smallModels.complete(runtime, {
           cwd: project.path,
@@ -2417,14 +2408,14 @@ export async function boot(opts: BootOptions = {}) {
         });
         return sanitizeNextActionReply(text, PROMPT_IMPROVEMENT_OUTPUT_MAX_CHARS);
       },
-      distill: async (sessionId) => {
+      distill: async (space, sessionId) => {
         const transcript = await assistTranscript(sessionId);
         if (!transcript.trim()) {
           throw Object.assign(new Error("nothing to distill — the session has no messages"), { code: "invalid-input" });
         }
-        return parseNoteReply(await assistComplete(sessionId, buildNotePrompt(transcript)));
+        return parseNoteReply(await assistComplete(sessionId, buildNotePrompt(transcript), 1_024, space.userId));
       },
-      taskBrief: async (sessionId: string) => {
+      taskBrief: async (space, sessionId: string) => {
         const messages = deriveMessages(await store.events(sessionId));
         const latest = [...messages].reverse().find((message) => message.role === "user");
         const prompt = latest?.parts
@@ -2433,12 +2424,11 @@ export async function boot(opts: BootOptions = {}) {
         if (!prompt) throw Object.assign(new Error("nothing to summarize — the session has no user prompt"), { code: "invalid-input" });
         const proj = await store.projection(sessionId);
         const project = proj ? await projects.get(proj.projectId) : null;
-        const configuredSmallModel = resolveSmallModel();
-        const model = configuredSmallModel ?? proj?.model ?? undefined;
-        const runtime = await runtimes.forProject(proj?.projectId ?? "__default__", project?.path, configuredSmallModel?.harnessId);
+        const route = smallModelExecutionRoute(resolveSmallModel(space.userId), proj);
+        const runtime = await runtimes.forProject(proj?.projectId ?? "__default__", project?.path, route.harnessId);
         const { text: brief } = await smallModels.complete(runtime, {
           cwd: project?.path ?? process.cwd(),
-          ...(model ? { model } : {}),
+          ...(route.model ? { model: route.model } : {}),
           maxOutputTokens: 128,
           timeoutMs: 90_000,
           prompt: [

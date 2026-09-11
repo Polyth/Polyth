@@ -286,8 +286,9 @@ export interface ServerPackageHost extends TrustedServerPluginHost {
    * supported; oneShot is only a compatibility fallback. */
   smallModelComplete(runtime: AgentRuntime, opts: ServerSmallModelOptions): Promise<ServerSmallModelResult>;
   smallModelInputBudget(runtime: AgentRuntime, model: ModelRef | undefined, maxOutputTokens: number): Promise<number>;
-  /** Configured cheap model for auditors/summaries, including its owning harness. */
-  smallModel(): (ModelRef & { harnessId?: string }) | undefined;
+  /** Account-configured cheap model for auditors/summaries, including its
+   * owning harness. Omit userId only for background work that has no requester. */
+  smallModel(userId?: string): (ModelRef & { harnessId?: string }) | undefined;
   /** Resolve a session's project runtime + cwd/model/agent context. */
   resolveSessionRuntime(sessionId: string): Promise<SessionRuntimeBinding>;
   /** Mount a kernel plugin on the composition root; dispose to unmount. */

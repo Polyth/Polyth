@@ -15,7 +15,7 @@ const parseModel = (raw?: string): ModelRef | undefined => {
 };
 
 export function fusionRoutes(fusion: FusionService): RouteHandler {
-  return async ({ path, method, body, json }) => {
+  return async ({ path, method, body, json, space }) => {
     let match = path.match(/^\/api\/sessions\/([^/]+)\/fuse$/);
     if (match && method === "POST") {
       const input = await body();
@@ -23,7 +23,7 @@ export function fusionRoutes(fusion: FusionService): RouteHandler {
       const { id } = await fusion.start(match[1]!, {
         text: String(input.text ?? ""),
         models,
-      });
+      }, space.userId);
       json(200, { fusionId: id });
       return true;
     }
@@ -67,9 +67,9 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         ...(parseModel(model) ? { model: parseModel(model)! } : {}),
       });
     },
-    synthesize: async ({ sessionId, prompt, answers }) => {
+    synthesize: async ({ sessionId, prompt, answers, userId }) => {
       const binding = await host.resolveSessionRuntime(sessionId);
-      const smallModel = host.smallModel();
+      const smallModel = host.smallModel(userId);
       const projection = smallModel?.harnessId ? await host.store.projection(sessionId) : undefined;
       const rt = smallModel?.harnessId
         ? await host.runtimes.forProject(projection?.projectId ?? "__default__", binding.cwd, smallModel.harnessId)

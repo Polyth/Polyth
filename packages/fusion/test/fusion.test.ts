@@ -12,7 +12,7 @@ const flush = () => new Promise((r) => setImmediate(r));
 
 function harness(opts: {
   runModel?: (ctx: { model: string; prompt: string }) => Promise<string>;
-  synthesize?: (raw: string) => Promise<string>;
+  synthesize?: (raw: string, userId?: string) => Promise<string>;
 }): Harness {
   const events: Array<{ sessionId: string; type: string; data: JsonObject }> = [];
   const service = createFusionService({
@@ -20,8 +20,8 @@ function harness(opts: {
       events.push({ sessionId, type, data });
     },
     runModel: async (ctx) => (opts.runModel ? opts.runModel(ctx) : `reply from ${ctx.model}`),
-    synthesize: async () =>
-      opts.synthesize ? opts.synthesize("") : '{"answer":"combined","weights":[{"model":"a","weight":2},{"model":"b","weight":2}],"disagreements":["x disagrees"]}',
+    synthesize: async (ctx) =>
+      opts.synthesize ? opts.synthesize("", ctx.userId) : '{"answer":"combined","weights":[{"model":"a","weight":2},{"model":"b","weight":2}],"disagreements":["x disagrees"]}',
     now: () => 1000,
   });
   return { events, service };
@@ -78,6 +78,21 @@ test("start rejects empty prompt or no models", async () => {
   const h = harness({});
   await assert.rejects(() => h.service.start("s1", { text: "", models: ["a"] }));
   await assert.rejects(() => h.service.start("s1", { text: "hi", models: [] }));
+});
+
+test("fusion keeps requester identity for the background small-model pass", async () => {
+  let seenUserId: string | undefined;
+  const h = harness({
+    synthesize: async (_raw, userId) => {
+      seenUserId = userId;
+      return '{"answer":"combined","weights":[],"disagreements":[]}';
+    },
+  });
+  const { id } = await h.service.start("s1", { text: "hi", models: ["a"] }, "usr_test");
+  await flush();
+  await flush();
+  assert.equal(h.service.get(id)?.status, "completed");
+  assert.equal(seenUserId, "usr_test");
 });
 
 test("a runModel failure marks the fusion failed instead of throwing to the caller", async () => {

@@ -71,6 +71,21 @@ test("keep verdict continues the session and counts continuations", async () => 
   assert.equal(h.service.get("s1")?.continuations, 1);
 });
 
+test("goal auditor retains the requester for small-model selection", async () => {
+  let seenUserId: string | undefined;
+  const service = createGoalService({
+    append: async () => {},
+    send: async () => {},
+    complete: async (_sessionId, _prompt, userId) => {
+      seenUserId = userId;
+      return '{"verdict":"done","reason":"finished"}';
+    },
+  });
+  await service.attach("s1", { objective: "ship it" }, "usr_test");
+  await service.onTurnCompleted("s1", "done");
+  assert.equal(seenUserId, "usr_test");
+});
+
 test("done verdict completes and stops continuing", async () => {
   const h = harness(['{"verdict":"done","reason":"finished"}']);
   await h.service.attach("s1", { objective: "ship it" });

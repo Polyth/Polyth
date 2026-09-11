@@ -28,12 +28,12 @@ export interface FusionDeps {
   /** Run the prompt against one model backend and return its raw text answer. */
   runModel: (ctx: { sessionId: string; fusionId: string; model: string; prompt: string }) => Promise<string>;
   /** One-shot cheap-model synthesis pass; sees the prompt and every model's answer. */
-  synthesize: (ctx: { sessionId: string; fusionId: string; prompt: string; answers: ModelAnswer[] }) => Promise<string>;
+  synthesize: (ctx: { sessionId: string; fusionId: string; prompt: string; answers: ModelAnswer[]; userId?: string }) => Promise<string>;
   now?: () => number;
 }
 
 export interface FusionService {
-  start(sessionId: string, input: StartFusionInput): Promise<{ id: string }>;
+  start(sessionId: string, input: StartFusionInput, userId?: string): Promise<{ id: string }>;
   get(fusionId: string): FusionState | null;
   snapshot(state: FusionState): FusionDto;
 }
@@ -109,6 +109,7 @@ export function snapshot(state: FusionState): FusionDto {
 export function createFusionService(deps: FusionDeps): FusionService {
   const now = deps.now ?? (() => Date.now());
   const fusions = new Map<string, FusionState>();
+  const users = new Map<string, string>();
 
   const finish = async (state: FusionState) => {
     await deps.append(state.sessionId, "fusion/completed", {
@@ -126,6 +127,7 @@ export function createFusionService(deps: FusionDeps): FusionService {
   };
 
   const run = async (state: FusionState): Promise<void> => {
+    const userId = users.get(state.id);
     try {
       const answers = await Promise.all(
         state.models.map(async (model): Promise<ModelAnswer> => ({
@@ -134,7 +136,13 @@ export function createFusionService(deps: FusionDeps): FusionService {
         })),
       );
       state.sources = answers;
-      const raw = await deps.synthesize({ sessionId: state.sessionId, fusionId: state.id, prompt: state.prompt, answers });
+      const raw = await deps.synthesize({
+        sessionId: state.sessionId,
+        fusionId: state.id,
+        prompt: state.prompt,
+        answers,
+        ...(userId ? { userId } : {}),
+      });
       const parsed = parseSynthesis(raw, state.models);
       state.answer = parsed.answer;
       state.weights = parsed.weights;
@@ -144,11 +152,15 @@ export function createFusionService(deps: FusionDeps): FusionService {
       state.status = "failed";
       state.error = String(err instanceof Error ? err.message : err).slice(0, 300);
     }
-    await finish(state);
+    try {
+      await finish(state);
+    } finally {
+      users.delete(state.id);
+    }
   };
 
   return {
-    async start(sessionId, input) {
+    async start(sessionId, input, userId) {
       const text = input.text.trim();
       if (!text) throw new Error("fusion prompt is empty");
       if (!input.models.length) throw new Error("fusion needs at least one model");
@@ -158,6 +170,7 @@ export function createFusionService(deps: FusionDeps): FusionService {
         status: "running", answer: "", weights: [], disagreements: [], sources: [], createdAt: now(),
       };
       fusions.set(id, state);
+      if (userId) users.set(id, userId);
       await deps.append(sessionId, "fusion/started", { fusionId: id, prompt: text, models: state.models });
       void run(state);
       return { id };

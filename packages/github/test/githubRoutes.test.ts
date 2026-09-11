@@ -25,7 +25,10 @@ interface Call {
   input?: CreateSessionInput | UserTurnInput;
 }
 
-function makeHarness(opts: { exec?: ExecFn; describe?: (root: string, base?: string) => Promise<{ title: string; body: string }> } = {}) {
+function makeHarness(opts: {
+  exec?: ExecFn;
+  describe?: (root: string, base?: string, userId?: string) => Promise<{ title: string; body: string }>;
+} = {}) {
   const calls: Call[] = [];
   let seq = 0;
   const exec: ExecFn = async (bin, args, execOpts) => {
@@ -74,6 +77,7 @@ function makeHarness(opts: { exec?: ExecFn; describe?: (root: string, base?: str
     let payload: unknown;
     const rc = {
       req: {}, res: {},
+      space: { userId: "usr_test" },
       url: new URL(`http://x${path}${query}`),
       path, method,
       body: async () => body,
@@ -255,17 +259,17 @@ test("pr/describe fails soft when unwired and returns the wired draft", async ()
   assert.equal(off.status, 200);
   assert.deepEqual(off.payload, { ok: false, reason: "AI describe is not available on this server" });
 
-  const seen: Array<{ root: string; base?: string }> = [];
+  const seen: Array<{ root: string; base?: string; userId?: string }> = [];
   const wired = makeHarness({
-    describe: async (root, base) => {
-      seen.push({ root, ...(base ? { base } : {}) });
+    describe: async (root, base, userId) => {
+      seen.push({ root, ...(base ? { base } : {}), ...(userId ? { userId } : {}) });
       return { title: "Add thing", body: "Because reasons." };
     },
   });
   const on = await wired.call("POST", "/api/github/pr/describe", { projectId: "p1", base: "develop" });
   assert.equal(on.status, 200);
   assert.deepEqual(on.payload, { ok: true, data: { title: "Add thing", body: "Because reasons." } });
-  assert.deepEqual(seen, [{ root: "/repo", base: "develop" }]);
+  assert.deepEqual(seen, [{ root: "/repo", base: "develop", userId: "usr_test" }]);
 
   const throwing = makeHarness({ describe: async () => { throw new Error("no commits to describe against main"); } });
   const soft = await throwing.call("POST", "/api/github/pr/describe", { projectId: "p1" });

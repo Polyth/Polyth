@@ -244,9 +244,9 @@ test("assist service: unusable model output saves nothing, errors fail soft", as
 function routeHarness(opts: {
   projections?: Record<string, SessionProjection>;
   latestSeq?: number;
-  distill?: (sessionId: string) => Promise<{ title: string; body: string }>;
-  taskBrief?: (sessionId: string) => Promise<string>;
-  suggestion?: (sessionId: string, draft?: string) => Promise<{ suggestion: string; atSeq: number }>;
+  distill?: (space: SpaceContext, sessionId: string) => Promise<{ title: string; body: string }>;
+  taskBrief?: (space: SpaceContext, sessionId: string) => Promise<string>;
+  suggestion?: (space: SpaceContext, sessionId: string, draft?: string) => Promise<{ suggestion: string; atSeq: number }>;
   improve?: (space: SpaceContext, projectId: string, draft: string) => Promise<string>;
 }) {
   const settings = createAssistSettings({ file: join(tmp(), "assist.json") });
@@ -263,7 +263,7 @@ function routeHarness(opts: {
     let status = 0;
     let payload: unknown;
     const rc = {
-      req: {}, res: {}, space: { spaceId: "space-1", membership: { role: "owner" } },
+      req: {}, res: {}, space: { spaceId: "space-1", userId: "usr_test", membership: { role: "owner" } },
       url: new URL(`http://x${path}`),
       path, method,
       body: async () => body,
@@ -322,7 +322,7 @@ test("POST assist/note: 404 unknown, 503 unwired, draft when wired, 502 on failu
 
   const wired = routeHarness({
     projections: { s1: proj("s1") },
-    distill: async (id) => ({ title: `Note for ${id}`, body: "decisions" }),
+    distill: async (_space, id) => ({ title: `Note for ${id}`, body: "decisions" }),
   });
   const ok = await wired.call("POST", "/api/sessions/s1/assist/note");
   assert.equal(ok.status, 200);
@@ -376,6 +376,29 @@ test("POST assist/suggestion returns an ephemeral result and typed conflicts", a
     suggestion: async () => { throw new Error("small model offline"); },
   });
   assert.equal((await failure.call("POST", "/api/sessions/s1/assist/suggestion")).status, 502);
+});
+
+test("small-model routes forward the authenticated account identity", async () => {
+  const seen: string[] = [];
+  const h = routeHarness({
+    projections: { s1: proj("s1") },
+    suggestion: async (space, sessionId) => {
+      seen.push(`${space.userId}:${sessionId}`);
+      return { suggestion: "Validate the change.", atSeq: 7 };
+    },
+    distill: async (space, sessionId) => {
+      seen.push(`${space.userId}:${sessionId}`);
+      return { title: "Note", body: "Body" };
+    },
+    taskBrief: async (space, sessionId) => {
+      seen.push(`${space.userId}:${sessionId}`);
+      return "Brief";
+    },
+  });
+  await h.call("POST", "/api/sessions/s1/assist/suggestion");
+  await h.call("POST", "/api/sessions/s1/assist/note");
+  await h.call("POST", "/api/sessions/s1/task-brief");
+  assert.deepEqual(seen, ["usr_test:s1", "usr_test:s1", "usr_test:s1"]);
 });
 
 test("POST project assist/prompt improves a pre-session draft", async () => {

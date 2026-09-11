@@ -164,12 +164,12 @@ export function gitlabRoutes(host: ServerPackageHost, deps: { accounts: GitlabAc
       const handler = hostingRoutes({
         projects: scoped.projects, provider, prefix: "/api/gitlab", mergeStrategies: ["merge", "squash"],
         presentation: { changeRequest: "merge request", abbreviation: "MR", numberPrefix: "!", conflictEvent: "gitlab/conflict-resolution-started" },
-        describe: async (root, base) => {
+        describe: async (root, base, userId) => {
           const repository = await provider.repo(root);
           if (!repository.ok) throw new Error(repository.reason);
           const target = base || repository.data.defaultBranch;
           const git = host.services.require(serverServiceKey<GitService>("git"));
-          return describeChangeRequest(host, projectId, root, await git.diffRange(root, target, "HEAD"), "merge request");
+          return describeChangeRequest(host, projectId, root, await git.diffRange(root, target, "HEAD"), "merge request", userId);
         },
         sessions: { create: input => scoped.sessions.create(input), snapshot: id => scoped.sessions.snapshot(id), send: (id, input) => scoped.sessions.send(id, input) },
         append: (id, type, data) => host.events.append(id, type, data, { ignorable: true, producerPlugin: "gitlab" }),

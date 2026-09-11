@@ -10,11 +10,11 @@ export function assistRoutes(deps: {
   projection(sessionId: string): Promise<SessionProjection | undefined>;
   latestSeq(sessionId: string): Promise<number>;
   /** Small-model chat→note distillation; absent = honest 503. */
-  distill?: (sessionId: string) => Promise<{ title: string; body: string }>;
+  distill?: (space: SpaceContext, sessionId: string) => Promise<{ title: string; body: string }>;
   /** Small-model summary of the latest user prompt for mobile task chrome. */
-  taskBrief?: (sessionId: string) => Promise<string>;
+  taskBrief?: (space: SpaceContext, sessionId: string) => Promise<string>;
   /** Explicit, ephemeral next-action suggestion for the composer. */
-  suggestion?: (sessionId: string, draft?: string) => Promise<{ suggestion: string; atSeq: number }>;
+  suggestion?: (space: SpaceContext, sessionId: string, draft?: string) => Promise<{ suggestion: string; atSeq: number }>;
   /** Prompt-only rewrite for a composer that has not created a session yet. */
   improve?: (space: SpaceContext, projectId: string, draft: string) => Promise<string>;
 }): RouteHandler {
@@ -76,7 +76,7 @@ export function assistRoutes(deps: {
       try {
         const body = await rc.body();
         const draft = typeof body.draft === "string" ? body.draft : undefined;
-        json(200, await deps.suggestion(sessionId, draft));
+        json(200, await deps.suggestion(rc.space, sessionId, draft));
       } catch (error) {
         const code = typeof (error as { code?: unknown })?.code === "string"
           ? (error as { code: string }).code : "upstream";
@@ -100,7 +100,7 @@ export function assistRoutes(deps: {
       }
       try {
         // returns a draft only — saving goes through the normal /api/knowledge flow
-        json(200, await deps.distill(sessionId));
+        json(200, await deps.distill(rc.space, sessionId));
       } catch (e) {
         json(502, { error: "upstream", message: e instanceof Error ? e.message : String(e) });
       }
@@ -117,7 +117,7 @@ export function assistRoutes(deps: {
         return true;
       }
       try {
-        json(200, { brief: await deps.taskBrief(sessionId) });
+        json(200, { brief: await deps.taskBrief(rc.space, sessionId) });
       } catch (e) {
         json(502, { error: "upstream", message: e instanceof Error ? e.message : String(e) });
       }

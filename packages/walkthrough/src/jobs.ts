@@ -17,17 +17,17 @@ export interface WalkthroughJobDeps {
   /** Capture the immutable source diff for a walkthrough source. */
   captureDiff: (source: WalkthroughSource) => Promise<string>;
   /** Model call (one-shot). Absent → heuristic stages with honest labels. */
-  generate?: (source: WalkthroughSource, prompt: string, signal?: AbortSignal) => Promise<string>;
+  generate?: (source: WalkthroughSource, prompt: string, signal?: AbortSignal, userId?: string) => Promise<string>;
   /** Append to the session log; used only when the job carries a sessionId. */
   append?: (sessionId: string, type: string, data: JsonObject) => Promise<SessionEvent>;
   cacheFile?: string;
-  modelId?: string;
+  modelId?: string | ((userId?: string) => string | undefined);
   /** Global prompt budget calculated from the selected model's context/output limits. */
-  inputBudget?: (source: WalkthroughSource) => Promise<number>;
+  inputBudget?: (source: WalkthroughSource, userId?: string) => Promise<number>;
 }
 
 export interface WalkthroughJobService {
-  create(source: WalkthroughSource, sessionId?: string): Promise<GeneratedWalkthroughDto>;
+  create(source: WalkthroughSource, sessionId?: string, userId?: string): Promise<GeneratedWalkthroughDto>;
   get(id: string): GeneratedWalkthroughDto | null;
   cancel(id: string): GeneratedWalkthroughDto | null;
   sourceStatus(id: string): Promise<{ stale: boolean; sourceDigest: string; currentDigest: string }>;
@@ -43,6 +43,7 @@ export function createWalkthroughJobService(deps: WalkthroughJobDeps): Walkthrou
   const jobs = new Map<string, GeneratedWalkthroughDto>();
   const cancelled = new Set<string>();
   const settlers = new Map<string, Promise<void>>();
+  const users = new Map<string, string>();
   const captures = new Map<string, Promise<{ diff: string; digest: string }>>();
   const inFlight = new Map<string, {
     controller: AbortController;
@@ -57,8 +58,10 @@ export function createWalkthroughJobService(deps: WalkthroughJobDeps): Walkthrou
       cache = JSON.parse(readFileSync(deps.cacheFile, "utf8")) as Record<string, CacheEntry>;
     } catch { /* first run or corrupt cache: start empty */ }
   }
-  const cacheKey = (digest: string): string =>
-    `${digest}:v${WALKTHROUGH_PROMPT_VERSION}:${deps.modelId ?? (deps.generate ? "default" : "heuristic")}`;
+  const cacheKey = (digest: string, userId?: string): string => {
+    const configured = typeof deps.modelId === "function" ? deps.modelId(userId) : deps.modelId;
+    return `${digest}:v${WALKTHROUGH_PROMPT_VERSION}:${configured ?? (deps.generate ? "default" : "heuristic")}`;
+  };
   let cacheWrite: Promise<void> = Promise.resolve();
   const saveCache = () => {
     if (!deps.cacheFile) return;
@@ -97,6 +100,7 @@ export function createWalkthroughJobService(deps: WalkthroughJobDeps): Walkthrou
     files: ReturnType<typeof parseUnifiedDiffText>,
     prompt: string,
     jobId: string,
+    userId?: string,
   ): Promise<GeneratedWalkthroughStage[]> => {
     const active = inFlight.get(key);
     if (active) {
@@ -106,7 +110,7 @@ export function createWalkthroughJobService(deps: WalkthroughJobDeps): Walkthrou
     const controller = new AbortController();
     const promise = (async () => {
       if (!deps.generate) return heuristicStages(files);
-      const raw = await deps.generate(source, prompt, controller.signal);
+      const raw = await deps.generate(source, prompt, controller.signal, userId);
       const parsed = parseGeneratedStages(raw, files);
       if (!parsed.ok) throw new Error(parsed.error);
       return parsed.stages;
@@ -115,11 +119,11 @@ export function createWalkthroughJobService(deps: WalkthroughJobDeps): Walkthrou
     return promise;
   };
 
-  const run = async (job: GeneratedWalkthroughDto, diff: string, sessionId?: string): Promise<void> => {
+  const run = async (job: GeneratedWalkthroughDto, diff: string, sessionId?: string, userId?: string): Promise<void> => {
     try {
       job.status = "running";
       const files = parseUnifiedDiffText(diff);
-      const key = cacheKey(job.sourceDigest);
+      const key = cacheKey(job.sourceDigest, userId);
       const hit = cache[key];
       if (hit) {
         if (cancelled.has(job.id)) { job.status = "failed"; job.error = "cancelled"; return; }
@@ -127,8 +131,8 @@ export function createWalkthroughJobService(deps: WalkthroughJobDeps): Walkthrou
         return;
       }
 
-      const inputBudget = deps.inputBudget ? await deps.inputBudget(job.source) : undefined;
-      const stages = await stagesFor(key, job.source, files, buildWalkthroughPrompt(files, inputBudget), job.id);
+      const inputBudget = deps.inputBudget ? await deps.inputBudget(job.source, userId) : undefined;
+      const stages = await stagesFor(key, job.source, files, buildWalkthroughPrompt(files, inputBudget), job.id, userId);
       if (cancelled.has(job.id)) { job.status = "failed"; job.error = "cancelled"; return; }
       cache[key] = { stages, createdAt: Date.now() };
       const oldest = Object.entries(cache)
@@ -145,11 +149,13 @@ export function createWalkthroughJobService(deps: WalkthroughJobDeps): Walkthrou
       }
       job.status = "failed";
       job.error = e instanceof Error ? e.message : String(e);
+    } finally {
+      users.delete(job.id);
     }
   };
 
   return {
-    async create(source, sessionId) {
+    async create(source, sessionId, userId) {
       const sourceKey = JSON.stringify(source);
       let capture = captures.get(sourceKey);
       if (!capture) {
@@ -172,7 +178,8 @@ export function createWalkthroughJobService(deps: WalkthroughJobDeps): Walkthrou
         status: "queued", stages: [], createdAt: Date.now(),
       };
       jobs.set(job.id, job);
-      settlers.set(job.id, run(job, diff, sessionId));
+      if (userId) users.set(job.id, userId);
+      settlers.set(job.id, run(job, diff, sessionId, userId));
       return job;
     },
 
@@ -185,7 +192,7 @@ export function createWalkthroughJobService(deps: WalkthroughJobDeps): Walkthrou
         cancelled.add(id);
         job.status = "failed";
         job.error = "cancelled";
-        const flight = inFlight.get(cacheKey(job.sourceDigest));
+        const flight = inFlight.get(cacheKey(job.sourceDigest, users.get(id)));
         if (flight) {
           flight.jobs.delete(id);
           if (flight.jobs.size === 0) flight.controller.abort();

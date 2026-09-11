@@ -20,7 +20,7 @@ import { createWalkthroughJobService } from "./jobs.ts";
 import { createReviewFlowService, createReviewService } from "./reviewService.ts";
 
 interface WalkthroughJobService {
-  create(source: WalkthroughSource, sessionId?: string): Promise<GeneratedWalkthroughDto>;
+  create(source: WalkthroughSource, sessionId?: string, userId?: string): Promise<GeneratedWalkthroughDto>;
   get(id: string): GeneratedWalkthroughDto | null;
   cancel(id: string): GeneratedWalkthroughDto | null;
   sourceStatus(id: string): Promise<{
@@ -36,11 +36,11 @@ type ReviewResult =
   | { ok: false; reason: string };
 
 interface ReviewService {
-  generate(sessionId: string, source: WalkthroughSource): Promise<ReviewResult>;
+  generate(sessionId: string, source: WalkthroughSource, userId?: string): Promise<ReviewResult>;
 }
 
 interface ReviewFlowService {
-  create(sessionId: string, opts?: { maxIterations?: number }): Promise<ReviewFlowState>;
+  create(sessionId: string, opts?: { maxIterations?: number }, userId?: string): Promise<ReviewFlowState>;
   get(sessionId: string): ReviewFlowState | null;
   pause(sessionId: string): Promise<ReviewFlowState | null>;
   resume(sessionId: string): Promise<ReviewFlowState | null>;
@@ -90,12 +90,13 @@ export function walkthroughRoutes(deps: {
   review?: ReviewService;
   flow?: ReviewFlowService;
 }): RouteHandler {
-  return async ({ path, method, json, body }) => {
+  return async ({ path, method, json, body, space }) => {
     if (deps.jobs && path === "/api/walkthroughs" && method === "POST") {
       const input = await body();
       json(200, await deps.jobs.create(
         parseSource(input.source),
         input.sessionId ? String(input.sessionId) : undefined,
+        space.userId,
       ));
       return true;
     }
@@ -132,7 +133,7 @@ export function walkthroughRoutes(deps: {
     let reviewMatch = path.match(/^\/api\/sessions\/([^/]+)\/review\/generate$/);
     if (deps.review && reviewMatch && method === "POST") {
       const input = await body();
-      json(200, await deps.review.generate(reviewMatch[1]!, parseSource(input.source)));
+      json(200, await deps.review.generate(reviewMatch[1]!, parseSource(input.source), space.userId));
       return true;
     }
     reviewMatch = path.match(/^\/api\/sessions\/([^/]+)\/review-flow$/);
@@ -142,7 +143,7 @@ export function walkthroughRoutes(deps: {
         ...(input.maxIterations !== undefined
           ? { maxIterations: Number(input.maxIterations) }
           : {}),
-      }));
+      }, space.userId));
       return true;
     }
     if (deps.flow && reviewMatch && method === "GET") {
@@ -228,9 +229,14 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     if (!r.ok) throw Object.assign(new Error(r.reason), { code: "invalid-input" });
     return r.data;
   };
-  const generate = async (source: WalkthroughSource, prompt: string, signal?: AbortSignal): Promise<string> => {
+  const generate = async (
+    source: WalkthroughSource,
+    prompt: string,
+    signal?: AbortSignal,
+    userId?: string,
+  ): Promise<string> => {
     const project = await host.projects.get(source.projectId);
-    const model = host.smallModel();
+    const model = host.smallModel(userId);
     const rt = await host.runtimes.forProject(source.projectId, project?.path, model?.harnessId);
     const result = await host.smallModelComplete(rt, {
       cwd: project?.path ?? process.cwd(),
@@ -242,8 +248,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     });
     return result.text;
   };
-  const inputBudget = async (source: WalkthroughSource): Promise<number> => {
-    const model = host.smallModel();
+  const inputBudget = async (source: WalkthroughSource, userId?: string): Promise<number> => {
+    const model = host.smallModel(userId);
     const rt = await host.runtimes.forProject(source.projectId, undefined, model?.harnessId);
     return host.smallModelInputBudget(rt, model, 2_048);
   };
@@ -256,16 +262,19 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     append,
     cacheFile: join(host.storageDir, "walkthroughs.json"),
     inputBudget,
-    ...(host.smallModel()
-      ? { modelId: `${host.smallModel()!.providerID}/${host.smallModel()!.modelID}` }
-      : {}),
+    modelId: (userId) => {
+      const model = host.smallModel(userId);
+      return model
+        ? `${model.harnessId ?? "auto"}/${model.providerID}/${model.modelID}`
+        : undefined;
+    },
   });
   const review = createReviewService({ captureDiff, generate, append });
   const flow = createReviewFlowService({
     sessionStatus: async (sessionId) => (await host.store.projection(sessionId))?.status ?? null,
     sessionProject: async (sessionId) => (await host.store.projection(sessionId))?.projectId ?? null,
     send: async (sessionId, text) => { await host.sessions.send(sessionId, { text }); },
-    review: (sessionId, source) => review.generate(sessionId, source),
+    review: (sessionId, source, userId) => review.generate(sessionId, source, userId),
     append,
   });
   host.services.provide(serverServiceKey<WalkthroughJobService>("walkthrough.jobs"), jobs);

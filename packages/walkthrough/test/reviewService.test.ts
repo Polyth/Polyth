@@ -71,6 +71,26 @@ test("walkthrough job: model stages, malformed JSON fails the job honestly", asy
   assert.match(bad.get(j3.id)!.error!, /malformed/);
 });
 
+test("walkthrough generation scopes model choice and cache by requester", async () => {
+  const seen: Array<string | undefined> = [];
+  const svc = createWalkthroughJobService({
+    captureDiff: async () => DIFF,
+    modelId: (userId) => userId ? `claude/anthropic/${userId}` : undefined,
+    generate: async (_source, prompt, _signal, userId) => {
+      seen.push(userId);
+      const id = /--- hunk (\w+)/.exec(prompt)![1]!;
+      return JSON.stringify({ stages: [{ title: "T", stops: [{ hunkId: id }] }] });
+    },
+  });
+  const first = await svc.create(source, undefined, "usr_a");
+  await svc.settled(first.id);
+  const second = await svc.create(source, undefined, "usr_b");
+  await svc.settled(second.id);
+  const cached = await svc.create(source, undefined, "usr_a");
+  await svc.settled(cached.id);
+  assert.deepEqual(seen, ["usr_a", "usr_b"]);
+});
+
 test("walkthrough job: cache survives restart via cache file", async () => {
   const file = join(mkdtempSync(join(tmpdir(), "polyth-wt-")), "cache.json");
   let calls = 0;

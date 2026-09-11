@@ -15,6 +15,7 @@ function makeHarness(opts: {
     ownedBranch?: string;
   }) => Promise<{ branchCleanupFailed?: boolean } | void>;
   onMark?: () => Promise<void>;
+  onCommitMessage?: (root: string, userId?: string) => Promise<string>;
   sessions?: SessionProjection[];
 }) {
   const createCalls: Array<{ branch: string; path?: string; base?: string }> = [];
@@ -60,7 +61,7 @@ function makeHarness(opts: {
       },
     } as unknown as SessionService,
     git,
-    commitMessage: async () => "",
+    commitMessage: opts.onCommitMessage ?? (async () => ""),
   });
   const call = async (
     body: Record<string, unknown> = { projectId: "p1", path: WT },
@@ -70,6 +71,7 @@ function makeHarness(opts: {
     let payload: unknown;
     const handled = await routes({
       req: {}, res: {},
+      space: { userId: "usr_test" },
       url: new URL(`http://x${path}`),
       path,
       method: "POST",
@@ -83,6 +85,21 @@ function makeHarness(opts: {
 
 const present = () => [{ path: WT, branch: "wt/one" }];
 const absent = () => [] as Array<{ path: string; branch: string | null }>;
+
+test("commit-message generation forwards the authenticated account", async () => {
+  const seen: Array<{ root: string; userId?: string }> = [];
+  const h = makeHarness({
+    list: present,
+    onCommitMessage: async (root, userId) => {
+      seen.push({ root, ...(userId ? { userId } : {}) });
+      return "Update routing";
+    },
+  });
+  const result = await h.call({ projectId: "p1" }, "/api/git/commit-message");
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.payload, { message: "Update routing" });
+  assert.deepEqual(seen, [{ root: "/repo", userId: "usr_test" }]);
+});
 
 test("active isolation workspace cannot be removed through the generic route", async () => {
   const { call, removeCalls, markCalls } = makeHarness({

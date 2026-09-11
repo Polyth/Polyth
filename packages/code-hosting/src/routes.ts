@@ -17,7 +17,7 @@ export function hostingRoutes(deps: {
     snapshot: (sessionId: string) => Promise<SessionProjection>;
     send: (sessionId: string, input: UserTurnInput & { githubConflictResolution?: boolean }) => Promise<unknown>;
   };
-  describe?: (root: string, base?: string) => Promise<{ title: string; body: string }>;
+  describe?: (root: string, base?: string, userId?: string) => Promise<{ title: string; body: string }>;
 }): RouteHandler {
   const rootOf = async (projectId: string | null): Promise<string> => {
     if (!projectId) {
@@ -28,7 +28,7 @@ export function hostingRoutes(deps: {
     return project.path;
   };
 
-  return async ({ path, method, url, json, body }) => {
+  return async ({ path, method, url, json, body, space }) => {
     if (path !== deps.prefix && !path.startsWith(`${deps.prefix}/`)) return false;
     // Keep the mature endpoint suffixes as a wire compatibility detail.
     path = `/api/hosting${path.slice(deps.prefix.length)}`;
@@ -280,7 +280,7 @@ export function hostingRoutes(deps: {
       try {
         json(200, {
           ok: true,
-          data: await deps.describe(root, input.base ? String(input.base) : undefined),
+          data: await deps.describe(root, input.base ? String(input.base) : undefined, space.userId),
         });
       } catch (error) {
         json(200, {
@@ -354,9 +354,16 @@ export function hostingRoutes(deps: {
 
 
 /** Both providers use the existing bounded one-shot runtime for user-requested descriptions. */
-export async function describeChangeRequest(host: ServerPackageHost, projectId: string, root: string, diff: string, label: string) {
+export async function describeChangeRequest(
+  host: ServerPackageHost,
+  projectId: string,
+  root: string,
+  diff: string,
+  label: string,
+  userId?: string,
+) {
   if (!diff.trim()) throw Object.assign(new Error("No commits to describe against the target branch."), { code: "invalid-input" });
-  const model = host.smallModel();
+  const model = host.smallModel(userId);
   const runtime = await host.runtimes.forProject(projectId, root, model?.harnessId);
   const text = await host.oneShot(runtime, {
     cwd: root, ...(model ? { model } : {}),

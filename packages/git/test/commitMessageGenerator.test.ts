@@ -11,10 +11,11 @@ test("commit generator caches unchanged selected diff and coalesces concurrent r
   let seenTimeoutMs: number | undefined;
   let selected = { harnessId: "opencode", providerID: "openai", modelID: "small" };
   let seenHarness: string | undefined;
+  let seenUserId: string | undefined;
   const generate = createCommitMessageGenerator({
     diff: async (_root, opts) => ({ diff: opts?.staged ? DIFF : "unstaged ignored" }),
     runtime: async (_root, model) => { seenHarness = model?.harnessId; return runtime; },
-    model: () => selected,
+    model: (userId) => { seenUserId = userId; return selected; },
     inputBudget: async () => 2_000,
     complete: async (_rt, options) => {
       calls += 1;
@@ -22,10 +23,11 @@ test("commit generator caches unchanged selected diff and coalesces concurrent r
       return { text: "Update the implementation" };
     },
   });
-  const [first, second] = await Promise.all([generate("/repo"), generate("/repo")]);
+  const [first, second] = await Promise.all([generate("/repo", "usr_test"), generate("/repo", "usr_test")]);
   assert.equal(first, "Update the implementation");
   assert.equal(second, first);
   assert.equal(calls, 1);
+  assert.equal(seenUserId, "usr_test");
   await generate("/repo");
   assert.equal(calls, 1);
   selected = { ...selected, harnessId: "codex" };

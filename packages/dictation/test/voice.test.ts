@@ -45,7 +45,7 @@ test("voice settings: round-trip persists refs, validates URLs and env names", (
 function harness(opts: {
   env?: Record<string, string>;
   fetchFn?: typeof fetch;
-  summarize?: (text: string) => Promise<string>;
+  summarize?: (text: string, userId?: string) => Promise<string>;
 }) {
   const voice = createVoiceSettings({ file: join(tmp(), "voice.json"), env: opts.env ?? {} });
   const routes = voiceRoutes({
@@ -66,6 +66,7 @@ function harness(opts: {
         end: (b: Buffer) => { rawBody = b; },
       },
       url: new URL(`http://x${path}`),
+      space: { userId: "usr_test" },
       path, method,
       body: async () => body,
       json: (code: number, b: unknown) => { status = code; payload = b; },
@@ -213,4 +214,16 @@ test("tts/summarize: 503 unwired, small-model text when wired, 502 on failure", 
   const soft = await failing.call("POST", "/api/tts/summarize", { text: "x" });
   assert.equal(soft.status, 502);
   assert.match(String((soft.payload as { message: string }).message), /model offline/);
+});
+
+test("tts/summarize forwards the authenticated account to small-model selection", async () => {
+  let userId: string | undefined;
+  const h = harness({
+    summarize: async (_text, requestedBy) => {
+      userId = requestedBy;
+      return "short";
+    },
+  });
+  assert.equal((await h.call("POST", "/api/tts/summarize", { text: "long reply" })).status, 200);
+  assert.equal(userId, "usr_test");
 });

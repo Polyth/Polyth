@@ -238,7 +238,7 @@ export function voiceRoutes(deps: {
   voice: VoiceSettingsService;
   providers: ProviderRegistry;
   fetchFn?: typeof fetch;
-  summarize?: (text: string) => Promise<string>;
+  summarize?: (text: string, userId?: string) => Promise<string>;
   localModelInstalled?: (id: string) => boolean;
   localRuntimeInstalled?: () => boolean;
 }): RouteHandler {
@@ -455,7 +455,7 @@ export function voiceRoutes(deps: {
         return true;
       }
       try {
-        json(200, { text: (await deps.summarize(text)).trim() });
+        json(200, { text: (await deps.summarize(text, request.space.userId)).trim() });
       } catch (error) {
         json(502, {
           error: "upstream",
@@ -631,8 +631,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         providers,
         localModelInstalled: (id) => !!installedLocalModel(id),
         localRuntimeInstalled: () => !!installedLocalRuntime(),
-        summarize: async (text) => {
-          const model = host.smallModel();
+        summarize: async (text, userId) => {
+          const model = host.smallModel(userId);
           const runtime = await host.runtimes.forProject("__default__", undefined, model?.harnessId);
           return host.oneShot(runtime, {
             cwd: process.cwd(),

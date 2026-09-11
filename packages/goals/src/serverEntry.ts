@@ -8,7 +8,7 @@ import {
 import { createGoalService, type GoalService } from "./index.ts";
 
 export function goalRoutes(goals: GoalService): RouteHandler {
-  return async ({ path, method, body, json }) => {
+  return async ({ path, method, body, json, space }) => {
     const match = path.match(
       /^\/api\/sessions\/([^/]+)\/goal(?:\/(pause|resume|stop))?$/,
     );
@@ -29,7 +29,7 @@ export function goalRoutes(goals: GoalService): RouteHandler {
         ...(input.maxContinuations !== undefined
           ? { maxContinuations: Number(input.maxContinuations) }
           : {}),
-      }));
+      }, space.userId));
       return true;
     }
     if (action && method === "POST") {
@@ -54,11 +54,12 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     append: (sessionId, type, data) =>
       host.events.append(sessionId, type, data, { ignorable: true }),
     send: (sessionId, text) => host.sessions.send(sessionId, { text }),
-    complete: async (sessionId, prompt) => {
+    complete: async (sessionId, prompt, userId) => {
       const proj = await host.store.projection(sessionId);
       const project = proj ? await host.projects.get(proj.projectId) : null;
-      const model = host.smallModel();
-      const rt = await host.runtimes.forProject(proj?.projectId ?? "__default__", project?.path, model?.harnessId);
+      const model = host.smallModel(userId);
+      const harnessId = model?.harnessId ?? (model ? undefined : proj?.resolvedHarnessId);
+      const rt = await host.runtimes.forProject(proj?.projectId ?? "__default__", project?.path, harnessId);
       return host.oneShot(rt, {
         cwd: project?.path ?? process.cwd(),
         prompt,

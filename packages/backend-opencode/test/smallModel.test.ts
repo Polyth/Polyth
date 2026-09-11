@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { completeSmallModelDirect } from "../src/smallModel.ts";
@@ -60,6 +60,33 @@ test("direct small-model transport propagates AbortSignal", async () => {
     globalThis.fetch = previousFetch;
     if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = previousKey;
+    if (previousData === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = previousData;
+  }
+});
+
+test("an OAuth login never invents an unconfigured small model", async () => {
+  const previousData = process.env.XDG_DATA_HOME;
+  const previousFetch = globalThis.fetch;
+  const data = mkdtempSync(join(tmpdir(), "polyth-small-model-"));
+  mkdirSync(join(data, "opencode"), { recursive: true });
+  writeFileSync(join(data, "opencode", "auth.json"), JSON.stringify({
+    openai: { type: "oauth", access: "not-used", expires: Date.now() + 60_000 },
+  }));
+  process.env.XDG_DATA_HOME = data;
+  let fetched = false;
+  globalThis.fetch = async () => {
+    fetched = true;
+    throw new Error("must not call a provider without an explicit model");
+  };
+  try {
+    await assert.rejects(
+      () => completeSmallModelDirect({ cwd: "/repo", prompt: "next action" }),
+      (error: Error & { code?: string }) => error.code === "unsupported" && /unresolved/.test(error.message),
+    );
+    assert.equal(fetched, false);
+  } finally {
+    globalThis.fetch = previousFetch;
     if (previousData === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = previousData;
   }

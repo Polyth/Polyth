@@ -206,14 +206,14 @@ export function sanitizeNextActionReply(raw: string, maxChars = NEXT_ACTION_OUTP
 }
 
 export interface ManualSuggestionService {
-  generate(sessionId: string, draft?: string): Promise<{ suggestion: string; atSeq: number }>;
+  generate(sessionId: string, draft?: string, userId?: string): Promise<{ suggestion: string; atSeq: number }>;
 }
 
 /** One explicit, ephemeral request per session. This never writes the session log or projection. */
 export function createManualSuggestionService(deps: {
   latestSeq(sessionId: string): Promise<number>;
   events(sessionId: string): Promise<SessionEvent[]>;
-  complete(sessionId: string, prompt: string): Promise<string>;
+  complete(sessionId: string, prompt: string, userId?: string): Promise<string>;
 }): ManualSuggestionService {
   const inFlight = new Set<string>();
   const fail = (code: "in-flight" | "stale" | "no-completed-exchange"): never => {
@@ -221,7 +221,7 @@ export function createManualSuggestionService(deps: {
   };
 
   return {
-    async generate(sessionId, draft = "") {
+    async generate(sessionId, draft = "", userId) {
       if (inFlight.has(sessionId)) fail("in-flight");
       inFlight.add(sessionId);
       try {
@@ -235,7 +235,7 @@ export function createManualSuggestionService(deps: {
           prompt = buildNextActionPrompt(exchange);
         }
         if ((await deps.latestSeq(sessionId)) !== atSeq) fail("stale");
-        const raw = await deps.complete(sessionId, prompt);
+        const raw = await deps.complete(sessionId, prompt, userId);
         if ((await deps.latestSeq(sessionId)) !== atSeq) fail("stale");
         return {
           suggestion: sanitizeNextActionReply(raw, draft.trim() ? PROMPT_IMPROVEMENT_OUTPUT_MAX_CHARS : undefined),

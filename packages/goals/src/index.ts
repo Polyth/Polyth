@@ -34,7 +34,7 @@ export interface GoalDeps {
   /** Ask the session service for another turn. */
   send: (sessionId: string, text: string) => Promise<unknown>;
   /** One-shot cheap-model completion, used only by the auditor. */
-  complete: (sessionId: string, prompt: string) => Promise<string>;
+  complete: (sessionId: string, prompt: string, userId?: string) => Promise<string>;
   now?: () => number;
   /** Text injected as the continuation turn. */
   continuePrompt?: string;
@@ -106,7 +106,7 @@ const snapshot = (g: GoalState): JsonObject => ({
 });
 
 export interface GoalService {
-  attach(sessionId: string, input: AttachGoalInput): Promise<GoalState>;
+  attach(sessionId: string, input: AttachGoalInput, userId?: string): Promise<GoalState>;
   get(sessionId: string): GoalState | null;
   pause(sessionId: string): Promise<GoalState>;
   resume(sessionId: string): Promise<GoalState>;
@@ -124,6 +124,7 @@ export function createGoalService(deps: GoalDeps): GoalService {
   const now = deps.now ?? (() => Date.now());
   const continueText = deps.continuePrompt ?? CONTINUE_PROMPT;
   const goals = new Map<string, GoalState>();
+  const users = new Map<string, string>();
   const auditing = new Set<string>(); // serialize continuation per session
 
   const touch = (g: GoalState): GoalState => {
@@ -136,7 +137,7 @@ export function createGoalService(deps: GoalDeps): GoalService {
   };
 
   return {
-    async attach(sessionId, input) {
+    async attach(sessionId, input, userId) {
       const objective = input.objective.trim();
       if (!objective) {
         throw Object.assign(new Error("objective is required"), { code: "invalid-input", field: "objective" });
@@ -156,6 +157,8 @@ export function createGoalService(deps: GoalDeps): GoalService {
         updatedAt: now(),
       });
       goals.set(sessionId, state);
+      if (userId) users.set(sessionId, userId);
+      else users.delete(sessionId);
       await emit(sessionId, "goal/attached", state);
       return state;
     },
@@ -194,6 +197,7 @@ export function createGoalService(deps: GoalDeps): GoalService {
       touch(g);
       await emit(sessionId, "goal/stopped", g);
       goals.delete(sessionId);
+      users.delete(sessionId);
     },
 
     recordUsage(sessionId, tokens) {
@@ -211,7 +215,7 @@ export function createGoalService(deps: GoalDeps): GoalService {
         let verdict: GoalVerdict;
         let reason: string;
         try {
-          const raw = await deps.complete(sessionId, auditorPrompt(g.objective, assistantText));
+          const raw = await deps.complete(sessionId, auditorPrompt(g.objective, assistantText), users.get(sessionId));
           ({ verdict, reason } = parseVerdict(raw));
         } catch (err) {
           // Auditor failure must never silently continue an autonomous loop.
@@ -235,6 +239,7 @@ export function createGoalService(deps: GoalDeps): GoalService {
           g.status = "completed";
           touch(g);
           await emit(sessionId, "goal/completed", g);
+          users.delete(sessionId);
           return;
         }
         if (verdict === "stuck" && g.stuckStreak >= STUCK_STREAK_LIMIT) {
@@ -311,7 +316,10 @@ export function createGoalService(deps: GoalDeps): GoalService {
         else if (ev.type === "goal/stopped") state = null;
       }
       if (state) goals.set(sessionId, state);
-      else goals.delete(sessionId);
+      else {
+        goals.delete(sessionId);
+        users.delete(sessionId);
+      }
       return state;
     },
 

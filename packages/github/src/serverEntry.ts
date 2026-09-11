@@ -67,14 +67,14 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           snapshot: (sessionId) => scoped.sessions.snapshot(sessionId),
           send: (sessionId, input) => scoped.sessions.send(sessionId, input),
         },
-        describe: async (root, base) => {
+        describe: async (root, base, userId) => {
           let baseRef = base;
           if (!baseRef) {
             const repository = await github.repo(root);
             baseRef = (repository.ok && repository.data.defaultBranch) || "main";
           }
           const diff = await git.diffRange(root, baseRef, "HEAD");
-          return describeChangeRequest(host, projectId, root, diff, "pull request");
+          return describeChangeRequest(host, projectId, root, diff, "pull request", userId);
         },
       })({ ...request, body: async () => input, json: (status, payload) => {
         if (request.path === "/api/github/status") statusCache.set(key, payload as Awaited<ReturnType<GithubService["status"]>>);

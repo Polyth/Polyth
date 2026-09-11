@@ -23,7 +23,6 @@ type AuthStore = Record<string, AuthEntry>;
 const CODEX_TOKEN_URL = "https://auth.openai.com/oauth/token";
 const CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
 const CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
-const OPENAI_OAUTH_SMALL_MODEL = "gpt-5.4-mini";
 
 /** OpenCode's credential store is deliberately read only here. Values never
  * cross this backend boundary or appear in any DTO/log/API response. */
@@ -105,10 +104,9 @@ export async function completeSmallModelDirect(
   request: SmallModelCompletionRequest,
 ): Promise<SmallModelCompletionResult> {
   const auth = readAuth();
-  // Match OpenCode's inexpensive utility fallback for a ChatGPT OAuth login.
-  const model = request.model ?? (auth.openai?.type === "oauth"
-    ? { providerID: "openai", modelID: OPENAI_OAUTH_SMALL_MODEL }
-    : undefined);
+  // Model choice is product policy, not an adapter guess. In particular, an
+  // OAuth login does not prove that a hard-coded model is available today.
+  const model = request.model;
   if (!model) throw unsupported("unresolved");
   const started = performance.now();
   const signal = timeoutSignal(request.signal, request.timeoutMs);

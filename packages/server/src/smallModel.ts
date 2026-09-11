@@ -7,6 +7,7 @@ import type {
   JsonObject,
   ModelDescriptor,
   ModelRef,
+  SessionProjection,
   SmallModelCompletionResult,
 } from "@polyth/contracts";
 import { resolveModelSelection } from "@polyth/contracts";
@@ -34,6 +35,43 @@ export interface SmallModelService {
 const FALLBACK_CONTEXT_TOKENS = 32_000;
 const PROMPT_OVERHEAD_TOKENS = 256;
 const CHARS_PER_TOKEN = 3.6;
+
+export type SmallModelRef = ModelRef & { harnessId?: string };
+
+/** Read the browser-owned small-model preference from an account settings blob. */
+export function smallModelPreference(settings: unknown): SmallModelRef | undefined {
+  const raw = (settings as {
+    sessionDefaults?: { smallModel?: { harnessId?: unknown; providerID?: unknown; modelID?: unknown } };
+  } | null | undefined)?.sessionDefaults?.smallModel;
+  if (
+    !raw
+    || typeof raw.providerID !== "string"
+    || !raw.providerID
+    || typeof raw.modelID !== "string"
+    || !raw.modelID
+  ) return undefined;
+  return {
+    providerID: raw.providerID,
+    modelID: raw.modelID,
+    ...(typeof raw.harnessId === "string" && raw.harnessId
+      ? { harnessId: raw.harnessId }
+      : {}),
+  };
+}
+
+/** Keep a fallback session model on the runtime that actually owns it. */
+export function smallModelExecutionRoute(
+  configured: SmallModelRef | undefined,
+  session?: Pick<SessionProjection, "model" | "resolvedHarnessId">,
+): { model?: SmallModelRef; harnessId?: string } {
+  const model = configured ?? session?.model;
+  const harnessId = configured?.harnessId
+    ?? (configured ? undefined : session?.resolvedHarnessId);
+  return {
+    ...(model ? { model } : {}),
+    ...(harnessId ? { harnessId } : {}),
+  };
+}
 
 const promptForFallback = (options: SmallModelCompleteOptions): string =>
   options.systemPrompt ? `${options.systemPrompt}\n\n${options.prompt}` : options.prompt;

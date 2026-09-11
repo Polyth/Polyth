@@ -61,7 +61,7 @@ export function buildCommitMessagePrompt(diff: string, inputBudget: number): str
 export interface CommitMessageGeneratorDeps {
   diff(root: string, opts?: { staged?: boolean }): Promise<{ diff: string }>;
   runtime(root: string, model: (ModelRef & { harnessId?: string }) | undefined): Promise<AgentRuntime>;
-  model?: () => (ModelRef & { harnessId?: string }) | undefined;
+  model?: (userId?: string) => (ModelRef & { harnessId?: string }) | undefined;
   inputBudget(runtime: AgentRuntime, model: ModelRef | undefined, maxOutputTokens: number): Promise<number>;
   complete(runtime: AgentRuntime, options: {
     cwd: string; prompt: string; model?: ModelRef; maxOutputTokens: number; timeoutMs?: number;
@@ -71,16 +71,16 @@ export interface CommitMessageGeneratorDeps {
 
 /** Content-addressed, short-lived commit utility cache with single-flight
  * coalescing. It intentionally stores only generated text, never secrets. */
-export function createCommitMessageGenerator(deps: CommitMessageGeneratorDeps): (root: string) => Promise<string> {
+export function createCommitMessageGenerator(deps: CommitMessageGeneratorDeps): (root: string, userId?: string) => Promise<string> {
   const cache = new Map<string, { text: string; expiresAt: number }>();
   const inFlight = new Map<string, Promise<string>>();
   const now = deps.now ?? Date.now;
-  return async (root) => {
+  return async (root, userId) => {
     const staged = await deps.diff(root, { staged: true });
     const stagedSelected = !!staged.diff.trim();
     const diff = stagedSelected ? staged.diff : (await deps.diff(root)).diff;
     if (!diff.trim()) throw Object.assign(new Error("nothing to describe"), { code: "invalid-input" });
-    const model = deps.model?.();
+    const model = deps.model?.(userId);
     const modelKey = model ? `${model.harnessId ?? "auto"}/${model.providerID}/${model.modelID}` : "default";
     const key = `${digest(diff)}:${stagedSelected ? "staged" : "unstaged"}:${modelKey}:v${COMMIT_PROMPT_VERSION}`;
     const hit = cache.get(key);
@@ -150,7 +150,7 @@ export function gitRoutes(deps: {
   projects: ProjectService;
   sessions: SessionService;
   git: GitService;
-  commitMessage(root: string): Promise<string>;
+  commitMessage(root: string, userId?: string): Promise<string>;
   /** Session-log append seam for the conflict-resolution handoff. Optional so
    *  minimal deployments and existing test fakes stay valid; when absent the
    *  handoff still sends the prompt, it just skips the marker event. */
@@ -182,7 +182,7 @@ export function gitRoutes(deps: {
   const paths = (body: Record<string, unknown>): string[] =>
     Array.isArray(body.paths) ? body.paths.map((path) => assertGitRelativePath(String(path))) : [];
 
-  return async ({ path, method, url, body, json }) => {
+  return async ({ path, method, url, body, json, space }) => {
     const query = (key: string) => url.searchParams.get(key);
 
     if (path === "/api/projects/clone" && method === "POST") {
@@ -384,7 +384,7 @@ export function gitRoutes(deps: {
         json(200, await git.commit(root, String(input.message ?? "")));
         return true;
       case "/api/git/commit-message":
-        json(200, { message: await deps.commitMessage(root) });
+        json(200, { message: await deps.commitMessage(root, space.userId) });
         return true;
       case "/api/git/branch":
         await git.createBranch(root, String(input.name ?? ""), input.from ? String(input.from) : undefined);
@@ -585,7 +585,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           const project = (await host.projects.list()).find((candidate) => candidate.path === root);
           return host.runtimes.forProject(project?.id ?? "__default__", root, model?.harnessId);
         },
-        model: host.smallModel,
+        model: (userId) => host.smallModel(userId),
         inputBudget: (runtime, model, maxOutputTokens) => host.smallModelInputBudget(runtime, model, maxOutputTokens),
         complete: (runtime, options) => host.smallModelComplete(runtime, {
           ...options,

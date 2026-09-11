@@ -12,7 +12,7 @@ import { buildReviewPrompt, parseReviewAssessment, sourceDigestOf } from "./inde
 
 export interface ReviewDeps {
   captureDiff: (source: WalkthroughSource) => Promise<string>;
-  generate: ((source: WalkthroughSource, prompt: string) => Promise<string>) | null;
+  generate: ((source: WalkthroughSource, prompt: string, signal?: AbortSignal, userId?: string) => Promise<string>) | null;
   append: (sessionId: string, type: string, data: JsonObject) => Promise<SessionEvent>;
 }
 
@@ -22,14 +22,14 @@ export type ReviewResult =
 
 export function createReviewService(deps: ReviewDeps) {
   return {
-    async generate(sessionId: string, source: WalkthroughSource): Promise<ReviewResult> {
+    async generate(sessionId: string, source: WalkthroughSource, userId?: string): Promise<ReviewResult> {
       if (!deps.generate) return { ok: false, reason: "model generation unavailable — no agent runtime" };
       const diff = await deps.captureDiff(source);
       if (!diff.trim()) return { ok: false, reason: "no changes in the selected source" };
       const digest = sourceDigestOf(diff);
       let raw: string;
       try {
-        raw = await deps.generate(source, buildReviewPrompt(diff));
+        raw = await deps.generate(source, buildReviewPrompt(diff), undefined, userId);
       } catch (e) {
         return { ok: false, reason: e instanceof Error ? e.message : String(e) };
       }
@@ -59,14 +59,14 @@ export interface ReviewFlowDeps {
   sessionStatus: (sessionId: string) => Promise<string | null>;
   sessionProject: (sessionId: string) => Promise<string | null>;
   send: (sessionId: string, text: string) => Promise<void>;
-  review: (sessionId: string, source: WalkthroughSource) => Promise<ReviewResult>;
+  review: (sessionId: string, source: WalkthroughSource, userId?: string) => Promise<ReviewResult>;
   append: (sessionId: string, type: string, data: JsonObject) => Promise<SessionEvent>;
   /** risk at or below this with no critical/high findings passes */
   passRiskThreshold?: number;
 }
 
 export interface ReviewFlowService {
-  create(sessionId: string, opts?: { maxIterations?: number }): Promise<ReviewFlowState>;
+  create(sessionId: string, opts?: { maxIterations?: number }, userId?: string): Promise<ReviewFlowState>;
   get(sessionId: string): ReviewFlowState | null;
   pause(sessionId: string): Promise<ReviewFlowState | null>;
   resume(sessionId: string): Promise<ReviewFlowState | null>;
@@ -77,9 +77,11 @@ export interface ReviewFlowService {
 }
 
 const ACTIVE = new Set(["implementing", "awaiting-review", "reviewing", "changes-requested"]);
+const TERMINAL = new Set(["stopped", "passed", "failed"]);
 
 export function createReviewFlowService(deps: ReviewFlowDeps): ReviewFlowService {
   const flows = new Map<string, ReviewFlowState>();
+  const users = new Map<string, string>();
   const threshold = deps.passRiskThreshold ?? 2;
   let ticking = false;
 
@@ -113,7 +115,7 @@ export function createReviewFlowService(deps: ReviewFlowDeps): ReviewFlowService
       return;
     }
     await log(flow.sessionId, "review-flow/review-requested", { flowId: flow.id, iteration: flow.iteration });
-    const result = await deps.review(flow.sessionId, { kind: "working-tree", projectId });
+    const result = await deps.review(flow.sessionId, { kind: "working-tree", projectId }, users.get(flow.sessionId));
     if (!result.ok) {
       flow.status = "failed";
       flow.stoppedReason = result.reason;
@@ -152,7 +154,7 @@ export function createReviewFlowService(deps: ReviewFlowDeps): ReviewFlowService
   };
 
   return {
-    async create(sessionId, opts = {}) {
+    async create(sessionId, opts = {}, userId) {
       const existing = flows.get(sessionId);
       if (existing && ACTIVE.has(existing.status)) return existing;
       const flow: ReviewFlowState = {
@@ -164,6 +166,8 @@ export function createReviewFlowService(deps: ReviewFlowDeps): ReviewFlowService
         baseDigest: "",
       };
       flows.set(sessionId, flow);
+      if (userId) users.set(sessionId, userId);
+      else users.delete(sessionId);
       await log(sessionId, "review-flow/started", { flowId: flow.id, maxIterations: flow.maxIterations });
       return flow;
     },
@@ -192,10 +196,14 @@ export function createReviewFlowService(deps: ReviewFlowDeps): ReviewFlowService
       const flow = flows.get(sessionId);
       if (!flow) return null;
       // idempotent: stopping a settled flow appends nothing
-      if (flow.status === "stopped" || flow.status === "passed" || flow.status === "failed") return flow;
+      if (TERMINAL.has(flow.status)) {
+        users.delete(sessionId);
+        return flow;
+      }
       flow.status = "stopped";
       flow.stoppedReason = reason;
       await log(sessionId, "review-flow/stopped", { flowId: flow.id, reason });
+      users.delete(sessionId);
       return flow;
     },
 
@@ -210,6 +218,7 @@ export function createReviewFlowService(deps: ReviewFlowDeps): ReviewFlowService
             flow.stoppedReason = e instanceof Error ? e.message : String(e);
             await log(flow.sessionId, "review-flow/failed", { flowId: flow.id, reason: flow.stoppedReason }).catch(() => {});
           });
+          if (TERMINAL.has(flow.status)) users.delete(flow.sessionId);
         }
       } finally {
         ticking = false;
