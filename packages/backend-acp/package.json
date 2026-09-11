@@ -1,1 +1,25 @@
-{ "name": "@polyth/backend-acp", "version": "0.1.0", "type": "module", "exports": { ".": "./src/index.ts" }, "dependencies": { "@polyth/contracts": "0.1.0", "@polyth/harness-runtime": "0.1.0", "@polyth/plugins": "0.1.0" }, "polyth": { "serverEntry": "./src/serverEntry.ts", "descriptor": { "name": "ACP harnesses", "description": "Shared Agent Client Protocol transport and runtime", "core": false, "enabled": true, "icon": "network", "hasSettings": false } } }
+{
+  "name": "@polyth/backend-acp",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./executable-discovery": "./src/executableDiscovery.ts"
+  },
+  "dependencies": {
+    "@polyth/contracts": "0.1.0",
+    "@polyth/harness-runtime": "0.1.0",
+    "@polyth/plugins": "0.1.0"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "descriptor": {
+      "name": "ACP harnesses",
+      "description": "Shared Agent Client Protocol transport and runtime",
+      "core": false,
+      "enabled": true,
+      "icon": "network",
+      "hasSettings": false
+    }
+  }
+}
