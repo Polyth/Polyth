@@ -3,7 +3,7 @@
 // (components/workspace/WorkspaceHost.ts) or a right-rail panel
 // (components/ContextRail.tsx). Packages supply a title, an optional
 // description / icon / actions and a body; the frame owns the shared header,
-// the single top-right close control, and the scroll body. Phone presentation
+// the single navigation affordance, and the scroll body. Phone presentation
 // (opaque full cover of the session, right-to-left slide-in, z-stacked so
 // several open modules overlap and dismiss together) is realized in
 // styles.css from `.module-view` + `--module-depth`.
@@ -15,7 +15,8 @@ import { createElement, type ReactNode } from "react";
 import { surfaceContentMode, type SurfaceContentMode } from "@polyth/web-sdk/surface-content";
 import { listSurfaces } from "../../surfaces.ts";
 import { tr } from "../../i18n/index.ts";
-import { CloseIcon, CollapseIcon, DockBottomIcon, DockSideIcon, ExpandIcon, PinIcon } from "./icons.ts";
+import { useShellMode } from "../../responsiveShell.ts";
+import { BackIcon, CloseIcon, CollapseIcon, DockBottomIcon, DockSideIcon, ExpandIcon, PinIcon } from "./icons.ts";
 
 export type ModuleViewVariant = "main" | "rail";
 export type ModuleContentMode = SurfaceContentMode;
@@ -37,7 +38,7 @@ export interface ModuleViewProps {
   description?: string;
   /** Small leading glyph shown before the title. */
   icon?: ReactNode;
-  /** Right-aligned controls rendered just before the close button. */
+  /** Right-aligned controls rendered just before the navigation button. */
   actions?: ReactNode;
   /** Workbench regions hosting several surfaces replace the single title with
    *  a tab strip; the title then names the group for assistive tech only. */
@@ -53,8 +54,7 @@ export interface ModuleViewProps {
   onToggleFullscreen?: () => void;
   pinned?: boolean;
   fullscreen?: boolean;
-  /** The single close affordance. Callers pass closeAllModules() so one tap
-   *  dismisses every open module and returns to the session (UX spec §4). */
+  /** Desktop closes the module; phone presents the same callback as Back. */
   onClose: () => void;
   closeLabel?: string;
   /** "main" = WorkspaceHost surface, "rail" = ContextRail panel. */
@@ -94,6 +94,8 @@ export default function ModuleView(props: ModuleViewProps): ReactNode {
     onTogglePin, dockActions, onToggleFullscreen, pinned = false, fullscreen = false,
     variant = "main", contentMode = "page", depth = 0, className, children,
   } = props;
+  const shellMode = useShellMode();
+  const phone = shellMode === "phone";
   // Both rail and workbench hosts already subscribe to the surface registry.
   // Resolve here, once per frame, so moving a page cannot turn it into an
   // edge-to-edge canvas. Unknown/legacy surfaces retain the caller's fallback.
@@ -102,7 +104,7 @@ export default function ModuleView(props: ModuleViewProps): ReactNode {
   return createElement(
     "section",
     {
-      className: `module-view module-view--${variant}${className ? ` ${className}` : ""}`,
+      className: `module-view module-view--${variant}${phone ? " module-view--phone" : ""}${className ? ` ${className}` : ""}`,
       "data-module-id": id,
       "data-module-depth": depth,
       "data-content-mode": resolvedContentMode,
@@ -115,7 +117,7 @@ export default function ModuleView(props: ModuleViewProps): ReactNode {
         icon ? createElement("span", { key: "icon", className: "module-view-icon", "aria-hidden": true }, icon) : null,
         createElement(
           "div",
-          { key: "heading", className: "module-view-heading", ...headingProps },
+          { key: "heading", className: "module-view-heading", ...(!phone ? headingProps : {}) },
           createElement("h1", { className: "module-view-title", tabIndex: -1, title }, title),
           description
             ? createElement("p", { className: "module-view-desc" }, description)
@@ -124,16 +126,22 @@ export default function ModuleView(props: ModuleViewProps): ReactNode {
       ],
       createElement("span", { className: "header-spacer" }),
       actions ? createElement("div", { className: "module-view-actions" }, actions) : null,
-      dockActions && dockActions.length > 0
+      !phone && dockActions && dockActions.length > 0
         ? dockActions.map((action) => systemAction(
           dockIcon(action.edge), action.label, action.onClick, action.selected,
           "module-view-system-action module-view-dock-action", `dock-${action.edge}`,
         ))
-        : onTogglePin
+        : !phone && onTogglePin
           ? systemAction(PinIcon, pinned ? "Unpin window" : "Pin window", onTogglePin, pinned, "module-view-system-action")
           : null,
-      onToggleFullscreen ? systemAction(fullscreen ? CollapseIcon : ExpandIcon, fullscreen ? "Exit fullscreen" : "Enter fullscreen", onToggleFullscreen, fullscreen, "module-view-system-action") : null,
-      systemAction(CloseIcon, closeLabel ?? tr("contextrail.closePanel"), onClose, undefined, "module-view-close"),
+      !phone && onToggleFullscreen ? systemAction(fullscreen ? CollapseIcon : ExpandIcon, fullscreen ? "Exit fullscreen" : "Enter fullscreen", onToggleFullscreen, fullscreen, "module-view-system-action") : null,
+      systemAction(
+        phone ? BackIcon : CloseIcon,
+        phone ? tr("common.back") : closeLabel ?? tr("contextrail.closePanel"),
+        onClose,
+        undefined,
+        `module-view-close${phone ? " module-view-back" : ""}`,
+      ),
     ),
     createElement(
       "div",
