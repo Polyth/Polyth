@@ -9,6 +9,7 @@ import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from 
 import { claudeAuthFingerprint, createClaudeRuntime, discoverClaudeModels, invalidateClaudeModelCache, CLAUDE_CAPABILITIES } from "./index.ts";
 import { createClaudeProvisioner } from "./provisioner.ts";
 const exec = promisify(execFile);
+const windowsShim = (command: string) => process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
 // Optional SDK is loaded only by this package, never a server boot prerequisite.
 const loadSdk = () => import("@anthropic-ai/claude-agent-sdk");
 
@@ -18,12 +19,14 @@ const resolveClaudeBinary = async () => {
     if (!report.hit) {
         throw Object.assign(new Error(`Claude Code CLI was not found (${report.searched.slice(0, 8).join(", ") || "no searchable locations"})`), { code: "not-installed" });
     }
-    const env = await harnessExecutableChildEnv(report.hit.executablePath);
-    // The Agent SDK accepts the configured command name itself. Keep the
-    // process environment wide enough that a GUI-launched desktop resolves the
-    // exact CLI discovered from a login shell / well-known install directory.
+    const command = report.hit.executablePath;
+    const env = await harnessExecutableChildEnv(command);
+    // The SDK reads this existing Polyth override when it constructs its query.
+    // Persist the exact discovered path so a later runtime cannot resolve a
+    // different `claude` than the one whose version/auth we just verified.
+    process.env.POLYTH_CLAUDE_BIN = command;
     process.env.PATH = env.PATH;
-    return report.hit.executablePath;
+    return command;
 };
 
 export default function registerPackage(host: ServerPackageHost) {
@@ -48,8 +51,9 @@ export default function registerPackage(host: ServerPackageHost) {
             try {
                 const command = await resolveClaudeBinary();
                 const env = await harnessExecutableChildEnv(command);
-                const version = (await exec(command, ["--version"], { timeout: 5000, maxBuffer: 4096, env })).stdout.trim();
-                const authenticated = await exec(command, ["auth", "status", "--json"], { timeout: 5000, maxBuffer: 8192, env }).then(({ stdout }) => JSON.parse(stdout).loggedIn === true).catch(() => false);
+                const shell = windowsShim(command);
+                const version = (await exec(command, ["--version"], { timeout: 5000, maxBuffer: 4096, env, shell })).stdout.trim();
+                const authenticated = await exec(command, ["auth", "status", "--json"], { timeout: 5000, maxBuffer: 8192, env, shell }).then(({ stdout }) => JSON.parse(stdout).loggedIn === true).catch(() => false);
                 // A sign-in/out flips what the account can list, so the cached
                 // cold catalog must not survive it.
                 if (lastAuthenticated !== undefined && lastAuthenticated !== authenticated) {
