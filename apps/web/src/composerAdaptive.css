@@ -1,0 +1,274 @@
+/* Adaptive composer polish ---------------------------------------------------
+   This file is deliberately loaded after the core/module styles. The composer
+   is an extension host, so the final layout rules belong to the shell rather
+   than to individual packages/harnesses.
+
+   Contract:
+   - secondary controls are quiet/borderless;
+   - attachments/context stay outside and above the writing surface;
+   - Send / Queue / Stop own one stable primary-action slot;
+   - mobile exposes at most one inline extension lane; additional contributed
+     actions remain horizontally reachable without widening the composer;
+   - desktop keeps contributed actions compact while model + primary action
+     stay together at the trailing edge. */
+
+.composer-simple .composer-card {
+  position: relative;
+}
+
+/* Attachments are context for the next turn, not text-field chrome. Keep one
+   compact, horizontally scrollable context strip above the composer instead
+   of making the editor grow vertically as files/URLs are added. The top
+   margin reserves the exact strip height, so the timeline never sits under it. */
+.composer-simple .composer-card:has(> .attachment-pills) {
+  margin-block-start: calc(var(--control-h-sm) + var(--space-2));
+}
+
+.composer-simple .composer-card > .attachment-pills {
+  position: absolute;
+  z-index: 2;
+  inset-inline: 0;
+  inset-block-end: calc(100% + var(--space-2));
+  min-width: 0;
+  height: var(--control-h-sm);
+  max-height: var(--control-h-sm);
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-1);
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+}
+
+.composer-simple .composer-card > .attachment-pills::-webkit-scrollbar {
+  display: none;
+}
+
+.composer-simple .composer-card > .attachment-pills .attachment-pill {
+  min-width: 0;
+  max-width: min(240px, 70vw);
+  min-height: 30px;
+  flex: 0 0 auto;
+  padding-inline: var(--space-2);
+  border: 0;
+  background: var(--surface-overlay);
+  box-shadow: none;
+}
+
+.composer-simple .composer-card > .attachment-pills .attachment-open,
+.composer-simple .composer-card > .attachment-pills .att-remove {
+  border: 0;
+  box-shadow: none;
+}
+
+/* A composer is a single control surface. Only the primary action is filled;
+   add/config/package controls keep their hit area but lose decorative frames. */
+.composer-simple .composer-rail :is(
+  .composer-add-trigger,
+  .config-chip,
+  .picker-chip,
+  .model-picker-trigger,
+  .composer-send-options,
+  .icon-btn,
+  .header-action,
+  .ui-icon-btn,
+  .ui-btn--quiet
+) {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.composer-simple .composer-rail :is(
+  .composer-add-trigger,
+  .config-chip,
+  .picker-chip,
+  .model-picker-trigger,
+  .composer-send-options,
+  .icon-btn,
+  .header-action,
+  .ui-icon-btn
+) {
+  background: transparent;
+}
+
+.composer-simple .composer-rail :is(
+  .composer-add-trigger,
+  .config-chip,
+  .picker-chip,
+  .model-picker-trigger,
+  .composer-send-options,
+  .icon-btn,
+  .header-action,
+  .ui-icon-btn
+):hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--surface-overlay-hover);
+  box-shadow: none;
+}
+
+.composer-simple .composer-rail .send,
+.composer-simple .composer-rail .stop {
+  border: 0;
+}
+
+/* Queue replaces Send while a turn is active; it must not change the row's
+   geometry. The accessible name remains on the button, while the visible
+   label stays out of both phone and desktop layouts. */
+.composer-simple .composer-queue .composer-action-label {
+  display: none;
+}
+
+.composer-simple .composer-send-split {
+  gap: 2px;
+}
+
+.composer-simple .composer-send-options {
+  border: 0;
+  box-shadow: none;
+}
+
+/* Mobile ------------------------------------------------------------------ */
+@media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
+  .composer-mobile .composer-rail {
+    gap: var(--space-1);
+  }
+
+  .composer-mobile .composer-leading-zone,
+  .composer-mobile .composer-actions,
+  .composer-mobile .composer-config,
+  .composer-mobile .composer-primary {
+    gap: var(--space-1);
+  }
+
+  /* One extension lane is intentionally visible on phone. Packages can
+     contribute more controls without widening the bar; the lane scrolls and
+     each action keeps a full touch target. */
+  .composer-mobile .composer-mobile-extensions {
+    width: var(--tap);
+    max-width: var(--tap);
+    flex: 0 0 var(--tap);
+    scroll-snap-type: x proximity;
+  }
+
+  .composer-mobile .composer-mobile-extensions > *,
+  .composer-mobile .composer-mobile-extensions .placed-mini-widget > * {
+    scroll-snap-align: start;
+  }
+
+  .composer-mobile .composer-mobile-extensions :is(button, .ui-icon-btn),
+  .composer-mobile .composer-add-trigger,
+  .composer-mobile .composer-send-options,
+  .composer-mobile .composer-config :is(button, .config-chip, .picker-chip) {
+    border: 0;
+    box-shadow: none;
+  }
+
+  .composer-mobile .composer-action-label,
+  .composer-mobile .composer-queue .composer-action-label {
+    display: none;
+  }
+
+  /* Send and Queue use the same circular slot. The adjacent overflow trigger
+     remains a quiet touch target and never makes the primary button wider. */
+  .composer-mobile .composer-send-split .composer-queue,
+  .composer-mobile .composer-primary > .send,
+  .composer-mobile .composer-primary > .stop {
+    width: var(--tap);
+    min-width: var(--tap);
+    height: var(--tap);
+    min-height: var(--tap);
+    flex: 0 0 var(--tap);
+    padding: 0;
+  }
+
+  .composer-mobile .composer-send-options {
+    flex: 0 0 var(--tap);
+    margin-inline-start: 0;
+    background: transparent;
+  }
+
+  /* With the software keyboard visible, favour writing space over chrome.
+     The model still remains reachable, but secondary extension slots do not
+     compete with the primary Queue/Send action. */
+  body[data-keyboard="open"] .composer-mobile .composer-mobile-extensions {
+    max-width: var(--tap);
+  }
+
+  .composer-mobile .composer-card > .attachment-pills {
+    padding-inline: 0;
+  }
+
+  .composer-mobile .composer-card > .attachment-pills .attachment-pill {
+    max-width: min(220px, 68vw);
+  }
+}
+
+/* Desktop ----------------------------------------------------------------- */
+@media (min-width: 961px) and (min-height: 481px), (min-width: 961px) and (pointer: fine) {
+  .composer-simple .composer-rail {
+    gap: var(--space-1);
+    padding-inline: var(--space-3);
+  }
+
+  .composer-simple .composer-leading-zone,
+  .composer-simple .composer-execution,
+  .composer-simple .composer-extensions,
+  .composer-simple .composer-config,
+  .composer-simple .composer-actions,
+  .composer-simple .composer-primary {
+    gap: var(--space-1);
+  }
+
+  /* Package/harness actions may grow over time. They get a bounded strip;
+     model selection and the primary action are never pushed away or covered. */
+  .composer-simple .composer-actions {
+    margin-inline-start: auto;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: visible;
+  }
+
+  .composer-simple .composer-actions > .composer-extensions {
+    min-width: 0;
+    max-width: min(30vw, 260px);
+    flex: 0 1 auto;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+
+  .composer-simple .composer-actions > .composer-extensions::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* The model belongs to the act of sending. Keep the config cluster directly
+     beside the primary button rather than visually distributing it through
+     the rest of the toolbar. */
+  .composer-simple .composer-config {
+    flex: 0 0 auto;
+    margin-inline-start: var(--space-1);
+    margin-inline-end: 0;
+  }
+
+  .composer-simple .composer-config .model-picker-trigger {
+    max-width: min(240px, 24vw);
+  }
+
+  .composer-simple .composer-primary {
+    margin-inline-start: 0;
+    flex: 0 0 auto;
+  }
+
+  .composer-simple .composer-config + .composer-primary {
+    margin-inline-start: 2px;
+  }
+
+  .composer-simple .composer-send-split {
+    gap: 2px;
+  }
+}
