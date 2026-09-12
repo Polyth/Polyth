@@ -7,6 +7,8 @@ import { prepareMobileLaunch } from "@polyth/mobile/runtime";
 import "./styles.css";
 import "./moduleContent.css";
 import "./composerAdaptive.css";
+import "./motion.css";
+import "./chatMotion.ts";
 
 // Auth and locale start in parallel. The app graph itself waits for auth
 // prefetch so a remembered multi-user session restores its browser-local

@@ -1,0 +1,77 @@
+/* Chat motion --------------------------------------------------------------
+ * The live controller owns row entrances so React streaming updates cannot
+ * cancel a transition halfway through. These rules replace the old
+ * blur/scale positional animation and cover surface-level chat transitions.
+ */
+:root {
+  --chat-motion-enter: 300ms;
+  --chat-motion-surface: 240ms;
+  --chat-motion-distance: 8px;
+  --chat-motion-ease-out: cubic-bezier(0, 0, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Timeline used to animate whichever row happened to be last. The JS motion
+     controller now animates actual DOM arrivals, so history/session changes do
+     not replay an entrance and live re-renders cannot interrupt one. */
+  .timeline > .timeline-row-enter:not(.activity-group) > *,
+  .timeline > .activity-group.timeline-row-enter > .ui-run-summary,
+  .activity-group-items > .timeline-row-enter > * {
+    animation: none !important;
+  }
+
+  /* New Chat is another state of the same workspace. Keep the keyboard-owned
+     composer on opacity only; translating it while the visual viewport moves
+     would create a double-motion jerk on iOS/Android. */
+  .stage-new .hero-body {
+    animation: chat-surface-in var(--chat-motion-surface) var(--chat-motion-ease-out) both;
+  }
+
+  .stage-new .hero-dock,
+  .focus-conversation > .timeline-wrap,
+  .focus-conversation > .conversation-composer-dock {
+    animation: chat-fade-in var(--chat-motion-surface) ease-out both;
+  }
+
+  .chat-motion-enter {
+    animation: chat-row-in var(--chat-motion-enter) var(--chat-motion-ease-out) both;
+  }
+
+  @keyframes chat-row-in {
+    from {
+      opacity: 0;
+      transform: translate3d(0, var(--chat-motion-distance), 0);
+    }
+    to {
+      opacity: 1;
+      transform: translate3d(0, 0, 0);
+    }
+  }
+
+  @keyframes chat-surface-in {
+    from {
+      opacity: 0;
+      transform: translate3d(0, 6px, 0);
+    }
+    to {
+      opacity: 1;
+      transform: translate3d(0, 0, 0);
+    }
+  }
+
+  @keyframes chat-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+}
+
+/* polyth's mobile cadence is deliberately short: less travel, fast
+   ease-out, no blur. Match that feel while leaving Polyth's VisualViewport
+   code as the only owner of keyboard geometry. */
+@media (max-width: 620px), (pointer: coarse) {
+  :root {
+    --chat-motion-enter: 260ms;
+    --chat-motion-surface: 220ms;
+    --chat-motion-distance: 6px;
+  }
+}
