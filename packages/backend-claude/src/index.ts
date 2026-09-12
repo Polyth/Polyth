@@ -17,7 +17,7 @@ export { claudeAuthFingerprint, claudeModelDescriptors, discoverClaudeModels, in
 type Sdk = Pick<typeof import("@anthropic-ai/claude-agent-sdk"), "query" | "getSessionInfo">;
 const claudeExecutable = (): string => process.env.POLYTH_CLAUDE_BIN ?? "claude";
 export const CLAUDE_CAPABILITIES = {
-    streaming: false, permissions: true, questions: false, compaction: false, subagents: false,
+    streaming: true, permissions: true, questions: false, compaction: false, subagents: false,
     steering: false, resume: true, usage: true, cost: true, fork: false, mcp: true,
     title: "native" as const,
     attachments: { modalities: {
@@ -79,6 +79,9 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
     let lastContextResultId = "";
     let lastTitle = "";
     let pendingRetry: RateLimitRetryHint | undefined;
+    let streamMessageOrdinal = -1;
+    let streamEventOrdinal = 0;
+    const streamPartIds = new Map<number, string>();
     const nativeCommands: RuntimeCommandDescriptor[] = [];
     const permissions = new Map<string, {
         resolve(result: PermissionResult): void;
@@ -104,6 +107,14 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
         emit({ type: "turn/started", turnId: active, ...(nativeModel ? { model: nativeModel } : {}) }, active + ":start");
         done();
     } };
+    const streamPartId = (index: number): string => {
+        const existing = streamPartIds.get(index);
+        if (existing) return existing;
+        const ordinal = Math.max(0, streamMessageOrdinal);
+        const partId = `${active}:stream:${ordinal}:${index}`;
+        streamPartIds.set(index, partId);
+        return partId;
+    };
     async function* prompts(): AsyncGenerator<SDKUserMessage> { while (connected) {
         if (!inputs.length)
             await new Promise<void>(resolve => { wake = resolve; });
@@ -132,7 +143,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
         }
         let initialization!: Awaited<ReturnType<Query["initializationResult"]>>;
         try {
-            query = sdk.query({ prompt: prompts(), options: { cwd: context.cwd, ...(resume ? { resume: id } : { sessionId: id }), pathToClaudeCodeExecutable: claudeExecutable(), permissionMode: "default", includePartialMessages: false,
+            query = sdk.query({ prompt: prompts(), options: { cwd: context.cwd, ...(resume ? { resume: id } : { sessionId: id }), pathToClaudeCodeExecutable: claudeExecutable(), permissionMode: "default", includePartialMessages: true,
                     ...(effort ? { effort: effort as EffortLevel } : {}),
                     ...(model ? { model } : {}),
                     // Parallel subagents are not yet represented by this adapter.
@@ -266,6 +277,14 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                         nativeCommands.splice(0, nativeCommands.length, ...toNativeCommands(message.commands));
                         emit({ type: "runtime/commands-changed", commands: [...nativeCommands] }, message.uuid + ":commands");
                     }
+                    if (message.type === "system" && message.subtype === "status"
+                        && (message as { status?: string }).status === "requesting") {
+                        // The SDK emits this immediately before the native API
+                        // request. That is prompt-admission evidence: do not wait
+                        // for the first completed assistant message before the UI
+                        // can clear the composer and enter the working state.
+                        markAccepted();
+                    }
                     if (message.type === "rate_limit_event") {
                         const info = message.rate_limit_info;
                         if (info.status === "rejected" && info.resetsAt) {
@@ -283,13 +302,49 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                             if (nativeCommands.length) emit({ type: "runtime/commands-changed", commands: [...nativeCommands] }, "init:commands");
                         }).catch(() => {});
                     }
+                    if (message.type === "stream_event") {
+                        const event = message.event as {
+                            type?: string;
+                            index?: number;
+                            message?: { model?: string };
+                            content_block?: { type?: string; id?: string; name?: string; input?: unknown };
+                            delta?: { type?: string; text?: string };
+                        };
+                        if (event.type === "message_start") {
+                            streamMessageOrdinal += 1;
+                            streamPartIds.clear();
+                            if (typeof event.message?.model === "string" && event.message.model) {
+                                nativeModel = { providerID: "anthropic", modelID: event.message.model };
+                            }
+                            markAccepted();
+                        }
+                        if (event.type === "content_block_start" && typeof event.index === "number") {
+                            const block = event.content_block;
+                            if (block?.type === "text") streamPartId(event.index);
+                            if (block?.type === "tool_use" && typeof block.id === "string" && typeof block.name === "string") {
+                                markAccepted();
+                                const input = block.input && typeof block.input === "object" && !Array.isArray(block.input)
+                                    ? block.input as JsonObject
+                                    : {};
+                                emit({ type: "tool/call", callId: block.id, tool: block.name, input, status: "pending" }, `${block.id}:pending`);
+                            }
+                        }
+                        if (event.type === "content_block_delta" && typeof event.index === "number"
+                            && event.delta?.type === "text_delta" && typeof event.delta.text === "string" && event.delta.text) {
+                            markAccepted();
+                            const partId = streamPartId(event.index);
+                            emit({ type: "assistant/chunk", partId, text: event.delta.text }, `${active}:stream:${streamEventOrdinal++}`);
+                        }
+                        // Thinking/signature deltas are intentionally ignored:
+                        // Claude's private reasoning never enters continuity.
+                    }
                     if (message.type === "assistant") {
                         if (message.message.model) nativeModel = { providerID: "anthropic", modelID: message.message.model };
                         markAccepted();
                         const body = message.message.content;
                         for (let i = 0; i < body.length; i++) {
                             const block = body[i]!;
-                            const key = `${message.uuid}:${i}`;
+                            const key = block.type === "text" ? (streamPartIds.get(i) ?? `${message.uuid}:${i}`) : `${message.uuid}:${i}`;
                             if (block.type === "text")
                                 emit({ type: "assistant/message", partId: key, text: block.text }, key);
                             if (block.type === "tool_use")
@@ -487,6 +542,9 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                 };
             }
             active = operationId;
+            streamMessageOrdinal = -1;
+            streamEventOrdinal = 0;
+            streamPartIds.clear();
             order++;
             return new Promise(resolve => { admission = () => resolve({ kind: "confirmed", value: { admissionId: operationId }, receipt: operationId }); inputs.push({ type: "user", uuid: operationId as SDKUserMessage["uuid"], session_id: nativeId, parent_tool_use_id: null, message: { role: "user", content: content as SDKUserMessage["message"]["content"] } }); wake?.(); });
         },
