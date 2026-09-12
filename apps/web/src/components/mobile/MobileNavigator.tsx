@@ -594,6 +594,14 @@ export default function MobileNavigator() {
               const kind = resolveSessionStatus(session, now).kind;
               return kind === "needs-reply" || kind === "needs-approval";
             }).length;
+            const completedCount = all.filter((session) => resolveSessionStatus(session, now).kind === "unread").length;
+            const failedCount = all.filter((session) => resolveSessionStatus(session, now).kind === "failed").length;
+            const collapsedStatusLabel = [
+              activeCount > 0 ? `${activeCount} ${tr("common.running")}` : "",
+              waitingCount > 0 ? `${waitingCount} ${tr("sidebar.needsAttention")}` : "",
+              completedCount > 0 ? `${completedCount} ${tr("sidebar.sessionlist.unreadActivity")}` : "",
+              failedCount > 0 ? `${failedCount} ${tr("common.error")}` : "",
+            ].filter(Boolean).join(", ");
             const metadata = [
               tr("sidebar.sessionlist.valueSessions", { length: all.length }),
               activeCount > 0 ? `${activeCount} active` : "",
@@ -658,7 +666,39 @@ export default function MobileNavigator() {
                       onClick={() => { activateProject(project.id); setSidebarOpen(false); }}
                     >
                       <span className="mobile-nav-project-name">{project.name || project.path}</span>
-                      <span className="mobile-nav-project-meta">{metadata}</span>
+                      <span className="mobile-nav-project-meta">
+                        <span className="mobile-nav-project-meta-copy">
+                          {expanded ? metadata : tr("sidebar.sessionlist.valueSessions", { length: all.length })}
+                        </span>
+                        {!expanded && collapsedStatusLabel && (
+                          <span className="mobile-nav-project-statuses" aria-label={collapsedStatusLabel}>
+                            {activeCount > 0 && (
+                              <span className="mobile-nav-project-status is-running" title={`${activeCount} ${tr("common.running")}`}>
+                                <span className="mobile-nav-project-status-ring" aria-hidden="true" />
+                                <span>{activeCount}</span>
+                              </span>
+                            )}
+                            {waitingCount > 0 && (
+                              <span className="mobile-nav-project-status is-waiting" title={`${waitingCount} ${tr("sidebar.needsAttention")}`}>
+                                <span aria-hidden="true">↩</span>
+                                <span>{waitingCount}</span>
+                              </span>
+                            )}
+                            {completedCount > 0 && (
+                              <span className="mobile-nav-project-status is-complete" title={`${completedCount} ${tr("sidebar.sessionlist.unreadActivity")}`}>
+                                <span aria-hidden="true">✓</span>
+                                <span>{completedCount}</span>
+                              </span>
+                            )}
+                            {failedCount > 0 && (
+                              <span className="mobile-nav-project-status is-failed" title={`${failedCount} ${tr("common.error")}`}>
+                                <span aria-hidden="true">!</span>
+                                <span>{failedCount}</span>
+                              </span>
+                            )}
+                          </span>
+                        )}
+                      </span>
                     </button>
                   )}
                   <div className="mobile-nav-project-actions">
