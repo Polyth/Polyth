@@ -25,3 +25,82 @@
   border-radius: 16px;
   background: color-mix(in srgb, var(--surface) 15%, transparent);
 }
+
+/* Collapsed projects keep live work visible without stealing title space.
+ * Finished means unread completed activity: once the result is viewed the check
+ * disappears rather than leaving a permanent historical counter. */
+.mobile-nav-project-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.mobile-nav-project-meta-copy {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-nav-project-statuses {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 5px;
+  margin-left: auto;
+}
+
+.mobile-nav-project-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-round);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mobile-nav-project-status.is-running {
+  color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.mobile-nav-project-status.is-waiting {
+  color: var(--amber-on-wash);
+  background: var(--amber-wash);
+}
+
+.mobile-nav-project-status.is-complete {
+  color: var(--green-on-wash);
+  background: var(--green-wash);
+}
+
+.mobile-nav-project-status.is-failed {
+  color: var(--red);
+  background: var(--red-wash);
+}
+
+.mobile-nav-project-status-ring {
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: mobile-nav-project-status-spin .85s linear infinite;
+}
+
+@keyframes mobile-nav-project-status-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-nav-project-status-ring {
+    animation: none;
+    border-right-color: currentColor;
+  }
+}
