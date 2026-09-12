@@ -1,5 +1,6 @@
 import "./styles.css";
 import "./sessionUsage.css";
+import "./dashboardSurface.css";
 import { defineWebPackage } from "@polyth/web-sdk";
 import { UsageDashboard } from "./usage/UsageDashboard.tsx";
 import { USAGE_WIDGET_PLUGIN } from "./sessionUsagePlugin.tsx";
