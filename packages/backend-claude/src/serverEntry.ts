@@ -14,6 +14,32 @@ const windowsShim = (command: string) => process.platform === "win32" && /\.(?:c
 // Optional SDK is loaded only by this package, never a server boot prerequisite.
 const loadSdk = () => import("@anthropic-ai/claude-agent-sdk");
 
+type ClaudeSessionInfoLike = {
+    customTitle?: string | null;
+    summary?: string | null;
+};
+
+/**
+ * Agent-SDK sessions can report the first user prompt through `summary` even
+ * when no semantic title was ever generated. `customTitle`, in contrast, is an
+ * explicit native title. Keep the session object intact for resume detection,
+ * but hide an untrusted summary from the runtime title-ingestion path.
+ */
+export function titleSafeClaudeSessionInfo<T extends ClaudeSessionInfoLike | null | undefined>(info: T): T {
+    if (!info || info.customTitle) return info;
+    return { ...info, summary: "" } as T;
+}
+
+const titleSafeClaudeSdk = async () => {
+    const sdk = await loadSdk();
+    return {
+        query: sdk.query,
+        async getSessionInfo(...args: Parameters<typeof sdk.getSessionInfo>) {
+            return titleSafeClaudeSessionInfo(await sdk.getSessionInfo(...args));
+        },
+    };
+};
+
 const resolveClaudeBinary = async () => {
     const requested = configuredClaudeBinary || "claude";
     const report = await discoverHarnessExecutable(requested);
@@ -40,7 +66,10 @@ export default function registerPackage(host: ServerPackageHost) {
     };
     const provider: HarnessProvider = {
         descriptor: { id: "claude", name: "Claude Code", integration: "Agent SDK", priority: 20, setupUrl: "https://code.claude.com/docs/en/setup", installCommand: "curl -fsSL https://claude.ai/install.sh | bash", signInCommand: "claude auth login" },
-        staticFeatures: CLAUDE_CAPABILITIES,
+        // SDK-hosted sessions do not guarantee a semantic native title. The
+        // canonical layer should therefore publish its fallback immediately;
+        // an explicit customTitle event may still refine it later.
+        staticFeatures: { ...CLAUDE_CAPABILITIES, title: "emulated" },
         async probe(context) {
             if (context.remote)
                 return { harnessId: "claude", installed: false, healthy: false, authenticated: "unknown", message: "Local execution only" };
@@ -85,7 +114,7 @@ export default function registerPackage(host: ServerPackageHost) {
             return {
                 state: "ready" as const,
                 authenticated: true,
-                capabilities: CLAUDE_CAPABILITIES,
+                capabilities: { ...CLAUDE_CAPABILITIES, title: "emulated" as const },
                 catalog: { models, agents: [] },
             };
         },
@@ -95,7 +124,10 @@ export default function registerPackage(host: ServerPackageHost) {
             await resolveClaudeBinary();
             const authority = await createHarnessProcessAuthority(stateFile(context));
             try {
-                return await createClaudeRuntime(context, await loadSdk(), authority);
+                const runtime = await createClaudeRuntime(context, await titleSafeClaudeSdk(), authority);
+                const capabilities = runtime.capabilities.bind(runtime);
+                runtime.capabilities = async () => ({ ...await capabilities(), title: "emulated" as const });
+                return runtime;
             }
             catch (error) {
                 await authority.close();
