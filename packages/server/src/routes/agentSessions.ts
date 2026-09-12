@@ -215,11 +215,11 @@ const pendingRequests = (events: readonly SessionEvent[]): SessionDebugDto["pend
     const requestId = (event.data as { requestId?: unknown }).requestId;
     if (typeof requestId !== "string" || !requestId) continue;
     if (event.type === "permission/requested") permissions.add(requestId);
-    else if (event.type === "permission/resolved") permissions.delete(requestId);
+    else if (event.type === "permission/resolved" || event.type === "permission/expired") permissions.delete(requestId);
     else if (event.type === "question/asked") questions.add(requestId);
-    else if (event.type === "question/answered") questions.delete(requestId);
+    else if (event.type === "question/answered" || event.type === "question/expired") questions.delete(requestId);
     else if (event.type === "secret/requested") secrets.add(requestId);
-    else if (event.type === "secret/resolved") secrets.delete(requestId);
+    else if (event.type === "secret/resolved" || event.type === "secret/expired") secrets.delete(requestId);
   }
   return {
     permissions: [...permissions],

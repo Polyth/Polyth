@@ -132,15 +132,55 @@
 
 /* Mobile ------------------------------------------------------------------ */
 @media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
+  /* The engaged phone composer uses one compact vertical rhythm: a two-line
+     writing area followed by a 44px action row. The core phone rules reserve
+     two full tap heights for the editor and then add toolbar padding, which
+     leaves an outsized empty band between a one-line draft and the actions. */
+  .composer-mobile.composer-expanded .composer-card textarea {
+    min-height: calc(var(--control-h-lg) + var(--space-3));
+    padding: var(--space-2) var(--space-3) var(--space-1);
+  }
+
+  .composer-mobile.composer-expanded .composer-rail {
+    min-height: calc(var(--tap) + var(--space-3));
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-2) var(--space-2);
+  }
+
   .composer-mobile .composer-rail {
     gap: var(--space-1);
   }
 
   .composer-mobile .composer-leading-zone,
   .composer-mobile .composer-actions,
+  .composer-mobile .composer-extensions,
   .composer-mobile .composer-config,
   .composer-mobile .composer-primary {
     gap: var(--space-1);
+  }
+
+  /* Slot contributions may request a compact IconButton (24px visual box),
+     while the adjacent Add, model and primary controls use 44px boxes. Keep
+     the icon itself compact but normalize its layout box so centers and gaps
+     stay even and transparent coarse-pointer hit areas never overlap. */
+  .composer-mobile .composer-extensions .ui-icon-btn {
+    width: var(--tap);
+    min-width: var(--tap);
+    height: var(--tap);
+    min-height: var(--tap);
+    padding: 0;
+  }
+
+  .composer-mobile .composer-execution,
+  .composer-mobile .composer-execution > .picker {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .composer-mobile .composer-execution .model-picker-trigger {
+    height: var(--tap);
+    min-height: var(--tap);
+    max-width: 100%;
   }
 
   /* One extension lane is intentionally visible on phone. Packages can
@@ -203,6 +243,33 @@
 
   .composer-mobile .composer-card > .attachment-pills .attachment-pill {
     max-width: min(220px, 68vw);
+  }
+}
+
+/* At the narrowest supported phone width, two simultaneously visible trailing
+   extensions would squeeze the model trigger below a touch target. They share
+   one scrollable action slot here; the primary action remains pinned. */
+@media (max-width: 340px) {
+  .composer-mobile .composer-actions > .composer-extensions {
+    width: var(--tap);
+    max-width: var(--tap);
+    flex: 0 0 var(--tap);
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-inline: contain;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+
+  .composer-mobile .composer-actions > .composer-extensions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .composer-mobile .composer-actions > .composer-extensions > *,
+  .composer-mobile .composer-actions > .composer-extensions .placed-mini-widget > * {
+    flex: none;
+    scroll-snap-align: start;
   }
 }
 

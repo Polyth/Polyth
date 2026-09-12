@@ -5,7 +5,7 @@
 // in editor/FilePane. This file implements no tab store and no second editor.
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { api, type FileEntry } from "@polyth/session/web-api";
-import { closeWorkspacePane, getState, openEditorFile, useStore } from "../../../apps/web/src/store.ts";
+import { closeWorkspacePane, getState, openEditorFile, setEditorFile, useStore } from "../../../apps/web/src/store.ts";
 import EmptyState from "../../../apps/web/src/components/EmptyState.tsx";
 import { requestComposerInsert } from "../../../apps/web/src/composerInsert.ts";
 import { setDragPath } from "../../../apps/web/src/dnd.ts";
@@ -105,7 +105,7 @@ export default function EditorView() {
   const onActiveChange = (tab: PaneTab | null) => {
     setActiveTab(tab);
     const next = tab && tab.kind === "file" && !tab.unavailable ? tab.resource : null;
-    if (getState().editorFile !== next) openEditorFile(next);
+    if (getState().editorFile !== next) setEditorFile(next);
     if (next !== null) {
       setSel(next);
       setMobileStage("editor");

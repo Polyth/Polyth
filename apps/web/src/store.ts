@@ -894,6 +894,10 @@ export function setGitDiffPath(gitDiffPath: string | null): void {
 export function setSidebarOpen(sidebarOpen: boolean): void {
   set({ sidebarOpen });
 }
+/** Sync the kept-alive editor selection without navigating to Files. */
+export function setEditorFile(editorFile: string | null): void {
+  set({ editorFile, editorLocation: null });
+}
 /** Compatibility adapter: open the Files surface and the stable
  *  "file:<path>" provider resource. Never sets the primary view. A location
  *  asks the editor to select/center that range once loaded. */

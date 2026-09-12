@@ -19,7 +19,7 @@ import {
   removeProject,
   renameProject,
 } from "../../init.ts";
-import { resolveSessionStatus } from "../../sessionStatus.ts";
+import { resolveSessionStatus, type SessionRowStatus } from "../../sessionStatus.ts";
 import { ago } from "../../format.ts";
 import { Icon } from "../../icons.tsx";
 import { tr } from "../../i18n/index.ts";
@@ -32,6 +32,16 @@ import {
 } from "../../sessionActions.ts";
 import { tapFeedback } from "../../haptics.ts";
 import { useModalSurface } from "../a11y/Dialog.tsx";
+import UiIcon from "../ui/Icon.tsx";
+import {
+  ErrorIcon,
+  HelpIcon,
+  LoaderIcon,
+  RefreshIcon,
+  ShieldIcon,
+  SuccessIcon,
+  WarningIcon,
+} from "../ui/icons.ts";
 import { Menu, type MenuEntry } from "../ui/index.ts";
 import "./MobileNavigator.css";
 
@@ -94,6 +104,34 @@ function workingDuration(ms: number): string {
   return `${Math.floor(minutes / 60)}h`;
 }
 
+type MobileStatusKind = SessionRowStatus["kind"] | "waiting" | "complete";
+
+/** Mobile status marks stay icon-based so platform fonts cannot turn a text
+ * glyph into an emoji or give the same state different shapes per device. */
+function statusIcon(kind: MobileStatusKind) {
+  switch (kind) {
+    case "working":
+      return <UiIcon icon={LoaderIcon} size="sm" className="mobile-nav-state-icon" />;
+    case "needs-reply":
+    case "waiting":
+    case "unknown":
+      return <UiIcon icon={HelpIcon} size="sm" className="mobile-nav-state-icon" />;
+    case "needs-approval":
+      return <UiIcon icon={ShieldIcon} size="sm" className="mobile-nav-state-icon" />;
+    case "unread":
+    case "complete":
+      return <UiIcon icon={SuccessIcon} size="sm" className="mobile-nav-state-icon" />;
+    case "failed":
+      return <UiIcon icon={ErrorIcon} size="sm" className="mobile-nav-state-icon" />;
+    case "epoch-pending":
+      return <UiIcon icon={WarningIcon} size="sm" className="mobile-nav-state-icon" />;
+    case "reconciling":
+      return <UiIcon icon={RefreshIcon} size="sm" className="mobile-nav-state-icon" />;
+    case "regular":
+      return null;
+  }
+}
+
 function statusNode(session: SessionProjection, now: number) {
   const status = resolveSessionStatus(session, now);
   switch (status.kind) {
@@ -105,15 +143,15 @@ function statusNode(session: SessionProjection, now: number) {
         </span>
       );
     case "needs-reply":
-      return <span className="mobile-nav-session-state is-attention" aria-label={status.label}>↩</span>;
+      return <span className="mobile-nav-session-state is-attention" aria-label={status.label}>{statusIcon(status.kind)}</span>;
     case "needs-approval":
-      return <span className="mobile-nav-session-state is-attention is-approval" aria-label={status.label}>◇</span>;
+      return <span className="mobile-nav-session-state is-attention is-approval" aria-label={status.label}>{statusIcon(status.kind)}</span>;
     case "failed":
-      return <span className="mobile-nav-session-state is-failed" aria-label={status.label}>!</span>;
+      return <span className="mobile-nav-session-state is-failed" aria-label={status.label}>{statusIcon(status.kind)}</span>;
     case "epoch-pending":
     case "reconciling":
     case "unknown":
-      return <span className="mobile-nav-session-state is-attention" aria-label={status.label}>{status.glyph}</span>;
+      return <span className="mobile-nav-session-state is-attention" aria-label={status.label}>{statusIcon(status.kind)}</span>;
     default:
       return <span className="mobile-nav-session-time">{activityLabel(session, now)}</span>;
   }
@@ -680,25 +718,25 @@ export default function MobileNavigator() {
                           <span className="mobile-nav-project-statuses" aria-label={collapsedStatusLabel}>
                             {activeCount > 0 && (
                               <span className="mobile-nav-project-status is-running" title={`${activeCount} ${tr("common.running")}`}>
-                                <span className="mobile-nav-project-status-ring" aria-hidden="true" />
+                                {statusIcon("working")}
                                 <span>{activeCount}</span>
                               </span>
                             )}
                             {waitingCount > 0 && (
                               <span className="mobile-nav-project-status is-waiting" title={`${waitingCount} ${tr("sidebar.needsAttention")}`}>
-                                <span aria-hidden="true">↩</span>
+                                {statusIcon("waiting")}
                                 <span>{waitingCount}</span>
                               </span>
                             )}
                             {completedCount > 0 && (
                               <span className="mobile-nav-project-status is-complete" title={`${completedCount} ${tr("sidebar.sessionlist.unreadActivity")}`}>
-                                <span aria-hidden="true">✓</span>
+                                {statusIcon("complete")}
                                 <span>{completedCount}</span>
                               </span>
                             )}
                             {failedCount > 0 && (
                               <span className="mobile-nav-project-status is-failed" title={`${failedCount} ${tr("common.error")}`}>
-                                <span aria-hidden="true">!</span>
+                                {statusIcon("failed")}
                                 <span>{failedCount}</span>
                               </span>
                             )}

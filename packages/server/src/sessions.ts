@@ -853,6 +853,9 @@ export function createSessionService(deps: {
     });
   };
 
+  const runtimeRequestMissing = <T,>(outcome: MutationOutcome<T>): boolean =>
+    outcome.kind === "rejected" && (outcome.code === "not-found" || outcome.code === "http-404");
+
   const blockingOperation = async (
     sessionId: string,
     exceptOperationId?: string,
@@ -3974,6 +3977,10 @@ export function createSessionService(deps: {
         () => ({}),
         { type: "question/answered", data: { requestId: rid, rejected: true }, ignorable: true },
       );
+      if (runtimeRequestMissing(outcome)) {
+        await expireQuestionRequest(sessionId, rid);
+        continue;
+      }
       if (outcome.kind !== "confirmed") throw outcomeError(outcome);
     }
     for (const [rid, requested] of [...facts.openSecrets]) {
@@ -4015,6 +4022,7 @@ export function createSessionService(deps: {
     requestId: string,
     kind: "permission" | "question",
     payload: JsonObject,
+    expired = false,
   ): Promise<void> => {
     const child = await store.projection(childSessionId);
     if (!child?.parentId) return;
@@ -4026,12 +4034,23 @@ export function createSessionService(deps: {
     if (!stillOpen) return;
     await appendAndBroadcast(
       parentId,
-      kind === "permission" ? "permission/resolved" : "question/answered",
+      expired
+        ? kind === "permission" ? "permission/expired" : "question/expired"
+        : kind === "permission" ? "permission/resolved" : "question/answered",
       { requestId, ...payload },
       { ignorable: true },
     );
     await settleAfterLastRequest(parentId);
   };
+
+  async function expireQuestionRequest(sessionId: string, requestId: string): Promise<void> {
+    const data = { requestId, reason: "runtime-request-not-found" };
+    if ((await logFacts(sessionId)).openQuestions.has(requestId)) {
+      await appendAndBroadcast(sessionId, "question/expired", data, { ignorable: true });
+      await settleAfterLastRequest(sessionId);
+    }
+    await closeParentRequestMirror(sessionId, requestId, "question", data, true);
+  }
 
   const replyPermissionCore = async (
     sessionId: string,
@@ -4190,6 +4209,10 @@ export function createSessionService(deps: {
       },
     );
     if (outcome.kind !== "confirmed") {
+      if (runtimeRequestMissing(outcome)) {
+        await expireQuestionRequest(sessionId, requestId);
+        return;
+      }
       if (outcome.kind === "unknown") {
         await updateProjection(sessionId, { status: "unknown" });
         scheduleReconciliation(sessionId, proj, rt, "question-outcome-unknown");
@@ -5611,6 +5634,9 @@ export function createSessionService(deps: {
     await withSessionLock(sessionId, async () => {
       const active = activeToolsFromEvents(await store.events(sessionId)).get(callId);
       if (!active) return;
+      // Human latency is not a stuck execution. The durable request remains
+      // actionable after a Polyth restart until it is answered or rejected.
+      if (active.tool === "question" && (await logFacts(sessionId)).openQuestions.size > 0) return;
       const duration = TOOL_EXECUTION_TIMEOUT_MS >= 60_000
         ? `${Math.round(TOOL_EXECUTION_TIMEOUT_MS / 60_000)} minutes`
         : `${TOOL_EXECUTION_TIMEOUT_MS}ms`;

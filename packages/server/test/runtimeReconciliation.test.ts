@@ -1557,6 +1557,65 @@ test("tool watchdog aborts a stuck execution and records the failure for the age
   await store.close();
 });
 
+test("a pending question survives watchdog rehydration and remains answerable after restart", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-question-restart-"));
+  const endpoint = endpointFor(dir);
+  const sessionId = "session-question-restart";
+  const seed = createStore(join(dir, "sessions.db"));
+  await seed.upsertProjection({
+    id: sessionId,
+    projectId: "project-1",
+    backendSessionId: "backend-question-restart",
+    runtimeBinding: persistedBindingFor(endpoint, "backend-question-restart"),
+    title: "Pending question",
+    status: "waiting",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+  await seed.append(sessionId, "turn/started", { turnId: "turn-question" });
+  await seed.append(sessionId, "tool/started", {
+    callId: "call-question",
+    tool: "question",
+    input: { questions: [{ question: "Continue?" }] },
+  });
+  await seed.append(sessionId, "question/asked", {
+    requestId: "question-restart",
+    questions: [{ id: "continue", question: "Continue?" }],
+  });
+  await seed.close();
+
+  let aborts = 0;
+  let replies = 0;
+  const runtime = runtimeWithSnapshot(endpoint, (binding) => ({
+    authorityId: binding.authorityId,
+    generation: binding.generation,
+    location: binding.location,
+    backendSessionId: binding.backendSessionId!,
+    reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+    state: { value: "running" },
+    completeness: { events: "complete", permissions: "complete", questions: "complete" },
+    permissions: [],
+    questions: [{
+      requestId: "question-restart",
+      questions: [{ id: "continue", question: "Continue?" }],
+    }],
+    events: [],
+  }));
+  runtime.abort = async () => { aborts += 1; };
+  runtime.replyQuestion = async (_id, requestId) => {
+    assert.equal(requestId, "question-restart");
+    replies += 1;
+  };
+
+  const { sessions, store } = makeHarness(runtime, dir, 25);
+  await new Promise((resolve) => setTimeout(resolve, 75));
+  assert.equal(aborts, 0);
+  await sessions.replyQuestion(sessionId, "question-restart", { continue: "yes" });
+  assert.equal(replies, 1);
+  assert.equal((await store.events(sessionId)).some((event) => event.type === "question/answered"), true);
+  await store.close();
+});
+
 test("backend listing never offers an active deletion tombstone for re-adoption", async () => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-tombstone-"));
   const endpoint = endpointFor(dir);

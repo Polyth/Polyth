@@ -34,6 +34,34 @@ test("queue and contributed composer actions stay compact and borderless", async
   assert.match(css, /\.composer-simple \.composer-rail \.send,[\s\S]*?border:\s*0;/);
 });
 
+test("expanded phone composer uses one compact spacing and control rhythm", async () => {
+  const css = await read("../src/composerAdaptive.css");
+
+  assert.match(
+    css,
+    /\.composer-mobile\.composer-expanded \.composer-card textarea\s*\{[^}]*min-height:\s*calc\(var\(--control-h-lg\) \+ var\(--space-3\)\);[^}]*padding:\s*var\(--space-2\) var\(--space-3\) var\(--space-1\);/s,
+  );
+  assert.match(
+    css,
+    /\.composer-mobile\.composer-expanded \.composer-rail\s*\{[^}]*min-height:\s*calc\(var\(--tap\) \+ var\(--space-3\)\);[^}]*gap:\s*var\(--space-1\);[^}]*padding:\s*var\(--space-1\) var\(--space-2\) var\(--space-2\);/s,
+  );
+  assert.match(
+    css,
+    /\.composer-mobile \.composer-extensions \.ui-icon-btn\s*\{[^}]*width:\s*var\(--tap\);[^}]*min-width:\s*var\(--tap\);[^}]*height:\s*var\(--tap\);[^}]*min-height:\s*var\(--tap\);/s,
+    "contributed icon controls should occupy the same mobile layout box as built-in actions",
+  );
+  assert.match(
+    css,
+    /\.composer-mobile \.composer-execution \.model-picker-trigger\s*\{[^}]*height:\s*var\(--tap\);[^}]*max-width:\s*100%;/s,
+    "the model control should align to the action row and yield width before overflowing",
+  );
+  assert.match(
+    css,
+    /@media \(max-width: 340px\)[\s\S]*?\.composer-mobile \.composer-actions > \.composer-extensions\s*\{[^}]*width:\s*var\(--tap\);[^}]*flex:\s*0 0 var\(--tap\);[^}]*overflow-x:\s*auto;/s,
+    "the narrowest phone should give extra trailing actions one scrollable touch-width lane",
+  );
+});
+
 test("desktop keeps extension actions bounded and model next to send", async () => {
   const css = await read("../src/composerAdaptive.css");
 

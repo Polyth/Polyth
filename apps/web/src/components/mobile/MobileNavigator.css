@@ -471,6 +471,10 @@
   line-height: 20px;
 }
 
+.mobile-nav-state-icon {
+  color: currentColor;
+}
+
 .mobile-nav-session-state.is-running {
   font-weight: 400;
 }
@@ -495,10 +499,6 @@
 
 .mobile-nav-session-state.is-attention {
   color: var(--warning, #9a6d16);
-}
-
-.mobile-nav-session-state.is-approval {
-  font-size: 19px;
 }
 
 .mobile-nav-session-state.is-failed {
@@ -646,10 +646,10 @@
   }
 
   .mobile-nav-project-actions .mobile-nav-project-action {
-    width: 41px;
+    width: var(--tap);
   }
 
   .mobile-nav-project-body {
-    padding-left: 17px;
+    padding-left: var(--space-4);
   }
 }

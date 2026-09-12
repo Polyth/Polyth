@@ -985,11 +985,12 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       }
       break;
     }
-    case "question/answered": {
+    case "question/answered":
+    case "question/expired": {
       const requestId = str(d, "requestId") ?? "";
       const q = model.questions.find((x) => x.requestId === requestId);
       if (q) {
-        q.status = "answered";
+        q.status = ev.type === "question/expired" || d.rejected === true ? "rejected" : "answered";
         const answers = obj(d, "answers");
         if (answers !== undefined) q.answers = answers;
       }

@@ -9098,7 +9098,11 @@ color: var(--muted);
   .app.mode-chat.view-session .app-shell { padding-top: 0; }
   .app.mode-chat.view-session .stage:not(.stage-new) { padding-top: calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height)) + var(--space-4)); }
   .app.mode-chat.view-session .stage-new .hero-body { padding-top: calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height)) + var(--space-3)); }
-  .app.mode-chat.view-session .timeline { padding-top: calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height)) + var(--space-4)); }
+  .app.mode-chat.view-session .timeline {
+    padding-top: calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height)) + var(--space-4));
+    -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height))), #000 calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height)) + var(--space-4)));
+    mask-image: linear-gradient(to bottom, transparent calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height))), #000 calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height)) + var(--space-4)));
+  }
   .mobile-tools-sheet.sheet {
     width: calc(100vw - max(var(--space-1), var(--safe-right)));
     max-width: none;

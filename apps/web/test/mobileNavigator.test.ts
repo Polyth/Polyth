@@ -24,3 +24,24 @@ test("session swipe actions (Pin to top / Archive) stay hidden until actually sw
     /\.mobile-nav-session-underlay\[aria-hidden="true"\]\s*\{\s*visibility:\s*hidden;\s*\}/,
   );
 });
+
+test("phone navigator uses a compact rhythm and vector status icons", async () => {
+  const [source, css, polish] = await Promise.all([
+    read("../src/components/mobile/MobileNavigator.tsx"),
+    read("../src/components/mobile/MobileNavigator.css"),
+    read("../src/components/mobile/MobileNavigatorPolish.css"),
+  ]);
+
+  assert.match(source, /function statusIcon\(kind: MobileStatusKind\)/);
+  for (const icon of ["HelpIcon", "ShieldIcon", "SuccessIcon", "ErrorIcon", "WarningIcon", "RefreshIcon"]) {
+    assert.match(source, new RegExp(`icon=\\{${icon}\\}`), `${icon} is used for a mobile state`);
+  }
+  assert.doesNotMatch(source, />(?:↩|◇|✓|!|⚠|↻)</,
+    "mobile navigator state marks should not be platform-font glyphs");
+  assert.match(css, /\.mobile-nav-state-icon\s*\{[^}]*color:\s*currentColor;/);
+  assert.match(polish, /\.mobile-nav-project\s*\{[^}]*margin:\s*0 0 var\(--space-1\);/s);
+  assert.match(polish, /\.mobile-nav-project-head\s*\{[^}]*min-height:\s*var\(--tap\);/s);
+  assert.match(polish, /\.mobile-nav-session-swipe,[\s\S]*?\.mobile-nav-session-main,[\s\S]*?min-height:\s*var\(--tap\);/s);
+  assert.match(polish, /\.mobile-nav-project-action\s*\{[^}]*width:\s*var\(--tap\);[^}]*height:\s*var\(--tap\);/s);
+  assert.match(polish, /\.mobile-nav-project-body\s*\{[^}]*padding-left:\s*var\(--space-4\);/s);
+});

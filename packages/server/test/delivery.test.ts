@@ -572,6 +572,33 @@ test("dismissPending rejects open questions and denies open permissions before s
   await store.close();
 });
 
+test("missing runtime questions expire instead of blocking replies or queued sends", async () => {
+  const fake = fakeRuntime();
+  fake.rt.replyQuestionOperation = async (_sessionId, requestId, _answers, _operationId) => ({
+    kind: "rejected",
+    code: "http-404",
+    message: `Question request not found: ${requestId}`,
+  });
+  const { sessions, store } = makeService(fake);
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await sessions.send(id, { text: "start" });
+  await flush();
+
+  fake.emit(id, { type: "question/asked", requestId: "stale-answer", questions: [{ prompt: "pick" }] });
+  await flush();
+  await sessions.replyQuestion(id, "stale-answer", { choice: "yes" });
+
+  fake.emit(id, { type: "question/asked", requestId: "stale-send", questions: [{ prompt: "pick" }] });
+  await flush();
+  const sent = await sessions.send(id, { text: "continue", delivery: "queue", dismissPending: true });
+
+  assert.ok(sent.queued);
+  const events = await store.events(id);
+  assert.deepEqual(events.filter((event) => event.type === "question/expired")
+    .map((event) => (event.data as { requestId?: string }).requestId), ["stale-answer", "stale-send"]);
+  await store.close();
+});
+
 test("queue order survives service restart and dispatches after reopen", async () => {
   const fake = fakeRuntime();
   const dir = mkdtempSync(join(tmpdir(), "polyth-restart-"));

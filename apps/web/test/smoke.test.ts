@@ -515,7 +515,7 @@ test("task snapshot revisions derive ordered semantic activity exactly once", ()
   assert.equal(model.tasks?.revision, 3);
 });
 
-test("permission requested → resolved (and question asked → answered)", () => {
+test("permission requested → resolved (and questions close when answered or expired)", () => {
   const m = buildModel([
     ev("permission/requested", { requestId: "r1", permission: "bash", patterns: ["ls *"], tool: "bash" }),
     ev("question/asked", { requestId: "q1", questions: [{ question: "Continue?" }] }),
@@ -535,6 +535,10 @@ test("permission requested → resolved (and question asked → answered)", () =
   const m3 = reduceEvent(m2, ev("question/answered", { requestId: "q1", answers: { "0": "yes" } }));
   assert.equal(m3.questions[0]?.status, "answered");
   assert.deepEqual(m3.questions[0]?.answers, { "0": "yes" });
+
+  const m4 = reduceEvent(m3, ev("question/asked", { requestId: "q2", questions: [{ question: "Still there?" }] }));
+  const m5 = reduceEvent(m4, ev("question/expired", { requestId: "q2" }));
+  assert.equal(m5.questions[1]?.status, "rejected");
 });
 
 test("secret/requested adds a pending credential handle and secret/resolved clears it", () => {

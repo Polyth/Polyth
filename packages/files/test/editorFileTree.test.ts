@@ -14,6 +14,7 @@ const dom = new Window({ url: "http://localhost:3000/" });
 Object.assign(globalThis, {
   window: dom as unknown as typeof globalThis & Window,
   document: dom.document as unknown as Document,
+  HTMLElement: dom.HTMLElement,
 });
 Object.defineProperty(globalThis, "navigator", { value: dom.navigator, configurable: true });
 Object.defineProperty(globalThis, "localStorage", { value: dom.localStorage, configurable: true });
@@ -50,7 +51,12 @@ register("./tsxHooks.mjs", import.meta.url);
 
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { activateProject } = await import("../../../apps/web/src/store.ts");
+const {
+  activateProject, activateSession, closeWorkspacePane, getState,
+  openWorkspacePane, startNewSession, useStore,
+} = await import("../../../apps/web/src/store.ts");
+const { registerSurface } = await import("../../../apps/web/src/surfaces.ts");
+const { PaneVisibilityContext } = await import("../../../apps/web/src/workspace/paneVisibility.ts");
 const { fileTypeKeyOf } = await import("../widgets/editor/fileTreeIcons.tsx");
 const { default: EditorView } = await import("../widgets/EditorView.tsx");
 
@@ -136,6 +142,60 @@ test("file tree renders an ARIA tree with disclosure, indentation, and namespace
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();
+  }
+});
+
+test("a hidden Files editor does not reopen when the session scope changes", async () => {
+  const projectId = "p-files-closed";
+  const pane = (path: string) => JSON.stringify({
+    tabs: [{ id: `file:${path}`, kind: "file", resource: path, title: path }],
+    activeId: `file:${path}`,
+  });
+  localStorage.setItem(`polyth.pane.${projectId}:first`, pane("first.ts"));
+  localStorage.setItem(`polyth.pane.${projectId}:second`, pane("second.ts"));
+  localStorage.setItem(`polyth.pane.${projectId}:project`, pane("new.ts"));
+  const unregister = registerSurface({
+    id: "files",
+    title: "Files",
+    order: 1,
+    component: () => null,
+    presentation: {
+      kind: "workspace", defaultRatio: 0.6, minWidth: 380,
+      preferredMaxWidth: 760, keepAlive: true, escape: "close",
+    },
+  });
+  function KeptAliveFiles() {
+    const visible = useStore((state) => state.railPlugin === "files");
+    return createElement(
+      PaneVisibilityContext.Provider,
+      { value: visible },
+      createElement(EditorView),
+    );
+  }
+
+  activateProject(projectId);
+  activateSession("first");
+  openWorkspacePane("files");
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(KeptAliveFiles)); });
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { closeWorkspacePane(); });
+    assert.equal(getState().railPlugin, null);
+
+    await act(async () => { activateSession("second"); });
+    await act(async () => { await Promise.resolve(); });
+    assert.equal(getState().railPlugin, null, "switching sessions keeps the closed Files pane closed");
+
+    await act(async () => { startNewSession(projectId); });
+    await act(async () => { await Promise.resolve(); });
+    assert.equal(getState().railPlugin, null, "starting a new session keeps the closed Files pane closed");
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+    unregister();
   }
 });
 
