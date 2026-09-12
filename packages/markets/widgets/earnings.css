@@ -70,8 +70,9 @@
 
 .markets-earnings-toolbar button:focus-visible,
 .markets-earnings-toolbar input:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px var(--focus-wash);
 }
 
 .markets-earnings-toolbar button:disabled {

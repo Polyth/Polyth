@@ -93,8 +93,9 @@
 .markets-heatmap-sector-label:focus-visible,
 .markets-heatmap-cell:focus-visible,
 .markets-heatmap-toolbar select:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px var(--focus-wash);
 }
 
 .markets-heatmap-actions button:disabled,
@@ -131,7 +132,7 @@
   flex: 1;
   min-height: 320px;
   overflow: hidden;
-  background: var(--surface);
+  background: var(--panel);
 }
 
 .markets-heatmap-sector-label {
@@ -217,7 +218,7 @@
   display: grid;
   z-index: 4;
   place-items: center;
-  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
   color: var(--muted);
   font-size: var(--font-meta);
 }

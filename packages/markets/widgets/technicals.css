@@ -70,8 +70,9 @@
 
 .markets-technicals-actions button:focus-visible,
 .markets-technicals-ranges button:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px var(--focus-wash);
 }
 
 .markets-technicals-actions button:disabled {

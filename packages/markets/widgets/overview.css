@@ -78,8 +78,9 @@
 .markets-overview-actions button:focus-visible,
 .markets-overview-market-grid button:focus-visible,
 .markets-overview-crypto-table button:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px var(--focus-wash);
 }
 
 .markets-overview-actions button:disabled {
@@ -122,7 +123,7 @@
 .markets-overview-market-grid button {
   min-width: 0;
   padding: var(--space-3);
-  background: var(--surface);
+  background: var(--panel);
 }
 
 .markets-overview-metric > span,
@@ -234,7 +235,7 @@
 
 .markets-overview-empty {
   grid-column: 1 / -1;
-  background: var(--surface);
+  background: var(--panel);
   color: var(--muted);
 }
 

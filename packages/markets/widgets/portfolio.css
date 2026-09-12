@@ -67,8 +67,9 @@
 .markets-portfolio-remove:focus-visible,
 .markets-portfolio-table th button:focus-visible,
 .markets-portfolio-add input:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px var(--focus-wash);
 }
 
 .markets-portfolio-add {

@@ -29,6 +29,16 @@
   min-height: 0;
 }
 
+/* Older Markets surface styles were authored while --focus-ring still looked
+   like a shadow role. It is a color token. This package-owned final surface
+   seam restores the same visible focus contract as core without restyling the
+   host navigation buttons above. */
+.markets-surface-frame-body :is(button, input, select, textarea, a[href]):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px var(--focus-wash);
+}
+
 /* These section views already live inside a host-padded page. Their root
    must not create another viewport or a second set of exterior gutters. */
 .markets-surface-frame-body > :is(div, section, main):not(.empty-state):not([role="alert"]):not([class^="ui-"]):not([class*=" ui-"]) {

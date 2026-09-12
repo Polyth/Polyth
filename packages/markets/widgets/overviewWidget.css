@@ -39,7 +39,7 @@
   min-width: 0;
   padding: var(--space-2);
   border: 0;
-  background: var(--surface);
+  background: var(--panel);
   color: var(--text);
   font: inherit;
   text-align: left;
@@ -53,8 +53,9 @@
 
 .markets-overview-widget-title:focus-visible,
 .markets-overview-widget-grid button:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px var(--focus-wash);
 }
 
 .markets-overview-widget-title:disabled,

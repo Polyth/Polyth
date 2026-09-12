@@ -59,8 +59,9 @@
 
 .markets-calendar button:focus-visible,
 .markets-calendar select:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px var(--focus-wash);
 }
 
 .markets-calendar button:disabled {

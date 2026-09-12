@@ -72,8 +72,9 @@
 .markets-filings-toolbar button:focus-visible,
 .markets-filings-filters button:focus-visible,
 .markets-filings-toolbar input:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px var(--focus-wash);
 }
 
 .markets-filings-toolbar button:disabled {
@@ -145,8 +146,9 @@
 }
 
 .markets-filing-row:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px var(--focus-wash);
 }
 
 .markets-filing-form {

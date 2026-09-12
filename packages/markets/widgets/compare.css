@@ -45,7 +45,9 @@
 
 .markets-compare-toolbar input:focus-visible {
   border-color: var(--accent);
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px var(--focus-wash);
 }
 
 .markets-compare-ranges {
@@ -99,8 +101,9 @@
 .markets-compare-ranges button:focus-visible,
 .markets-compare-ask:focus-visible,
 .markets-compare-table button:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px var(--focus-wash);
 }
 
 .markets-compare-hint {

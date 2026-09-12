@@ -27,8 +27,9 @@
 .markets-portfolio-widget-summary:focus-visible,
 .markets-portfolio-widget-empty:focus-visible,
 .markets-portfolio-widget-positions button:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px var(--focus-wash);
 }
 
 .markets-portfolio-widget-summary {

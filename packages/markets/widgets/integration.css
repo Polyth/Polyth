@@ -30,8 +30,9 @@
 .markets-watch-toggle:focus-visible,
 .markets-ask:focus-visible,
 .markets-handoff-menu button:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px var(--focus-wash);
 }
 
 .markets-handoff {

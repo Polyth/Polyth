@@ -45,7 +45,9 @@
 
 .markets-search-field > input:focus-visible {
   border-color: var(--accent);
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px var(--focus-wash);
 }
 
 .markets-search-field > button {
@@ -85,8 +87,9 @@
 .markets-refresh:focus-visible,
 .markets-range button:focus-visible,
 .markets-search-results button:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px var(--focus-wash);
 }
 
 .markets-range button[aria-pressed="true"] {
@@ -102,7 +105,7 @@
   left: 0;
   right: 0;
   overflow: auto;
-  max-height: min(320px, 50vh);
+  max-height: 320px;
   padding: var(--space-1);
   border: 1px solid var(--material-glass-border);
   border-radius: var(--radius-card);
