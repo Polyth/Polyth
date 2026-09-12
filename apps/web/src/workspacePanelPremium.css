@@ -1,0 +1,448 @@
+/* Premium mobile Workspace surface.
+ * Deliberately scoped to the Workspace sheet so shared Sheet and package
+ * widget primitives keep their normal presentation everywhere else. */
+
+@media (max-width: 640px), (max-height: 500px) and (pointer: coarse) {
+  .sheet-backdrop:has(.workspace-panel-sheet) {
+    align-items: stretch;
+    justify-content: flex-end;
+    padding:
+      max(8px, var(--safe-top))
+      max(8px, var(--safe-right))
+      max(8px, var(--safe-bottom))
+      clamp(72px, 20vw, 104px);
+    background: color-mix(in srgb, var(--scrim) 16%, transparent);
+    -webkit-backdrop-filter: blur(6px) saturate(.92);
+    backdrop-filter: blur(6px) saturate(.92);
+  }
+
+  .workspace-panel-sheet.sheet {
+    position: relative;
+    width: 100%;
+    max-width: 560px;
+    height: 100%;
+    max-height: 100%;
+    margin: 0;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--material-glass-border) 52%, transparent);
+    border-radius: clamp(28px, 8vw, 36px);
+    background:
+      linear-gradient(145deg,
+        color-mix(in srgb, var(--panel) 90%, transparent),
+        color-mix(in srgb, var(--panel) 80%, transparent));
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, white 52%, transparent),
+      inset 1px 0 0 color-mix(in srgb, white 24%, transparent),
+      -18px 18px 54px rgba(0, 0, 0, .08);
+    -webkit-backdrop-filter: blur(30px) saturate(1.18);
+    backdrop-filter: blur(30px) saturate(1.18);
+    container: workspace-panel / inline-size;
+  }
+
+  .workspace-panel-sheet.sheet::before {
+    content: "";
+    position: absolute;
+    z-index: 2;
+    top: 12px;
+    left: 50%;
+    width: 40px;
+    height: 5px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--text) 17%, transparent);
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+
+  .workspace-panel-sheet .sheet-grabber { display: none; }
+
+  .workspace-panel-sheet .sheet-head {
+    min-height: 76px;
+    gap: 6px;
+    padding:
+      25px
+      12px
+      8px
+      14px;
+    border-bottom: 0;
+    background: transparent;
+  }
+
+  .workspace-panel-sheet .sheet-title {
+    margin-right: auto;
+    font-size: clamp(23px, 6.6vw, 28px);
+    font-weight: 720;
+    line-height: 1.08;
+    letter-spacing: -.035em;
+  }
+
+  .workspace-panel-sheet .sheet-head-action,
+  .workspace-panel-sheet .sheet-close {
+    border: 0;
+    box-shadow: none;
+  }
+
+  .workspace-panel-sheet .sheet-head-action {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0 6px;
+    color: var(--text-dim);
+    background: transparent;
+    font-size: var(--font-label);
+    font-weight: 520;
+  }
+
+  .workspace-panel-sheet .sheet-head-action:hover,
+  .workspace-panel-sheet .sheet-head-action:active {
+    border: 0;
+    background: color-mix(in srgb, var(--panel) 36%, transparent);
+  }
+
+  .workspace-panel-sheet .sheet-close {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    padding: 0;
+    border-radius: 50%;
+    color: var(--text-dim);
+    background: color-mix(in srgb, var(--panel) 38%, transparent);
+    box-shadow: inset 0 1px 0 color-mix(in srgb, white 34%, transparent);
+  }
+
+  .workspace-panel-sheet .sheet-close:hover,
+  .workspace-panel-sheet .sheet-close:active {
+    border: 0;
+    background: color-mix(in srgb, var(--panel) 58%, transparent);
+  }
+
+  .workspace-panel-sheet .sheet-body {
+    padding: 0 12px max(18px, var(--safe-bottom));
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+  .workspace-panel-sheet .sheet-body::-webkit-scrollbar { display: none; }
+
+  .workspace-panel-subtitle {
+    margin: 1px 4px 12px;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.25;
+  }
+
+  /* Four quiet launchers per row. Their surface is visible by light, not by
+     outlines; the larger hit box remains even when the material is subtle. */
+  .workspace-panel-sheet .workspace-panel-items {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 7px 6px;
+  }
+
+  .workspace-panel-sheet .workspace-panel-item {
+    min-width: 0;
+    border: 0;
+    border-radius: 18px;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .workspace-panel-sheet .workspace-panel-item--launcher {
+    grid-column: span 1;
+    min-height: 88px;
+  }
+
+  .workspace-panel-sheet .workspace-panel-launcher {
+    min-height: 88px;
+    gap: 8px;
+    padding: 9px 3px 8px;
+    border: 0;
+    border-radius: 18px;
+    color: var(--text-dim);
+    background:
+      linear-gradient(145deg,
+        color-mix(in srgb, var(--panel) 28%, transparent),
+        color-mix(in srgb, var(--panel) 14%, transparent));
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, white 28%, transparent),
+      0 5px 18px rgba(0, 0, 0, .018);
+    font-size: clamp(10.5px, 2.9vw, 12.5px);
+    line-height: 1.18;
+  }
+
+  .workspace-panel-sheet .workspace-panel-launcher > svg {
+    width: 25px;
+    height: 25px;
+    flex: none;
+    color: var(--accent);
+    stroke-width: 1.75;
+  }
+
+  .workspace-panel-sheet .workspace-panel-launcher > span {
+    display: -webkit-box;
+    min-width: 0;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow-wrap: anywhere;
+    text-wrap: balance;
+  }
+
+  .workspace-panel-sheet .workspace-panel-launcher:not(:disabled):hover,
+  .workspace-panel-sheet .workspace-panel-launcher:not(:disabled):active {
+    border: 0;
+    color: var(--text);
+    background: color-mix(in srgb, var(--panel) 52%, transparent);
+  }
+
+  /* Widgets become sections of one sheet instead of cards inside cards. */
+  .workspace-panel-sheet .workspace-panel-item--widget {
+    grid-column: 1 / -1;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-radius: 0;
+    border-top: 1px solid color-mix(in srgb, var(--hair) 72%, transparent);
+    background: transparent;
+  }
+
+  .workspace-panel-sheet .workspace-panel-widget-head {
+    min-height: 52px;
+    gap: 10px;
+    padding: 0 4px;
+    border: 0;
+    border-radius: 14px;
+    background: transparent;
+  }
+
+  .workspace-panel-sheet .workspace-panel-widget-head:not(:disabled):hover,
+  .workspace-panel-sheet .workspace-panel-widget-head:not(:disabled):active {
+    border: 0;
+    background: color-mix(in srgb, var(--panel) 30%, transparent);
+  }
+
+  .workspace-panel-sheet .workspace-panel-widget-head > svg {
+    width: 22px;
+    height: 22px;
+    color: var(--accent);
+  }
+
+  .workspace-panel-sheet .workspace-panel-widget-head strong {
+    font-size: clamp(15px, 4.2vw, 17px);
+    font-weight: 680;
+    letter-spacing: -.015em;
+  }
+
+  .workspace-panel-sheet .workspace-panel-widget-head > span {
+    padding-right: 2px;
+    color: var(--text-dim);
+    font-size: 25px;
+    font-weight: 300;
+  }
+
+  .workspace-panel-sheet .workspace-panel-widget-body {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .workspace-panel-sheet .workspace-panel-item--compact .workspace-panel-widget-body,
+  .workspace-panel-sheet .workspace-panel-item--standard .workspace-panel-widget-body {
+    min-height: 0;
+    max-height: 118px;
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+
+  .workspace-panel-sheet .workspace-panel-item--compact .workspace-panel-widget-body::-webkit-scrollbar,
+  .workspace-panel-sheet .workspace-panel-item--standard .workspace-panel-widget-body::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Agent actions: one calm status row with a soft semantic state dot. */
+  .workspace-panel-sheet .widget-agent-actions {
+    padding: 0 4px 8px;
+  }
+
+  .workspace-panel-sheet .widget-agent-actions > div {
+    align-items: center;
+    gap: 10px;
+    padding: 7px 0;
+    border-bottom: 0;
+  }
+
+  .workspace-panel-sheet .widget-agent-actions p {
+    font-size: 13px;
+    line-height: 1.22;
+  }
+
+  .workspace-panel-sheet .widget-agent-actions p strong { font-weight: 620; }
+  .workspace-panel-sheet .widget-agent-actions p small {
+    margin-top: 2px;
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .workspace-panel-sheet .action-dot {
+    width: 28px;
+    height: 28px;
+    flex: 0 0 28px;
+    border-radius: 50%;
+    font-size: 12px;
+  }
+
+  /* Activity reads as a tiny timeline rather than another boxed table. */
+  .workspace-panel-sheet .widget-activity {
+    position: relative;
+    padding: 0 4px 8px 34px;
+  }
+
+  .workspace-panel-sheet .widget-activity::before {
+    content: "";
+    position: absolute;
+    top: 9px;
+    bottom: 13px;
+    left: 14px;
+    width: 1px;
+    background: color-mix(in srgb, var(--hair) 82%, transparent);
+  }
+
+  .workspace-panel-sheet .widget-activity-row {
+    position: relative;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 8px;
+    min-height: 34px;
+    align-items: center;
+    padding: 5px 0;
+    border-bottom: 0;
+    font-size: 12px;
+  }
+
+  .workspace-panel-sheet .widget-activity-row::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: -24px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--panel) 82%, transparent);
+    transform: translateY(-50%);
+  }
+
+  .workspace-panel-sheet .widget-activity-row > span:nth-child(2) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .workspace-panel-sheet .widget-activity-row time {
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  /* Project-progress separator is intentionally almost invisible. */
+  .workspace-panel-sheet .workspace-panel-item--divider,
+  .workspace-panel-sheet .workspace-panel-item--header,
+  .workspace-panel-sheet .workspace-panel-item--labeled-divider {
+    grid-column: 1 / -1;
+    border: 0;
+    background: transparent;
+  }
+
+  .workspace-panel-sheet .workspace-panel-divider {
+    margin: 9px 4px;
+    background: color-mix(in srgb, var(--hair) 72%, transparent);
+  }
+
+  .workspace-panel-sheet .workspace-panel-labeled-divider {
+    min-height: 44px;
+    gap: 10px;
+    padding-inline: 4px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .workspace-panel-sheet .workspace-panel-labeled-divider > i {
+    background: color-mix(in srgb, var(--hair) 72%, transparent);
+  }
+
+  /* Usage summary: three metrics in one quiet strip, with no nested cards. */
+  .workspace-panel-sheet .usage-widget-panel {
+    min-height: 0;
+    padding: 0 4px 8px;
+  }
+
+  .workspace-panel-sheet .usage-widget-panel > .provider-share-card {
+    display: none;
+  }
+
+  .workspace-panel-sheet .usage-widget-stat-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0;
+    padding: 0;
+  }
+
+  .workspace-panel-sheet .usage-widget-stat-grid > div {
+    min-width: 0;
+    gap: 3px;
+    padding: 8px 11px 10px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .workspace-panel-sheet .usage-widget-stat-grid > div + div {
+    border-left: 1px solid color-mix(in srgb, var(--hair) 72%, transparent);
+  }
+
+  .workspace-panel-sheet .usage-widget-stat-grid span {
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .workspace-panel-sheet .usage-widget-stat-grid strong {
+    overflow: hidden;
+    color: var(--text);
+    font: 680 clamp(16px, 4.8vw, 20px)/1.08 var(--ui-font-family);
+    letter-spacing: -.02em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .workspace-panel-sheet .usage-session-stats small { display: none; }
+
+  /* Editing remains fully usable but does not reintroduce persistent chrome. */
+  .workspace-panel-sheet .workspace-panel-item.dragging {
+    opacity: .62;
+    background: color-mix(in srgb, var(--accent) 7%, transparent);
+    box-shadow: inset 0 0 0 1px var(--accent-line);
+  }
+
+  .workspace-panel-sheet .workspace-panel-edit-controls {
+    min-height: 40px;
+    padding: 0 2px;
+    border-bottom: 1px dashed color-mix(in srgb, var(--hair) 70%, transparent);
+  }
+
+  .workspace-panel-sheet .workspace-panel-library {
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid color-mix(in srgb, var(--hair) 72%, transparent);
+  }
+}
+
+@media (max-width: 360px) {
+  .sheet-backdrop:has(.workspace-panel-sheet) {
+    padding-left: 52px;
+  }
+
+  .workspace-panel-sheet .sheet-body { padding-inline: 10px; }
+  .workspace-panel-sheet .workspace-panel-items { gap-inline: 4px; }
+  .workspace-panel-sheet .workspace-panel-launcher {
+    min-height: 82px;
+    padding-inline: 2px;
+    font-size: 10.5px;
+  }
+}
