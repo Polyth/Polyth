@@ -459,7 +459,7 @@ test("the running action floats out of the folded block while settled rows stay 
     })));
     const live = [...container.querySelectorAll(".activity-live .execution-row")];
     assert.equal(live.length, 1, "only the running action floats above the block");
-    assert.equal(live[0]?.querySelector(".tool-preview")?.textContent, "npm test");
+    assert.equal(live[0]?.querySelector(".tool-preview")?.textContent, "Run tests");
     assert.ok(live[0]?.classList.contains("open"), "a floating action shows its output while it runs");
     const toggle = container.querySelector<HTMLButtonElement>(".ui-run-summary")!;
     assert.equal(toggle.getAttribute("aria-expanded"), "false", "the block never opens itself while work runs");
