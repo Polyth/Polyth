@@ -25,6 +25,22 @@ test("session swipe actions (Pin to top / Archive) stay hidden until actually sw
   );
 });
 
+test("phone navigator uses the canonical viewport, safe-area, and semantic color seams", async () => {
+  const [css, polish] = await Promise.all([
+    read("../src/components/mobile/MobileNavigator.css"),
+    read("../src/components/mobile/MobileNavigatorPolish.css"),
+  ]);
+
+  assert.match(css, /\.mobile-navigator\s*\{[^}]*height:\s*var\(--visual-vh, 100dvh\);/s);
+  assert.match(css, /var\(--safe-top\)/);
+  assert.match(css, /var\(--safe-bottom\)/);
+  assert.doesNotMatch(css, /env\(safe-area-inset-/);
+  for (const deprecated of ["--surface", "--text-muted", "--danger", "--warning"]) {
+    assert.doesNotMatch(css, new RegExp(`var\\(${deprecated}(?:[,\\)])`), `${deprecated} is deprecated in Navigator CSS`);
+    assert.doesNotMatch(polish, new RegExp(`var\\(${deprecated}(?:[,\\)])`), `${deprecated} is deprecated in Navigator polish CSS`);
+  }
+});
+
 test("phone navigator uses a compact rhythm and vector status icons", async () => {
   const [source, css, polish] = await Promise.all([
     read("../src/components/mobile/MobileNavigator.tsx"),

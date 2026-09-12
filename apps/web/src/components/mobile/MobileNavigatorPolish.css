@@ -124,7 +124,7 @@
 
 .mobile-nav-project.is-current > .mobile-nav-project-head {
   border-radius: 16px;
-  background: color-mix(in srgb, var(--surface) 15%, transparent);
+  background: color-mix(in srgb, var(--panel) 15%, transparent);
 }
 
 /* Collapsed projects keep live work visible without stealing title space.

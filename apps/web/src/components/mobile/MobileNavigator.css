@@ -19,7 +19,7 @@
   display: flex;
   flex-direction: column;
   width: 100vw;
-  height: 100dvh;
+  height: var(--visual-vh, 100dvh);
   max-width: none;
   overflow: hidden;
   color: var(--text);
@@ -44,8 +44,8 @@
   align-items: center;
   gap: 3px;
   flex: 0 0 auto;
-  min-height: calc(50px + env(safe-area-inset-top));
-  padding: calc(6px + env(safe-area-inset-top)) 10px 6px;
+  min-height: calc(50px + var(--safe-top));
+  padding: calc(6px + var(--safe-top)) max(10px, var(--safe-right)) 6px max(10px, var(--safe-left));
   background: color-mix(in srgb, var(--bg) 56%, transparent);
   -webkit-backdrop-filter: blur(34px) saturate(114%);
   backdrop-filter: blur(34px) saturate(114%);
@@ -73,7 +73,7 @@
   height: 50px;
   padding: 0 6px 0 15px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--surface) 44%, transparent);
+  background: color-mix(in srgb, var(--panel) 44%, transparent);
   box-shadow: inset 0 0 0 .5px color-mix(in srgb, white 22%, transparent);
 }
 
@@ -81,7 +81,7 @@
   flex: 0 0 auto;
   width: 21px;
   height: 21px;
-  color: var(--text-muted);
+  color: var(--muted);
   stroke-width: 1.8;
 }
 
@@ -99,7 +99,7 @@
 }
 
 .mobile-nav-search input::placeholder {
-  color: color-mix(in srgb, var(--text-muted) 86%, transparent);
+  color: color-mix(in srgb, var(--muted) 86%, transparent);
 }
 
 .mobile-nav-search-clear,
@@ -113,7 +113,7 @@
   place-items: center;
   flex: 0 0 auto;
   padding: 0;
-  color: var(--text-muted);
+  color: var(--muted);
   background: transparent;
   border: 0;
   outline: 0;
@@ -148,7 +148,7 @@
   width: 48px;
   height: 48px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--surface) 25%, transparent);
+  background: color-mix(in srgb, var(--panel) 25%, transparent);
 }
 
 .mobile-nav-tool svg {
@@ -174,7 +174,7 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  padding: 12px 10px calc(14px + env(safe-area-inset-bottom));
+  padding: 12px max(10px, var(--safe-right)) calc(14px + var(--safe-bottom)) max(10px, var(--safe-left));
   scrollbar-width: none;
 }
 
@@ -184,7 +184,7 @@
 
 .mobile-nav-empty {
   padding: 40px 14px;
-  color: var(--text-muted);
+  color: var(--muted);
   font-size: 15px;
   line-height: 20px;
   text-align: center;
@@ -198,7 +198,7 @@
 }
 
 .mobile-nav-project.is-current {
-  background: color-mix(in srgb, var(--surface) 15%, transparent);
+  background: color-mix(in srgb, var(--panel) 15%, transparent);
 }
 
 .mobile-nav-project-head {
@@ -229,8 +229,8 @@
   height: 36px;
   margin-right: 7px;
   border-radius: 12px;
-  color: var(--text-muted);
-  background: color-mix(in srgb, var(--surface) 24%, transparent);
+  color: var(--muted);
+  background: color-mix(in srgb, var(--panel) 24%, transparent);
 }
 
 .mobile-nav-project-icon svg {
@@ -272,7 +272,7 @@
   width: 100%;
   margin-top: 2px;
   overflow: hidden;
-  color: var(--text-muted);
+  color: var(--muted);
   font-size: 13px;
   font-weight: 400;
   line-height: 18px;
@@ -286,7 +286,7 @@
   height: 42px;
   padding: 0 9px;
   color: var(--text);
-  background: color-mix(in srgb, var(--surface) 34%, transparent);
+  background: color-mix(in srgb, var(--panel) 34%, transparent);
   border: 0;
   border-radius: 12px;
   outline: 0;
@@ -368,15 +368,15 @@
 .mobile-nav-swipe-action {
   width: 82px;
   padding: 0 7px;
-  color: var(--text-muted);
-  background: color-mix(in srgb, var(--surface) 42%, transparent);
+  color: var(--muted);
+  background: color-mix(in srgb, var(--panel) 42%, transparent);
   border: 0;
   font-size: 13px;
   font-weight: 600;
 }
 
 .mobile-nav-swipe-action.is-trailing {
-  color: var(--danger, #c43c44);
+  color: var(--red);
 }
 
 .mobile-nav-session-row {
@@ -392,7 +392,7 @@
 }
 
 .mobile-nav-session-row.is-active {
-  background: color-mix(in srgb, var(--accent) 5.5%, var(--surface) 20%);
+  background: color-mix(in srgb, var(--accent) 5.5%, var(--panel) 20%);
 }
 
 .mobile-nav-session-row.is-active::before {
@@ -408,7 +408,7 @@
 }
 
 .mobile-nav-session-row.is-failed {
-  background: color-mix(in srgb, var(--danger, #c43c44) 4%, transparent);
+  background: color-mix(in srgb, var(--red) 4%, transparent);
 }
 
 .mobile-nav-session-main {
@@ -453,7 +453,7 @@
 
 .mobile-nav-session-time,
 .mobile-nav-duration {
-  color: var(--text-muted);
+  color: var(--muted);
   font-size: 14px;
   font-weight: 400;
   line-height: 18px;
@@ -465,7 +465,7 @@
   align-items: center;
   gap: 5px;
   min-height: 22px;
-  color: var(--text-muted);
+  color: var(--muted);
   font-size: 16px;
   font-weight: 600;
   line-height: 20px;
@@ -482,7 +482,7 @@
 .mobile-nav-running-ring {
   width: 15px;
   height: 15px;
-  border: 1.6px solid color-mix(in srgb, var(--text-muted) 30%, transparent);
+  border: 1.6px solid color-mix(in srgb, var(--muted) 30%, transparent);
   border-top-color: color-mix(in srgb, var(--text) 68%, transparent);
   border-radius: 999px;
   animation: mobile-nav-spin .9s linear infinite;
@@ -498,11 +498,11 @@
 }
 
 .mobile-nav-session-state.is-attention {
-  color: var(--warning, #9a6d16);
+  color: var(--amber);
 }
 
 .mobile-nav-session-state.is-failed {
-  color: var(--danger, #c43c44);
+  color: var(--red);
   font-weight: 700;
 }
 
@@ -532,7 +532,7 @@
   margin-left: 5px;
   padding: 0 8px;
   color: var(--text);
-  background: color-mix(in srgb, var(--surface) 42%, transparent);
+  background: color-mix(in srgb, var(--panel) 42%, transparent);
   border: 0;
   border-radius: 10px;
   outline: 0;
@@ -547,7 +547,7 @@
   min-height: 44px;
   margin-left: 8px;
   padding: 0 8px;
-  color: var(--text-muted);
+  color: var(--muted);
   background: transparent;
   border: 0;
   font-size: 15px;
@@ -579,7 +579,7 @@
   min-width: 0;
   min-height: 44px;
   padding: 0;
-  color: var(--text-muted);
+  color: var(--muted);
   text-align: left;
   background: transparent;
   border: 0;
@@ -618,7 +618,7 @@
 .mobile-nav-worktree-icon {
   display: grid;
   place-items: center;
-  color: color-mix(in srgb, var(--text-muted) 78%, transparent);
+  color: color-mix(in srgb, var(--muted) 78%, transparent);
 }
 
 .mobile-nav-worktree-icon svg {
