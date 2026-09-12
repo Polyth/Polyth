@@ -19,6 +19,7 @@ const LIVE_ROW_SELECTOR = [
 
 let pendingUserSendUntil = 0;
 let quietUntil = 0;
+let navigationPending = false;
 let lastLocation = typeof location === "undefined" ? "" : location.href;
 const animated = new WeakSet<HTMLElement>();
 
@@ -41,6 +42,10 @@ function touchProfile(): boolean {
 
 function markUserSend(): void {
   pendingUserSendUntil = now() + USER_SEND_TTL_MS;
+  // A deliberate send establishes a live continuation even when the current
+  // screen was reached by navigation moments earlier.
+  navigationPending = false;
+  quietUntil = 0;
 }
 
 function consumeUserSend(): boolean {
@@ -57,6 +62,7 @@ function markNavigation(): void {
   // treat that as historical navigation or the freshly sent prompt would lose
   // its entrance motion.
   if (pendingUserSendUntil > now()) return;
+  navigationPending = true;
   quietUntil = now() + NAVIGATION_QUIET_MS;
 }
 
@@ -155,7 +161,7 @@ function candidatesFrom(node: Node): HTMLElement[] {
   return candidates;
 }
 
-function animateAddedNode(node: Node): void {
+function animateAddedNode(node: Node, suppressChat = false): void {
   if (!(node instanceof Element)) return;
 
   // A newly mounted timeline is hydration/navigation, not a sequence of new
@@ -186,14 +192,26 @@ function animateAddedNode(node: Node): void {
     if (nested) continue;
 
     if (element.matches(".msg.user")) {
-      if (consumeUserSend()) playEntrance(element);
+      const explicitSend = consumeUserSend();
+      // Explicit send provenance wins even if route bookkeeping is still
+      // settling. Other live user rows may animate when they arrive at the
+      // timeline tail (e.g. interrupt/send-now paths).
+      if (explicitSend || (!suppressChat && now() >= quietUntil && nearTimelineTail(element))) {
+        playEntrance(element);
+      }
       continue;
     }
 
-    if (now() < quietUntil) continue;
+    if (suppressChat || now() < quietUntil) continue;
     if (!nearTimelineTail(element)) continue;
     playEntrance(element);
   }
+}
+
+function nodeHasChatCandidates(node: Node): boolean {
+  if (!(node instanceof Element)) return false;
+  return node.matches(".timeline") || node.matches(LIVE_ROW_SELECTOR)
+    || !!node.querySelector(`.timeline, ${LIVE_ROW_SELECTOR}`);
 }
 
 function installMutationWatcher(): void {
@@ -203,8 +221,16 @@ function installMutationWatcher(): void {
       lastLocation = href;
       markNavigation();
     }
+
+    // Navigation may load data asynchronously, so a fixed timeout alone is not
+    // enough. Suppress the first actual chat insertion batch after navigation,
+    // then immediately return to live event motion.
+    const suppressNavigationBatch = navigationPending
+      && records.some((record) => Array.from(record.addedNodes).some(nodeHasChatCandidates));
+    if (suppressNavigationBatch) navigationPending = false;
+
     for (const record of records) {
-      for (const node of record.addedNodes) animateAddedNode(node);
+      for (const node of record.addedNodes) animateAddedNode(node, suppressNavigationBatch);
     }
   });
   observer.observe(document.body, { childList: true, subtree: true });
