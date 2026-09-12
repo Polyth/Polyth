@@ -19,6 +19,11 @@ export interface LocalMutationIntent {
 export type ClientMutationReconciliation = "none" | "applied" | "not-applied" | "unknown";
 
 const KIND = "unsent-intent";
+// Process-local only: a durable `unknown` is written before POST for crash
+// recovery, but while this renderer still owns that POST it is not a recovery
+// failure. Never persist this set — after a renderer/process restart the
+// durable marker must become eligible for reconciliation again.
+const activeLocalMutationIds = new Set<string>();
 const intentScope = (sessionId: string, captured?: PersistenceScope): PersistenceScope =>
   captured ?? clientPersistenceScope({ sessionId });
 const scopeIsCurrent = (sessionId: string, captured: PersistenceScope): boolean =>
@@ -49,6 +54,12 @@ export function loadLocalMutationIntent(sessionId: string, capturedScope?: Persi
   } catch {
     return null;
   }
+}
+
+/** A recovery warning is valid only for a durable intent no live POST owns. */
+export function shouldSurfaceLocalMutationRecovery(sessionId: string): boolean {
+  const intent = loadLocalMutationIntent(sessionId);
+  return intent !== null && !activeLocalMutationIds.has(intent.operationId);
 }
 
 export async function hydrateLocalMutationIntent(sessionId: string): Promise<LocalMutationIntent | null> {
@@ -96,49 +107,54 @@ export async function submitDirectPrompt(
 ): Promise<SendResult> {
   const capturedScope = intentScope(sessionId, scopeOverride);
   const intent = stageLocalMutationIntent(sessionId, body.delivery === "queue" ? "queue-admission" : "turn-submit", newLogicalOperationId(), capturedScope);
+  activeLocalMutationIds.add(intent.operationId);
   try {
-    // The recovery token and the draft share this flush boundary. Do not let
-    // a request leave the device until process-restart recovery can name it.
-    await flushClientPersistence();
-  } catch (error) {
-    throw Object.assign(
-      new Error(error instanceof Error ? error.message : "client recovery metadata could not be persisted"),
-      { code: "client-persistence-failed", status: 409 },
-    );
-  }
-  if (!scopeIsCurrent(sessionId, capturedScope)) {
-    throw Object.assign(new Error("session context changed before admission"), {
-      code: "client-context-changed",
-      status: 409,
-    });
-  }
-  // Cross the network only after restart recovery durably knows this request
-  // may have left the device. Otherwise a process kill during fetch can revive
-  // a stale `never-transmitted` marker and make an absent status look like
-  // proof that a still-arriving POST did not apply.
-  markLocalMutationUnknown(sessionId, intent, capturedScope);
-  try {
-    await flushClientPersistence();
-  } catch (error) {
-    throw Object.assign(
-      new Error(error instanceof Error ? error.message : "client recovery metadata could not be persisted"),
-      { code: "client-persistence-failed", status: 409 },
-    );
-  }
-  if (!scopeIsCurrent(sessionId, capturedScope)) {
-    throw Object.assign(new Error("session context changed before admission"), {
-      code: "client-context-changed",
-      status: 409,
-    });
-  }
-  try {
-    const result = await api.sendMessage(sessionId, { ...body, clientOperationId: intent.operationId });
-    clearLocalMutationIntent(sessionId, capturedScope);
-    return result;
-  } catch (error) {
-    if (retainLocalMutationIntentAfterError(error)) markLocalMutationUnknown(sessionId, intent, capturedScope);
-    else clearLocalMutationIntent(sessionId, capturedScope);
-    throw error;
+    try {
+      // The recovery token and the draft share this flush boundary. Do not let
+      // a request leave the device until process-restart recovery can name it.
+      await flushClientPersistence();
+    } catch (error) {
+      throw Object.assign(
+        new Error(error instanceof Error ? error.message : "client recovery metadata could not be persisted"),
+        { code: "client-persistence-failed", status: 409 },
+      );
+    }
+    if (!scopeIsCurrent(sessionId, capturedScope)) {
+      throw Object.assign(new Error("session context changed before admission"), {
+        code: "client-context-changed",
+        status: 409,
+      });
+    }
+    // Cross the network only after restart recovery durably knows this request
+    // may have left the device. Otherwise a process kill during fetch can revive
+    // a stale `never-transmitted` marker and make an absent status look like
+    // proof that a still-arriving POST did not apply.
+    markLocalMutationUnknown(sessionId, intent, capturedScope);
+    try {
+      await flushClientPersistence();
+    } catch (error) {
+      throw Object.assign(
+        new Error(error instanceof Error ? error.message : "client recovery metadata could not be persisted"),
+        { code: "client-persistence-failed", status: 409 },
+      );
+    }
+    if (!scopeIsCurrent(sessionId, capturedScope)) {
+      throw Object.assign(new Error("session context changed before admission"), {
+        code: "client-context-changed",
+        status: 409,
+      });
+    }
+    try {
+      const result = await api.sendMessage(sessionId, { ...body, clientOperationId: intent.operationId });
+      clearLocalMutationIntent(sessionId, capturedScope);
+      return result;
+    } catch (error) {
+      if (retainLocalMutationIntentAfterError(error)) markLocalMutationUnknown(sessionId, intent, capturedScope);
+      else clearLocalMutationIntent(sessionId, capturedScope);
+      throw error;
+    }
+  } finally {
+    activeLocalMutationIds.delete(intent.operationId);
   }
 }
 

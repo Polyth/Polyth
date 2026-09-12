@@ -1,4 +1,5 @@
 import { scopedDraftCacheKey } from "./draftRecord.ts";
+import { shouldSurfaceLocalMutationRecovery } from "./mutationIntent.ts";
 
 export interface FailedSend {
   sessionId: string;
@@ -30,6 +31,10 @@ export function reportSendFailure(sessionId: string, error: unknown, capturedSco
   const code = typeof (error as { code?: unknown })?.code === "string"
     ? (error as { code: string }).code
     : "";
+  // Reconnect/session-open reconciliation can race the exact POST that wrote
+  // the durable `unknown` marker — or finish after that POST already succeeded
+  // and cleared it. Only an orphaned durable intent is a real recovery state.
+  if (code === "outcome-unknown" && !shouldSurfaceLocalMutationRecovery(sessionId)) return null;
   if (code === "outcome-unknown" || status === 0 || status >= 500) {
     const failure: FailedSend = { sessionId, kind: "unknown" };
     failures.set(capturedScopeKey, failure);
