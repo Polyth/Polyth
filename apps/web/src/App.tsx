@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import Sidebar from "./components/Sidebar.tsx";
+import Navigation from "./components/Navigation.tsx";
 import Main from "./components/Main.tsx";
 import ContextRail from "./components/ContextRail.tsx";
 import StatusBar from "./components/StatusBar.tsx";
@@ -76,7 +76,7 @@ export default function App() {
     <div className={`app mode-${workspaceMode} view-${activeView}`}>
       <Header />
       <div className="app-shell">
-        <Sidebar />
+        <Navigation />
         {/* UX-PANE-MODEL: while a workspace surface covers the workspace, Chat
             stays mounted underneath but is inert and out of the a11y tree — it
             consumes no hit area and cannot retain sequential focus. */}
