@@ -31,8 +31,8 @@ test("session usage uses native context telemetry without inventing token totals
 
   assert.match(html, /data-usage-metric="context"/);
   assert.match(html, />40%</);
-  assert.match(html, /80k/i);
-  assert.match(html, /200k/i);
+  assert.match(html, /80\.0k/i);
+  assert.match(html, /200\.0k/i);
   for (const metric of ["input", "output", "total"]) {
     assert.match(html, new RegExp(`data-usage-metric="${metric}"[^>]*>[\\s\\S]*?—`));
   }
