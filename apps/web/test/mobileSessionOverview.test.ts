@@ -14,19 +14,24 @@ test("mobile session overview only renders sections that have content", () => {
   assert.match(source, /origin="top"/);
 });
 
-test("mobile session overview uses compact locale-safe progress and truthful harness metadata", () => {
+test("mobile session overview removes duplicated chrome and keeps useful state semantic", () => {
   const source = read("../src/components/mobile/MobileSessionHeader.tsx");
   assert.match(source, /formatNumber\(currentStep\).*formatNumber\(tasks\.length\)/s);
-  assert.doesNotMatch(source, /\$\{currentStep\} of \$\{tasks\.length\}/);
-  assert.doesNotMatch(source, /session\?\.resolvedHarnessId \?\? descriptor\?\.providerName/);
+  assert.match(source, /tasksForIsland\(model\.tasks, model\.messages\)/);
+  assert.doesNotMatch(source, /mobile-island-session|mobile-island-meta/);
+  assert.doesNotMatch(source, /mobile\.island\.showFullPrompt|mobile\.island\.hideFullPrompt/);
+  assert.doesNotMatch(source, /meta=\{itemStatus|trailing=\{/);
+  assert.match(source, /eventsHaveCodeChanges\(events\[item\.id\]\).*mobile\.island\.codeChanged/s);
 });
 
-test("mobile session overview inherits canonical sheet geometry and mobile hit targets", () => {
+test("mobile session overview inherits canonical sheet geometry and uses quiet dense rows", () => {
   const css = read("../src/components/mobile/MobileSessionHeader.css");
   assert.doesNotMatch(css, /86dvh|max-height:\s*min\(/);
   assert.doesNotMatch(css, /--safe-top/);
   assert.doesNotMatch(css, /@media\s*\(max-width:\s*380px\)/);
-  assert.doesNotMatch(css, /width:\s*38px/);
-  assert.match(css, /padding:\s*var\(--space-2\) var\(--screen-gutter\) 0/);
-  assert.match(css, /\.mobile-island-prompt-toggle[\s\S]*?min-height:\s*max\(var\(--control-h-sm\), var\(--hit-min\)\)/);
+  assert.doesNotMatch(css, /mobile-island-prompt-toggle/);
+  assert.match(css, /\.mobile-island-sheet \.sheet-close[\s\S]*?width:\s*var\(--tap\);[\s\S]*?height:\s*var\(--tap\);/);
+  assert.match(css, /\.mobile-island-sheet \.mobile-task-list li[\s\S]*?min-height:\s*var\(--tap\);/);
+  assert.match(css, /\.mobile-island-sheet \.mobile-task-list li\.active[\s\S]*?background:\s*transparent;/);
+  assert.match(css, /\.mobile-island-sheet \.sheet-row-main[\s\S]*?min-height:\s*var\(--tap\);/);
 });

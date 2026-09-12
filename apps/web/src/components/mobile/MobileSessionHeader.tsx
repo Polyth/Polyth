@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { SessionEvent, SessionProjection } from "@polyth/contracts";
-import { ago, displaySessionTitle } from "../../format.ts";
+import { displaySessionTitle } from "../../format.ts";
 import { Icon } from "../../icons.tsx";
 import { formatNumber, tr } from "../../i18n/index.ts";
 import {
@@ -10,6 +10,7 @@ import {
   promptExcerpt,
   recentSessionsForIsland,
   sessionTitleOf,
+  tasksForIsland,
   type IslandItem,
   type IslandTask,
 } from "../../mobileIsland.ts";
@@ -48,27 +49,11 @@ function SessionLiveIcon({ status }: { status: SessionRowStatus }) {
   return <span className="mobile-island-live idle" title={status.label} aria-label={status.label} />;
 }
 
-function CodeChangedMark() {
-  return (
-    <span className="mobile-island-diff" title={tr("mobile.island.codeChanged")} aria-label={tr("mobile.island.codeChanged")}>
-      <i className="add" /><i className="del" />
-    </span>
-  );
-}
-
 function PromptExcerpt({ text }: { text: string }) {
-  const excerpt = promptExcerpt(text);
-  const expandable = text.trim() !== excerpt;
-  const [open, setOpen] = useState(false);
   return (
     <div className="mobile-island-prompt">
       <span className="mobile-island-prompt-label">{tr("mobile.island.prompt")}</span>
-      <p className={open ? "full" : undefined}>{open ? text : excerpt}</p>
-      {expandable && (
-        <button type="button" className="mobile-island-prompt-toggle" onClick={() => setOpen((value) => !value)}>
-          {open ? tr("mobile.island.hideFullPrompt") : tr("mobile.island.showFullPrompt")}
-        </button>
-      )}
+      <p>{promptExcerpt(text, 140)}</p>
     </div>
   );
 }
@@ -80,15 +65,6 @@ function TaskMark({ status }: { status: IslandTask["status"] }) {
   return <span className="mobile-task-mark pending" aria-hidden="true" />;
 }
 
-function displayHarnessLabel(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  return value
-    .split(/[-_]/g)
-    .filter(Boolean)
-    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
-    .join(" ");
-}
-
 function progressStep(tasks: IslandTask[]): number {
   const active = tasks.findIndex((task) => task.status === "active");
   if (active >= 0) return active + 1;
@@ -98,26 +74,18 @@ function progressStep(tasks: IslandTask[]): number {
 }
 
 function IslandOverview({
-  title,
   prompt,
   tasks,
   requests,
   recent,
   events,
-  status,
-  harnessLabel,
-  age,
   onClose,
 }: {
-  title: string;
   prompt: string | undefined;
   tasks: IslandTask[];
   requests: IslandItem[];
   recent: SessionProjection[];
   events: Record<string, readonly SessionEvent[] | undefined>;
-  status: SessionRowStatus | null;
-  harnessLabel?: string;
-  age?: string;
   onClose: () => void;
 }) {
   const actionNeededCopy = tr("mobile.island.requests");
@@ -125,7 +93,6 @@ function IslandOverview({
   const progressCopy = tr("mobile.island.tasks");
   const progressLabel = progressCopy === "Tasks" ? "Progress" : progressCopy;
   const currentStep = progressStep(tasks);
-  const statusLabel = status?.kind === "working" ? tr("common.running") : status?.label;
 
   return (
     <Sheet
@@ -134,20 +101,11 @@ function IslandOverview({
       className="mobile-island-sheet"
       onClose={onClose}
     >
-      <div className="mobile-island-now">
-        <strong className="mobile-island-session">{title}</strong>
-        {(harnessLabel || statusLabel || age) && (
-          <div className="mobile-island-meta">
-            {harnessLabel && <span className="mobile-island-harness">{harnessLabel}</span>}
-            {harnessLabel && (statusLabel || age) && <span className="mobile-island-meta-separator" aria-hidden="true">·</span>}
-            {status && <SessionLiveIcon status={status} />}
-            {statusLabel && <span>{statusLabel}</span>}
-            {statusLabel && age && <span className="mobile-island-meta-separator" aria-hidden="true">·</span>}
-            {age && <span>{age}</span>}
-          </div>
-        )}
-        {prompt && <PromptExcerpt text={prompt} />}
-      </div>
+      {prompt && (
+        <div className="mobile-island-now">
+          <PromptExcerpt text={prompt} />
+        </div>
+      )}
 
       {requests.length > 0 && (
         <SheetSection title={`${actionNeededLabel} · ${formatNumber(requests.length)}`}>
@@ -168,10 +126,7 @@ function IslandOverview({
             {tasks.map((task) => (
               <li key={task.id} className={task.status}>
                 <TaskMark status={task.status} />
-                <span className="mobile-task-copy">
-                  <span className="mobile-task-text">{task.text}</span>
-                  {task.status === "active" && <small>{tr("common.running")}</small>}
-                </span>
+                <span className="mobile-task-text">{task.text}</span>
               </li>
             ))}
           </ul>
@@ -183,13 +138,17 @@ function IslandOverview({
           {recent.map((item) => {
             const itemStatus = resolveSessionStatus(item);
             const itemTitle = sessionTitleOf(item, events);
+            const rowLabel = [
+              itemTitle,
+              itemStatus.label,
+              eventsHaveCodeChanges(events[item.id]) ? tr("mobile.island.codeChanged") : "",
+            ].filter(Boolean).join(", ");
             return (
               <SheetRow
                 key={item.id}
                 title={itemTitle}
-                meta={itemStatus.kind === "regular" ? ago(item.lastTurnAt ?? item.createdAt) : itemStatus.label}
                 icon={<SessionLiveIcon status={itemStatus} />}
-                trailing={eventsHaveCodeChanges(events[item.id]) ? <CodeChangedMark /> : undefined}
+                ariaLabel={rowLabel}
                 onClick={() => {
                   void openSession(item.id);
                   onClose();
@@ -253,19 +212,20 @@ export default function MobileSessionHeader() {
     newChat: tr("mobile.island.newChat"),
   }), []);
 
-  // The pill title stays put; the derived items only feed the status glyph and
-  // the overview's request list, so nothing rotates under the reader.
-  const items = useMemo(() => buildIslandItems({
+  const overviewTasks = tasksForIsland(model.tasks, model.messages);
+  // The pill title stays put; derived state only feeds the overview and status
+  // signals, so no secondary copy competes with the current session title.
+  const items = buildIslandItems({
     sessionTitle: title,
     hasSession: session !== null,
-    tasks: model.tasks?.items,
+    tasks: overviewTasks,
     permissions: model.permissions,
     questions: model.questions,
     secrets: model.secrets,
     peers,
     labels,
-  }), [title, session, model.tasks, model.permissions, model.questions, model.secrets, peers, labels]);
-  const requests = useMemo(() => items.filter((item) => item.kind === "request"), [items]);
+  });
+  const requests = items.filter((item) => item.kind === "request");
   const sessionStatus = session ? resolveSessionStatus(session) : null;
   const runtimeFeatures = useStore((state) => session?.id ? state.runtimeFeatures[session.id] : undefined);
   const activeModel = model.contextUsage?.model ?? model.turn?.model ?? session?.model;
@@ -274,8 +234,6 @@ export default function MobileSessionHeader() {
     : undefined;
   const telemetryStatus = contextTelemetryStatus(runtimeFeatures?.telemetry);
   const gauge = contextGaugeForTelemetry(model, descriptor?.context, session?.contextWindow ?? null, telemetryStatus);
-  const harnessLabel = displayHarnessLabel(descriptor?.harnessId ?? session?.resolvedHarnessId);
-  const sessionAge = session ? ago(session.lastTurnAt ?? session.createdAt) : undefined;
 
   return <>
     <div className="mobile-session-floats" aria-label="Workspace navigation">
@@ -305,15 +263,11 @@ export default function MobileSessionHeader() {
     </div>
     {surface === "island" && (
       <IslandOverview
-        title={title}
         prompt={promptVisible ? undefined : prompt}
-        tasks={model.tasks?.items ?? []}
+        tasks={overviewTasks}
         requests={requests}
         recent={recent}
         events={events}
-        status={sessionStatus}
-        harnessLabel={harnessLabel}
-        age={sessionAge}
         onClose={() => setSurface(null)}
       />
     )}

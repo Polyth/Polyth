@@ -1,5 +1,5 @@
-/* Session overview is a top-origin status surface: dense enough to scan, but
-   visually one frosted material rather than a stack of cards. */
+/* Session overview is a top-origin status surface: one quiet material with
+   only the information that changes what the user does next. */
 .mobile-island-sheet.sheet-origin-top {
   border-top: 0;
   border-right: 0;
@@ -24,7 +24,7 @@
 
 .mobile-island-sheet .sheet-head {
   min-height: var(--tap);
-  padding: var(--space-2) var(--screen-gutter) 0;
+  padding: 0 var(--screen-gutter);
 }
 
 .mobile-island-sheet .sheet-close {
@@ -33,58 +33,28 @@
   padding: 0;
   border: 0;
   border-radius: var(--radius-round);
-  background: var(--surface-overlay);
+  background: transparent;
   color: var(--text-dim);
 }
 
+@media (hover: hover) {
+  .mobile-island-sheet .sheet-close:hover {
+    background: var(--surface-overlay);
+  }
+}
+
 .mobile-island-sheet .sheet-body {
-  padding: 0 0 var(--space-2);
+  padding: 0 0 var(--space-3);
 }
 
 .mobile-island-sheet .mobile-island-now {
-  display: grid;
-  gap: var(--space-2);
-  margin: 0;
-  padding: var(--space-2) var(--screen-gutter) var(--space-4);
-}
-
-.mobile-island-sheet .mobile-island-session {
-  min-width: 0;
-  color: var(--text);
-  font-size: var(--font-heading);
-  font-weight: 720;
-  line-height: 1.2;
-  letter-spacing: -.015em;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-}
-
-.mobile-island-sheet .mobile-island-meta {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  color: var(--muted);
-  font-size: var(--font-label);
-  line-height: 1.25;
-}
-
-.mobile-island-sheet .mobile-island-meta .mobile-island-live {
-  flex: 0 0 auto;
-  margin-inline-end: calc(-1 * var(--space-1));
-}
-
-.mobile-island-sheet .mobile-island-meta-separator {
-  color: var(--faint);
+  margin: 0 var(--screen-gutter);
+  padding: var(--space-1) 0 var(--space-3);
 }
 
 .mobile-island-sheet .mobile-island-prompt {
   display: grid;
   gap: var(--space-1);
-  margin-top: var(--space-2);
 }
 
 .mobile-island-sheet .mobile-island-prompt-label {
@@ -94,40 +64,30 @@
 }
 
 .mobile-island-sheet .mobile-island-prompt p {
+  display: -webkit-box;
   margin: 0;
+  overflow: hidden;
   color: var(--text-dim);
   font-size: var(--font-body);
-  line-height: 1.42;
+  line-height: 1.4;
   white-space: normal;
-}
-
-.mobile-island-sheet .mobile-island-prompt p:not(.full) {
-  display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  overflow: hidden;
-}
-
-.mobile-island-sheet .mobile-island-prompt-toggle {
-  justify-self: start;
-  min-height: max(var(--control-h-sm), var(--hit-min));
-  margin-top: var(--space-1);
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  font-size: var(--font-meta);
-  font-weight: 620;
+  -webkit-line-clamp: 2;
 }
 
 .mobile-island-sheet .sheet-section {
   margin: 0 var(--screen-gutter);
-  padding: var(--space-4) 0 var(--space-1);
+  padding: var(--space-3) 0 0;
   border-top: 1px solid var(--border-soft);
 }
 
+.mobile-island-sheet .sheet-body > .sheet-section:first-child {
+  padding-top: var(--space-1);
+  border-top: 0;
+}
+
 .mobile-island-sheet .sheet-section + .sheet-section {
-  margin-top: var(--space-2);
+  margin-top: var(--space-1);
 }
 
 .mobile-island-sheet .sheet-section-head {
@@ -141,32 +101,29 @@
   font-size: var(--font-meta);
   font-weight: 650;
   line-height: 1.25;
-  letter-spacing: .1em;
+  letter-spacing: .08em;
   text-transform: uppercase;
 }
 
 .mobile-island-sheet .mobile-task-list {
   display: grid;
-  gap: var(--space-1);
+  gap: 0;
 }
 
 .mobile-island-sheet .mobile-task-list li {
   grid-template-columns: var(--space-5) minmax(0, 1fr);
   min-height: var(--tap);
+  align-items: center;
   gap: var(--space-3);
-  padding: var(--space-2) 0;
+  padding: var(--space-1) 0;
   color: var(--text-dim);
 }
 
-.mobile-island-sheet .mobile-task-list li.request {
-  align-items: center;
-}
-
 .mobile-island-sheet .mobile-task-list li.active {
-  margin-inline: calc(-1 * var(--space-2));
-  padding-inline: var(--space-2);
-  border-radius: var(--radius-card);
-  background: var(--accent-wash);
+  margin: 0;
+  padding-inline: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--text);
 }
 
@@ -178,29 +135,19 @@
   color: var(--muted);
 }
 
-.mobile-island-sheet .mobile-task-copy {
-  display: grid;
-  min-width: 0;
-  align-self: center;
-  gap: var(--space-1);
+.mobile-island-sheet .mobile-task-list li.done .mobile-task-text {
+  text-decoration: none;
 }
 
 .mobile-island-sheet .mobile-task-text {
   min-width: 0;
   overflow: hidden;
+  line-height: 1.35;
   text-overflow: clip;
   white-space: normal;
-  line-height: 1.32;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
-}
-
-.mobile-island-sheet .mobile-task-copy small {
-  color: var(--accent);
-  font-size: var(--font-meta);
-  font-weight: 650;
-  line-height: 1.2;
 }
 
 .mobile-island-sheet .mobile-action-needed-list .mobile-island-dot {
@@ -216,35 +163,28 @@
 
 .mobile-island-sheet .sheet-row-main {
   min-height: var(--tap);
-  padding: var(--space-2) 0;
+  padding: 0;
   border: 0;
+  border-radius: 0;
   background: transparent;
 }
 
 .mobile-island-sheet .sheet-row-icon {
   width: var(--space-5);
   min-width: var(--space-5);
+  justify-content: center;
 }
 
 .mobile-island-sheet .sheet-row-copy {
   min-width: 0;
-  gap: var(--space-1);
+  gap: 0;
 }
 
 .mobile-island-sheet .sheet-row-copy strong {
   overflow: hidden;
   color: var(--text);
+  font-size: var(--font-body);
   font-weight: 620;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.mobile-island-sheet .sheet-row-copy small {
-  color: var(--muted);
-  font-size: var(--font-meta);
-}
-
-.mobile-island-sheet .mobile-island-diff {
-  opacity: .45;
-  filter: grayscale(1);
 }

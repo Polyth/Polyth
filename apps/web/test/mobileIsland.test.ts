@@ -8,6 +8,7 @@ import {
   notablePeers,
   promptExcerpt,
   recentSessionsForIsland,
+  tasksForIsland,
 } from "../src/mobileIsland.ts";
 import { lastUserText } from "../src/utils.ts";
 
@@ -51,6 +52,41 @@ test("lastTask prefers the active item and otherwise keeps the latest snapshot r
   ];
   assert.equal(lastTask(items)?.id, "c");
   assert.equal(lastTask(items.slice(0, 2))?.id, "b");
+});
+
+test("task overview falls back to TodoWrite tool state and keeps completed items visible", () => {
+  const tasks = tasksForIsland(null, [{
+    kind: "tool",
+    id: "todo-1",
+    callId: "todo-1",
+    eventSeq: 1,
+    tool: "TodoWrite",
+    input: {
+      todos: [
+        { id: "a", content: "Inspect", status: "completed" },
+        { id: "b", content: "Polish", status: "in_progress" },
+        { id: "c", content: "Ship", status: "pending" },
+      ],
+    },
+    status: "done",
+    time: NOW,
+  }]);
+  assert.deepEqual(tasks, [
+    { id: "a", text: "Inspect", status: "done" },
+    { id: "b", text: "Polish", status: "active" },
+    { id: "c", text: "Ship", status: "pending" },
+  ]);
+
+  assert.deepEqual(tasksForIsland({ listId: "todo", revision: 3, items: [] }, [{
+    kind: "tool",
+    id: "old-todo",
+    callId: "old-todo",
+    eventSeq: 1,
+    tool: "todo_write",
+    input: { todos: [{ content: "Old", status: "pending" }] },
+    status: "done",
+    time: NOW,
+  }]), []);
 });
 
 test("the island marks tasks, current requests, and notable peer sessions", () => {

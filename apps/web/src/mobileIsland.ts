@@ -8,6 +8,7 @@ import type {
   PendingPermission,
   PendingQuestion,
   PendingSecret,
+  RenderMessage,
   TaskListState,
 } from "./reduce.ts";
 import { resolveSessionStatus, type SessionRowStatus } from "./sessionStatus.ts";
@@ -38,6 +39,26 @@ export interface IslandLabels {
 }
 
 export type IslandTask = TaskListState["items"][number];
+
+const TODO_STATUS: Record<string, IslandTask["status"]> = {
+  pending: "pending",
+  queued: "pending",
+  todo: "pending",
+  in_progress: "active",
+  inprogress: "active",
+  active: "active",
+  running: "active",
+  working: "active",
+  completed: "done",
+  complete: "done",
+  done: "done",
+  success: "done",
+  succeeded: "done",
+  cancelled: "failed",
+  canceled: "failed",
+  failed: "failed",
+  error: "failed",
+};
 
 export function promptExcerpt(text: string, max = ISLAND_PROMPT_EXCERPT): string {
   return titleFromPrompt(text, max);
@@ -74,6 +95,57 @@ export function eventsHaveCodeChanges(events: readonly SessionEvent[] | undefine
   const value = eventsHaveCodeChangesUncached(events);
   codeChangeCache.set(events, value);
   return value;
+}
+
+function todoTool(tool: string): boolean {
+  const normalized = tool.toLowerCase().replace(/[^a-z]/g, "");
+  return normalized === "todowrite" || normalized === "todo";
+}
+
+function todoItems(value: unknown): IslandTask[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const items: IslandTask[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const candidate = value[index];
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
+    const row = candidate as Record<string, unknown>;
+    const text = typeof row.content === "string" ? row.content.trim()
+      : typeof row.text === "string" ? row.text.trim()
+        : typeof row.description === "string" ? row.description.trim()
+          : "";
+    if (!text) continue;
+    const rawStatus = typeof row.status === "string"
+      ? row.status.trim().toLowerCase().replace(/[\s-]+/g, "_")
+      : "pending";
+    items.push({
+      id: typeof row.id === "string" ? row.id
+        : typeof row.id === "number" ? String(row.id)
+          : `todo-${index}`,
+      text,
+      status: TODO_STATUS[rawStatus] ?? "pending",
+    });
+  }
+  return items;
+}
+
+/**
+ * Canonical task snapshots win. Harnesses that only expose TodoWrite as a
+ * normal tool call still get a persistent checklist in the overview, including
+ * the final completed snapshot after the turn has ended.
+ */
+export function tasksForIsland(
+  tasks: TaskListState | null | undefined,
+  messages: readonly RenderMessage[],
+): IslandTask[] {
+  if (tasks) return tasks.items;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message || message.kind !== "tool" || !todoTool(message.tool)) continue;
+    const source = message.input.todos ?? message.input.tasks ?? message.input.items;
+    const items = todoItems(source);
+    if (items !== undefined) return items;
+  }
+  return [];
 }
 
 /** Active task if one exists; otherwise the latest item in the snapshot. */
