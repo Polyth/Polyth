@@ -364,6 +364,10 @@ export default function MobileNavigator() {
     open: drawerOpen,
     onClose: () => setSidebarOpen(false),
     containerRef: navRef,
+    // The drawer itself takes focus: it must open silently, without raising
+    // the keyboard through an autofocused search input (same contract as
+    // Sheet's data-sheet-focus).
+    initialFocus: "[data-drawer-focus]",
   });
 
   useEffect(() => {
@@ -496,6 +500,8 @@ export default function MobileNavigator() {
         role="dialog"
         aria-modal="true"
         aria-label={tr("sidebar.projectsAndSessions")}
+        tabIndex={-1}
+        data-drawer-focus=""
       >
         <h2 className="sr-only">{tr("sidebar.projectsAndSessions")}</h2>
         <div className={`mobile-nav-toolbar${searchMode ? " is-searching" : ""}`}>

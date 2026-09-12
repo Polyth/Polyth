@@ -359,6 +359,12 @@
   overflow: hidden;
 }
 
+/* Not just aria-hidden: without this the "Pin to top"/"Archive" labels paint
+ * through the row's transparent background at rest, showing on every row. */
+.mobile-nav-session-underlay[aria-hidden="true"] {
+  visibility: hidden;
+}
+
 .mobile-nav-swipe-action {
   width: 82px;
   padding: 0 7px;
