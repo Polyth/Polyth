@@ -1,7 +1,6 @@
 /* Session overview is a top-origin status surface: dense enough to scan, but
    visually one frosted material rather than a stack of cards. */
 .mobile-island-sheet.sheet-origin-top {
-  max-height: min(86dvh, var(--visual-vh, 100dvh));
   border-top: 0;
   border-right: 0;
   border-left: 0;
@@ -25,7 +24,7 @@
 
 .mobile-island-sheet .sheet-head {
   min-height: var(--tap);
-  padding: max(var(--space-2), var(--safe-top)) var(--space-3) 0;
+  padding: var(--space-2) var(--screen-gutter) 0;
 }
 
 .mobile-island-sheet .sheet-close {
@@ -34,7 +33,7 @@
   padding: 0;
   border: 0;
   border-radius: var(--radius-round);
-  background: color-mix(in srgb, var(--elevated) 72%, transparent);
+  background: var(--surface-overlay);
   color: var(--text-dim);
 }
 
@@ -42,19 +41,11 @@
   padding: 0 0 var(--space-2);
 }
 
-.mobile-island-sheet .sheet-grabber {
-  opacity: .58;
-}
-
-.mobile-island-sheet .sheet-grabber i {
-  width: 38px;
-}
-
 .mobile-island-sheet .mobile-island-now {
   display: grid;
   gap: var(--space-2);
   margin: 0;
-  padding: var(--space-2) var(--space-5) var(--space-4);
+  padding: var(--space-2) var(--screen-gutter) var(--space-4);
 }
 
 .mobile-island-sheet .mobile-island-session {
@@ -83,7 +74,7 @@
 
 .mobile-island-sheet .mobile-island-meta .mobile-island-live {
   flex: 0 0 auto;
-  margin-inline: 1px calc(-1 * var(--space-1));
+  margin-inline-end: calc(-1 * var(--space-1));
 }
 
 .mobile-island-sheet .mobile-island-meta-separator {
@@ -92,7 +83,7 @@
 
 .mobile-island-sheet .mobile-island-prompt {
   display: grid;
-  gap: 3px;
+  gap: var(--space-1);
   margin-top: var(--space-2);
 }
 
@@ -119,8 +110,8 @@
 
 .mobile-island-sheet .mobile-island-prompt-toggle {
   justify-self: start;
-  min-height: 0;
-  margin-top: 2px;
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  margin-top: var(--space-1);
   padding: 0;
   border: 0;
   background: transparent;
@@ -130,7 +121,7 @@
 }
 
 .mobile-island-sheet .sheet-section {
-  margin: 0 var(--space-5);
+  margin: 0 var(--screen-gutter);
   padding: var(--space-4) 0 var(--space-1);
   border-top: 1px solid var(--border-soft);
 }
@@ -156,7 +147,7 @@
 
 .mobile-island-sheet .mobile-task-list {
   display: grid;
-  gap: 2px;
+  gap: var(--space-1);
 }
 
 .mobile-island-sheet .mobile-task-list li {
@@ -175,7 +166,7 @@
   margin-inline: calc(-1 * var(--space-2));
   padding-inline: var(--space-2);
   border-radius: var(--radius-card);
-  background: color-mix(in srgb, var(--accent-wash) 58%, transparent);
+  background: var(--accent-wash);
   color: var(--text);
 }
 
@@ -191,7 +182,7 @@
   display: grid;
   min-width: 0;
   align-self: center;
-  gap: 2px;
+  gap: var(--space-1);
 }
 
 .mobile-island-sheet .mobile-task-text {
@@ -237,7 +228,7 @@
 
 .mobile-island-sheet .sheet-row-copy {
   min-width: 0;
-  gap: 1px;
+  gap: var(--space-1);
 }
 
 .mobile-island-sheet .sheet-row-copy strong {
@@ -256,19 +247,4 @@
 .mobile-island-sheet .mobile-island-diff {
   opacity: .45;
   filter: grayscale(1);
-}
-
-@media (max-width: 380px) {
-  .mobile-island-sheet .mobile-island-now,
-  .mobile-island-sheet .sheet-section {
-    margin-inline: 0;
-  }
-
-  .mobile-island-sheet .mobile-island-now {
-    padding-inline: var(--space-4);
-  }
-
-  .mobile-island-sheet .sheet-section {
-    margin-inline: var(--space-4);
-  }
 }

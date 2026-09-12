@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { SessionEvent, SessionProjection } from "@polyth/contracts";
 import { ago, displaySessionTitle } from "../../format.ts";
 import { Icon } from "../../icons.tsx";
-import { tr } from "../../i18n/index.ts";
+import { formatNumber, tr } from "../../i18n/index.ts";
 import {
   buildIslandItems,
   eventsHaveCodeChanges,
@@ -150,7 +150,7 @@ function IslandOverview({
       </div>
 
       {requests.length > 0 && (
-        <SheetSection title={`${actionNeededLabel} · ${requests.length}`}>
+        <SheetSection title={`${actionNeededLabel} · ${formatNumber(requests.length)}`}>
           <ul className="mobile-task-list mobile-action-needed-list">
             {requests.map((request) => (
               <li key={request.id} className="request">
@@ -163,7 +163,7 @@ function IslandOverview({
       )}
 
       {tasks.length > 0 && (
-        <SheetSection title={`${progressLabel} · ${currentStep} of ${tasks.length}`}>
+        <SheetSection title={`${progressLabel} · ${formatNumber(currentStep)}/${formatNumber(tasks.length)}`}>
           <ul className="mobile-task-list mobile-progress-list">
             {tasks.map((task) => (
               <li key={task.id} className={task.status}>
@@ -274,7 +274,7 @@ export default function MobileSessionHeader() {
     : undefined;
   const telemetryStatus = contextTelemetryStatus(runtimeFeatures?.telemetry);
   const gauge = contextGaugeForTelemetry(model, descriptor?.context, session?.contextWindow ?? null, telemetryStatus);
-  const harnessLabel = displayHarnessLabel(descriptor?.harnessId ?? session?.resolvedHarnessId ?? descriptor?.providerName);
+  const harnessLabel = displayHarnessLabel(descriptor?.harnessId ?? session?.resolvedHarnessId);
   const sessionAge = session ? ago(session.lastTurnAt ?? session.createdAt) : undefined;
 
   return <>
