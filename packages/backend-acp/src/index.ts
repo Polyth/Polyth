@@ -431,6 +431,12 @@ export function createAcpRuntime(
             return;
         }
         if (!active) return;
+        if (harnessId === "cursor" && update.sessionUpdate === "agent_thought_chunk") {
+            // Cursor emits private thought activity before its first visible tool/message.
+            // The content remains private, but the turn-scoped update proves prompt admission.
+            markAccepted();
+            return;
+        }
         if (update.sessionUpdate === "agent_message_chunk" && update.content?.type === "text") {
             markAccepted();
             const partId = currentMessagePartId();
