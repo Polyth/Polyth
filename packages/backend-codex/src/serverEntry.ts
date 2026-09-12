@@ -7,6 +7,7 @@ import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/ha
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { createCodexRuntime, CODEX_CAPABILITIES, type Thread } from "./index.ts";
 import { createCodexProvisioner } from "./provisioner.ts";
+import { withCodexTitleGeneration } from "./title.ts";
 const exec = promisify(execFile);
 const windowsShim = (command: string) => process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
 
@@ -33,6 +34,19 @@ export async function connectCodex(context: HarnessContext, stateFile?: string) 
         throw error;
     }
 }
+
+const createManagedCodexRuntime = async (context: HarnessContext, stateFile?: string) => {
+    const rpc = await connectCodex(context, stateFile);
+    try {
+        const runtime = await createCodexRuntime(context, rpc);
+        return withCodexTitleGeneration(context, rpc, runtime);
+    }
+    catch (error) {
+        await rpc.close().catch(() => {});
+        throw error;
+    }
+};
+
 export default function registerPackage(host: ServerPackageHost) {
     const registry = host.services.require(serverServiceKey<HarnessRegistry>("harnesses"));
     const stateFile = (context: HarnessContext) => {
@@ -41,7 +55,9 @@ export default function registerPackage(host: ServerPackageHost) {
     };
     const provider: HarnessProvider = {
         descriptor: { id: "codex", name: "Codex", integration: "App Server", priority: 10, setupUrl: "https://developers.openai.com/codex/cli/", installCommand: "npm install -g @openai/codex", signInCommand: "codex login" },
-        staticFeatures: CODEX_CAPABILITIES,
+        // Polyth now reproduces the Codex client's semantic metadata turn, so
+        // canonical sessions can wait briefly for the native thread name event.
+        staticFeatures: { ...CODEX_CAPABILITIES, title: "native" },
         async probe(context) {
             if (context.remote)
                 return { harnessId: "codex", installed: false, authenticated: "unknown", healthy: false, message: "Local execution only" };
@@ -58,7 +74,7 @@ export default function registerPackage(host: ServerPackageHost) {
             }
         },
         async discover(context) {
-            const runtime = await createCodexRuntime(context, await connectCodex(context));
+            const runtime = await createManagedCodexRuntime(context);
             try {
                 const [models, agents, capabilities] = await Promise.all([
                     runtime.models(), runtime.agents(), runtime.capabilities(),
@@ -72,7 +88,7 @@ export default function registerPackage(host: ServerPackageHost) {
         async createRuntime(context) {
             if (!context.space || context.remote)
                 throw Object.assign(new Error("Local Space context required"), { code: "unsupported" });
-            return createCodexRuntime(context, await connectCodex(context, stateFile(context)));
+            return createManagedCodexRuntime(context, stateFile(context));
         },
         async releaseExecution(context, binding, operationId) {
             if (!context.space || context.remote)
