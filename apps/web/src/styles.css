@@ -9100,8 +9100,8 @@ color: var(--muted);
   .app.mode-chat.view-session .stage-new .hero-body { padding-top: calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height)) + var(--space-3)); }
   .app.mode-chat.view-session .timeline {
     padding-top: calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height)) + var(--space-4));
-    -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height))), #000 calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height)) + var(--space-4)));
-    mask-image: linear-gradient(to bottom, transparent calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height))), #000 calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height)) + var(--space-4)));
+    -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height))), #000 calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height)) + var(--space-2)));
+    mask-image: linear-gradient(to bottom, transparent calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height))), #000 calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height)) + var(--space-2)));
   }
   .mobile-tools-sheet.sheet {
     width: calc(100vw - max(var(--space-1), var(--safe-right)));
@@ -12063,6 +12063,35 @@ html[data-font] body :is(
 .task-list-collapse-content { min-width: 0; min-height: 0; overflow: hidden; }
 .activity-group-items { min-width: 0; display: grid; padding-inline: var(--space-3); border-top: 1px solid var(--border-soft); }
 .activity-group-items > :last-child { border-bottom: 0; }
+
+/* Live actions -------------------------------------------------------------
+ * The block never opens itself. A running action rises out of the composer
+ * into this dock, sits under the folded summary, and collapses up into the
+ * block once it settles. A first, single action shows no block chrome at all
+ * because there is nothing folded behind it yet. */
+.activity-group.live-only { border-color: transparent; box-shadow: none; }
+.activity-live-dock { min-width: 0; display: grid; padding-inline: var(--space-3); }
+.activity-group:not(.live-only) > .activity-live-dock { border-top: 1px solid var(--border-soft); }
+.activity-live {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows var(--motion-normal) var(--motion-ease),
+    opacity var(--motion-normal) var(--motion-ease),
+    transform var(--motion-normal) var(--motion-ease);
+}
+.activity-live.leaving { grid-template-rows: 0fr; opacity: 0; transform: translate3d(0, -6px, 0); }
+.activity-live-content { min-width: 0; min-height: 0; overflow: hidden; }
+.activity-live-dock > :last-child :is(.execution-row, .reasoning, .task-activity) { border-bottom: 0; }
+
+/* Reduced motion and low-resource mode keep the same structure: the row
+   appears and folds away instantly instead of travelling. */
+@media (prefers-reduced-motion: reduce) {
+  .activity-live { transition: none; }
+}
+html[data-reduce-animations="true"] .activity-live,
+body[data-desktop-low-resource="true"] .activity-live { transition: none; }
 
 .activity-group .reasoning { border-bottom: 1px solid var(--hair); }
 .activity-group .reasoning-toggle,

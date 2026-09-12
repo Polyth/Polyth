@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import type { SessionEvent } from "@polyth/contracts";
 import { renderMarkdown } from "../markdown.tsx";
 import { fmtCost, fmtDuration, fmtTokens } from "../format.ts";
-import { groupActivity, mergeThinking, promptIndex, copyText, loadDraft, type ActivityGroup } from "../utils.ts";
+import { groupActivity, mergeThinking, promptIndex, copyText, loadDraft, type ActivityGroup, type ActivityItem } from "../utils.ts";
 import { executionPresentation, reasoningHead, reasoningTail } from "../execution.ts";
 import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { cancelResume, forkSession, loadOlderEvents, resumeNow } from "../init.ts";
@@ -90,7 +90,7 @@ import ProviderLogo from "../../../../packages/models/widgets/ProviderLogo.tsx";
 import { seedMultiRunPrompt } from "@polyth/multirun/prompt-seed";
 import WorkflowTimelineCard from "../../../../packages/workflow/widgets/WorkflowTimelineCard.tsx";
 import { tr } from "../i18n/index.ts";
-import ExecutionRow, { DiffStat, useCollapsePresence } from "./ExecutionRow.tsx";
+import ExecutionRow, { DiffStat, EXECUTION_COLLAPSE_MS, useCollapsePresence } from "./ExecutionRow.tsx";
 import Picker from "./Picker.tsx";
 import type { PickerItem } from "../picker.ts";
 import { Button, Menu, Notice, RunSummary, type RunSummaryState } from "./ui/index.ts";
@@ -1021,6 +1021,49 @@ function childForTool(tool: ToolMsg, subagents: SubagentState | null): SubagentS
     agent.label === description || agent.currentTask === tool.input.prompt);
 }
 
+/** An action is live while it is still executing. Live actions float above the
+ *  activity block instead of expanding it, so the block can stay folded. */
+function inFlight(item: ActivityItem): boolean {
+  if (item.kind === "tool") return item.status === "pending" || item.status === "running";
+  if (item.kind === "assistant") return !item.finalized;
+  return item.action === "started";
+}
+
+/** Keeps ids mounted for one collapse beat after they stop being live, so the
+ *  floating row folds into the block instead of vanishing. The removal timer is
+ *  deliberately not cleared on re-run: a second action settling must not cancel
+ *  the first row's exit and strand it on screen. */
+function useLingering(ids: string[], ms: number): string[] {
+  const [leaving, setLeaving] = useState<string[]>([]);
+  const previous = useRef(ids);
+  const timers = useRef<number[]>([]);
+  const key = ids.join(" ");
+  useEffect(() => {
+    const gone = previous.current.filter((id) => !ids.includes(id));
+    previous.current = ids;
+    if (gone.length === 0) return;
+    setLeaving((current) => [...current, ...gone]);
+    timers.current.push(window.setTimeout(
+      () => setLeaving((current) => current.filter((id) => !gone.includes(id))), ms));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- key is the identity of ids
+  }, [key]);
+  useEffect(() => () => timers.current.forEach((timer) => window.clearTimeout(timer)), []);
+  return leaving;
+}
+
+function activityItemNode(
+  item: ActivityItem,
+  subagents: SubagentState | null,
+  live: boolean,
+  entering: boolean,
+) {
+  return item.kind === "tool"
+    ? <ExecutionRow key={item.id} message={item} subagent={childForTool(item, subagents)} defaultOpen={live} entering={entering} />
+    : item.kind === "assistant"
+      ? <Thinking key={item.id} m={item} live={live} entering={entering} />
+      : <TaskActivityRow key={item.id} activity={item} entering={entering} />;
+}
+
 function derivedActivityState(g: ActivityGroup): RunSummaryState {
   const latestTasks = new Map(g.tasks.map((task) => [task.taskId, task]));
   if (g.tools.some((tool) => tool.status === "error" && /cancel(?:led|ed)|aborted|stopped|interrupted/i.test(tool.error ?? ""))) return "cancelled";
@@ -1042,13 +1085,18 @@ export function ActivityGroupView({
 }) {
   const state = stateOverride ?? derivedActivityState(g);
   const active = state === "active" || state === "waiting";
-  const [open, setOpen] = useState(active);
-  const userToggled = useRef(false);
+  // The block never opens itself. Running work is shown by the floating live
+  // rows below it; opening the block is a reader decision only.
+  const [open, setOpen] = useState(false);
   const itemsPresent = useCollapsePresence(open);
-  useEffect(() => {
-    if (userToggled.current) return;
-    setOpen(active);
-  }, [active]);
+  const liveIds = active ? g.items.filter(inFlight).map((item) => item.id) : [];
+  const leavingIds = useLingering(liveIds, EXECUTION_COLLAPSE_MS);
+  const floatingIds = new Set([...liveIds, ...leavingIds]);
+  const floating = g.items.filter((item) => floatingIds.has(item.id));
+  const folded = g.items.filter((item) => !floatingIds.has(item.id));
+  // A first, single action needs no block chrome around it. The block appears
+  // as soon as anything has settled into it.
+  const showBlock = g.items.length > liveIds.length;
   const files = new Set(g.tools.flatMap((tool) => {
     const presentation = executionPresentation(tool);
     return [
@@ -1069,38 +1117,45 @@ export function ActivityGroupView({
     fmtDuration(g.ms),
   ].join(" · ");
   return (
-    <section className={`msg assistant activity-group${entering ? " timeline-row-enter" : ""}${open ? " open" : ""}${active ? " current" : ""}`} aria-label={tr("timeline.agentActivity")}>
-      <RunSummary
-        title={tr("timeline.activity")}
-        meta={meta}
-        state={state}
-        expanded={open}
-        additions={lineStats.add}
-        deletions={lineStats.del}
-        label={open
-          ? tr("timeline.collapseActivityValue", { value: meta })
-          : tr("timeline.expandActivityValue", { value: meta })}
-        diffLabel={tr("timeline.valueAdditionsValueDeletions", { additions: lineStats.add, deletions: lineStats.del })}
-        onToggle={() => {
-          userToggled.current = true;
-          setOpen((value) => !value);
-        }}
-      />
-      <div className="activity-group-expand-shell" aria-hidden={!open}>
-        <div className="activity-group-collapse-content">
-          {itemsPresent && (
-            <div className="activity-group-items">
-              {g.items.map((item, index) => (
-                 item.kind === "tool"
-                  ? <ExecutionRow key={item.id} message={item} subagent={childForTool(item, subagents)} defaultOpen={active && (item.status === "pending" || item.status === "running")} entering={entering && active && index === g.items.length - 1} />
-                  : item.kind === "assistant"
-                    ? <Thinking key={item.id} m={item} live={active && index === g.items.length - 1} entering={entering && active && index === g.items.length - 1} />
-                    : <TaskActivityRow key={item.id} activity={item} entering={entering && active && index === g.items.length - 1} />
-              ))}
-            </div>
-          )}
+    <section className={`msg assistant activity-group${entering ? " timeline-row-enter" : ""}${open ? " open" : ""}${active ? " current" : ""}${showBlock ? "" : " live-only"}`} aria-label={tr("timeline.agentActivity")}>
+      {showBlock && (
+        <RunSummary
+          title={tr("timeline.activity")}
+          meta={meta}
+          state={state}
+          expanded={open}
+          additions={lineStats.add}
+          deletions={lineStats.del}
+          label={open
+            ? tr("timeline.collapseActivityValue", { value: meta })
+            : tr("timeline.expandActivityValue", { value: meta })}
+          diffLabel={tr("timeline.valueAdditionsValueDeletions", { additions: lineStats.add, deletions: lineStats.del })}
+          onToggle={() => setOpen((value) => !value)}
+        />
+      )}
+      {showBlock && (
+        <div className="activity-group-expand-shell" aria-hidden={!open}>
+          <div className="activity-group-collapse-content">
+            {itemsPresent && (
+              <div className="activity-group-items">
+                {folded.map((item, index) =>
+                  activityItemNode(item, subagents, false, entering && active && index === folded.length - 1))}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
+      {floating.length > 0 && (
+        <div className="activity-live-dock">
+          {floating.map((item) => (
+            <div key={item.id} className={`activity-live${liveIds.includes(item.id) ? "" : " leaving"}`}>
+              <div className="activity-live-content">
+                {activityItemNode(item, subagents, liveIds.includes(item.id), false)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

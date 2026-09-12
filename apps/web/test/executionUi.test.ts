@@ -436,12 +436,20 @@ test("execution row renders collapsed value first, expands inline, and opens lev
   }
 });
 
-test("only the newest row in a live activity group receives entrance and print motion", async () => {
+test("the running action floats out of the folded block while settled rows stay inside it", async () => {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   const first = tool({ id: "call-first", callId: "call-first", eventSeq: 1 });
-  const latest = tool({ id: "call-latest", callId: "call-latest", eventSeq: 2, input: { command: "npm test" } });
+  const latest = tool({
+    id: "call-latest",
+    callId: "call-latest",
+    eventSeq: 2,
+    input: { command: "npm test" },
+    status: "running",
+    output: undefined,
+    finishTime: undefined,
+  });
   try {
     await act(async () => root.render(createElement(ActivityGroupView, {
       g: activityGroup("activity-motion", [first, latest]),
@@ -449,11 +457,18 @@ test("only the newest row in a live activity group receives entrance and print m
       state: "active",
       entering: true,
     })));
-    const rows = [...container.querySelectorAll(".execution-row")];
-    assert.equal(rows.length, 2);
-    assert.equal(rows[0]?.classList.contains("timeline-row-enter"), false);
-    assert.equal(rows[1]?.classList.contains("timeline-row-enter"), true);
-    assert.notEqual(rows[0]?.querySelector(".tool-preview")?.textContent, "", "history never retypes from empty");
+    const live = [...container.querySelectorAll(".activity-live .execution-row")];
+    assert.equal(live.length, 1, "only the running action floats above the block");
+    assert.equal(live[0]?.querySelector(".tool-preview")?.textContent, "npm test");
+    assert.ok(live[0]?.classList.contains("open"), "a floating action shows its output while it runs");
+    const toggle = container.querySelector<HTMLButtonElement>(".ui-run-summary")!;
+    assert.equal(toggle.getAttribute("aria-expanded"), "false", "the block never opens itself while work runs");
+    assert.equal(container.querySelectorAll(".execution-row").length, 1, "settled rows stay folded away");
+
+    await act(async () => toggle.click());
+    const folded = [...container.querySelectorAll(".activity-group-items .execution-row")];
+    assert.equal(folded.length, 1, "the block holds only the settled rows");
+    assert.notEqual(folded[0]?.querySelector(".tool-preview")?.textContent, "", "history never retypes from empty");
   } finally {
     await act(async () => root.unmount());
     container.remove();
@@ -774,7 +789,7 @@ test("execution rows stay folded by default while running and after settling", a
   }
 });
 
-test("working groups open while running and preserve a reader toggle", async () => {
+test("a lone running action needs no block chrome and folds into the block when it settles", async () => {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -782,18 +797,17 @@ test("working groups open while running and preserve a reader toggle", async () 
   const group = (message: ToolMsg) => activityGroup("activity-1", [message]);
   try {
     await act(async () => root.render(createElement(ActivityGroupView, { g: group(running), subagents: null })));
-    const toggle = container.querySelector<HTMLButtonElement>(".ui-run-summary")!;
-    assert.equal(toggle.getAttribute("aria-expanded"), "true", "the current batch exposes its live tool");
+    assert.equal(container.querySelector(".ui-run-summary"), null, "a first single action carries no block around it");
+    assert.ok(container.querySelector(".activity-group.live-only"), "the block chrome stays out of the way");
+    assert.ok(container.querySelector(".activity-live .execution-row"), "the action itself is on screen");
 
+    await act(async () => root.render(createElement(ActivityGroupView, { g: group(tool()), subagents: null })));
+    const toggle = container.querySelector<HTMLButtonElement>(".ui-run-summary")!;
+    assert.ok(toggle, "the block appears as soon as something has settled into it");
+    assert.equal(toggle.getAttribute("aria-expanded"), "false", "the block stays folded");
+    assert.ok(container.querySelector(".activity-live.leaving"), "the settled action folds up into the block");
     await act(async () => toggle.click());
-    assert.equal(toggle.getAttribute("aria-expanded"), "false");
-    await act(async () => root.render(createElement(ActivityGroupView, {
-      g: group(tool()),
-      subagents: null,
-    })));
-    assert.equal(toggle.getAttribute("aria-expanded"), "false", "a hand toggle is preserved across settle");
-    await act(async () => toggle.click());
-    assert.equal(toggle.getAttribute("aria-expanded"), "true");
+    assert.equal(toggle.getAttribute("aria-expanded"), "true", "a hand toggle still opens it");
   } finally {
     await act(async () => root.unmount());
     container.remove();

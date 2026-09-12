@@ -15,6 +15,7 @@ const LIVE_ROW_SELECTOR = [
   ".msg.user",
   ".msg.assistant",
   ".activity-group",
+  ".activity-live",
   ".execution-row",
   ".reasoning",
   ".task-activity",
@@ -73,10 +74,14 @@ function snapshotRect(rect: DOMRect): RectSnapshot {
   };
 }
 
-function captureSendTransition(): SendTransitionSnapshot | null {
-  if (motionDisabled()) return null;
+function composerAnchor(): RectSnapshot | null {
   const composerInput = document.querySelector<HTMLElement>(".composer-chat [data-composer-input]")
     ?? document.querySelector<HTMLElement>(".composer-chat .composer-input");
+  return composerInput ? snapshotRect(composerInput.getBoundingClientRect()) : null;
+}
+
+function captureSendTransition(): SendTransitionSnapshot | null {
+  if (motionDisabled()) return null;
   const timeline = document.querySelector<HTMLElement>(".timeline");
   const viewport = timeline?.getBoundingClientRect();
   const rows: SendTransitionSnapshot["rows"] = [];
@@ -92,7 +97,7 @@ function captureSendTransition(): SendTransitionSnapshot | null {
   }
   return {
     capturedAt: now(),
-    source: composerInput ? snapshotRect(composerInput.getBoundingClientRect()) : null,
+    source: composerAnchor(),
     timeline,
     rows,
   };
@@ -210,8 +215,34 @@ function playTransform(
   });
   void animation.finished.catch(() => undefined).finally(() => {
     if (element.isConnected) element.style.willChange = previousWillChange;
+    // Release the filled end state. It equals the element's natural style, and
+    // a retained fill would outrank the CSS exit transition on the same row.
+    if (animation.playState === "finished") animation.cancel();
   });
   return true;
+}
+
+/** Vertical origin of a row that should appear to come out of the composer.
+ *  The composer sits immediately below the timeline on phones, so the seam is
+ *  the floor: start there rather than beyond the overflow clip. */
+function composerOrigin(element: HTMLElement, timeline: HTMLElement): number {
+  const rect = element.getBoundingClientRect();
+  const floor = timeline.getBoundingClientRect().bottom - Math.min(12, rect.height);
+  const anchor = composerAnchor();
+  return (anchor ? Math.min(anchor.top, floor) : floor) - rect.top;
+}
+
+/** Every agent action enters the way a prompt does: it rises out of the
+ *  composer, then folds into the activity block when it settles. */
+function playActionRise(element: HTMLElement): void {
+  if (animated.has(element) || motionDisabled()) return;
+  const timeline = element.closest<HTMLElement>(".timeline");
+  const duration = touchProfile() ? SEND_LIFT_TOUCH_MS : SEND_LIFT_DESKTOP_MS;
+  if (timeline && playTransform(element, composerOrigin(element, timeline), duration, 0)) {
+    animated.add(element);
+    return;
+  }
+  playEntrance(element);
 }
 
 /**
@@ -242,7 +273,8 @@ function playSendTransition(element: HTMLElement): boolean {
   const viewport = timeline.getBoundingClientRect();
   // The composer sits immediately below the timeline on phones. Start at that
   // seam instead of beyond the overflow clip, so the bubble visibly emerges
-  // from the composer and travels all the way to its fresh-turn anchor.
+  // from the composer and travels all the way to its fresh-turn anchor. The
+  // pre-send rect is used because sending resets the composer's height.
   const sourceTop = snapshot.source
     ? Math.min(snapshot.source.top, viewport.bottom - Math.min(12, promptRect.height))
     : viewport.bottom - Math.min(12, promptRect.height);
@@ -333,6 +365,14 @@ function animateAddedNode(node: Node, suppressChat = false): void {
     }
 
     if (suppressChat || now() < quietUntil) continue;
+
+    // A live action is at the tail by construction: it exists only while it is
+    // running. It gets the composer rise rather than the short row entrance.
+    if (element.matches(".activity-live")) {
+      playActionRise(element);
+      continue;
+    }
+
     if (!nearTimelineTail(element)) continue;
     playEntrance(element);
   }
