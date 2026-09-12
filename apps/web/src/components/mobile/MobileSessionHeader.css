@@ -1,0 +1,274 @@
+/* Session overview is a top-origin status surface: dense enough to scan, but
+   visually one frosted material rather than a stack of cards. */
+.mobile-island-sheet.sheet-origin-top {
+  max-height: min(86dvh, var(--visual-vh, 100dvh));
+  border-top: 0;
+  border-right: 0;
+  border-left: 0;
+  border-bottom: 1px solid var(--material-glass-border);
+  border-radius: 0 0 var(--radius-sheet) var(--radius-sheet);
+  box-shadow: var(--shadow-md);
+  transform-origin: top center;
+  animation-name: mobile-session-sheet-drop;
+}
+
+@keyframes mobile-session-sheet-drop {
+  from {
+    transform: translateY(calc(-1 * var(--space-5)));
+    opacity: .45;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.mobile-island-sheet .sheet-head {
+  min-height: var(--tap);
+  padding: max(var(--space-2), var(--safe-top)) var(--space-3) 0;
+}
+
+.mobile-island-sheet .sheet-close {
+  width: var(--tap);
+  height: var(--tap);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-round);
+  background: color-mix(in srgb, var(--elevated) 72%, transparent);
+  color: var(--text-dim);
+}
+
+.mobile-island-sheet .sheet-body {
+  padding: 0 0 var(--space-2);
+}
+
+.mobile-island-sheet .sheet-grabber {
+  opacity: .58;
+}
+
+.mobile-island-sheet .sheet-grabber i {
+  width: 38px;
+}
+
+.mobile-island-sheet .mobile-island-now {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) var(--space-5) var(--space-4);
+}
+
+.mobile-island-sheet .mobile-island-session {
+  min-width: 0;
+  color: var(--text);
+  font-size: var(--font-heading);
+  font-weight: 720;
+  line-height: 1.2;
+  letter-spacing: -.015em;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.mobile-island-sheet .mobile-island-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-label);
+  line-height: 1.25;
+}
+
+.mobile-island-sheet .mobile-island-meta .mobile-island-live {
+  flex: 0 0 auto;
+  margin-inline: 1px calc(-1 * var(--space-1));
+}
+
+.mobile-island-sheet .mobile-island-meta-separator {
+  color: var(--faint);
+}
+
+.mobile-island-sheet .mobile-island-prompt {
+  display: grid;
+  gap: 3px;
+  margin-top: var(--space-2);
+}
+
+.mobile-island-sheet .mobile-island-prompt-label {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 650;
+}
+
+.mobile-island-sheet .mobile-island-prompt p {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-body);
+  line-height: 1.42;
+  white-space: normal;
+}
+
+.mobile-island-sheet .mobile-island-prompt p:not(.full) {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.mobile-island-sheet .mobile-island-prompt-toggle {
+  justify-self: start;
+  min-height: 0;
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 620;
+}
+
+.mobile-island-sheet .sheet-section {
+  margin: 0 var(--space-5);
+  padding: var(--space-4) 0 var(--space-1);
+  border-top: 1px solid var(--border-soft);
+}
+
+.mobile-island-sheet .sheet-section + .sheet-section {
+  margin-top: var(--space-2);
+}
+
+.mobile-island-sheet .sheet-section-head {
+  position: static;
+  z-index: auto;
+  min-height: 0;
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.mobile-island-sheet .mobile-task-list {
+  display: grid;
+  gap: 2px;
+}
+
+.mobile-island-sheet .mobile-task-list li {
+  grid-template-columns: var(--space-5) minmax(0, 1fr);
+  min-height: var(--tap);
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  color: var(--text-dim);
+}
+
+.mobile-island-sheet .mobile-task-list li.request {
+  align-items: center;
+}
+
+.mobile-island-sheet .mobile-task-list li.active {
+  margin-inline: calc(-1 * var(--space-2));
+  padding-inline: var(--space-2);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--accent-wash) 58%, transparent);
+  color: var(--text);
+}
+
+.mobile-island-sheet .mobile-task-list li.active::before {
+  display: none;
+}
+
+.mobile-island-sheet .mobile-task-list li.done {
+  color: var(--muted);
+}
+
+.mobile-island-sheet .mobile-task-copy {
+  display: grid;
+  min-width: 0;
+  align-self: center;
+  gap: 2px;
+}
+
+.mobile-island-sheet .mobile-task-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: normal;
+  line-height: 1.32;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.mobile-island-sheet .mobile-task-copy small {
+  color: var(--accent);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.mobile-island-sheet .mobile-action-needed-list .mobile-island-dot {
+  justify-self: center;
+}
+
+.mobile-island-sheet .sheet-row {
+  min-height: var(--tap);
+  gap: var(--space-2);
+  border: 0;
+  background: transparent;
+}
+
+.mobile-island-sheet .sheet-row-main {
+  min-height: var(--tap);
+  padding: var(--space-2) 0;
+  border: 0;
+  background: transparent;
+}
+
+.mobile-island-sheet .sheet-row-icon {
+  width: var(--space-5);
+  min-width: var(--space-5);
+}
+
+.mobile-island-sheet .sheet-row-copy {
+  min-width: 0;
+  gap: 1px;
+}
+
+.mobile-island-sheet .sheet-row-copy strong {
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-island-sheet .sheet-row-copy small {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.mobile-island-sheet .mobile-island-diff {
+  opacity: .45;
+  filter: grayscale(1);
+}
+
+@media (max-width: 380px) {
+  .mobile-island-sheet .mobile-island-now,
+  .mobile-island-sheet .sheet-section {
+    margin-inline: 0;
+  }
+
+  .mobile-island-sheet .mobile-island-now {
+    padding-inline: var(--space-4);
+  }
+
+  .mobile-island-sheet .sheet-section {
+    margin-inline: var(--space-4);
+  }
+}

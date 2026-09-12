@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { SessionEvent, SessionProjection } from "@polyth/contracts";
-import { ago, displaySessionTitle, fmtTokens } from "../../format.ts";
+import { ago, displaySessionTitle } from "../../format.ts";
 import { Icon } from "../../icons.tsx";
 import { tr } from "../../i18n/index.ts";
 import {
@@ -23,13 +23,11 @@ import WorkspacePanel from "./WorkspacePanel.tsx";
 import { PROMPT_VISIBILITY_EVENT, promptIsVisible } from "../../promptVisibility.ts";
 import {
   contextGaugeForTelemetry,
-  contextTelemetryNotice,
   contextTelemetryStatus,
-  formatContextPercent,
-  type ContextGauge,
 } from "../../reduce.ts";
 import { useUiSettings } from "../../uiPrefs.ts";
 import ContextIndicator from "../ContextIndicator.tsx";
+import "./MobileSessionHeader.css";
 
 function SessionLiveIcon({ status }: { status: SessionRowStatus }) {
   if (status.kind === "working") {
@@ -82,6 +80,23 @@ function TaskMark({ status }: { status: IslandTask["status"] }) {
   return <span className="mobile-task-mark pending" aria-hidden="true" />;
 }
 
+function displayHarnessLabel(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  return value
+    .split(/[-_]/g)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function progressStep(tasks: IslandTask[]): number {
+  const active = tasks.findIndex((task) => task.status === "active");
+  if (active >= 0) return active + 1;
+  const pending = tasks.findIndex((task) => task.status === "pending");
+  if (pending >= 0) return pending + 1;
+  return tasks.length;
+}
+
 function IslandOverview({
   title,
   prompt,
@@ -89,8 +104,9 @@ function IslandOverview({
   requests,
   recent,
   events,
-  gauge,
-  contextNotice,
+  status,
+  harnessLabel,
+  age,
   onClose,
 }: {
   title: string;
@@ -99,11 +115,18 @@ function IslandOverview({
   requests: IslandItem[];
   recent: SessionProjection[];
   events: Record<string, readonly SessionEvent[] | undefined>;
-  gauge: ContextGauge;
-  contextNotice?: string;
+  status: SessionRowStatus | null;
+  harnessLabel?: string;
+  age?: string;
   onClose: () => void;
 }) {
-  const contextPercent = formatContextPercent(gauge);
+  const actionNeededCopy = tr("mobile.island.requests");
+  const actionNeededLabel = actionNeededCopy === "Requests" ? "Action needed" : actionNeededCopy;
+  const progressCopy = tr("mobile.island.tasks");
+  const progressLabel = progressCopy === "Tasks" ? "Progress" : progressCopy;
+  const currentStep = progressStep(tasks);
+  const statusLabel = status?.kind === "working" ? tr("common.running") : status?.label;
+
   return (
     <Sheet
       title={tr("mobile.island.overview")}
@@ -113,19 +136,22 @@ function IslandOverview({
     >
       <div className="mobile-island-now">
         <strong className="mobile-island-session">{title}</strong>
-        <div className="mobile-island-context">
-          <strong>Context{contextPercent ? ` · ${contextPercent}` : ""}</strong>
-          <span>{contextNotice ?? (gauge.known
-            ? `${fmtTokens(gauge.inputTokens)} / ${fmtTokens(gauge.contextTokens)} tokens`
-            : "Model context metadata is unavailable.")}</span>
-        </div>
-        {prompt
-          ? <PromptExcerpt text={prompt} />
-          : <p className="mobile-island-empty">{tr("mobile.island.noPrompt")}</p>}
+        {(harnessLabel || statusLabel || age) && (
+          <div className="mobile-island-meta">
+            {harnessLabel && <span className="mobile-island-harness">{harnessLabel}</span>}
+            {harnessLabel && (statusLabel || age) && <span className="mobile-island-meta-separator" aria-hidden="true">·</span>}
+            {status && <SessionLiveIcon status={status} />}
+            {statusLabel && <span>{statusLabel}</span>}
+            {statusLabel && age && <span className="mobile-island-meta-separator" aria-hidden="true">·</span>}
+            {age && <span>{age}</span>}
+          </div>
+        )}
+        {prompt && <PromptExcerpt text={prompt} />}
       </div>
+
       {requests.length > 0 && (
-        <SheetSection title={tr("mobile.island.requests")}>
-          <ul className="mobile-task-list">
+        <SheetSection title={`${actionNeededLabel} · ${requests.length}`}>
+          <ul className="mobile-task-list mobile-action-needed-list">
             {requests.map((request) => (
               <li key={request.id} className="request">
                 <span className={`mobile-island-dot ${request.tone ?? request.kind}`} aria-hidden="true" />
@@ -135,39 +161,44 @@ function IslandOverview({
           </ul>
         </SheetSection>
       )}
-      <SheetSection title={tr("mobile.island.tasks")}>
-        {tasks.length > 0 ? (
-          <ul className="mobile-task-list">
+
+      {tasks.length > 0 && (
+        <SheetSection title={`${progressLabel} · ${currentStep} of ${tasks.length}`}>
+          <ul className="mobile-task-list mobile-progress-list">
             {tasks.map((task) => (
               <li key={task.id} className={task.status}>
                 <TaskMark status={task.status} />
-                <span className="mobile-task-text">{task.text}</span>
-                {task.status === "active" && <small>{tr("mobile.island.inProgress")}</small>}
+                <span className="mobile-task-copy">
+                  <span className="mobile-task-text">{task.text}</span>
+                  {task.status === "active" && <small>{tr("common.running")}</small>}
+                </span>
               </li>
             ))}
           </ul>
-        ) : <p className="sheet-empty">{tr("mobile.island.noTasks")}</p>}
-      </SheetSection>
-      <SheetSection title={tr("mobile.island.recent")}>
-        {recent.map((item) => {
-          const status = resolveSessionStatus(item);
-          const itemTitle = sessionTitleOf(item, events);
-          return (
-            <SheetRow
-              key={item.id}
-              title={itemTitle}
-              meta={status.kind === "regular" ? ago(item.lastTurnAt ?? item.createdAt) : status.label}
-              icon={<SessionLiveIcon status={status} />}
-              trailing={eventsHaveCodeChanges(events[item.id]) ? <CodeChangedMark /> : undefined}
-              onClick={() => {
-                void openSession(item.id);
-                onClose();
-              }}
-            />
-          );
-        })}
-        {recent.length === 0 && <p className="sheet-empty">{tr("mobile.island.noRecent")}</p>}
-      </SheetSection>
+        </SheetSection>
+      )}
+
+      {recent.length > 0 && (
+        <SheetSection title={tr("mobile.island.recent")}>
+          {recent.map((item) => {
+            const itemStatus = resolveSessionStatus(item);
+            const itemTitle = sessionTitleOf(item, events);
+            return (
+              <SheetRow
+                key={item.id}
+                title={itemTitle}
+                meta={itemStatus.kind === "regular" ? ago(item.lastTurnAt ?? item.createdAt) : itemStatus.label}
+                icon={<SessionLiveIcon status={itemStatus} />}
+                trailing={eventsHaveCodeChanges(events[item.id]) ? <CodeChangedMark /> : undefined}
+                onClick={() => {
+                  void openSession(item.id);
+                  onClose();
+                }}
+              />
+            );
+          })}
+        </SheetSection>
+      )}
     </Sheet>
   );
 }
@@ -192,11 +223,13 @@ export default function MobileSessionHeader() {
     ? displaySessionTitle(session.title, session.id, firstUserTextCached(events[session.id]))
     : tr("mobile.island.newChat");
   const prompt = lastUserTextCached(session ? events[session.id] : undefined);
+
   useEffect(() => {
     const update = (event: Event) => setPromptVisible((event as CustomEvent<boolean>).detail);
     window.addEventListener(PROMPT_VISIBILITY_EVENT, update);
     return () => window.removeEventListener(PROMPT_VISIBILITY_EVENT, update);
   }, []);
+
   const recent = useMemo(
     () => recentSessionsForIsland(sessions, session?.id),
     [sessions, session?.id],
@@ -205,10 +238,12 @@ export default function MobileSessionHeader() {
     () => notablePeers(sessions, session?.id, events),
     [sessions, session?.id, events],
   );
+
   useEffect(() => {
     for (const peer of peers) prefetchSessionTail(peer.id);
     for (const item of recent) prefetchSessionTail(item.id);
   }, [peers, recent]);
+
   const labels = useMemo(() => ({
     task: tr("mobile.island.kindTask"),
     request: tr("mobile.island.kindRequest"),
@@ -217,6 +252,7 @@ export default function MobileSessionHeader() {
     working: tr("mobile.island.working"),
     newChat: tr("mobile.island.newChat"),
   }), []);
+
   // The pill title stays put; the derived items only feed the status glyph and
   // the overview's request list, so nothing rotates under the reader.
   const items = useMemo(() => buildIslandItems({
@@ -231,12 +267,15 @@ export default function MobileSessionHeader() {
   }), [title, session, model.tasks, model.permissions, model.questions, model.secrets, peers, labels]);
   const requests = useMemo(() => items.filter((item) => item.kind === "request"), [items]);
   const sessionStatus = session ? resolveSessionStatus(session) : null;
-  const runtimeFeatures = useStore((s) => session?.id ? s.runtimeFeatures[session.id] : undefined);
+  const runtimeFeatures = useStore((state) => session?.id ? state.runtimeFeatures[session.id] : undefined);
   const activeModel = model.contextUsage?.model ?? model.turn?.model ?? session?.model;
-  const descriptor = activeModel ? models.find((item) => item.providerID === activeModel.providerID && item.modelID === activeModel.modelID) : undefined;
+  const descriptor = activeModel
+    ? models.find((item) => item.providerID === activeModel.providerID && item.modelID === activeModel.modelID)
+    : undefined;
   const telemetryStatus = contextTelemetryStatus(runtimeFeatures?.telemetry);
   const gauge = contextGaugeForTelemetry(model, descriptor?.context, session?.contextWindow ?? null, telemetryStatus);
-  const contextNotice = contextTelemetryNotice(telemetryStatus, gauge);
+  const harnessLabel = displayHarnessLabel(descriptor?.harnessId ?? session?.resolvedHarnessId ?? descriptor?.providerName);
+  const sessionAge = session ? ago(session.lastTurnAt ?? session.createdAt) : undefined;
 
   return <>
     <div className="mobile-session-floats" aria-label="Workspace navigation">
@@ -272,8 +311,9 @@ export default function MobileSessionHeader() {
         requests={requests}
         recent={recent}
         events={events}
-        gauge={gauge}
-        contextNotice={contextNotice}
+        status={sessionStatus}
+        harnessLabel={harnessLabel}
+        age={sessionAge}
         onClose={() => setSurface(null)}
       />
     )}
