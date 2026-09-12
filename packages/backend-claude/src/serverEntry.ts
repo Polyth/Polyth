@@ -7,6 +7,7 @@ import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/ha
 import { createHarnessProcessAuthority } from "@polyth/harness-runtime/process-authority";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { claudeAuthFingerprint, createClaudeRuntime, discoverClaudeModels, invalidateClaudeModelCache, CLAUDE_CAPABILITIES } from "./index.ts";
+import { gateClaudeAgentTools, hasPolythAgentToolsMcp } from "./mcpReadiness.ts";
 import { createClaudeProvisioner } from "./provisioner.ts";
 const exec = promisify(execFile);
 const configuredClaudeBinary = process.env.POLYTH_CLAUDE_BIN?.trim();
@@ -33,7 +34,13 @@ export function titleSafeClaudeSessionInfo<T extends ClaudeSessionInfoLike | nul
 const titleSafeClaudeSdk = async () => {
     const sdk = await loadSdk();
     return {
-        query: sdk.query,
+        query(...args: Parameters<typeof sdk.query>) {
+            const query = sdk.query(...args);
+            return gateClaudeAgentTools(
+                query,
+                hasPolythAgentToolsMcp(args[0]?.options?.mcpServers),
+            );
+        },
         async getSessionInfo(...args: Parameters<typeof sdk.getSessionInfo>) {
             return titleSafeClaudeSessionInfo(await sdk.getSessionInfo(...args));
         },
