@@ -1,7 +1,8 @@
 import "./styles.css";
+import "./sessionUsage.css";
 import { defineWebPackage } from "@polyth/web-sdk";
 import { UsageDashboard } from "./usage/UsageDashboard.tsx";
-import { USAGE_WIDGET_PLUGIN } from "./usagePlugin.tsx";
+import { USAGE_WIDGET_PLUGIN } from "./sessionUsagePlugin.tsx";
 
 export default defineWebPackage((host) => () => {
   const off = [
