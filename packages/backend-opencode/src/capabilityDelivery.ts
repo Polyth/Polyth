@@ -18,6 +18,17 @@ interface OpenCodeCapabilityDelivery {
 
 const configured = new WeakSet<AgentRuntime>();
 
+const enabledMcpNames = (overlay: OpenCodeLaunchOverlay): Array<[string, string]> => {
+  const names = Object.entries(overlay.mcpNames ?? {});
+  if (!names.length || !overlay.configContent.trim()) return names;
+  try {
+    const config = JSON.parse(overlay.configContent) as { mcp?: Record<string, { enabled?: boolean }> };
+    return names.filter(([, name]) => config.mcp?.[name]?.enabled !== false);
+  } catch {
+    return names;
+  }
+};
+
 /** Read only from the captured physical generation. No probe invokes user tools. */
 export async function verifyOpenCodeCapabilities(
   overlay: OpenCodeLaunchOverlay,
@@ -46,7 +57,10 @@ export async function verifyOpenCodeCapabilities(
         { stage: "staged", source: "opencode:launch" });
     }
   }
-  const servers = Object.entries(overlay.mcpNames ?? {});
+  // Native Polyth tools keep the scoped callback bridge in the launch config as
+  // an explicitly disabled transport/debug entry. It is not supposed to appear
+  // connected in OpenCode and must therefore not be treated as a failed MCP.
+  const servers = enabledMcpNames(overlay);
   if (servers.length) {
     try {
       const result = await read("/mcp");

@@ -2,7 +2,7 @@
 // Harnesses receive a scoped stdio MCP that can invoke only currently
 // registered package tools for the token's Space/project/session.
 import { existsSync } from "node:fs";
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type { AgentCapabilityDescriptor, JsonObject, RouteHandler, ToolExecutor } from "@polyth/contracts";
@@ -10,6 +10,7 @@ import { semanticCapabilityRevision } from "@polyth/harness-runtime";
 
 export const AGENT_TOOLS_MCP_NAME = "polyth-agent-tools";
 export const AGENT_TOOLS_PATH = "/internal/agent-tools";
+const POLYTH_SESSION_CONTROL_TOOL_ID = "harness-runtime.polyth-control";
 
 export interface AgentToolBinding {
   id: string;
@@ -81,6 +82,40 @@ const bindingOf = (
   mutating: tool.mutating,
   digest: semanticCapabilityRevision(tool),
 });
+
+const stringProjectTarget = (input: JsonObject): string | undefined => {
+  const parameters = input.parameters;
+  if (!parameters || typeof parameters !== "object" || Array.isArray(parameters)) return undefined;
+  const projectId = (parameters as Record<string, unknown>).projectId;
+  return typeof projectId === "string" && projectId.trim() ? projectId.trim() : undefined;
+};
+
+/**
+ * Core Polyth session control is intentionally frictionless inside the caller's
+ * own project, while any explicit external project target gets an independent
+ * durable permission subject. The normal permission engine can therefore offer
+ * once/session/project ("always") without granting every external project at
+ * once. A deny on the base tool still wins before target-specific evaluation.
+ */
+export function polythSessionAuthorizationSubjects(
+  tool: Extract<AgentCapabilityDescriptor, { kind: "tool" }>,
+  grant: Pick<AgentToolGrant, "projectId">,
+  input: JsonObject,
+): Array<Extract<AgentCapabilityDescriptor, { kind: "tool" }>> {
+  if (tool.id !== POLYTH_SESSION_CONTROL_TOOL_ID) return [tool];
+  const baseGuard = { ...tool, trust: "pure" as const, mutating: false };
+  const targetProjectId = stringProjectTarget(input);
+  if (!targetProjectId || targetProjectId === grant.projectId) return [baseGuard];
+  const targetKey = createHash("sha256").update(targetProjectId).digest("hex").slice(0, 20);
+  return [
+    baseGuard,
+    {
+      ...tool,
+      id: `${tool.id}.external-project.${targetKey}`,
+      name: `polyth external project ${targetProjectId}`,
+    },
+  ];
+}
 
 export function createAgentToolBridge(opts: {
   executor(id: string): ToolExecutor | undefined;
@@ -175,12 +210,6 @@ export function createAgentToolBridge(opts: {
         rc.json(400, { error: { code: "invalid-input", message: "tool id is required" } });
         return true;
       }
-      // Look up the live contribution FIRST, and execute ONLY that same
-      // object's `execute`. Two independent lookups (a descriptor from one
-      // call, an executor from another) can observe different generations of
-      // a package's registration across the gap between them — invoking
-      // whichever executor happened to still be live is a fail-open bypass
-      // of the binding check below.
       const tool = grant.tools.find((item) => item.id === id);
       const binding = grant.bindings.find((item) => item.id === id);
       const contribution = opts.contribution?.(id);
@@ -207,18 +236,19 @@ export function createAgentToolBridge(opts: {
         const scopedGrant = { ...grant, ...(sessionId ? { sessionId } : {}) };
         if (controller.signal.aborted || rc.req.aborted || rc.res?.destroyed) return true;
         await opts.requested?.(descriptor, scopedGrant);
-        const decision = await (opts.authorize ?? defaultAuthorize)(descriptor, scopedGrant, controller.signal);
-        if (decision === "deny") {
-          rc.json(403, { error: { code: "forbidden", message: "tool is not permitted" } });
-          return true;
+        const input = (body.arguments ?? {}) as JsonObject;
+        const authorize = opts.authorize ?? defaultAuthorize;
+        for (const subject of polythSessionAuthorizationSubjects(descriptor, scopedGrant, input)) {
+          const decision = await authorize(subject, scopedGrant, controller.signal);
+          if (decision === "deny") {
+            rc.json(403, { error: { code: "forbidden", message: "tool is not permitted" } });
+            return true;
+          }
+          if (decision === "permission-required") {
+            rc.json(403, { error: { code: "permission-required", message: "Polyth authorization is required before this tool can run" } });
+            return true;
+          }
         }
-        if (decision === "permission-required") {
-          rc.json(403, { error: { code: "permission-required", message: "Polyth authorization is required before this tool can run" } });
-          return true;
-        }
-        // Authorization may wait for a person. Re-resolve the token and the
-        // contribution after that wait so package disable/reload or grant
-        // revocation cannot execute the stale function captured above.
         const liveGrant = grantFor(token);
         const liveBinding = liveGrant?.bindings.find((item) => item.id === id);
         const liveContribution = opts.contribution?.(id);
@@ -234,16 +264,11 @@ export function createAgentToolBridge(opts: {
           rc.json(403, { error: { code: "stale-capability", message: "tool grant no longer matches the registered capability" } });
           return true;
         }
-        // A native MCP client can time out or disappear while a human decides.
-        // Never perform a newly authorized mutation after its response channel
-        // has already gone away.
         if (controller.signal.aborted || rc.req.aborted || rc.res?.destroyed) return true;
         if (opts.resolveSession && await opts.resolveSession(scopedGrant) !== sessionId) {
           rc.json(403, { error: { code: "session-unavailable", message: "The requesting Polyth session is no longer active" } });
           return true;
         }
-        // Session resolution is asynchronous too: fence the final await before
-        // handing execution to a package that may have been disabled meanwhile.
         if (controller.signal.aborted || rc.req.aborted || rc.res?.destroyed) return true;
         if (grantFor(token) !== liveGrant || opts.contribution?.(id) !== liveContribution
           || !matchesBinding(liveBinding, liveDescriptor)) {
@@ -251,7 +276,7 @@ export function createAgentToolBridge(opts: {
           return true;
         }
         try {
-          const result = await liveExecute((body.arguments ?? {}) as JsonObject, {
+          const result = await liveExecute(input, {
             sessionId: sessionId ?? "",
             signal: controller.signal,
             projectId: liveGrant.projectId,

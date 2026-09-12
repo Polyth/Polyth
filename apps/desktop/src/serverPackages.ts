@@ -50,7 +50,7 @@ import backendPi from "../../../packages/backend-pi/src/serverEntry.ts";
 
 import backendOpencode from "../../../packages/backend-opencode/src/serverEntry.ts";
 
-import harnessRuntime from "../../../packages/harness-runtime/src/serverEntry.ts";
+import harnessRuntime from "../../../packages/harness-runtime/src/packageEntry.ts";
 
 import opencode from "../../../packages/opencode/src/serverEntry.ts";
 

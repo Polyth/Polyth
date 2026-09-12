@@ -17,7 +17,7 @@
     "@polyth/web-sdk": "0.1.0"
   },
   "polyth": {
-    "serverEntry": "./src/serverEntry.ts",
+    "serverEntry": "./src/packageEntry.ts",
     "descriptor": {
       "name": "Harnesses",
       "description": "Choose the execution engine for a canonical session",
