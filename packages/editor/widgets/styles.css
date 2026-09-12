@@ -14,8 +14,7 @@
   max-width: 100%;
 }
 @media (max-width: 480px), (pointer: coarse) {
-  .cm-textfield,
-  .cm-content {
+  .cm-textfield {
     font-size: max(16px, var(--font-input, 1em));
   }
 }

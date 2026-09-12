@@ -281,14 +281,12 @@ function resolveRetained(
   const key = retainedKey(ref);
   const handle = peekDocument(ref);
   const generation = handle?.getSnapshot().authoritativeGeneration ?? 0;
-  const text = handle?.getBuffer() ?? "";
   const existing = states.get(key);
-  if (!existing || existing.generation !== generation) {
-    const fresh = freshRetained(text, readOnly, wrap, ariaLabel, generation);
-    states.set(key, fresh);
-    return fresh;
-  }
-  return existing;
+  if (existing && existing.generation === generation) return existing;
+  const text = handle?.getBuffer() ?? "";
+  const fresh = freshRetained(text, readOnly, wrap, ariaLabel, generation);
+  states.set(key, fresh);
+  return fresh;
 }
 
 function applyBindingToView(group: EditorGroup, binding: EditorBinding): void {
@@ -545,6 +543,11 @@ export default function EditorRuntime(props: EditorSurfaceProps): ReactElement {
     };
 
     if (handle) {
+      // The editor package is lazy-loaded, so a document can finish loading
+      // before the editor bridge exists. Seed retained state from the document
+      // buffer before attaching the EditorView as its source; otherwise the
+      // shared group's initial empty state can replace the freshly loaded text.
+      resolveRetained(props.resource, readOnly, binding.wrap, props.ariaLabel);
       const source = {
         getText: () => {
           const active = groups.get(props.groupId)?.active;
