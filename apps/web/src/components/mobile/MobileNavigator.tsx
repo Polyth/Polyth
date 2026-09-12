@@ -218,7 +218,7 @@ function SessionRow({
     },
     {
       id: "pin",
-      label: session.pinned ? tr("sidebar.sessionlist.unpin") : tr("sidebar.sessionlist.pin"),
+      label: session.pinned ? tr("sidebar.sessionlist.unpin") : tr("sidebar.sessionlist.pinToTop"),
       onSelect: () => void togglePin(),
     },
     "separator",
@@ -277,7 +277,7 @@ function SessionRow({
           tabIndex={swipeX > 0 ? 0 : -1}
           onClick={() => void togglePin()}
         >
-          {session.pinned ? tr("sidebar.sessionlist.unpin") : tr("sidebar.sessionlist.pin")}
+          {session.pinned ? tr("sidebar.sessionlist.unpin") : tr("sidebar.sessionlist.pinToTop")}
         </button>
         <button
           className="mobile-nav-swipe-action is-trailing"
@@ -295,7 +295,7 @@ function SessionRow({
           <input
             className="mobile-nav-inline-rename"
             value={title}
-            aria-label={tr("sidebar.sessionlist.renameSession")}
+            aria-label={tr("common.rename")}
             onChange={(event) => setTitle(event.target.value)}
             onBlur={() => void commitRename()}
             onKeyDown={(event) => {
@@ -313,10 +313,10 @@ function SessionRow({
               void openCurrent();
             }}
           >
-            <span className="mobile-nav-session-title">{session.title || tr("sidebar.sessionlist.untitledSession")}</span>
+            <span className="mobile-nav-session-title">{session.title || tr("sidebar.sessionlist.newSession")}</span>
             <span className="mobile-nav-session-trailing">
               {statusNode(session, now)}
-              {unread && <span className="mobile-nav-unread-dot" aria-label={tr("sidebar.sessionlist.unread")} />}
+              {unread && <span className="mobile-nav-unread-dot" aria-label={tr("sidebar.sessionlist.unreadActivity")} />}
             </span>
           </button>
         )}
@@ -519,8 +519,15 @@ export default function MobileNavigator() {
               onFocus={() => setSearchMode(true)}
               onChange={(event) => setQuery(event.target.value)}
             />
-            {query && (
-              <button className="mobile-nav-search-clear" aria-label={tr("sidebar.clearSearch")} onClick={() => setQuery("")}>
+            {searchMode && (
+              <button
+                className="mobile-nav-search-clear"
+                aria-label={query ? tr("sidebar.clearSearch") : tr("common.close")}
+                onClick={() => {
+                  if (query) setQuery("");
+                  else { setSearchMode(false); searchRef.current?.blur(); }
+                }}
+              >
                 <Icon.close />
               </button>
             )}
@@ -568,7 +575,7 @@ export default function MobileNavigator() {
 
         <div className="mobile-nav-scroll">
           {visibleProjects.length === 0 && (
-            <div className="mobile-nav-empty">{tr("sidebar.noSessionsMatchSearch")}</div>
+            <div className="mobile-nav-empty">{tr("sidebar.noMatchingSessions")}</div>
           )}
           {visibleProjects.map((project) => {
             const all = projectSessions.get(project.id) ?? [];
@@ -588,7 +595,7 @@ export default function MobileNavigator() {
               return kind === "needs-reply" || kind === "needs-approval";
             }).length;
             const metadata = [
-              `${all.length} ${all.length === 1 ? "session" : "sessions"}`,
+              tr("sidebar.sessionlist.valueSessions", { length: all.length }),
               activeCount > 0 ? `${activeCount} active` : "",
               waitingCount > 0 ? `${waitingCount} waiting` : "",
             ].filter(Boolean).join(" · ");
@@ -604,18 +611,18 @@ export default function MobileNavigator() {
               },
               {
                 id: "copy-path",
-                label: tr("sidebar.copyPath"),
+                label: tr("editor.filepane.copyPath"),
                 onSelect: () => { void navigator.clipboard?.writeText(project.path); },
               },
               "separator",
               {
                 id: "remove",
-                label: tr("sidebar.removeProject"),
+                label: tr("sidebar.closeProject"),
                 danger: true,
                 onSelect: () => {
-                  void confirmAlert(tr("sidebar.removeProjectValue", { value: project.name || project.path }), {
-                    title: tr("sidebar.removeProject"),
-                    confirmLabel: tr("common.remove"),
+                  void confirmAlert(tr("sidebar.closeValueThisRemovesItFrom", { name: project.name || project.path }), {
+                    title: tr("sidebar.closeProject"),
+                    confirmLabel: tr("sidebar.closeProject"),
                   }).then((ok) => { if (ok) void removeProject(project.id); });
                 },
               },
@@ -626,7 +633,7 @@ export default function MobileNavigator() {
                 <div className="mobile-nav-project-head">
                   <button
                     className="mobile-nav-disclosure"
-                    aria-label={expanded ? tr("sidebar.collapseProject") : tr("sidebar.expandProject")}
+                    aria-label={expanded ? tr("sidebar.sessionlist.collapse") : tr("sidebar.sessionlist.expand")}
                     aria-expanded={expanded}
                     onClick={() => toggleProject(project.id)}
                   >
@@ -669,7 +676,7 @@ export default function MobileNavigator() {
                     >
                       <Icon.plus />
                     </button>
-                    <Menu label={tr("sidebar.projectActionsForValue", { value: project.name || project.path })} align="end" entries={projectEntries}>
+                    <Menu label={tr("sidebar.actionsForValue", { value: project.name || project.path })} align="end" entries={projectEntries}>
                       {(trigger) => (
                         <button className="mobile-nav-project-action" aria-label={tr("common.more")} {...trigger}>
                           <Icon.more />
