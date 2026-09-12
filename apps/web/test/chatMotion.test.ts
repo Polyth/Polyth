@@ -29,6 +29,18 @@ test("chat motion is compositor-friendly and shorter on touch", () => {
   assert.doesNotMatch(css, /scale\s*\(/);
 });
 
+test("explicit sends lift the prompt from the composer and FLIP previous rows upward", () => {
+  const controller = source("../src/chatMotion.ts");
+
+  assert.match(controller, /captureSendTransition/);
+  assert.match(controller, /\.composer-chat \[data-composer-input\]/);
+  assert.match(controller, /snapshot\.rows/);
+  assert.match(controller, /row\.rect\.top - after\.top/);
+  assert.match(controller, /playSendTransition/);
+  assert.match(controller, /SEND_LIFT_TOUCH_MS = 420/);
+  assert.match(controller, /SEND_LIFT_EASE = "cubic-bezier\(0\.16, 1, 0\.3, 1\)"/);
+});
+
 test("new-chat and conversation surfaces share the same motion profile", () => {
   const css = source("../src/motion.css");
   assert.match(css, /\.stage-new \.hero-body/);
