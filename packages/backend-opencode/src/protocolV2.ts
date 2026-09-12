@@ -178,6 +178,24 @@ const queryRequired = async (
   return response.body;
 };
 
+const queryOptional = async (
+  transport: OpenCodeTransport,
+  path: string,
+  deadlineMs: number,
+): Promise<{ ok: true; value: unknown } | { ok: false }> => {
+  try {
+    return { ok: true, value: await queryRequired(transport, path, deadlineMs) };
+  } catch {
+    return { ok: false };
+  }
+};
+
+const optionalDataArray = (body: unknown): unknown[] | undefined => {
+  const record = asRecord(body);
+  const value = record && "data" in record ? record.data : body;
+  return Array.isArray(value) ? value : undefined;
+};
+
 /** One-shot provider-auth write (no session/replay semantics apply). */
 const mutateRequired = async (
   transport: OpenCodeTransport,
@@ -897,17 +915,22 @@ export const createV2ProtocolAdapter = (
         `/api/session/${encodeURIComponent(backendSessionId)}/message?limit=${V2_PAGE_LIMIT}&order=asc`,
         input.location,
       );
+      const todosPath = withLocation(
+        `/api/session/${encodeURIComponent(backendSessionId)}/todo`,
+        input.location,
+      );
       const permissionsPath = withLocation(
         "/api/permission/request",
         input.location,
         "deep",
       );
       const questionsPath = withLocation("/api/question/request", input.location, "deep");
-      const [sessionBody, activeBody, messageRows, permissionsBody, questionsBody] =
+      const [sessionBody, activeBody, messageRows, todosResult, permissionsBody, questionsBody] =
         await Promise.all([
           queryRequired(options.transport, sessionPath, deadlineMs),
           queryRequired(options.transport, activePath, deadlineMs),
           queryAllPages(options.transport, messagesPath, deadlineMs),
+          queryOptional(options.transport, todosPath, deadlineMs),
           queryRequired(options.transport, permissionsPath, deadlineMs),
           queryRequired(options.transport, questionsPath, deadlineMs),
         ]);
@@ -932,6 +955,22 @@ export const createV2ProtocolAdapter = (
         for (const event of pulledV2MessageEvents(row, backendSessionId)) {
           appendPulledEvents(events, event, observed, state);
         }
+      }
+      const todoRows = todosResult.ok ? optionalDataArray(todosResult.value) : undefined;
+      if (todoRows) {
+        appendPulledEvents(
+          events,
+          {
+            type: "todo.updated",
+            properties: {
+              sessionID: backendSessionId,
+              todos: todoRows,
+              revision: ordinal,
+            },
+          },
+          observed,
+          state,
+        );
       }
       const permissions = permissionRows
         .map((value) => v2PermissionOf(value, backendSessionId))

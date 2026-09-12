@@ -17,7 +17,11 @@ const until = async (condition: () => Promise<boolean>) => {
   assert.fail("condition not reached");
 };
 
-function fixture(path = ":memory:") {
+function fixture(path = ":memory:", options: {
+  workspaceInstructions?: {
+    read(root: string, projectId: string): Promise<string | null>;
+  };
+} = {}) {
   let store = createStore(path);
   const detach: Array<() => void> = [];
   let shuttingDown = false;
@@ -153,6 +157,7 @@ function fixture(path = ":memory:") {
     broadcast: { event(event) { broadcasts.push(event.type); }, projection() {} },
     queue: store,
     isShuttingDown: () => shuttingDown,
+    ...(options.workspaceInstructions ? { workspaceInstructions: options.workspaceInstructions } : {}),
   });
   let sessions = makeSessions();
   const drain = () => new Promise((resolve) => setTimeout(resolve, 40));
@@ -182,6 +187,48 @@ test("A1 A2 → B1 → A retains one canonical session, cwd and confirmed contex
   assert.notEqual(a.backendSessionId, original.backendSessionId);
   assert.equal(a.runtimeBinding!.location.directory, original.runtimeBinding!.location.directory);
   assert.equal((await f.store.projections()).length, 1);
+  await f.close();
+});
+
+test("each fresh harness leg receives current AGENTS.md once without changing visible chat", async () => {
+  let policy = "Always preserve canonical history.";
+  const reads: string[] = [];
+  const f = fixture(":memory:", {
+    workspaceInstructions: {
+      async read(root, projectId) {
+        reads.push(`${projectId}:${root}`);
+        return policy;
+      },
+    },
+  });
+  const { id } = await f.sessions.create({ projectId: "p" });
+
+  await f.sessions.send(id, { text: "A1" });
+  assert.match(f.engines[0]!.requests[0]!.text, /Always preserve canonical history\./);
+  assert.equal((await f.store.events(id)).find((event) => event.type === "user/message")!.data.text, "A1");
+  f.engines[0]!.complete();
+  await f.idle(id);
+
+  await f.sessions.send(id, { text: "A2" });
+  assert.equal(f.engines[0]!.requests[1]!.text, "A2");
+  f.engines[0]!.complete();
+  await f.idle(id);
+
+  policy = "Use the policy revision read by the new harness.";
+  await f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" });
+  await f.sessions.send(id, { text: "B1" });
+  const switchedPrompt = f.engines.at(-1)!.requests[0]!.text;
+  assert.match(switchedPrompt, /Use the policy revision read by the new harness\./);
+  assert.equal(
+    (switchedPrompt.match(/<polyth-workspace-instructions path="AGENTS\.md">/g) ?? []).length,
+    1,
+  );
+  const lastUser = (await f.store.events(id)).filter((event) => event.type === "user/message").at(-1)!;
+  assert.equal(lastUser.data.text, "B1");
+  assert.match((lastUser.data as { recoveryContext?: string }).recoveryContext ?? "", /Use the policy revision/);
+  assert.deepEqual(reads, ["p:/same/worktree", "p:/same/worktree"]);
+  f.engines.at(-1)!.complete();
+  await f.idle(id);
   await f.close();
 });
 

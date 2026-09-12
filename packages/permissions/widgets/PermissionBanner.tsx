@@ -43,10 +43,12 @@ function PermissionRow({ p }: { p: PendingPermission }) {
     <div className="perm-row permission-request">
       <div className="permission-request-head">
         <span className="permission-mode-icon" aria-hidden="true">{modeIcon(p.permission, isBrowser)}</span>
-        <strong className="permission-request-title">{title}</strong>
-        {!isBrowser && p.tool !== undefined && p.tool !== title && (
-          <span className="permission-request-tool">{tr("permissionbanner.viaValue", { tool: p.tool })}</span>
-        )}
+        <span className="permission-request-copy">
+          <strong className="permission-request-title">{title}</strong>
+          {!isBrowser && p.tool !== undefined && p.tool !== title && (
+            <span className="permission-request-tool">{tr("permissionbanner.viaValue", { tool: p.tool })}</span>
+          )}
+        </span>
         {risk !== undefined && (
           <Badge
             tone={risk === "high" ? "danger" : risk === "low" ? "success" : "warning"}
@@ -68,7 +70,7 @@ function PermissionRow({ p }: { p: PendingPermission }) {
           ))}
         </div>
       )}
-      <div className="perm-actions">
+      <div className={`perm-actions${canAlways ? " has-always" : ""}`}>
         <Button size="sm" variant="primary" className="permission-allow" onClick={() => reply("once")}>
           {tr("permissionbanner.allowOnce")}
         </Button>

@@ -21,7 +21,7 @@ const LIVE_ROW_SELECTOR = [
   ".task-activity",
   ".github-conflict-card",
 ].join(",");
-const TOP_LEVEL_TIMELINE_ROW_SELECTOR = ".msg, .activity-group, .task-activity, .github-conflict-card";
+const TOP_LEVEL_TIMELINE_ROW_SELECTOR = ".msg, .activity-group, .activity-live, .task-activity, .github-conflict-card";
 
 interface RectSnapshot {
   top: number;
@@ -190,7 +190,7 @@ function nearTimelineTail(element: HTMLElement): boolean {
   let meaningfulFollowers = 0;
   for (let sibling = row.nextElementSibling; sibling; sibling = sibling.nextElementSibling) {
     if (!(sibling instanceof HTMLElement)) continue;
-    if (sibling.matches(".msg, .activity-group, .task-activity, .github-conflict-card")) meaningfulFollowers += 1;
+    if (sibling.matches(".msg, .activity-group, .activity-live, .task-activity, .github-conflict-card")) meaningfulFollowers += 1;
     if (meaningfulFollowers > 2) return false;
   }
   return true;
@@ -207,6 +207,10 @@ function playTransform(
   element.style.willChange = "opacity, transform";
   const animation = element.animate([
     { opacity: opacityFrom, transform: `translate3d(0, ${deltaY}px, 0)` },
+    // Opacity lands early on its own offset: a fade stretched across the whole
+    // travel reads as a smear, while a solid row gliding into place reads as
+    // one object moving. Transform still spans the full duration.
+    { opacity: 1, offset: 0.32 },
     { opacity: 1, transform: "translate3d(0, 0, 0)" },
   ], {
     duration,
@@ -237,8 +241,12 @@ function composerOrigin(element: HTMLElement, timeline: HTMLElement): number {
 function playActionRise(element: HTMLElement): void {
   if (animated.has(element) || motionDisabled()) return;
   const timeline = element.closest<HTMLElement>(".timeline");
-  const duration = touchProfile() ? SEND_LIFT_TOUCH_MS : SEND_LIFT_DESKTOP_MS;
-  if (timeline && playTransform(element, composerOrigin(element, timeline), duration, 0)) {
+  const delta = timeline ? composerOrigin(element, timeline) : 0;
+  // A long travel needs longer. Held at the short duration, a row crossing the
+  // whole timeline reads as a teleport instead of a lift.
+  const base = touchProfile() ? SEND_LIFT_TOUCH_MS : SEND_LIFT_DESKTOP_MS;
+  const duration = Math.round(base * (1 + Math.min(Math.abs(delta) / 1200, 0.45)));
+  if (timeline && playTransform(element, delta, duration, 0)) {
     animated.add(element);
     return;
   }

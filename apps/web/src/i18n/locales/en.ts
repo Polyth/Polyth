@@ -1444,7 +1444,7 @@ export const en = {
   "settings.pages.shortBeepWhenATurnCompletes": "Short beep when a turn completes.",
   "settings.pages.showLightweightCopyRevertAndForkControls": "Show lightweight Copy, Revert, and Fork controls when a message is hovered or focused.",
   "settings.pages.shownInTheSidebarAndWindowChrome": "Shown in the sidebar and window chrome.",
-  "settings.pages.showSessionActivityAs2mAgoInstead": "Show session activity as “2m ago” instead of a clock time.",
+  "settings.pages.showSessionActivityAs2mAgoInstead": "Show session date dividers as “Yesterday” instead of a calendar date.",
   "settings.pages.slashCommandsSnippets": "Slash commands & snippets",
   "settings.pages.smaller": "Smaller",
   "settings.pages.square": "Square",
@@ -2320,6 +2320,16 @@ export const en = {
   "timeline.rateLimit.resumeNow": "Resume now",
   "timeline.rateLimit.cancelWait": "Cancel wait",
   "timeline.rateLimit.switchModel": "Other model",
+  "sidebar.allDates": "All dates",
+  "sidebar.clearDates": "Clear dates",
+  "sidebar.date": "Date",
+  "sidebar.dateRange": "Date range",
+  "sidebar.fromDate": "From",
+  "sidebar.onDate": "On date",
+  "sidebar.sortProjects": "Sort projects",
+  "sidebar.sortProjectsCurrentlyValue": "Sort projects, currently {value}",
+  "sidebar.toDate": "To",
+  "sidebar.sessionlist.pinnedChats": "Pinned chats",
 } as const;
 
 export type AppMessageKey = keyof typeof en;

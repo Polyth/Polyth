@@ -16,38 +16,29 @@
   position: relative;
 }
 
-/* Attachments are context for the next turn, not text-field chrome. Keep one
-   compact, horizontally scrollable context strip above the composer instead
-   of making the editor grow vertically as files/URLs are added. The top
-   margin reserves the exact strip height, so the timeline never sits under it. */
-.composer-simple .composer-card:has(> .attachment-pills) {
-  margin-block-start: calc(var(--control-h-sm) + var(--space-2));
-}
-
-.composer-simple .composer-card > .attachment-pills {
-  position: absolute;
-  z-index: 2;
-  inset-inline: 0;
-  inset-block-end: calc(100% + var(--space-2));
+/* Attachments are next-turn context, not text-field chrome. New chats place
+   them above project selection; existing chats place them directly above the
+   composer. Images are visual tiles, while text/files retain their names. */
+.composer-simple > .attachment-pills {
   min-width: 0;
-  height: var(--control-h-sm);
-  max-height: var(--control-h-sm);
+  min-height: var(--control-h-sm);
+  max-height: calc((var(--tap) * 2) + var(--space-2));
   display: flex;
   flex-wrap: nowrap;
-  align-items: center;
+  align-items: flex-end;
   gap: var(--space-1);
-  padding: 0 var(--space-1);
+  padding: 0 var(--space-1) var(--space-1);
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-inline: contain;
   scrollbar-width: none;
 }
 
-.composer-simple .composer-card > .attachment-pills::-webkit-scrollbar {
+.composer-simple > .attachment-pills::-webkit-scrollbar {
   display: none;
 }
 
-.composer-simple .composer-card > .attachment-pills .attachment-pill {
+.composer-simple > .attachment-pills .attachment-pill {
   min-width: 0;
   max-width: min(240px, 70vw);
   min-height: 30px;
@@ -58,10 +49,33 @@
   box-shadow: none;
 }
 
-.composer-simple .composer-card > .attachment-pills .attachment-open,
-.composer-simple .composer-card > .attachment-pills .att-remove {
+.composer-simple > .attachment-pills .attachment-open,
+.composer-simple > .attachment-pills .att-remove {
   border: 0;
   box-shadow: none;
+}
+
+.composer-simple > .attachment-pills .attachment-pill:not(.att-image) {
+  position: relative;
+  min-height: var(--control-h-lg);
+  padding-inline-start: var(--space-3);
+  padding-inline-end: var(--tap);
+  border-radius: var(--radius-card);
+  font-size: var(--font-label);
+}
+
+.composer-simple > .attachment-pills .attachment-pill:not(.att-image) .attachment-open {
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.composer-simple > .attachment-pills .attachment-pill:not(.att-image) .att-remove {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-end: 0;
+  margin: 0;
+  background: transparent;
+  transform: translateY(-50%);
 }
 
 /* A composer is a single control surface. Only the primary action is filled;
@@ -237,11 +251,11 @@
     max-width: var(--tap);
   }
 
-  .composer-mobile .composer-card > .attachment-pills {
+  .composer-mobile > .attachment-pills {
     padding-inline: 0;
   }
 
-  .composer-mobile .composer-card > .attachment-pills .attachment-pill {
+  .composer-mobile > .attachment-pills .attachment-pill {
     max-width: min(220px, 68vw);
   }
 }

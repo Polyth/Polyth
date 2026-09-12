@@ -1150,7 +1150,7 @@ export const createLegacyProtocolAdapter = (
         backendSessionId,
         reconciliationOrdinal: ordinal,
       };
-      const [status, messages, permissionsResult, questionsResult] = await Promise.all([
+      const [status, messages, todosResult, permissionsResult, questionsResult] = await Promise.all([
         queryOptional(
           options.transport,
           withLocation("/session/status", input.location),
@@ -1160,6 +1160,14 @@ export const createLegacyProtocolAdapter = (
           options.transport,
           withLocation(
             `/session/${encodeURIComponent(backendSessionId)}/message?limit=1000`,
+            input.location,
+          ),
+          deadlineMs,
+        ),
+        queryOptional(
+          options.transport,
+          withLocation(
+            `/session/${encodeURIComponent(backendSessionId)}/todo`,
             input.location,
           ),
           deadlineMs,
@@ -1228,6 +1236,21 @@ export const createLegacyProtocolAdapter = (
             state,
           );
         }
+      }
+      if (todosResult.ok) {
+        appendPulledEvents(
+          events,
+          {
+            type: "todo.updated",
+            properties: {
+              sessionID: backendSessionId,
+              todos: asArray(todosResult.value),
+              revision: ordinal,
+            },
+          },
+          observed,
+          state,
+        );
       }
 
       const permissions = (permissionsResult.ok ? asArray(permissionsResult.value) : [])

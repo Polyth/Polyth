@@ -83,6 +83,15 @@ The bundle contains:
 - Current cwd, and bounded Git branch, HEAD, dirty status and modified/untracked filenames when available. No repository copying and no diff bodies. Failed or remote Git inspection leaves unavailable facts absent.
 - An explicit statement that the workspace is authoritative and unconfirmed operations must not be assumed successful.
 
+The first admitted prompt on every fresh runtime leg also carries the active
+worktree's `AGENTS.md`, when present, in the same hidden `recoveryContext`
+channel. The visible `user/message` text remains unchanged. Harness switches
+therefore re-read current workspace policy instead of copying the prior leg's
+hidden wrapper. Reads are path-confined and capped at 32 KiB; a missing or empty
+file is a no-op, while an unsafe, non-text or oversized file blocks admission
+instead of being silently ignored or truncated. If the files-owned reader is
+unavailable, admission also fails closed because absence cannot be established.
+
 It does not transfer native transcripts, reasoning, private system prompts, tool trace dumps or invented summaries. Existing recovery context is removed before constructing another bundle. Secure Safe values, known sensitive environment values and common credential syntax are redacted before budgeting. The UI renders the original user text, not the recovery wrapper.
 
 Native observations carry the current reconciliation ordinal. Codex emits a canonical final answer on item completion, not on an empty item-start notification; this prevents its placeholder from suppressing the real answer in later history. Failed native tools map to the existing `tool/error` contract.

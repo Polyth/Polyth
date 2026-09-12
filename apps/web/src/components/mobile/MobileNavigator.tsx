@@ -20,9 +20,8 @@ import {
   renameProject,
 } from "../../init.ts";
 import { resolveSessionStatus, type SessionRowStatus } from "../../sessionStatus.ts";
-import { ago } from "../../format.ts";
 import { Icon } from "../../icons.tsx";
-import { tr } from "../../i18n/index.ts";
+import { getLocale, tr } from "../../i18n/index.ts";
 import { friendlyError } from "../../settings.ts";
 import { confirmAlert } from "../../alerts.ts";
 import {
@@ -30,7 +29,9 @@ import {
   renameSessionTitle,
   toggleSessionPin,
 } from "../../sessionActions.ts";
-import { tapFeedback } from "../../haptics.ts";
+import { successFeedback, tapFeedback } from "../../haptics.ts";
+import { copyText } from "../../utils.ts";
+import { announce } from "../a11y/live.tsx";
 import { useModalSurface } from "../a11y/Dialog.tsx";
 import UiIcon from "../ui/Icon.tsx";
 import {
@@ -43,6 +44,16 @@ import {
   WarningIcon,
 } from "../ui/icons.ts";
 import { Menu, type MenuEntry } from "../ui/index.ts";
+import SessionDateFilterControls from "../sidebar/SessionDateFilterControls.tsx";
+import {
+  compareSessionNavigation,
+  EMPTY_SESSION_DATE_FILTER,
+  groupSessionsByActivityDate,
+  sessionDateFilterActive,
+  sessionDateGroupLabel,
+  sessionMatchesDateFilter,
+  type SessionDateFilter,
+} from "../../sessionDates.ts";
 import "./MobileNavigator.css";
 
 const EXPANDED_PROJECTS_KEY = "polyth.sidebar.expandedProjects";
@@ -84,16 +95,6 @@ function statusPriority(session: SessionProjection): number {
   ) return 1;
   if ((session.attention?.unread ?? 0) > 0) return 2;
   return 3;
-}
-
-function smartSessionSort(a: SessionProjection, b: SessionProjection): number {
-  return statusPriority(a) - statusPriority(b)
-    || (b.lastTurnAt ?? b.updatedAt ?? b.createdAt) - (a.lastTurnAt ?? a.updatedAt ?? a.createdAt);
-}
-
-function activityLabel(session: SessionProjection, now: number): string {
-  const timestamp = session.lastTurnAt ?? session.updatedAt ?? session.createdAt;
-  return timestamp ? ago(timestamp, now) : "";
 }
 
 function workingDuration(ms: number): string {
@@ -153,7 +154,7 @@ function statusNode(session: SessionProjection, now: number) {
     case "unknown":
       return <span className="mobile-nav-session-state is-attention" aria-label={status.label}>{statusIcon(status.kind)}</span>;
     default:
-      return <span className="mobile-nav-session-time">{activityLabel(session, now)}</span>;
+      return null;
   }
 }
 
@@ -237,10 +238,20 @@ function SessionRow({
   const togglePin = async () => {
     try {
       await toggleSessionPin(session, pinnedSessions);
+      successFeedback();
       setSwipeX(0);
       onChanged();
     } catch (error) {
       setUiError(friendlyError(tr("common.error"), error));
+    }
+  };
+
+  const copySessionId = async () => {
+    if (await copyText(session.id)) {
+      successFeedback();
+      announce(tr("sidebar.sessionlist.sessionIdCopied"));
+    } else {
+      setUiError(tr("questioncards.copyFailedClipboardUnavailable"));
     }
   };
 
@@ -253,6 +264,11 @@ function SessionRow({
         setRenaming(true);
         requestAnimationFrame(() => rowButtonRef.current?.parentElement?.querySelector<HTMLInputElement>("input")?.focus());
       },
+    },
+    {
+      id: "copy-id",
+      label: tr("sidebar.sessionlist.copySessionId"),
+      onSelect: () => void copySessionId(),
     },
     {
       id: "pin",
@@ -326,7 +342,7 @@ function SessionRow({
         </button>
       </div>
       <div
-        className={`mobile-nav-session-row${active ? " is-active" : ""}${unread ? " is-unread" : ""}${rowStatus.kind === "failed" ? " is-failed" : ""}`}
+        className={`mobile-nav-session-row${active ? " is-active" : ""}${session.pinned ? " is-pinned" : ""}${unread ? " is-unread" : ""}${rowStatus.kind === "failed" ? " is-failed" : ""}`}
         style={{ transform: `translateX(${swipeX}px)` }}
       >
         {renaming ? (
@@ -351,6 +367,13 @@ function SessionRow({
               void openCurrent();
             }}
           >
+            {session.pinned && (
+              <span
+                className="mobile-nav-pin-icon"
+                aria-label={tr("sidebar.sessionlist.pinnedChats")}
+                title={tr("sidebar.sessionlist.pinnedChats")}
+              ><Icon.pin /></span>
+            )}
             <span className="mobile-nav-session-title">{session.title || tr("sidebar.sessionlist.newSession")}</span>
             <span className="mobile-nav-session-trailing">
               {statusNode(session, now)}
@@ -362,6 +385,7 @@ function SessionRow({
           label={tr("sidebar.sessionlist.actionsForValue", { value: session.title || tr("sidebar.sessionlist.session") })}
           entries={entries}
           align="end"
+          phonePresentation="popover"
           open={menuOpen}
           onOpenChange={setMenuOpen}
           returnFocusRef={rowButtonRef}
@@ -383,10 +407,12 @@ export default function MobileNavigator() {
   const activeProjectId = useStore((state) => state.activeProjectId);
   const activeSessionId = useStore((state) => state.activeSessionId);
   const sessions = useStore((state) => state.sessions);
+  const relativeTime = useStore((state) => state.settings.relativeTime);
   const projects = registry.projects;
   const [query, setQuery] = useState("");
   const [searchMode, setSearchMode] = useState(false);
   const [attentionOnly, setAttentionOnly] = useState(false);
+  const [dateFilter, setDateFilter] = useState<SessionDateFilter>(EMPTY_SESSION_DATE_FILTER);
   const [sort, setSort] = useState<ProjectSort>("recent");
   const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(() => loadExpanded(activeProjectId));
   const [showAllProjects, setShowAllProjects] = useState<ReadonlySet<string>>(new Set());
@@ -445,7 +471,7 @@ export default function MobileNavigator() {
       list.push(session);
       result.set(session.projectId, list);
     }
-    for (const list of result.values()) list.sort(smartSessionSort);
+    for (const list of result.values()) list.sort(compareSessionNavigation);
     return result;
   }, [sessions]);
 
@@ -453,16 +479,18 @@ export default function MobileNavigator() {
     const needle = query.trim().toLocaleLowerCase();
     const filtered = projects.filter((project) => {
       const list = projectSessions.get(project.id) ?? [];
-      const hasAttention = list.some((session) => statusPriority(session) <= 1 || (session.attention?.unread ?? 0) > 0);
+      const dated = list.filter((session) => sessionMatchesDateFilter(session, dateFilter));
+      if (sessionDateFilterActive(dateFilter) && dated.length === 0) return false;
+      const hasAttention = dated.some((session) => statusPriority(session) <= 1 || (session.attention?.unread ?? 0) > 0);
       if (attentionOnly && !hasAttention) return false;
       if (!needle) return true;
       if (`${project.name} ${project.path}`.toLocaleLowerCase().includes(needle)) return true;
-      return list.some((session) => `${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLocaleLowerCase().includes(needle));
+      return dated.some((session) => `${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLocaleLowerCase().includes(needle));
     });
     return filtered.sort((a, b) => {
       if (sort === "name") return (a.name || a.path).localeCompare(b.name || b.path);
       const score = (id: string) => {
-        const list = projectSessions.get(id) ?? [];
+        const list = (projectSessions.get(id) ?? []).filter((session) => sessionMatchesDateFilter(session, dateFilter));
         const bestPriority = list.reduce((best, session) => Math.min(best, statusPriority(session)), 4);
         const latest = list.reduce((value, session) => Math.max(value, session.lastTurnAt ?? session.updatedAt ?? session.createdAt), 0);
         return { bestPriority, latest };
@@ -471,7 +499,7 @@ export default function MobileNavigator() {
       const right = score(b.id);
       return left.bestPriority - right.bestPriority || right.latest - left.latest;
     });
-  }, [attentionOnly, projectSessions, projects, query, sort]);
+  }, [attentionOnly, dateFilter, projectSessions, projects, query, sort]);
 
   if (!drawerOpen) return null;
 
@@ -502,7 +530,7 @@ export default function MobileNavigator() {
   };
 
   const filterEntries: MenuEntry[] = [
-    { heading: tr("sidebar.sortSessions") },
+    { heading: tr("sidebar.sortProjects") },
     {
       id: "recent",
       label: tr("sidebar.recentActivity"),
@@ -576,15 +604,22 @@ export default function MobileNavigator() {
               </button>
             )}
             {!searchMode && (
-              <Menu label={tr("sidebar.listOptions")} title={tr("sidebar.listOptions")} align="end" entries={filterEntries}>
+              <Menu
+                label={tr("sidebar.listOptions")}
+                title={tr("sidebar.listOptions")}
+                align="end"
+                entries={filterEntries}
+                className="session-filter-menu"
+                footer={<SessionDateFilterControls value={dateFilter} onChange={setDateFilter} />}
+              >
                 {(trigger) => (
                   <button
-                    className={`mobile-nav-filter${attentionOnly || sort !== "recent" ? " is-active" : ""}`}
+                    className={`mobile-nav-filter${attentionOnly || sort !== "recent" || sessionDateFilterActive(dateFilter) ? " is-active" : ""}`}
                     aria-label={tr("sidebar.listOptions")}
                     {...trigger}
                   >
                     <Icon.sliders />
-                    {(attentionOnly || sort !== "recent") && <span className="mobile-nav-filter-dot" />}
+                    {(attentionOnly || sort !== "recent" || sessionDateFilterActive(dateFilter)) && <span className="mobile-nav-filter-dot" />}
                   </button>
                 )}
               </Menu>
@@ -624,22 +659,27 @@ export default function MobileNavigator() {
           {visibleProjects.map((project) => {
             const all = projectSessions.get(project.id) ?? [];
             const needle = query.trim().toLocaleLowerCase();
-            const matching = needle
-              ? all.filter((session) => `${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLocaleLowerCase().includes(needle))
-              : all;
-            const normal = matching.filter((session) => !isIsolated(session));
-            const isolated = matching.filter(isIsolated);
+            const dated = all.filter((session) => sessionMatchesDateFilter(session, dateFilter));
+            const projectMatches = `${project.name} ${project.path}`.toLocaleLowerCase().includes(needle);
+            const matching = needle && !projectMatches
+              ? dated.filter((session) => `${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLocaleLowerCase().includes(needle))
+              : dated;
+            const pinned = matching.filter((session) => session.pinned !== undefined);
+            const normal = matching.filter((session) => session.pinned === undefined && !isIsolated(session));
+            const isolated = matching.filter((session) => session.pinned === undefined && isIsolated(session));
             const expanded = searchMode || expandedProjects.has(project.id);
             const showAll = searchMode || showAllProjects.has(project.id);
-            const visibleNormal = showAll ? normal : normal.slice(0, INITIAL_VISIBLE_SESSIONS);
+            const visibleNormal = showAll
+              ? normal
+              : normal.slice(0, Math.max(0, INITIAL_VISIBLE_SESSIONS - pinned.length));
             const hiddenCount = Math.max(0, normal.length - visibleNormal.length);
-            const activeCount = all.filter((session) => resolveSessionStatus(session, now).kind === "working").length;
-            const waitingCount = all.filter((session) => {
+            const activeCount = matching.filter((session) => resolveSessionStatus(session, now).kind === "working").length;
+            const waitingCount = matching.filter((session) => {
               const kind = resolveSessionStatus(session, now).kind;
               return kind === "needs-reply" || kind === "needs-approval";
             }).length;
-            const completedCount = all.filter((session) => resolveSessionStatus(session, now).kind === "unread").length;
-            const failedCount = all.filter((session) => resolveSessionStatus(session, now).kind === "failed").length;
+            const completedCount = matching.filter((session) => resolveSessionStatus(session, now).kind === "unread").length;
+            const failedCount = matching.filter((session) => resolveSessionStatus(session, now).kind === "failed").length;
             const collapsedStatusLabel = [
               activeCount > 0 ? `${activeCount} ${tr("common.running")}` : "",
               waitingCount > 0 ? `${waitingCount} ${tr("sidebar.needsAttention")}` : "",
@@ -647,11 +687,13 @@ export default function MobileNavigator() {
               failedCount > 0 ? `${failedCount} ${tr("common.error")}` : "",
             ].filter(Boolean).join(", ");
             const metadata = [
-              tr("sidebar.sessionlist.valueSessions", { length: all.length }),
+              tr("sidebar.sessionlist.valueSessions", { length: matching.length }),
               activeCount > 0 ? `${activeCount} active` : "",
               waitingCount > 0 ? `${waitingCount} waiting` : "",
             ].filter(Boolean).join(" · ");
             const pinnedSessions = all.filter((session) => !!session.pinned);
+            const normalDateGroups = groupSessionsByActivityDate(visibleNormal);
+            const isolatedDateGroups = groupSessionsByActivityDate(isolated);
             const isolationExpanded = searchMode || expandedIsolation.has(project.id)
               || isolated.some((session) => session.id === activeSessionId);
 
@@ -712,7 +754,7 @@ export default function MobileNavigator() {
                       <span className="mobile-nav-project-name">{project.name || project.path}</span>
                       <span className="mobile-nav-project-meta">
                         <span className="mobile-nav-project-meta-copy">
-                          {expanded ? metadata : tr("sidebar.sessionlist.valueSessions", { length: all.length })}
+                          {expanded ? metadata : tr("sidebar.sessionlist.valueSessions", { length: matching.length })}
                         </span>
                         {!expanded && collapsedStatusLabel && (
                           <span className="mobile-nav-project-statuses" aria-label={collapsedStatusLabel}>
@@ -772,16 +814,41 @@ export default function MobileNavigator() {
 
                 {expanded && (
                   <div className="mobile-nav-project-body">
-                    {visibleNormal.map((session) => (
-                      <SessionRow
-                        key={session.id}
-                        session={session}
-                        active={session.id === activeSessionId}
-                        now={now}
-                        pinnedSessions={pinnedSessions}
-                        onChanged={() => refreshProject(project.id)}
-                      />
-                    ))}
+                    {pinned.length > 0 && (
+                      <div className="mobile-nav-pinned" aria-label={tr("sidebar.sessionlist.pinnedChats")}>
+                        <div className="mobile-nav-date-divider is-pinned" role="separator">
+                          <span><Icon.pin />{tr("sidebar.sessionlist.pinnedChats")}</span>
+                        </div>
+                        {pinned.map((session) => (
+                          <SessionRow
+                            key={session.id}
+                            session={session}
+                            active={session.id === activeSessionId}
+                            now={now}
+                            pinnedSessions={pinnedSessions}
+                            onChanged={() => refreshProject(project.id)}
+                          />
+                        ))}
+                      </div>
+                    )}
+                    {normalDateGroups.map((group) => {
+                      const label = sessionDateGroupLabel(group.timestamp, relativeTime, getLocale(), now);
+                      return (
+                        <div className="mobile-nav-date-group" key={group.key}>
+                          <div className="mobile-nav-date-divider" role="separator" aria-label={label}><span>{label}</span></div>
+                          {group.sessions.map((session) => (
+                            <SessionRow
+                              key={session.id}
+                              session={session}
+                              active={session.id === activeSessionId}
+                              now={now}
+                              pinnedSessions={pinnedSessions}
+                              onChanged={() => refreshProject(project.id)}
+                            />
+                          ))}
+                        </div>
+                      );
+                    })}
                     {hiddenCount > 0 && (
                       <button
                         className="mobile-nav-more-sessions"
@@ -816,18 +883,26 @@ export default function MobileNavigator() {
                         </div>
                         {isolationExpanded && (
                           <div className="mobile-nav-isolated-list">
-                            {isolated.map((session) => (
-                              <div className="mobile-nav-isolated-item" key={session.id}>
-                                <span className="mobile-nav-worktree-icon" aria-hidden="true"><Icon.branch /></span>
-                                <SessionRow
-                                  session={session}
-                                  active={session.id === activeSessionId}
-                                  now={now}
-                                  pinnedSessions={pinnedSessions}
-                                  onChanged={() => refreshProject(project.id)}
-                                />
-                              </div>
-                            ))}
+                            {isolatedDateGroups.map((group) => {
+                              const label = sessionDateGroupLabel(group.timestamp, relativeTime, getLocale(), now);
+                              return (
+                                <div className="mobile-nav-date-group" key={group.key}>
+                                  <div className="mobile-nav-date-divider" role="separator" aria-label={label}><span>{label}</span></div>
+                                  {group.sessions.map((session) => (
+                                    <div className="mobile-nav-isolated-item" key={session.id}>
+                                      <span className="mobile-nav-worktree-icon" aria-hidden="true"><Icon.branch /></span>
+                                      <SessionRow
+                                        session={session}
+                                        active={session.id === activeSessionId}
+                                        now={now}
+                                        pinnedSessions={pinnedSessions}
+                                        onChanged={() => refreshProject(project.id)}
+                                      />
+                                    </div>
+                                  ))}
+                                </div>
+                              );
+                            })}
                           </div>
                         )}
                       </div>

@@ -430,6 +430,16 @@ test("V2 core session methods use native paths and reconcile pending requests", 
           }],
         });
       }
+      if (path.startsWith("/api/session/ses_created_1/todo?")) {
+        return httpResponse({
+          data: [{
+            id: "todo-v2",
+            content: "Render current tasks on mobile",
+            status: "in_progress",
+            priority: "high",
+          }],
+        });
+      }
       if (path.startsWith("/api/session/ses_created_1?")) {
         return httpResponse({
           data: {
@@ -519,6 +529,15 @@ test("V2 core session methods use native paths and reconcile pending requests", 
   assert.equal(snapshot.permissions[0]?.requestId, "per_1");
   assert.deepEqual(snapshot.permissions[0]?.patterns, ["src/a.ts"]);
   assert.equal(snapshot.questions[0]?.requestId, "que_1");
+  assert.deepEqual(
+    snapshot.events.find((entry) => entry.event.type === "task/snapshot")?.event,
+    {
+      type: "task/snapshot",
+      listId: "todo",
+      revision: 1,
+      items: [{ id: "todo-v2", text: "Render current tasks on mobile", status: "active" }],
+    },
+  );
   assert.ok(snapshot.events.some((event) => event.event.type === "assistant/message"));
   assert.equal(
     snapshot.state.value,

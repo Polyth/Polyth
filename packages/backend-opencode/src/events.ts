@@ -372,9 +372,8 @@ const TASK_STATUS: Record<string, TaskStatus> = {
   completed: "done", done: "done", cancelled: "failed", failed: "failed",
 };
 
-/** Normalize a todowrite tool input into a full task snapshot (or undefined). */
-const taskItemsOf = (input: JsonObject): Array<{ id: string; text: string; status: TaskStatus }> | undefined => {
-  const todos = (input as { todos?: unknown }).todos;
+/** Normalize OpenCode's authoritative todo array into a full task snapshot. */
+const taskItemsOf = (todos: unknown): Array<{ id: string; text: string; status: TaskStatus }> | undefined => {
   if (!Array.isArray(todos)) return undefined;
   const items: Array<{ id: string; text: string; status: TaskStatus }> = [];
   for (let i = 0; i < todos.length; i++) {
@@ -391,6 +390,20 @@ const taskItemsOf = (input: JsonObject): Array<{ id: string; text: string; statu
   return items;
 };
 
+const appendTaskSnapshot = (
+  out: RuntimeEvent[],
+  state: TranslateState,
+  items: Array<{ id: string; text: string; status: TaskStatus }>,
+): void => {
+  const key = JSON.stringify(items);
+  if (key === state.lastTaskKey) return;
+  // An empty list only has meaning after a populated snapshot. Avoid turning
+  // every taskless session reconciliation into synthetic task history.
+  if (items.length === 0 && state.lastTaskKey === "") return;
+  state.lastTaskKey = key;
+  out.push({ type: "task/snapshot", listId: "todo", revision: ++state.taskRevision, items });
+};
+
 const subagentSnapshot = (state: TranslateState): RuntimeEvent => ({
   type: "subagent/snapshot",
   revision: ++state.subagentRevision,
@@ -401,6 +414,15 @@ export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEve
   const out: RuntimeEvent[] = [];
   const p = ev.properties ?? {};
   const type = ev.type ?? "";
+
+  // Modern OpenCode owns todo state outside message parts and publishes the
+  // complete replacement list directly. This is the authoritative path; the
+  // TodoWrite part handling below remains a compatibility fallback.
+  if (type === "todo.updated") {
+    const items = taskItemsOf(p.todos);
+    if (items) appendTaskSnapshot(out, state, items);
+    return out;
+  }
 
   if (type === "session.updated") {
     const info = asRecord(p.info);
@@ -563,14 +585,8 @@ export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEve
       // ---- WP8: todo tools become full task snapshots ----------------------
       const toolLower = tool.toLowerCase().replace(/[^a-z]/g, "");
       if (toolLower === "todowrite" || toolLower === "todo") {
-        const items = taskItemsOf(input);
-        if (items && items.length > 0) {
-          const key = JSON.stringify(items);
-          if (key !== state.lastTaskKey) {
-            state.lastTaskKey = key;
-            out.push({ type: "task/snapshot", listId: "todo", revision: ++state.taskRevision, items });
-          }
-        }
+        const items = taskItemsOf(input.todos);
+        if (items) appendTaskSnapshot(out, state, items);
         // fall through: the tool call/result itself still logs below
       }
 
@@ -1019,6 +1035,24 @@ const semanticIdentityOf = (
     info,
     part,
   );
+
+  if (ev.type === "todo.updated") {
+    const items = taskItemsOf(properties.todos);
+    if (!items) return undefined;
+    const key = JSON.stringify(items);
+    const nextRevision = state && key !== state.lastTaskKey
+      ? state.taskRevision + 1
+      : state?.taskRevision ?? 0;
+    return {
+      // Task-list replacement is a tool-owned upstream fact. Keep it separate
+      // from individual tool-call entities with a stable reserved key.
+      artifactKind: "tool",
+      entityId: "task-list:todo",
+      revision: directRevision
+        ?? (ev.id ? `event:${ev.id}` : `state:${nextRevision}:${key}`),
+      checkpoint: { items },
+    };
+  }
 
   if (ev.type === "message.updated") {
     if (typeof info?.id !== "string" || !info.id) return undefined;

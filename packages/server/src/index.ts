@@ -2046,6 +2046,18 @@ export async function boot(opts: BootOptions = {}) {
   // the files package failed to load it is absent and the session service
   // raises a typed error for any staged `_inbox/*` attachment.
   const attachmentGuard = svc<NonNullable<SessionDeps["attachments"]>>("files.attachments");
+  const workspaceInstructions = svc<NonNullable<SessionDeps["workspaceInstructions"]>>(
+    "files.workspace-instructions",
+  );
+  // Workspace policy is fail-closed: without the files-owned reader Polyth
+  // cannot establish that AGENTS.md is absent, so it must not admit a turn as
+  // though no repository instructions existed.
+  const requiredWorkspaceInstructions: NonNullable<SessionDeps["workspaceInstructions"]> =
+    workspaceInstructions ?? {
+      async read() {
+        throw Object.assign(new Error("Workspace instructions are unavailable"), { code: "unavailable" });
+      },
+    };
   const autoAcceptStore = svc<NonNullable<SessionDeps["autoAccept"]>>("permissions.auto-accept");
   const browserArtifactsDir = join(dataDir, "browser-artifacts");
   const resolveBrowserArtifact = async (id: string) => {
@@ -2158,6 +2170,7 @@ export async function boot(opts: BootOptions = {}) {
     ...(autoAcceptStore ? { autoAccept: autoAcceptStore } : {}),
     notify: pushNotifier,
     ...(attachmentGuard ? { attachments: attachmentGuard } : {}),
+    workspaceInstructions: requiredWorkspaceInstructions,
     browserArtifacts: { resolve: resolveBrowserArtifact, commit: commitBrowserArtifacts },
     ...(commandService ? {
       expand: async (projectId: string, text: string) => {

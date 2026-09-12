@@ -9,6 +9,10 @@ import {
 import { createFileService, MAX_RAW_BYTES, type FileService } from "./index.ts";
 import { createRemoteFileService } from "./remote.ts";
 import { registerFilesHandoffSources } from "./handoffSources.ts";
+import {
+  createWorkspaceInstructionSource,
+  type WorkspaceInstructionSourceService,
+} from "./workspaceInstructions.ts";
 
 /** `_inbox/` is an explicit project-root staging area for freshly attached
  *  files: uploads land here before any session/worktree owns the message. */
@@ -306,6 +310,15 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   host.services.provide(
     serverServiceKey<AttachmentSourceService>("files.attachments"),
     createAttachmentSourceService(attachmentFilesFor),
+  );
+  host.services.provide(
+    serverServiceKey<WorkspaceInstructionSourceService>("files.workspace-instructions"),
+    createWorkspaceInstructionSource({
+      projects: host.projects,
+      localFiles: files,
+      remoteHost: (connectionId) =>
+        host.services.get(serverServiceKey<SshTransportService>("ssh"))?.host(connectionId),
+    }),
   );
   let routes: RouteHandler | null = null;
   return {

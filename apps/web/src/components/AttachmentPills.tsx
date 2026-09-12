@@ -75,12 +75,13 @@ export default function AttachmentPills({ attachments, onRemove }: {
           const blocked = isBlockedAttachment(a);
           const detail = kind === "url" ? a.url : a.path;
           const size = kind === "url" ? "" : fmtSize(a.size);
+          const imagePreview = kind === "image" && a.url && !blocked;
           const body = (
             <>
-              {kind === "image" && a.url && !blocked
+              {imagePreview
                 ? <img className="att-thumb" src={a.url} alt="" />
                 : <span className="att-icon" aria-hidden>{GLYPHS[kind] ?? "▤"}</span>}
-              <span className="att-name" title={detail ? `${detail}${size ? ` · ${size}` : ""}` : a.name}>{a.name}</span>
+              {!imagePreview && <span className="att-name" title={detail ? `${detail}${size ? ` · ${size}` : ""}` : a.name}>{a.name}</span>}
             </>
           );
           return (

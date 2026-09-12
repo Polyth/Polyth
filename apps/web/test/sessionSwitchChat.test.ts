@@ -54,7 +54,7 @@ const eventFixtures = new Map<string, unknown[]>();
 };
 
 const store = await import("../src/store.ts");
-const { createSession, openSession, prefetchSessionTail } = await import("../src/init.ts");
+const { createSession, openSession, pollSessionTail, prefetchSessionTail } = await import("../src/init.ts");
 const { registerSurface } = await import("../src/surfaces.ts");
 const { getWorkspacePanePrefs, workspacePaneKey } = await import("../src/workspace/panePrefs.ts");
 const { getWorkspaceMode, setWorkspaceMode } = await import("../src/widgets/workspaceMode.ts");
@@ -304,6 +304,46 @@ test("tail prefetch dedupes and click paints its cache before reconcile resolves
 
   unblockFetches();
   await opening;
+  eventFixtures.delete(sessionId);
+});
+
+test("a passive tail poll refreshes a hydrated background session title without opening it", async () => {
+  const sessionId = "background-title";
+  store.upsertSession({
+    id: sessionId,
+    projectId: "p1",
+    title: "New session",
+    status: "working",
+    createdAt: 1,
+    updatedAt: 2,
+    lastTurnAt: 2,
+  });
+  eventFixtures.set(sessionId, []);
+  prefetchSessionTail(sessionId);
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+  const activeBefore = store.getState().activeSessionId;
+  eventFixtures.set(sessionId, [{
+    id: "background-title-1",
+    sessionId,
+    seq: 1,
+    time: 2,
+    type: "user/message",
+    data: { text: "Refresh background session titles" },
+    v: 1,
+  }]);
+  requestedPaths = [];
+
+  await pollSessionTail(sessionId);
+
+  assert.equal(
+    store.getState().sessions.find((session) => session.id === sessionId)?.title,
+    "Refresh background session titles",
+  );
+  assert.equal(store.getState().activeSessionId, activeBefore, "title polling must not navigate");
+  assert.deepEqual(requestedPaths, [
+    `/api/sessions/${sessionId}/events?afterSeq=0&limit=40&prefetch=1`,
+  ]);
   eventFixtures.delete(sessionId);
 });
 

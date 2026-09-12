@@ -35,3 +35,19 @@ test("mobile session overview inherits canonical sheet geometry and uses quiet d
   assert.match(css, /\.mobile-island-sheet \.mobile-task-list li\.active[\s\S]*?background:\s*transparent;/);
   assert.match(css, /\.mobile-island-sheet \.sheet-row-main[\s\S]*?min-height:\s*var\(--tap\);/);
 });
+
+test("mobile session overview keeps its clear glass out of the modal scrim", () => {
+  const css = read("../src/components/mobile/MobileSessionHeader.css");
+  assert.match(
+    css,
+    /\.sheet-backdrop-top:has\(> \.mobile-island-sheet\)\s*\{[^}]*background:\s*transparent;/s,
+  );
+});
+
+test("mobile session overview polls unresolved titles only while it is open", () => {
+  const source = read("../src/components/mobile/MobileSessionHeader.tsx");
+  assert.match(source, /pollSessionTail/);
+  assert.match(source, /surface !== "island" \|\| !projectId/);
+  assert.match(source, /window\.setTimeout\(/);
+  assert.match(source, /window\.clearTimeout\(/);
+});

@@ -798,7 +798,8 @@ test("a lone running action needs no block chrome and folds into the block when 
   try {
     await act(async () => root.render(createElement(ActivityGroupView, { g: group(running), subagents: null })));
     assert.equal(container.querySelector(".ui-run-summary"), null, "a first single action carries no block around it");
-    assert.ok(container.querySelector(".activity-group.live-only"), "the block chrome stays out of the way");
+    assert.equal(container.querySelector(".activity-group"), null, "the block itself is not on screen yet");
+    assert.equal(container.querySelector(".activity-live .activity-group"), null, "and the action is never nested inside it");
     assert.ok(container.querySelector(".activity-live .execution-row"), "the action itself is on screen");
 
     await act(async () => root.render(createElement(ActivityGroupView, { g: group(tool()), subagents: null })));
@@ -808,6 +809,40 @@ test("a lone running action needs no block chrome and folds into the block when 
     assert.ok(container.querySelector(".activity-live.leaving"), "the settled action folds up into the block");
     await act(async () => toggle.click());
     assert.equal(toggle.getAttribute("aria-expanded"), "true", "a hand toggle still opens it");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test("an action that arrives already finished still appears outside the block first", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const settled = tool();
+  // A fast tool can be called and answered inside one render batch, so it is
+  // never observed running. Its own timestamp is old; what makes it an arrival
+  // is that it was not there when the group mounted.
+  const fast = tool({ id: "call-2", callId: "call-2" });
+  const group = (items: ToolMsg[]) => activityGroup("activity-fast", items);
+  try {
+    await act(async () => root.render(createElement(ActivityGroupView, { g: group([settled]), subagents: null })));
+    assert.equal(container.querySelector(".activity-live"), null, "replayed history mounts folded inside the block");
+
+    await act(async () => root.render(createElement(ActivityGroupView, { g: group([settled, fast]), subagents: null })));
+    const live = [...container.querySelectorAll(".activity-live:not(.leaving) .execution-row")];
+    assert.equal(live.length, 1, "a finished action still gets its moment outside the block");
+    assert.equal(
+      container.querySelector(".ui-run-summary")?.getAttribute("aria-expanded"),
+      "false",
+      "the block stays folded while the action floats",
+    );
+
+    const next = tool({ id: "call-3", callId: "call-3" });
+    await act(async () => root.render(createElement(ActivityGroupView, { g: group([settled, fast, next]), subagents: null })));
+    const floating = [...container.querySelectorAll(".activity-live:not(.leaving)")];
+    assert.equal(floating.length, 1, "the next arrival replaces it instead of stacking a second list");
+    assert.ok(container.querySelector(".activity-live.leaving"), "the previous action folds into the block");
   } finally {
     await act(async () => root.unmount());
     container.remove();
@@ -1062,7 +1097,9 @@ test("approval is always action-required: intent, target, risk, and decisions vi
     // Decisions are rendered up front, in decision order.
     const actions = container.querySelector(".perm-actions");
     assert.ok(actions);
+    assert.ok(actions.classList.contains("has-always"));
     assert.match(actions.textContent ?? "", /Allow once.*Always.*Deny/s);
+    assert.ok(container.querySelector(".permission-request-copy"));
     const allow = container.querySelector<HTMLButtonElement>(".perm-actions .permission-allow");
     const deny = container.querySelector<HTMLButtonElement>(".perm-actions .permission-deny");
     assert.ok(allow && allow.textContent?.includes("Allow once"));
@@ -1101,4 +1138,13 @@ test("browser approval names the browser and its bounded capabilities", async ()
     await act(async () => root.unmount());
     container.remove();
   }
+});
+
+test("compact permission actions override the wide decision rail", async () => {
+  const css = await readFile(new URL("../../../packages/permissions/widgets/styles.css", import.meta.url), "utf8");
+  const compact = css.slice(css.indexOf("@container permission-banner (max-width: 620px)"));
+  assert.match(
+    compact,
+    /\.perm-banner \.perm-actions,\s*\.perm-banner \.perm-actions\.has-always\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/,
+  );
 });

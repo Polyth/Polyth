@@ -177,6 +177,12 @@ const startFake = async () => {
   const sessionCreateBodies: Array<Record<string, unknown>> = [];
   const permissionReplies: unknown[] = [];
   const questionReplies: unknown[] = [];
+  let todos: unknown[] = [{
+    id: "todo-1",
+    content: "Reconcile the current task list",
+    status: "in_progress",
+    priority: "high",
+  }];
   let aborts = 0;
 
   const server = http.createServer((req, res) => {
@@ -209,6 +215,9 @@ const startFake = async () => {
     }
     if (req.method === "GET" && path === "/session") return json(200, []);
     if (req.method === "GET" && path.match(/^\/session\/[^/]+\/message$/)) return json(200, []);
+    if (req.method === "GET" && path.match(/^\/session\/[^/]+\/todo$/)) {
+      return json(200, todos);
+    }
     const msg = path.match(/^\/session\/([^/]+)\/(message|prompt_async)$/);
     if (req.method === "POST" && msg) {
       const sessionID = msg[1]!;
@@ -293,6 +302,9 @@ const startFake = async () => {
     replay(ev: ScriptedEvent) {
       const frame = sseFrame(ev);
       for (const c of sseClients) c.write(frame);
+    },
+    setTodos(next: unknown[]) {
+      todos = next;
     },
   };
 };
@@ -534,6 +546,80 @@ test("SSE reconnect dedups by event id", async () => {
     await waitUntil(() => events.filter((e) => e.type === "permission/requested").length >= 1);
     await new Promise((r) => setTimeout(r, 50));
     assert.equal(events.filter((e) => e.type === "permission/requested").length, 1);
+  } finally {
+    await runtime.dispose();
+    fake.server.close();
+  }
+});
+
+test("a reconciled task list seeds the next live todo revision", async () => {
+  const fake = await startFake();
+  const runtime = await createTestRuntime(fake.baseUrl);
+  const events: RuntimeEvent[] = [];
+  runtime.onEvent((_sessionId, event) => events.push(event));
+  try {
+    await runtime.ensureSession({ sessionId: "task-revision", projectId: "p", cwd: "/tmp" });
+    await waitUntil(() => fake.sseClients.length >= 1);
+    const endpoint = await runtime.endpoint!();
+    const snapshot = await runtime.reconcile!({
+      canonicalSessionId: "task-revision",
+      backendSessionId: "ses_fake_1",
+      authorityId: endpoint.authorityId,
+      generation: endpoint.generation,
+      continuity: endpoint.continuity,
+      location: endpoint.location,
+      reconciliationOrdinal: 1,
+    });
+    assert.equal(
+      snapshot.events.find((entry) => entry.event.type === "task/snapshot")?.event.revision,
+      1,
+    );
+
+    fake.replay({
+      id: "evt_todo_changed",
+      type: "todo.updated",
+      properties: {
+        sessionID: "ses_fake_1",
+        todos: [{
+          id: "todo-1",
+          content: "Verify the mobile quick menu",
+          status: "completed",
+          priority: "high",
+        }],
+      },
+    });
+    await waitUntil(() => events.some((event) => event.type === "task/snapshot"));
+    assert.deepEqual(events.find((event) => event.type === "task/snapshot"), {
+      type: "task/snapshot",
+      listId: "todo",
+      revision: 2,
+      items: [{ id: "todo-1", text: "Verify the mobile quick menu", status: "done" }],
+    });
+
+    fake.setTodos([{
+      id: "todo-2",
+      content: "Recover the task list after reconnect",
+      status: "in_progress",
+      priority: "high",
+    }]);
+    const recovered = await runtime.reconcile!({
+      canonicalSessionId: "task-revision",
+      backendSessionId: "ses_fake_1",
+      authorityId: endpoint.authorityId,
+      generation: endpoint.generation,
+      continuity: endpoint.continuity,
+      location: endpoint.location,
+      reconciliationOrdinal: 2,
+    });
+    assert.deepEqual(
+      recovered.events.find((entry) => entry.event.type === "task/snapshot")?.event,
+      {
+        type: "task/snapshot",
+        listId: "todo",
+        revision: 3,
+        items: [{ id: "todo-2", text: "Recover the task list after reconnect", status: "active" }],
+      },
+    );
   } finally {
     await runtime.dispose();
     fake.server.close();

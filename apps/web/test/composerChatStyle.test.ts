@@ -30,6 +30,24 @@ test("the conversation keeps the complete glass dock in flow and fresh-turn spac
   assert.match(css, /padding-bottom:\s*calc\(var\(--conversation-group-gap\) \+ var\(--timeline-turn-sheet-space, 0px\)\)/);
 });
 
+test("the transcript remains the bounded vertical scroll root", () => {
+  const css = read("../src/styles.css");
+
+  for (const selector of [".timeline-wrap", ".timeline-shell", ".timeline-viewport"]) {
+    const start = css.indexOf(`${selector} {`);
+    assert.ok(start >= 0, `${selector} is missing`);
+    const block = css.slice(start, css.indexOf("}", start));
+    assert.match(block, /min-height:\s*0/);
+    assert.match(block, /overflow:\s*hidden/);
+  }
+  const start = css.indexOf(".timeline {");
+  const timeline = css.slice(start, css.indexOf("}", start));
+  assert.match(timeline, /overflow-y:\s*auto/);
+  assert.match(timeline, /overscroll-behavior-y:\s*contain/);
+  assert.match(timeline, /touch-action:\s*pan-y/);
+  assert.match(timeline, /-webkit-overflow-scrolling:\s*touch/);
+});
+
 test("new timeline surfaces animate without moving the measured row", () => {
   const css = read("../src/styles.css");
 
@@ -49,10 +67,11 @@ test("spawning is an above-composer activity status and never replaces the compo
   assert.match(composer, /!session && !creatingSession && <SessionContextBar/);
 });
 
-test("agent status docks center their content with token spacing", () => {
+test("agent status docks use compact borderless glass chrome", () => {
   const css = read("../src/styles.css");
 
-  assert.match(css, /\.agent-status-dock\s*\{[^}]*align-items:\s*center;[^}]*padding:\s*var\(--space-3\) var\(--space-4\)/s);
+  assert.match(css, /\.agent-status-dock\s*\{[^}]*min-height:\s*var\(--activity-row-height\);[^}]*align-items:\s*center;[^}]*padding:\s*var\(--space-2\) var\(--space-3\);[^}]*border:\s*0;[^}]*background:\s*var\(--material-glass\);[^}]*box-shadow:\s*var\(--shadow-sm\)/s);
+  assert.match(css, /\.agent-status-dock\.ui-glass-dock\s*\{[^}]*var\(--material-glass-control-fill\)[^}]*var\(--material-glass-control-edge\)/s);
   assert.match(css, /\.agent-status-dock-icon\s*\{[^}]*place-items:\s*center;[^}]*width:\s*var\(--icon-xl\)/s);
   assert.doesNotMatch(css, /\.agent-status-dock-icon\s*\{[^}]*margin-block-start:/s);
 });
@@ -146,6 +165,18 @@ test("answer footers expose the configured copy action", () => {
   assert.match(timeline, /copy:\s*tr\("timeline\.copyAnswer"\)/);
   assert.match(timeline, /id === "copy"[\s\S]*?copyText\(m\.text\)/);
   assert.match(timeline, /className="response-footer-actions"/);
+});
+
+test("sent attachments sit outside the message bubble and response info dismisses on the next activation", () => {
+  const timeline = read("../src/components/Timeline.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(timeline, /<\/div>\s*\{m\.attachments && m\.attachments\.length > 0 && \(\s*<AttachmentPills attachments=\{m\.attachments\} \/>/);
+  assert.match(css, /\.msg\.user > \.attachment-pills\s*\{[^}]*align-self:\s*flex-end;/s);
+  assert.match(timeline, /className="response-footer-metadata-trigger"[\s\S]*?<InfoIcon \/>/);
+  assert.match(timeline, /document\.addEventListener\("click", dismiss, true\)/);
+  assert.match(timeline, /queueMicrotask\(\(\) => setMetadataOpen\(false\)\)/);
+  assert.match(timeline, /aria-expanded=\{metadataOpen\}/);
 });
 
 test("thinking, tasks, and every execution share the compact activity-card treatment", () => {

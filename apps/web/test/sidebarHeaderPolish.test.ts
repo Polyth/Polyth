@@ -33,7 +33,9 @@ test("sidebar uses contextual tree actions and no permanent footer", async () =>
   assert.match(sidebar, /tr\("sidebar\.serverConnectionValue"/);
   assert.match(sidebar, /tr\("sidebar\.reconnect"\)/);
   assert.doesNotMatch(sessions, /session-sync-icon/);
-  assert.match(sessions, /sessionActivityLabel/);
+  assert.match(sessions, /groupSessionsByActivityDate/);
+  assert.match(sessions, /sessionDateGroupLabel/);
+  assert.doesNotMatch(sessions, /className="session-time"/);
   assert.match(sessions, /session-worktree-actions/);
   assert.match(sessions, /session-worktree-toggle-sign/);
   assert.doesNotMatch(sessions, /session-worktree-count/);

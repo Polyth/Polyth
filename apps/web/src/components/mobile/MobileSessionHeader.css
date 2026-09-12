@@ -1,5 +1,11 @@
-/* Session overview is a top-origin status surface: one quiet material with
-   only the information that changes what the user does next. */
+/* Session overview is a top-origin status surface: dense enough to scan, but
+   visually one frosted material rather than a stack of cards. */
+.sheet-backdrop-top:has(> .mobile-island-sheet) {
+  /* A translucent sheet over a dark scrim compounds into a flat gray panel.
+     This quick surface samples the workspace directly; the canonical sheet
+     material remains its readable opaque fallback when blur is unavailable. */
+  background: transparent;
+}
 .mobile-island-sheet.sheet-origin-top {
   border-top: 0;
   border-right: 0;

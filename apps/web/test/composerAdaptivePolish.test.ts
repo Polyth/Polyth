@@ -14,15 +14,17 @@ test("adaptive composer polish loads after the shared style layers", async () =>
     "adaptive composer rules are the final shell-level style layer");
 });
 
-test("composer attachments live in a reserved strip above the writing surface", async () => {
+test("composer attachments live outside the writing surface", async () => {
   const css = await read("../src/composerAdaptive.css");
+  const composer = await read("../src/components/Composer.tsx");
+  const pills = await read("../src/components/AttachmentPills.tsx");
 
-  assert.ok(css.includes(".composer-simple .composer-card:has(> .attachment-pills)"));
-  assert.match(css, /margin-block-start:\s*calc\(var\(--control-h-sm\) \+ var\(--space-2\)\)/);
-  assert.match(css, /\.composer-simple \.composer-card > \.attachment-pills\s*\{[\s\S]*?position:\s*absolute;/);
-  assert.match(css, /inset-block-end:\s*calc\(100% \+ var\(--space-2\)\)/);
+  assert.match(composer, /\{!session && attachmentStrip\}[\s\S]*?<SessionContextBar/);
+  assert.match(composer, /<QueuedMessageList[\s\S]*?\{session && attachmentStrip\}[\s\S]*?<GlassDock/);
+  assert.match(css, /\.composer-simple > \.attachment-pills\s*\{/);
   assert.match(css, /flex-wrap:\s*nowrap;/);
   assert.match(css, /overflow-x:\s*auto;/);
+  assert.match(pills, /!imagePreview && <span className="att-name"/);
 });
 
 test("queue and contributed composer actions stay compact and borderless", async () => {

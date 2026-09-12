@@ -61,3 +61,28 @@ test("phone navigator uses a compact rhythm and vector status icons", async () =
   assert.match(polish, /\.mobile-nav-project-action\s*\{[^}]*width:\s*var\(--tap\);[^}]*height:\s*var\(--tap\);/s);
   assert.match(polish, /\.mobile-nav-project-body\s*\{[^}]*padding-left:\s*var\(--space-4\);/s);
 });
+
+test("session actions stay a nested menu and can copy the session id", async () => {
+  const source = await read("../src/components/mobile/MobileNavigator.tsx");
+
+  assert.match(source, /copyText\(session\.id\)/);
+  assert.match(source, /id:\s*"copy-id"[\s\S]*?label:\s*tr\("sidebar\.sessionlist\.copySessionId"\)/);
+  assert.match(source, /<Menu[\s\S]*?phonePresentation="popover"[\s\S]*?open=\{menuOpen\}/);
+});
+
+test("phone chats are pinned-first, date-filtered, and grouped without row ages", async () => {
+  const [source, css] = await Promise.all([
+    read("../src/components/mobile/MobileNavigator.tsx"),
+    read("../src/components/mobile/MobileNavigator.css"),
+  ]);
+
+  assert.match(source, /list\.sort\(compareSessionNavigation\)/);
+  assert.match(source, /sessionMatchesDateFilter\(session, dateFilter\)/);
+  assert.match(source, /<SessionDateFilterControls value=\{dateFilter\} onChange=\{setDateFilter\}/);
+  assert.match(source, /className="mobile-nav-date-divider is-pinned"/);
+  assert.match(source, /className="mobile-nav-pin-icon"/);
+  assert.doesNotMatch(source, /function activityLabel/);
+  assert.doesNotMatch(source, /mobile-nav-session-time/);
+  assert.match(css, /\.mobile-nav-session-row\.is-pinned:not\(\.is-active\)/);
+  assert.match(css, /\.mobile-nav-date-divider::before,[\s\S]*?background:\s*var\(--border-soft\)/);
+});

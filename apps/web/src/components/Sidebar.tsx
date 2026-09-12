@@ -13,6 +13,7 @@ import {
 import { friendlyError } from "../settings.ts";
 import { Icon } from "../icons.tsx";
 import SessionList from "./sidebar/SessionList.tsx";
+import SessionDateFilterControls from "./sidebar/SessionDateFilterControls.tsx";
 import ImportSessionsDialog from "./ImportSessionsDialog.tsx";
 import { useShellMode } from "../responsiveShell.ts";
 import { useModalSurface } from "./a11y/Dialog.tsx";
@@ -46,6 +47,12 @@ import { useInlineRename } from "./input/inlineRename.ts";
 import {
   PULL_REFRESH_DISTANCE, pullRefreshDistance, type GesturePoint,
 } from "../mobileGestures.ts";
+import {
+  EMPTY_SESSION_DATE_FILTER,
+  sessionDateFilterActive,
+  sessionMatchesDateFilter,
+  type SessionDateFilter,
+} from "../sessionDates.ts";
 
 const EXPANDED_PROJECTS_KEY = "polyth.sidebar.expandedProjects";
 
@@ -96,6 +103,7 @@ export default function Sidebar() {
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [appearanceProjectId, setAppearanceProjectId] = useState<string | null>(null);
   const [attentionOnly, setAttentionOnly] = useState(false);
+  const [dateFilter, setDateFilter] = useState<SessionDateFilter>(EMPTY_SESSION_DATE_FILTER);
   const [pullDistance, setPullDistance] = useState(0);
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const syncStatus = useSyncExternalStore(subscribeSyncStatus, getSyncStatus, () => "disconnected");
@@ -132,9 +140,8 @@ export default function Sidebar() {
   };
   const visibleProjects = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    const matchesAttention = (projectId: string) => sessions.some((session) =>
-      session.projectId === projectId
-      && session.status !== "archived"
+    const matchesAttention = (candidates: typeof sessions) => candidates.some((session) =>
+      session.status !== "archived"
       && (session.status === "working"
         || session.status === "waiting"
         || session.status === "reconciling"
@@ -142,25 +149,28 @@ export default function Sidebar() {
         || (session.attention?.questions ?? 0) > 0
         || (session.attention?.permissions ?? 0) > 0));
     const filtered = projects.filter((candidate) => {
-      if (attentionOnly && !matchesAttention(candidate.id)) return false;
+      const candidates = sessions.filter((session) =>
+        session.projectId === candidate.id && sessionMatchesDateFilter(session, dateFilter));
+      if (sessionDateFilterActive(dateFilter) && candidates.length === 0) return false;
+      if (attentionOnly && !matchesAttention(candidates)) return false;
       if (!needle) return true;
       if (`${candidate.name} ${candidate.path}`.toLowerCase().includes(needle)) return true;
-      return sessions.some((session) =>
-        session.projectId === candidate.id
-        && `${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLowerCase().includes(needle));
+      return candidates.some((session) =>
+        `${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLowerCase().includes(needle));
     });
     if (sort === "manual") return applyManualProjectOrder(filtered, projectOrder);
     return filtered.sort((a, b) => {
       if (sort === "name") return (a.name || a.path).localeCompare(b.name || b.path);
       const latest = (projectId: string) => sessions.reduce(
         (value, session) => session.projectId === projectId
+          && sessionMatchesDateFilter(session, dateFilter)
           ? Math.max(value, session.lastTurnAt ?? session.createdAt)
           : value,
         0,
       );
       return latest(b.id) - latest(a.id) || (a.name || a.path).localeCompare(b.name || b.path);
     });
-  }, [attentionOnly, projectOrder, projects, query, sessions, sort]);
+  }, [attentionOnly, dateFilter, projectOrder, projects, query, sessions, sort]);
   // UX-A390: below the compact seam (COMPACT_MAX_WIDTH) the sidebar is a modal
   // drawer — every portrait tablet and small window included. It never opens by
   // itself when the viewport shrinks — wide visibility is not a persisted
@@ -347,7 +357,7 @@ export default function Sidebar() {
   };
 
   const sortEntries: MenuEntry[] = [
-    { heading: tr("sidebar.sortSessions") },
+    { heading: tr("sidebar.sortProjects") },
     {
       id: "recent",
       label: tr("sidebar.recentActivity"),
@@ -480,15 +490,15 @@ export default function Sidebar() {
                   />
                 )}
                 <Menu
-                  label={tr("sidebar.sortSessions")}
-                  title={tr("sidebar.sortSessions")}
+                  label={tr("sidebar.sortProjects")}
+                  title={tr("sidebar.sortProjects")}
                   align="start"
                   entries={sortEntries}
                 >
                   {(trigger) => (
                     <IconButton
                       icon={SortIcon}
-                      label={tr("sidebar.sortSessions")}
+                      label={tr("sidebar.sortProjects")}
                       className={`sidebar-drawer-tool${sort !== "recent" ? " active" : ""}`}
                       {...trigger}
                     />
@@ -499,12 +509,14 @@ export default function Sidebar() {
                   title={tr("sidebar.filterSessions")}
                   align="start"
                   entries={filterEntries}
+                  className="session-filter-menu"
+                  footer={<SessionDateFilterControls value={dateFilter} onChange={setDateFilter} />}
                 >
                   {(trigger) => (
                     <IconButton
                       icon={FilterIcon}
                       label={tr("sidebar.filterSessions")}
-                      className={`sidebar-drawer-tool${attentionOnly ? " active" : ""}`}
+                      className={`sidebar-drawer-tool${attentionOnly || sessionDateFilterActive(dateFilter) ? " active" : ""}`}
                       {...trigger}
                     />
                   )}
@@ -561,7 +573,7 @@ export default function Sidebar() {
           )}
           <div className="sidebar-filter">
             <Menu
-              label={tr("sidebar.sortSessionsCurrentlyValue", {
+              label={tr("sidebar.sortProjectsCurrentlyValue", {
                 value: sort === "name"
                   ? tr("sidebar.projectName")
                   : sort === "manual"
@@ -571,12 +583,14 @@ export default function Sidebar() {
               title={tr("sidebar.listOptions")}
               align="end"
               entries={[...sortEntries, "separator", ...filterEntries]}
+              className="session-filter-menu"
+              footer={<SessionDateFilterControls value={dateFilter} onChange={setDateFilter} />}
             >
               {(trigger) => (
                 <IconButton
                   icon={FilterIcon}
                   label={tr("sidebar.listOptions")}
-                  className={`sidebar-list-options${attentionOnly ? " active" : ""}`}
+                  className={`sidebar-list-options${attentionOnly || sessionDateFilterActive(dateFilter) ? " active" : ""}`}
                   {...trigger}
                 />
               )}
@@ -672,6 +686,7 @@ export default function Sidebar() {
                     projectId={p.id}
                     query={projectMatches ? "" : query}
                     attentionOnly={attentionOnly}
+                    dateFilter={dateFilter}
                     selectMode={selectMode}
                     selectedSessionIds={selectedSessionIds}
                     onToggleSelected={toggleSelectedSession}
@@ -853,6 +868,7 @@ export default function Sidebar() {
                       projectId={p.id}
                       query={projectQuery}
                       attentionOnly={attentionOnly}
+                      dateFilter={dateFilter}
                       selectMode={selectMode}
                       selectedSessionIds={selectedSessionIds}
                       onToggleSelected={toggleSelectedSession}
@@ -873,6 +889,7 @@ export default function Sidebar() {
                     : query
                 }
                 attentionOnly={attentionOnly}
+                dateFilter={dateFilter}
                 selectMode={selectMode}
                 selectedSessionIds={selectedSessionIds}
                 onToggleSelected={toggleSelectedSession}

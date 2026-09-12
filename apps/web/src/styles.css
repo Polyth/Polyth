@@ -889,8 +889,12 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   background: var(--session-blue-soft, var(--accent-wash));
   opacity: 1;
 }
-/* Archived rows stay subdued via ink roles, never whole-row opacity — the
-   status/time labels must keep normal-text contrast (UX-FIXTURE-VISUAL P1). */
+.session-row.pinned:not(.active) .session-btn::before {
+  background: color-mix(in srgb, var(--accent-wash) 58%, transparent);
+  opacity: 1;
+}
+/* Archived rows stay subdued via ink roles, never whole-row opacity — status
+   labels must keep normal-text contrast (UX-FIXTURE-VISUAL P1). */
 .session-row.archived .session-title { color: var(--muted); }
 .session-title {
   grid-column: 1;
@@ -904,8 +908,18 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   overflow: hidden;
 }
 .session-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-pin-icon { display: inline-flex; flex: none; color: var(--accent); }
-.session-pin-icon svg { width: 12px; height: 12px; }
+.session-pin-icon {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-round);
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+.session-pin-icon svg { width: 11px; height: 11px; }
 .session-worktree-label {
   flex: none;
   display: inline-flex;
@@ -965,8 +979,6 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   white-space: nowrap;
 }
 .session-row.search-result .session-status-zone { grid-row: 1 / 3; }
-.session-time { color: var(--faint); font: inherit; letter-spacing: -0.01em; }
-.session-btn:hover .session-time { color: var(--muted); }
 .session-status-indicator {
   display: inline-flex;
   align-items: center;
@@ -1247,21 +1259,36 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   border-radius: calc(var(--radius-control) - 3px); padding: 3px 5px;
 }
 
-.timeline-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.timeline-wrap {
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+  /* Keep the transcript's scroll extent inside its one designated scroll
+     root. Visible overflow here lets dynamic rows grow the flex chain instead
+     of producing a bounded .timeline scrollport on touch/WebKit layouts. */
+  overflow: hidden;
+}
 /* UX-TIMELINE-LAYOUT-01 §2.1: one flex shell stacks the reserved utility
    region, the single .timeline scroll root, and the reserved latest-reveal
    region as normal-flow siblings. Reserved chrome consumes layout space; it
    is never absolutely positioned over the transcript (sole exception: the
    right-gutter prompt rail below, which sits outside the reading column). */
-.timeline-shell { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.timeline-shell {
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+  overflow: hidden;
+}
 /* Non-scrolling positioning context for the prompt rail: the rail is a sibling
    of the .timeline scroller, so the scroller's overflow can never clip it. */
-.timeline-viewport { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.timeline-viewport {
+  position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column;
+  overflow: hidden;
+}
 /* Centered reading measure: fluid up to 768px, minimum 16px logical gutters
    at narrow widths (§2.2). Bottom padding is the ≥32px (target 40px) tail
    clearance between the last surface and the composer boundary. */
 .timeline {
   flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
   scroll-behavior: auto;
   /* Browser anchoring and Polyth's explicit fresh-turn/follow contract must not
      compete when an activity disclosure changes height. */
@@ -1552,6 +1579,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   scrollbar-gutter: stable;
 }
 .msg .attachment-pills { padding: 8px 0 0; }
+.msg.user > .attachment-pills { align-self: flex-end; max-inline-size: 100%; }
 .attachment-pill {
   display: inline-flex; align-items: center; gap: 6px; max-width: 260px;
   padding: 3px 8px; border: 1px solid var(--border); border-radius: var(--radius-round);
@@ -1564,6 +1592,37 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .attachment-pill .att-thumb {
   width: 22px; height: 22px; object-fit: cover; border-radius: var(--radius-control);
   border: 1px solid var(--border);
+}
+.attachment-pill.att-image:has(.att-thumb) {
+  position: relative;
+  width: calc(var(--tap) * 2);
+  height: calc(var(--tap) * 2);
+  padding: 0;
+  overflow: visible;
+  border-radius: var(--radius-card);
+  background: var(--sunken);
+}
+.attachment-pill.att-image:has(.att-thumb) .attachment-open,
+.attachment-pill.att-image:has(.att-thumb) .att-thumb {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: inherit;
+}
+.attachment-pill.att-image:has(.att-thumb) .att-remove {
+  position: absolute;
+  z-index: 1;
+  inset-block-start: calc(var(--space-1) * -1);
+  inset-inline-end: calc(var(--space-1) * -1);
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: var(--radius-round);
+  background: var(--material-glass-chrome);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
 }
 .attachment-pill .att-link {
   display: inline-flex; align-items: center; gap: 6px; min-width: 0;
@@ -3610,9 +3669,140 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
   padding: 8px 10px 2px; font-size: var(--font-meta); font-weight: 600; text-transform: uppercase;
   letter-spacing: 0.04em; color: var(--muted);
 }
-.session-pinned { margin-bottom: 5px; padding-bottom: 4px; border-bottom: 1px solid var(--border-soft); }
-.session-row[draggable="true"] { cursor: grab; }
-.session-row[draggable="true"]:active { cursor: grabbing; }
+.session-pinned { margin-bottom: var(--space-1); padding-bottom: var(--space-1); }
+.session-date-group { display: flex; min-width: 0; flex-direction: column; }
+.session-date-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 22px;
+  padding: var(--space-1) var(--space-3) 2px;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 560;
+  line-height: var(--font-meta-lh);
+  white-space: nowrap;
+}
+.session-date-divider::before,
+.session-date-divider::after {
+  content: "";
+  height: 1px;
+  flex: 1 1 auto;
+  background: var(--border-soft);
+}
+.session-date-divider > span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.session-pinned-divider { color: var(--accent); }
+.session-pinned-divider::before,
+.session-pinned-divider::after { background: var(--accent-line); }
+.session-pinned-divider svg { width: var(--icon-sm); height: var(--icon-sm); }
+
+.ui-menu.session-filter-menu { min-width: min(292px, calc(100vw - 2 * var(--screen-gutter))); }
+.session-date-filter {
+  min-width: 0;
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2) var(--space-1) var(--space-1);
+  border: 0;
+  border-top: 1px solid var(--border-soft);
+}
+.session-date-filter legend {
+  padding: 0 var(--control-pad-x-sm) var(--space-1);
+  color: var(--faint);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.session-date-filter-modes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-1);
+}
+.session-date-filter-modes label {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: max(30px, var(--hit-min));
+  place-items: center;
+  padding: var(--space-1);
+  border: 1px solid var(--control-border);
+  border-radius: calc(var(--radius-control) - 2px);
+  color: var(--muted);
+  cursor: pointer;
+  text-align: center;
+}
+.session-date-filter-modes label.is-selected {
+  border-color: var(--accent-line);
+  background: var(--accent-wash);
+  color: var(--text);
+}
+.session-date-filter-modes label:focus-within {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.session-date-filter-modes input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.session-date-filter-modes span {
+  overflow: hidden;
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-date-filter-range {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.session-date-filter-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+.session-date-filter-field input {
+  width: 100%;
+  min-width: 0;
+  min-height: max(32px, var(--hit-min));
+  padding: 3px var(--space-2);
+  border: 1px solid var(--control-border);
+  border-radius: calc(var(--radius-control) - 2px);
+  background: var(--input-bg);
+  color: var(--text);
+  color-scheme: light dark;
+  font: inherit;
+}
+.session-date-filter-field input:focus-visible { border-color: var(--accent-line); }
+.session-date-filter-clear {
+  min-height: max(30px, var(--hit-min));
+  margin-top: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: calc(var(--radius-control) - 2px);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+.session-date-filter-clear:hover,
+.session-date-filter-clear:focus-visible { background: var(--surface-overlay-hover); color: var(--text); }
+.ui-menu-sheet-list .session-date-filter {
+  margin-inline: var(--space-2);
+  padding-inline: var(--space-2);
+}
+.ui-menu-sheet-list .session-date-filter-modes label,
+.ui-menu-sheet-list .session-date-filter-field input,
+.ui-menu-sheet-list .session-date-filter-clear { min-height: var(--tap); }
+.ui-menu-sheet-list .session-date-filter-field input { font-size: var(--font-input); }
 :is(.project-entry, .project-tree-node).reorderable { cursor: grab; }
 :is(.project-entry, .project-tree-node).reorderable:active { cursor: grabbing; }
 .session-archived { border-top: 1px solid var(--border-soft); margin-top: 6px; padding-top: 2px; }
@@ -11986,19 +12176,38 @@ html[data-font] body :is(
 .ui-run-summary-diff { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--muted); font-size: var(--font-response-meta); white-space: nowrap; }
 
 .agent-status-dock {
+  --material-glass: var(--material-glass-medium);
   position: relative;
   width: min(calc(100% - (2 * var(--conversation-chrome-inset))), var(--chat-measure));
-  min-height: var(--agent-dock-height);
+  min-height: var(--activity-row-height);
   margin-inline: auto;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  background: var(--material-glass);
+  box-shadow: var(--shadow-sm);
   color: var(--text-dim);
   text-align: start;
   cursor: pointer;
   overflow: hidden;
+}
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  @media (prefers-reduced-motion: no-preference) {
+    html:not([data-reduce-animations="true"])
+      body:not([data-glass="off"]):not([data-desktop-low-resource="true"])
+      .agent-status-dock.ui-glass-dock {
+      background:
+        radial-gradient(
+          150% 120% at 16% 0%,
+          color-mix(in srgb, var(--material-glass) var(--material-glass-control-fill), transparent) 0%,
+          color-mix(in srgb, var(--material-glass) var(--material-glass-control-edge), transparent) 72%,
+          transparent 100%
+        );
+    }
+  }
 }
 .agent-status-dock::after {
   content: ""; position: absolute; inset-inline: var(--space-3); inset-block-end: 0; height: 1px;
@@ -12025,7 +12234,10 @@ html[data-font] body :is(
   line-height: var(--font-response-lh);
 }
 
+/* A live action carries the same frame as the block it is about to join, so
+   the fold is one surface settling into another rather than a shape change. */
 .activity-group,
+.activity-live,
 .task-list {
   width: 100%;
   max-width: 100%;
@@ -12036,8 +12248,10 @@ html[data-font] body :is(
   background: var(--surface-activity);
   box-shadow: var(--shadow-sm);
 }
-.activity-group { background: transparent; }
-.activity-group.current { border-color: color-mix(in srgb, var(--accent-line) 58%, var(--border-soft)); }
+.activity-group,
+.activity-live { background: transparent; }
+.activity-group.current,
+.activity-live { border-color: color-mix(in srgb, var(--accent-line) 58%, var(--border-soft)); }
 /* Nested summaries inherit the container's chrome. The surface is handed over
    through a variable so the shared hover state still wins the cascade. */
 .activity-group > .ui-run-summary,
@@ -12065,25 +12279,31 @@ html[data-font] body :is(
 .activity-group-items > :last-child { border-bottom: 0; }
 
 /* Live actions -------------------------------------------------------------
- * The block never opens itself. A running action rises out of the composer
- * into this dock, sits under the folded summary, and collapses up into the
- * block once it settles. A first, single action shows no block chrome at all
- * because there is nothing folded behind it yet. */
-.activity-group.live-only { border-color: transparent; box-shadow: none; }
-.activity-live-dock { min-width: 0; display: grid; padding-inline: var(--space-3); }
-.activity-group:not(.live-only) > .activity-live-dock { border-top: 1px solid var(--border-soft); }
+ * A running action is its own timeline card, framed exactly like the block it
+ * will join — inside the block it only added a second, differently framed list
+ * to a surface that is meant to stay folded. It rises out of the composer,
+ * stays readable while it runs, then folds up and away as the block absorbs
+ * it. The block itself never opens on its own. */
 .activity-live {
-  min-width: 0;
+  --activity-live-exit: 280ms;
+  --activity-live-exit-ease: cubic-bezier(0.4, 0, 0.7, 0.2);
   display: grid;
   grid-template-rows: 1fr;
+  transform-origin: 50% 0;
   transition:
-    grid-template-rows var(--motion-normal) var(--motion-ease),
-    opacity var(--motion-normal) var(--motion-ease),
-    transform var(--motion-normal) var(--motion-ease);
+    grid-template-rows var(--activity-live-exit) var(--activity-live-exit-ease),
+    /* Gone before the gap finishes closing: the fold never shows a squashed
+       ghost of the card, and its border collapses invisibly. */
+    opacity calc(var(--activity-live-exit) * 0.55) linear,
+    transform var(--activity-live-exit) var(--activity-live-exit-ease);
 }
-.activity-live.leaving { grid-template-rows: 0fr; opacity: 0; transform: translate3d(0, -6px, 0); }
-.activity-live-content { min-width: 0; min-height: 0; overflow: hidden; }
-.activity-live-dock > :last-child :is(.execution-row, .reasoning, .task-activity) { border-bottom: 0; }
+.activity-live.leaving {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translate3d(0, -8px, 0) scale(.985);
+}
+.activity-live-content { min-width: 0; min-height: 0; overflow: hidden; padding-inline: var(--space-3); }
+.activity-live-content > :is(.execution-row, .reasoning, .task-activity) { border-bottom: 0; }
 
 /* Reduced motion and low-resource mode keep the same structure: the row
    appears and folds away instantly instead of travelling. */
@@ -12093,23 +12313,23 @@ html[data-font] body :is(
 html[data-reduce-animations="true"] .activity-live,
 body[data-desktop-low-resource="true"] .activity-live { transition: none; }
 
-.activity-group .reasoning { border-bottom: 1px solid var(--hair); }
-.activity-group .reasoning-toggle,
-.activity-group .reasoning-heading {
+:is(.activity-group, .activity-live) .reasoning { border-bottom: 1px solid var(--hair); }
+:is(.activity-group, .activity-live) .reasoning-toggle,
+:is(.activity-group, .activity-live) .reasoning-heading {
   min-height: var(--activity-row-height);
   padding: var(--conversation-related-gap) 0;
 }
-.activity-group .reasoning-main strong {
+:is(.activity-group, .activity-live) .reasoning-main strong {
   color: var(--text-dim);
   font-size: var(--font-tool-label);
   line-height: var(--font-tool-label-lh);
 }
-.activity-group .reasoning-body {
+:is(.activity-group, .activity-live) .reasoning-body {
   color: var(--muted);
   font-size: var(--font-technical);
   line-height: var(--font-technical-lh);
 }
-.activity-group .task-activity {
+:is(.activity-group, .activity-live) .task-activity {
   min-height: var(--activity-row-height);
   align-items: center;
   margin: 0;
@@ -12120,7 +12340,7 @@ body[data-desktop-low-resource="true"] .activity-live { transition: none; }
   font-size: var(--font-technical);
 }
 
-.activity-group .tool-card.execution-row { animation: none; }
+:is(.activity-group, .activity-live) .tool-card.execution-row { animation: none; }
 .execution-summary.tool-disclosure {
   min-height: var(--activity-row-height);
   max-height: none;
@@ -12159,7 +12379,7 @@ body[data-desktop-low-resource="true"] .activity-live { transition: none; }
 .response-footer-duration { flex: none; white-space: nowrap; }
 .response-footer-duration::before { content: "·"; margin-inline-end: var(--space-2); color: var(--faint); }
 .response-footer-metadata { position: relative; flex: none; }
-.response-footer-metadata > summary {
+.response-footer-metadata-trigger {
   width: var(--control-h-sm);
   min-height: var(--tap);
   display: grid;
@@ -12167,11 +12387,13 @@ body[data-desktop-low-resource="true"] .activity-live { transition: none; }
   border-radius: var(--radius-control);
   color: var(--muted);
   cursor: pointer;
-  list-style: none;
+  border: 0;
+  background: transparent;
 }
-.response-footer-metadata > summary::-webkit-details-marker { display: none; }
-.response-footer-metadata > summary:hover { color: var(--text); background: var(--surface-overlay-hover); }
-.response-footer-metadata[open] > summary svg { transform: rotate(180deg); }
+.response-footer-metadata-trigger:hover,
+.response-footer-metadata-trigger:focus-visible,
+.response-footer-metadata-trigger[aria-expanded="true"] { color: var(--text); background: var(--surface-overlay-hover); }
+.response-footer-metadata-trigger svg { width: var(--icon-sm); height: var(--icon-sm); }
 .response-footer-metadata-grid {
   position: absolute;
   inset-inline-start: 0;
@@ -12248,12 +12470,12 @@ body[data-desktop-low-resource="true"] .activity-live { transition: none; }
   .response-footer-model { max-width: 28vw; }
   .response-footer-duration { display: none; }
   .response-footer-actions { opacity: 1; pointer-events: auto; }
-  .agent-status-dock { min-height: var(--agent-dock-height); padding-inline: var(--space-2); }
+  .agent-status-dock { min-height: var(--activity-row-height); padding-inline: var(--space-3); }
   .agent-status-dock-branch { display: none; }
   .agent-status-dock-primary strong { max-width: 36%; }
   .ui-run-summary-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .msg.user .bubble { max-inline-size: min(96%, 640px); }
-  .activity-group .task-activity-mark { width: var(--icon-md); flex-basis: var(--icon-md); }
+  :is(.activity-group, .activity-live) .task-activity-mark { width: var(--icon-md); flex-basis: var(--icon-md); }
 }
 
 /* Keep this after responsive timeline shorthands. The dock's height is already

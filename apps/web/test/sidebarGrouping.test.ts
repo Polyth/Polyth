@@ -5,8 +5,7 @@ import assert from "node:assert/strict";
 import type { SessionProjection } from "@polyth/contracts";
 import {
   applyManualProjectOrder, BUILTIN_GROUPINGS, getGroupingMode, groupSessions, listGroupings,
-  parseGroupingMode, registerGrouping, reorderPinnedSessions, setGroupingMode,
-  reorderManualProjects, sortPinnedSessions,
+  parseGroupingMode, registerGrouping, setGroupingMode, reorderManualProjects,
 } from "../src/sidebarPrefs.ts";
 
 const session = (over: Partial<SessionProjection> & { id: string }): SessionProjection => ({
@@ -59,26 +58,11 @@ test("flat and folder modes return one structural bucket", () => {
   }
 });
 
-test("pinned sessions sort by position and reorder to normalized persisted positions", () => {
-  const sessions = [
-    session({ id: "plain", updatedAt: 50 }),
-    session({ id: "second", updatedAt: 20, pinned: { position: 8 } }),
-    session({ id: "first", updatedAt: 10, pinned: { position: 2 } }),
-    session({ id: "tie-newer", updatedAt: 30, pinned: { position: 8 } }),
-  ];
-  assert.deepEqual(sortPinnedSessions(sessions).map((item) => item.id), ["first", "tie-newer", "second"]);
-
-  const reordered = reorderPinnedSessions(sessions, "second", "first");
-  assert.deepEqual(reordered.map((item) => item.id), ["second", "first", "tie-newer"]);
-  assert.deepEqual(reordered.map((item) => item.pinned?.position), [0, 1, 2]);
-  assert.equal(reorderPinnedSessions(sessions, "missing", "first")[0]?.id, "first");
-});
-
-test("manual ordering moves a session into its drop target's slot", () => {
-  const sessions = [session({ id: "new" }), session({ id: "middle" }), session({ id: "old" })];
-  const order = reorderManualProjects(sessions.map((item) => item.id), "old", "new");
+test("manual ordering moves a project into its drop target's slot", () => {
+  const projects = [session({ id: "new" }), session({ id: "middle" }), session({ id: "old" })];
+  const order = reorderManualProjects(projects.map((item) => item.id), "old", "new");
   assert.deepEqual(order, ["old", "new", "middle"]);
-  assert.deepEqual(applyManualProjectOrder(sessions, order).map((item) => item.id), order);
+  assert.deepEqual(applyManualProjectOrder(projects, order).map((item) => item.id), order);
 });
 
 test("manual order defaults to newest-created first when nothing was dragged", () => {

@@ -89,6 +89,11 @@ const transportForPull = (): OpenCodeTransport => ({
         },
       ] as T;
     }
+    if (request.path.startsWith("/session/session-a/todo")) {
+      return [
+        { id: "todo-a", content: "Restore the mobile task list", status: "in_progress", priority: "high" },
+      ] as T;
+    }
     if (request.path.startsWith("/permission")) {
       return [
         {
@@ -159,10 +164,52 @@ test("pull reconciliation recovers identified pending permission and question", 
     revision: "pending",
   }]);
   assert.equal(snapshot.questions[0]?.requestId, "question-a");
+  assert.deepEqual(
+    snapshot.events.find((entry) => entry.event.type === "task/snapshot")?.event,
+    {
+      type: "task/snapshot",
+      listId: "todo",
+      revision: 1,
+      items: [{ id: "todo-a", text: "Restore the mobile task list", status: "active" }],
+    },
+  );
   assert.ok(
     snapshot.events.every((entry) => entry.event.type !== "assistant/message"),
     "unmapped user history is never re-appended as recovered model output",
   );
+});
+
+test("todo.updated is a durable identified task observation", () => {
+  const observed: ObservationBinding = {
+    authorityId: endpoint.authorityId,
+    generation: endpoint.generation,
+    location: endpoint.location,
+    backendSessionId: "session-a",
+    reconciliationOrdinal: 18,
+  };
+  const normalized = normalizeOcObservation({
+    data: {
+      id: "event-todo-1",
+      type: "todo.updated",
+      data: {
+        sessionID: "session-a",
+        todos: [{ id: "todo-a", content: "Show tasks", status: "pending", priority: "high" }],
+      },
+    },
+    channel: "sse",
+    observed,
+    current: observed,
+    state: createTranslateState(),
+  });
+  assert.equal(normalized.kind, "accepted");
+  if (normalized.kind !== "accepted") throw new Error("todo observation was not accepted");
+  assert.equal(normalized.observation.identity.artifactKind, "tool");
+  assert.deepEqual(normalized.observation.events, [{
+    type: "task/snapshot",
+    listId: "todo",
+    revision: 1,
+    items: [{ id: "todo-a", text: "Show tasks", status: "pending" }],
+  }]);
 });
 
 test("live and pulled multi-event tool facts share per-event semantic revisions", async () => {

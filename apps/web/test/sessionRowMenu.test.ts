@@ -96,6 +96,7 @@ const {
 const { default: SessionList } = await import("../src/components/sidebar/SessionList.tsx");
 const { default: Sidebar } = await import("../src/components/Sidebar.tsx");
 const { default: AlertDialog } = await import("../src/components/AlertDialog.tsx");
+const { sessionDateInputValue } = await import("../src/sessionDates.ts");
 
 const session = (over: Partial<SessionProjection>): SessionProjection => ({
   id: "s", projectId: "p1", title: "session", status: "idle",
@@ -349,12 +350,77 @@ test("pinned chats are first across worktrees and their menu offers Unpin", asyn
     );
 
     const pinnedRow = rowOf(container, "Pinned worktree");
+    assert.equal(pinnedRow.getAttribute("draggable"), null, "pinned chats are prioritized without drag sorting");
+    assert.ok(pinnedRow.classList.contains("pinned"), "the pinned state has a themed row marker");
+    assert.match(pinned.querySelector(".session-pinned-divider")?.textContent ?? "", /Pinned chats/);
     await act(async () => {
       pinnedRow.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, cancelable: true }));
     });
     const items = menuItems().map((item) => item.textContent?.trim());
     assert.ok(items.includes("Unpin"), `pinned row offers Unpin (got: ${items.join(", ")})`);
     assert.ok(!items.includes("Pin to top"), "pinned row does not offer Pin to top");
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("Pin to top writes a position ahead of every existing pin", async () => {
+  activateProject("p1");
+  setSessions("p1", [
+    session({ id: "existing", title: "Existing pin", pinned: { position: 0 } }),
+    session({ id: "target", title: "Pin me" }),
+  ]);
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    fetchCalls.length = 0;
+    await act(async () => { root.render(createElement(SessionList, { projectId: "p1" })); });
+    const target = rowOf(container, "Pin me");
+    assert.equal(target.getAttribute("draggable"), null, "ordinary chats cannot be custom-sorted");
+    await act(async () => {
+      target.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, cancelable: true }));
+    });
+    const pin = menuItems().find((button) => button.textContent?.trim() === "Pin to top");
+    assert.ok(pin);
+    await act(async () => {
+      pin!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const shift = fetchCalls.find((call) => call.method === "PATCH" && call.url === "/api/sessions/existing/organize");
+    const organize = fetchCalls.find((call) => call.method === "PATCH" && call.url === "/api/sessions/target/organize");
+    assert.ok(shift && organize);
+    assert.deepEqual(JSON.parse(shift!.body ?? "{}"), { pinned: { position: 1 } });
+    assert.deepEqual(JSON.parse(organize!.body ?? "{}"), { pinned: { position: 0 } });
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("session date filters and day dividers replace per-row age labels", async () => {
+  const today = new Date(2026, 8, 12, 14).getTime();
+  const yesterday = new Date(2026, 8, 11, 14).getTime();
+  activateProject("p1");
+  setSessions("p1", [
+    session({ id: "today", title: "Today chat", createdAt: today, updatedAt: today }),
+    session({ id: "yesterday", title: "Yesterday chat", createdAt: yesterday, updatedAt: yesterday }),
+  ]);
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => {
+      root.render(createElement(SessionList, {
+        projectId: "p1",
+        dateFilter: { mode: "date", date: sessionDateInputValue(today), from: "", to: "" },
+      }));
+    });
+    assert.match(container.textContent ?? "", /Today chat/);
+    assert.doesNotMatch(container.textContent ?? "", /Yesterday chat/);
+    assert.equal(container.querySelectorAll(".session-date-divider").length, 1);
+    assert.equal(container.querySelector(".session-time"), null, "chat age is not repeated on every row");
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();

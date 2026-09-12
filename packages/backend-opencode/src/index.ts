@@ -1060,7 +1060,27 @@ export const createOpenCodeRuntimeFacade = (
       }
       reconciliationOrdinals.set(binding.canonicalSessionId, ordinal!);
       const protocol = await lifecycle.protocol();
-      return lifecycle.reconcile({ ...binding, protocol }, after);
+      const snapshot = await lifecycle.reconcile({ ...binding, protocol }, after);
+      if (!snapshot.events.some((entry) => entry.event.type === "task/snapshot")) {
+        return snapshot;
+      }
+
+      // Pull adapters rebuild a fresh translation state, while SSE translation
+      // is session-lived. Rebase pulled task snapshots onto that shared state
+      // so every changed replacement remains monotonic across reconnects.
+      const state = stateFor(binding.canonicalSessionId);
+      let revision = state.taskRevision;
+      let key = state.lastTaskKey;
+      const events = snapshot.events.map((entry) => {
+        if (entry.event.type !== "task/snapshot") return entry;
+        const nextKey = JSON.stringify(entry.event.items);
+        if (nextKey !== key) revision += 1;
+        key = nextKey;
+        return { ...entry, event: { ...entry.event, revision } };
+      });
+      state.taskRevision = revision;
+      state.lastTaskKey = key;
+      return { ...snapshot, events };
     },
     onObservation(cb) {
       observationListeners.add(cb);

@@ -1,7 +1,8 @@
 // Action menu with responsive presentation: an anchored menu surface on
 // desktop (canonical useDismissibleMenu semantics: outside press, Escape,
-// arrow navigation, focus restore) and the shared bottom Sheet on phones —
-// one entry list, zero duplicated business logic.
+// arrow navigation, focus restore) and the shared bottom Sheet by default on
+// phones. A nested phone action menu can remain anchored without duplicating
+// its entry list or business logic.
 //
 // Entries can carry selection semantics: `kind: "radio"`/`"checkbox"` maps to
 // menuitemradio/menuitemcheckbox with aria-checked and a leading check glyph
@@ -61,6 +62,9 @@ export interface MenuProps {
   children: (trigger: MenuTriggerProps) => ReactNode;
   align?: AnchoredAlign;
   className?: string;
+  /** Phone menus normally use a bottom sheet. Nested action menus may stay
+   *  anchored when replacing their parent surface would obscure context. */
+  phonePresentation?: "sheet" | "popover";
   /** Controlled open state for extra entry points (context menu, long-press,
    *  Shift+F10). Omit for the default trigger-toggled behavior. */
   open?: boolean;
@@ -84,7 +88,7 @@ function roleOf(action: MenuAction): "menuitem" | "menuitemradio" | "menuitemche
 
 export default function Menu({
   label, title, entries, children, align = "start", className,
-  open: controlledOpen, onOpenChange, returnFocusRef, footer,
+  phonePresentation = "sheet", open: controlledOpen, onOpenChange, returnFocusRef, footer,
 }: MenuProps) {
   const packageWindowOwner = usePackageWindowOwner();
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
@@ -93,7 +97,7 @@ export default function Menu({
     if (controlledOpen === undefined) setUncontrolledOpen(next);
     onOpenChange?.(next);
   };
-  const asSheet = useShellMode() === "phone";
+  const asSheet = useShellMode() === "phone" && phonePresentation === "sheet";
   const triggerRef = useRef<HTMLButtonElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const position = useAnchoredPosition(open && !asSheet, triggerRef, surfaceRef, { align });

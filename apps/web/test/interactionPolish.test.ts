@@ -88,8 +88,9 @@ test("shared selects render the chosen value once and use field styling", async 
 });
 
 test("P1 mobile refinements remain wired to their visible surfaces", async () => {
-  const [sessions, sidebar, settings, models, folder, empty, haptics, css] = await Promise.all([
+  const [sessions, sessionDates, sidebar, settings, models, folder, empty, haptics, css] = await Promise.all([
     read("../src/components/sidebar/SessionList.tsx"),
+    read("../src/sessionDates.ts"),
     read("../src/components/Sidebar.tsx"),
     read("../src/components/SettingsView.tsx"),
     read("../../../packages/models/widgets/ModelPicker.tsx"),
@@ -101,8 +102,9 @@ test("P1 mobile refinements remain wired to their visible surfaces", async () =>
 
   assert.match(sessions, /aria-busy=\{opening \|\| undefined\}/, "session switching exposes loading state");
   assert.match(sessions, /data-swipe=\{/, "session rows expose swipe state");
-  assert.match(sessions, /age < 7 \* 24 \* 60 \* 60_000\) return ago\(activityAt, now\)/,
-    "recent timestamps use relative labels before falling back to calendar dates");
+  assert.match(sessions, /groupSessionsByActivityDate/, "session recency is shown once per date group");
+  assert.match(sessionDates, /new Intl\.RelativeTimeFormat\(locale, \{ numeric: "auto" \}\)/,
+    "recent date dividers use localized relative labels before calendar dates");
   assert.match(sidebar, /className=\{`pull-refresh/, "the project/session picker supports pull-to-refresh");
   assert.match(settings, /isEdgeBackSwipe/, "settings supports the mobile back gesture");
   assert.match(models, /className="model-row-provider-logo"/, "mobile model rows identify providers");

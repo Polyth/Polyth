@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { SessionEvent, SessionProjection } from "@polyth/contracts";
-import { displaySessionTitle } from "../../format.ts";
+import { ago, displaySessionTitle, isPlaceholderTitle } from "../../format.ts";
 import { Icon } from "../../icons.tsx";
 import { formatNumber, tr } from "../../i18n/index.ts";
 import {
@@ -15,7 +15,12 @@ import {
   type IslandTask,
 } from "../../mobileIsland.ts";
 import { resolveSessionStatus, type SessionRowStatus } from "../../sessionStatus.ts";
-import { openSession, prefetchSessionTail } from "../../init.ts";
+import {
+  openSession,
+  pollSessionTail,
+  prefetchSessionTail,
+  refreshSessions,
+} from "../../init.ts";
 import { setRailPlugin, setSidebarOpen, startNewSession, useActiveModel, useStore } from "../../store.ts";
 import { firstUserTextCached, lastUserTextCached } from "../../utils.ts";
 import { ComposeIcon, GlassIsland, IconButton, LayersIcon, MenuIcon } from "../ui/index.ts";
@@ -29,6 +34,8 @@ import {
 import { useUiSettings } from "../../uiPrefs.ts";
 import ContextIndicator from "../ContextIndicator.tsx";
 import "./MobileSessionHeader.css";
+
+const SESSION_TITLE_POLL_MS = 2_000;
 
 function SessionLiveIcon({ status }: { status: SessionRowStatus }) {
   if (status.kind === "working") {
@@ -193,6 +200,14 @@ export default function MobileSessionHeader() {
     () => recentSessionsForIsland(sessions, session?.id),
     [sessions, session?.id],
   );
+  const unresolvedTitleIds = useMemo(
+    () => recent
+      .filter((item) => isPlaceholderTitle(item.title, item.id)
+        && (item.lastTurnAt !== undefined || item.status !== "idle"))
+      .map((item) => item.id),
+    [recent],
+  );
+  const unresolvedTitleIdsRef = useRef<readonly string[]>(unresolvedTitleIds);
   const peers = useMemo(
     () => notablePeers(sessions, session?.id, events),
     [sessions, session?.id, events],
@@ -202,6 +217,32 @@ export default function MobileSessionHeader() {
     for (const peer of peers) prefetchSessionTail(peer.id);
     for (const item of recent) prefetchSessionTail(item.id);
   }, [peers, recent]);
+
+  useEffect(() => {
+    unresolvedTitleIdsRef.current = unresolvedTitleIds;
+  }, [unresolvedTitleIds]);
+
+  useEffect(() => {
+    if (surface !== "island" || !projectId) return;
+    let disposed = false;
+    let timer: number | undefined;
+    const poll = async (): Promise<void> => {
+      // Projections carry native/generated titles; passive tails cover the
+      // short interval where a new background session has a durable prompt
+      // but its semantic title is still pending. Recursive scheduling avoids
+      // overlapping reads on slow mobile links.
+      await Promise.allSettled([
+        refreshSessions(projectId),
+        ...unresolvedTitleIdsRef.current.map((id) => pollSessionTail(id)),
+      ]);
+      if (!disposed) timer = window.setTimeout(() => void poll(), SESSION_TITLE_POLL_MS);
+    };
+    void poll();
+    return () => {
+      disposed = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [surface, projectId]);
 
   const labels = useMemo(() => ({
     task: tr("mobile.island.kindTask"),

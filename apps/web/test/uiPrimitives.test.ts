@@ -175,6 +175,9 @@ test("AgentStatusDock is a passive live status unless a details action exists", 
     assert.equal(status.tagName, "DIV");
     assert.equal(status.getAttribute("role"), "status");
     assert.equal(status.getAttribute("aria-busy"), "true");
+    assert.ok(status.classList.contains("ui-glass-dock--medium"));
+    assert.ok(!status.classList.contains("ui-glass-dock--strong"));
+    assert.equal(status.querySelector(".agent-status-dock-secondary"), null);
     assert.equal(passive.container.querySelector("button"), null);
   } finally { await passive.unmount(); }
 
@@ -184,6 +187,7 @@ test("AgentStatusDock is a passive live status unless a details action exists", 
     model: "Agent",
     status: "Running tests",
     label: "Open active run",
+    files: "1 file",
     onClick: () => { opened += 1; },
   }));
   try {
@@ -191,6 +195,7 @@ test("AgentStatusDock is a passive live status unless a details action exists", 
     await act(async () => { button.click(); });
     assert.equal(opened, 1);
     assert.equal(button.querySelector('[role="status"]')?.textContent, "Running tests");
+    assert.equal(button.querySelector(".agent-status-dock-secondary")?.textContent, "1 file");
   } finally { await actionable.unmount(); }
 });
 
@@ -299,6 +304,35 @@ test("Menu (desktop): opens a role=menu popover, selects, and dismisses on Escap
     });
     assert.equal(document.body.querySelector('[role="menu"]'), null, "Escape closes the menu");
   } finally { await view.unmount(); }
+});
+
+test("Menu: a nested phone action menu can stay an anchored popover", async () => {
+  media.compact = true;
+  media.phone = true;
+  let picked = "";
+  const view = await mount(createElement(ui.Menu, {
+    label: "Session actions",
+    phonePresentation: "popover",
+    entries: [{ id: "copy", label: "Copy session ID", onSelect: () => { picked = "copy"; } }],
+    children: (trigger: object) =>
+      createElement("button", { ...trigger, className: "menu-trigger" }, "Actions"),
+  }));
+  try {
+    const trigger = view.container.querySelector<HTMLButtonElement>(".menu-trigger")!;
+    assert.equal(trigger.getAttribute("aria-haspopup"), "menu");
+    await act(async () => { trigger.click(); });
+
+    const menu = document.body.querySelector<HTMLElement>('[role="menu"]');
+    assert.ok(menu, "the nested action stays a compact menu");
+    assert.equal(document.body.querySelector(".sheet-backdrop"), null);
+    await act(async () => { menu!.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click(); });
+    assert.equal(picked, "copy");
+    assert.equal(document.body.querySelector('[role="menu"]'), null);
+  } finally {
+    await view.unmount();
+    media.compact = false;
+    media.phone = false;
+  }
 });
 
 test("Menu selection semantics: radio/checkbox roles, headings, swatches, stay-open checkboxes", async () => {

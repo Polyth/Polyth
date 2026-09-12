@@ -729,11 +729,21 @@ const backfillInFlight = new Set<string>();
 const tailRequests = new Map<string, { passive: boolean; promise: Promise<SessionEvent[]> }>();
 const prefetchedSessions = new Set<string>();
 
-function requestSessionTail(sessionId: string, passive: boolean): Promise<SessionEvent[]> {
+function requestSessionTail(
+  sessionId: string,
+  passive: boolean,
+  afterSeq = 0,
+): Promise<SessionEvent[]> {
   const existing = tailRequests.get(sessionId);
   if (existing) return existing.promise;
   markSessionPerformance("request_started", sessionId);
-  const request = api.getEvents(sessionId, 0, { limit: INITIAL_EVENT_WINDOW, prefetch: passive })
+  // A cold request asks for the newest bounded window. Once a tail is cached,
+  // a poll reads the complete suffix so it cannot create a sequence gap when
+  // a busy background session emits more than one window between polls.
+  const request = api.getEvents(sessionId, afterSeq, {
+    ...(afterSeq === 0 ? { limit: INITIAL_EVENT_WINDOW } : {}),
+    prefetch: passive,
+  })
     .then((events) => {
       markSessionPerformance("response_received", sessionId);
       const active = store.getState().activeSessionId;
@@ -761,6 +771,21 @@ export function prefetchSessionTail(sessionId: string): void {
   void requestSessionTail(sessionId, true).catch(() => {
     prefetchedSessions.delete(sessionId); // a later pointer intent may retry
   });
+}
+
+/** Revalidate an already-prefetched background tail without activating it.
+ *  The mobile session overview uses this only for active placeholder-titled
+ *  rows, whose first durable user message can arrive after the initial empty
+ *  prefetch. Applying that suffix lets the normal store title projection
+ *  update the row without making a navigation read interactive. */
+export async function pollSessionTail(sessionId: string): Promise<void> {
+  prefetchedSessions.add(sessionId);
+  try {
+    await requestSessionTail(sessionId, true, store.lastSeq(sessionId));
+  } catch (error) {
+    prefetchedSessions.delete(sessionId);
+    throw error;
+  }
 }
 
 async function reconcileSession(sessionId: string, afterSeq: number, generation: number): Promise<void> {

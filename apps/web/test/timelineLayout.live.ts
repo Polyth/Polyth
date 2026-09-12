@@ -844,12 +844,12 @@ test("live expanded agent action remains above the full status and composer dock
   const lp = await openApp({ width: 1280, height: 620, session: workSessionId, ready: ".msg" });
   const { page } = lp;
   await sendMessage(workSessionId, "Run the live action visibility gate.");
-  await page.waitForSelector(".activity-group.current .execution-row.current.open", { state: "visible", timeout: 15_000 });
+  await page.waitForSelector(":is(.activity-group, .activity-live) .execution-row.current.open", { state: "visible", timeout: 15_000 });
   await page.waitForTimeout(100);
 
   const geometry = await page.evaluate(() => {
     const timeline = document.querySelector<HTMLElement>(".timeline")!;
-    const action = document.querySelector<HTMLElement>(".activity-group.current .execution-row.current.open")!;
+    const action = document.querySelector<HTMLElement>(":is(.activity-group, .activity-live) .execution-row.current.open")!;
     const dock = document.querySelector<HTMLElement>(".conversation-composer-dock")!;
     const port = timeline.getBoundingClientRect();
     const row = action.getBoundingClientRect();

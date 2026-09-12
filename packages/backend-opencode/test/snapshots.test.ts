@@ -61,6 +61,39 @@ test("todowrite emits a full task snapshot with normalized statuses", () => {
   assert.deepEqual(snap.items.map((i) => i.text), ["explore", "build", "test", "drop"]);
 });
 
+test("the authoritative todo.updated event emits and clears task snapshots", () => {
+  const state = createTranslateState();
+  const updated = translateOcEvent({
+    type: "todo.updated",
+    properties: {
+      sessionID: "ses-1",
+      todos: [
+        { id: "1", content: "inspect", status: "completed", priority: "high" },
+        { id: "2", content: "fix", status: "in_progress", priority: "medium" },
+      ],
+    },
+  }, state);
+  assert.deepEqual(updated, [{
+    type: "task/snapshot",
+    listId: "todo",
+    revision: 1,
+    items: [
+      { id: "1", text: "inspect", status: "done" },
+      { id: "2", text: "fix", status: "active" },
+    ],
+  }]);
+
+  assert.deepEqual(translateOcEvent({
+    type: "todo.updated",
+    properties: { sessionID: "ses-1", todos: [] },
+  }, state), [{
+    type: "task/snapshot",
+    listId: "todo",
+    revision: 2,
+    items: [],
+  }]);
+});
+
 test("identical todo state does not re-emit; changed state bumps revision", () => {
   const state = createTranslateState();
   const input = { todos: [{ id: "1", content: "a", status: "pending" }] };

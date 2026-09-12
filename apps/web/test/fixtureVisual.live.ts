@@ -463,7 +463,7 @@ test("P1: sidebar status/time labels and the header subtitle meet 4.5:1", async 
     return {
       selectedStatus: contrast(".session-row.active .session-sub"),
       restingStatus: contrast(".session-row:not(.active) .session-sub"),
-      sessionTime: contrast(".session-row:not(.active) .session-time"),
+      sessionDate: contrast(".session-date-divider"),
       headerSub: contrast(".header-sub"),
       archivedTitle: contrast(".session-row.archived .session-title"),
     };
@@ -472,7 +472,7 @@ test("P1: sidebar status/time labels and the header subtitle meet 4.5:1", async 
   const cases: Array<[string, number | null]> = [
     ["selected status label", ratios.selectedStatus],
     ["resting status label", ratios.restingStatus],
-    ["session time label", ratios.sessionTime],
+    ["session date divider", ratios.sessionDate],
     ["header subtitle", ratios.headerSub],
     ["archived session title", ratios.archivedTitle],
   ];

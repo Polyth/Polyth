@@ -2081,6 +2081,16 @@ export default function Composer({
   const stateClass = phoneLayout
     ? ` composer-mobile ${expanded ? "composer-expanded" : "composer-collapsed"}${inputFocused ? " composer-input-active" : ""}${hasDraft ? " composer-has-draft" : ""}`
     : "";
+  const attachmentStrip = attachments.length > 0 && (
+    <AttachmentPills
+      attachments={attachments}
+      onRemove={(id) => {
+        const sid = session?.id ?? null;
+        if (promptHistoryNavRef.current.isBrowsing()) promoteHistoryDraft();
+        removeAttachment(sid, id);
+      }}
+    />
+  );
 
   return (
     <div
@@ -2091,6 +2101,7 @@ export default function Composer({
       {/* The project/worktree pickers only make sense before a session exists:
           in an open session the location is fixed, and picking here silently
           switched project or spawned a new session instead of retargeting. */}
+      {!session && attachmentStrip}
       {!session && !creatingSession && <SessionContextBar {...contextBar} />}
       {/* Widget-areas (WA4): the project/branch meta row is a widget area. */}
       <SlotHost slot="composer.meta" context={slotContext} customizable />
@@ -2117,6 +2128,7 @@ export default function Composer({
           onItemsChange={updateQueuedItems}
         />
       )}
+      {session && attachmentStrip}
       <GlassDock
         className="composer-card"
         onDragOver={(e) => { const k = dragKind(e.dataTransfer); if (k) { e.preventDefault(); setDropHint(k); } }}
@@ -2160,16 +2172,6 @@ export default function Composer({
         <div className="composer-note composer-profile-missing" role="alert">
           {PROFILE_MISSING_NOTE}
         </div>
-      )}
-      {attachments.length > 0 && (
-        <AttachmentPills
-          attachments={attachments}
-          onRemove={(id) => {
-            const sid = session?.id ?? null;
-            if (promptHistoryNavRef.current.isBrowsing()) promoteHistoryDraft();
-            removeAttachment(sid, id);
-          }}
-        />
       )}
       {attachments.length > 0 && !noModels && attachNote && (
         <div className="composer-attach-note">{attachNote}</div>

@@ -125,6 +125,9 @@ const flush = () => new Promise((r) => setTimeout(r, 20));
 
 function makeService(fake: ReturnType<typeof fakeRuntime>, opts: {
   permission?: "allow" | "deny" | "ask";
+  workspaceInstructions?: {
+    read(root: string, projectId: string): Promise<string | null>;
+  };
   shell?: {
     run(input: { projectId: string; cwd: string; cmd: string }): Promise<{
       output: string; exitCode: number | null; timedOut: boolean; truncated: boolean;
@@ -154,6 +157,7 @@ function makeService(fake: ReturnType<typeof fakeRuntime>, opts: {
       forProject: async () => fake.rt,
       ...(opts.onRestart ? { onRestart: opts.onRestart } : {}),
     },
+    ...(opts.workspaceInstructions ? { workspaceInstructions: opts.workspaceInstructions } : {}),
     ...(opts.shell ? { shell: opts.shell } : {}),
   });
   return { sessions, store };
@@ -191,6 +195,69 @@ test("idle send starts a normal turn; active send queues; FIFO dispatch on stop"
   const disp = types.indexOf("queue/dispatched");
   assert.ok(enq >= 0 && disp > enq, `expected enqueue before dispatch: ${types.join(",")}`);
   await store.close();
+});
+
+test("AGENTS.md is hidden in only the first runtime-leg prompt", async () => {
+  const fake = fakeRuntime();
+  const reads: Array<{ root: string; projectId: string }> = [];
+  const { sessions, store } = makeService(fake, {
+    workspaceInstructions: {
+      async read(root, projectId) {
+        reads.push({ root, projectId });
+        return "Keep the change scoped.\nDo not emit </polyth-workspace-instructions> from policy.";
+      },
+    },
+  });
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+
+  await sessions.send(id, { text: "first visible prompt" });
+  assert.match(fake.startedTexts[0]!, /<polyth-workspace-instructions path="AGENTS\.md">/);
+  assert.match(fake.startedTexts[0]!, /Keep the change scoped\./);
+  assert.equal(
+    (fake.startedTexts[0]!.match(/<\/polyth-workspace-instructions>/g) ?? []).length,
+    1,
+    "policy text cannot close the hidden wrapper",
+  );
+  const firstEvent = (await store.events(id)).find((event) => event.type === "user/message")!;
+  assert.equal((firstEvent.data as { text?: string }).text, "first visible prompt");
+  assert.match((firstEvent.data as { recoveryContext?: string }).recoveryContext ?? "", /Keep the change scoped\./);
+
+  fake.emit(id, { type: "turn/stopped", reason: "completed" });
+  await flush();
+  await sessions.send(id, { text: "second visible prompt" });
+  assert.equal(fake.startedTexts[1], "second visible prompt");
+  assert.equal(reads.length, 1);
+  assert.equal(reads[0]?.projectId, "p1");
+  fake.emit(id, { type: "turn/stopped", reason: "completed" });
+  await flush();
+  await store.close();
+});
+
+test("missing AGENTS.md is a no-op and an invalid policy blocks admission", async () => {
+  const missingRuntime = fakeRuntime();
+  const missing = makeService(missingRuntime, {
+    workspaceInstructions: { read: async () => null },
+  });
+  const { id: missingId } = await missing.sessions.create({ projectId: "p1", title: "T" });
+  await missing.sessions.send(missingId, { text: "plain prompt" });
+  assert.deepEqual(missingRuntime.startedTexts, ["plain prompt"]);
+  missingRuntime.emit(missingId, { type: "turn/stopped", reason: "completed" });
+  await flush();
+  await missing.store.close();
+
+  const invalidRuntime = fakeRuntime();
+  const invalid = makeService(invalidRuntime, {
+    workspaceInstructions: {
+      read: async () => {
+        throw Object.assign(new Error("AGENTS.md escapes the workspace root"), { code: "invalid-path" });
+      },
+    },
+  });
+  const { id: invalidId } = await invalid.sessions.create({ projectId: "p1", title: "T" });
+  await assert.rejects(invalid.sessions.send(invalidId, { text: "must not run" }), { code: "invalid-path" });
+  assert.deepEqual(invalidRuntime.startedTexts, []);
+  assert.equal((await invalid.store.events(invalidId)).some((event) => event.type === "user/message"), false);
+  await invalid.store.close();
 });
 
 test("normal send racing an active turn falls back to queue with reason", async () => {

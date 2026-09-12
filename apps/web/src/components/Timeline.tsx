@@ -90,10 +90,10 @@ import ProviderLogo from "../../../../packages/models/widgets/ProviderLogo.tsx";
 import { seedMultiRunPrompt } from "@polyth/multirun/prompt-seed";
 import WorkflowTimelineCard from "../../../../packages/workflow/widgets/WorkflowTimelineCard.tsx";
 import { tr } from "../i18n/index.ts";
-import ExecutionRow, { DiffStat, EXECUTION_COLLAPSE_MS, useCollapsePresence } from "./ExecutionRow.tsx";
+import ExecutionRow, { DiffStat, useCollapsePresence } from "./ExecutionRow.tsx";
 import Picker from "./Picker.tsx";
 import type { PickerItem } from "../picker.ts";
-import { Button, Menu, Notice, RunSummary, type RunSummaryState } from "./ui/index.ts";
+import { Button, InfoIcon, Menu, Notice, RunSummary, type RunSummaryState } from "./ui/index.ts";
 import type { TurnLimitState } from "../reduce.ts";
 
 const EMPTY_SESSION_EVENTS: SessionEvent[] = [];
@@ -686,6 +686,13 @@ function AssistantAgentHeader({
   const models = useStore((state) => state.models);
   const prefs = useUiSettings();
   const [pinBusy, setPinBusy] = useState(false);
+  const [metadataOpen, setMetadataOpen] = useState(false);
+  useEffect(() => {
+    if (!metadataOpen) return;
+    const dismiss = () => queueMicrotask(() => setMetadataOpen(false));
+    document.addEventListener("click", dismiss, true);
+    return () => document.removeEventListener("click", dismiss, true);
+  }, [metadataOpen]);
   const modelRef = turn?.model ?? m.model ?? session?.model;
   const descriptor = modelRef
     ? models.find((candidate) =>
@@ -760,9 +767,16 @@ function AssistantAgentHeader({
         />
         <span className="response-footer-model">{modelName}</span>
         {duration && <span className="response-footer-duration">{duration}</span>}
-        <details className="response-footer-metadata">
-          <summary aria-label={tr("timeline.showResponseMetadata")} title={tr("timeline.responseMetadata")}><Icon.chevronDown /></summary>
-          <div className="response-footer-metadata-grid">
+        <div className="response-footer-metadata">
+          <button
+            type="button"
+            className="response-footer-metadata-trigger"
+            aria-label={tr("timeline.showResponseMetadata")}
+            title={tr("timeline.responseMetadata")}
+            aria-expanded={metadataOpen}
+            onClick={() => setMetadataOpen((open) => !open)}
+          ><InfoIcon /></button>
+          {metadataOpen && <div className="response-footer-metadata-grid">
             {(m.harnessId ?? turn?.harnessId) && <><span>Harness</span><strong>{m.harnessId ?? turn?.harnessId}</strong></>}
             {(m.profileId ?? turn?.profileId) && <><span>Profile</span><code>{m.profileId ?? turn?.profileId}</code></>}
             {(m.runtimeLegId ?? turn?.runtimeLegId) && <><span>Runtime leg</span><code>{m.runtimeLegId ?? turn?.runtimeLegId}</code></>}
@@ -772,8 +786,8 @@ function AssistantAgentHeader({
             {usage?.cacheRead ? <><span>{tr("timeline.cached")}</span><strong>{fmtTokens(usage.cacheRead)}</strong></> : null}
             {cost ? <><span>{tr("timeline.cost")}</span><strong>{fmtCost(cost)}</strong></> : null}
             {turn?.turnId ? <><span>Run</span><code>{turn.turnId}</code></> : null}
-          </div>
-        </details>
+          </div>}
+        </div>
         <span className="response-footer-actions" aria-label={tr("timeline.answerActions")}>
           {directActions.map((id) => {
             const Glyph = RESPONSE_ACTION_ICON[id];
@@ -1021,12 +1035,47 @@ function childForTool(tool: ToolMsg, subagents: SubagentState | null): SubagentS
     agent.label === description || agent.currentTask === tool.input.prompt);
 }
 
+/** Matches --activity-live-exit: the floating row must stay mounted for the
+ *  whole fold-away before it is handed to the block. */
+const ACTIVITY_LIVE_EXIT_MS = 280;
+/** How long a freshly arrived action stays outside the block. Status alone is
+ *  not enough: a tool whose call and result land in the same render batch is
+ *  never observed running, and would otherwise appear straight inside the
+ *  block. Every action gets its moment outside first. */
+const ARRIVAL_DWELL_MS = 1100;
+
 /** An action is live while it is still executing. Live actions float above the
  *  activity block instead of expanding it, so the block can stay folded. */
 function inFlight(item: ActivityItem): boolean {
   if (item.kind === "tool") return item.status === "pending" || item.status === "running";
   if (item.kind === "assistant") return !item.finalized;
   return item.action === "started";
+}
+
+/** Ids still inside their arrival dwell, measured from first sight. Rows that
+ *  were already there at mount are dated by their own timestamp instead, so
+ *  replayed history stays folded on scroll-back while a group that mounts with
+ *  its first action still plays the arrival. The timestamp is clamped to now:
+ *  a skewed clock must not park a row outside the block indefinitely. */
+function useArrivals(items: ActivityItem[], ms: number): Set<string> {
+  const seen = useRef(new Map<string, number>());
+  const mounted = useRef(false);
+  const [, redraw] = useState(0);
+  const at = Date.now();
+  for (const item of items) {
+    if (!seen.current.has(item.id)) seen.current.set(item.id, mounted.current ? at : Math.min(at, item.time));
+  }
+  mounted.current = true;
+  const fresh = items.filter((item) => at - seen.current.get(item.id)! < ms);
+  // Wake on the earliest expiry, not on a fixed beat: a second arrival must not
+  // extend the first row's stay outside the block.
+  const soonest = Math.min(...fresh.map((item) => seen.current.get(item.id)! + ms));
+  useEffect(() => {
+    if (!Number.isFinite(soonest)) return;
+    const timer = window.setTimeout(() => redraw((value) => value + 1), Math.max(0, soonest - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [soonest]);
+  return new Set(fresh.map((item) => item.id));
 }
 
 /** Keeps ids mounted for one collapse beat after they stop being live, so the
@@ -1037,7 +1086,7 @@ function useLingering(ids: string[], ms: number): string[] {
   const [leaving, setLeaving] = useState<string[]>([]);
   const previous = useRef(ids);
   const timers = useRef<number[]>([]);
-  const key = ids.join(" ");
+  const key = ids.join("\u0000");
   useEffect(() => {
     const gone = previous.current.filter((id) => !ids.includes(id));
     previous.current = ids;
@@ -1089,8 +1138,13 @@ export function ActivityGroupView({
   // rows below it; opening the block is a reader decision only.
   const [open, setOpen] = useState(false);
   const itemsPresent = useCollapsePresence(open);
-  const liveIds = active ? g.items.filter(inFlight).map((item) => item.id) : [];
-  const leavingIds = useLingering(liveIds, EXECUTION_COLLAPSE_MS);
+  const arrived = useArrivals(g.items, ARRIVAL_DWELL_MS);
+  // Only the newest arrival lingers outside the block. A settled action folds
+  // in when its dwell ends or when the next action arrives, whichever comes
+  // first, so a burst of fast tools never stacks up into a second list.
+  const newest = g.items.filter((item) => arrived.has(item.id)).at(-1)?.id;
+  const liveIds = g.items.filter((item) => item.id === newest || (active && inFlight(item))).map((item) => item.id);
+  const leavingIds = useLingering(liveIds, ACTIVITY_LIVE_EXIT_MS);
   const floatingIds = new Set([...liveIds, ...leavingIds]);
   const floating = g.items.filter((item) => floatingIds.has(item.id));
   const folded = g.items.filter((item) => !floatingIds.has(item.id));
@@ -1116,47 +1170,46 @@ export function ActivityGroupView({
     ...(files > 0 ? [files === 1 ? tr("timeline.valueFileCount", { count: files }) : tr("timeline.valueFilesCount", { count: files })] : []),
     fmtDuration(g.ms),
   ].join(" · ");
+  // A live action is its own timeline card, not a lodger inside the block:
+  // nesting it there made the folded block grow a second, differently framed
+  // list. It stands alone while it runs, then folds away into the block.
   return (
-    <section className={`msg assistant activity-group${entering ? " timeline-row-enter" : ""}${open ? " open" : ""}${active ? " current" : ""}${showBlock ? "" : " live-only"}`} aria-label={tr("timeline.agentActivity")}>
+    <>
       {showBlock && (
-        <RunSummary
-          title={tr("timeline.activity")}
-          meta={meta}
-          state={state}
-          expanded={open}
-          additions={lineStats.add}
-          deletions={lineStats.del}
-          label={open
-            ? tr("timeline.collapseActivityValue", { value: meta })
-            : tr("timeline.expandActivityValue", { value: meta })}
-          diffLabel={tr("timeline.valueAdditionsValueDeletions", { additions: lineStats.add, deletions: lineStats.del })}
-          onToggle={() => setOpen((value) => !value)}
-        />
+        <section className={`msg assistant activity-group${entering ? " timeline-row-enter" : ""}${open ? " open" : ""}${active ? " current" : ""}`} aria-label={tr("timeline.agentActivity")}>
+          <RunSummary
+            title={tr("timeline.activity")}
+            meta={meta}
+            state={state}
+            expanded={open}
+            additions={lineStats.add}
+            deletions={lineStats.del}
+            label={open
+              ? tr("timeline.collapseActivityValue", { value: meta })
+              : tr("timeline.expandActivityValue", { value: meta })}
+            diffLabel={tr("timeline.valueAdditionsValueDeletions", { additions: lineStats.add, deletions: lineStats.del })}
+            onToggle={() => setOpen((value) => !value)}
+          />
+          <div className="activity-group-expand-shell" aria-hidden={!open}>
+            <div className="activity-group-collapse-content">
+              {itemsPresent && (
+                <div className="activity-group-items">
+                  {folded.map((item, index) =>
+                    activityItemNode(item, subagents, false, entering && active && index === folded.length - 1))}
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
       )}
-      {showBlock && (
-        <div className="activity-group-expand-shell" aria-hidden={!open}>
-          <div className="activity-group-collapse-content">
-            {itemsPresent && (
-              <div className="activity-group-items">
-                {folded.map((item, index) =>
-                  activityItemNode(item, subagents, false, entering && active && index === folded.length - 1))}
-              </div>
-            )}
+      {floating.map((item) => (
+        <div key={item.id} className={`activity-live${liveIds.includes(item.id) ? "" : " leaving"}`}>
+          <div className="activity-live-content">
+            {activityItemNode(item, subagents, liveIds.includes(item.id), false)}
           </div>
         </div>
-      )}
-      {floating.length > 0 && (
-        <div className="activity-live-dock">
-          {floating.map((item) => (
-            <div key={item.id} className={`activity-live${liveIds.includes(item.id) ? "" : " leaving"}`}>
-              <div className="activity-live-content">
-                {activityItemNode(item, subagents, liveIds.includes(item.id), false)}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
+      ))}
+    </>
   );
 }
 
@@ -1180,9 +1233,6 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segm
       <div className={`msg user${entering ? " timeline-row-enter" : ""}`} data-msg-id={m.id} role="article" aria-label={userArticleName(m.time)}>
         <div className="bubble" dir="auto">
           {renderMarkdown(m.text, m.id)}
-          {m.attachments && m.attachments.length > 0 && (
-            <AttachmentPills attachments={m.attachments} />
-          )}
           {m.raw && m.raw !== m.text && (
             <div className="user-expanded-hint">
               {tr("timeline.expandedFrom")}{" "}<code>{m.raw.split("\n")[0] ?? m.raw}</code>
@@ -1192,6 +1242,9 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segm
             <div className="runtime-recovery-caption">{tr("runtimeRecovery.uncertainTurn")}</div>
           )}
         </div>
+        {m.attachments && m.attachments.length > 0 && (
+          <AttachmentPills attachments={m.attachments} />
+        )}
         {announce && (
           <MessageMeta m={m} announce={announce} onRevert={onRevert} onFork={onFork} revert={revert} fork={fork} />
         )}

@@ -135,7 +135,6 @@ const writeKey = (key: string, value: string): void => {
 
 export const PROJECT_SORT_KEY = "polyth.sidebar.projectSort";
 export const PROJECT_ORDER_KEY = "polyth.sidebar.projectOrder";
-export const SESSION_ORDER_KEY = "polyth.sidebar.sessionOrder";
 export type ProjectSortMode = "recent" | "name" | "manual";
 
 export function parseProjectSortMode(raw: string | null): ProjectSortMode {
@@ -199,32 +198,8 @@ export function useProjectOrder(): string[] {
   );
 }
 
-let storedSessionOrder: string[] = parseProjectOrder(readKey(SESSION_ORDER_KEY));
-const sessionOrderListeners = new Set<() => void>();
-
-export function getSessionOrder(): string[] {
-  return storedSessionOrder;
-}
-
-export function setSessionOrder(ids: readonly string[]): void {
-  storedSessionOrder = [...ids];
-  writeKey(SESSION_ORDER_KEY, JSON.stringify(storedSessionOrder));
-  for (const l of [...sessionOrderListeners]) l();
-}
-
-export function useSessionOrder(): string[] {
-  return useSyncExternalStore(
-    (cb) => {
-      sessionOrderListeners.add(cb);
-      return () => { sessionOrderListeners.delete(cb); };
-    },
-    getSessionOrder,
-    () => storedSessionOrder,
-  );
-}
-
 /** Pure: order `projects` by the stored manual order. Anything the stored
- *  order does not mention (a freshly added session/project) is treated as
+ *  order does not mention (a freshly added project) is treated as
  *  "new" and sorted to the top by `createdAt` descending, so the default
  *  manual view is newest-first until the user drags something. Stable for
  *  equal ranks. */
@@ -266,32 +241,6 @@ export interface SessionGroup {
   key: string;
   label: string;
   sessions: SessionProjection[];
-}
-
-export function sortPinnedSessions(sessions: readonly SessionProjection[]): SessionProjection[] {
-  return sessions
-    .filter((session) => session.pinned !== undefined)
-    .sort((a, b) =>
-      (a.pinned!.position - b.pinned!.position)
-      || (b.updatedAt - a.updatedAt)
-      || a.id.localeCompare(b.id),
-    );
-}
-
-export function reorderPinnedSessions(
-  sessions: readonly SessionProjection[],
-  draggedId: string,
-  targetId: string,
-): SessionProjection[] {
-  const ordered = sortPinnedSessions(sessions);
-  const from = ordered.findIndex((session) => session.id === draggedId);
-  const to = ordered.findIndex((session) => session.id === targetId);
-  if (from < 0 || to < 0 || from === to) return ordered;
-  const next = [...ordered];
-  const [dragged] = next.splice(from, 1);
-  if (!dragged) return ordered;
-  next.splice(to, 0, dragged);
-  return next.map((session, position) => ({ ...session, pinned: { position } }));
 }
 
 /** Pure: bucket sessions for keyed modes. flat/folder return one bucket
