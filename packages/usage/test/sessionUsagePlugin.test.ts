@@ -66,6 +66,7 @@ test("latest context event is selected as the live occupancy fallback", () => {
     type: "context/updated",
     time: 10,
     data: { source: "native", updatedAt: 10, usedTokens: 10, limitTokens: 100 },
+    v: 1,
   } as const;
   const second = {
     id: "e2",
@@ -74,6 +75,7 @@ test("latest context event is selected as the live occupancy fallback", () => {
     type: "context/updated",
     time: 20,
     data: { source: "native", updatedAt: 20, usedTokens: 40, limitTokens: 100 },
+    v: 1,
   } as const;
   const latest = latestContextWindow([first, second]);
   assert.equal(latest?.usedTokens, 40);
