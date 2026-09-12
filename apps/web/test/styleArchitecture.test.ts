@@ -86,6 +86,21 @@ test("Usage layout is container-responsive in narrow docked surfaces", async () 
   assert.doesNotMatch(usage, /usage-dashboard-hero|usage-hero-status|usage-eyebrow/);
 });
 
+test("Workspace chrome does not restyle package-owned Usage content", async () => {
+  const [premium, widgetFixes, sessionUsage] = await Promise.all([
+    read("../src/workspacePanelPremium.css"),
+    read("../src/workspacePanelWidgetFixes.css"),
+    read("../../../packages/usage/widgets/sessionUsage.css"),
+  ]);
+  const host = `${premium}\n${widgetFixes}`;
+
+  assert.doesNotMatch(host, /\.usage-[\w-]+/, "host Workspace CSS must not target package-owned Usage selectors");
+  assert.match(sessionUsage, /\.usage-session-widget\s*\{[^}]*container:\s*usage-session\s*\/\s*inline-size/s);
+  assert.match(sessionUsage, /@container usage-session \(max-width: 520px\)/);
+  assert.doesNotMatch(sessionUsage, /@media[^{]*max-width/,
+    "embedded Usage content responds to its container, not the viewport");
+});
+
 test("shared style behavior is owned by core instead of copied across packages", async () => {
   const [styles, entries] = await Promise.all([
     read("../src/styles.css"),
@@ -140,17 +155,6 @@ test("tablet-class width is a container-query layout state, not a media pile", a
     /\.app-shell\s*\{[^}]*container:\s*app-shell\s*\/\s*inline-size/,
     ".app-shell is the shell container the tablet band queries",
   );
-  // The band's lower bound must sit exactly one pixel above the compact seam
-  // (COMPACT_MAX_WIDTH + 1 = 961): below it the navigator is already a drawer
-  // (the compact shell owns the layout), so the band and the compact rules can
-  // neither overlap nor leave a gap. That guarantees the two rule sets tile
-  // cleanly — it does NOT make 960 -> 961 geometrically continuous: at 961 the
-  // persistent navigator and a reserved launcher lane enter flow and the
-  // primary workspace drops from the full width to ~621px in one pixel. The
-  // seam is placed where both sides are usable, not eliminated; see
-  // docs/dev/tablet-ux.md. What this test pins is only that a drawer-nav shell
-  // hands off to a persistent-nav shell whose idle rail is a bounded floating
-  // cluster, with no width where both or neither apply.
   const bandMin = COMPACT_MAX_WIDTH + 1;
   const band = new RegExp(
     `@container app-shell \\(min-width: ${bandMin}px\\) and \\(max-width: 1400px\\)\\s*\\{`,
@@ -159,10 +163,6 @@ test("tablet-class width is a container-query layout state, not a media pile", a
   const bandBlock = styles.slice(styles.search(band));
   const bandBody = bandBlock.slice(0, bandBlock.indexOf("\n}\n") + 3);
 
-  // Open/closed is the semantic `.railbar-open` class (React `rail` state), not
-  // `:has(.rail)`: a visited keep-alive surface leaves `.rail` mounted-but-
-  // hidden after close, so a `:has(.rail)` guard would latch the shell into the
-  // open layout for the rest of the session (regression: keepAliveRailState).
   assert.match(
     bandBody,
     /\.railbar:not\(\.railbar-open\)\s*\{[^}]*height:\s*auto/,
@@ -173,7 +173,6 @@ test("tablet-class width is a container-query layout state, not a media pile", a
     /:has\(\.rail\)/,
     "the band must not reverse-engineer rail state from .rail DOM presence",
   );
-  // Many packages + short viewport: the cluster is height-bounded and scrolls.
   assert.match(
     bandBody,
     /\.railbar:not\(\.railbar-open\)\s*\{[^}]*max-height:/,

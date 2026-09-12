@@ -2,7 +2,7 @@
  * Deliberately scoped to the Workspace sheet so shared Sheet and package
  * widget primitives keep their normal presentation everywhere else. */
 
-@media (max-width: 640px), (max-height: 500px) and (pointer: coarse) {
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
   .sheet-backdrop:has(.workspace-panel-sheet) {
     align-items: stretch;
     justify-content: flex-end;
@@ -82,8 +82,8 @@
   }
 
   .workspace-panel-sheet .sheet-head-action {
-    min-width: 44px;
-    min-height: 44px;
+    min-width: var(--tap);
+    min-height: var(--tap);
     padding: 0 6px;
     color: var(--text-dim);
     background: transparent;
@@ -98,9 +98,9 @@
   }
 
   .workspace-panel-sheet .sheet-close {
-    width: 44px;
-    min-width: 44px;
-    height: 44px;
+    width: var(--tap);
+    min-width: var(--tap);
+    height: var(--tap);
     padding: 0;
     border-radius: 50%;
     color: var(--text-dim);
@@ -354,7 +354,7 @@
   }
 
   .workspace-panel-sheet .workspace-panel-labeled-divider {
-    min-height: 44px;
+    min-height: var(--tap);
     gap: 10px;
     padding-inline: 4px;
     color: var(--muted);
@@ -365,53 +365,8 @@
     background: color-mix(in srgb, var(--hair) 72%, transparent);
   }
 
-  /* Usage summary: three metrics in one quiet strip, with no nested cards. */
-  .workspace-panel-sheet .usage-widget-panel {
-    min-height: 0;
-    padding: 0 4px 8px;
-  }
-
-  .workspace-panel-sheet .usage-widget-panel > .provider-share-card {
-    display: none;
-  }
-
-  .workspace-panel-sheet .usage-widget-stat-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0;
-    padding: 0;
-  }
-
-  .workspace-panel-sheet .usage-widget-stat-grid > div {
-    min-width: 0;
-    gap: 3px;
-    padding: 8px 11px 10px;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-  }
-
-  .workspace-panel-sheet .usage-widget-stat-grid > div + div {
-    border-left: 1px solid color-mix(in srgb, var(--hair) 72%, transparent);
-  }
-
-  .workspace-panel-sheet .usage-widget-stat-grid span {
-    overflow: hidden;
-    color: var(--muted);
-    font-size: 11px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .workspace-panel-sheet .usage-widget-stat-grid strong {
-    overflow: hidden;
-    color: var(--text);
-    font: 680 clamp(16px, 4.8vw, 20px)/1.08 var(--ui-font-family);
-    letter-spacing: -.02em;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .workspace-panel-sheet .usage-session-stats small { display: none; }
+  /* Package widgets own their inner presentation. The Workspace host only
+     controls the frame, scrolling, and widget placement around them. */
 
   /* Editing remains fully usable but does not reintroduce persistent chrome. */
   .workspace-panel-sheet .workspace-panel-item.dragging {
@@ -430,19 +385,5 @@
     margin-top: 18px;
     padding-top: 16px;
     border-top: 1px solid color-mix(in srgb, var(--hair) 72%, transparent);
-  }
-}
-
-@media (max-width: 360px) {
-  .sheet-backdrop:has(.workspace-panel-sheet) {
-    padding-left: 52px;
-  }
-
-  .workspace-panel-sheet .sheet-body { padding-inline: 10px; }
-  .workspace-panel-sheet .workspace-panel-items { gap-inline: 4px; }
-  .workspace-panel-sheet .workspace-panel-launcher {
-    min-height: 82px;
-    padding-inline: 2px;
-    font-size: 10.5px;
   }
 }

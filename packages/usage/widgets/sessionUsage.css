@@ -1,4 +1,10 @@
-/* Clean responsive layout for the Session Usage widget. */
+/* Clean responsive layout for the Session Usage widget. Package content owns
+ * its own container responsiveness; host/sheet CSS only owns the outer frame. */
+.usage-session-widget {
+  min-width: 0;
+  container: usage-session / inline-size;
+}
+
 .usage-session-stats {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -11,24 +17,24 @@
 }
 .usage-session-stats > div {
   min-width: 0;
-  min-height: 62px;
+  min-height: calc(var(--control-h-lg) + var(--space-3));
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 3px;
-  padding: 10px 12px;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
   border: 0;
   border-radius: 0;
   background: var(--panel);
 }
 .usage-session-stats > [data-usage-metric="context"] {
   grid-column: 1 / -1;
-  min-height: 78px;
+  min-height: calc(var(--control-h-lg) + var(--space-6));
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
-  gap: 3px 14px;
-  padding-block: 11px 12px;
+  gap: var(--space-1) var(--space-3);
+  padding-block: var(--space-3);
   background: color-mix(in srgb, var(--panel) 95%, var(--accent) 5%);
 }
 .usage-session-stats > [data-usage-metric="context"] > span {
@@ -45,7 +51,9 @@
   grid-row: 1 / span 2;
   align-self: center;
   color: var(--text);
-  font: 700 23px/1 var(--ui-font-family);
+  font-size: var(--font-heading);
+  font-weight: 700;
+  line-height: 1;
   letter-spacing: -.035em;
 }
 .usage-session-stats > [data-usage-metric="context"] > small {
@@ -53,7 +61,7 @@
   grid-column: 1;
   overflow: hidden;
   color: var(--text-dim);
-  font: 11px/1.25 var(--mono);
+  font: var(--font-meta)/var(--font-meta-lh) var(--mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -61,8 +69,8 @@
   min-width: 0;
   overflow: hidden;
   color: var(--muted);
-  font-size: 11px;
-  line-height: 1.15;
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -70,17 +78,19 @@
   min-width: 0;
   overflow: hidden;
   color: var(--text);
-  font: 680 clamp(15px, 1.6vw, 19px)/1.08 var(--ui-font-family);
+  font-size: var(--font-heading);
+  font-weight: 680;
+  line-height: 1.08;
   letter-spacing: -.02em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .usage-context-meter {
   grid-column: 1 / -1;
-  height: 4px;
-  margin-top: 6px;
+  height: var(--space-1);
+  margin-top: var(--space-2);
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   background: color-mix(in srgb, var(--text) 9%, transparent);
 }
 .usage-context-meter > i {
@@ -94,6 +104,26 @@
 .usage-context-meter.red > i { background: var(--red); }
 .usage-context-meter.fraction > i { opacity: .72; }
 .usage-session-stats-partial > div:not([data-usage-metric="context"]) > strong { color: var(--muted); }
-@media (max-width: 520px) {
-  .usage-session-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+@container usage-session (max-width: 520px) {
+  .usage-session-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .usage-session-stats > div {
+    min-height: var(--control-h-lg);
+    padding: var(--space-2);
+    background: transparent;
+  }
+
+  .usage-session-stats > [data-usage-metric="context"] {
+    min-height: calc(var(--control-h-lg) + var(--space-5));
+    padding: var(--space-2) var(--space-1) var(--space-3);
+    border-bottom: 1px solid var(--hair);
+  }
 }

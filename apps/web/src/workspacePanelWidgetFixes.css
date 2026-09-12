@@ -1,6 +1,7 @@
-/* Mobile Workspace widgets use natural content height. The sheet scrolls;
- * individual widgets must not crop themselves into tiny nested scroll areas. */
-@media (max-width: 640px), (max-height: 500px) and (pointer: coarse) {
+/* Phone Workspace widgets use natural content height. The sheet scrolls;
+ * individual widgets must not crop themselves into tiny nested scroll areas.
+ * Inner package presentation stays package-owned. */
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
   .workspace-panel-sheet .workspace-panel-item--widget,
   .workspace-panel-sheet .workspace-panel-widget-body {
     overflow: visible;
@@ -13,65 +14,5 @@
     min-height: 0;
     max-height: none;
     overflow: visible;
-  }
-
-  .workspace-panel-sheet .usage-session-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0;
-    padding: 0 4px 10px;
-    overflow: visible;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-  }
-
-  .workspace-panel-sheet .usage-session-stats > div {
-    min-height: 66px;
-    padding: 10px;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-  }
-
-  .workspace-panel-sheet .usage-session-stats > [data-usage-metric="context"] {
-    grid-column: 1 / -1;
-    min-height: 88px;
-    padding: 8px 4px 13px;
-    border-bottom: 1px solid color-mix(in srgb, var(--hair) 72%, transparent);
-    background: transparent;
-  }
-
-  .workspace-panel-sheet .usage-session-stats > [data-usage-metric="context"] > strong {
-    font-size: clamp(20px, 5.6vw, 24px);
-  }
-
-  .workspace-panel-sheet .usage-session-stats > [data-usage-metric="context"] > small {
-    display: block;
-    color: var(--text-dim);
-    font-size: 11px;
-  }
-
-  .workspace-panel-sheet .usage-session-stats > [data-usage-metric="output"],
-  .workspace-panel-sheet .usage-session-stats > [data-usage-metric="cost"] {
-    border-left: 1px solid color-mix(in srgb, var(--hair) 72%, transparent);
-  }
-
-  .workspace-panel-sheet .usage-session-stats > [data-usage-metric="total"],
-  .workspace-panel-sheet .usage-session-stats > [data-usage-metric="cost"] {
-    border-top: 1px solid color-mix(in srgb, var(--hair) 72%, transparent);
-  }
-
-  .workspace-panel-sheet .usage-session-stats > div:not([data-usage-metric="context"]) > span {
-    font-size: 11px;
-  }
-
-  .workspace-panel-sheet .usage-session-stats > div:not([data-usage-metric="context"]) > strong {
-    font-size: clamp(16px, 4.7vw, 20px);
-  }
-
-  .workspace-panel-sheet .usage-context-meter {
-    height: 4px;
-    margin-top: 7px;
-    background: color-mix(in srgb, var(--text) 8%, transparent);
   }
 }

@@ -164,20 +164,22 @@ export function SessionUsageStats({
   }
 
   return (
-    <div className={`usage-widget-stat-grid usage-session-stats${totals.tokensKnown ? "" : " usage-session-stats-partial"}`}>
-      {rows.map((row) => (
-        <div key={row.id} data-usage-metric={row.id}>
-          <span>{row.label}</span>
-          <strong>{row.value}</strong>
-          {row.detail && <small>{row.detail}</small>}
-          {row.meter !== undefined && (
-            <div className={`usage-context-meter ${row.level ?? ""}`} aria-hidden="true">
-              <i style={{ width: `${row.meter}%` }} />
-            </div>
-          )}
-        </div>
-      ))}
-      {rows.length === 0 && <div className="widget-empty">{tr("widgets.usageplugin.chooseMetricsInWidgetSettings")}</div>}
+    <div className="usage-session-widget">
+      <div className={`usage-widget-stat-grid usage-session-stats${totals.tokensKnown ? "" : " usage-session-stats-partial"}`}>
+        {rows.map((row) => (
+          <div key={row.id} data-usage-metric={row.id}>
+            <span>{row.label}</span>
+            <strong>{row.value}</strong>
+            {row.detail && <small>{row.detail}</small>}
+            {row.meter !== undefined && (
+              <div className={`usage-context-meter ${row.level ?? ""}`} aria-hidden="true">
+                <i style={{ width: `${row.meter}%` }} />
+              </div>
+            )}
+          </div>
+        ))}
+        {rows.length === 0 && <div className="widget-empty">{tr("widgets.usageplugin.chooseMetricsInWidgetSettings")}</div>}
+      </div>
     </div>
   );
 }
