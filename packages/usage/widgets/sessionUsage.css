@@ -1,0 +1,99 @@
+/* Clean responsive layout for the Session Usage widget. */
+.usage-session-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-surface);
+  background: var(--border-soft);
+}
+.usage-session-stats > div {
+  min-width: 0;
+  min-height: 62px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 0;
+  background: var(--panel);
+}
+.usage-session-stats > [data-usage-metric="context"] {
+  grid-column: 1 / -1;
+  min-height: 78px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 3px 14px;
+  padding-block: 11px 12px;
+  background: color-mix(in srgb, var(--panel) 95%, var(--accent) 5%);
+}
+.usage-session-stats > [data-usage-metric="context"] > span {
+  min-width: 0;
+  grid-column: 1;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.usage-session-stats > [data-usage-metric="context"] > strong {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  color: var(--text);
+  font: 700 23px/1 var(--ui-font-family);
+  letter-spacing: -.035em;
+}
+.usage-session-stats > [data-usage-metric="context"] > small {
+  min-width: 0;
+  grid-column: 1;
+  overflow: hidden;
+  color: var(--text-dim);
+  font: 11px/1.25 var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.usage-session-stats > div:not([data-usage-metric="context"]) > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.usage-session-stats > div:not([data-usage-metric="context"]) > strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font: 680 clamp(15px, 1.6vw, 19px)/1.08 var(--ui-font-family);
+  letter-spacing: -.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.usage-context-meter {
+  grid-column: 1 / -1;
+  height: 4px;
+  margin-top: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 9%, transparent);
+}
+.usage-context-meter > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width var(--motion-surface) var(--motion-ease);
+}
+.usage-context-meter.yellow > i { background: var(--amber); }
+.usage-context-meter.red > i { background: var(--red); }
+.usage-context-meter.fraction > i { opacity: .72; }
+.usage-session-stats-partial > div:not([data-usage-metric="context"]) > strong { color: var(--muted); }
+@media (max-width: 520px) {
+  .usage-session-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
