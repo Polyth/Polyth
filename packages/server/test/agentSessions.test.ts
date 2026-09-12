@@ -194,6 +194,49 @@ async function makeApp(
   };
 }
 
+test("agent session.create requires and normalizes a human-readable title", async () => {
+  const app = await makeApp();
+  try {
+    const missing = await jsonFetch<{ error: string; message?: string }>(
+      app.base,
+      "/api/agent/sessions",
+      jsonRequest("POST", { projectId: "p1" }),
+    );
+    assert.equal(missing.status, 400);
+    assert.equal(missing.body.error, "invalid-input");
+
+    const blank = await jsonFetch<{ error: string }>(
+      app.base,
+      "/api/agent/sessions",
+      jsonRequest("POST", { projectId: "p1", title: "   " }),
+    );
+    assert.equal(blank.status, 400);
+
+    const tooLong = await jsonFetch<{ error: string }>(
+      app.base,
+      "/api/agent/sessions",
+      jsonRequest("POST", { projectId: "p1", title: "x".repeat(121) }),
+    );
+    assert.equal(tooLong.status, 400);
+
+    const created = await jsonFetch<{ session: { title: string } }>(
+      app.base,
+      "/api/agent/sessions",
+      jsonRequest("POST", { projectId: "p1", title: "  Fix   mobile navigation  " }),
+    );
+    assert.equal(created.status, 201);
+    assert.equal(created.body.session.title, "Fix mobile navigation");
+
+    const discovery = await jsonFetch<{
+      contracts: { sessionCreate: { required: string[]; title: { maxLength: number } } };
+    }>(app.base, "/api/agent");
+    assert.deepEqual(discovery.body.contracts.sessionCreate.required, ["projectId", "title"]);
+    assert.equal(discovery.body.contracts.sessionCreate.title.maxLength, 120);
+  } finally {
+    await app.close();
+  }
+});
+
 test("agent session.create preserves explicit Claude, Cursor, and Codex harness pins", async () => {
   const harnessIds = ["claude", "cursor", "codex"];
   const app = await makeApp([], harnessIds);
@@ -203,6 +246,7 @@ test("agent session.create preserves explicit Claude, Cursor, and Codex harness 
         session: { id: string; harness?: { mode: string; harnessId?: string }; resolvedHarnessId?: string };
       }>(app.base, "/api/agent/sessions", jsonRequest("POST", {
         projectId: "p1",
+        title: `${harnessId} delegated session`,
         harness: { mode: "pinned", harnessId },
       }));
       assert.equal(created.status, 201);

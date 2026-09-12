@@ -14,10 +14,19 @@ interface Action {
   request(input: Json): ControlRequest;
 }
 
+const SESSION_TITLE_MAX = 120;
+
 const required = (input: Json, key: string): string => {
   const value = input[key];
   if ((typeof value !== "string" && typeof value !== "number") || String(value).length === 0) throw new Error(`${key} is required`);
   return encodeURIComponent(String(value));
+};
+const sessionTitle = (input: Json): string => {
+  if (typeof input.title !== "string") throw new Error("title is required for session.create");
+  const title = input.title.replace(/\s+/g, " ").trim();
+  if (!title) throw new Error("title is required for session.create");
+  if (title.length > SESSION_TITLE_MAX) throw new Error(`title must be ${SESSION_TITLE_MAX} characters or fewer`);
+  return title;
 };
 const query = (input: Json, keys: string[]): string => {
   const out = new URLSearchParams();
@@ -54,7 +63,19 @@ export const ACTIONS: Record<string, Action> = {
   "backend.list": action("sessions", "List backend sessions available to import.", "GET", (i) => `/api/agent/backend-sessions${query(i, ["projectId"])}`),
   "backend.import": action("sessions", "Import selected backend sessions.", "POST", () => "/api/agent/backend-sessions/import"),
   "session.list": action("sessions", "List sessions across projects with filters and recent events.", "GET", (i) => `/api/agent/sessions${query(i, ["projectId", "status", "archived", "limit", "offset", "recentEvents", "updatedAfter"])}`),
-  "session.create": action("sessions", "Create a session and optionally send its first message.", "POST", () => "/api/agent/sessions"),
+  "session.create": {
+    group: "sessions",
+    description: "Create a session and optionally send its first message. A concise human-readable title is required.",
+    request(input) {
+      const title = sessionTitle(input);
+      return {
+        method: "POST",
+        path: "/api/agent/sessions",
+        body: body({ ...input, title }),
+        ...(typeof input.spaceId === "string" ? { spaceId: input.spaceId } : {}),
+      };
+    },
+  },
   "session.get": action("sessions", "Read a session, messages, events, queue, and runtime state.", "GET", (i) => `/api/agent/sessions/${required(i, "sessionId")}${query(i, ["eventLimit"])}`),
   "session.events": action("sessions", "Page a session event log.", "GET", (i) => `/api/agent/sessions/${required(i, "sessionId")}/events${query(i, ["afterSeq", "limit"])}`),
   "session.messages": action("sessions", "Read derived conversation messages.", "GET", (i) => `/api/agent/sessions/${required(i, "sessionId")}/messages`),
@@ -225,8 +246,28 @@ export const tools = [
       required: ["action"],
       properties: {
         action: { type: "string", enum: Object.keys(ACTIONS) },
-        input: { type: "object", description: "Action fields; use spaceId to select a Space." },
+        input: { type: "object", description: "Action fields; use spaceId to select a Space. session.create requires a concise title." },
       },
+      allOf: [{
+        if: { properties: { action: { const: "session.create" } }, required: ["action"] },
+        then: {
+          required: ["input"],
+          properties: {
+            input: {
+              type: "object",
+              required: ["title"],
+              properties: {
+                title: {
+                  type: "string",
+                  minLength: 1,
+                  maxLength: SESSION_TITLE_MAX,
+                  description: "Concise human-readable title for the spawned session; do not copy the full prompt.",
+                },
+              },
+            },
+          },
+        },
+      }],
     },
   },
 ];

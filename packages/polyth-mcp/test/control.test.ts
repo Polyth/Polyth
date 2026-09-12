@@ -7,6 +7,40 @@ test("MCP tool names do not duplicate the Polyth server prefix", () => {
   assert.deepEqual(tools.map((tool) => tool.name), ["capabilities", "configure", "control"]);
 });
 
+test("session.create requires and normalizes a human-readable title", () => {
+  assert.throws(
+    () => buildControlRequest("session.create", { projectId: "p1" }),
+    /title is required/,
+  );
+  assert.throws(
+    () => buildControlRequest("session.create", { projectId: "p1", title: "   " }),
+    /title is required/,
+  );
+  assert.throws(
+    () => buildControlRequest("session.create", { projectId: "p1", title: "x".repeat(121) }),
+    /120 characters or fewer/,
+  );
+  assert.deepEqual(buildControlRequest("session.create", {
+    projectId: "p1",
+    title: "  Fix   mobile navigation  ",
+    message: "Audit and fix the mobile project navigator.",
+    spaceId: "space-1",
+  }), {
+    method: "POST",
+    path: "/api/agent/sessions",
+    body: {
+      projectId: "p1",
+      title: "Fix mobile navigation",
+      message: "Audit and fix the mobile project navigator.",
+    },
+    spaceId: "space-1",
+  });
+
+  const control = tools.find((tool) => tool.name === "control");
+  assert.match(JSON.stringify(control?.inputSchema), /session\.create/);
+  assert.match(JSON.stringify(control?.inputSchema), /"required":\["title"\]/);
+});
+
 test("control catalog covers the complete session lifecycle and safe API escape hatch", () => {
   assert.ok(Object.keys(ACTIONS).length >= 50);
   assert.deepEqual(buildControlRequest("session.send", {

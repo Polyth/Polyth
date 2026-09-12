@@ -17,6 +17,8 @@ Use this skill only for an explicitly authorized interaction with a running Poly
 
 Discover capabilities and exact input schemas before calling actions. Preserve explicit user choices, model/provider/profile and delivery mode. Inspect current state to distinguish an idempotent retry from a second mutation. Do not start paid turns, alter permissions, disable security, cancel another session or change a project's state merely to test connectivity.
 
+When spawning a session with `session.create`, formulate and supply a concise human-readable `title` that identifies the delegated job. The title is required: never leave it blank, use a placeholder such as `New session`, or paste the full prompt into it.
+
 The legacy control seam names `polyth_capabilities`, `polyth_control` and `polyth_configure`; use only names exposed by the live tool registry. The internal socket is a protected administrative channel, not an authentication bypass. Never send secret values; secret entry belongs in the authorized UI. Never broaden enabled actions automatically.
 
 Resolve ambiguous destructive operations before executing them, and keep targets explicit. Read-only status queries still must avoid leaking prompts, credentials or tenant data. Report actual operation receipts/results and remaining uncertainty. When the connector is unavailable, perform source-based diagnosis or provide a manual operation plan clearly marked unexecuted. Do not claim control actions occurred from code inspection.

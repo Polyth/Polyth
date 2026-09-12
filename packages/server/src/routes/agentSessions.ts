@@ -27,6 +27,7 @@ const SESSION_STATUSES = new Set([
 ]);
 const DELIVERY_MODES = new Set(["normal", "steer", "queue", "interrupt"]);
 const MAX_IMPORT_BATCH = 200;
+const SESSION_TITLE_MAX = 120;
 
 export interface AgentGoalState {
   objective: string;
@@ -115,6 +116,16 @@ const optionalString = (
   if (value === undefined) return undefined;
   if (typeof value !== "string") return invalid(`${key} must be a string`);
   return value;
+};
+
+const agentSessionTitle = (body: Record<string, unknown>): string => {
+  const value = optionalString(body, "title");
+  const title = value?.replace(/\s+/g, " ").trim() ?? "";
+  if (!title) return invalid("title is required for agent-created sessions");
+  if (title.length > SESSION_TITLE_MAX) {
+    return invalid(`title must be ${SESSION_TITLE_MAX} characters or fewer`);
+  }
+  return title;
 };
 
 const modelInput = (value: unknown): ModelRef | undefined => {
@@ -361,6 +372,12 @@ export function agentSessionRoutes(deps: AgentSessionRouteDeps): RouteHandler {
         apiVersion: 1,
         serverVersion: deps.version ?? "unknown",
         capabilities: deps.capabilities?.() ?? [],
+        contracts: {
+          sessionCreate: {
+            required: ["projectId", "title"],
+            title: { maxLength: SESSION_TITLE_MAX, purpose: "concise human-readable delegated job title" },
+          },
+        },
         endpoints: {
           projects: "GET /api/agent/projects",
           backendSessions: "GET|POST /api/agent/backend-sessions[/import]",
@@ -476,14 +493,14 @@ export function agentSessionRoutes(deps: AgentSessionRouteDeps): RouteHandler {
       }
       const model = modelInput(input.model);
       const harness = harnessInput(input.harness);
-      const title = optionalString(input, "title");
+      const title = agentSessionTitle(input);
       const agent = optionalString(input, "agent");
       const parentId = optionalString(input, "parentId");
       const worktreePath = optionalString(input, "worktreePath");
       const createInput = {
         projectId: input.projectId,
         ...(harness ? { harness } : {}),
-        ...(title !== undefined ? { title } : {}),
+        title,
         ...(model ? { model } : {}),
         ...(agent !== undefined ? { agent } : {}),
         ...(parentId !== undefined ? { parentId } : {}),
