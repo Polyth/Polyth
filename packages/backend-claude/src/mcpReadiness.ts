@@ -13,6 +13,7 @@ type ClaudeMcpSurface = {
 export interface ClaudeAgentToolsReadinessOptions {
   timeoutMs?: number;
   pollIntervalMs?: number;
+  maxPollIntervalMs?: number;
 }
 
 const TERMINAL_FAILURES = new Set([
@@ -46,8 +47,13 @@ export async function waitForClaudeAgentTools(
   }
 
   const timeoutMs = Math.max(0, options.timeoutMs ?? 5_000);
-  const pollIntervalMs = Math.max(0, options.pollIntervalMs ?? 25);
+  const initialPollIntervalMs = Math.max(0, options.pollIntervalMs ?? 50);
+  const maxPollIntervalMs = Math.max(
+    initialPollIntervalMs,
+    options.maxPollIntervalMs ?? 150,
+  );
   const deadline = Date.now() + timeoutMs;
+  let nextPollIntervalMs = initialPollIntervalMs;
   let lastStatus = "missing";
   let lastError = "";
 
@@ -69,8 +75,13 @@ export async function waitForClaudeAgentTools(
       lastError = error instanceof Error ? error.message : String(error);
     }
 
-    if (Date.now() >= deadline) break;
-    await delay(Math.min(pollIntervalMs, Math.max(0, deadline - Date.now())));
+    const remainingMs = Math.max(0, deadline - Date.now());
+    if (remainingMs === 0) break;
+
+    await delay(Math.min(nextPollIntervalMs, remainingMs));
+    if (nextPollIntervalMs > 0) {
+      nextPollIntervalMs = Math.min(maxPollIntervalMs, nextPollIntervalMs * 2);
+    }
   }
 
   throw Object.assign(
