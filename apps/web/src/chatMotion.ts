@@ -1,11 +1,15 @@
 const USER_SEND_TTL_MS = 8_000;
+const SEND_TRANSITION_TTL_MS = 1_800;
 const NAVIGATION_QUIET_MS = 180;
 const DESKTOP_DURATION_MS = 300;
 const TOUCH_DURATION_MS = 260;
 const STATUS_DURATION_MS = 220;
+const SEND_LIFT_DESKTOP_MS = 360;
+const SEND_LIFT_TOUCH_MS = 420;
 const DESKTOP_DISTANCE_PX = 8;
 const TOUCH_DISTANCE_PX = 6;
 const EASE_OUT = "cubic-bezier(0, 0, 0.2, 1)";
+const SEND_LIFT_EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
 
 const LIVE_ROW_SELECTOR = [
   ".msg.user",
@@ -16,8 +20,26 @@ const LIVE_ROW_SELECTOR = [
   ".task-activity",
   ".github-conflict-card",
 ].join(",");
+const TOP_LEVEL_TIMELINE_ROW_SELECTOR = ".msg, .activity-group, .task-activity, .github-conflict-card";
+
+interface RectSnapshot {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
+interface SendTransitionSnapshot {
+  capturedAt: number;
+  source: RectSnapshot | null;
+  timeline: HTMLElement | null;
+  rows: Array<{ element: HTMLElement; rect: RectSnapshot }>;
+}
 
 let pendingUserSendUntil = 0;
+let pendingSendTransition: SendTransitionSnapshot | null = null;
 let quietUntil = 0;
 let navigationPending = false;
 let lastLocation = typeof location === "undefined" ? "" : location.href;
@@ -40,8 +62,45 @@ function touchProfile(): boolean {
   return matchMedia("(pointer: coarse)").matches || matchMedia("(max-width: 620px)").matches;
 }
 
+function snapshotRect(rect: DOMRect): RectSnapshot {
+  return {
+    top: rect.top,
+    right: rect.right,
+    bottom: rect.bottom,
+    left: rect.left,
+    width: rect.width,
+    height: rect.height,
+  };
+}
+
+function captureSendTransition(): SendTransitionSnapshot | null {
+  if (motionDisabled()) return null;
+  const composerInput = document.querySelector<HTMLElement>(".composer-chat [data-composer-input]")
+    ?? document.querySelector<HTMLElement>(".composer-chat .composer-input");
+  const timeline = document.querySelector<HTMLElement>(".timeline");
+  const viewport = timeline?.getBoundingClientRect();
+  const rows: SendTransitionSnapshot["rows"] = [];
+  if (timeline && viewport) {
+    for (const child of Array.from(timeline.children)) {
+      if (!(child instanceof HTMLElement) || !child.matches(TOP_LEVEL_TIMELINE_ROW_SELECTOR)) continue;
+      const rect = child.getBoundingClientRect();
+      // Only rows the reader can currently see participate in the FLIP. Rows
+      // already outside the viewport need no animation and would waste work.
+      if (rect.bottom < viewport.top || rect.top > viewport.bottom) continue;
+      rows.push({ element: child, rect: snapshotRect(rect) });
+    }
+  }
+  return {
+    capturedAt: now(),
+    source: composerInput ? snapshotRect(composerInput.getBoundingClientRect()) : null,
+    timeline,
+    rows,
+  };
+}
+
 function markUserSend(): void {
   pendingUserSendUntil = now() + USER_SEND_TTL_MS;
+  pendingSendTransition = captureSendTransition();
   // A deliberate send establishes a live continuation even when the current
   // screen was reached by navigation moments earlier.
   navigationPending = false;
@@ -51,10 +110,18 @@ function markUserSend(): void {
 function consumeUserSend(): boolean {
   if (pendingUserSendUntil <= now()) {
     pendingUserSendUntil = 0;
+    pendingSendTransition = null;
     return false;
   }
   pendingUserSendUntil = 0;
   return true;
+}
+
+function consumeSendTransition(): SendTransitionSnapshot | null {
+  const snapshot = pendingSendTransition;
+  pendingSendTransition = null;
+  if (!snapshot || now() - snapshot.capturedAt > SEND_TRANSITION_TTL_MS) return null;
+  return snapshot;
 }
 
 function markNavigation(): void {
@@ -62,6 +129,7 @@ function markNavigation(): void {
   // treat that as historical navigation or the freshly sent prompt would lose
   // its entrance motion.
   if (pendingUserSendUntil > now()) return;
+  pendingSendTransition = null;
   navigationPending = true;
   quietUntil = now() + NAVIGATION_QUIET_MS;
 }
@@ -121,6 +189,66 @@ function nearTimelineTail(element: HTMLElement): boolean {
     if (meaningfulFollowers > 2) return false;
   }
   return true;
+}
+
+function playTransform(
+  element: HTMLElement,
+  deltaY: number,
+  duration: number,
+  opacityFrom = 1,
+): boolean {
+  if (typeof element.animate !== "function" || Math.abs(deltaY) < 1) return false;
+  const previousWillChange = element.style.willChange;
+  element.style.willChange = "opacity, transform";
+  const animation = element.animate([
+    { opacity: opacityFrom, transform: `translate3d(0, ${deltaY}px, 0)` },
+    { opacity: 1, transform: "translate3d(0, 0, 0)" },
+  ], {
+    duration,
+    easing: SEND_LIFT_EASE,
+    fill: "both",
+  });
+  void animation.finished.catch(() => undefined).finally(() => {
+    if (element.isConnected) element.style.willChange = previousWillChange;
+  });
+  return true;
+}
+
+/**
+ * The timeline aligns every fresh prompt near the reading top immediately.
+ * Capture the pre-send geometry, then FLIP the already-correct final layout:
+ * the new prompt rises from the composer edge while all previously visible
+ * rows retain their old pixels for frame zero and slide upward together. This
+ * keeps scroll state canonical (no synthetic smooth-scroll events fighting the
+ * reader-intent logic) while making the send feel like one continuous motion.
+ */
+function playSendTransition(element: HTMLElement): boolean {
+  const snapshot = consumeSendTransition();
+  if (!snapshot || motionDisabled()) return false;
+  const timeline = element.closest<HTMLElement>(".timeline");
+  if (!timeline) return false;
+  const duration = touchProfile() ? SEND_LIFT_TOUCH_MS : SEND_LIFT_DESKTOP_MS;
+  let moved = false;
+
+  if (snapshot.timeline === timeline) {
+    for (const row of snapshot.rows) {
+      if (!row.element.isConnected || row.element.parentElement !== timeline) continue;
+      const after = row.element.getBoundingClientRect();
+      moved = playTransform(row.element, row.rect.top - after.top, duration) || moved;
+    }
+  }
+
+  const promptRect = element.getBoundingClientRect();
+  const viewport = timeline.getBoundingClientRect();
+  // The composer sits immediately below the timeline on phones. Start at that
+  // seam instead of beyond the overflow clip, so the bubble visibly emerges
+  // from the composer and travels all the way to its fresh-turn anchor.
+  const sourceTop = snapshot.source
+    ? Math.min(snapshot.source.top, viewport.bottom - Math.min(12, promptRect.height))
+    : viewport.bottom - Math.min(12, promptRect.height);
+  const promptMoved = playTransform(element, sourceTop - promptRect.top, duration, 0.82);
+  if (promptMoved) animated.add(element);
+  return promptMoved || moved;
 }
 
 function playEntrance(element: HTMLElement, status = false): void {
@@ -193,10 +321,12 @@ function animateAddedNode(node: Node, suppressChat = false): void {
 
     if (element.matches(".msg.user")) {
       const explicitSend = consumeUserSend();
-      // Explicit send provenance wins even if route bookkeeping is still
-      // settling. Other live user rows may animate when they arrive at the
-      // timeline tail (e.g. interrupt/send-now paths).
-      if (explicitSend || (!suppressChat && now() >= quietUntil && nearTimelineTail(element))) {
+      // Explicit sends get the larger composer→prompt FLIP: the prompt rises
+      // to the fresh-turn anchor while previous agent rows slide up with it.
+      // Non-send user rows keep the ordinary short entrance.
+      if (explicitSend) {
+        if (!playSendTransition(element)) playEntrance(element);
+      } else if (!suppressChat && now() >= quietUntil && nearTimelineTail(element)) {
         playEntrance(element);
       }
       continue;
