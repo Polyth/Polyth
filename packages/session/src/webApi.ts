@@ -997,6 +997,8 @@ export const api = {
     jfetch<{ ok: true }>(`/api/git/pull`, json("POST", { projectId, remote, ...(sessionId ? { sessionId } : {}) })),
   gitPush: (projectId: string, remote = "origin", sessionId?: string) =>
     jfetch<{ ok: true }>(`/api/git/push`, json("POST", { projectId, remote, ...(sessionId ? { sessionId } : {}) })),
+  gitSync: (projectId: string, remote = "origin", sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/git/sync`, json("POST", { projectId, remote, ...(sessionId ? { sessionId } : {}) })),
   /** Local-conflict sibling of githubConflictAgent: hands a diverged pull or an
    *  in-progress merge/rebase to an agent session with a default prompt. */
   gitResolveConflictAgent: (input: {
@@ -1004,6 +1006,7 @@ export const api = {
     target: "new-session" | "current-session";
     prompt: string;
     sessionId?: string;
+    problem?: string;
   }) =>
     jfetch<GhListResult<{ sessionId: string }>>(
       `/api/git/resolve-conflict-agent`,

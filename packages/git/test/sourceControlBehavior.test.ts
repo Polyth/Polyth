@@ -677,6 +677,50 @@ test("GitView destructive confirmation focuses Cancel and restores the opener on
   }
 });
 
+test("GitView remote push failure shows the real reason and resolve-with-agent actions", async () => {
+  const projectId = "git-push-error-project";
+  const pushError = "Push was rejected because the remote has commits you do not have locally. Pull or rebase first, then push again.";
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    const method = (init as { method?: string } | undefined)?.method ?? "GET";
+    if (url.startsWith("/api/git/status")) {
+      return response({
+        branch: "main", ahead: 1, behind: 1, conflicted: [], staged: [], untracked: [], unstaged: [], isRepo: true,
+      });
+    }
+    if (url.startsWith("/api/git/branches")) return response({ current: "main", branches: [{ name: "main", current: true }] });
+    if (url.startsWith("/api/worktrees") || url.startsWith("/api/git/graph") || url.startsWith("/api/git/stashes")) return response([]);
+    if (url.startsWith("/api/git/push") && method === "POST") {
+      return response({ error: "conflict", message: pushError }, 409);
+    }
+    throw new Error(`Unexpected request: ${method} ${url}`);
+  };
+
+  activateProject(projectId);
+  const view = await mounted(createElement(GitView));
+  try {
+    await act(async () => { await delay(40); });
+    const trigger = view.container.querySelector<HTMLButtonElement>('.source-remote-actions [aria-haspopup="menu"]');
+    assert.ok(trigger, "remote overflow trigger renders");
+    await act(async () => { trigger.click(); await delay(20); });
+    const pushItem = [...document.querySelectorAll<HTMLElement>('[role^="menuitem"]')]
+      .find((item) => /push/i.test(item.textContent ?? ""));
+    assert.ok(pushItem, "push action is reachable");
+    await act(async () => { pushItem.click(); await delay(40); });
+    const status = view.container.querySelector(".source-inline-status.error");
+    assert.ok(status, "remote failure status renders");
+    assert.match(status!.textContent ?? "", /Push was rejected because the remote has commits/);
+    assert.doesNotMatch(status!.textContent ?? "", /To github\.com/);
+    const banner = view.container.querySelector(".conflict-agent-bar");
+    assert.ok(banner, "resolve-with-agent banner renders for push failures");
+    assert.ok(banner!.textContent?.includes("Resolve with an agent") || banner!.textContent?.includes("agent"));
+    assert.ok(banner!.querySelectorAll("button").length >= 2, "both resolve actions remain available");
+  } finally {
+    await view.unmount();
+    activateProject(null);
+  }
+});
+
 test("GitView remote-actions menu keeps a distinct Sync glyph and restores focus on Escape", async () => {
   const projectId = "git-remote-menu-project";
   const mutations: string[] = [];

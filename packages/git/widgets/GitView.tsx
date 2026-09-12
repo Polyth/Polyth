@@ -498,9 +498,8 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
     }
   };
 
-  // One button: commit what's staged (when a message is present), publish the
-  // branch — creating its upstream if there is none — then fast-forward from
-  // the remote. Ordered push-before-pull so a brand-new branch syncs in one go.
+  // One button: commit what's staged (when a message is present), then sync via
+  // the server-owned fetch/integrate/publish flow.
   const syncRepository = async () => {
     if (!projectId) return;
     if (commitMsg.trim() && (status?.staged.length ?? 0) > 0) {
@@ -509,8 +508,7 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
       setSelected(null);
       setMobileDetail(false);
     }
-    await api.gitPush(projectId, "origin", sessionId ?? undefined);
-    await api.gitPull(projectId, "origin", sessionId ?? undefined);
+    await api.gitSync(projectId, "origin", sessionId ?? undefined);
   };
 
   const runRemote = async (step: RemoteStep) => {
@@ -533,7 +531,7 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
     }
   };
 
-  const startConflictAgent = async (target: ConflictAgentTarget) => {
+  const startConflictAgent = async (target: ConflictAgentTarget, problem?: string) => {
     if (conflictAgentBusy || !projectId) return;
     if (target === "current-session" && !sessionId) {
       setConflictAgentFailed(true);
@@ -548,6 +546,7 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
         projectId,
         target,
         prompt: settings.conflictAgentPrompt,
+        ...(problem?.trim() ? { problem: problem.trim() } : {}),
         ...(target === "current-session" && sessionId ? { sessionId } : {}),
       });
       if (!result.ok) {
@@ -731,16 +730,17 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
         </div>
       )}
 
-      {remoteStatus?.error && (remoteStatus.step === "pull" || remoteStatus.step === "sync")
-        && /diverged|fast-forward/i.test(remoteStatus.error) && (
+      {remoteStatus?.error && (
         <ConflictAgentBanner
-          hint={tr("gitview.historyDivergedHint")}
+          hint={/diverged|fast-forward|rejected|non-fast-forward/i.test(remoteStatus.error)
+            ? tr("gitview.historyDivergedHint")
+            : tr("gitview.resolveProblemHint")}
           defaultTarget={settings.conflictAgentTarget}
           hasCurrentSession={!!sessionId}
           busy={conflictAgentBusy}
           message={conflictAgentMsg}
           failed={conflictAgentFailed}
-          onResolve={(target) => void startConflictAgent(target)}
+          onResolve={(target) => void startConflictAgent(target, remoteStatus.error)}
         />
       )}
 

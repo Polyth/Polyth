@@ -4,7 +4,16 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cloneRepository, createGitService, normalizeRepositoryUrl, pathsUnder } from "../src/index.ts";
+import {
+  buildLocalConflictResolutionPrompt,
+  cloneRepository,
+  createGitService,
+  normalizeRepositoryUrl,
+  pathsUnder,
+  shortErr,
+} from "../src/index.ts";
+import { gitRoutes } from "../src/serverEntry.ts";
+import type { SessionProjection, SessionService } from "@polyth/contracts";
 import { createManagedWorktrees, isolateBranchName, isolateWorktreePath } from "../src/managedWorktrees.ts";
 
 const git = createGitService();
@@ -18,12 +27,15 @@ const recordedGit = (opts?: {
   raceRemove?: boolean;
   failListAfterRemove?: boolean;
   showRef?: "absent" | "fatal" | "hang";
+  pushStderr?: string;
   timeoutMs?: number;
 }) => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-gitwrap-"));
   dirs.push(dir);
   const logFile = join(dir, "argv.log");
   const listCount = join(dir, "worktree-list.count");
+  const pushStderrFile = opts?.pushStderr ? join(dir, "push.stderr") : "";
+  if (opts?.pushStderr) writeFileSync(pushStderrFile, opts.pushStderr);
   const wrapper = join(dir, "git");
   writeFileSync(wrapper, `#!/bin/sh
 {
@@ -45,6 +57,7 @@ if [ "$1" = worktree ] && [ "$2" = remove ]; then echo "fatal: cannot remove wor
 ${opts?.showRef === "absent" ? 'if [ "$1" = show-ref ]; then exit 1; fi' : ""}
 ${opts?.showRef === "fatal" ? 'if [ "$1" = show-ref ]; then echo "fatal: not a git repository" >&2; exit 128; fi' : ""}
 ${opts?.showRef === "hang" ? 'if [ "$1" = show-ref ]; then exec sleep 2; fi' : ""}
+${opts?.pushStderr ? `if [ "$1" = push ]; then cat >&2 ${JSON.stringify(pushStderrFile)}; exit 1; fi` : ""}
 exec ${JSON.stringify(REAL_GIT)} "$@"
 `);
   chmodSync(wrapper, 0o755);
@@ -446,6 +459,13 @@ test("git errors surface a short message, not a stack of stderr", async () => {
     assert.ok(!err.message.startsWith("fatal:"));
     return true;
   });
+  const transport = [
+    "To github.com:otto-assistant/polyth.git",
+    " ! [rejected] main -> main (non-fast-forward)",
+    "error: failed to push some refs to 'github.com:otto-assistant/polyth.git'",
+  ].join("\n");
+  assert.match(shortErr(transport), /rejected|non-fast-forward|failed to push/i);
+  assert.doesNotMatch(shortErr(transport), /^To github\.com/);
 });
 
 test("graph returns parents, refs, merges, and paginates", async () => {
@@ -596,7 +616,7 @@ test("push publishes a branch that has no upstream and sets tracking", async () 
   assert.equal((await git.status(dir)).ahead, 0);
 });
 
-test("pull reports divergent histories as a resolvable conflict", async () => {
+const divergedRemote = () => {
   const dir = repo();
   const bare = mkdtempSync(join(tmpdir(), "polyth-remote-"));
   const peerParent = mkdtempSync(join(tmpdir(), "polyth-peer-"));
@@ -611,17 +631,182 @@ test("pull reports divergent histories as a resolvable conflict", async () => {
   const pg = (...args: string[]) => execFileSync("git", args, { cwd: peer, stdio: "pipe" });
   pg("config", "user.email", "t@example.com");
   pg("config", "user.name", "Peer");
-
-  writeFileSync(join(dir, "local.txt"), "local\n");
-  g("add", "."); g("commit", "-qm", "local change");
+  pg("config", "commit.gpgsign", "false");
   writeFileSync(join(peer, "remote.txt"), "remote\n");
   pg("add", "."); pg("commit", "-qm", "remote change"); pg("push", "-q");
+  writeFileSync(join(dir, "local.txt"), "local\n");
+  g("add", "."); g("commit", "-qm", "local change");
+  return { dir, bare };
+};
 
+test("push rejection surfaces the real reason, not the transport line", async () => {
+  const { dir } = divergedRemote();
+  await assert.rejects(() => git.push(dir), (error: Error & { code?: string }) => {
+    assert.equal(error.code, "conflict");
+    assert.match(error.message, /rejected|remote has commits|Pull or rebase/i);
+    assert.doesNotMatch(error.message, /^To github\.com/);
+    assert.ok(error.message.length < 200);
+    return true;
+  });
+});
+
+test("permission-style push failure is not remapped to a behind-remote message", async () => {
+  const permissionStderr = [
+    "To github.com:otto-assistant/polyth.git",
+    "remote: Permission to otto-assistant/polyth.git denied to deploy-key.",
+    "fatal: unable to access 'https://github.com/otto-assistant/polyth.git/': The requested URL returned error: 403",
+    "error: failed to push some refs to 'github.com:otto-assistant/polyth.git'",
+  ].join("\n");
+  assert.match(shortErr(permissionStderr), /failed to push|Permission|403/i);
+  assert.doesNotMatch(shortErr(permissionStderr), /^To github\.com/);
+
+  const dir = repo();
+  const bare = mkdtempSync(join(tmpdir(), "polyth-remote-"));
+  dirs.push(bare);
+  execFileSync("git", ["init", "--bare", "-q"], { cwd: bare });
+  const g = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "pipe" });
+  g("remote", "add", "origin", bare);
+  g("push", "-qu", "origin", "main");
+  const { git: wrapped } = recordedGit({ pushStderr: permissionStderr });
+  await assert.rejects(() => wrapped.push(dir), (error: Error & { code?: string }) => {
+    assert.notEqual(error.code, "conflict");
+    assert.doesNotMatch(error.message, /remote has commits you do not have locally/);
+    assert.doesNotMatch(error.message, /^To github\.com/);
+    assert.match(error.message, /failed to push|Permission|403/i);
+    return true;
+  });
+});
+
+test("sync succeeds when local is behind-only", async () => {
+  const dir = repo();
+  const bare = mkdtempSync(join(tmpdir(), "polyth-remote-"));
+  dirs.push(bare);
+  execFileSync("git", ["init", "--bare", "-q"], { cwd: bare });
+  const g = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "pipe" });
+  g("remote", "add", "origin", bare);
+  g("push", "-qu", "origin", "main");
+  execFileSync("git", ["symbolic-ref", "HEAD", "refs/heads/main"], { cwd: bare });
+  const peerParent = mkdtempSync(join(tmpdir(), "polyth-peer-"));
+  dirs.push(peerParent);
+  const peer = join(peerParent, "repo");
+  execFileSync("git", ["clone", "-q", bare, peer]);
+  const pg = (...args: string[]) => execFileSync("git", args, { cwd: peer, stdio: "pipe" });
+  pg("config", "user.email", "t@example.com");
+  pg("config", "user.name", "Peer");
+  pg("config", "commit.gpgsign", "false");
+  writeFileSync(join(peer, "peer.txt"), "from peer\n");
+  pg("add", "."); pg("commit", "-qm", "peer change"); pg("push", "-q");
+  await git.fetch(dir, "origin");
+  assert.equal((await git.status(dir)).behind, 1);
+  assert.equal((await git.status(dir)).ahead, 0);
+  await git.sync(dir, "origin");
+  assert.equal((await git.status(dir)).behind, 0);
+  assert.ok(existsSync(join(dir, "peer.txt")));
+});
+
+test("sync still publishes a branch with no upstream", async () => {
+  const dir = repo();
+  const bare = mkdtempSync(join(tmpdir(), "polyth-remote-"));
+  dirs.push(bare);
+  execFileSync("git", ["init", "--bare", "-q"], { cwd: bare });
+  const g = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "pipe" });
+  g("remote", "add", "origin", bare);
+  g("checkout", "-q", "-b", "feature/no-upstream");
+  writeFileSync(join(dir, "feature.txt"), "new work\n");
+  g("add", "."); g("commit", "-qm", "feature work");
+  await git.sync(dir, "origin");
+  const tracking = execFileSync(
+    "git",
+    ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+    { cwd: dir, stdio: "pipe" },
+  ).toString().trim();
+  assert.equal(tracking, "origin/feature/no-upstream");
+});
+
+test("sync on diverged history fails with a resolvable conflict", async () => {
+  const { dir } = divergedRemote();
+  await assert.rejects(() => git.sync(dir), (error: Error & { code?: string }) => {
+    assert.equal(error.code, "conflict");
+    assert.match(error.message, /diverged|cannot continue/i);
+    return true;
+  });
+});
+
+test("buildLocalConflictResolutionPrompt includes problem when provided", () => {
+  const withProblem = buildLocalConflictResolutionPrompt(
+    { branch: "main", ahead: 0, behind: 1, conflictedPaths: [], diverged: false, problem: "Push was rejected" },
+    "Fix it",
+  );
+  assert.match(withProblem, /Reported failure: Push was rejected/);
+  assert.match(withProblem, /Diagnose the reported failure/);
+  const withoutProblem = buildLocalConflictResolutionPrompt(
+    { branch: "main", ahead: 1, behind: 1, conflictedPaths: [], diverged: true },
+    "Fix it",
+  );
+  assert.doesNotMatch(withoutProblem, /Reported failure:/);
+  assert.match(withoutProblem, /rebase the local commits onto the upstream branch/i);
+});
+
+test("pull reports divergent histories as a resolvable conflict", async () => {
+  const { dir } = divergedRemote();
   await assert.rejects(() => git.pull(dir), (error: Error & { code?: string }) => {
     assert.equal(error.code, "conflict");
     assert.match(error.message, /cannot fast-forward/);
     return true;
   });
+});
+
+test("/api/git/sync and resolve-conflict-agent accept problem without an active conflict", async () => {
+  const syncCalls: string[] = [];
+  const sent: Array<{ sessionId: string; text: string }> = [];
+  const appended: Array<{ sessionId: string; type: string; data: Record<string, unknown> }> = [];
+  const created: string[] = [];
+  const gitMock = {
+    isRepo: async () => true,
+    status: async () => ({
+      branch: "main", ahead: 0, behind: 0, conflicted: [], staged: [], unstaged: [], untracked: [], clean: true,
+    }),
+    sync: async (_root: string, remote?: string) => { syncCalls.push(remote ?? "origin"); },
+  };
+  const sessions = {
+    create: async () => { created.push("new"); return { id: "s-new" }; },
+    snapshot: async (id: string) => ({ id, projectId: "p1", title: "t", status: "idle", createdAt: 1, updatedAt: 1 } as SessionProjection),
+    send: async (sessionId: string, input: { text: string }) => { sent.push({ sessionId, text: input.text }); },
+  } as unknown as SessionService;
+  const routes = gitRoutes({
+    projects: { get: async (id: string) => (id === "p1" ? { id, path: "/repo", name: "repo" } : undefined) } as never,
+    sessions,
+    git: gitMock as never,
+    commitMessage: async () => "",
+    append: async (sessionId, type, data) => { appended.push({ sessionId, type, data: data as Record<string, unknown> }); },
+  });
+  const call = async (path: string, body: Record<string, unknown>) => {
+    let status = 0;
+    let payload: unknown;
+    const handled = await routes({
+      req: {}, res: {},
+      space: { userId: "usr_test" },
+      url: new URL(`http://x${path}`),
+      path,
+      method: "POST",
+      body: async () => body,
+      json: (code: number, data: unknown) => { status = code; payload = data; },
+    } as never);
+    return { handled, status, payload };
+  };
+  const sync = await call("/api/git/sync", { projectId: "p1", remote: "origin" });
+  assert.equal(sync.status, 200);
+  assert.deepEqual(syncCalls, ["origin"]);
+  const agent = await call("/api/git/resolve-conflict-agent", {
+    projectId: "p1",
+    target: "new-session",
+    prompt: "help",
+    problem: "Push was rejected because the remote has commits you do not have locally.",
+  });
+  assert.equal(agent.status, 200);
+  assert.deepEqual(created, ["new"]);
+  assert.match(String(sent[0]?.text), /Reported failure: Push was rejected/);
+  assert.equal(appended[0]?.data.problem, "Push was rejected because the remote has commits you do not have locally.");
 });
 
 test("snapshotCommit captures untracked files and respects gitignore", async () => {

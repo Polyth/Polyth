@@ -348,16 +348,14 @@ export function gitRoutes(deps: {
       const status = await git.status(root);
       const conflictedPaths = status.conflicted.map((file) => file.path);
       const diverged = status.ahead > 0 && status.behind > 0;
-      if (conflictedPaths.length === 0 && !diverged) {
-        json(409, { ok: false, reason: "there is no git conflict to resolve in this repository" });
-        return true;
-      }
+      const problem = typeof input.problem === "string" && input.problem.trim() ? input.problem.trim() : undefined;
+      const hasConflict = conflictedPaths.length > 0 || diverged;
 
       let sessionId = givenSessionId;
       if (target === "new-session") {
         sessionId = (await deps.sessions.create({
           projectId,
-          title: "Resolve git conflicts",
+          title: hasConflict ? "Resolve git conflicts" : "Resolve git problem",
         })).id;
       }
 
@@ -368,6 +366,7 @@ export function gitRoutes(deps: {
           behind: status.behind,
           conflictedPaths,
           diverged,
+          ...(problem ? { problem } : {}),
         },
         String(input.prompt ?? ""),
       );
@@ -377,6 +376,7 @@ export function gitRoutes(deps: {
         behind: status.behind,
         conflictedCount: conflictedPaths.length,
         diverged,
+        ...(problem ? { problem } : {}),
       });
       await deps.sessions.send(sessionId, { text: prompt, githubConflictResolution: true });
       json(200, { ok: true, data: { sessionId } });
@@ -425,6 +425,7 @@ export function gitRoutes(deps: {
       case "/api/git/fetch": await git.fetch(root, input.remote ? String(input.remote) : undefined); break;
       case "/api/git/pull": await git.pull(root, input.remote ? String(input.remote) : undefined); break;
       case "/api/git/push": await git.push(root, input.remote ? String(input.remote) : undefined); break;
+      case "/api/git/sync": await git.sync(root, input.remote ? String(input.remote) : undefined); break;
       case "/api/git/identity":
         await git.setIdentity(root, { name: String(input.name ?? ""), email: String(input.email ?? "") });
         json(200, await git.identity(root));
@@ -590,6 +591,7 @@ export const GIT_REMOTE_ACCESS: RemoteAccessPolicy = {
     { methods: ["POST"], path: "/api/git/fetch", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/git/pull", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/git/push", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/git/sync", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/git/identity", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/worktrees", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/worktrees/remove", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },

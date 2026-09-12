@@ -112,6 +112,8 @@ export interface GitService {
   fetch(root: string, remote?: string): Promise<void>;
   pull(root: string, remote?: string): Promise<void>;
   push(root: string, remote?: string): Promise<void>;
+  /** Fetch, integrate upstream when safe, then publish local commits. */
+  sync(root: string, remote?: string): Promise<void>;
   identity(root: string): Promise<{ name: string; email: string }>;
   setIdentity(root: string, identity: { name: string; email: string }): Promise<void>;
   /** Resolve a ref to a 40-char SHA. */
@@ -180,19 +182,25 @@ export function buildLocalConflictResolutionPrompt(
     behind: number;
     conflictedPaths: string[];
     diverged: boolean;
+    problem?: string;
   },
   userPrompt: string,
 ): string {
   const instructions = userPrompt.trim();
+  const conflicted = state.conflictedPaths.length > 0;
+  const problem = state.problem?.trim();
   const lines = [
-    "Resolve the git conflict in this repository's working tree.",
+    conflicted || state.diverged
+      ? "Resolve the git conflict in this repository's working tree."
+      : "Diagnose and resolve the reported git problem in this repository's working tree.",
     "",
     "Repository state:",
     `- Branch: ${state.branch ?? "(detached HEAD)"}`,
     `- Local commits ahead of upstream: ${state.ahead}`,
     `- Upstream commits not yet integrated: ${state.behind}`,
   ];
-  if (state.conflictedPaths.length > 0) {
+  if (problem) lines.push(`- Reported failure: ${problem}`);
+  if (conflicted) {
     lines.push(`- Files with conflict markers (${state.conflictedPaths.length}):`);
     for (const path of state.conflictedPaths.slice(0, 50)) lines.push(`  - ${path}`);
     if (state.conflictedPaths.length > 50) lines.push("  - …");
@@ -204,16 +212,30 @@ export function buildLocalConflictResolutionPrompt(
   lines.push(
     "",
     "User instructions:",
-    instructions || "Inspect and resolve every merge conflict in the working tree.",
+    instructions || (conflicted || state.diverged
+      ? "Inspect and resolve every merge conflict in the working tree."
+      : "Diagnose the reported failure and restore a healthy sync with the remote."),
     "",
     "Required steps:",
-    "- If no merge or rebase is in progress yet, integrate the upstream branch first. This project keeps a linear history, so rebase the local commits onto the upstream branch (e.g. `git pull --rebase`) unless the user asked for a merge.",
-    "- Resolve every conflict by understanding both sides; explain each non-obvious decision.",
-    "- Remove all conflict markers and keep the code buildable.",
-    "- Run the relevant tests or checks once the tree is clean.",
-    "- Stage the resolved files and complete the rebase or merge locally.",
-    "- Do NOT push or force-push without explicit user approval.",
   );
+  if (conflicted || state.diverged) {
+    lines.push(
+      "- If no merge or rebase is in progress yet, integrate the upstream branch first. This project keeps a linear history, so rebase the local commits onto the upstream branch (e.g. `git pull --rebase`) unless the user asked for a merge.",
+      "- Resolve every conflict by understanding both sides; explain each non-obvious decision.",
+      "- Remove all conflict markers and keep the code buildable.",
+      "- Run the relevant tests or checks once the tree is clean.",
+      "- Stage the resolved files and complete the rebase or merge locally.",
+      "- Do NOT push or force-push without explicit user approval.",
+    );
+  } else {
+    lines.push(
+      "- Diagnose the reported failure from the repository state above.",
+      "- Prefer `git fetch`, then a fast-forward pull (`git pull --ff-only`) when you are behind-only.",
+      "- Push local commits when you are ahead-only and the remote accepts them.",
+      "- Rebase onto upstream only when local and remote histories have diverged.",
+      "- Do NOT force-push without explicit user approval.",
+    );
+  }
   return lines.join("\n");
 }
 
@@ -341,9 +363,23 @@ const STATUS_LETTER: Record<string, GitFileStatus> = {
 
 const CONFLICT_PAIRS = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
 
-const shortErr = (stderr: string): string => {
-  const line = stderr.split("\n").map((l) => l.trim()).filter(Boolean)[0] ?? "git command failed";
-  return line.replace(/^(fatal|error):\s*/i, "");
+const SKIP_ERR_LINE = /^(?:To |From )|^remote:/i;
+const PREFER_ERR_LINE = /^(?:fatal|error):|!\s*\[rejected\]|failed to push|not possible to fast-forward|Updates were rejected/i;
+
+export const shortErr = (stderr: string): string => {
+  const lines = stderr.split("\n").map((line) => line.trim()).filter(Boolean);
+  const informative = lines.find((line) => PREFER_ERR_LINE.test(line))
+    ?? lines.find((line) => !SKIP_ERR_LINE.test(line))
+    ?? lines[0]
+    ?? "git command failed";
+  let message = informative.replace(/^(fatal|error):\s*/i, "");
+  if (message.length >= 200) message = `${message.slice(0, 197)}…`;
+  return message;
+};
+
+const pushRejection = (failure: Error & { cause?: unknown }): boolean => {
+  const text = `${failure.message} ${String(failure.cause ?? "")}`;
+  return /!\s*\[rejected\]|non-fast-forward|Updates were rejected|fetch first|tip of your current branch is behind|its remote counterpart/i.test(text);
 };
 
 /** Git's own refusal for a dirty linked worktree. Status is never the gate. */
@@ -720,6 +756,16 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
 
     async push(root, remote = "origin") {
       if (!/^[\w.-]{1,120}$/.test(remote)) throw Object.assign(new Error("invalid remote"), { code: "invalid-input" });
+      const mapPushFailure = (error: unknown): never => {
+        const failure = error as Error & { cause?: unknown };
+        if (pushRejection(failure)) {
+          throw Object.assign(
+            new Error("Push was rejected because the remote has commits you do not have locally. Pull or rebase first, then push again."),
+            { code: "conflict" },
+          );
+        }
+        throw error;
+      };
       // On a normal branch with no tracking ref yet, `git push` aborts with
       // "has no upstream branch". Publish the branch and set upstream so the
       // first push (and every sync after) just works.
@@ -728,11 +774,47 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
       if (branch) {
         const hasUpstream = (await run(root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], true)).code === 0;
         if (!hasUpstream) {
-          await run(root, ["push", "--set-upstream", remote, branch]);
+          try {
+            await run(root, ["push", "--set-upstream", remote, branch]);
+          } catch (error) {
+            mapPushFailure(error);
+          }
           return;
         }
       }
-      await run(root, ["push", remote]);
+      try {
+        await run(root, ["push", remote]);
+      } catch (error) {
+        mapPushFailure(error);
+      }
+    },
+
+    async sync(root, remote = "origin") {
+      if (!/^[\w.-]{1,120}$/.test(remote)) throw Object.assign(new Error("invalid remote"), { code: "invalid-input" });
+      await run(root, ["fetch", remote]);
+      const branchRef = await run(root, ["symbolic-ref", "--quiet", "--short", "HEAD"], true);
+      const branch = branchRef.code === 0 ? branchRef.stdout.trim() : "";
+      const hasUpstream = branch
+        ? (await run(root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], true)).code === 0
+        : false;
+      if (!hasUpstream) {
+        await service.push(root, remote);
+        return;
+      }
+      const status = await service.status(root);
+      if (status.ahead > 0 && status.behind > 0) {
+        throw Object.assign(
+          new Error("Sync cannot continue because local and remote histories have diverged. Rebase or merge your local commits, then try again."),
+          { code: "conflict" },
+        );
+      }
+      if (status.behind > 0 && status.ahead === 0) {
+        await service.pull(root, remote);
+        const afterPull = await service.status(root);
+        if (afterPull.ahead > 0) await service.push(root, remote);
+        return;
+      }
+      await service.push(root, remote);
     },
 
     async identity(root) {
