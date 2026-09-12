@@ -1,0 +1,27 @@
+/* Final phone-only refinements kept separate from the structural stylesheet so
+ * the Navigator can consume Polyth's native safe-area bridge without changing
+ * desktop or compact navigation styles. */
+
+.mobile-nav-toolbar {
+  min-height: calc(50px + var(--safe-top));
+  padding-top: calc(6px + var(--safe-top));
+  padding-right: max(10px, var(--safe-right));
+  padding-left: max(10px, var(--safe-left));
+}
+
+.mobile-nav-scroll {
+  padding-right: max(10px, var(--safe-right));
+  padding-bottom: calc(14px + var(--safe-bottom));
+  padding-left: max(10px, var(--safe-left));
+}
+
+/* The current project is not a card. Only its header gets a barely perceptible
+ * material lift; sessions continue directly into the shared navigator surface. */
+.mobile-nav-project.is-current {
+  background: transparent;
+}
+
+.mobile-nav-project.is-current > .mobile-nav-project-head {
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface) 15%, transparent);
+}
