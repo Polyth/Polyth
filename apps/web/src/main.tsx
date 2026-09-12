@@ -8,6 +8,7 @@ import "./styles.css";
 import "./moduleContent.css";
 import "./composerAdaptive.css";
 import "./workspacePanelPremium.css";
+import "./workspacePanelWidgetFixes.css";
 import "./motion.css";
 import "./chatMotion.ts";
 
