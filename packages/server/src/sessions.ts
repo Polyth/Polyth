@@ -6158,7 +6158,23 @@ export function createSessionService(deps: {
         || projectProfileHarnessId === harness.harnessId)
         ? projectProfile
         : undefined;
-      input = { ...input, harness };
+      // A caller that names no model/agent (agent-facing handoffs such as the
+      // git conflict resolver) inherits the project's configured defaults.
+      // Without this the runtime falls back to its own native default and a
+      // session can silently run on a model the user never chose. Mirror the
+      // composer rule: a stored model is only a default while the project
+      // remembers model selection, and only when the caller did not pin a
+      // harness — defaults are harness-qualified, an explicit override is not.
+      const remembersModel = project.defaults?.rememberModelSelection ?? project.defaults?.model != null;
+      const defaultModel = remembersModel && !requestedHarness
+        ? project.defaults?.model ?? undefined
+        : undefined;
+      input = {
+        ...input,
+        harness,
+        ...(!input.model && defaultModel ? { model: defaultModel } : {}),
+        ...(!input.agent && !requestedHarness && project.defaults?.agent ? { agent: project.defaults.agent } : {}),
+      };
       let worktree: { path: string; branch: string | null } | undefined;
       if (input.worktreePath && deps.worktrees) {
         const requested = resolve(input.worktreePath);

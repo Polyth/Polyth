@@ -69,7 +69,6 @@ import {
 } from "../composerInsert.ts";
 import { activeToken, completeToken, shellCommand, type PromptToken } from "../composer/language.ts";
 import {
-  ATTACHMENT_COMPAT_NOTE,
   catalogFromResult,
   commandAutocomplete,
   composerModelAbsence,
@@ -1836,7 +1835,10 @@ export default function Composer({
   // keeps the legacy "not reported" line.
   const attachNote = (() => {
     if (attachments.length === 0) return null;
-    if (!composerAttachmentSupport) return ATTACHMENT_COMPAT_NOTE;
+    // No capability report is not a claim of incompatibility — most providers
+    // simply don't report it, and it works. Only an explicit unsupported
+    // modality is worth interrupting the draft for.
+    if (!composerAttachmentSupport) return null;
     for (const attachment of attachments) {
       const modality = attachmentModality(attachment);
       if (!modality) continue;

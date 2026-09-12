@@ -554,10 +554,17 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
         setConflictAgentMsg(result.reason);
         return;
       }
-      if (target === "new-session" || result.data.sessionId !== sessionId) {
-        await openSession(result.data.sessionId);
-      }
+      // The server already created the session and admitted the prompt. State
+      // that before navigating: a failure to open the chat must not be
+      // reported as a failure to start the conflict resolution.
       setConflictAgentMsg(tr("gitview.conflictAgentStarted"));
+      if (target === "new-session" || result.data.sessionId !== sessionId) {
+        try {
+          await openSession(result.data.sessionId);
+        } catch (cause) {
+          setUiError(friendlyError(tr("common.error"), cause));
+        }
+      }
     } catch (cause) {
       setConflictAgentFailed(true);
       setConflictAgentMsg(friendlyError(tr("pullrequestview.conflictAgentFailed"), cause));

@@ -7596,6 +7596,14 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
     min-height: var(--composer-height);
     padding: 0 var(--space-2);
   }
+  /* Notices/attach-notes are engaged-state content, not part of the minimal
+     row's item order; unmounting them here (rather than just visually) would
+     lose their announcement, so keep them mounted but out of the row box. */
+  .composer-mobile.composer-collapsed .composer-note,
+  .composer-mobile.composer-collapsed .composer-attach-note,
+  .composer-mobile.composer-collapsed .drop-hint {
+    display: none;
+  }
   .composer-mobile.composer-collapsed .composer-rail { display: contents; }
   .composer-mobile.composer-collapsed .composer-leading-zone { display: contents; }
   .composer-mobile.composer-collapsed .composer-config { display: none; }

@@ -179,6 +179,9 @@ export async function attachProjectFile(
   range?: [number, number],
   refId = newAttachmentId(),
   expectedScopeKey = scopedDraftCacheKey(sessionId),
+  /** The pill's display name. Uploads store bytes under an id-prefixed
+   *  `_inbox/` path; that storage detail is not a name worth showing. */
+  displayName = basename(path),
 ): Promise<AttachResult> {
   // Resolve against the session's worktree so the pill points at the same
   // bytes the agent sees (UX-FIXTURE-VISUAL P0).
@@ -195,7 +198,7 @@ export async function attachProjectFile(
   const mime = st.mime || "application/octet-stream";
   const ref: AttachmentRef = {
     id: refId,
-    name: range ? `${basename(path)} (${range[0]}–${range[1]})` : basename(path),
+    name: range ? `${displayName} (${range[0]}–${range[1]})` : displayName,
     mime,
     size: st.size,
     kind: range ? "range" : mime.startsWith("image/") ? "image" : "file",
@@ -235,14 +238,14 @@ export async function attachUpload(
     try {
       const existing = await api.filesStat(projectId, rel, sessionId ?? undefined);
       if (existing.kind === "file" && existing.size === file.size) {
-        return attachProjectFile(projectId, sessionId, rel, undefined, id, expectedScopeKey);
+        return attachProjectFile(projectId, sessionId, rel, undefined, id, expectedScopeKey, safeName);
       }
       return { ok: false, reason: `${safeName} has a conflicting server copy; it was not uploaded again.` };
     } catch {
       return { ok: false, reason: err instanceof Error ? err.message : String(err) };
     }
   }
-  return attachProjectFile(projectId, sessionId, rel, undefined, id, expectedScopeKey);
+  return attachProjectFile(projectId, sessionId, rel, undefined, id, expectedScopeKey, safeName);
 }
 
 export type NativeStagedSource = Omit<NativeStagedAttachment, "destination">;
@@ -272,7 +275,7 @@ export async function attachNativeStagedUpload(
   const stillCurrent = () => scopedDraftCacheKey(sessionId) === scopeKey;
   const finish = async (): Promise<AttachResult> => {
     if (!stillCurrent()) return { ok: false, reason: "Attachment context changed; the staged copy was retained." };
-    const attached = await attachProjectFile(projectId, sessionId, staged.destination, undefined, staged.id, scopeKey);
+    const attached = await attachProjectFile(projectId, sessionId, staged.destination, undefined, staged.id, scopeKey, staged.name);
     if (!attached.ok) return attached;
     removeNativeStagedAttachment(sessionId, staged.id);
     // Persist the attachment pill + staged-metadata removal before deleting

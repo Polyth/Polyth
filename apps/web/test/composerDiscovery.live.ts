@@ -493,7 +493,8 @@ test("github link: mismatch reports the exact error with no pill; a match create
   assert.equal(await url.inputValue(), "https://github.com/other/lib/issues/3");
   await shot(page, "github_mismatch_error.png");
 
-  // Matching issue: dialog closes, one link-only pill, honest attachment note.
+  // Matching issue: dialog closes, one link-only pill, no compatibility note —
+  // an unreported capability is not a claim of incompatibility.
   const match = `https://github.com/${GH_OWNER}/${GH_NAME}/issues/12`;
   await url.fill(match);
   await page.locator(".github-link-dialog button", { hasText: "Add link" }).click();
@@ -505,10 +506,7 @@ test("github link: mismatch reports the exact error with no pill; a match create
   assert.equal((await name.innerText()).trim(), "Issue #12", "pill is the reference only — no issue body");
   assert.equal(await name.getAttribute("title"), match, "pill detail is the sanitized URL");
   await pill.locator(".att-remove").waitFor({ state: "visible" });
-  assert.equal(
-    (await page.locator(".composer-attach-note").innerText()).trim(),
-    "Attachment compatibility is not reported by this provider",
-  );
+  assert.equal(await page.locator(".composer-attach-note").count(), 0, "no note when compatibility isn't reported");
   await shot(page, "github_pill_and_note.png");
 
   assert.equal(await eventCount(SESSIONS.main), before, "unsent pills append no session event");

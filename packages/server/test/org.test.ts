@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createStore } from "@polyth/session";
-import type { AgentRuntime, FeatureSupport, Project, ProjectService, RuntimeEvent, SessionEvent, SessionProjection } from "@polyth/contracts";
+import type { AgentRuntime, FeatureSupport, Project, ProjectDefaults, ProjectService, RuntimeEvent, SessionEvent, SessionProjection } from "@polyth/contracts";
 import { titleFromPrompt } from "@polyth/harness-runtime";
 import { createSessionService, type Broadcaster } from "../src/sessions.ts";
 import { createProjectService } from "../src/projects.ts";
@@ -63,10 +63,11 @@ function makeService(opts: {
   polledTitleAfter?: number;
   harnessId?: string;
   titleSupport?: FeatureSupport;
+  defaults?: ProjectDefaults;
 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "polyth-orgsvc-"));
   const store = createStore(join(dir, "s.db"));
-  const project: Project = { id: "p1", path: dir, name: "p", createdAt: 1 };
+  const project: Project = { id: "p1", path: dir, name: "p", createdAt: 1, ...(opts.defaults ? { defaults: opts.defaults } : {}) };
   const projects: ProjectService = {
     list: async () => [project],
     get: async (id) => (id === "p1" ? project : undefined),
@@ -404,4 +405,48 @@ test("manual title prevents native overwrite", async () => {
   await sessions.send(id, { text: "Do not rename", autoTitle: true });
   await new Promise((r) => setTimeout(r, 50));
   assert.equal((await sessions.snapshot(id)).title, "Manual title");
+});
+
+test("session create inherits the project default model and agent", async () => {
+  const { sessions } = makeService({
+    defaults: {
+      model: { providerID: "openrouter", modelID: "deepseek/deepseek-v4.1-flash" },
+      agent: "build",
+    },
+  });
+  const { id } = await sessions.create({ projectId: "p1", title: "Resolve git conflicts" });
+  const snap = await sessions.snapshot(id);
+  assert.deepEqual(snap.model, { providerID: "openrouter", modelID: "deepseek/deepseek-v4.1-flash" });
+  assert.equal(snap.agent, "build");
+
+  // An explicit caller choice still wins over the project default.
+  const explicit = await sessions.create({
+    projectId: "p1",
+    title: "Explicit",
+    model: { providerID: "openrouter", modelID: "other-model" },
+    agent: "plan",
+  });
+  const explicitSnap = await sessions.snapshot(explicit.id);
+  assert.deepEqual(explicitSnap.model, { providerID: "openrouter", modelID: "other-model" });
+  assert.equal(explicitSnap.agent, "plan");
+
+  // A caller that pins its own harness does not inherit a harness-qualified
+  // project default model.
+  const pinned = await sessions.create({
+    projectId: "p1",
+    title: "Pinned elsewhere",
+    harness: { mode: "pinned", harnessId: "claude" },
+  });
+  assert.equal((await sessions.snapshot(pinned.id)).model, undefined);
+});
+
+test("a stored project model is not a default while model memory is off", async () => {
+  const { sessions } = makeService({
+    defaults: {
+      model: { providerID: "openrouter", modelID: "deepseek/deepseek-v4.1-flash" },
+      rememberModelSelection: false,
+    },
+  });
+  const { id } = await sessions.create({ projectId: "p1", title: "No memory" });
+  assert.equal((await sessions.snapshot(id)).model, undefined);
 });
