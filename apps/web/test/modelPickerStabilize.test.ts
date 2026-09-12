@@ -52,6 +52,7 @@ test("native catalog updates preserve Luna, flat rows, and the existing picker s
     assert.equal(container.querySelector(".model-trigger-name")?.textContent, "Luna");
     await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
     const shell = document.body.querySelector(".model-pop");
+    assert.ok(shell?.classList.contains("model-pop--compact"), "small native catalogs do not reserve a full-height menu");
     assert.equal(document.body.querySelectorAll(".model-picker-row").length, 2);
     assert.equal(document.body.querySelector(".model-provider-head"), null);
     assert.equal(document.body.querySelector(".model-star-btn"), null);
@@ -135,6 +136,92 @@ test("stable anchoring ignores composer layout movement and still clamps after v
   }
 });
 
+test("anchored surfaces stay in the visible band when both sides are short", async () => {
+  const { act, createElement, useRef } = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { useAnchoredPosition } = await import("../src/components/ui/useAnchoredPosition.ts");
+  const anchor = { getBoundingClientRect: () => ({ left: 20, right: 120, top: 40, bottom: 60, width: 100, height: 20 }) } as HTMLElement;
+  const surface = { getBoundingClientRect: () => ({ width: 160, height: 300 }) } as HTMLElement;
+  let position: { top: number; maxHeight: number; side: string } | undefined;
+  function Harness() {
+    position = useAnchoredPosition(true, useRef(anchor), useRef(surface));
+    return null;
+  }
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const originalHeight = window.innerHeight;
+  try {
+    Object.defineProperty(window, "innerHeight", { value: 100, configurable: true });
+    await act(async () => { root.render(createElement(Harness)); });
+    assert.equal(position?.side, "down");
+    assert.equal(position?.maxHeight, 26);
+    assert.equal(position?.top, 66);
+    assert.ok((position?.top ?? 0) + (position?.maxHeight ?? 0) <= 92, "surface stays above the viewport margin");
+    Object.defineProperty(window, "innerHeight", { value: 900, configurable: true });
+    await act(async () => { window.dispatchEvent(new window.Event("resize")); });
+    assert.equal(position?.maxHeight, 826, "available height is not capped at the previously measured content height");
+  } finally {
+    Object.defineProperty(window, "innerHeight", { value: originalHeight, configurable: true });
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("non-searchable Picker supports keyboard selection and restores trigger focus", async () => {
+  const { act, createElement } = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { default: Picker } = await import("../src/components/Picker.tsx");
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const picked: string[] = [];
+  try {
+    await act(async () => { root.render(createElement(Picker, {
+      label: "Choice", searchable: false,
+      items: [{ id: "one", label: "One", group: "" }, { id: "two", label: "Two", group: "" }],
+      onPick: (id: string) => picked.push(id),
+    })); });
+    const trigger = container.querySelector<HTMLButtonElement>(".picker-chip")!;
+    await act(async () => { trigger.click(); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    const list = document.body.querySelector<HTMLElement>(".picker-list")!;
+    assert.equal(document.activeElement, list);
+    await act(async () => { list.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })); });
+    assert.equal(document.getElementById(list.getAttribute("aria-activedescendant")!)?.textContent?.includes("Two"), true);
+    await act(async () => { list.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+    assert.deepEqual(picked, ["two"]);
+    assert.equal(document.body.querySelector(".picker-list"), null);
+    assert.equal(document.activeElement, trigger);
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("phone Picker exposes multi-selection on its listbox", async () => {
+  phoneMode = true;
+  const { act, createElement } = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { default: Picker } = await import("../src/components/Picker.tsx");
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(Picker, {
+      label: "Choices", mobileSheet: true, values: ["one"],
+      items: [{ id: "one", label: "One", group: "" }], onPick: () => {},
+    })); });
+    await act(async () => { container.querySelector<HTMLButtonElement>(".picker-chip")!.click(); });
+    assert.equal(document.body.querySelector('.picker-sheet [role="listbox"]')?.getAttribute("aria-multiselectable"), "true");
+    assert.equal(document.body.querySelector('.picker-sheet [role="option"]')?.getAttribute("aria-selected"), "true");
+  } finally {
+    phoneMode = false;
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
 test("harness picker header omits Manage and Auto tabs", async () => {
   const source = await read("../../../packages/harness-runtime/widgets/runtime.tsx");
   assert.doesNotMatch(source, /pkg-harnesses-manage/);
@@ -173,7 +260,7 @@ test("model picker loads details only after a row interaction", async () => {
     const row = document.body.querySelector<HTMLElement>(".model-picker-row");
     assert.ok(row, "catalog row renders");
     await act(async () => { row!.dispatchEvent(new window.MouseEvent("mouseover", { bubbles: true })); });
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 25)); });
+    await act(async () => { await import("../../../packages/models/widgets/ModelDetails.tsx"); });
     assert.match(document.body.querySelector(".model-hover-details")?.textContent ?? "", /GPT Test/);
     assert.equal(picks, 0, "hovering for details does not choose a model");
   } finally {
@@ -257,6 +344,72 @@ test("phone model details stay inside the shared sheet focus boundary", async ()
     assert.ok(sheet!.contains(document.activeElement), "details move focus to a control inside the sheet");
   } finally {
     phoneMode = false;
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("compact catalog shell height follows unfiltered rows and holds while searching", async () => {
+  const { act, createElement } = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { default: ModelPicker } = await import("../../../packages/models/widgets/ModelPicker.tsx");
+  const styles = await read("../../../packages/models/widgets/styles.css");
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const setInput = (input: HTMLInputElement, value: string) => {
+    const setter = Object.getOwnPropertyDescriptor(dom.HTMLInputElement.prototype, "value")?.set;
+    setter!.call(input, value);
+    input.dispatchEvent(new window.Event("input", { bubbles: true }));
+  };
+  const model = (id: string, name: string) => ({ harnessId: "codex", providerID: "openai", modelID: id, name });
+  try {
+    await act(async () => {
+      root.render(createElement(ModelPicker, {
+        harnessId: "codex",
+        models: [model("m0", "Model 0"), model("m1", "Model 1")],
+        onPick: () => {},
+      }));
+    });
+    await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
+    const shell = document.body.querySelector<HTMLElement>(".model-picker-shell");
+    assert.ok(shell, "compact shell renders");
+    assert.ok(document.body.querySelector(".model-pop--compact"), "short flat catalogs use compact sizing");
+    assert.equal(shell!.style.getPropertyValue("--model-pop-rows"), "2", "height derives from the unfiltered catalog");
+    assert.equal(document.body.querySelectorAll(".model-picker-row").length, 2);
+
+    const search = document.body.querySelector<HTMLInputElement>(".model-pop-search input")!;
+    await act(async () => { setInput(search, "Model 1"); });
+    assert.equal(document.body.querySelectorAll(".model-picker-row").length, 1, "search filters the visible rows");
+    assert.equal(shell!.style.getPropertyValue("--model-pop-rows"), "2", "filtering must not shrink the open shell");
+
+    await act(async () => {
+      root.render(createElement(ModelPicker, {
+        harnessId: "codex",
+        models: Array.from({ length: 8 }, (_, index) => model(`d${index}`, `Dense ${index}`)),
+        onPick: () => {},
+      }));
+    });
+    assert.equal(
+      document.body.querySelector<HTMLElement>(".model-picker-shell")?.style.getPropertyValue("--model-pop-rows"),
+      "8",
+      "dense flat catalogs size to their own row count",
+    );
+
+    assert.match(styles, /\.model-pop--compact\s*\{[^}]*height:\s*auto/s, "compact surfaces size to content, not a fixed 360px");
+    assert.match(styles, /\.model-pop--compact\s*\{[^}]*max-height:\s*min\(360px,\s*72vh\)/s, "short viewports still cap the compact surface");
+    assert.match(styles, /\.model-pop--compact \.model-picker-list\s*\{[^}]*height:\s*calc\(var\(--model-pop-rows/s, "the list is sized from the unfiltered row count");
+
+    // An empty flat catalog keeps a bounded floor for its message.
+    await act(async () => {
+      root.render(createElement(ModelPicker, { harnessId: "codex", models: [], onPick: () => {} }));
+    });
+    assert.equal(
+      document.body.querySelector<HTMLElement>(".model-picker-shell")?.style.getPropertyValue("--model-pop-rows"),
+      "2",
+      "empty compact catalogs keep a two-row floor",
+    );
+  } finally {
     await act(async () => { root.unmount(); });
     container.remove();
   }

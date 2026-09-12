@@ -13,6 +13,7 @@ import {
   useRef,
   useState,
   Suspense,
+  type CSSProperties,
   type DragEvent,
   type KeyboardEvent,
   type MouseEvent,
@@ -634,6 +635,18 @@ export default function ModelPicker({
   );
 
   const detailsPanelModel = detail ?? hoverDetailsModel;
+  const compactCatalog = flatCatalog && models.length <= 8;
+  // A compact flat catalog sizes its list to the unfiltered row count, not the
+  // filtered rows: the list keeps one height while the user types, so an
+  // upward-anchored search field never drifts. An empty catalog keeps a
+  // two-row floor so its "no models" message is not clipped.
+  const compactRows = compactCatalog ? (models.length === 0 ? 2 : models.length) : 0;
+  // A genuinely empty catalog has no rows to filter, so let its message size
+  // naturally instead of forcing a row grid.
+  const emptyCompactCatalog = compactCatalog && models.length === 0;
+  const compactShellStyle = !phone && compactCatalog
+    ? ({ "--model-pop-rows": String(compactRows) } as CSSProperties)
+    : undefined;
   const detailsPanelContent = detailsPanelModel && (
     <Suspense fallback={null}>
       {detail
@@ -669,10 +682,10 @@ export default function ModelPicker({
           side={direction === "up" ? "up" : "down"}
           align="start"
           stableAnchor
-          className={phone ? "model-sheet" : "model-pop"}
+          className={phone ? "model-sheet" : `model-pop${compactCatalog ? " model-pop--compact" : ""}${emptyCompactCatalog ? " model-pop--empty" : ""}`}
           popoverOverflow="visible"
           initialFocus={!phone ? ".model-pop-search input" : undefined}
-          sheetSize="tall"
+          sheetSize={compactCatalog ? "auto" : "tall"}
           sheetSearch={{
             value: pickerState.query,
             onChange: (query: string) => {
@@ -691,7 +704,7 @@ export default function ModelPicker({
             },
           } : {})}
         >
-        <div ref={pickerShellRef} className="model-picker-shell">
+        <div ref={pickerShellRef} className="model-picker-shell" style={compactShellStyle}>
           {header && <div className="model-picker-header">{header}</div>}
           {phone ? (detail ? detailsPanelContent : (
             <div role="listbox" aria-label={tr("modelpicker.models")}>

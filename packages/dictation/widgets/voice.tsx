@@ -22,7 +22,7 @@ import {
 import { defineWidgetPlugin } from "../../../apps/web/src/widgets/catalog.ts";
 import type { WebPackageHost } from "@polyth/web-sdk";
 import { requestComposerInsert } from "../../../apps/web/src/composerInsert.ts";
-import { getState } from "../../../apps/web/src/store.ts";
+import { getState, subscribeStore } from "../../../apps/web/src/store.ts";
 import { api } from "@polyth/session/web-api";
 import { startStreamingDictation, type StreamingDictation } from "./dictationClient.ts";
 import { canStartDirectProvider, startDirectProvider } from "./directProviders.ts";
@@ -506,7 +506,7 @@ function MicButton() {
 
   const lastAnnounced = useRef<string | null>(null);
   useEffect(() => {
-    if (lifecycleStatus && lifecycleStatus !== lastAnnounced.current) announce(lifecycleStatus);
+    if (lifecycleStatus !== lastAnnounced.current) announce(lifecycleStatus);
     lastAnnounced.current = lifecycleStatus;
   }, [lifecycleStatus]);
 

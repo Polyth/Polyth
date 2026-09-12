@@ -69,7 +69,7 @@ test("shell-backed repository inspection is presented by semantic action", () =>
   const search = executionPresentation(searchTool);
   assert.equal(search.kind, "search");
   assert.equal(search.label, "Search");
-  assert.equal(search.preview, "“harnessTransition” · packages/server/test/harnessSwitch.test.ts");
+  assert.equal(search.preview, "“harnessTransition” · …/harnessSwitch.test.ts");
 
   const readTool = tool({
     input: { command: "/bin/bash -lc \"sed -n '1,185p' packages/server/test/harnessSwitch.test.ts\"" },
@@ -428,8 +428,8 @@ test("execution row renders collapsed value first, expands inline, and opens lev
       await new Promise((resolve) => setTimeout(resolve, 200));
     });
     assert.equal(container.querySelector(".execution-details"), null, "details unmount after the motion-normal collapse");
-    // The visible summary reads label + command + duration + check mark.
-    assert.match(disclosure.textContent ?? "", /Shell.*git diff.*420ms.*✓/s);
+    // The summary is semantic; the full command remains in the details above.
+    assert.match(disclosure.textContent ?? "", /Git.*Review changes.*420ms.*✓/s);
   } finally {
     await act(async () => root.unmount());
     timeline.remove();

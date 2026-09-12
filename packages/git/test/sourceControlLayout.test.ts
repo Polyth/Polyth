@@ -1,18 +1,14 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import type { Browser, Page } from "playwright-core";
+import { findChromiumExecutable } from "@polyth/browser/chromium";
 
-const CHROME = [
-  process.env.POLYTH_CHROMIUM_PATH,
-  "/usr/local/bin/google-chrome",
-  "/usr/bin/google-chrome",
-  "/usr/bin/google-chrome-stable",
-  "/usr/bin/chromium",
-].find((candidate): candidate is string => Boolean(candidate && existsSync(candidate)));
+const CHROME = await findChromiumExecutable();
 const css = [
   "../../../apps/web/src/tokens.css",
   "../../../apps/web/src/styles.css",
+  "../../../apps/web/src/moduleContent.css",
   "../widgets/styles.css",
   "../../code-hosting/widgets/styles.css",
   "../../files/widgets/styles.css",
@@ -29,6 +25,34 @@ before(async () => {
 
 after(async () => {
   await browser?.close();
+});
+
+test("docked source control reserves a usable scrolling file pane", { skip: !CHROME }, async () => {
+  assert.ok(page);
+  for (const width of [320, 438, 900]) {
+    await page.setViewportSize({ width, height: 720 });
+    await page.setContent(`<style>${css}</style>
+      <aside class="rail rail-workspace" style="width:100%;height:700px"><section class="module-view">
+        <header class="module-view-head">Source control</header>
+        <div class="module-view-body"><div class="module-view-content module-view-content--workspace"><div class="rail-body">
+          <div class="git-page">
+            <div class="source-control-head">Repository</div>
+            <nav class="source-tabs"><button>Changes</button><button>Log</button></nav>
+            <div class="git-changes-layout"><div class="git-master-detail">
+              <section class="git-master-pane">${Array.from({ length: 30 }, (_, i) => `<div class="git-file-row"><button class="git-file-main">File ${i}</button></div>`).join("")}</section>
+              <section class="git-detail-pane">Select a file</section>
+            </div></div>
+          </div>
+        </div></div></div>
+      </section></aside>`);
+    const pane = page.locator(".git-master-pane");
+    assert.ok((await pane.boundingBox())!.height > 300, `${width}px: the file pane must not collapse to zero`);
+    await pane.evaluate(element => { element.scrollTop = element.scrollHeight; });
+    const last = await page.locator(".git-file-row").last().boundingBox();
+    const bounds = await pane.boundingBox();
+    assert.ok(last!.y + last!.height <= bounds!.y + bounds!.height + 1, "the final change remains reachable");
+  }
+  await page.setViewportSize({ width: 320, height: 720 });
 });
 
 test("320px source-control layout keeps repository metadata clear of tabs", { skip: !CHROME }, async () => {
@@ -261,4 +285,53 @@ test("narrow source-control shell keeps every change group above the commit comp
     await page.click("#untracked-disclosure");
     assert.equal(await page.evaluate(() => document.body.dataset.lastTap), "untracked-disclosure");
   }
+});
+
+test("compact git.recent summary keeps its action reachable in a small card", { skip: !CHROME }, async () => {
+  assert.ok(page);
+  const fileRow = (index: number) => `
+    <button type="button" class="git-recent-file">
+      <span class="git-file-letter unstaged">M</span>
+      <span class="git-recent-path">packages/git/widgets/some/deeply/nested/file-${index}.tsx</span>
+    </button>`;
+  for (const size of [{ width: 300, height: 220 }, { width: 210, height: 170 }]) {
+    await page.setViewportSize({ width: 640, height: 720 });
+    await page.setContent(`
+      <style>${css}</style>
+      <div id="card" class="git-recent-widget" style="width:${size.width}px;height:${size.height}px">
+        <div class="git-recent-head">
+          <span class="source-branch"><span class="mono">feature/a-rather-long-branch-name</span></span>
+          <span class="git-recent-summary">12 changed files</span>
+        </div>
+        <div class="git-recent-list">${Array.from({ length: 12 }, (_, index) => fileRow(index)).join("")}</div>
+        <div class="git-recent-foot">
+          <button type="button" class="git-recent-open"><span>Source control</span></button>
+        </div>
+      </div>
+    `);
+    const geometry = await page.evaluate(() => {
+      const card = document.querySelector<HTMLElement>("#card")!;
+      const list = document.querySelector<HTMLElement>(".git-recent-list")!;
+      const open = document.querySelector<HTMLElement>(".git-recent-open")!;
+      const head = document.querySelector<HTMLElement>(".git-recent-head")!;
+      const cardRect = card.getBoundingClientRect();
+      const listRect = list.getBoundingClientRect();
+      const openRect = open.getBoundingClientRect();
+      const headRect = head.getBoundingClientRect();
+      return {
+        openBottom: openRect.bottom,
+        cardBottom: cardRect.bottom,
+        openWidth: openRect.width,
+        headBottom: headRect.bottom,
+        listTop: listRect.top,
+        listScrollHeight: list.scrollHeight,
+        listClientHeight: list.clientHeight,
+      };
+    });
+    assert.ok(geometry.openBottom <= geometry.cardBottom + 0.5, `${size.width}x${size.height}: the action must stay inside the card`);
+    assert.ok(geometry.openWidth > 0, `${size.width}x${size.height}: the action must keep a hit area`);
+    assert.ok(geometry.headBottom <= geometry.listTop + 1, `${size.width}x${size.height}: the header must not overlap the list`);
+    assert.ok(geometry.listScrollHeight > geometry.listClientHeight, `${size.width}x${size.height}: the preview must own overflow instead of stretching the card`);
+  }
+  await page.setViewportSize({ width: 320, height: 720 });
 });

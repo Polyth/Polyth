@@ -8,8 +8,8 @@ import { buildPushPayload } from "../push.ts";
 export function pushRoutes(push: PushService): RouteHandler {
   return async (rc) => {
     const { path, method } = rc;
-    const account = { userId: rc.space.userId, spaceId: rc.space.spaceId };
     if (!path.startsWith("/api/push/")) return false;
+    const account = { userId: rc.space.userId, spaceId: rc.space.spaceId };
 
     if (path === "/api/push/key" && method === "GET") {
       rc.json(200, { publicKey: push.publicKey(), subscriptions: push.count(account) });

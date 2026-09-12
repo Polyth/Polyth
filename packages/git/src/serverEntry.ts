@@ -193,7 +193,8 @@ export function gitRoutes(deps: {
   const paths = (body: Record<string, unknown>): string[] =>
     Array.isArray(body.paths) ? body.paths.map((path) => assertGitRelativePath(String(path))) : [];
 
-  return async ({ path, method, url, body, json, space }) => {
+  return async (rc) => {
+    const { path, method, url, body, json } = rc;
     const query = (key: string) => url.searchParams.get(key);
 
     if (path === "/api/projects/clone" && method === "POST") {
@@ -410,7 +411,7 @@ export function gitRoutes(deps: {
         json(200, await git.commit(root, String(input.message ?? "")));
         return true;
       case "/api/git/commit-message":
-        json(200, { message: await deps.commitMessage(root, space.userId) });
+        json(200, { message: await deps.commitMessage(root, rc.space.userId) });
         return true;
       case "/api/git/branch":
         await git.createBranch(root, String(input.name ?? ""), input.from ? String(input.from) : undefined);

@@ -90,13 +90,14 @@ export function walkthroughRoutes(deps: {
   review?: ReviewService;
   flow?: ReviewFlowService;
 }): RouteHandler {
-  return async ({ path, method, json, body, space }) => {
+  return async (rc) => {
+    const { path, method, json, body } = rc;
     if (deps.jobs && path === "/api/walkthroughs" && method === "POST") {
       const input = await body();
       json(200, await deps.jobs.create(
         parseSource(input.source),
         input.sessionId ? String(input.sessionId) : undefined,
-        space.userId,
+        rc.space.userId,
       ));
       return true;
     }
@@ -133,7 +134,7 @@ export function walkthroughRoutes(deps: {
     let reviewMatch = path.match(/^\/api\/sessions\/([^/]+)\/review\/generate$/);
     if (deps.review && reviewMatch && method === "POST") {
       const input = await body();
-      json(200, await deps.review.generate(reviewMatch[1]!, parseSource(input.source), space.userId));
+      json(200, await deps.review.generate(reviewMatch[1]!, parseSource(input.source), rc.space.userId));
       return true;
     }
     reviewMatch = path.match(/^\/api\/sessions\/([^/]+)\/review-flow$/);
@@ -143,7 +144,7 @@ export function walkthroughRoutes(deps: {
         ...(input.maxIterations !== undefined
           ? { maxIterations: Number(input.maxIterations) }
           : {}),
-      }, space.userId));
+      }, rc.space.userId));
       return true;
     }
     if (deps.flow && reviewMatch && method === "GET") {

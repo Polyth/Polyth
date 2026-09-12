@@ -64,6 +64,7 @@ Object.defineProperty(dom.navigator, "clipboard", {
 const fetchCalls: Array<{ url: string; method: string; body?: string }> = [];
 let labelFixtures: WorkspaceLabel[] = [];
 let sessionListFixtures: SessionProjection[] | null = null;
+let worktreeFixtures: Array<{ path: string; branch: string; isMain: boolean }> = [];
 (globalThis as { fetch?: unknown }).fetch = async (url: string, init?: { method?: string; body?: string }) => {
   const request = { url: String(url), method: init?.method ?? "GET", ...(init?.body ? { body: init.body } : {}) };
   fetchCalls.push(request);
@@ -73,6 +74,8 @@ let sessionListFixtures: SessionProjection[] | null = null;
       ? { id: "s-idle", projectId: "p1", title: "Idle session", status: "idle", createdAt: 1, updatedAt: 1 }
     : request.method === "GET" && request.url.startsWith("/api/sessions?") && sessionListFixtures !== null
       ? sessionListFixtures
+      : request.method === "GET" && request.url.startsWith("/api/worktrees?")
+        ? worktreeFixtures
       : [];
   return {
     ok: true,
@@ -171,6 +174,25 @@ test("subagent sessions stay collapsed under their parent until expanded", async
   } finally {
     await act(async () => root.unmount());
     container.remove();
+  }
+});
+
+test("empty worktrees start compact but remain expandable", async () => {
+  worktreeFixtures = [{ path: "/tmp/empty-worktree", branch: "feature/empty", isMain: false }];
+  const { container, unmount } = await mountList();
+  try {
+    const toggle = container.querySelector<HTMLButtonElement>(".session-worktree-toggle");
+    assert.ok(toggle);
+    assert.equal(toggle.getAttribute("aria-expanded"), "false");
+    assert.equal(container.querySelector(".session-worktree-group .session-worktree-sessions"), null);
+    await act(async () => { toggle.click(); });
+    assert.equal(toggle.getAttribute("aria-expanded"), "true");
+    assert.ok(container.querySelector(".session-worktree-group .session-worktree-sessions"));
+    await act(async () => { toggle.click(); });
+    assert.equal(toggle.getAttribute("aria-expanded"), "false");
+  } finally {
+    worktreeFixtures = [];
+    await unmount();
   }
 });
 

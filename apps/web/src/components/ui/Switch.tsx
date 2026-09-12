@@ -23,7 +23,7 @@ export default function Switch({ checked, onChange, label, labelledBy, disabled,
       disabled={disabled}
       onClick={() => onChange(!checked)}
     >
-      <i />
+      <span className="switch-track" aria-hidden="true"><i /></span>
     </button>
   );
 }

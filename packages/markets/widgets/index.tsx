@@ -29,9 +29,8 @@ import { MarketPortfolioWidget } from "./MarketPortfolioWidget.tsx";
 import MarketScreenerSurface from "./MarketScreenerSurface.tsx";
 import MarketTechnicalSurface from "./MarketTechnicalSurface.tsx";
 import { MarketAssetWidget, MarketNewsWidget, MarketWatchlistWidget } from "./MarketWidgets.tsx";
+import { MarketSurfaceNav, type MarketSurfaceId } from "./MarketSurfaceNav.tsx";
 import { selectMarketSymbol } from "./selection.ts";
-
-type MarketSurfaceId = "markets.overview" | "markets" | "markets.technicals" | "markets.calendar" | "markets.screener" | "markets.heatmap" | "markets.compare" | "markets.portfolio" | "markets.earnings" | "markets.filings";
 
 function MarketSurfaceFrame({
   host,
@@ -42,33 +41,9 @@ function MarketSurfaceFrame({
   activeId: MarketSurfaceId;
   children: ReactNode;
 }) {
-  const links: Array<{ id: MarketSurfaceId; label: string }> = [
-    { id: "markets.overview", label: "Overview" },
-    { id: "markets", label: "Research" },
-    { id: "markets.technicals", label: "Technicals" },
-    { id: "markets.calendar", label: "Calendar" },
-    { id: "markets.screener", label: "Screener" },
-    { id: "markets.heatmap", label: "Heatmap" },
-    { id: "markets.compare", label: "Compare" },
-    { id: "markets.portfolio", label: "Portfolio" },
-    { id: "markets.earnings", label: "Earnings" },
-    { id: "markets.filings", label: "Filings" },
-  ];
   return (
     <div className="markets-surface-frame">
-      <nav className="markets-surface-nav" aria-label="Markets sections">
-        {links.map((link) => (
-          <host.ui.components.Button
-            key={link.id}
-            size="sm"
-            variant={activeId === link.id ? "quiet" : "ghost"}
-            aria-current={activeId === link.id ? "page" : undefined}
-            onClick={() => host.navigation.openWorkspacePane(link.id)}
-          >
-            {link.label}
-          </host.ui.components.Button>
-        ))}
-      </nav>
+      <MarketSurfaceNav host={host} activeId={activeId} />
       <div className="markets-surface-frame-body">{children}</div>
     </div>
   );

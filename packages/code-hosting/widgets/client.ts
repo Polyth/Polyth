@@ -8,7 +8,14 @@ import type {
 } from "@polyth/code-hosting";
 
 export interface CodeHostingPresentation {
-  serviceName: string; command: string; issueLabel: string; changeLabel: string;
+  serviceName: string; command: string;
+  /** Singular, prose-safe label ("issue"). Used in agent prompts and titles. */
+  issueLabel: string;
+  /** Plural heading for the issues list and its empty state ("Issues"). Optional
+   *  so an existing provider that predates the tab correction keeps compiling;
+   *  the view falls back to issueLabel when it is absent. */
+  issuePlural?: string;
+  changeLabel: string;
   changePlural: string; changeNumberPrefix: "#" | "!"; icon: () => ReactNode;
 }
 export interface CodeHostingProvider {

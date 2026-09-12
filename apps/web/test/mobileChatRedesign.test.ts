@@ -397,7 +397,8 @@ test("the composer is adaptive, with one primary action at a time", async () => 
     "wider layouts keep the plain proportional cap",
   );
   assert.ok(!composer.includes("STARTER_SUGGESTIONS"), "starters come from the starter system, not hardcoded chips");
-  assert.ok(composer.includes("mobileSheet"), "the mode selector opens as a sheet on phones");
+  const modelPicker = await read("../../../packages/models/widgets/ModelPicker.tsx");
+  assert.match(modelPicker, /<ResponsiveOverlay[\s\S]*className=\{phone \? "model-sheet"/, "phone model and harness controls use the shared sheet");
   assert.ok(
     composer.includes('onClick={() => send()}'),
     "the primary active-run action retains the configured queue behavior",

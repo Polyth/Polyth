@@ -6,14 +6,9 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright-core";
+import { findChromiumExecutable } from "@polyth/browser/chromium";
 
-const CHROME = [
-  process.env.POLYTH_CHROMIUM_PATH,
-  "/usr/local/bin/google-chrome",
-  "/usr/bin/google-chrome",
-  "/usr/bin/google-chrome-stable",
-  "/usr/bin/chromium",
-].find((candidate): candidate is string => Boolean(candidate && existsSync(candidate)));
+const CHROME = await findChromiumExecutable();
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const read = (path: string) => readFileSync(join(root, path), "utf8");
 const coreCss = ["tokens.css", "styles.css", "moduleContent.css"]
@@ -72,7 +67,7 @@ for (const reverse of [false, true]) {
               <div class="module-view-body"><div class="module-view-content module-view-content--${mode}">${body}</div></div>
             </section>
           `);
-          const measured = await page.evaluate((placement) => {
+          const measured: { gutter: number; rootPadding: string; rootMargin: string; rootBorder: string; rootBackground: string; inheritedFont: boolean; scrollable: boolean; noHorizontalOverflow: boolean; inactiveHidden: boolean } = await page.evaluate((placement) => {
             const root = document.querySelector<HTMLElement>(".contract-feature")!;
             const owner = document.querySelector<HTMLElement>(placement === "rail" ? ".rail-body:not([hidden])" : placement === "workbench" ? ".wb-surface-mount" : ".module-view-content")!;
             const featureStyle = getComputedStyle(root);
@@ -117,7 +112,7 @@ test("Markets navigation does not reskin the shared Button", { skip: !CHROME }, 
         </nav>
       </div>
     `);
-    const buttons = await page.evaluate(() => {
+    const buttons: { reference: Record<string, string>; navigation: Record<string, string> } = await page.evaluate(() => {
       const properties = ["fontSize", "borderRadius", "paddingLeft", "paddingRight", "minHeight", "backgroundColor", "borderTopColor"] as const;
       const capture = (id: string) => {
         const style = getComputedStyle(document.getElementById(id)!);

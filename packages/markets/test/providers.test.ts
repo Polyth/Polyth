@@ -139,3 +139,102 @@ test("provider ids reject duplicates", () => {
   registry.register({ id: "same" });
   assert.throws(() => registry.register({ id: "same" }), /already registered/);
 });
+
+const rejectionMessage = async (run: () => Promise<unknown>): Promise<string> => {
+  try {
+    await run();
+  } catch (cause) {
+    return (cause as Error).message;
+  }
+  throw new Error("expected the aggregate run to reject");
+};
+
+test("run attributes an already-prefixed provider error exactly once", async () => {
+  const registry = new ProviderRegistry();
+  registry.register({ id: "nasdaq", quote: async () => { throw notFound("nasdaq: missing data"); } });
+
+  const message = await rejectionMessage(() =>
+    registry.run("quote", (provider) => provider.quote!("NVDA", new AbortController().signal)),
+  );
+
+  assert.equal(message, "no quote provider has data for this request: nasdaq: missing data");
+});
+
+test("run attributes an unprefixed provider error", async () => {
+  const registry = new ProviderRegistry();
+  registry.register({ id: "nasdaq", quote: async () => { throw new Error("rate limited"); } });
+
+  const message = await rejectionMessage(() =>
+    registry.run("quote", (provider) => provider.quote!("NVDA", new AbortController().signal)),
+  );
+
+  assert.equal(message, "all quote providers failed: nasdaq: rate limited");
+});
+
+test("run keeps a nonmatching provider prefix alongside the real provider identity", async () => {
+  const registry = new ProviderRegistry();
+  registry.register({ id: "nasdaq", quote: async () => { throw new Error("yahoo: rate limited"); } });
+
+  const message = await rejectionMessage(() =>
+    registry.run("quote", (provider) => provider.quote!("NVDA", new AbortController().signal)),
+  );
+
+  assert.equal(message, "all quote providers failed: nasdaq: yahoo: rate limited");
+});
+
+test("run keeps multi-provider diagnostics without duplicating attribution", async () => {
+  const registry = new ProviderRegistry();
+  registry.register({ id: "nasdaq", quote: async () => { throw new Error("nasdaq: missing data"); } });
+  registry.register({ id: "yahoo", quote: async () => { throw new Error("rate limited"); } });
+
+  const message = await rejectionMessage(() =>
+    registry.run("quote", (provider) => provider.quote!("NVDA", new AbortController().signal)),
+  );
+
+  assert.equal(message, "all quote providers failed: nasdaq: missing data; yahoo: rate limited");
+});
+
+test("runAll attributes an already-prefixed provider error exactly once", async () => {
+  const registry = new ProviderRegistry();
+  registry.register({ id: "nasdaq", news: async () => { throw notFound("nasdaq: missing data"); } });
+
+  const message = await rejectionMessage(() =>
+    registry.runAll("news", (provider) => provider.news!("NVDA", new AbortController().signal)),
+  );
+
+  assert.equal(message, "no news provider has data: nasdaq: missing data");
+});
+
+test("runAll attributes an unprefixed provider error", async () => {
+  const registry = new ProviderRegistry();
+  registry.register({ id: "nasdaq", news: async () => { throw new Error("rate limited"); } });
+
+  const message = await rejectionMessage(() =>
+    registry.runAll("news", (provider) => provider.news!("NVDA", new AbortController().signal)),
+  );
+
+  assert.equal(message, "all news providers failed: nasdaq: rate limited");
+});
+
+test("runAll keeps a nonmatching provider prefix alongside the real provider identity", async () => {
+  const registry = new ProviderRegistry();
+  registry.register({ id: "nasdaq", news: async () => { throw new Error("yahoo: rate limited"); } });
+
+  const message = await rejectionMessage(() =>
+    registry.runAll("news", (provider) => provider.news!("NVDA", new AbortController().signal)),
+  );
+
+  assert.equal(message, "all news providers failed: nasdaq: yahoo: rate limited");
+});
+
+test("runAll keeps multi-provider diagnostics without duplicating attribution", async () => {
+  const registry = new ProviderRegistry();
+  registry.register({ id: "nasdaq", news: async () => { throw new Error("nasdaq: missing data"); } });
+  registry.register({ id: "yahoo", news: async () => { throw new Error("rate limited"); } });
+
+  const message = await rejectionMessage(() =>
+    registry.runAll("news", (provider) => provider.news!("NVDA", new AbortController().signal)),
+  );
+
+  assert.equal(message, "all news providers failed: nasdaq: missing data; yahoo: rate limited");
+});

@@ -403,19 +403,20 @@ grid-column: auto;
 }
 .git-page {
 width: 100%; max-width: 1440px; margin-inline: auto;
-  padding: var(--space-4) var(--gutter); gap: 14px;
+  display: flex; flex-direction: column; flex: 1; min-height: 0;
+  padding: var(--space-3); gap: var(--space-3); overflow: hidden;
 }
 .source-control-head {
-display: flex; align-items: center; gap: 14px; min-width: 0;
+display: flex; flex: none; align-items: center; gap: var(--space-3); min-width: 0;
 }
 .source-control-title {
 display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1;
 }
 .git-changes-layout {
-display: flex; min-width: 0; flex-direction: column; gap: inherit;
+display: flex; flex: 1; min-height: 0; min-width: 0; flex-direction: column; gap: inherit;
 }
 .git-master-detail {
-display: grid; grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); min-height: min(680px, 72vh);
+display: grid; grid-template-columns: minmax(240px, 35%) minmax(0, 1fr); flex: 1; min-height: 0;
   overflow: hidden; border: 1px solid var(--border-soft); border-radius: var(--radius-card);
   background: var(--panel); box-shadow: none;
 }
@@ -429,12 +430,13 @@ min-width: 0; padding: 14px 16px 20px; overflow: auto; background: var(--bg);
 min-height: 360px; display: grid; place-content: center;
 }
 .git-pane-toolbar {
-position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 6px; min-height: 58px; padding: 7px 9px 7px 13px;
+position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-height: var(--control-h-lg); padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--surface-divider); background: var(--panel);
 }
 .git-pane-toolbar > div:first-child {
-display: flex; flex-direction: column; gap: 2px; font-size: var(--font-meta);
+display: flex; flex: 1; flex-direction: column; gap: var(--space-1); font-size: var(--font-meta);
 }
+.git-pane-actions { display: flex; flex-basis: 100%; align-items: center; gap: var(--space-2); }
 .git-pane-toolbar > div:first-child .muted {
 font-size: var(--font-meta);
 }
@@ -582,7 +584,7 @@ display: flex; flex-direction: column; gap: 5px; padding: 6px 0 12px; border-bot
 font-size: 15px;
 }
 .git-resource-page {
-display: flex; flex-direction: column; gap: 14px;
+display: flex; flex: 1; min-height: 0; flex-direction: column; gap: var(--space-3); overflow: auto;
 }
 .git-resource-head {
 display: flex; align-items: center; gap: 8px;
@@ -918,8 +920,8 @@ width: auto; min-height: 0; flex-wrap: nowrap;
 }
 
 .git-master-detail {
-display: grid; grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
-    min-height: min(680px, 72vh); overflow: hidden; border: 1px solid var(--border-soft);
+display: grid; grid-template-columns: minmax(240px, 35%) minmax(0, 1fr);
+    min-height: 0; overflow: hidden; border: 1px solid var(--border-soft);
     border-radius: var(--radius-card); background: var(--panel); box-shadow: none;
 }
 
@@ -1064,10 +1066,7 @@ color: var(--purple);
 .source-confirm-dialog p { margin: 0; color: var(--text-dim); overflow-wrap: anywhere; }
 .source-confirm-dialog-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
 @container feature-panel (max-width: 700px) {
-  .source-branch { order: 3; flex-basis: 100%; max-width: 100%; padding-left: 2px; }
-  .source-remote-actions { width: 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .source-remote-actions .source-sync-btn { grid-column: 1 / -1; }
-  .source-remote-actions .source-refresh-btn { grid-column: 1 / -1; width: 100%; }
+  .source-branch { max-width: 100%; }
   .source-tabs {
     position: sticky; top: 0; z-index: 8;
     background: var(--bg);
@@ -1085,10 +1084,6 @@ color: var(--purple);
      instead of squeezing Push onto a clipped second row. */
   .source-remote-actions { width: auto; display: flex; flex: none; flex-wrap: nowrap; }
   .source-remote-actions .source-action-btn { min-width: max-content; }
-}
-@container feature-panel (max-width: 430px) {
-  .source-remote-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .source-remote-actions .source-refresh-btn { grid-column: 1 / -1; width: 100%; }
 }
 .git-clone-panel {
   display: grid;
@@ -1212,3 +1207,106 @@ color: var(--purple);
   }
 }
 
+/* Compact Canvas summary widget (git.recent). Read-only: links into the
+   full Source control surface instead of embedding GitView in a small card. */
+.git-recent-widget {
+  container: git-recent / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  padding: var(--space-3);
+  color: var(--text);
+}
+.git-recent-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.git-recent-head .source-branch {
+  max-width: 100%;
+}
+.git-recent-summary {
+  margin-inline-start: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+.git-recent-head .git-ahead-behind {
+  margin-left: 0;
+}
+.git-recent-list {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 0;
+  overflow: auto;
+}
+.git-recent-file {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.git-recent-file:hover,
+.git-recent-file:focus-visible {
+  background: var(--raised);
+}
+.git-recent-file .git-file-letter {
+  flex: none;
+}
+.git-recent-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--font-code);
+}
+.git-recent-foot {
+  flex: none;
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--hair);
+}
+.git-recent-open {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-meta);
+  cursor: pointer;
+}
+.git-recent-open:hover,
+.git-recent-open:focus-visible {
+  background: var(--raised);
+}
+.git-recent-open .ui-icon {
+  flex: none;
+  color: var(--accent);
+}

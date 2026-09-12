@@ -1611,7 +1611,7 @@ export default function Composer({
   const lastAnnounced = useRef<string | null>(null);
   const statusText = acView?.status?.text ?? null;
   useEffect(() => {
-    if (statusText && statusText !== lastAnnounced.current) announce(statusText);
+    if (statusText !== lastAnnounced.current) announce(statusText);
     lastAnnounced.current = statusText;
   }, [statusText]);
 

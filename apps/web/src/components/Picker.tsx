@@ -151,7 +151,7 @@ export default function Picker({
     if (!multi) close();
   };
 
-  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+  const onKey = (e: KeyboardEvent<HTMLElement>) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setActive((n) => Math.min(n + 1, Math.max(shown.length - 1, 0)));
@@ -221,7 +221,7 @@ export default function Picker({
               {...(popoverToggle.hint ? { description: popoverToggle.hint } : {})}
             />
           )}
-          <div role="listbox" aria-label={label}>
+          <div role="listbox" aria-label={label} aria-multiselectable={multi || undefined}>
             {shown.map((it) => (
               <SheetRow
                 key={it.id || "(default)"}
@@ -264,6 +264,7 @@ export default function Picker({
           side={_direction}
           ariaLabel={label}
           className="picker-pop"
+          {...(!searchable ? { initialFocus: ".picker-list" } : {})}
         >
             {popoverToggle && (
               <Checkbox
@@ -293,9 +294,12 @@ export default function Picker({
               id={listId}
               className="picker-list"
               role="listbox"
+              tabIndex={searchable ? -1 : 0}
               aria-label={label}
               aria-multiselectable={multi || undefined}
+              aria-activedescendant={!searchable && shown[active] ? `${pickerId}-option-${active}` : undefined}
               ref={listRef}
+              onKeyDown={!searchable ? onKey : undefined}
             >
               {shown.map((it, n) => (
                 <Fragment key={it.id || "(default)"}>

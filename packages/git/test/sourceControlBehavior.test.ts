@@ -24,6 +24,10 @@ Object.defineProperty(globalThis, "requestAnimationFrame", {
     return 1;
   },
 });
+Object.defineProperty(globalThis, "cancelAnimationFrame", {
+  configurable: true,
+  value: () => {},
+});
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 register("./tsxHooks.mjs", import.meta.url);
@@ -31,8 +35,9 @@ register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { activateProject, activateSession, applyEvents, applyProjectAdded, clearUiError, getState, seedSessionCache, setGitBranch, setModels } = await import("../../../apps/web/src/store.ts");
+const { activateProject, activateSession, applyEvents, applyProjectAdded, clearUiError, getState, seedSessionCache, setGitBranch, setGitDiffPath, setModels } = await import("../../../apps/web/src/store.ts");
 const { default: GitView, DiffContent } = await import("../widgets/GitView.tsx");
+const { default: RecentChangesWidget } = await import("../widgets/RecentChangesWidget.tsx");
 const { api } = await import("@polyth/session/web-api");
 const { refreshGitStatus } = await import("../widgets/gitStatusStore.ts");
 const {
@@ -608,4 +613,214 @@ test("GitView surfaces worktree cleanup warnings without claiming removal failed
     clearUiError();
     activateProject(null);
   }
+});
+
+test("GitView destructive confirmation focuses Cancel and restores the opener on Escape", async () => {
+  const projectId = "git-confirm-focus-project";
+  const mutations: string[] = [];
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    const method = (init as { method?: string } | undefined)?.method ?? "GET";
+    if (url.startsWith("/api/git/status")) {
+      return response({
+        branch: "main", ahead: 0, behind: 0, conflicted: [], staged: [], untracked: [],
+        unstaged: [{ path: "src/app.ts", status: "modified", staged: false }],
+        isRepo: true,
+      });
+    }
+    if (url.startsWith("/api/git/branches")) return response({ current: "main", branches: [{ name: "main", current: true }] });
+    if (url.startsWith("/api/worktrees") || url.startsWith("/api/git/graph") || url.startsWith("/api/git/stashes")) return response([]);
+    if (url.startsWith("/api/git/diff")) return response({ path: "src/app.ts", diff: "@@ -1 +1 @@\n-old\n+new" });
+    if (method !== "GET") mutations.push(`${method} ${url}`);
+    throw new Error(`Unexpected request: ${url}`);
+  };
+
+  activateProject(projectId);
+  const view = await mounted(createElement(GitView));
+  try {
+    await act(async () => { await delay(40); });
+    const revertAll = labeledButton(view.container, "Revert all");
+    assert.ok(revertAll, "revert-all control is present");
+    await act(async () => {
+      revertAll.focus();
+      revertAll.click();
+      await delay(20);
+    });
+
+    const foot = document.querySelector<HTMLElement>(".ui-dialog-foot");
+    assert.ok(foot, "confirmation footer uses the shared dialog chrome");
+    const cancel = foot.querySelector<HTMLButtonElement>(".ui-btn:first-child");
+    const danger = foot.querySelector<HTMLButtonElement>(".ui-btn--danger");
+    assert.ok(cancel && danger, "cancel and danger actions render");
+    assert.equal(cancel.textContent, "Cancel");
+    assert.equal(document.activeElement, cancel, "initial focus lands on the safe Cancel action");
+    assert.notEqual(document.activeElement, danger, "the destructive action never receives initial focus");
+    assert.notEqual(
+      document.activeElement,
+      document.querySelector(".ui-dialog-head button"),
+      "the header close button never receives initial focus",
+    );
+    assert.deepEqual(mutations, [], "opening the confirmation mutates nothing");
+
+    const panel = document.querySelector<HTMLElement>('[role="dialog"]');
+    assert.ok(panel);
+    await act(async () => {
+      panel.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await delay(20);
+    });
+    assert.equal(document.querySelector(".ui-dialog-foot"), null, "Escape closes the confirmation");
+    assert.equal(document.activeElement, revertAll, "focus returns to the destructive opener");
+    assert.deepEqual(mutations, [], "Escape mutates nothing");
+  } finally {
+    await view.unmount();
+    activateProject(null);
+  }
+});
+
+test("GitView remote-actions menu keeps a distinct Sync glyph and restores focus on Escape", async () => {
+  const projectId = "git-remote-menu-project";
+  const mutations: string[] = [];
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    const method = (init as { method?: string } | undefined)?.method ?? "GET";
+    if (url.startsWith("/api/git/status")) {
+      return response({
+        branch: "main", ahead: 0, behind: 0, conflicted: [], staged: [], untracked: [], unstaged: [], isRepo: true,
+      });
+    }
+    if (url.startsWith("/api/git/branches")) return response({ current: "main", branches: [{ name: "main", current: true }] });
+    if (url.startsWith("/api/worktrees") || url.startsWith("/api/git/graph") || url.startsWith("/api/git/stashes")) return response([]);
+    if (method !== "GET") mutations.push(`${method} ${url}`);
+    throw new Error(`Unexpected request: ${url}`);
+  };
+
+  activateProject(projectId);
+  const view = await mounted(createElement(GitView));
+  try {
+    await act(async () => { await delay(40); });
+    const sync = view.container.querySelector<HTMLButtonElement>(".source-sync-btn");
+    const refresh = view.container.querySelector<HTMLButtonElement>(".source-refresh-btn");
+    assert.ok(sync && refresh, "sync and read-only refresh controls both remain");
+    assert.ok(sync.querySelector("svg")?.classList.contains("lucide-repeat"), "Sync uses the distinct bidirectional glyph");
+    assert.equal(refresh.querySelector("svg")?.classList.contains("lucide-repeat"), false, "Refresh keeps its reload glyph");
+    assert.notEqual(sync.querySelector("svg")?.outerHTML, refresh.querySelector("svg")?.outerHTML);
+
+    const trigger = view.container.querySelector<HTMLButtonElement>('.source-remote-actions [aria-haspopup="menu"]');
+    assert.ok(trigger, "remote overflow trigger renders");
+    await act(async () => { trigger.click(); await delay(20); });
+    const menu = document.querySelector<HTMLElement>('[role="menu"]');
+    assert.ok(menu, "remote actions menu opens");
+    const items = [...menu.querySelectorAll<HTMLElement>('[role^="menuitem"]')];
+    assert.equal(items.length, 3, "fetch, pull and push remain reachable");
+    await act(async () => { await delay(20); });
+    assert.ok(menu.contains(document.activeElement), "the menu moves focus onto an item");
+
+    await act(async () => {
+      menu.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+    assert.equal(document.activeElement, items[1], "arrow keys move through remote actions");
+    await act(async () => {
+      document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await delay(20);
+    });
+    assert.equal(document.querySelector('[role="menu"]'), null, "Escape closes the menu");
+    assert.equal(document.activeElement, trigger, "focus returns to the overflow trigger");
+    assert.deepEqual(mutations, [], "opening and dismissing the menu never runs a remote action");
+  } finally {
+    await view.unmount();
+    activateProject(null);
+  }
+});
+
+test("compact git.recent widget covers each status and links files without mutating", async () => {
+  let mutations = 0;
+  const dirtyStatus = {
+    branch: "feature/compact", ahead: 2, behind: 1, conflicted: [], staged: [], untracked: [],
+    unstaged: [
+      { path: "src/a.ts", status: "modified", staged: false },
+      { path: "src/b.ts", status: "modified", staged: false },
+    ],
+    isRepo: true,
+  };
+  const only = (body: unknown) => async (input: string | URL | Request, init?: RequestInit) => {
+    if (String(input).startsWith("/api/git/status")) return response(body);
+    if ((init?.method ?? "GET") !== "GET") mutations += 1;
+    throw new Error(`Unexpected request: ${String(input)}`);
+  };
+
+  // Pending status renders the bounded skeleton, never a crash.
+  let release: ((value: Response) => void) | undefined;
+  globalThis.fetch = () => new Promise<Response>((resolve) => { release = resolve; });
+  const loading = await mounted(createElement(RecentChangesWidget, { projectId: "git-recent-loading", sessionId: null }));
+  try {
+    assert.ok(loading.container.querySelector('[aria-busy="true"]'), "pending status shows a busy skeleton");
+  } finally {
+    await loading.unmount();
+  }
+  release?.(response(dirtyStatus));
+  await delay(0);
+
+  // A failed status fetch must stay in the bounded skeleton, never claim clean.
+  globalThis.fetch = async () => { throw new Error("status exploded"); };
+  const errored = await mounted(createElement(RecentChangesWidget, { projectId: "git-recent-error", sessionId: null }));
+  try {
+    await act(async () => { await delay(20); });
+    assert.ok(errored.container.querySelector('[aria-busy="true"]'), "failed status keeps the bounded skeleton");
+    assert.doesNotMatch(errored.container.textContent ?? "", /Working tree clean/, "a failed fetch is never reported as clean");
+    assert.equal(errored.container.querySelectorAll(".git-recent-file").length, 0);
+  } finally {
+    await errored.unmount();
+  }
+
+  // No project.
+  const noProject = await mounted(createElement(RecentChangesWidget, { projectId: null, sessionId: null }));
+  try {
+    assert.match(noProject.container.textContent ?? "", /No project selected/);
+  } finally {
+    await noProject.unmount();
+  }
+
+  // Not a repository.
+  globalThis.fetch = only({ ...dirtyStatus, isRepo: false });
+  const noRepo = await mounted(createElement(RecentChangesWidget, { projectId: "git-recent-norepo", sessionId: null }));
+  try {
+    await act(async () => { await delay(20); });
+    assert.match(noRepo.container.textContent ?? "", /This folder isn/);
+  } finally {
+    await noRepo.unmount();
+  }
+
+  // Clean working tree.
+  globalThis.fetch = only({ ...dirtyStatus, unstaged: [], ahead: 0, behind: 0 });
+  const clean = await mounted(createElement(RecentChangesWidget, { projectId: "git-recent-clean", sessionId: null }));
+  try {
+    await act(async () => { await delay(20); });
+    assert.match(clean.container.textContent ?? "", /Working tree clean/);
+    assert.equal(clean.container.querySelectorAll(".git-recent-file").length, 0);
+  } finally {
+    await clean.unmount();
+  }
+
+  // Read-only summary plus a file target that routes into Source control.
+  setGitDiffPath(null);
+  globalThis.fetch = only(dirtyStatus);
+  const dirty = await mounted(createElement(RecentChangesWidget, { projectId: "git-recent-dirty", sessionId: null }));
+  try {
+    await act(async () => { await delay(20); });
+    assert.match(dirty.container.textContent ?? "", /2 changed files/);
+    assert.match(dirty.container.textContent ?? "", /feature\/compact/);
+    assert.match(dirty.container.textContent ?? "", /↑ 2/);
+    assert.match(dirty.container.textContent ?? "", /↓ 1/);
+    const files = [...dirty.container.querySelectorAll<HTMLButtonElement>(".git-recent-file")];
+    assert.equal(files.length, 2, "both changed files are listed");
+    await act(async () => { files[0]!.click(); });
+    assert.equal(getState().gitDiffPath, "src/a.ts", "a file row targets its own diff in Source control");
+    // The summary is read-only: no stage/revert/publish surface exists here.
+    assert.equal(dirty.container.querySelector(".git-recent-more"), null, "no duplicate inline-expansion action");
+    assert.equal(dirty.container.querySelectorAll(".git-recent-foot .git-recent-open").length, 1, "one destination action");
+  } finally {
+    await dirty.unmount();
+    setGitDiffPath(null);
+  }
+  assert.equal(mutations, 0, "the compact summary never mutates the repository");
 });

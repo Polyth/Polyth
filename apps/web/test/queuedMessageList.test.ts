@@ -97,9 +97,9 @@ test("late queue reads cannot resurrect a dispatched row", async () => {
   let release!: (value: ReturnType<typeof response>) => void;
   let reads = 0;
   globalThis.fetch = (async () => {
-    if (++reads === 1) return new Promise((resolve) => { release = resolve; });
+    if (++reads === 1) return new Promise<ReturnType<typeof response>>((resolve) => { release = resolve; });
     return response([]);
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
   const container = document.createElement("div");
   const root = createRoot(container);
   try {

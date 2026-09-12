@@ -1473,7 +1473,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 
 .empty-state-title { margin: 0; font-size: var(--font-label); font-weight: 680; letter-spacing: -.018em; text-wrap: balance; }
 .empty-state-desc { margin: 8px 0 0; max-width: 34ch; color: var(--muted); font-size: var(--font-meta); line-height: 1.6; text-wrap: pretty; }
-.empty-state-action { min-height: var(--control-h); margin-top: 20px; padding: 8px 18px; box-shadow: var(--shadow-sm); }
+.empty-state-action { min-height: var(--control-h); max-inline-size: 100%; margin-top: 20px; padding: var(--space-2) var(--space-4); white-space: normal; box-shadow: var(--shadow-sm); }
 @keyframes empty-state-enter {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: none; }
@@ -2429,8 +2429,13 @@ border-color: var(--accent); color: var(--accent); background: var(--accent-wash
 /* switch — the visual track never grows for touch; a transparent centered
    hit box extends the target to --hit-min on coarse pointers. */
 .switch {
-  width: 38px; height: 22px; border-radius: var(--radius-round); padding: 2px; flex: none;
-  background: var(--raised); border: 1px solid var(--hair); position: relative;
+  width: 38px; height: 22px; border-radius: var(--radius-round); padding: 0; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: 0; position: relative;
+}
+.switch-track {
+  display: block; flex: none; width: 38px; height: 22px; padding: 2px;
+  border-radius: var(--radius-round); background: var(--raised); border: 1px solid var(--hair);
   transition: background var(--motion-normal) var(--motion-ease), border-color var(--motion-normal) var(--motion-ease);
 }
 .switch::after {
@@ -2442,14 +2447,20 @@ border-color: var(--accent); color: var(--accent); background: var(--accent-wash
   height: max(100%, var(--hit-min));
   transform: translate(-50%, -50%);
 }
-.switch:hover { background: var(--raised); border-color: var(--hair); }
+/* Keep the enlarged outer hit box transparent on hover: the global
+   button:hover fill would otherwise repaint it (including 44px phone/coarse
+   targets, and it would also paint a disabled switch). The genuine cue is a
+   border tint on unchecked tracks only, so checked accent and disabled
+   behavior are untouched. */
+.switch:hover { background: transparent; }
+.switch:hover:not(:disabled):not([aria-checked="true"]) .switch-track { border-color: var(--border); }
 .switch i {
   display: block; width: 16px; height: 16px; border-radius: 50%; background: var(--muted);
   transition: transform var(--motion-normal) var(--motion-ease), background var(--motion-normal) var(--motion-ease);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
 }
-.switch[aria-checked="true"], .switch[aria-checked="true"]:hover {
-  background: linear-gradient(180deg, var(--accent-hi), var(--accent)); border-color: var(--accent-line);
+.switch[aria-checked="true"] .switch-track {
+  background: var(--accent); border-color: var(--accent-line);
 }
 .switch[aria-checked="true"] i { transform: translateX(16px); background: var(--accent-ink); }
 
@@ -4351,7 +4362,7 @@ color: var(--text-dim);
   border: none; background: transparent; color: var(--accent); cursor: nwse-resize;
 }
 .widget-chat { min-height: 0; flex: 1; display: flex; flex-direction: column; }
-.widget-chat-empty { flex: 1; display: grid; place-content: center; gap: 12px; padding: 20px; text-align: center; color: var(--muted); }
+.widget-chat-empty { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--space-3); padding: var(--space-4); overflow: auto; text-align: center; color: var(--muted); }
 .widget-quick-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px; }
 .widget-quick-actions button { padding: 5px 9px; font-size: var(--font-meta); }
 .widget-empty { margin: auto; padding: 20px; color: var(--muted); font-size: 12px; }
@@ -4515,7 +4526,10 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
   max-width: 100%;
   background: var(--bg);
 }
-.app-shell { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; overflow: hidden; container: app-shell / inline-size; }
+/* `clip`, not `hidden`: `hidden` is still a scroll container, so focus/rAF
+   handoffs during a wide->compact flip can scroll the shell and translate every
+   in-flow child (the P1 phone-home clipping). `clip` can never be scrolled. */
+.app-shell { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; overflow: clip; overflow-clip-margin: 0; container: app-shell / inline-size; }
 .app > .header {
   flex: none;
   width: 100%;
@@ -5133,12 +5147,13 @@ html[dir="rtl"] input[type="number"] {
 .settings-nav .nav-foot { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-top: 1px solid var(--border-soft); color: var(--faint); font-size: var(--font-meta); }
 .settings-nav .nav-foot button { height: var(--control-h-sm); border-color: var(--border-soft); background: var(--elevated); color: var(--text-dim); font-size: var(--font-meta); }
 .settings-pane-head {
-  height: var(--control-h-lg);
+  height: auto;
   min-height: var(--control-h-lg);
   padding: var(--space-2) var(--space-5);
   background: var(--elevated);
 }
 .settings-pane-head-copy { flex: 1; min-width: 0; }
+.settings-pane-head-actions { display: flex; align-items: center; gap: var(--space-1); }
 .settings-pane-head-copy .modal-desc { overflow-wrap: anywhere; }
 .settings-pane-title { font-size: var(--font-heading); }
 .settings-pane-body { padding: var(--space-3) var(--space-5) var(--space-6); }
@@ -5661,11 +5676,11 @@ html[dir="rtl"] input[type="number"] {
   .widget-preview-changes > div { width: 100%; }
 }
 
-.packages-list { display: flex; flex-direction: column; gap: 20px; }
+.packages-list { display: flex; flex-direction: column; gap: var(--space-5); }
 .package-group { min-width: 0; }
-.package-group-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; }
-.package-group-head strong { font-size: 12px; }
-.package-group-head span { color: var(--muted); font-size: 9.5px; }
+.package-group-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-2); }
+.package-group-head strong { font-size: var(--font-label); }
+.package-group-head span { color: var(--muted); font-size: var(--font-meta); }
 .package-grid { display: grid; }
 .settings-pane-body .packages-list {
 min-width: 0;
@@ -5673,36 +5688,31 @@ min-width: 0;
 }
 
 .settings-pane-body .package-grid {
-grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
 }
 
 .package-tile {
-  min-width: 0; min-height: 210px; display: flex; flex-direction: column;
-  align-items: center; gap: var(--space-2); padding: var(--space-4); text-align: center;
-  border: 1px solid var(--border-soft); border-radius: var(--radius-card); background: var(--elevated);
-  transition: border-color var(--motion-fast) var(--motion-ease), opacity var(--motion-fast) var(--motion-ease);
+  min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center; gap: var(--space-3); padding: var(--space-3) 0; text-align: start;
+  border: 0; border-bottom: 1px solid var(--border-soft); border-radius: 0; background: transparent;
 }
-.package-tile:hover { border-color: var(--hair-strong); }
-.package-tile.enabled { border-color: var(--accent-line); }
-.package-tile.disabled { opacity: .72; }
+/* The section heading already closes the group; the final row must not hang a
+   divider under it. */
+.package-grid .package-tile:last-child { border-bottom: 0; }
 .package-icon {
-  display: grid; place-items: center; flex: none; width: 58px; height: 58px;
-  border-radius: var(--radius-card); background: var(--accent-wash);
-  color: var(--accent); font-size: var(--icon-xl);
+  display: grid; place-items: center; width: var(--control-h-sm); height: var(--control-h-sm);
+  color: var(--muted); font-size: var(--icon-lg);
 }
-.package-copy { min-width: 0; display: flex; flex-direction: column; align-items: center; gap: var(--space-1); }
-.package-copy strong { color: var(--text); font-size: 13.5px; }
+.package-copy { min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.package-copy strong { color: var(--text); font-size: var(--font-label); }
 .package-copy p {
   margin: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh);
 }
 .package-tile-control {
-  min-height: var(--control-h); display: flex; align-items: center; justify-content: center;
-  margin-top: auto;
+  min-height: var(--control-h); display: flex; align-items: center; justify-content: flex-end;
   gap: var(--space-2);
 }
-.package-tile-control > span:not(.tag) { color: var(--muted); font-size: var(--font-meta); font-weight: 600; }
-.package-tile-core { background: color-mix(in srgb, var(--elevated) 88%, var(--sunken)); }
 .package-core-badge { flex: none; padding-inline: 9px; }
 .packages-plugin-link { align-self: flex-start; }
 
@@ -5710,12 +5720,6 @@ grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
 .widget-zone.zone-floating { grid-column: 1 / -1; grid-row: 4; min-height: 74px; }
 @media (max-width: 760px) {
 .widget-place-grid { grid-template-columns: 1fr; }
-}
-
-@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-.settings-pane-body .package-grid {
-grid-template-columns: 1fr !important;
-}
 }
 
 
@@ -7439,13 +7443,15 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
 
 /* ---- project / branch context bar (§5/§6/§8) ---------------------------- */
 .session-context-bar { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
-.context-selector { flex: 1 1 50%; min-width: 0; display: flex; }
-.context-selector.picker { flex: 1 1 50%; }
+/* No hard half-width cap: a short project name stays compact while a long
+   branch name can use the remaining space, and flex shrinking truncates the
+   pair when both are long instead of stretching two full-width fields. */
+.context-selector { flex: 0 1 auto; min-width: 0; display: flex; }
 .context-selector .picker-chip {
   flex: 1;
   min-width: 0;
   max-width: none;
-  min-height: var(--control-h);
+  min-height: max(var(--control-h-sm), var(--hit-min));
   gap: var(--space-2);
   padding: 0 var(--space-3);
   border: 1px solid var(--border-soft);
@@ -7517,7 +7523,6 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
 
   .stage-new { --dock-bg: color-mix(in srgb, var(--bg) 94%, var(--elevated)); }
   .hero-body { padding: var(--space-5) var(--screen-gutter) var(--space-4); }
-  .stage-new .hero h2 { font-size: clamp(26px, 7.6vw, 32px); line-height: 1.18; }
   /* Last-resort guard: on a very short band (small phone + tall keyboard)
      the dock scrolls instead of clipping its own send button. */
   .hero-dock {
@@ -7532,7 +7537,6 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   body[data-keyboard="open"] .hero-body { justify-content: flex-start; padding-top: var(--space-3); }
   body[data-keyboard="open"] .hero-sub,
   body[data-keyboard="open"] .hero-recent { display: none; }
-  body[data-keyboard="open"] .stage-new .hero h2 { font-size: 21px; line-height: 1.25; }
   .hero-widget-settings { display: none; }
   /* The attachment menu is a popover, not content in the widget column. */
   .stage-new .hero-dock:has(.add-menu) {
@@ -7605,10 +7609,9 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   .composer-mobile.composer-collapsed .composer-card textarea {
     min-height: 44px;
     max-height: 44px;
-    padding: 12px 0;
+    padding: 0;
+    line-height: var(--tap);
     overflow: hidden;
-  }
-  .composer-mobile.composer-collapsed.composer-has-draft .composer-card textarea {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -9632,7 +9635,6 @@ width: 100%;
     max-width: none;
 }
 
-.settings-pane-body .package-grid,
 .role-card-grid {
 grid-template-columns: minmax(0, 1fr);
 }
@@ -9640,12 +9642,6 @@ grid-template-columns: minmax(0, 1fr);
 
   /* The switch keeps its compact track; its transparent ::after hit box
      already reaches --hit-min/--tap on coarse pointers. */
-}
-
-@media (prefers-reduced-motion: reduce) {
-.package-tile {
-transition: none;
-}
 }
 
 /* Shared rules recovered while splitting package CSS. Only cross-package
@@ -12234,13 +12230,15 @@ html[data-font] body :is(
   .agent-status-dock-icon > i { animation: none; }
 }
 
-/* All conversation chrome shares one horizontal frame. Keeping the inset on
-   the conversation itself makes the timeline, composer, and above-composer
+/* All conversation chrome shares one horizontal frame. New Chat uses it too.
+   Keeping the inset on the surface makes the timeline, composer, and above-composer
    status resilient to the compact shell seam and the tablet launcher lane. */
+.stage-new,
 .focus-conversation {
   --conversation-frame-inline-start: max(var(--gutter), calc((100% - var(--chat-measure)) / 2));
   --conversation-frame-inline-end: max(var(--gutter), calc((100% - var(--chat-measure)) / 2));
 }
+.stage-new .hero-body,
 .timeline,
 .composer-chat {
   padding-inline-start: var(--conversation-frame-inline-start);
@@ -12255,12 +12253,14 @@ html[data-font] body :is(
   margin-inline-end: var(--conversation-frame-inline-end);
 }
 @media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
+  .stage-new,
   .focus-conversation {
     --conversation-frame-inline-start: var(--conversation-chrome-inset);
     --conversation-frame-inline-end: var(--conversation-chrome-inset);
   }
 }
 @media (max-width: 620px) {
+  .stage-new,
   .focus-conversation {
     --conversation-frame-inline-start: max(var(--conversation-inset), var(--safe-left), var(--safe-right));
     --conversation-frame-inline-end: max(var(--conversation-inset), var(--safe-left), var(--safe-right));
@@ -12272,6 +12272,7 @@ html[data-font] body :is(
   }
 }
 @container app-shell (min-width: 961px) and (max-width: 1400px) {
+  .app-shell:not(:has(.railbar-open)) .stage-new,
   .app-shell:not(:has(.railbar-open)) .focus-conversation {
     --conversation-frame-inline-end: calc(
       max(var(--gutter), (100% - var(--chat-measure)) / 2)
@@ -12474,7 +12475,10 @@ body:not([data-glass="off"]) :is(
     body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) :is(
       .app > .header,
       .sidebar,
-      .railbar:not(:has(.rail-fullscreen)),
+      /* Excluded when it holds the compact contextual sheet: backdrop-filter
+         makes .railbar a containing block for its position:fixed children, and
+         the inset:0 sheet would collapse to the 0-width launcher strip. */
+      .railbar:not(:has(.rail-fullscreen)):not(:has(> .panel-sheet)),
       .statusbar,
       .background-quick-trigger,
       .ui-glass-island,

@@ -1,15 +1,9 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
 import type { Browser, Page } from "playwright-core";
+import { findChromiumExecutable } from "@polyth/browser/chromium";
 
-const CHROME = [
-  process.env.POLYTH_CHROMIUM_PATH,
-  "/usr/local/bin/google-chrome",
-  "/usr/bin/google-chrome",
-  "/usr/bin/google-chrome-stable",
-  "/usr/bin/chromium",
-].find((candidate): candidate is string => Boolean(candidate && existsSync(candidate)));
+const CHROME = await findChromiumExecutable();
 
 let browser: Browser | null = null;
 let page: Page | null = null;

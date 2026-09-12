@@ -15,7 +15,8 @@ const parseModel = (raw?: string): ModelRef | undefined => {
 };
 
 export function fusionRoutes(fusion: FusionService): RouteHandler {
-  return async ({ path, method, body, json, space }) => {
+  return async (rc) => {
+    const { path, method, body, json } = rc;
     let match = path.match(/^\/api\/sessions\/([^/]+)\/fuse$/);
     if (match && method === "POST") {
       const input = await body();
@@ -23,7 +24,7 @@ export function fusionRoutes(fusion: FusionService): RouteHandler {
       const { id } = await fusion.start(match[1]!, {
         text: String(input.text ?? ""),
         models,
-      }, space.userId);
+      }, rc.space.userId);
       json(200, { fusionId: id });
       return true;
     }

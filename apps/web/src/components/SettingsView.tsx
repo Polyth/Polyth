@@ -4,7 +4,7 @@
 // to the exact row; page-title filtering remains the fallback for plugin
 // pages without item metadata.
 import {
-  Fragment, useEffect, useMemo, useRef, useState,
+  Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore,
   type ReactNode, type TouchEvent as ReactTouchEvent,
 } from "react";
 import { consumePendingSettingsNavigation, setOverlay, type PendingSettingsNavigation } from "../store.ts";
@@ -27,14 +27,15 @@ import PackagesPage from "./settings/PackagesPage.tsx";
 import WidgetsPage from "./settings/WidgetsPage.tsx";
 import { PackageGlyph } from "./settings/packageIcons.tsx";
 import PackageTourOverlay from "./PackageTourOverlay.tsx";
-import { maybeAutoShowPackageTour } from "../packages/onboarding/controller.ts";
+import { openPackageTour } from "../packages/onboarding/controller.ts";
 import { settingsPageToPackageId } from "../packages/onboarding/pageMap.ts";
+import { getPackageOnboarding, subscribePackageOnboardings } from "../packages/onboarding/registry.ts";
 import { useModalSurface } from "./a11y/Dialog.tsx";
 import { tr } from "../i18n/index.ts";
 import { tapFeedback } from "../haptics.ts";
 import { isEdgeBackSwipe, type GesturePoint } from "../mobileGestures.ts";
 import { Button, IconButton, TextInput } from "./ui/index.ts";
-import { BackIcon, CloseIcon } from "./ui/icons.ts";
+import { BackIcon, CloseIcon, HelpIcon } from "./ui/icons.ts";
 import type { SettingsNavigationTarget } from "@polyth/web-sdk";
 
 interface PageDef {
@@ -238,13 +239,6 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
     if (mobile) setMobileStage("page");
   }, [active, mobile, pages]);
 
-  // First visit to a package's settings page auto-opens its tour (unless the
-  // user skipped it, skipped all onboardings, or already saw it this session).
-  useEffect(() => {
-    const packageId = settingsPageToPackageId(active, visibleSlotItems);
-    if (packageId) maybeAutoShowPackageTour(packageId);
-  }, [active, visibleSlotItems]);
-
   useEffect(() => {
     const navigate = (event: Event) => {
       const detail = (event as CustomEvent<unknown>).detail;
@@ -308,6 +302,9 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
   const resultCount = itemHits.length + pageHits.length;
 
   const current = pages.find((p) => p.id === active) ?? pages[0]!;
+  const tourId = settingsPageToPackageId(current.id, visibleSlotItems);
+  const tour = useSyncExternalStore(subscribePackageOnboardings, () => tourId ? getPackageOnboarding(tourId) : undefined, () => undefined);
+  const tourHelp = tour && <IconButton icon={HelpIcon} label={tr("settings.packagespage.previewTheValueTour", { name: current.label })} onClick={() => openPackageTour(tour.packageId, "preview")} />;
 
   const gotoItem = (hit: SettingsSearchHit) => {
     setActive(hit.item.pageId);
@@ -476,7 +473,10 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
                   {tr("common.back")}
                 </Button>
                 <span className="settings-mobile-title">{current.label}</span>
-                <IconButton icon={CloseIcon} label={tr("common.close")} onClick={closeSettings} />
+                <div className="settings-pane-head-actions">
+                  {tourHelp}
+                  <IconButton icon={CloseIcon} label={tr("common.close")} onClick={closeSettings} />
+                </div>
               </div>
             ) : (
               <>
@@ -486,6 +486,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
                   </h1>
                 </div>
                 <span className="dialog-hint" id="settings-close-hint"><kbd>{tr("settingsview.esc")}</kbd> {tr("settingsview.close")}</span>
+                {tourHelp}
                 <IconButton icon={CloseIcon} label={tr("common.close")} onClick={closeSettings} />
               </>
             )}

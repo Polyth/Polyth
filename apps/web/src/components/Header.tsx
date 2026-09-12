@@ -261,28 +261,36 @@ function useResizeFocusHandoff(mode: ShellMode) {
     const active = document.activeElement;
     if (active instanceof HTMLElement && active !== document.body && active.getClientRects().length > 0) return;
     const prev = lastFocus.current;
-    if (!prev) return;
     const q = (sel: string) => document.querySelector<HTMLElement>(sel);
     let target: HTMLElement | null = null;
-    if (prev.closest(".view-switcher")) target = q(".header-view-picker .picker-chip");
-    else if (prev.closest(".header-view-picker")) target = q(".view-switcher .view-icon.active") ?? q(".view-switcher .view-icon");
-    else if (prev.closest(".railbar")) target = q(".narrow-panel-trigger");
-    else if (prev.closest(".narrow-panel-trigger")) target = q(".plugin-strip .strip-btn.active") ?? q(".plugin-strip .strip-btn");
-    else if (prev.closest(".panel-sheet")) target = q(".plugin-strip .strip-btn.active") ?? q(".rail-toggle");
-    else if (prev.closest(".header-drawer-btn")) {
-      target = q(".sidebar .sidebar-expand") ?? q(".sidebar .sidebar-search input");
+    if (prev) {
+      if (prev.closest(".view-switcher")) target = q(".header-view-picker .picker-chip");
+      else if (prev.closest(".header-view-picker")) target = q(".view-switcher .view-icon.active") ?? q(".view-switcher .view-icon");
+      else if (prev.closest(".railbar")) target = q(".narrow-panel-trigger") ?? q(".plugin-strip .strip-btn.active") ?? q(".rail-toggle");
+      else if (prev.closest(".narrow-panel-trigger")) target = q(".plugin-strip .strip-btn.active") ?? q(".plugin-strip .strip-btn");
+      else if (prev.closest(".panel-sheet")) target = q(".plugin-strip .strip-btn.active") ?? q(".rail-toggle");
+      else if (prev.closest(".header-drawer-btn")) {
+        target = q(".sidebar .sidebar-expand") ?? q(".sidebar .sidebar-search input");
+      }
+      else if (prev.closest(".sidebar")) target = q(".header-drawer-btn");
     }
-    else if (prev.closest(".sidebar")) target = q(".header-drawer-btn");
-    if (!target || target.getClientRects().length === 0) return;
-    target.focus();
-    // The compact drawer removes `inert` in its own effect after this header
-    // effect runs. Retry once after that effect flushes if the first focus was
-    // suppressed by the still-inert ancestor.
-    if (document.activeElement !== target && typeof requestAnimationFrame === "function") {
-      const focusRaf = requestAnimationFrame(() => {
-        if (target?.isConnected && target.getClientRects().length > 0) target.focus();
-      });
-      return () => cancelAnimationFrame(focusRaf);
+    if (target && target.getClientRects().length > 0) {
+      target.focus();
+      // The compact drawer removes `inert` in its own effect after this header
+      // effect runs. Retry once after that effect flushes if the first focus was
+      // suppressed by the still-inert ancestor.
+      if (document.activeElement !== target && typeof requestAnimationFrame === "function") {
+        const focusRaf = requestAnimationFrame(() => {
+          if (target?.isConnected && target.getClientRects().length > 0) target.focus();
+        });
+        return () => cancelAnimationFrame(focusRaf);
+      }
+      return;
+    }
+    // No visible equivalent: never leave focus on a control with zero client
+    // rects, or the browser keeps trying to reveal it inside a scroll container.
+    if (active instanceof HTMLElement && active !== document.body && active.getClientRects().length === 0) {
+      active.blur();
     }
   }, [mode]);
 }

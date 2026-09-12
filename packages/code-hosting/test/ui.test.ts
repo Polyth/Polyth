@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createServer } from "node:http";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { build } from "esbuild";
+import { findChromiumExecutable } from "@polyth/browser/chromium";
 import { summarizeChecks } from "../src/checks.ts";
 
-const chrome = process.env.POLYTH_CHROMIUM_PATH;
-test("shared hosting tabs, discussion writes, and provider switching work at desktop/mobile widths", { skip: !chrome || !existsSync(chrome), timeout: 60_000 }, async () => {
+const CHROME = await findChromiumExecutable();
+test("shared hosting tabs, discussion writes, and provider switching work at desktop/mobile widths", { skip: !CHROME, timeout: 60_000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "hosting-ui-"));
   const calls: string[] = [];
   const writes: Array<{ path: string; body: Record<string, unknown> }> = [];
@@ -45,7 +45,7 @@ test("shared hosting tabs, discussion writes, and provider switching work at des
     await build({ entryPoints: [new URL("./fixtures/hostingSmoke.tsx", import.meta.url).pathname], bundle: true, format: "esm", jsx: "automatic", outdir: directory, loader: { ".woff2": "dataurl", ".woff": "dataurl", ".svg": "dataurl" }, logLevel: "silent" });
     await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
     const { chromium } = await import("playwright-core");
-    browser = await chromium.launch({ executablePath: chrome, args: ["--no-sandbox"] });
+    browser = await chromium.launch({ executablePath: CHROME, args: ["--no-sandbox"] });
     const page = await browser.newPage(); page.setDefaultTimeout(8000);
     const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
     for (const width of [1200, 390]) {

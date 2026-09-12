@@ -19,7 +19,7 @@ const gitlabIcon = () => createElement("svg", { className: "ui-icon", viewBox: "
 
 const provider = (host: WebPackageHost): CodeHostingProvider => ({
   id: "gitlab", apiBase: "/api/gitlab",
-  presentation: { serviceName: "GitLab", command: "glab", issueLabel: "Issue", changeLabel: "Merge request", changePlural: "Merge requests", changeNumberPrefix: "!", icon: gitlabIcon },
+  presentation: { serviceName: "GitLab", command: "glab", issueLabel: "Issue", issuePlural: t("githubview.issuesHeading"), changeLabel: "Merge request", changePlural: "Merge requests", changeNumberPrefix: "!", icon: gitlabIcon },
   t,
 });
 

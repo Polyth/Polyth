@@ -10,6 +10,7 @@ import {
   Bell,
   KeyRound,
   Pencil,
+  Repeat,
   Search,
   Sparkles,
   Square,
@@ -68,6 +69,9 @@ export {
   ArrowUpFromLine as PushIcon,
   Upload as UploadIcon,
   RefreshCw as RefreshIcon,
+  // Sync is a bidirectional exchange, not a read-only refresh: keep the two
+  // glyphs distinct so the mutating action never reads as a reload.
+  Repeat as SyncIcon,
   RotateCcw as UndoIcon,
   RotateCw as RedoIcon,
   Search as SearchIcon,

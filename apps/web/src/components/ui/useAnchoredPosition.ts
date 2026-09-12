@@ -82,13 +82,14 @@ export function useAnchoredPosition(
           ? (fits(below) || below >= above ? "down" : "up")
           : (fits(above) || above >= below ? "up" : "down");
       const space = resolvedSide === "down" ? below : above;
-      const maxHeight = Math.max(80, space);
+      const maxHeight = Math.max(0, Math.min(space, band.bottom - band.top - 2 * margin));
       const height = Math.min(surfaceRect.height, maxHeight);
-      const top = resolvedSide === "down"
+      const preferredTop = resolvedSide === "down"
         ? anchorRect.bottom + gap
         : anchorRect.top - gap - height;
+      const top = Math.max(band.top + margin, Math.min(preferredTop, band.bottom - margin - height));
 
-      const maxWidth = band.right - band.left - 2 * margin;
+      const maxWidth = Math.max(0, band.right - band.left - 2 * margin);
       const width = Math.min(surfaceRect.width, maxWidth);
       let left =
         align === "start" ? anchorRect.left

@@ -1,7 +1,8 @@
 // Session switches return to Chat unless the workspace window is pinned. A
 // pinned window remains the shared companion across sessions and reloads;
 // dynamic/fullscreen windows are transient.
-import test from "node:test";
+import test, { afterEach } from "node:test";
+import { setImmediate as settleLocalHydration } from "node:timers/promises";
 import assert from "node:assert/strict";
 import { Window } from "happy-dom";
 
@@ -83,6 +84,12 @@ function unblockSession(): void {
   blockedSessionGate = null;
   releaseBlockedSession = null;
 }
+
+afterEach(async () => {
+  unblockFetches();
+  unblockSession();
+  await settleLocalHydration();
+});
 
 // A minimal canonical workspace surface so openWorkspacePane admits "files"
 // without mounting the real component tree.
@@ -222,7 +229,8 @@ test("a hydrated session renders from cache while its suffix revalidates", async
   blockFetches();
 
   const revalidating = openSession("parallel");
-  assert.equal(store.getState().activeSessionId, "parallel", "cached session activates synchronously");
+  await settleLocalHydration();
+  assert.equal(store.getState().activeSessionId, "parallel", "cached session activates after local draft hydration, without waiting for the server");
   assert.equal(store.getState().activeView, "session", "cached chat is immediately usable");
   assert.deepEqual(requestedPaths, [
     "/api/harnesses/sessions/parallel/features",
@@ -247,8 +255,10 @@ test("first-message session creation opens the chat instantly while revalidating
   assert.equal(store.getState().activeSessionId, "precache");
   assert.equal(store.getState().openingSessionId, null);
   assert.equal(store.getState().activeView, "session");
-  assert.deepEqual(requestedPaths.slice(0, 4), [
+  await settleLocalHydration();
+  assert.deepEqual(requestedPaths.slice(0, 5), [
     "/api/sessions",
+    "/api/sessions?projectId=p1",
     "/api/harnesses/sessions/precache/features",
     "/api/sessions/precache",
     "/api/sessions/precache/events?afterSeq=0&prefetch=0",
@@ -297,7 +307,7 @@ test("tail prefetch dedupes and click paints its cache before reconcile resolves
   eventFixtures.delete(sessionId);
 });
 
-test("a completed prefetch activates synchronously before SWR resolves", async () => {
+test("a completed prefetch activates after local hydration before SWR resolves", async () => {
   const sessionId = "prefetched-ready";
   store.upsertSession({ id: sessionId, projectId: "p1", title: "Ready", status: "idle", createdAt: 1, updatedAt: 1 });
   eventFixtures.set(sessionId, [{
@@ -311,7 +321,8 @@ test("a completed prefetch activates synchronously before SWR resolves", async (
   blockFetches();
 
   const opening = openSession(sessionId);
-  assert.equal(store.getState().activeSessionId, sessionId, "completed prefetch paints cache synchronously");
+  await settleLocalHydration();
+  assert.equal(store.getState().activeSessionId, sessionId, "completed prefetch paints before server revalidation");
   assert.deepEqual(requestedPaths, [
     `/api/harnesses/sessions/${sessionId}/features`,
     `/api/sessions/${sessionId}`,
@@ -350,7 +361,7 @@ test("a cached reconcile cannot overwrite a newer streamed projection", async ()
   await openSession("stale-reconcile");
   blockSession("stale-reconcile");
   const stale = openSession("stale-reconcile");
-  await Promise.resolve();
+  await settleLocalHydration();
 
   store.upsertSession({
     id: "stale-reconcile", projectId: "p1", title: "newer projection",
@@ -378,7 +389,8 @@ test("a superseded first open never leaves a stale loading claim", async () => {
   assert.equal(store.getState().openingSessionId, "slow-claim", "first open claims the loading row");
 
   const cached = openSession("cached-take");
-  assert.equal(store.getState().activeSessionId, "cached-take", "cached open activates synchronously");
+  await settleLocalHydration();
+  assert.equal(store.getState().activeSessionId, "cached-take", "cached open activates without waiting for the first open");
   assert.equal(store.getState().openingSessionId, null, "cached open takes over the stale claim");
 
   unblockSession();

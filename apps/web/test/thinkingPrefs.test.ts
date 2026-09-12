@@ -13,6 +13,7 @@ const {
   getModelThinking,
   setModelThinking,
 } = await import("../src/thinkingPrefs.ts");
+const { accountStorageKey } = await import("../src/accountStorage.ts");
 
 test("thinking effort saves immediately and independently for each model", () => {
   mem.clear();
@@ -23,7 +24,8 @@ test("thinking effort saves immediately and independently for each model", () =>
   setModelThinking(claude, "low");
   assert.equal(getModelThinking(gpt), "high");
   assert.equal(getModelThinking(claude), "low");
-  assert.equal(mem.get(THINKING_PREFS_KEY), '{"local/anthropic/claude-4":"low","local/openai/gpt-5":"high"}');
+  assert.equal(mem.get(accountStorageKey(THINKING_PREFS_KEY)), '{"local/anthropic/claude-4":"low","local/openai/gpt-5":"high"}');
+  assert.equal(mem.has(THINKING_PREFS_KEY), false, "reasoning preferences must not leak into unscoped storage");
 
   setModelThinking(gpt, undefined);
   assert.equal(getModelThinking(gpt), undefined);

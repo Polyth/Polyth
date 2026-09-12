@@ -496,6 +496,7 @@ export default async function registerPackage(host: ServerPackageHost): Promise<
       const capabilities = host.services.require(serverServiceKey<AgentCapabilityContributionRegistry>("harness.capabilities"));
       agentTool = capabilities.register("browser", createBrowserAgentTool(browser));
       routes = async (request) => {
+        if (!request.path.startsWith("/api/browser/")) return false;
         const scoped = host.forSpace(request.space);
         const storage = host.spaceStorage(request.space);
         return browserRoutes({

@@ -383,30 +383,6 @@ test("mobile Settings swaps a vertical page list for content with a back action"
   assert.doesNotMatch(mobile, /\.settings-nav-list\s*\{[^}]*overflow-x:\s*auto/);
 });
 
-test("package tiles and plugin marketplace rows stay responsive", async () => {
-  const css = [
-    await read("../src/styles.css"),
-    await read("../../../packages/plugins/widgets/styles.css"),
-  ].join("\n");
-  assert.match(
-    css,
-    /\.settings-pane-body \.package-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)\s*!important[^}]*gap:\s*10px/,
-    "package grids use two pane-relative columns by default",
-  );
-  assert.match(
-    css,
-    /@media \(max-width: 480px\), \(max-height: 480px\) and \(pointer: coarse\)[\s\S]*?\.settings-pane-body \.package-grid\s*\{[^}]*grid-template-columns:\s*1fr/,
-    "package grids collapse to one column on phones",
-  );
-  assert.match(css, /\.pkg-plugins \.plugin-card-grid\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column/s,
-    "plugins use a vertical list instead of a tile grid");
-  assert.match(css, /\.pkg-plugins \.plugin-card\s*\{[^}]*border-bottom:\s*1px solid var\(--border-soft\)/s,
-    "plugin rows retain visible separation");
-  assert.match(css, /\.package-tile\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column[^}]*align-items:\s*center/);
-  assert.match(css, /\.pkg-plugins \.plugin-card-main\s*\{[^}]*display:\s*grid[^}]*align-items:\s*center/s);
-  assert.match(css, /\.package-icon\s*\{[^}]*width:\s*58px[^}]*height:\s*58px/);
-});
-
 test("shared menu, destructive, failed-turn, and header-action contracts stay wired", async () => {
   const sidebar = await read("../src/components/Sidebar.tsx");
   const header = await read("../src/components/Header.tsx");

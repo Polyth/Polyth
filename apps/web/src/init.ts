@@ -33,7 +33,6 @@ import { scopedDraftCacheKey } from "./draftRecord.ts";
 let sync: SyncClient | null = null;
 let syncStatus: SyncStatus = "disconnected";
 const syncStatusListeners = new Set<() => void>();
-let lastSubSession: string | undefined;
 let lastProject: string | null | undefined;
 let branchFetchedFor: string | null = null;
 let runtimeCatalogHydrated = false;
@@ -312,6 +311,36 @@ function startUrlSync(): void {
   });
 }
 
+/** The slice of `SyncClient` the store subscription needs. */
+export interface SyncScopeClient {
+  setSubscription(sessionId: string | undefined, afterSeq: number, projectId?: string): void;
+}
+
+/** Resubscribe the socket only when the connection scope actually changes.
+ *  `activeSessionId`/`activeProjectId` are `null` when absent; both are
+ *  normalized to `undefined` before comparison, so an ordinary store update on
+ *  New Chat never re-sends the subscription (the pre-fix bug compared raw
+ *  `null` against a stored `undefined` and resubscribed on every update until
+ *  the server closed the socket with 1008). Returns the unsubscribe function. */
+export function subscribeSyncScope(client: SyncScopeClient): () => void {
+  let lastSessionId: string | undefined;
+  let lastProjectId: string | undefined;
+  return store.subscribeStore(() => {
+    const s = store.getState();
+    const sessionId = s.activeSessionId ?? undefined;
+    const projectId = s.activeProjectId ?? undefined;
+    if (sessionId !== lastSessionId || projectId !== lastProjectId) {
+      lastSessionId = sessionId;
+      lastProjectId = projectId;
+      client.setSubscription(
+        sessionId,
+        s.activeSessionId ? store.lastSeq(s.activeSessionId) : 0,
+        projectId,
+      );
+    }
+  });
+}
+
 export function init(): Promise<void> {
   // PWA installability is independent from the opt-in push subscription.
   // Auth has already succeeded before init(), so register without prompting.
@@ -347,20 +376,9 @@ export function init(): Promise<void> {
   // F18: notification clicks from the service worker land here when a tab
   // already exists (postMessage instead of a second window).
   installPushDeepLinks(openSession);
+  if (sync) subscribeSyncScope(sync);
   store.subscribeStore(() => {
     const s = store.getState();
-    if (s.activeSessionId !== lastSubSession) {
-      lastSubSession = s.activeSessionId ?? undefined;
-      // projectId scopes the server's projection snapshot; the server skips
-      // it entirely when this socket already holds the same scope.
-      if (sync) {
-        sync.setSubscription(
-          s.activeSessionId ?? undefined,
-          s.activeSessionId ? store.lastSeq(s.activeSessionId) : 0,
-          s.activeProjectId ?? undefined,
-        );
-      }
-    }
     if (s.activeProjectId !== lastProject) {
       lastProject = s.activeProjectId;
       if (s.activeProjectId) {
@@ -1331,21 +1349,21 @@ export async function sendMessage(text: string, model?: JsonObject, agent?: stri
     && !!session
     && isPlaceholderTitle(session.title, session.id);
   try {
+    const delivery = opts?.delivery;
     const body = {
       text, model, agent, ...(autoTitle ? { autoTitle: true } : {}),
       ...(opts?.command ? { command: opts.command } : {}),
       ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
       ...(opts?.harness ? { harness: opts.harness } : {}),
-      ...(opts?.delivery ? { delivery: opts.delivery } : {}),
       ...(opts?.dismissPending ? { dismissPending: true } : {}),
       // Explicit null must reach the wire (it clears the stored profile);
       // only an omitted field means "inherit".
       ...(opts?.agentProfileId !== undefined ? { agentProfileId: opts.agentProfileId } : {}),
     };
-    if (!opts?.delivery || opts.delivery === "normal" || opts.delivery === "queue") {
+    if (!delivery || delivery === "normal" || delivery === "queue") {
       await submitDirectPrompt(id, {
         ...body,
-        ...(opts?.delivery ? { delivery: opts.delivery as "normal" | "queue" } : {}),
+        ...(delivery ? { delivery } : {}),
       }, capturedScope);
     } else {
       if (capturedScope && scopedDraftCacheKey(id) !== failureScopeKey) {
@@ -1354,7 +1372,7 @@ export async function sendMessage(text: string, model?: JsonObject, agent?: stri
           status: 409,
         });
       }
-      await api.sendMessage(id, { ...body, delivery: opts.delivery });
+      await api.sendMessage(id, { ...body, delivery });
     }
     clearSendFailure(id, failureScopeKey);
     return true;

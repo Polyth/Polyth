@@ -78,6 +78,14 @@ const errorCode = (cause: unknown): string | undefined =>
     ? (cause as { code: string }).code
     : undefined;
 
+/** Attribute an underlying provider error to its provider exactly once.
+ *  Many providers already prefix their own messages with `<id>:`; re-prefixing
+ *  would produce `nasdaq: nasdaq: ...`. A plain string comparison (never a
+ *  regex) keeps identities intact and still attributes messages that start
+ *  with a different or absent prefix. */
+const attributeError = (providerId: string, message: string): string =>
+  message.startsWith(`${providerId}:`) ? message : `${providerId}: ${message}`;
+
 export class ProviderRegistry {
   private readonly providers: MarketProvider[] = [];
   private readonly health = new Map<string, ProviderHealth>();
@@ -165,7 +173,7 @@ export class ProviderRegistry {
         return { value, providerId: provider.id };
       } catch (cause) {
         const message = errorMessage(cause);
-        errors.push(`${provider.id}: ${message}`);
+        errors.push(attributeError(provider.id, message));
         if (errorCode(cause) === "not-found") {
           misses += 1;
           continue;
@@ -225,7 +233,7 @@ export class ProviderRegistry {
     }));
     const successes = settled.filter((item) => item.ok).map((item) => ({ value: item.value, providerId: item.providerId }));
     if (successes.length > 0) return successes;
-    const errors = settled.filter((item) => !item.ok).map((item) => `${item.providerId}: ${item.message}`);
+    const errors = settled.filter((item) => !item.ok).map((item) => attributeError(item.providerId, item.message));
     const missesOnly = settled.every((item) => !item.ok && item.miss);
     throw Object.assign(new Error(`${missesOnly ? `no ${capability} provider has data` : `all ${capability} providers failed`}: ${errors.join("; ")}`), {
       code: missesOnly ? "not-found" : "unavailable",

@@ -22,6 +22,38 @@ const event = (seq: number, sessionId = "s1"): SessionEvent => ({
   id: `${sessionId}-${seq}`, sessionId, seq, time: seq, type: "test/event", data: {}, v: 1,
 });
 
+test("default reconnect timers retain their browser global receiver", () => {
+  const schedule = globalThis.setTimeout;
+  const cancel = globalThis.clearTimeout;
+  const handle = {} as ReturnType<typeof setTimeout>;
+  let scheduled = 0;
+  let cancelled = 0;
+  const socket = new FakeSocket();
+  let client: SyncClient | undefined;
+  try {
+    globalThis.setTimeout = function (this: unknown) {
+      assert.equal(this, globalThis, "window.setTimeout rejects a SyncClient receiver");
+      scheduled++;
+      return handle;
+    } as unknown as typeof setTimeout;
+    globalThis.clearTimeout = function (this: unknown) {
+      assert.equal(this, globalThis, "window.clearTimeout requires its global receiver");
+      cancelled++;
+    } as typeof clearTimeout;
+    client = new SyncClient({ webSocket: () => socket });
+    client.connect("ws://test/ws");
+    socket.open();
+    socket.ended();
+    assert.equal(scheduled, 1);
+    client.close();
+    assert.equal(cancelled, 1);
+  } finally {
+    globalThis.setTimeout = schedule;
+    globalThis.clearTimeout = cancel;
+    client?.close();
+  }
+});
+
 test("cursor-only replay is contiguous, recovers gaps, and remains bounded at 10k events", () => {
   const sockets: FakeSocket[] = [];
   const client = new SyncClient({ webSocket: () => {

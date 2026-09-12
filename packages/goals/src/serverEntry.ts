@@ -8,7 +8,8 @@ import {
 import { createGoalService, type GoalService } from "./index.ts";
 
 export function goalRoutes(goals: GoalService): RouteHandler {
-  return async ({ path, method, body, json, space }) => {
+  return async (rc) => {
+    const { path, method, body, json } = rc;
     const match = path.match(
       /^\/api\/sessions\/([^/]+)\/goal(?:\/(pause|resume|stop))?$/,
     );
@@ -29,7 +30,7 @@ export function goalRoutes(goals: GoalService): RouteHandler {
         ...(input.maxContinuations !== undefined
           ? { maxContinuations: Number(input.maxContinuations) }
           : {}),
-      }, space.userId));
+      }, rc.space.userId));
       return true;
     }
     if (action && method === "POST") {

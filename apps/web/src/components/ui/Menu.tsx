@@ -192,7 +192,8 @@ export default function Menu({
           style={{
             top: position.top,
             left: position.left,
-            maxHeight: position.maxHeight || undefined,
+            maxHeight: position.ready ? position.maxHeight : undefined,
+            maxWidth: position.ready ? position.maxWidth : undefined,
             visibility: position.ready ? undefined : "hidden",
           }}
           data-side={position.side}

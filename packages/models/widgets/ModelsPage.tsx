@@ -86,10 +86,6 @@ export default function ModelsPage() {
   const [reconfiguring, setReconfiguring] = useState<ReadonlySet<string>>(new Set());
   const [customOpen, setCustomOpen] = useState<null | { id?: string }>(null);
   const [modelQuery, setModelQuery] = useState<Record<string, string>>({});
-  const catalogModels = useMemo(
-    () => providers?.flatMap((provider) => provider.models) ?? [],
-    [providers],
-  );
 
   const refreshCatalog = ({ invalidateRuntime = true }: { invalidateRuntime?: boolean } = {}) =>
     loadOpenCodeProviders().then((catalog) => {
@@ -416,7 +412,7 @@ export default function ModelsPage() {
                   {visibleModels.map((m) => {
                     const favoriteKey = modelKey({ harnessId: "opencode", providerID: m.providerID, modelID: m.modelID });
                     const fav = isFavorite(prefs, favoriteKey);
-                    const displayName = modelDisplayName(m, catalogModels);
+                    const displayName = modelDisplayName(m, p.models);
                     return (
                       <div key={m.key} className={`set-model-row ${m.enabled ? "" : "model-disabled"}`}>
                         <IconButton

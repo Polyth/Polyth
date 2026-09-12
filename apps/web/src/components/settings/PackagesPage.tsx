@@ -8,7 +8,7 @@ import { getPackageOnboarding, subscribePackageOnboardings } from "../../package
 import { EmptyState, PageHead } from "./parts.tsx";
 import { PackageGlyph } from "./packageIcons.tsx";
 import { tr, type TranslationKey } from "../../i18n/index.ts";
-import { Button, Switch } from "../ui/index.ts";
+import { Button, Switch, TextInput } from "../ui/index.ts";
 
 const PACKAGE_NAME_KEYS: Readonly<Record<string, TranslationKey>> = {
   git: "packages.git.git",
@@ -91,6 +91,7 @@ export default function PackagesPage() {
   const [packages, setPackages] = useState<PackageDescriptorDto[] | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -111,10 +112,11 @@ export default function PackagesPage() {
   const [, setToursAt] = useState(0);
   useEffect(() => subscribePackageOnboardings(() => setToursAt((value) => value + 1)), []);
 
-  const grouped = useMemo(() => ({
-    core: packages?.filter((item) => item.core) ?? [],
-    optional: packages?.filter((item) => !item.core) ?? [],
-  }), [packages]);
+  const grouped = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    const matching = packages?.filter((item) => `${item.id} ${packageName(item)} ${packageDescription(item)}`.toLowerCase().includes(needle)) ?? [];
+    return { core: matching.filter((item) => item.core), optional: matching.filter((item) => !item.core) };
+  }, [packages, query]);
 
   const setEnabled = async (descriptor: PackageDescriptorDto, enabled: boolean) => {
     setBusy(descriptor.id);
@@ -149,7 +151,9 @@ export default function PackagesPage() {
       {!packages && <EmptyState title={tr("settings.packagespage.packagesUnavailable")} body={tr("settings.packagespage.thePackageRegistryCouldNotBeLoaded")} />}
       {packages && (
         <div className="packages-list">
-          <section className="package-group" aria-labelledby="optional-packages-title">
+          <TextInput type="search" value={query} onChange={(event) => setQuery(event.target.value)} aria-label={`${tr("common.search")} ${tr("settings.packagespage.packages")}`} placeholder={`${tr("common.search")} ${tr("settings.packagespage.packages")}…`} />
+          {grouped.optional.length === 0 && grouped.core.length === 0 && <EmptyState title={tr("picker.noMatches")} />}
+          {grouped.optional.length > 0 && <section className="package-group" aria-labelledby="optional-packages-title">
             <div className="package-group-head">
               <strong id="optional-packages-title">{tr("settings.packagespage.optionalPackages")}</strong>
               <span>{grouped.optional.filter((item) => item.enabled).length} {tr("settings.packagespage.enabled2")}</span>
@@ -164,7 +168,6 @@ export default function PackagesPage() {
                   </div>
                   <div className="package-tile-control">
                     <PackageTourButton descriptor={descriptor} />
-                    <span>{descriptor.enabled ? tr("settings.packagespage.enabled") : tr("settings.packagespage.disabled")}</span>
                     <Switch
                       checked={descriptor.enabled}
                       label={descriptor.enabled
@@ -177,8 +180,8 @@ export default function PackagesPage() {
                 </article>
               ))}
             </div>
-          </section>
-          <section className="package-group" aria-labelledby="core-packages-title">
+          </section>}
+          {grouped.core.length > 0 && <section className="package-group" aria-labelledby="core-packages-title">
             <div className="package-group-head">
               <strong id="core-packages-title">{tr("settings.packagespage.corePackages")}</strong>
               <span>{tr("settings.packagespage.alwaysEnabled")}</span>
@@ -198,7 +201,7 @@ export default function PackagesPage() {
                 </article>
               ))}
             </div>
-          </section>
+          </section>}
           {isPackageEnabled("plugins") && (
             <Button
               variant="ghost"

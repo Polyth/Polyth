@@ -146,8 +146,8 @@ export class SyncClient {
 
   constructor(options: SyncClientOptions = {}) {
     this.webSocket = options.webSocket ?? ((url) => new WebSocket(url));
-    this.schedule = options.setTimeout ?? globalThis.setTimeout;
-    this.cancel = options.clearTimeout ?? globalThis.clearTimeout;
+    this.schedule = options.setTimeout ?? ((callback, ms) => globalThis.setTimeout(callback, ms));
+    this.cancel = options.clearTimeout ?? ((timer) => globalThis.clearTimeout(timer));
     this.random = options.random ?? Math.random;
     this.now = options.now ?? Date.now;
     this.baseDelay = options.baseDelayMs ?? 500;

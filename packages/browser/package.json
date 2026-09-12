@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./chromium": "./src/chromium.ts",
     "./i18n": "./src/i18n/index.ts",
     "./widgets": "./widgets/index.tsx",
     "./i18n/*": "./src/i18n/*.ts"

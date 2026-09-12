@@ -1,5 +1,5 @@
-// Maps a settings page id to the package id whose tour should auto-show when
-// the user lands on that page. Kept free of React/DOM so it is unit-testable.
+// Maps a settings page id to its optional, explicitly opened help tour.
+// Kept free of React/DOM so it is unit-testable.
 
 /** Built-in SettingsView pages (no settings.pages slot entry). Each acts as
  * its own tour package id — e.g. a tour registered under "packages" shows on

@@ -33,8 +33,21 @@ const executable = async (path: string): Promise<string | null> => {
 
 /** Configured or well-known Chromium executable, or null (fallback mode).
  *  Never downloads a browser; playwright-core's bundled Chrome is used only
- *  when that file is already on disk. */
+ *  when that file is already on disk.
+ *  With POLYTH_REQUIRE_CHROMIUM=1 a missing browser throws instead of
+ *  returning null, so a layout-test job fails loudly rather than skipping. */
 export async function findChromiumExecutable(env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
+  const located = await locateChromiumExecutable(env);
+  if (located === null && env.POLYTH_REQUIRE_CHROMIUM === "1") {
+    throw new Error(
+      "POLYTH_REQUIRE_CHROMIUM=1 but no Chromium executable was found. "
+      + `Set POLYTH_CHROMIUM_PATH or install Chromium at one of: ${CHROMIUM_CANDIDATE_PATHS.join(", ")}.`,
+    );
+  }
+  return located;
+}
+
+async function locateChromiumExecutable(env: NodeJS.ProcessEnv): Promise<string | null> {
   const configured = env.POLYTH_CHROMIUM_PATH?.trim();
   if (configured) return executable(configured);
   if (env.POLYTH_REQUIRE_BUNDLED_CHROMIUM === "1") return null;

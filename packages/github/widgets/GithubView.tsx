@@ -16,6 +16,7 @@ export const githubProvider = (host: WebPackageHost): CodeHostingProvider => ({
     serviceName: "GitHub",
     command: "gh",
     issueLabel: host.ui.locale.translate("githubview.issue"),
+    issuePlural: host.ui.locale.translate("githubview.issuesHeading"),
     changeLabel: host.ui.locale.translate("githubview.pr"),
     changePlural: host.ui.locale.translate("githubview.pullRequestsHeading"),
     changeNumberPrefix: "#",

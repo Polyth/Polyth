@@ -657,7 +657,7 @@ export default function SessionList({
   const sessionOrder = useSessionOrder();
   const [labels, setLabels] = useState<WorkspaceLabel[]>([]);
   const [worktrees, setWorktrees] = useState<Worktree[]>([]);
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const [collapsed, setCollapsed] = useState<ReadonlyMap<string, boolean>>(new Map());
   const [expandedSubagents, setExpandedSubagents] = useState<ReadonlySet<string>>(new Set());
   const [showArchived, setShowArchived] = useState(expandArchived);
   const [draggedPin, setDraggedPin] = useState<string | null>(null);
@@ -968,7 +968,7 @@ export default function SessionList({
         </div>
       )}
       {worktreeGroups.map((group) => {
-        const isCollapsed = collapsed.has(group.key);
+        const isCollapsed = collapsed.get(group.key) ?? group.sessions.length === 0;
         const managedIsolation = isManagedIsolationBranch(group.worktree?.branch)
           || group.sessions.some((session) => session.isolation?.kind === "git-worktree");
         return (
@@ -984,9 +984,8 @@ export default function SessionList({
                   label: group.label,
                 })}
                 onClick={() => setCollapsed((prev) => {
-                  const next = new Set(prev);
-                  if (next.has(group.key)) next.delete(group.key);
-                  else next.add(group.key);
+                  const next = new Map(prev);
+                  next.set(group.key, !isCollapsed);
                   return next;
                 })}
               >

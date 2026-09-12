@@ -100,7 +100,7 @@ test("ACP permissions map native option ids; a lost admitted prompt records a te
     assert.equal((await rt.releaseExecution!(binding, "switch")).kind, "confirmed");
 });
 
-test("ACP follow-up silence times out with one terminal error and fences late completion", async () => {
+test("ACP follow-up silence from an unresponsive peer times out with one terminal error and fences late completion", async () => {
     const f = fakeRpc();
     let promptCount = 0;
     let finishFollowUp!: (value: unknown) => void;
@@ -111,6 +111,8 @@ test("ACP follow-up silence times out with one terminal error and fences late co
             if (promptCount === 1) return { stopReason: "end_turn" };
             return new Promise((resolve) => { finishFollowUp = resolve; });
         }
+        if (method === "_polyth/liveness")
+            throw Object.assign(new Error("Runtime response timed out"), { code: "outcome-unknown" });
         return {};
     });
     const rt = createAcpRuntime(context, f.rpc, "cursor", undefined, "Cursor", {
@@ -142,6 +144,46 @@ test("ACP follow-up silence times out with one terminal error and fences late co
     finishFollowUp({ stopReason: "end_turn" });
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(events.filter((event) => event.type === "turn/stopped" && event.turnId === "follow-up").length, 1);
+    await rt.dispose();
+});
+test("ACP silence from a responsive peer survives the idle window", async () => {
+    const f = fakeRpc();
+    let finishPrompt!: (value: unknown) => void;
+    let probes = 0;
+    f.handle(async (method) => {
+        if (method === "session/new") return { sessionId: "native" };
+        if (method === "session/prompt")
+            return new Promise((resolve) => { finishPrompt = resolve; });
+        if (method === "_polyth/liveness") {
+            probes++;
+            throw Object.assign(new Error("method not found"), { code: "runtime-rejected", rpcCode: -32601 });
+        }
+        return {};
+    });
+    const rt = createAcpRuntime(context, f.rpc, "cursor", undefined, "Cursor", {
+        promptIdleTimeoutMs: 20,
+    });
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    const admission = rt.startTurnOperation!({ sessionId: "canonical", text: "long task" }, "long");
+    f.emit("session/update", {
+        sessionId: "native",
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "working" } },
+    });
+    assert.equal((await admission).kind, "confirmed");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    assert.ok(probes >= 1);
+    assert.equal(events.filter((event) => event.type === "turn/stopped").length, 0);
+
+    finishPrompt({ stopReason: "end_turn" });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(events.filter((event) => event.type === "turn/stopped"), [{
+        type: "turn/stopped",
+        turnId: "long",
+        reason: "completed",
+    }]);
     await rt.dispose();
 });
 test("ACP session/new forwards overlay mcpServers", async () => {

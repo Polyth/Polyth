@@ -119,7 +119,7 @@ test("fresh mobile chat exposes project targets and attachments use the platform
   // UX-MOBILE-01 §5: the compact context bar belongs to the shared composer,
   // and appears only while its project/worktree target is still editable.
   assert.doesNotMatch(surface, /<SessionContextBar/);
-  assert.match(composer, /\{!session && <SessionContextBar \{\.\.\.contextBar\} \/>\}/);
+  assert.match(composer, /\{!session && !creatingSession && <SessionContextBar \{\.\.\.contextBar\} \/>\}/);
   assert.match(contextBar, /tr\("mobile\.sessioncontextbar\.projectCurrentValue"/);
   assert.match(contextBar, /tr\("mobile\.sessioncontextbar\.worktreeCurrentValue"/);
   assert.match(composer, /target: \{ kind: "branch", branch: candidate\.name \}/);

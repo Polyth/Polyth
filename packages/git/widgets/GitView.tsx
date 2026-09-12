@@ -33,12 +33,15 @@ import {
   Dialog,
   FetchIcon,
   IconButton,
+  Menu,
+  MoreIcon,
   PullIcon,
   PullRequestIcon,
   PushIcon,
   RefreshIcon,
   SessionIcon,
   StageIcon,
+  SyncIcon,
   Tabs,
   Textarea,
   TextInput,
@@ -695,28 +698,27 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
         <div className="source-remote-actions" aria-label={tr("gitview.remoteRepositoryActions")}>
           <Button
             size="sm"
-            variant="primary"
             className="source-action-btn source-sync-btn"
-            iconStart={RefreshIcon}
-            busy={busyRemote === "sync"}
+            iconStart={SyncIcon}
+            busy={busyRemote !== null}
             disabled={busyRemote !== null || busy}
             onClick={() => void runRemote("sync")}
           >
-            {remoteLabel.sync.idle}
+            {busyRemote ? remoteLabel[busyRemote].busy : remoteLabel.sync.idle}
           </Button>
-          {(["fetch", "pull", "push"] as const).map((step) => (
-            <Button
-              key={step}
-              size="sm"
-              className="source-action-btn"
-              iconStart={step === "fetch" ? FetchIcon : step === "pull" ? PullIcon : PushIcon}
-              busy={busyRemote === step}
-              disabled={busyRemote !== null || busy}
-              onClick={() => void runRemote(step)}
-            >
-              {busyRemote === step ? remoteLabel[step].busy : remoteLabel[step].idle}
-            </Button>
-          ))}
+          <Menu
+            label={tr("gitview.remoteRepositoryActions")}
+            align="end"
+            entries={(["fetch", "pull", "push"] as const).map((step) => ({
+              id: step,
+              label: remoteLabel[step].idle,
+              icon: step === "fetch" ? FetchIcon : step === "pull" ? PullIcon : PushIcon,
+              disabled: busyRemote !== null || busy,
+              onSelect: () => { void runRemote(step); },
+            }))}
+          >
+            {(trigger) => <IconButton {...trigger} icon={MoreIcon} size="sm" label={tr("gitview.remoteRepositoryActions")} disabled={busy || busyRemote !== null} />}
+          </Menu>
           <IconButton icon={RefreshIcon} size="sm" className="source-refresh-btn" label={tr("gitview.refreshSourceControl")} disabled={busy || busyRemote !== null} onClick={() => void refresh()} />
         </div>
       </header>
@@ -753,7 +755,7 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
         <Dialog
           title={confirmRequest.title}
           onClose={() => setConfirmRequest(null)}
-          initialFocus=".ui-btn--danger"
+          initialFocus=".ui-dialog-foot .ui-btn:first-child"
           footer={
             <>
               <Button onClick={() => setConfirmRequest(null)}>{tr("common.cancel")}</Button>
@@ -843,7 +845,7 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
                     <span>−{totalFileStats.deletions}</span>
                   </span>
                 )}
-                <span className="header-spacer" />
+                <div className="git-pane-actions">
                 {(status?.unstaged.length || status?.untracked.length || status?.conflicted.length) ? (
                   <Button size="sm" iconStart={StageIcon} disabled={busy} onClick={() => void run(() => api.gitFolder(projectId, "", "stage", sessionId ?? undefined))}>
                     {tr("gitview.stageAll")}
@@ -864,6 +866,7 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
                 {status && status.staged.length > 0 && (
                   <IconButton icon={UndoIcon} size="sm" label={tr("gitview.unstageAll")} disabled={busy} onClick={() => void run(() => api.gitFolder(projectId, "", "unstage", sessionId ?? undefined))} />
                 )}
+                </div>
               </div>
               <div className="git-change-groups">
                 {changeGroups.map((group) => (

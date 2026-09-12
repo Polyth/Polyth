@@ -1,8 +1,8 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import type { Browser, Page } from "playwright-core";
+import { findChromiumExecutable } from "@polyth/browser/chromium";
 
 const read = async (relative: string): Promise<string> => {
   const content = await readFile(new URL(relative, import.meta.url), "utf8");
@@ -10,13 +10,7 @@ const read = async (relative: string): Promise<string> => {
   const tokens = await readFile(new URL("../src/tokens.css", import.meta.url), "utf8");
   return `${tokens}\n${content}`;
 };
-const CHROME = [
-  process.env.POLYTH_CHROMIUM_PATH,
-  "/usr/local/bin/google-chrome",
-  "/usr/bin/google-chrome",
-  "/usr/bin/google-chrome-stable",
-  "/usr/bin/chromium",
-].find((candidate): candidate is string => Boolean(candidate && existsSync(candidate)));
+const CHROME = await findChromiumExecutable();
 
 let browser: Browser | null = null;
 let page: Page | null = null;
@@ -31,6 +25,33 @@ before(async () => {
 
 after(async () => {
   await browser?.close();
+});
+
+test("New Chat keeps its composer within the reading measure and switches keep compact tracks", { skip: !CHROME }, async () => {
+  assert.ok(page);
+  const css = `${await read("../src/styles.css")}\n${await read("../src/moduleContent.css")}`;
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await page.setContent(`<style>${css}</style>
+    <div class="stage-new" style="width:1100px">
+      <div class="composer composer-chat"><div class="composer-card">Message</div></div>
+    </div>
+    <div class="module-view--phone">
+      <button class="switch ui-switch" role="switch" aria-checked="true"><span class="switch-track"><i></i></span></button>
+    </div>
+    <div class="widget-chat-empty" style="width:900px"><p>Start a session</p><div class="composer composer-widget"><div class="composer-card">Message</div></div></div>`);
+  const geometry = await page.evaluate(() => ({
+    composer: document.querySelector(".composer-card")!.getBoundingClientRect().width,
+    inset: getComputedStyle(document.querySelector(".composer-chat")!).paddingInlineStart,
+    target: document.querySelector(".switch")!.getBoundingClientRect().height,
+    track: document.querySelector(".switch-track")!.getBoundingClientRect().height,
+    canvasComposer: document.querySelector(".composer-widget")!.getBoundingClientRect().width,
+  }));
+  await page.setViewportSize({ width: 390, height: 720 });
+  assert.equal(geometry.composer, 768);
+  assert.equal(geometry.inset, "166px");
+  assert.ok(geometry.target >= 44);
+  assert.equal(geometry.track, 22, "a larger hit target never stretches the visible switch");
+  assert.ok(geometry.canvasComposer > 700, "the Canvas composer must not shrink-wrap to the empty-state label");
 });
 
 test("modal primitives lock background scroll and retain touch dismissal", async () => {
@@ -485,7 +506,7 @@ test("Files keeps its editor beside the tree regardless of package style load or
                   <div class="files-search"><input class="ui-input ui-input--sm" placeholder="Search files…"></div>
                   <div class="ft-tree">
                     <div class="ft-row" style="padding-inline-start: 8px">
-                      <span class="ft-name">AGENTS.md</span><button class="ft-at">@</button>
+                      <span class="ft-name">AGENTS.md</span><span class="file-row-actions"><button>Actions</button></span>
                     </div>
                   </div>
                 </aside>
@@ -508,7 +529,7 @@ test("Files keeps its editor beside the tree regardless of package style load or
     const editor = document.querySelector<HTMLElement>(".editor-pane")!;
     const row = document.querySelector<HTMLElement>(".ft-row")!;
     const rowName = document.querySelector<HTMLElement>(".ft-name")!;
-    const rowAction = document.querySelector<HTMLElement>(".ft-at")!;
+    const rowAction = document.querySelector<HTMLElement>(".file-row-actions")!;
     const tab = document.querySelector<HTMLElement>(".pane-tab")!;
     const toolbar = document.querySelector<HTMLElement>(".editor-toolbar")!;
     return {
@@ -625,4 +646,327 @@ test("390px package windows cover Chat, clear the shell menu, and preserve the a
   assert.equal(geometry.railZ, "101", "rail package covers the composer");
   assert.equal(geometry.floatZ, "102", "the mobile menu remains above package windows");
   assert.equal(geometry.composerZ, "100", "the chat composer remains below package windows");
+});
+
+test("context selectors give a long label room and shrink instead of overflowing", { skip: !CHROME }, async () => {
+  assert.ok(page);
+  const css = `${await read("../src/styles.css")}\n${await read("../src/moduleContent.css")}`;
+  const chip = (id: string, text: string) =>
+    `<div class="context-selector context-selector-${id}"><button class="chip picker-chip">` +
+    `<span class="picker-trigger-icon">•</span><span class="picker-chip-text">${text}</span>` +
+    `<span class="picker-caret">v</span></button></div>`;
+  const phoneSelector = (id: string, text: string) =>
+    `<div class="context-selector context-selector-${id}"><button class="context-trigger">` +
+    `<span class="context-trigger-icon">•</span><span class="context-trigger-name">${text}</span>` +
+    `<span class="context-trigger-caret">v</span></button></div>`;
+  const short = "Polyth";
+  const long = "feature/a-rather-long-branch-name-for-testing-and-verifying-the-compact-context-bar";
+
+  for (const width of [320, 390, 1440]) {
+    await page.setViewportSize({ width, height: 720 });
+    const barWidth = Math.min(width - 16, 900);
+    await page.setContent(`<style>${css}</style>
+      <div class="session-context-bar" id="bar" style="width:${barWidth}px">
+        ${chip("project", short)}<span class="context-sep"></span>${chip("branch", long)}
+      </div>`);
+    const oneLong = await page.evaluate(() => {
+      const bar = document.querySelector<HTMLElement>("#bar")!;
+      const shortEl = document.querySelector<HTMLElement>(".context-selector-project")!;
+      const longEl = document.querySelector<HTMLElement>(".context-selector-branch")!;
+      return {
+        bar: bar.getBoundingClientRect().width,
+        scroll: bar.scrollWidth,
+        short: shortEl.getBoundingClientRect().width,
+        long: longEl.getBoundingClientRect().width,
+        longRight: longEl.getBoundingClientRect().right,
+        barRight: bar.getBoundingClientRect().right,
+      };
+    });
+    assert.ok(oneLong.long > oneLong.short + 20, `${width}px: a long label must use more space than a short one`);
+    assert.ok(
+      oneLong.long > oneLong.bar / 2 + 5,
+      `${width}px: a long label must not be capped at half the bar (${oneLong.long} vs ${oneLong.bar / 2})`,
+    );
+    assert.ok(oneLong.scroll <= oneLong.bar + 1, `${width}px: one-long pair fits the bar`);
+    assert.ok(oneLong.longRight <= oneLong.barRight + 1, `${width}px: selectors stay inside the bar`);
+
+    await page.setContent(`<style>${css}</style>
+      <div class="session-context-bar" id="bar" style="width:${barWidth}px">
+        ${chip("project", long)}<span class="context-sep"></span>${chip("branch", long)}
+      </div>`);
+    const twoLong = await page.evaluate(() => {
+      const bar = document.querySelector<HTMLElement>("#bar")!;
+      const project = document.querySelector<HTMLElement>(".context-selector-project")!.getBoundingClientRect().width;
+      const branch = document.querySelector<HTMLElement>(".context-selector-branch")!.getBoundingClientRect().width;
+      return { bar: bar.getBoundingClientRect().width, scroll: bar.scrollWidth, project, branch };
+    });
+    assert.ok(twoLong.scroll <= twoLong.bar + 1, `${width}px: two long labels must not overflow`);
+    assert.ok(twoLong.project >= 44 && twoLong.branch >= 44, `${width}px: both selectors keep a usable hit area`);
+    assert.ok(twoLong.project < twoLong.bar * 0.75 && twoLong.branch < twoLong.bar * 0.75, `${width}px: neither collapses into a full-width field`);
+  }
+
+  await page.setViewportSize({ width: 390, height: 720 });
+  await page.setContent(`<style>${css}</style>
+    <div class="session-context-bar" id="bar" style="width:374px">
+      ${phoneSelector("project", short)}<span class="context-sep"></span>${phoneSelector("branch", long)}
+    </div>`);
+  const phone = await page.evaluate(() => {
+    const bar = document.querySelector<HTMLElement>("#bar")!;
+    return {
+      scroll: bar.scrollWidth,
+      bar: bar.getBoundingClientRect().width,
+      project: document.querySelector<HTMLElement>(".context-selector-project")!.getBoundingClientRect().width,
+      branch: document.querySelector<HTMLElement>(".context-selector-branch")!.getBoundingClientRect().width,
+    };
+  });
+  assert.ok(phone.scroll <= phone.bar + 1, "phone context bar does not overflow");
+  assert.ok(phone.branch > phone.project, "phone branch label uses more space than the short project label");
+  await page.setViewportSize({ width: 390, height: 720 });
+});
+
+test("compact model catalog sizes the list to unfiltered rows with the full chrome", { skip: !CHROME }, async () => {
+  assert.ok(page);
+  const css = `${await read("../src/styles.css")}\n${await read("../../../packages/models/widgets/styles.css")}`;
+  const pop = (id: string, rows: number, renderedRows: number, empty = false) => `
+    <div class="model-pop model-pop--compact${empty ? " model-pop--empty" : ""}" id="${id}" style="width:360px">
+      <div class="model-picker-shell" style="--model-pop-rows:${rows}">
+        <div class="model-picker-header"><span>Harness header</span></div>
+        <div class="model-pop-content">
+          <div class="model-pop-search"><input class="ui-input" id="${id}-search" /></div>
+          <div class="model-picker-list ui-scroll" id="${id}-list">
+            ${empty
+              ? `<div class="palette-empty">No models found</div>`
+              : Array.from({ length: renderedRows }, (_, index) => `<div class="model-picker-row"><span class="model-picker-copy"><strong>Model ${index}</strong></span></div>`).join("")}
+          </div>
+          <footer class="model-picker-shortcuts"><span>Enter</span></footer>
+        </div>
+      </div>
+    </div>`;
+  const rect = (selector: string) => page!.evaluate((sel) => {
+    const el = document.querySelector<HTMLElement>(sel)!;
+    const r = el.getBoundingClientRect();
+    return { top: r.top, bottom: r.bottom, height: r.height, client: el.clientHeight, scroll: el.scrollHeight };
+  }, selector);
+
+  await page.setViewportSize({ width: 1440, height: 720 });
+  await page.setContent(`<style>${css}</style><div style="display:flex;gap:20px;align-items:flex-start">${pop("sparse", 2, 2)}${pop("dense", 8, 8)}</div>`);
+  const sparse = await rect("#sparse-list");
+  const dense = await rect("#dense-list");
+  assert.ok(sparse.height < dense.height, `sparse list shorter than dense (${sparse.height} < ${dense.height})`);
+  assert.ok(sparse.height < 200, `a 1-2 model list must not reserve a full-height menu (${sparse.height}px)`);
+  const lastRow = await rect("#sparse-list .model-picker-row:last-child");
+  assert.ok(lastRow.bottom <= sparse.bottom + 0.5, "both rows are fully visible when the viewport has room");
+  const header = await rect("#sparse .model-picker-header");
+  const search = await rect("#sparse-search");
+  const shortcuts = await rect("#sparse .model-picker-shortcuts");
+  assert.ok(header.bottom <= search.top + 0.5, "the harness header does not overlap the search field");
+  assert.ok(search.bottom <= sparse.top + 0.5, "the search field does not overlap the list");
+  assert.ok(sparse.bottom <= shortcuts.top + 0.5, "shortcuts stay below the list");
+
+  // Filtering rows out must not move the search input or resize the list.
+  await page.setContent(`<style>${css}</style><div style="display:flex;gap:20px;align-items:flex-start">${pop("full", 8, 8)}${pop("filtered", 8, 2)}</div>`);
+  const fullSearch = await rect("#full-search");
+  const filteredSearch = await rect("#filtered-search");
+  const fullList = await rect("#full-list");
+  const filteredList = await rect("#filtered-list");
+  assert.equal(filteredSearch.top, fullSearch.top, "filtering must not jump the search field");
+  assert.equal(filteredList.height, fullList.height, "the list keeps one height when a search filters rows");
+
+  // An empty catalog keeps its message visible.
+  await page.setContent(`<style>${css}</style>${pop("empty", 2, 2, true)}`);
+  const emptyList = await rect("#empty-list");
+  const emptyMsg = await rect("#empty-list .palette-empty");
+  assert.ok(emptyList.height >= emptyMsg.height, "the empty message is not clipped");
+  assert.ok(emptyList.height >= 44, "empty compact catalogs keep a usable floor");
+
+  // Short viewport: the surface caps and the list scrolls rather than pushing chrome out.
+  await page.setViewportSize({ width: 1440, height: 300 });
+  await page.setContent(`<style>${css}</style>${pop("short", 8, 8)}`);
+  const shortPop = await rect("#short");
+  const shortList = await rect("#short-list");
+  const shortHeader = await rect("#short .model-picker-header");
+  const shortSearch = await rect("#short-search");
+  const shortShortcuts = await rect("#short .model-picker-shortcuts");
+  assert.ok(shortPop.height <= 300 * 0.72 + 1, `compact surface caps at 72vh (${shortPop.height}px)`);
+  assert.ok(shortList.scroll > shortList.client + 1, "the list owns overflow on a short viewport");
+  assert.ok(shortHeader.bottom <= shortSearch.top + 0.5, "chrome still does not overlap on a short viewport");
+  assert.ok(shortSearch.bottom <= shortList.top + 0.5, "search stays above the scrolling list");
+  assert.ok(shortList.bottom <= shortShortcuts.top + 0.5, "shortcuts remain reachable below the list");
+  await page.setViewportSize({ width: 390, height: 720 });
+});
+
+test("switch hover keeps the 44px outer target transparent and the track cue intact", { skip: !CHROME }, async () => {
+  assert.ok(page);
+  const css = `${await read("../src/styles.css")}\n${await read("../src/moduleContent.css")}`;
+  await page.setViewportSize({ width: 390, height: 720 });
+  await page.setContent(`<style>${css}</style>
+    <div class="module-view--phone">
+      <button class="switch ui-switch" id="off" role="switch" aria-checked="false"><span class="switch-track"><i></i></span></button>
+      <button class="switch ui-switch" id="on" role="switch" aria-checked="true"><span class="switch-track"><i></i></span></button>
+      <button class="switch ui-switch" id="dis" role="switch" aria-checked="false" disabled><span class="switch-track"><i></i></span></button>
+    </div>`);
+  const readSwitch = (selector: string) => page!.evaluate((sel) => {
+    const el = document.querySelector<HTMLElement>(sel)!;
+    const after = getComputedStyle(el, "::after");
+    const track = getComputedStyle(el.querySelector(".switch-track")!);
+    const knob = getComputedStyle(el.querySelector("i")!);
+    return {
+      outerBg: getComputedStyle(el).backgroundColor,
+      hitWidth: parseFloat(after.width),
+      hitHeight: parseFloat(after.height),
+      trackW: track.width,
+      trackH: track.height,
+      trackBg: track.backgroundColor,
+      trackBorder: track.borderTopColor,
+      knobTransform: knob.transform,
+    };
+  }, selector);
+
+  const offBefore = await readSwitch("#off");
+  const onBefore = await readSwitch("#on");
+  await page.hover("#off");
+  const offHover = await readSwitch("#off");
+  assert.equal(offHover.outerBg, "rgba(0, 0, 0, 0)", "hover must not repaint the outer hit box");
+  assert.ok(offHover.hitHeight >= 44, `the coarse hit box stays 44px tall on hover (${offHover.hitHeight}px)`);
+  assert.ok(offHover.hitWidth >= 38, `the hit box is at least the 38px track (${offHover.hitWidth}px)`);
+  assert.equal(offHover.trackW, "38px", "the track never grows for touch");
+  assert.equal(offHover.trackH, "22px", "the track never grows for touch");
+
+  await page.hover("#on");
+  const onHover = await readSwitch("#on");
+  assert.equal(onHover.outerBg, "rgba(0, 0, 0, 0)", "checked hover keeps the outer hit box transparent");
+  assert.equal(onHover.trackW, "38px");
+  assert.equal(onHover.trackH, "22px");
+  assert.notEqual(onHover.trackBg, "rgba(0, 0, 0, 0)", "the checked accent fill persists on hover");
+  assert.equal(onHover.trackBg, onBefore.trackBg, "hover does not replace the checked fill");
+  assert.equal(onHover.knobTransform, onBefore.knobTransform, "hover does not move the checked knob");
+  assert.equal(offBefore.trackBg, offHover.trackBg, "the unchecked track keeps its base fill; only the border cue changes");
+  assert.notEqual(offHover.trackBorder, offBefore.trackBorder, "hover adds a visible track-border cue");
+  assert.equal(onHover.trackBorder, onBefore.trackBorder, "the checked track keeps its accent border on hover");
+
+  const disBefore = await readSwitch("#dis");
+  await page.hover("#dis");
+  const disHover = await readSwitch("#dis");
+  assert.equal(disHover.outerBg, "rgba(0, 0, 0, 0)", "a disabled switch hover stays transparent");
+  assert.equal(disHover.trackBorder, disBefore.trackBorder, "a disabled switch does not get the hover cue");
+  assert.equal(disHover.trackBg, disBefore.trackBg, "a disabled switch keeps its base fill");
+  await page.setViewportSize({ width: 390, height: 720 });
+});
+
+test("compact contextual panel sheet spans the viewport instead of collapsing to the rail strip", { skip: !CHROME }, async () => {
+  assert.ok(page);
+  const css = `${await read("../src/styles.css")}\n${await read("../src/moduleContent.css")}`;
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setContent(`<style>${css}</style>
+    <div class="app"><div class="app-shell">
+      <div class="railbar railbar-open">
+        <div class="panel-sheet" id="sheet" role="dialog" aria-modal="true" aria-label="Context">
+          <div class="rail-head" style="min-height:56px">Context</div>
+          <div class="rail-body"><button id="sheet-close" aria-label="Close panel">×</button>Body</div>
+        </div>
+      </div>
+    </div></div>`);
+  const g = await page.evaluate(() => {
+    const sheet = document.querySelector<HTMLElement>("#sheet")!;
+    const close = document.querySelector<HTMLElement>("#sheet-close")!;
+    const sr = sheet.getBoundingClientRect();
+    const cr = close.getBoundingClientRect();
+    return { x: sr.x, width: sr.width, right: sr.right, closeX: cr.x, closeRight: cr.right, vw: window.innerWidth };
+  });
+  assert.ok(g.width >= 360, `the compact sheet must span the viewport, got width ${g.width}`);
+  assert.ok(g.x >= -1 && g.right <= g.vw + 1, `the sheet must sit inside the viewport (x=${g.x}, right=${g.right}, vw=${g.vw})`);
+  assert.ok(g.closeX >= -1 && g.closeRight <= g.vw + 1, `a sheet control must be reachable (x=${g.closeX}, right=${g.closeRight})`);
+  await page.setViewportSize({ width: 390, height: 720 });
+});
+
+interface MeasuredBox {
+  x: number; y: number; width: number; height: number;
+  display: string; borderBottom: number; flexDirection: string;
+}
+
+test("package and plugin management rows measure as compact stacked rows", { skip: !CHROME }, async () => {
+  assert.ok(page);
+  const css = `${await read("../src/styles.css")}\n${await read("../../../packages/plugins/widgets/styles.css")}`;
+  const fixture = (width: number) => `
+    <style>${css}</style>
+    <div class="settings-pane-body" style="width:${width}px">
+      <div class="packages-list">
+        <section class="package-group">
+          <div class="package-group-head"><strong>Optional</strong></div>
+          <div class="package-grid" id="pkg-grid">
+            <article class="package-tile enabled" id="tile-1">
+              <span class="package-icon">A</span>
+              <div class="package-copy"><strong>Alpha</strong><p>First package description.</p></div>
+              <div class="package-tile-control"><button class="ui-btn ui-btn--ghost ui-btn--sm">Tour</button><button class="switch ui-switch" role="switch" aria-checked="true"><span class="switch-track"><i></i></span></button></div>
+            </article>
+            <article class="package-tile disabled" id="tile-2">
+              <span class="package-icon">B</span>
+              <div class="package-copy"><strong>Beta</strong><p>Second package description.</p></div>
+              <div class="package-tile-control"><button class="ui-btn ui-btn--ghost ui-btn--sm">Tour</button><button class="switch ui-switch" role="switch" aria-checked="false"><span class="switch-track"><i></i></span></button></div>
+            </article>
+          </div>
+        </section>
+      </div>
+    </div>
+    <div class="pkg-plugins" style="width:${width}px">
+      <div class="plugin-card-grid" id="plugin-grid">
+        <article class="plugin-card disabled" id="plugin-1"><button class="plugin-card-main"><span class="plugin-card-icon">P</span><span class="plugin-card-copy">Plugin one</span></button></article>
+        <article class="plugin-card disabled" id="plugin-2"><button class="plugin-card-main"><span class="plugin-card-icon">Q</span><span class="plugin-card-copy">Plugin two</span></button></article>
+      </div>
+    </div>`;
+
+  for (const width of [720, 360]) {
+    await page.setViewportSize({ width: width + 40, height: 900 });
+    await page.setContent(fixture(width));
+    const m = JSON.parse(await page.evaluate(() => {
+      const box = (selector: string): MeasuredBox => {
+        const el = document.querySelector<HTMLElement>(selector)!;
+        const r = el.getBoundingClientRect();
+        const s = getComputedStyle(el);
+        return {
+          x: r.x, y: r.y, width: r.width, height: r.height,
+          display: s.display,
+          borderBottom: parseFloat(s.borderBottomWidth),
+          flexDirection: s.flexDirection,
+        };
+      };
+      return JSON.stringify({
+        grid: box("#pkg-grid"),
+        gridColumns: getComputedStyle(document.querySelector<HTMLElement>("#pkg-grid")!).gridTemplateColumns,
+        tile1: box("#tile-1"),
+        tile2: box("#tile-2"),
+        copy: box("#tile-1 .package-copy"),
+        control: box("#tile-1 .package-tile-control"),
+        icon: box("#tile-1 .package-icon"),
+        pluginGrid: box("#plugin-grid"),
+        plugin1: box("#plugin-1"),
+        plugin2: box("#plugin-2"),
+        pluginMain: box("#plugin-1 .plugin-card-main"),
+      });
+    })) as {
+      grid: MeasuredBox; gridColumns: string; tile1: MeasuredBox; tile2: MeasuredBox;
+      copy: MeasuredBox; control: MeasuredBox; icon: MeasuredBox;
+      pluginGrid: MeasuredBox; plugin1: MeasuredBox; plugin2: MeasuredBox; pluginMain: MeasuredBox;
+    };
+
+    assert.equal(m.gridColumns.trim().split(/\s+/).length, 1, `${width}px: packages are a single column, not a card grid`);
+    assert.ok(m.tile2.y >= m.tile1.y + m.tile1.height - 0.5, `${width}px: package rows stack vertically`);
+    assert.ok(Math.abs(m.tile1.width - m.grid.width) <= 1, `${width}px: a package row spans its list width`);
+    assert.ok(Math.abs(m.icon.width - 32) <= 1 && Math.abs(m.icon.height - 32) <= 1, `${width}px: package icon is control-sized, not oversized`);
+    assert.equal(m.tile1.borderBottom, 1, `${width}px: rows keep a 1px separator`);
+    assert.equal(m.tile2.borderBottom, 0, `${width}px: the last row must not hang a divider`);
+
+    if (width <= 480) {
+      assert.ok(m.control.y >= m.copy.y + 8, `${width}px: controls move below the description on a phone-width pane`);
+    } else {
+      assert.ok(m.control.y <= m.copy.y + 8, `${width}px: controls stay on the row at wide widths`);
+    }
+
+    assert.equal(m.pluginGrid.flexDirection, "column", `${width}px: plugins render as a vertical list`);
+    assert.ok(m.plugin2.y >= m.plugin1.y + m.plugin1.height - 0.5, `${width}px: plugin rows stack vertically`);
+    assert.equal(m.plugin1.borderBottom, 1, `${width}px: plugin rows retain a separator`);
+    assert.equal(m.pluginMain.display, "grid", `${width}px: plugin rows use the shared row grid`);
+    assert.ok(Math.abs(m.plugin1.width - m.pluginGrid.width) <= 1, `${width}px: a plugin row spans its list width`);
+  }
+  await page.setViewportSize({ width: 390, height: 720 });
 });

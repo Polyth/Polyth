@@ -141,7 +141,7 @@ test("changes-ready shows integrate, review, continue and delete in overflow", a
     const deleteEntry = [...document.querySelectorAll('[role="menuitem"]')]
       .find((entry) => entry.textContent === tr("isolation.discardWorkspace"));
     assert.ok(deleteEntry);
-    await act(async () => { deleteEntry!.dispatchEvent(new dom.MouseEvent("click", { bubbles: true })); await wait(); });
+    await act(async () => { (deleteEntry as HTMLButtonElement).click(); await wait(); });
     assert.ok(document.body.textContent?.includes(tr("isolation.discardTitle")));
     const confirm = buttons(document.body).find((b) => b.textContent === tr("isolation.discard"));
     assert.ok(confirm);
@@ -175,7 +175,7 @@ test("continue working calls isolationKeep and hides dismissed card", async () =
   let kept = 0;
   api.isolationKeep = async (id) => {
     kept++;
-    isolation = { ...base, state: "active", dismissedRevision: 1 };
+    isolation = { ...base, state: "active", dismissedRevision: "rev" };
     suggestion = { eligible: false, hasChanges: true, targetBranch: "main", targetDirty: false, revision: "rev", reason: "dismissed" };
     return projection(id, isolation);
   };
@@ -359,7 +359,7 @@ test("unavailable return checkout is explained before publication; running sessi
 
 test("publication repair shows integrating copy without restoreOrigin; cleanup keeps path visible", async () => {
   const originalStatus = api.isolationStatus;
-  let isolation: SessionIsolation = { ...base, state: "publishing", resultCommit: "published", publish: {
+  let isolation: SessionIsolation = { ...base, state: "publishing", publish: {
     expectedTargetSha: "old", resultCommit: "published", snapshotSha: "snapshot", targetRef: "refs/heads/main",
     receiptRef: "refs/polyth/isolation/ui", checkoutPath: base.originPath, sourceRevision: "source",
   } };
@@ -469,7 +469,7 @@ test("discard confirmation closes when the session changes", async () => {
     const deleteEntry = [...document.querySelectorAll('[role="menuitem"]')]
       .find((entry) => entry.textContent === tr("isolation.discardWorkspace"));
     assert.ok(deleteEntry);
-    await act(async () => { deleteEntry!.dispatchEvent(new dom.MouseEvent("click", { bubbles: true })); await wait(); });
+    await act(async () => { (deleteEntry as HTMLButtonElement).click(); await wait(); });
     assert.ok(document.body.textContent?.includes(tr("isolation.discardTitle")));
     await act(async () => {
       seedSessionCache(projection("discard-session-b", isolation));

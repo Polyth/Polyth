@@ -63,8 +63,8 @@ export default function Popover({
   const style: CSSProperties = {
     top: position.top,
     left: position.left,
-    maxHeight: position.maxHeight || undefined,
-    maxWidth: position.maxWidth || undefined,
+    maxHeight: position.ready ? position.maxHeight : undefined,
+    maxWidth: position.ready ? position.maxWidth : undefined,
     visibility: position.ready ? undefined : "hidden",
   };
 

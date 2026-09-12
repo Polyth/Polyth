@@ -653,3 +653,105 @@ test("tablet width, short viewport: idle launcher stays inside the shell and scr
     await closePage(page);
   }
 });
+
+// ======================================================================
+// P1: wide -> compact contextual sheet must not scroll .app-shell
+// ======================================================================
+
+const p1Geometry = (page: Page) => page.evaluate(() => {
+  const shell = document.querySelector<HTMLElement>(".app-shell");
+  const rect = (selector: string) => {
+    const el = document.querySelector<HTMLElement>(selector);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.x, width: r.width };
+  };
+  return {
+    shellScrollLeft: shell?.scrollLeft ?? null,
+    shellScrollWidth: shell?.scrollWidth ?? null,
+    shellClientWidth: shell?.clientWidth ?? null,
+    workspace: rect(".workspace"),
+    railbar: rect(".railbar"),
+    panelSheet: rect(".panel-sheet"),
+  };
+});
+
+test("P1 compact contextual sheet: wide->compact resize never scrolls .app-shell", async () => {
+  const page = await openApp(1280, `/p/${PROJECT}/s/${S_LOADED}`, ".timeline .msg", { height: 800 });
+  const context = page.locator('.plugin-strip button[aria-label="Context"]').first();
+  await context.waitFor({ state: "visible", timeout: 10_000 });
+  await context.click();
+  await page.waitForSelector(".railbar.railbar-open .rail:not(.rail-workspace)", { state: "visible", timeout: 10_000 });
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.closest(".railbar") !== null),
+    true,
+    "focus must start inside .railbar",
+  );
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  // The sheet may render with a degenerate rect while the shell is mid-flip;
+  // attach (not "visible") is the honest signal that compact mode engaged.
+  await page.waitForSelector(".panel-sheet", { state: "attached", timeout: 10_000 });
+  await page.waitForFunction(() => window.innerWidth === 390, undefined, { timeout: 10_000 });
+  await page.waitForTimeout(3200); // investigator's persistence window
+
+  const g = await p1Geometry(page);
+  assert.equal(
+    g.shellScrollLeft,
+    0,
+    `.app-shell must never accumulate scroll (workspace x=${g.workspace?.x}, railbar x=${g.railbar?.x}, panel x=${g.panelSheet?.x}, scrollWidth=${g.shellScrollWidth}/${g.shellClientWidth})`,
+  );
+  assert.equal(g.workspace?.x, 0, `.workspace left edge moved (x=${g.workspace?.x})`);
+  assert.equal(g.railbar?.x, 390, `.railbar is not pinned at the compact right edge (x=${g.railbar?.x})`);
+
+  // The compact contextual sheet must be a real, usable surface: the glass
+  // rail's backdrop-filter used to make it a zero-width containing block.
+  const sheet = await page.evaluate(() => {
+    const el = document.querySelector<HTMLElement>(".panel-sheet");
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    const btn = el.querySelector<HTMLElement>(".module-view-close");
+    const br = btn?.getBoundingClientRect();
+    return {
+      x: r.x,
+      width: r.width,
+      right: r.right,
+      vw: window.innerWidth,
+      control: br ? { x: br.x, right: br.right, width: br.width } : null,
+    };
+  });
+  assert.ok(sheet, "the compact contextual sheet renders");
+  assert.ok(sheet!.width >= 360, `the sheet must span the compact viewport (width ${sheet!.width})`);
+  assert.ok(sheet!.x >= -1 && sheet!.right <= sheet!.vw + 1, `the sheet must sit inside the viewport (x=${sheet!.x}, right=${sheet!.right})`);
+  assert.ok(
+    sheet!.control && sheet!.control.width >= 24 && sheet!.control.x >= -1 && sheet!.control.right <= sheet!.vw + 1,
+    `a sheet control must be inside the viewport (${JSON.stringify(sheet!.control)})`,
+  );
+  await page.screenshot({ path: join(ARTIFACTS, "p1_contextual_sheet_390.png") });
+  await page.locator(".panel-sheet .module-view-close").click();
+  await page.waitForFunction(() => !document.querySelector(".panel-sheet"), undefined, { timeout: 5000 });
+
+  await page.screenshot({ path: join(ARTIFACTS, "p1_contextual_resize_390.png") });
+  await closePage(page);
+});
+
+test("P1 guard: wide->compact resize with a workspace pane keeps x:0", async () => {
+  const page = await openApp(1280, `/p/${PROJECT}/s/${S_LOADED}`, ".timeline .msg", { height: 800 });
+  const launcher = page.locator('[data-pane-launcher="knowledge"]').first();
+  await launcher.waitFor({ state: "visible", timeout: 10_000 });
+  await launcher.click();
+  await page.waitForSelector(".rail-workspace, .rail-fullscreen", { state: "visible", timeout: 10_000 });
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.closest(".railbar") !== null),
+    true,
+    "focus must start inside .railbar",
+  );
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(3200);
+
+  const g = await p1Geometry(page);
+  assert.equal(g.shellScrollLeft, 0, "a workspace pane must keep .app-shell unscrolled");
+  assert.equal(g.workspace?.x, 0, "a workspace pane must not translate the shell");
+  await closePage(page);
+});

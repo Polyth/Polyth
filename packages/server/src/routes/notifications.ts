@@ -26,6 +26,7 @@ function parseIds(raw: unknown): string[] {
 
 export function notificationRoutes(notifications: NotificationStore): RouteHandler {
   return async (rc) => {
+    if (rc.path !== "/api/notifications" && !rc.path.startsWith("/api/notifications/")) return false;
     const account = accountOf(rc);
     if (rc.path === "/api/notifications" && rc.method === "GET") {
       rc.json(200, await notifications.list(account, parseAfter(rc.url.searchParams.get("after"))));

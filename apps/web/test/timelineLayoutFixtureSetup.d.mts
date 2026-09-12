@@ -10,6 +10,7 @@ export declare const OC_STATE: string;
 export declare const PROJECT_ID: string;
 
 export declare const SESSIONS: {
+    work: string;
   rich: string;
   many: string;
   empty: string;

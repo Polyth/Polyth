@@ -285,11 +285,16 @@ export function createAcpRuntime(
         messagePartId = "";
         messagePartOrdinal++;
     };
+    const promptIdleTimeoutMs = options.promptIdleTimeoutMs ?? 2 * 60_000;
+    /** Re-armed on every observed update so a probe cannot fail a turn that
+     * became active while the probe was in flight. */
+    let promptWatchdogEpoch = 0;
     const clearPromptWatchdog = () => {
         if (promptWatchdog) clearTimeout(promptWatchdog);
         promptWatchdog = undefined;
+        // Invalidates any probe already in flight for the cleared window.
+        promptWatchdogEpoch++;
     };
-    const promptIdleTimeoutMs = options.promptIdleTimeoutMs ?? 2 * 60_000;
     const failTimedOutPrompt = (expectedTurnId: string) => {
         if (!active || turnId !== expectedTurnId) return;
         clearPromptWatchdog();
@@ -323,8 +328,30 @@ export function createAcpRuntime(
         if (!active || promptIdleTimeoutMs <= 0) return;
         clearPromptWatchdog();
         const expectedTurnId = turnId;
-        promptWatchdog = setTimeout(() => failTimedOutPrompt(expectedTurnId), promptIdleTimeoutMs);
+        const epoch = promptWatchdogEpoch;
+        promptWatchdog = setTimeout(() => void probePromptLiveness(expectedTurnId, epoch), promptIdleTimeoutMs);
         promptWatchdog.unref?.();
+    };
+    /**
+     * Some agents run nested tools (for example `Task` subagents) without any
+     * intermediate `session/update`, so silence past the idle window is not
+     * hang evidence. A reply to any request, including a JSON-RPC
+     * method-not-found error, proves the process is responsive; only an
+     * unanswered probe fails the turn.
+     */
+    const probePromptLiveness = async (expectedTurnId: string, epoch: number): Promise<void> => {
+        let responsive = true;
+        try {
+            await rpc.request("_polyth/liveness", {}, Math.min(promptIdleTimeoutMs, 20_000));
+        } catch (error) {
+            responsive = typeof (error as { rpcCode?: unknown }).rpcCode === "number";
+        }
+        if (!active || turnId !== expectedTurnId || epoch !== promptWatchdogEpoch) return;
+        if (responsive) {
+            touchPromptWatchdog();
+            return;
+        }
+        failTimedOutPrompt(expectedTurnId);
     };
     const markAccepted = () => { if (resolveAdmission) {
         const done = resolveAdmission;

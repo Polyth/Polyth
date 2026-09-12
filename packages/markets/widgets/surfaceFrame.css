@@ -14,12 +14,10 @@
   min-width: 0;
   align-items: center;
   gap: var(--space-1);
-  overflow-x: auto;
-  /* Leave space for the shared keyboard focus ring without shifting the
-     first control away from the content's common leading edge. */
-  padding: var(--space-2);
-  margin-inline: calc(-1 * var(--space-2));
-  scrollbar-width: thin;
+  /* Scroll ownership, the edge-fade affordance, inline padding, touch
+     containment and hidden scrollbar come from the core .ui-scroll-tabs
+     primitive. Only block padding stays local. */
+  padding-block: var(--space-2);
 }
 
 /* No local button colors, radii, fonts, hover rules or focus suppression.
