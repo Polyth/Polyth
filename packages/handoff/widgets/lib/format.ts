@@ -1,5 +1,5 @@
 import type { ModelDescriptor, SessionProjection } from "@polyth/contracts";
-import { resolveModelPresentation } from "@polyth/models/presentation";
+import { resolveModelPresentation } from "@polyth/contracts/model-presentation";
 
 export function formatTokenEstimate(tokens: number): string {
   if (tokens < 1000) return `≈${tokens}`;
