@@ -81,9 +81,13 @@ test("the rise stays smooth over long travel and the block never clips it", () =
   assert.match(controller, /\{ opacity: 1, offset: 0\.32 \}/);
   // Longer travel, longer duration: a fixed one reads as a teleport.
   assert.match(controller, /Math\.min\(Math\.abs\(delta\) \/ 1200, 0\.45\)/);
-  // A live action is its own timeline card wearing the block's frame, not a
-  // nested list inside a block whose own clipping would swallow the travel.
-  assert.match(css, /\.activity-group,\s*\.activity-live,\s*\.task-list \{/);
+  // A live action is a top-level timeline row, not a nested list inside a
+  // block whose own clipping would swallow the travel — and it wears no frame
+  // of its own: the block is the only framed surface in that region.
+  assert.match(css, /\.activity-group,\s*\.task-list \{/);
+  const liveRule = /\n\.activity-live \{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.doesNotMatch(liveRule, /border|box-shadow|background/);
+  assert.match(css, /\.timeline > :is\(\.activity-group, \.activity-live\) \+ \.activity-live \{\s*margin-block-start: calc\(var\(--space-1\) - var\(--timeline-gap\)\)/);
   assert.match(css, /--activity-live-exit: 280ms/);
   assert.match(css, /opacity calc\(var\(--activity-live-exit\) \* 0\.55\) linear/);
   assert.match(css, /\.activity-live\.leaving \{[^}]*grid-template-rows: 0fr[^}]*scale\(\.985\)/s);

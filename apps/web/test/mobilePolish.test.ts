@@ -148,6 +148,8 @@ test("fresh mobile chat exposes project targets and attachments use the platform
   assert.match(mobileHeader, /origin="top"/);
   assert.match(mobileHeader, /tr\("mobile.island.tasks"\)/);
   assert.match(css, /\.mobile-float-navigation, \.mobile-float-actions \{ display: inline-grid; grid-auto-flow: column;/);
+  assert.match(mobileHeader, /label="Open navigation" size="lg" variant="ghost"/);
+  assert.match(css, /\.mobile-float-navigation > \.ui-icon-btn,[\s\S]*?background: transparent !important;[\s\S]*?box-shadow: none;/);
   assert.match(css, /\.mobile-island-now\s*\{/s);
   assert.match(css, /\.sheet-origin-top\s*\{/s);
   assert.match(css, /@keyframes sheet-drop/);

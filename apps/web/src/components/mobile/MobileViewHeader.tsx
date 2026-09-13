@@ -27,7 +27,7 @@ export default function MobileViewHeader() {
   return <>
     <div className="mobile-session-floats" aria-label="View navigation">
       <GlassIsland className="mobile-float-navigation">
-        <IconButton icon={MenuIcon} label="Open navigation" size="lg" variant="quiet" className="mobile-float-button" aria-expanded={sidebarOpen} onClick={() => {
+        <IconButton icon={MenuIcon} label="Open navigation" size="lg" variant="ghost" className="mobile-float-button" aria-expanded={sidebarOpen} onClick={() => {
           setRailPlugin(null);
           setSidebarOpen(true);
         }} />

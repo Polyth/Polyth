@@ -1295,7 +1295,9 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   overflow-anchor: none;
   padding-block: var(--gutter) calc(var(--conversation-message-gap) + var(--conversation-group-gap));
   padding-inline: max(var(--conversation-inset), calc((100% - var(--chat-measure)) / 2));
-  display: flex; flex-direction: column; gap: var(--conversation-message-gap);
+  /* Named so a row can cancel its own share of it — see .activity-live. */
+  --timeline-gap: var(--conversation-message-gap);
+  display: flex; flex-direction: column; gap: var(--timeline-gap);
 }
 /* A column-flex SCROLLER must never compress its rows: rows with
    overflow:hidden (tool cards) have min-height:auto collapsing to 0, so the
@@ -8099,7 +8101,10 @@ textarea,
 body[data-density="comfortable"] { --density-scale: 1; --density-pad: var(--space-3); }
 body[data-density="balanced"] { --density-scale: .875; --density-pad: calc(var(--space-2) + 2px); }
 body[data-density="compact"] { --density-scale: .75; --density-pad: var(--space-2); }
-body[data-density] .timeline { gap: var(--conversation-message-gap); }
+/* Same value as before, read through the row gap variable so a row can cancel
+   its own share of it — see .activity-live. This is the rule that actually
+   wins for the timeline; the earlier per-density gaps never applied. */
+body[data-density] .timeline { gap: var(--timeline-gap); }
 body[data-density] .bubble { padding: var(--density-pad) calc(var(--density-pad) + 2px); }
 body[data-density] .set-row { padding-block: calc(var(--density-pad) - 1px); }
 body[data-density] .widget-place-card { padding: calc(var(--density-pad) + 3px); }
@@ -12391,10 +12396,10 @@ html[data-font] body :is(
   line-height: var(--font-response-lh);
 }
 
-/* A live action carries the same frame as the block it is about to join, so
-   the fold is one surface settling into another rather than a shape change. */
+/* The block is the only framed surface in this region: a live action is a bare
+   row that already belongs to it, so the fold is a row sliding home rather than
+   one card swallowing another. */
 .activity-group,
-.activity-live,
 .task-list {
   width: 100%;
   max-width: 100%;
@@ -12405,10 +12410,8 @@ html[data-font] body :is(
   background: var(--surface-activity);
   box-shadow: var(--shadow-sm);
 }
-.activity-group,
-.activity-live { background: transparent; }
-.activity-group.current,
-.activity-live { border-color: color-mix(in srgb, var(--accent-line) 58%, var(--border-soft)); }
+.activity-group { background: transparent; }
+.activity-group.current { border-color: color-mix(in srgb, var(--accent-line) 58%, var(--border-soft)); }
 /* Nested summaries inherit the container's chrome. The surface is handed over
    through a variable so the shared hover state still wins the cascade. */
 .activity-group > .ui-run-summary,
@@ -12436,31 +12439,40 @@ html[data-font] body :is(
 .activity-group-items > :last-child { border-bottom: 0; }
 
 /* Live actions -------------------------------------------------------------
- * A running action is its own timeline card, framed exactly like the block it
- * will join — inside the block it only added a second, differently framed list
- * to a surface that is meant to stay folded. It rises out of the composer,
- * stays readable while it runs, then folds up and away as the block absorbs
- * it. The block itself never opens on its own. */
+ * A running action is a bare row at the tail of the timeline, not a card:
+ * nested in the block it added a second list to a surface meant to stay
+ * folded, framed it read as a detached card. It rises out of the composer,
+ * sits just under the block while it runs, then folds up into it. The block
+ * itself never opens on its own. */
 .activity-live {
   --activity-live-exit: 280ms;
   --activity-live-exit-ease: cubic-bezier(0.4, 0, 0.7, 0.2);
+  width: 100%;
+  max-width: 100%;
   display: grid;
   grid-template-rows: 1fr;
   transform-origin: 50% 0;
   transition:
     grid-template-rows var(--activity-live-exit) var(--activity-live-exit-ease),
     /* Gone before the gap finishes closing: the fold never shows a squashed
-       ghost of the card, and its border collapses invisibly. */
+       ghost of the row. */
     opacity calc(var(--activity-live-exit) * 0.55) linear,
     transform var(--activity-live-exit) var(--activity-live-exit-ease);
+}
+/* Part of the block, so it sits against it: the timeline's row gap would push
+   it away and read as a separate turn. Only after the block or another live
+   row — a first lone action keeps its distance from the prompt above. */
+.timeline > :is(.activity-group, .activity-live) + .activity-live {
+  margin-block-start: calc(var(--space-1) - var(--timeline-gap));
 }
 .activity-live.leaving {
   grid-template-rows: 0fr;
   opacity: 0;
   transform: translate3d(0, -8px, 0) scale(.985);
 }
+/* Same inset as the block's own rows, so the fold lands without a sideways
+   step. */
 .activity-live-content { min-width: 0; min-height: 0; overflow: hidden; padding-inline: var(--space-3); }
-.activity-live-content > :is(.execution-row, .reasoning, .task-activity) { border-bottom: 0; }
 
 /* Reduced motion and low-resource mode keep the same structure: the row
    appears and folds away instantly instead of travelling. */
@@ -12498,6 +12510,13 @@ body[data-desktop-low-resource="true"] .activity-live { transition: none; }
 }
 
 :is(.activity-group, .activity-live) .tool-card.execution-row { animation: none; }
+/* Outside the block a row has nothing to separate itself from and nothing to
+   be highlighted against: no rules, no running tint, just the action. Kept
+   after the shared rules above so it wins on equal specificity. */
+.activity-live-content > :is(.execution-row, .reasoning, .task-activity) { border-bottom: 0; }
+.activity-live-content > .execution-row.current { background: transparent; }
+/* No card to clip the hover band, so the band rounds itself. */
+.activity-live-content :is(.execution-summary, .reasoning-toggle) { border-radius: var(--radius-control); }
 .execution-summary.tool-disclosure {
   min-height: var(--activity-row-height);
   max-height: none;
@@ -12620,7 +12639,7 @@ body[data-desktop-low-resource="true"] .activity-live { transition: none; }
   }
   .timeline {
     padding-inline: var(--conversation-chrome-inset);
-    gap: var(--conversation-message-gap);
+    gap: var(--timeline-gap);
   }
   .msg.assistant > .bubble { font-size: var(--font-response); line-height: var(--font-response-lh); }
   .execution-summary.tool-disclosure { min-height: var(--activity-row-height); }
@@ -12748,6 +12767,36 @@ body[data-desktop-low-resource="true"] .activity-live { transition: none; }
 }
 
 /* =================== end P1-W2 core UI primitives ======================== */
+
+/* The phone shell already paints one material per floating island. Keep its
+   icon actions transparent so hover/tap styles cannot create a second set of
+   circles or rectangles inside that surface. */
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  .mobile-float-navigation > .ui-icon-btn,
+  .mobile-float-actions > .ui-icon-btn,
+  .mobile-float-navigation > .ui-icon-btn:hover:not(:disabled),
+  .mobile-float-actions > .ui-icon-btn:hover:not(:disabled),
+  .mobile-float-navigation > .ui-icon-btn:active:not(:disabled),
+  .mobile-float-actions > .ui-icon-btn:active:not(:disabled),
+  .mobile-float-navigation > .ui-icon-btn[aria-expanded="true"],
+  .mobile-float-actions > .ui-icon-btn[aria-expanded="true"] {
+    background: transparent !important;
+    border-color: transparent;
+    box-shadow: none;
+  }
+
+  .mobile-float-navigation > .ui-icon-btn[aria-expanded="true"],
+  .mobile-float-actions > .ui-icon-btn[aria-expanded="true"] {
+    color: var(--text);
+  }
+
+  body:not([data-shift-held]) .mobile-float-navigation > .ui-icon-btn:focus-visible,
+  body:not([data-shift-held]) .mobile-float-actions > .ui-icon-btn:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 3px;
+    box-shadow: 0 0 0 4px var(--focus-wash);
+  }
+}
 
 /* ==================== browser-local workspace backgrounds ================= */
 .background-settings-hint {

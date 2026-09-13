@@ -279,7 +279,7 @@ export default function MobileSessionHeader() {
   return <>
     <div className="mobile-session-floats" aria-label="Workspace navigation">
       <GlassIsland className="mobile-float-navigation">
-        <IconButton icon={MenuIcon} label="Open navigation" size="lg" variant="quiet" aria-expanded={sidebarOpen} onClick={() => {
+        <IconButton icon={MenuIcon} label="Open navigation" size="lg" variant="ghost" aria-expanded={sidebarOpen} onClick={() => {
           setRailPlugin(null);
           setSidebarOpen(true);
         }} />
