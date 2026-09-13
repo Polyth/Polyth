@@ -42,6 +42,8 @@ test("composer Add menu styling is quiet, touch-safe and loaded after composer c
     "quick actions avoid card-within-card borders");
   assert.match(css, /\.composer-add-sheet \.add-menu-item\s*\{[^}]*min-height:\s*56px;/s,
     "mobile rows stay comfortably tappable");
+  assert.match(css, /@media \(pointer: coarse\) \{[\s\S]*?\.add-menu-v2 \.add-menu-quick-action,[\s\S]*?min-height:\s*var\(--tap\);/s,
+    "coarse-pointer Add actions preserve the shared minimum touch target");
   assert.match(css, /\.add-menu-v2 \.add-menu-hint\s*\{[^}]*border:\s*0;/s,
     "keyboard hints are quiet text, not nested outlined pills");
   assert.ok(main.indexOf('import "./composerAddMenu.css";') > main.indexOf('import "./composerAdaptive.css";'),
