@@ -143,6 +143,27 @@ const COMPOSER_CONTROLS_PLUGIN = defineWidgetPlugin({
       },
     },
     {
+      // Phone execution configuration belongs directly beside the model, not
+      // inside the model sheet. A dedicated required placement lets existing
+      // persisted layouts acquire the new control without relocating the
+      // customizable desktop effort widget.
+      id: "composer.effort-inline",
+      title: tr("composer.thinking"),
+      description: tr("composer.thinking"),
+      kind: "mini-widget",
+      defaultSlot: "composer.execution",
+      supportedSlots: ["composer.execution"],
+      defaultVisible: true,
+      requiredVisible: true,
+      defaultSize: { w: 1, h: 1 },
+      resizable: false,
+      audience: "simple",
+      order: 55,
+      render: (context) => context.phoneLayout === true && context.executionEffortControl
+        ? <span className="composer-effort-inline">{context.executionEffortControl as ReactNode}</span>
+        : null,
+    },
+    {
       id: "composer.effort",
       title: tr("composer.thinking"),
       description: tr("composer.thinking"),
