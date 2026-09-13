@@ -18,7 +18,6 @@ import { useStore } from "../store.ts";
 import SlotHost from "./slots/SlotHost.ts";
 import ChatActionButton from "./ChatActionButton.tsx";
 import { CopyIcon, ForkIcon, UndoIcon } from "./ui/index.ts";
-import { tr } from "../i18n/index.ts";
 
 export default function MessageQuickActions({
   message,
@@ -38,9 +37,6 @@ export default function MessageQuickActions({
   const prefs = useUiSettings();
   const sessionId = useStore((state) => state.activeSessionId);
   const copyFormat = prefs.messageCopyFormat;
-  const copyLabel = tr("timeline.copyAsValue", {
-    value: copyFormat === "markdown" ? tr("common.markdown") : tr("common.json"),
-  });
   const doCopy = () => {
     void copyText(copyFormat === "markdown" ? copyMarkdown(message) : copyJson(message)).then((ok) => {
       announce(copyAnnouncement(ok ? copyFormat : "failed"));
@@ -62,7 +58,6 @@ export default function MessageQuickActions({
           <ChatActionButton
             icon={CopyIcon}
             label={copyActionName("user", copyFormat)}
-            aria-description={copyLabel}
             onClick={doCopy}
           />
           {onRevert && (
