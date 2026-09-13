@@ -1,118 +1,125 @@
-// Permission banner (WP15, redesigned P2-W2): an approval is ALWAYS
-// action-required UI. The card never hides its decision buttons behind a
-// disclosure — intent (server-built redacted preview title), target lines,
-// risk, and Allow/Always/Deny are all visible the moment the request lands.
-// Only the machine identity ("via <tool>") is secondary text.
 import { Fragment, useState } from "react";
-import { replyPermission } from "../../../apps/web/src/init.ts";
+import { api } from "@polyth/session/web-api";
 import type { PendingPermission } from "../../../apps/web/src/reduce.ts";
 import { Icon } from "../../../apps/web/src/icons.tsx";
-import { Badge, Button, GlassDock, Select, Separator } from "../../../apps/web/src/components/ui/index.ts";
+import { Button, GlassDock, Separator } from "../../../apps/web/src/components/ui/index.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 
-type AlwaysScope = "session" | "project";
+type PermissionAction = "once" | "always" | "reject" | "session";
 
-function modeIcon(permission: string, browser = false) {
-  if (browser) return <Icon.globe />;
-  const p = permission.toLowerCase();
-  if (/bash|shell|terminal|exec/.test(p)) return <Icon.term />;
-  if (/edit|write|patch/.test(p)) return <Icon.pencil />;
-  if (/fetch|web|http|net/.test(p)) return <Icon.globe />;
-  if (/read|list|glob|grep/.test(p)) return <Icon.files />;
-  return <Icon.shield />;
+function ResponsiveLabel({ full, short }: { full: string; short: string }) {
+  return <><span className="permission-action-full">{full}</span><span className="permission-action-short">{short}</span></>;
 }
 
-function PermissionRow({ p }: { p: PendingPermission }) {
-  const [scope, setScope] = useState<AlwaysScope>("session");
-  const scopes = p.allowedScopes ?? ["once", "session", "project"];
-  const canAlways = scopes.includes("session") || scopes.includes("project");
-  const risk = p.preview?.risk;
-  const isBrowser = p.permission === "package-tool"
+function isBrowserRequest(p: PendingPermission): boolean {
+  return p.permission === "package-tool"
     && (p.tool === "polyth_browser"
       || p.tool === "browser.polyth-browser"
       || p.tool?.startsWith("browser.") === true
       || p.patterns.some((pattern) => pattern === "browser.polyth-browser"));
-  const title = isBrowser ? tr("permissionbanner.agentWantsToUseBrowser") : p.preview?.title ?? p.permission;
-  // The preview is server-built and secret-redacted; raw patterns are the
-  // fallback for old events. Either way the target is visible pre-decision.
+}
+
+/** Generic provider labels such as "Edit" repeat information already conveyed
+ * by the target and do not deserve a second visual row. Keep only a genuinely
+ * descriptive, server-built title. */
+function requestTitle(p: PendingPermission, browser: boolean): string | null {
+  if (browser) return tr("permissionbanner.agentWantsToUseBrowser");
+  const title = p.preview?.title?.trim();
+  if (!title) return null;
+  const normalized = title.toLocaleLowerCase();
+  if (normalized === p.permission.trim().toLocaleLowerCase()) return null;
+  if (p.tool && normalized === p.tool.trim().toLocaleLowerCase()) return null;
+  return title;
+}
+
+function PermissionRow({ p }: { p: PendingPermission }) {
+  const [busy, setBusy] = useState<PermissionAction | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const scopes = p.allowedScopes ?? ["once", "session", "project"];
+  const alwaysScope = scopes.includes("session") ? "session" : scopes.includes("project") ? "project" : null;
+  const browser = isBrowserRequest(p);
+  const title = requestTitle(p, browser);
   const lines = p.preview !== undefined && p.preview.lines.length > 0 ? p.preview.lines : p.patterns;
-  const reply = (decision: "once" | "always" | "reject", alwaysScope?: AlwaysScope) => {
-    replyPermission(p.sessionId, p.requestId, decision, alwaysScope);
+
+  const reply = async (action: PermissionAction) => {
+    if (busy) return;
+    setBusy(action);
+    setError(null);
+    try {
+      if (action === "session") {
+        // The canonical session policy also reconciles this open request. Set
+        // it first so the resumed runtime cannot race ahead into another card.
+        await api.autoAcceptSet(p.sessionId, "on");
+      } else {
+        await api.replyPermission(
+          p.sessionId,
+          p.requestId,
+          action,
+          action === "always" ? alwaysScope ?? undefined : undefined,
+        );
+      }
+    } catch (reason) {
+      setBusy(null);
+      setError(reason instanceof Error ? reason.message : tr("common.error"));
+    }
   };
+
   return (
     <div className="perm-row permission-request">
-      <div className="permission-request-head">
-        <span className="permission-mode-icon" aria-hidden="true">{modeIcon(p.permission, isBrowser)}</span>
-        <span className="permission-request-copy">
-          <strong className="permission-request-title">{title}</strong>
-          {!isBrowser && p.tool !== undefined && p.tool !== title && (
-            <span className="permission-request-tool">{tr("permissionbanner.viaValue", { tool: p.tool })}</span>
-          )}
-        </span>
-        {risk !== undefined && (
-          <Badge
-            tone={risk === "high" ? "danger" : risk === "low" ? "success" : "warning"}
-            className={`permission-risk risk-${risk}`}
-          >
-            {risk} {tr("permissionbanner.risk")}
-          </Badge>
-        )}
-      </div>
-      {isBrowser && (
+      {title && <strong className="permission-request-title">{title}</strong>}
+      {browser && (
         <p className="permission-browser-capabilities">
           {tr("permissionbanner.browserActionCapabilities")}
         </p>
       )}
       {lines.length > 0 && (
         <div className="permission-preview">
-          {lines.map((line, index) => (
-            <code key={index}>{line}</code>
-          ))}
+          {lines.map((line, index) => <code key={index}>{line}</code>)}
         </div>
       )}
-      <div className={`perm-actions${canAlways ? " has-always" : ""}`}>
-        <Button size="sm" variant="primary" className="permission-allow" onClick={() => reply("once")}>
-          {tr("permissionbanner.allowOnce")}
+      <div className={`perm-actions${alwaysScope ? " has-always" : ""}`} aria-label={tr("permissionbanner.permissionRequested")}>
+        <Button size="sm" variant="ghost" className="permission-deny" aria-label={tr("permissionbanner.deny")} busy={busy === "reject"} disabled={busy !== null} onClick={() => void reply("reject")}>
+          <ResponsiveLabel full={tr("permissionbanner.deny")} short={tr("permissionbanner.denyShort")} />
         </Button>
-        {canAlways && (
-          <span className="perm-always">
-            <Button size="sm" variant="quiet" onClick={() => reply("always", scope)}>
-              {tr("permissionbanner.always")}
-            </Button>
-            <Select
-              label={tr("permissionbanner.alwaysScope")}
-              ariaLabel={tr("permissionbanner.alwaysScope")}
-              value={scope}
-              options={[
-                ...(scopes.includes("session") ? [{ value: "session", label: tr("permissionbanner.thisSession") }] : []),
-                ...(scopes.includes("project") ? [{ value: "project", label: tr("permissionbanner.thisProject") }] : []),
-              ]}
-              onChange={(value) => setScope(value === "project" ? "project" : "session")}
-              className="perm-always-scope"
-            />
-          </span>
+        <Button size="sm" variant="primary" className="permission-allow" aria-label={tr("permissionbanner.allowOnce")} busy={busy === "once"} disabled={busy !== null} onClick={() => void reply("once")}>
+          <ResponsiveLabel full={tr("permissionbanner.allowOnce")} short={tr("permissionbanner.once")} />
+        </Button>
+        {alwaysScope && (
+          <Button
+            size="sm"
+            variant="quiet"
+            className="permission-always"
+            aria-label={`${tr("permissionbanner.always")} — ${alwaysScope === "session" ? tr("permissionbanner.thisSession") : tr("permissionbanner.thisProject")}`}
+            title={`${tr("permissionbanner.always")} — ${alwaysScope === "session" ? tr("permissionbanner.thisSession") : tr("permissionbanner.thisProject")}`}
+            busy={busy === "always"}
+            disabled={busy !== null}
+            onClick={() => void reply("always")}
+          >
+            {tr("permissionbanner.always")}
+          </Button>
         )}
-        <Button size="sm" variant="danger" className="permission-deny" onClick={() => reply("reject")}>
-          {tr("permissionbanner.deny")}
+        <Button
+          size="sm"
+          variant="quiet"
+          className="permission-session"
+          aria-label={tr("permissionbanner.allowAllSession")}
+          title={tr("permissionbanner.allowAllSession")}
+          busy={busy === "session"}
+          disabled={busy !== null}
+          onClick={() => void reply("session")}
+        >
+          <ResponsiveLabel full={tr("permissionbanner.allSession")} short={tr("permissionbanner.session")} />
         </Button>
       </div>
+      {error && <p className="permission-error" role="alert">{error}</p>}
     </div>
   );
 }
 
-export default function PermissionBanner({
-  permissions,
-}: {
-  permissions: PendingPermission[];
-}) {
+export default function PermissionBanner({ permissions }: { permissions: PendingPermission[] }) {
   if (permissions.length === 0) return null;
   return (
-    <GlassDock
-      className="perm-banner permission-toast"
-      role="alert"
-      aria-live="assertive"
-      aria-relevant="additions text"
-    >
+    <GlassDock className="perm-banner permission-toast" role="alert" aria-live="assertive" aria-relevant="additions text">
       <div className="perm-title">
         <span className="permission-mode-icon" aria-hidden="true"><Icon.shield /></span>
         {tr("permissionbanner.permissionRequested")}

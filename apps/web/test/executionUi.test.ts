@@ -1238,7 +1238,7 @@ test("search results open the matching file and line from inline detail", async 
   }
 });
 
-test("approval is always action-required: intent, target, risk, and decisions visible without disclosure", async () => {
+test("approval keeps the target and four decisions in one compact row without provider decoration", async () => {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -1247,38 +1247,105 @@ test("approval is always action-required: intent, target, risk, and decisions vi
       permissions: [{
         sessionId: "session-1",
         requestId: "permission-1",
-        permission: "bash",
+        permission: "edit",
         tool: "Shell",
         patterns: ["rm -rf apps/web/dist"],
         status: "pending",
         time: 1,
-        preview: { title: "Delete build artifacts", lines: ["apps/web/dist"], risk: "medium" },
+        preview: { title: "Edit", lines: ["apps/web/dist"], risk: "medium" },
       }],
     })));
     const banner = container.querySelector(".perm-banner");
     assert.ok(banner);
     assert.equal(banner.getAttribute("role"), "alert");
-    // No expand step: intent, tool, target, and risk are readable immediately.
     assert.match(container.querySelector(".perm-title")?.textContent ?? "", /Permission requested/);
-    assert.match(container.querySelector(".permission-request-title")?.textContent ?? "", /Delete build artifacts/);
-    assert.match(container.querySelector(".permission-request-tool")?.textContent ?? "", /via Shell/);
-    assert.match(container.querySelector(".permission-risk")?.textContent ?? "", /medium risk/);
+    assert.equal(container.querySelector(".permission-request-title"), null, "a generic Edit label does not get its own row");
+    assert.equal(container.querySelector(".permission-request-tool"), null);
+    assert.equal(container.querySelector(".permission-risk"), null);
     assert.match(container.querySelector(".permission-preview")?.textContent ?? "", /apps\/web\/dist/);
-    // Decisions are rendered up front, in decision order.
     const actions = container.querySelector(".perm-actions");
     assert.ok(actions);
     assert.ok(actions.classList.contains("has-always"));
-    assert.match(actions.textContent ?? "", /Allow once.*Always.*Deny/s);
-    assert.ok(container.querySelector(".permission-request-copy"));
+    assert.match(actions.textContent ?? "", /Deny.*Allow once.*Always.*All session/s);
+    assert.equal(actions.children.length, 4);
     const allow = container.querySelector<HTMLButtonElement>(".perm-actions .permission-allow");
     const deny = container.querySelector<HTMLButtonElement>(".perm-actions .permission-deny");
     assert.ok(allow && allow.textContent?.includes("Allow once"));
     assert.ok(deny && deny.textContent?.includes("Deny"));
-    // Always scope stays an explicit choice, never a silent global.
-    const scopeChip = container.querySelector(".perm-always .picker-chip-text");
-    assert.ok(scopeChip);
-    assert.match(scopeChip.textContent ?? "", /this session/i);
+    assert.match(container.querySelector(".permission-always")?.getAttribute("aria-label") ?? "", /this session/i);
+    assert.match(container.querySelector(".permission-session")?.getAttribute("aria-label") ?? "", /every following action/i);
   } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test("all-session approval enables canonical auto-accept instead of remembering one pattern", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const originalFetch = globalThis.fetch;
+  let request: { url: string; method: string; body: string } | null = null;
+  try {
+    globalThis.fetch = async (input, init) => {
+      request = {
+        url: String(input),
+        method: String(init?.method ?? "GET"),
+        body: String(init?.body ?? ""),
+      };
+      return new Response(JSON.stringify({ setting: "on", effective: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    await act(async () => root.render(createElement(PermissionBanner, {
+      permissions: [{
+        sessionId: "session/all",
+        requestId: "permission-1",
+        permission: "edit",
+        patterns: ["src/*"],
+        status: "pending",
+        time: 1,
+      }],
+    })));
+    await act(async () => container.querySelector<HTMLButtonElement>(".permission-session")!.click());
+    assert.deepEqual(request, {
+      url: "/api/sessions/session%2Fall/permissions/auto-accept",
+      method: "PATCH",
+      body: JSON.stringify({ setting: "on" }),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test("a failed session-wide approval keeps every decision available and explains the failure", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => new Response(JSON.stringify({ error: { message: "Could not update approval policy" } }), {
+      status: 500,
+      headers: { "content-type": "application/json" },
+    });
+    await act(async () => root.render(createElement(PermissionBanner, {
+      permissions: [{
+        sessionId: "session-1",
+        requestId: "permission-1",
+        permission: "edit",
+        patterns: ["src/*"],
+        status: "pending",
+        time: 1,
+      }],
+    })));
+    await act(async () => container.querySelector<HTMLButtonElement>(".permission-session")!.click());
+    assert.match(container.querySelector(".permission-error")?.textContent ?? "", /Could not update approval policy/);
+    assert.equal(container.querySelectorAll(".perm-actions button:disabled").length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
     await act(async () => root.unmount());
     container.remove();
   }
@@ -1303,18 +1370,16 @@ test("browser approval names the browser and its bounded capabilities", async ()
     assert.match(container.querySelector(".permission-request-title")?.textContent ?? "", /Agent wants to use Browser/);
     assert.match(container.querySelector(".permission-browser-capabilities")?.textContent ?? "", /read visible content/i);
     assert.equal(container.querySelector(".permission-request-tool"), null);
-    assert.match(container.querySelector(".perm-actions")?.textContent ?? "", /Allow once.*Always.*Deny/s);
+    assert.match(container.querySelector(".perm-actions")?.textContent ?? "", /Deny.*Allow once.*Always.*All session/s);
   } finally {
     await act(async () => root.unmount());
     container.remove();
   }
 });
 
-test("compact permission actions override the wide decision rail", async () => {
+test("permission decisions remain a single row in narrow containers", async () => {
   const css = await readFile(new URL("../../../packages/permissions/widgets/styles.css", import.meta.url), "utf8");
-  const compact = css.slice(css.indexOf("@container permission-banner (max-width: 620px)"));
-  assert.match(
-    compact,
-    /\.perm-banner \.perm-actions,\s*\.perm-banner \.perm-actions\.has-always\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/,
-  );
+  assert.match(css, /\.perm-banner \.perm-actions\.has-always\s*\{\s*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\)/);
+  const compact = css.slice(css.indexOf("@container permission-banner (max-width: 420px)"));
+  assert.doesNotMatch(compact, /grid-template-columns:\s*minmax\(0, 1fr\)/);
 });

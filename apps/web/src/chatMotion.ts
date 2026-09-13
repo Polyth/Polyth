@@ -8,6 +8,7 @@ const SEND_LIFT_DESKTOP_MS = 360;
 const SEND_LIFT_TOUCH_MS = 420;
 const DESKTOP_DISTANCE_PX = 8;
 const TOUCH_DISTANCE_PX = 6;
+const PROMPT_SETTLE_PX = 2;
 const EASE_OUT = "cubic-bezier(0, 0, 0.2, 1)";
 const SEND_LIFT_EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
 
@@ -201,18 +202,25 @@ function playTransform(
   deltaY: number,
   duration: number,
   opacityFrom = 1,
+  settle = false,
 ): boolean {
   if (typeof element.animate !== "function" || Math.abs(deltaY) < 1) return false;
   const previousWillChange = element.style.willChange;
   element.style.willChange = "opacity, transform";
-  const animation = element.animate([
+  const keyframes: Keyframe[] = [
     { opacity: opacityFrom, transform: `translate3d(0, ${deltaY}px, 0)` },
     // Opacity lands early on its own offset: a fade stretched across the whole
     // travel reads as a smear, while a solid row gliding into place reads as
     // one object moving. Transform still spans the full duration.
-    { opacity: 1, offset: 0.32 },
+    { opacity: 1, offset: settle ? 0.28 : 0.32 },
+    ...(settle ? [{
+      opacity: 1,
+      transform: `translate3d(0, -${PROMPT_SETTLE_PX}px, 0)`,
+      offset: 0.88,
+    }] : []),
     { opacity: 1, transform: "translate3d(0, 0, 0)" },
-  ], {
+  ];
+  const animation = element.animate(keyframes, {
     duration,
     easing: SEND_LIFT_EASE,
     fill: "both",
@@ -254,7 +262,8 @@ function playActionRise(element: HTMLElement): void {
 }
 
 /**
- * The timeline aligns every fresh prompt near the reading top immediately.
+ * The timeline aligns every fresh prompt below a visible tail of the previous
+ * answer immediately.
  * Capture the pre-send geometry, then FLIP the already-correct final layout:
  * the new prompt rises from the composer edge while all previously visible
  * rows retain their old pixels for frame zero and slide upward together. This
@@ -281,12 +290,12 @@ function playSendTransition(element: HTMLElement): boolean {
   const viewport = timeline.getBoundingClientRect();
   // The composer sits immediately below the timeline on phones. Start at that
   // seam instead of beyond the overflow clip, so the bubble visibly emerges
-  // from the composer and travels all the way to its fresh-turn anchor. The
+  // from the composer and travels all the way to its contextual anchor. The
   // pre-send rect is used because sending resets the composer's height.
   const sourceTop = snapshot.source
     ? Math.min(snapshot.source.top, viewport.bottom - Math.min(12, promptRect.height))
     : viewport.bottom - Math.min(12, promptRect.height);
-  const promptMoved = playTransform(element, sourceTop - promptRect.top, duration, 0.82);
+  const promptMoved = playTransform(element, sourceTop - promptRect.top, duration, 0.72, true);
   if (promptMoved) animated.add(element);
   return promptMoved || moved;
 }
@@ -346,6 +355,14 @@ function animateAddedNode(node: Node, suppressChat = false): void {
   const set = new Set(all);
 
   for (const element of all) {
+    // Live actions may be positioned inside their activity group so their
+    // rise cannot reflow the timeline. They still need their own animation;
+    // handle them before the nested-subtree de-duplication below.
+    if (element.matches(".activity-live")) {
+      if (!suppressChat && now() >= quietUntil) playActionRise(element);
+      continue;
+    }
+
     // Animate one visual layer per added subtree: a new activity group owns its
     // first frame; rows appended later to that existing group animate alone.
     let parent = element.parentElement;
@@ -362,7 +379,8 @@ function animateAddedNode(node: Node, suppressChat = false): void {
     if (element.matches(".msg.user")) {
       const explicitSend = consumeUserSend();
       // Explicit sends get the larger composer→prompt FLIP: the prompt rises
-      // to the fresh-turn anchor while previous agent rows slide up with it.
+      // to the contextual fresh-turn anchor while previous agent rows slide
+      // up with it, leaving the previous answer's tail on screen.
       // Non-send user rows keep the ordinary short entrance.
       if (explicitSend) {
         if (!playSendTransition(element)) playEntrance(element);
@@ -373,13 +391,6 @@ function animateAddedNode(node: Node, suppressChat = false): void {
     }
 
     if (suppressChat || now() < quietUntil) continue;
-
-    // A live action is at the tail by construction: it exists only while it is
-    // running. It gets the composer rise rather than the short row entrance.
-    if (element.matches(".activity-live")) {
-      playActionRise(element);
-      continue;
-    }
 
     if (!nearTimelineTail(element)) continue;
     playEntrance(element);

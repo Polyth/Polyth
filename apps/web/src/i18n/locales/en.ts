@@ -1890,6 +1890,7 @@ export const en = {
   "sidebar.sessionlist.sessionRenamedToValue": "Session renamed to {t}",
   "sidebar.sessionlist.showMoreSessions": "Show more sessions",
   "sidebar.sessionlist.theAgentIsStillRunningOr": "The agent is still running or waiting on you.",
+  "sidebar.sessionlist.theLocalIsolationWorkspaceAndEveryFileInItWillAlsoBePermanentlyDeleted": "The local isolation workspace and every file in it will also be permanently deleted.",
   "sidebar.sessionlist.unpin": "Unpin",
   "sidebar.sessionlist.unreadActivity": "Unread activity",
   "sidebar.sessionlist.valueSessions": "{length} sessions",

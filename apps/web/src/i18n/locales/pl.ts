@@ -1887,6 +1887,7 @@ export const pl: AppMessages = {
   "sidebar.sessionlist.sessionRenamedToValue": "Zmieniono nazwę sesji na {t}",
   "sidebar.sessionlist.showMoreSessions": "Pokaż więcej sesji",
   "sidebar.sessionlist.theAgentIsStillRunningOr": "Agent nadal działa lub czeka na Ciebie.",
+  "sidebar.sessionlist.theLocalIsolationWorkspaceAndEveryFileInItWillAlsoBePermanentlyDeleted": "Lokalny izolowany obszar roboczy i wszystkie znajdujące się w nim pliki również zostaną trwale usunięte.",
   "sidebar.sessionlist.unpin": "Odpiąć",
   "sidebar.sessionlist.unreadActivity": "Nieprzeczytana aktywność",
   "sidebar.sessionlist.valueSessions": "{length} sesji",

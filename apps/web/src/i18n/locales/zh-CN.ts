@@ -1887,6 +1887,7 @@ export const zhCN: AppMessages = {
   "sidebar.sessionlist.sessionRenamedToValue": "会话已重命名为{t}",
   "sidebar.sessionlist.showMoreSessions": "显示更多会话",
   "sidebar.sessionlist.theAgentIsStillRunningOr": "代理仍在运行或正在等待你。",
+  "sidebar.sessionlist.theLocalIsolationWorkspaceAndEveryFileInItWillAlsoBePermanentlyDeleted": "本地隔离工作区及其中的所有文件也将被永久删除。",
   "sidebar.sessionlist.unpin": "取消固定",
   "sidebar.sessionlist.unreadActivity": "未读活动",
   "sidebar.sessionlist.valueSessions": "{length}个会话",

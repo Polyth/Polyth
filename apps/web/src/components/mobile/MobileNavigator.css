@@ -239,6 +239,53 @@
   stroke-width: 1.75;
 }
 
+.mobile-nav-project-drag-handle {
+  display: grid;
+  place-items: center;
+  flex: 0 0 var(--tap);
+  width: var(--tap);
+  height: var(--tap);
+  margin-inline-end: var(--space-1);
+  padding: 0;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--panel) 24%, transparent);
+  border: 0;
+  border-radius: var(--radius-control);
+  outline: 0;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-nav-project-drag-handle:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.mobile-nav-project-drag-handle:active {
+  cursor: grabbing;
+  color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.mobile-nav-project-drag-handle:focus-visible {
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+.mobile-nav-project-drag-handle svg {
+  width: 20px;
+  height: 20px;
+}
+
+.mobile-nav-project.is-dragging {
+  opacity: .58;
+}
+
+.mobile-nav-project.is-drag-over > .mobile-nav-project-head {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
 .mobile-nav-project-main {
   display: flex;
   flex-direction: column;

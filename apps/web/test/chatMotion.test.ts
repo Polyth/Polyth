@@ -29,8 +29,9 @@ test("chat motion is compositor-friendly and shorter on touch", () => {
   assert.doesNotMatch(css, /scale\s*\(/);
 });
 
-test("explicit sends lift the prompt from the composer and FLIP previous rows upward", () => {
+test("explicit sends lift the prompt to a contextual anchor and FLIP previous rows upward", () => {
   const controller = source("../src/chatMotion.ts");
+  const timeline = source("../src/components/Timeline.tsx");
 
   assert.match(controller, /captureSendTransition/);
   assert.match(controller, /\.composer-chat \[data-composer-input\]/);
@@ -38,7 +39,11 @@ test("explicit sends lift the prompt from the composer and FLIP previous rows up
   assert.match(controller, /row\.rect\.top - after\.top/);
   assert.match(controller, /playSendTransition/);
   assert.match(controller, /SEND_LIFT_TOUCH_MS = 420/);
+  assert.match(controller, /PROMPT_SETTLE_PX = 2/);
   assert.match(controller, /SEND_LIFT_EASE = "cubic-bezier\(0\.16, 1, 0\.3, 1\)"/);
+  assert.match(controller, /sourceTop - promptRect\.top, duration, 0\.72, true/);
+  assert.match(timeline, /freshTurnContextOffset/);
+  assert.match(timeline, /responseToPromptGap: Math\.max\(0, row\.top - bubbleRect\.bottom\)/);
 });
 
 test("every live action rises out of the composer and honours the motion switch", () => {
@@ -78,17 +83,18 @@ test("the rise stays smooth over long travel and the block never clips it", () =
   const css = source("../src/styles.css");
 
   // Opacity lands on its own early offset; transform keeps the full duration.
-  assert.match(controller, /\{ opacity: 1, offset: 0\.32 \}/);
+  assert.match(controller, /\{ opacity: 1, offset: settle \? 0\.28 : 0\.32 \}/);
   // Longer travel, longer duration: a fixed one reads as a teleport.
   assert.match(controller, /Math\.min\(Math\.abs\(delta\) \/ 1200, 0\.45\)/);
-  // A live action is a top-level timeline row, not a nested list inside a
-  // block whose own clipping would swallow the travel — and it wears no frame
-  // of its own: the block is the only framed surface in that region.
+  // A live action is a bare row anchored to the block, not a nested list in
+  // the folded block's layout whose clipping would swallow the travel — and it
+  // wears no frame of its own: the block is the only framed surface there.
   assert.match(css, /\.activity-group,\s*\.task-list \{/);
   const liveRule = /\n\.activity-live \{([^}]*)\}/.exec(css)?.[1] ?? "";
   assert.doesNotMatch(liveRule, /border|box-shadow|background/);
-  assert.match(css, /\.activity-live-stage > \.activity-live \{ grid-area: 1 \/ 1; \}/);
-  assert.match(css, /\.timeline > \.activity-group \+ \.activity-live-stage \{\s*margin-block-start: calc\(var\(--space-1\) - var\(--timeline-gap\)\)/);
+  assert.match(css, /\.activity-group \{\s*position: relative;\s*overflow: visible;/);
+  assert.match(css, /\.activity-live-stage \{\s*position: absolute;\s*inset-inline: 0;\s*inset-block-start: calc\(100% \+ var\(--space-1\)\);/);
+  assert.match(css, /Inserting or\s+growing a live row must not change the scrollport/s);
   assert.match(css, /--activity-live-exit: 280ms/);
   assert.match(css, /opacity calc\(var\(--activity-live-exit\) \* 0\.55\) linear/);
   assert.match(css, /\.activity-live\.leaving \{[^}]*grid-template-rows: 0fr[^}]*scale\(\.985\)/s);

@@ -1,6 +1,11 @@
 import type { PermissionsMessages } from "./en.ts";
 
 export const bg: PermissionsMessages = {
+  "permissionbanner.denyShort": "Отказ",
+  "permissionbanner.once": "Веднъж",
+  "permissionbanner.session": "Сесия",
+  "permissionbanner.allSession": "Цялата сесия",
+  "permissionbanner.allowAllSession": "Разреши всички следващи действия в тази сесия",
   "permissionbanner.agentWantsToUseBrowser": "Агентът иска да използва браузъра",
   "permissionbanner.allowOnce": "Позволете веднъж",
   "permissionbanner.always": "Винаги",

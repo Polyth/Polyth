@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { requiredTurnSheetPadding, timelineFollowState } from "../src/timelineFollow.ts";
+import {
+  freshTurnContextOffset,
+  requiredTurnSheetPadding,
+  timelineFollowState,
+} from "../src/timelineFollow.ts";
 
 test("explicit reader intent detaches immediately and is not reclaimed by tail proximity", () => {
   const detached = timelineFollowState({
@@ -60,7 +64,7 @@ test("a detached reader is not reattached by tailward layout correction", () => 
   }), { readerDetached: true, following: false, showJump: true });
 });
 
-test("fresh-turn space aligns a prompt at the top and yields to growing activity", () => {
+test("fresh-turn space holds a contextual prompt anchor and yields to growing activity", () => {
   const initial = requiredTurnSheetPadding({
     scrollHeight: 1800,
     currentPadding: 0,
@@ -84,4 +88,48 @@ test("fresh-turn space aligns a prompt at the top and yields to growing activity
     desiredScrollTop: 1500,
   });
   assert.equal(exhausted, 0);
+});
+
+test("a fresh turn keeps a typographic fragment of the previous agent answer", () => {
+  assert.equal(freshTurnContextOffset({
+    viewportHeight: 600,
+    promptHeight: 48,
+    responseHeight: 520,
+    responseToPromptGap: 60,
+    responseLineHeight: 24,
+  }), 132, "60px of footer/gap plus three visible answer lines");
+
+  assert.equal(freshTurnContextOffset({
+    viewportHeight: 600,
+    promptHeight: 48,
+    responseHeight: 30,
+    responseToPromptGap: 20,
+    responseLineHeight: 24,
+  }), 50, "a short previous answer remains visible in full");
+});
+
+test("the previous-answer peek yields to the prompt and next answer on a short viewport", () => {
+  assert.equal(freshTurnContextOffset({
+    viewportHeight: 220,
+    promptHeight: 40,
+    responseHeight: 400,
+    responseToPromptGap: 68,
+    responseLineHeight: 24,
+  }), 108);
+
+  assert.equal(freshTurnContextOffset({
+    viewportHeight: 220,
+    promptHeight: 160,
+    responseHeight: 400,
+    responseToPromptGap: 68,
+    responseLineHeight: 24,
+  }), 0, "a tall prompt gets the available reading room");
+
+  assert.equal(freshTurnContextOffset({
+    viewportHeight: 600,
+    promptHeight: 48,
+    responseHeight: 0,
+    responseToPromptGap: 60,
+    responseLineHeight: 24,
+  }), 0, "the first prompt does not reserve nonexistent history");
 });

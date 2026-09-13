@@ -993,6 +993,14 @@ export interface ModelRef { providerID: string; modelID: string; variant?: strin
 export interface HarnessModelRef extends ModelRef { harnessId: string }
 export interface HarnessAgentRef { harnessId: string; agent: string }
 
+/** An explicit recovery route.  Supplying `harness` makes the resume use the
+ * same safe switch-before-send transaction as a normal submitted turn; an
+ * absent harness continues on the current runtime leg. */
+export interface ResumeTurnOptions {
+  model?: ModelRef;
+  harness?: HarnessSelection;
+}
+
 /** Browser-local execution choices for a conversation that does not exist
  * yet. The server receives these atomically when the first send materializes
  * the canonical session. */
@@ -1623,10 +1631,10 @@ export interface SessionService {
    *  nothing is scheduled. */
   cancelResume?(sessionId: string): Promise<void>;
   /** Run the pending rate-limit resume immediately: re-send the last user
-   *  message now, optionally switching to `model` (which also becomes the
-   *  session's model going forward). Rejects `no-resume` when nothing is
-   *  scheduled. */
-  resumeNow?(sessionId: string, model?: ModelRef): Promise<SendResult>;
+   *  message now, optionally choosing its model and/or safe harness route.
+   *  A bare ModelRef remains accepted for older callers. Rejects `no-resume`
+   *  when nothing is scheduled. */
+  resumeNow?(sessionId: string, options?: ResumeTurnOptions | ModelRef): Promise<SendResult>;
   /** No atSeq: copy the complete effective history. With atSeq: per-message
    *  fork — the child prefix ends strictly BEFORE the target user message and
    *  the excluded prompt returns as an editable draft. */
@@ -1639,9 +1647,13 @@ export interface SessionService {
   runShell?(sessionId: string, command: string): Promise<ShellTurnResult>;
   archive(sessionId: string): Promise<void>;
   restore(sessionId: string): Promise<void>;
-  /** Hard-delete the session (durable log + projection + queue). Guarded:
-   *  callers confirm destructive intent upstream; a running turn is aborted
-   *  first. Optional so existing fakes/tests remain valid. */
+  /** Hard-delete the session (durable log + projection + queue) and any
+   *  package-owned isolation resources. Callers confirm destructive intent
+   *  upstream. An already-absent workspace needs no runtime rebind; a present
+   *  workspace is removed only after exact ownership is proven and any
+   *  execution bound to it has verified release. Uncertain upstream identity
+   *  remains fenced by the durable
+   *  deletion tombstone. Optional so existing fakes/tests remain valid. */
   delete?(sessionId: string): Promise<void>;
   list(projectId?: string): Promise<SessionProjection[]>;
   sync(projectId: string): Promise<SessionProjection[]>;

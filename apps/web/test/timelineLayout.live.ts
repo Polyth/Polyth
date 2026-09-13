@@ -702,16 +702,16 @@ test("new-chat spawn status stays above the still-mounted composer", async () =>
 });
 
 // =============================================================================
-// 3. Streaming (spec 9.1 item 4): every new prompt starts at the reading top;
-//    a tiny upward gesture detaches immediately while the SAME response grows;
-//    Jump to latest remains keyboard-operable and reconnects follow mode.
+// 3. Streaming (spec 9.1 item 4): every new prompt keeps a visible tail of the
+//    previous answer; a tiny upward gesture detaches immediately while the SAME
+//    response grows; Jump to latest remains keyboard-operable and reconnects.
 // =============================================================================
 
-test("streaming: fresh prompt sheet, immediate reader detach, keyboard Jump to latest, resumed follow", async () => {
+test("streaming: contextual fresh turn, immediate reader detach, keyboard Jump to latest, resumed follow", async () => {
   const lp = await openApp({ width: 1280, height: 520, session: streamSessionId, ready: ".msg" });
   const { page } = lp;
 
-  // --- a new user turn starts at the top of the usable reading area --------
+  // --- a new user turn preserves the previous answer's visible tail --------
   const before = await scrollState(page);
   assert.ok(before.distance <= 2, `not at the tail before streaming (distance ${before.distance})`);
   const firstPrompt = "Stream one: start on a fresh sheet.";
@@ -723,14 +723,23 @@ test("streaming: fresh prompt sheet, immediate reader detach, keyboard Jump to l
   const fresh = await page.evaluate(() => {
     const el = document.querySelector<HTMLElement>(".timeline")!;
     const prompt = [...el.querySelectorAll<HTMLElement>(":scope > .msg.user")].at(-1)!;
+    const previousAnswer = [...el.querySelectorAll<HTMLElement>(":scope > .msg.assistant")]
+      .findLast((answer) => !!(answer.compareDocumentPosition(prompt) & Node.DOCUMENT_POSITION_FOLLOWING))!;
+    const previousBubble = previousAnswer.querySelector<HTMLElement>(":scope > .bubble")!;
     const port = el.getBoundingClientRect();
+    const paddingTop = Number.parseFloat(getComputedStyle(el).paddingTop) || 0;
+    const bubble = previousBubble.getBoundingClientRect();
+    const previousLineHeight = Number.parseFloat(getComputedStyle(previousBubble).lineHeight) || 1;
     return {
-      topDelta: prompt.getBoundingClientRect().top - port.top - (Number.parseFloat(getComputedStyle(el).paddingTop) || 0),
+      topDelta: prompt.getBoundingClientRect().top - port.top - paddingTop,
+      visiblePreviousAnswer: Math.max(0, Math.min(bubble.bottom, port.bottom) - Math.max(bubble.top, port.top + paddingTop)),
+      previousAnswerHeight: bubble.height,
+      previousLineHeight,
       sheetSpace: Number.parseFloat(el.style.getPropertyValue("--timeline-turn-sheet-space")) || 0,
       scrollTop: el.scrollTop,
       scrollHeight: el.scrollHeight,
       clientHeight: el.clientHeight,
-      paddingTop: Number.parseFloat(getComputedStyle(el).paddingTop) || 0,
+      paddingTop,
       paddingBottom: Number.parseFloat(getComputedStyle(el).paddingBottom) || 0,
       promptTop: prompt.getBoundingClientRect().top - port.top,
       promptOffsetTop: prompt.offsetTop,
@@ -738,8 +747,12 @@ test("streaming: fresh prompt sheet, immediate reader detach, keyboard Jump to l
     };
   });
   assert.ok(
-    Math.abs(fresh.topDelta) <= 2,
-    `new prompt missed the reading top: ${JSON.stringify(fresh)}`,
+    fresh.topDelta > 0 && fresh.topDelta < fresh.clientHeight / 2,
+    `new prompt missed its contextual anchor: ${JSON.stringify(fresh)}`,
+  );
+  assert.ok(
+    fresh.visiblePreviousAnswer + 1 >= Math.min(fresh.previousAnswerHeight, fresh.previousLineHeight * 1.25),
+    `previous answer has no readable fragment: ${JSON.stringify(fresh)}`,
   );
   assert.ok(fresh.sheetSpace > 0, "new prompt did not reserve a fresh response sheet");
 
@@ -800,7 +813,7 @@ test("streaming: fresh prompt sheet, immediate reader detach, keyboard Jump to l
   assert.notEqual(after.activeTag, "BODY", "keyboard jump dropped focus to BODY");
   assert.ok(after.activeInTimeline, "focus did not move into the timeline");
 
-  // --- even from detached history, the next prompt gets a clean sheet -------
+  // --- even from detached history, the next prompt keeps turn continuity ----
   const boxBeforeSecond = await page.locator(".timeline").boundingBox();
   assert.ok(boxBeforeSecond, "timeline disappeared before the next prompt");
   await page.mouse.move(
@@ -815,13 +828,33 @@ test("streaming: fresh prompt sheet, immediate reader detach, keyboard Jump to l
     const rows = document.querySelectorAll<HTMLElement>(".timeline > .msg.user");
     return rows[rows.length - 1]?.textContent?.includes(text) === true;
   }, secondPrompt);
-  const secondTopDelta = await page.evaluate(() => {
+  const secondAnchor = await page.evaluate(() => {
     const el = document.querySelector<HTMLElement>(".timeline")!;
     const prompt = [...el.querySelectorAll<HTMLElement>(":scope > .msg.user")].at(-1)!;
-    return prompt.getBoundingClientRect().top - el.getBoundingClientRect().top
-      - (Number.parseFloat(getComputedStyle(el).paddingTop) || 0);
+    const previousAnswer = [...el.querySelectorAll<HTMLElement>(":scope > .msg.assistant")]
+      .findLast((answer) => !!(answer.compareDocumentPosition(prompt) & Node.DOCUMENT_POSITION_FOLLOWING))!;
+    const previousBubble = previousAnswer.querySelector<HTMLElement>(":scope > .bubble")!;
+    const port = el.getBoundingClientRect();
+    const paddingTop = Number.parseFloat(getComputedStyle(el).paddingTop) || 0;
+    const bubble = previousBubble.getBoundingClientRect();
+    const previousLineHeight = Number.parseFloat(getComputedStyle(previousBubble).lineHeight) || 1;
+    return {
+      promptOffset: prompt.getBoundingClientRect().top - port.top - paddingTop,
+      visiblePreviousAnswer: Math.max(0, Math.min(bubble.bottom, port.bottom) - Math.max(bubble.top, port.top + paddingTop)),
+      previousAnswerHeight: bubble.height,
+      previousLineHeight,
+      clientHeight: el.clientHeight,
+    };
   });
-  assert.ok(Math.abs(secondTopDelta) <= 2, `next prompt missed the reading top by ${secondTopDelta}px`);
+  assert.ok(
+    secondAnchor.promptOffset > 0 && secondAnchor.promptOffset < secondAnchor.clientHeight / 2,
+    `next prompt missed its contextual anchor: ${JSON.stringify(secondAnchor)}`,
+  );
+  assert.ok(
+    secondAnchor.visiblePreviousAnswer + 1
+      >= Math.min(secondAnchor.previousAnswerHeight, secondAnchor.previousLineHeight * 1.25),
+    `next prompt hid the previous answer: ${JSON.stringify(secondAnchor)}`,
+  );
   assert.equal(
     await page.locator(".timeline-reveal").count(),
     0,

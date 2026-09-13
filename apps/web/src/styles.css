@@ -12438,7 +12438,11 @@ html[data-font] body :is(
   background: var(--surface-activity);
   box-shadow: var(--shadow-sm);
 }
-.activity-group { background: transparent; }
+.activity-group {
+  position: relative;
+  overflow: visible;
+  background: transparent;
+}
 .activity-group.current { border-color: color-mix(in srgb, var(--accent-line) 58%, var(--border-soft)); }
 /* Nested summaries inherit the container's chrome. The surface is handed over
    through a variable so the shared hover state still wins the cascade. */
@@ -12468,10 +12472,10 @@ html[data-font] body :is(
 
 /* Live actions -------------------------------------------------------------
  * A running action is a bare row at the tail of the timeline, not a card:
- * nested in the block it added a second list to a surface meant to stay
- * folded, framed it read as a detached card. It rises out of the composer,
- * sits just under the block while it runs, then folds up into it. The block
- * itself never opens on its own. */
+ * entering the block's normal layout added a second list to a surface meant
+ * to stay folded, and framing it read as a detached card. It rises out of the
+ * composer, sits just under the block while it runs, then folds up into it.
+ * The block itself never opens on its own. */
 .activity-live {
   --activity-live-exit: 280ms;
   --activity-live-exit-ease: cubic-bezier(0.4, 0, 0.7, 0.2);
@@ -12488,17 +12492,17 @@ html[data-font] body :is(
     transform var(--activity-live-exit) var(--activity-live-exit-ease);
 }
 .activity-live-stage {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-start: calc(100% + var(--space-1));
   width: 100%;
   min-width: 0;
   display: grid;
+  z-index: 1;
 }
-.activity-live-stage > .activity-live { grid-area: 1 / 1; }
-/* Part of the block, so it sits against it: the timeline's row gap would push
-   it away and read as a separate turn. Only after the block or another live
-   row — a first lone action keeps its distance from the prompt above. */
-.timeline > .activity-group + .activity-live-stage {
-  margin-block-start: calc(var(--space-1) - var(--timeline-gap));
-}
+/* The stage is an overlay anchored to the block, not a flex item. Inserting or
+   growing a live row must not change the scrollport or move every earlier row
+   while the composer-to-block rise is in flight. */
 .activity-live.leaving {
   grid-template-rows: 0fr;
   opacity: 0;

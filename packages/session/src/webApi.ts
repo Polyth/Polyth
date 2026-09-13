@@ -45,6 +45,7 @@ import type {
   ProjectCloneInput,
   ProjectPatch,
   QueueItemDto,
+  ResumeTurnOptions,
   RuntimeDiagnosticsDto,
   RuntimeFeaturesDto,
   RuntimeSession,
@@ -652,10 +653,10 @@ export const api = {
   /** Drop a pending rate-limit auto-resume; the session stays failed. */
   cancelResume: (id: string) =>
     jfetch<{ ok: true }>(`/api/sessions/${id}/resume/cancel`, { method: "POST" }),
-  /** Run the pending rate-limit resume now, optionally on a different model
-   *  (which also becomes the session's model going forward). */
-  resumeNow: (id: string, model?: ModelRef) =>
-    jfetch<SendResult>(`/api/sessions/${id}/resume/now`, json("POST", model ? { model } : {})),
+  /** Run the pending rate-limit resume now on an optional model and harness
+   *  route. The server switches that route before admitting the new turn. */
+  resumeNow: (id: string, options?: ResumeTurnOptions) =>
+    jfetch<SendResult>(`/api/sessions/${id}/resume/now`, json("POST", options ?? {})),
   taskBrief: (id: string) => jfetch<TaskBriefDto>(`/api/sessions/${encodeURIComponent(id)}/task-brief`, json("POST", {})),
   confirmBorrowedRuntimeEpoch: (id: string) =>
     jfetch<SessionProjection>(`/api/sessions/${id}/runtime-epoch`, json("POST", { confirm: true })),

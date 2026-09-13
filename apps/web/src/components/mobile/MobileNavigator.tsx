@@ -1,5 +1,6 @@
 import {
   useEffect, useMemo, useRef, useState,
+  type DragEvent as ReactDragEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { SessionProjection } from "@polyth/contracts";
@@ -54,6 +55,15 @@ import {
   sessionMatchesDateFilter,
   type SessionDateFilter,
 } from "../../sessionDates.ts";
+import {
+  applyManualProjectOrder,
+  reorderManualProjects,
+  setProjectOrder,
+  setProjectSortMode,
+  useProjectOrder,
+  useProjectSortMode,
+  type ProjectSortMode,
+} from "../../sidebarPrefs.ts";
 import "./MobileNavigator.css";
 
 const EXPANDED_PROJECTS_KEY = "polyth.sidebar.expandedProjects";
@@ -61,8 +71,6 @@ const INITIAL_VISIBLE_SESSIONS = 8;
 const LONG_PRESS_MS = 550;
 const SWIPE_WIDTH = 82;
 const SWIPE_THRESHOLD = 38;
-
-type ProjectSort = "recent" | "name";
 
 function loadExpanded(activeProjectId: string | null): ReadonlySet<string> {
   try {
@@ -221,10 +229,12 @@ function SessionRow({
   };
 
   const remove = async () => {
-    if (session.isolation) return;
     const label = session.title || tr("sidebar.sessionlist.session");
+    const activity = session.isolation
+      ? ` ${tr("sidebar.sessionlist.theLocalIsolationWorkspaceAndEveryFileInItWillAlsoBePermanentlyDeleted")}`
+      : "";
     if (!await confirmAlert(
-      tr("sidebar.sessionlist.deleteValueValueThisPermanentlyRemovesThe", { label, activity: "" }),
+      tr("sidebar.sessionlist.deleteValueValueThisPermanentlyRemovesThe", { label, activity }),
       { title: tr("sidebar.sessionlist.deleteSession"), confirmLabel: tr("common.delete") },
     )) return;
     try {
@@ -281,12 +291,12 @@ function SessionRow({
       label: tr("common.archive"),
       onSelect: () => void archive(),
     },
-    ...(!session.isolation ? [{
+    {
       id: "delete",
       label: tr("common.delete"),
       danger: true,
       onSelect: () => void remove(),
-    } satisfies MenuEntry] : []),
+    },
   ];
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -413,15 +423,25 @@ export default function MobileNavigator() {
   const [searchMode, setSearchMode] = useState(false);
   const [attentionOnly, setAttentionOnly] = useState(false);
   const [dateFilter, setDateFilter] = useState<SessionDateFilter>(EMPTY_SESSION_DATE_FILTER);
-  const [sort, setSort] = useState<ProjectSort>("recent");
+  const sort = useProjectSortMode();
+  const setSort = (mode: ProjectSortMode) => setProjectSortMode(mode);
+  const projectOrder = useProjectOrder();
   const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(() => loadExpanded(activeProjectId));
   const [showAllProjects, setShowAllProjects] = useState<ReadonlySet<string>>(new Set());
   const [expandedIsolation, setExpandedIsolation] = useState<ReadonlySet<string>>(new Set());
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("");
+  const [draggedProject, setDraggedProject] = useState<string | null>(null);
+  const [dragOverProject, setDragOverProject] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const navRef = useRef<HTMLElement>(null);
+  const navScrollRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const projectDragRef = useRef<{
+    id: string;
+    pointerId: number;
+    targetId: string;
+  } | null>(null);
 
   useModalSurface({
     enabled: true,
@@ -487,6 +507,7 @@ export default function MobileNavigator() {
       if (`${project.name} ${project.path}`.toLocaleLowerCase().includes(needle)) return true;
       return dated.some((session) => `${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLocaleLowerCase().includes(needle));
     });
+    if (sort === "manual") return applyManualProjectOrder(filtered, projectOrder);
     return filtered.sort((a, b) => {
       if (sort === "name") return (a.name || a.path).localeCompare(b.name || b.path);
       const score = (id: string) => {
@@ -499,7 +520,91 @@ export default function MobileNavigator() {
       const right = score(b.id);
       return left.bestPriority - right.bestPriority || right.latest - left.latest;
     });
-  }, [attentionOnly, dateFilter, projectSessions, projects, query, sort]);
+  }, [attentionOnly, dateFilter, projectOrder, projectSessions, projects, query, sort]);
+
+  const manualReorder = sort === "manual" && query.trim() === "";
+  const fullProjectOrder = () => applyManualProjectOrder(projects, projectOrder).map((project) => project.id);
+  const commitReorder = (draggedId: string, targetId: string) => {
+    if (!draggedId || draggedId === targetId) return;
+    setProjectOrder(reorderManualProjects(fullProjectOrder(), draggedId, targetId));
+    tapFeedback();
+    announce(tr("sidebar.projectsReordered"));
+  };
+  const moveProjectBy = (id: string, delta: -1 | 1) => {
+    const ids = fullProjectOrder();
+    const index = ids.indexOf(id);
+    const target = index + delta;
+    if (index < 0 || target < 0 || target >= ids.length) return;
+    [ids[index], ids[target]] = [ids[target]!, ids[index]!];
+    setProjectOrder(ids);
+    announce(tr("sidebar.projectsReordered"));
+  };
+  const clearProjectDrag = () => {
+    projectDragRef.current = null;
+    setDraggedProject(null);
+    setDragOverProject(null);
+  };
+  const projectAtPoint = (clientX: number, clientY: number): string | null => {
+    if (typeof document === "undefined") return null;
+    const projectNode = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>("[data-project-id]");
+    const id = projectNode?.dataset.projectId;
+    return id && visibleProjects.some((project) => project.id === id) ? id : null;
+  };
+  const startProjectDrag = (event: ReactPointerEvent<HTMLButtonElement>, id: string) => {
+    // Mouse uses the browser's native drag feedback; touch and pen use
+    // pointer capture because mobile browsers do not consistently dispatch
+    // HTML drag events for a draggable button.
+    if (!manualReorder || event.pointerType === "mouse" || projectDragRef.current) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    projectDragRef.current = { id, pointerId: event.pointerId, targetId: id };
+    setDraggedProject(id);
+    setDragOverProject(id);
+  };
+  const startProjectNativeDrag = (event: ReactDragEvent<HTMLButtonElement>, id: string) => {
+    if (!manualReorder) return;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", id);
+    setDraggedProject(id);
+    setDragOverProject(id);
+  };
+  const moveProjectDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = projectDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    const targetId = projectAtPoint(event.clientX, event.clientY);
+    if (targetId) {
+      drag.targetId = targetId;
+      setDragOverProject(targetId);
+    }
+    const scroll = navScrollRef.current;
+    if (!scroll) return;
+    const bounds = scroll.getBoundingClientRect();
+    const edge = 64;
+    if (event.clientY < bounds.top + edge) scroll.scrollTop -= 12;
+    else if (event.clientY > bounds.bottom - edge) scroll.scrollTop += 12;
+  };
+  const finishProjectDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = projectDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    commitReorder(drag.id, projectAtPoint(event.clientX, event.clientY) ?? drag.targetId);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    clearProjectDrag();
+  };
+  const cancelProjectDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (projectDragRef.current?.pointerId !== event.pointerId) return;
+    clearProjectDrag();
+  };
+
+  useEffect(() => {
+    if (manualReorder) return;
+    projectDragRef.current = null;
+    setDraggedProject(null);
+    setDragOverProject(null);
+  }, [manualReorder]);
 
   if (!drawerOpen) return null;
 
@@ -544,6 +649,13 @@ export default function MobileNavigator() {
       kind: "radio",
       checked: sort === "name",
       onSelect: () => setSort("name"),
+    },
+    {
+      id: "manual",
+      label: tr("sidebar.manualOrder"),
+      kind: "radio",
+      checked: sort === "manual",
+      onSelect: () => setSort("manual"),
     },
     "separator",
     { heading: tr("sidebar.filterSessions") },
@@ -652,7 +764,7 @@ export default function MobileNavigator() {
           )}
         </div>
 
-        <div className="mobile-nav-scroll">
+        <div ref={navScrollRef} className="mobile-nav-scroll">
           {visibleProjects.length === 0 && (
             <div className="mobile-nav-empty">{tr("sidebar.noMatchingSessions")}</div>
           )}
@@ -723,7 +835,21 @@ export default function MobileNavigator() {
             ];
 
             return (
-              <section className={`mobile-nav-project${project.id === activeProjectId ? " is-current" : ""}`} key={project.id}>
+              <section
+                className={`mobile-nav-project${project.id === activeProjectId ? " is-current" : ""}${manualReorder ? " is-reorderable" : ""}${draggedProject === project.id ? " is-dragging" : ""}${dragOverProject === project.id ? " is-drag-over" : ""}`}
+                data-project-id={project.id}
+                key={project.id}
+                onDragOver={(event) => {
+                  if (!draggedProject) return;
+                  event.preventDefault();
+                  setDragOverProject(project.id);
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  if (draggedProject) commitReorder(draggedProject, project.id);
+                  clearProjectDrag();
+                }}
+              >
                 <div className="mobile-nav-project-head">
                   <button
                     className="mobile-nav-disclosure"
@@ -733,7 +859,36 @@ export default function MobileNavigator() {
                   >
                     {expanded ? <Icon.chevronDown /> : <Icon.chevronRight />}
                   </button>
-                  <span className="mobile-nav-project-icon" aria-hidden="true"><Icon.files /></span>
+                  {manualReorder ? (
+                    <button
+                      type="button"
+                      className="mobile-nav-project-drag-handle"
+                      aria-label={tr("sidebar.reorderValue", { value: project.name || project.path })}
+                      aria-keyshortcuts="Alt+Shift+ArrowUp Alt+Shift+ArrowDown"
+                      draggable={manualReorder}
+                      onPointerDown={(event) => startProjectDrag(event, project.id)}
+                      onPointerMove={moveProjectDrag}
+                      onPointerUp={finishProjectDrag}
+                      onPointerCancel={cancelProjectDrag}
+                      onLostPointerCapture={clearProjectDrag}
+                      onDragStart={(event) => startProjectNativeDrag(event, project.id)}
+                      onDragEnd={clearProjectDrag}
+                      onKeyDown={(event) => {
+                        if (!event.altKey || !event.shiftKey) return;
+                        if (event.key === "ArrowUp") {
+                          event.preventDefault();
+                          moveProjectBy(project.id, -1);
+                        } else if (event.key === "ArrowDown") {
+                          event.preventDefault();
+                          moveProjectBy(project.id, 1);
+                        }
+                      }}
+                    >
+                      <Icon.pull />
+                    </button>
+                  ) : (
+                    <span className="mobile-nav-project-icon" aria-hidden="true"><Icon.files /></span>
+                  )}
                   {renamingProjectId === project.id ? (
                     <input
                       className="mobile-nav-project-rename"

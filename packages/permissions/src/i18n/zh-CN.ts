@@ -1,6 +1,11 @@
 import type { PermissionsMessages } from "./en.ts";
 
 export const zhCN: PermissionsMessages = {
+  "permissionbanner.denyShort": "拒绝",
+  "permissionbanner.once": "一次",
+  "permissionbanner.session": "会话",
+  "permissionbanner.allSession": "整个会话",
+  "permissionbanner.allowAllSession": "允许此会话中的所有后续操作",
   "permissionbanner.agentWantsToUseBrowser": "代理想要使用浏览器",
   "permissionbanner.allowOnce": "允许一次",
   "permissionbanner.always": "始终",

@@ -553,7 +553,22 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
         abortOperation: (_id, operationId) => mutate(operationId, async () => { await query?.interrupt(); return {}; }),
         async replyPermission(_id, requestId, reply) { const request = permissions.get(requestId); if (!request)
             throw Object.assign(new Error("Permission no longer pending"), { code: "not-found" }); permissions.delete(requestId); request.resolve(reply === "reject" ? { behavior: "deny", message: "User declined" } : { behavior: "allow", updatedInput: request.input }); },
-        replyPermissionOperation: (_id, requestId, reply, operationId) => mutate(operationId, async () => { await runtime.replyPermission(context.sessionId!, requestId, reply); return {}; }),
+        replyPermissionOperation: async (_id, requestId, reply, operationId) => {
+            try {
+                await runtime.replyPermission(context.sessionId!, requestId, reply);
+                return { kind: "confirmed", value: {} };
+            }
+            catch (error) {
+                // A reply for a request the SDK no longer holds is a definitive
+                // no-op, not an uncertain outcome. Reporting `unknown` here leaves a
+                // durable blocking operation that reconciliation can never settle
+                // (absence from a snapshot is deliberately not proof), wedging send
+                // admission forever. Mirror the question path's not-found handling.
+                if ((error as { code?: unknown }).code === "not-found")
+                    return { kind: "rejected", code: "not-found", message: "Permission is no longer pending" };
+                return { kind: "unknown", operationId, message: "Claude Code did not confirm the operation" };
+            }
+        },
         replyQuestion: async () => { throw Object.assign(new Error("Questions unsupported"), { code: "unsupported" }); },
         endpoint: async () => endpoint, protocol: async () => "legacy",
         reconcile: async (binding) => { reconciliationOrdinal = binding.reconciliationOrdinal ?? 0; return ({ ...endpoint, backendSessionId: binding.backendSessionId!, reconciliationOrdinal: binding.reconciliationOrdinal ?? 0, state: { value: !connected || nativeId !== binding.backendSessionId ? "unknown" : active ? "running" : "idle", comparison: { domain: authority.authorityId, order: ++order }, ...(createId && !accepted.length ? { causalOperationId: createId } : {}) }, completeness: { events: "partial", permissions: connected ? "complete" : "unverifiable", questions: "complete" }, events, permissions: [...permissions].map(([requestId, p]) => ({ requestId, permission: p.tool, patterns: [p.tool] })), questions: [], acceptedOperations: accepted }); },

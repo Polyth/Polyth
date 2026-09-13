@@ -1,12 +1,14 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import type { SessionEvent } from "@polyth/contracts";
+import type { HarnessSelection, SessionEvent } from "@polyth/contracts";
 import { renderMarkdown } from "../markdown.tsx";
 import { fmtCost, fmtDuration, fmtTokens } from "../format.ts";
 import { groupActivity, mergeThinking, promptIndex, copyText, loadDraft, type ActivityGroup, type ActivityItem } from "../utils.ts";
 import { executionPresentation, reasoningHead, reasoningTail } from "../execution.ts";
 import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { cancelResume, forkSession, loadOlderEvents, resumeNow } from "../init.ts";
+import { resumeOptionsForModel } from "../rateLimitRecovery.ts";
+import { useSpaces } from "../spaces.ts";
 import { markSessionPerformance } from "../sessionPerformance.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
 import {
@@ -64,6 +66,7 @@ import { captureTimelineAnchor, loadTimelineAnchor, restoreScrollDelta, saveTime
 import { publishPromptVisibility } from "../promptVisibility.ts";
 import {
   TIMELINE_TAIL_EPSILON,
+  freshTurnContextOffset,
   requiredTurnSheetPadding,
   timelineFollowState,
 } from "../timelineFollow.ts";
@@ -89,10 +92,10 @@ import "./messagePinAction.tsx";
 import ProviderLogo from "../../../../packages/models/widgets/ProviderLogo.tsx";
 import { seedMultiRunPrompt } from "@polyth/multirun/prompt-seed";
 import WorkflowTimelineCard from "../../../../packages/workflow/widgets/WorkflowTimelineCard.tsx";
+import ModelPicker from "@polyth/models/model-picker";
+import { useRuntimeCatalog } from "@polyth/models/runtime-catalog";
 import { tr } from "../i18n/index.ts";
 import ExecutionRow, { DiffStat, useCollapsePresence } from "./ExecutionRow.tsx";
-import Picker from "./Picker.tsx";
-import type { PickerItem } from "../picker.ts";
 import { Button, InfoIcon, Menu, Notice, RunSummary, type RunSummaryState } from "./ui/index.ts";
 import type { TurnLimitState } from "../reduce.ts";
 
@@ -1194,9 +1197,9 @@ export function ActivityGroupView({
     ...(files > 0 ? [files === 1 ? tr("timeline.valueFileCount", { count: files }) : tr("timeline.valueFilesCount", { count: files })] : []),
     fmtDuration(g.ms),
   ].join(" · ");
-  // A live action is its own timeline card, not a lodger inside the block:
-  // nesting it there made the folded block grow a second, differently framed
-  // list. It stands alone while it runs, then folds away into the block.
+  // A live action is its own visual timeline row, not part of the folded
+  // block's layout. Its positioned stage is anchored to the block while it
+  // runs, then the row folds away into the block.
   return (
     <>
       {showBlock && (
@@ -1224,24 +1227,24 @@ export function ActivityGroupView({
               )}
             </div>
           </div>
+          {floating.length > 0 && (
+            <div className="activity-live-stage">
+              {floating.map((item) => {
+                const live = liveIds.includes(item.id);
+                return <div
+                  key={item.id}
+                  className={`activity-live${live ? "" : " leaving"}`}
+                  aria-hidden={!live || undefined}
+                  inert={!live}
+                >
+                  <div className="activity-live-content">
+                    {activityItemNode(item, subagents, live, false)}
+                  </div>
+                </div>;
+              })}
+            </div>
+          )}
         </section>
-      )}
-      {floating.length > 0 && (
-        <div className="activity-live-stage">
-          {floating.map((item) => {
-            const live = liveIds.includes(item.id);
-            return <div
-              key={item.id}
-              className={`activity-live${live ? "" : " leaving"}`}
-              aria-hidden={!live || undefined}
-              inert={!live}
-            >
-              <div className="activity-live-content">
-                {activityItemNode(item, subagents, live, false)}
-              </div>
-            </div>;
-          })}
-        </div>
       )}
     </>
   );
@@ -1658,10 +1661,38 @@ function formatWait(totalSeconds: number): string {
 }
 
 /** Provider capacity stop: countdown to the server's auto-resume, with
- *  cancel-wait and continue-on-another-model actions. Replaces the generic
- *  "Last turn failed" line while `turn.limit` is set. */
+ *  cancel-wait and a full harness-qualified model recovery picker. Replaces
+ *  the generic "Last turn failed" line while `turn.limit` is set. */
 function RateLimitNotice({ sessionId, limit }: { sessionId: string; limit: TurnLimitState }) {
+  const session = useStore((s) => s.sessions.find((candidate) => candidate.id === sessionId) ?? null);
   const models = useStore((s) => s.models);
+  const agents = useStore((s) => s.agents);
+  const spaceId = useSpaces().activeSpaceId ?? undefined;
+  const storedHarness = session?.harness;
+  const storedHarnessKey = storedHarness?.mode === "pinned"
+    ? `pinned:${storedHarness.harnessId}`
+    : "auto";
+  const [harnessSelection, setHarnessSelection] = useState<HarnessSelection>(
+    () => storedHarness ?? { mode: "auto" },
+  );
+  // A newly selected session gets its canonical route, while a local tab
+  // choice remains stable through countdown/projection refreshes.
+  useEffect(() => {
+    setHarnessSelection(storedHarness ?? { mode: "auto" });
+  }, [sessionId, storedHarnessKey]);
+  const currentHarnessId = session?.resolvedHarnessId;
+  const selectedHarnessId = harnessSelection.mode === "pinned"
+    ? harnessSelection.harnessId
+    : currentHarnessId;
+  const routeCatalog = useRuntimeCatalog(session, models, agents, {
+    spaceId,
+    projectId: session?.projectId,
+    harnessId: selectedHarnessId,
+  });
+  const catalogHarnessId = routeCatalog.harnessId ?? selectedHarnessId;
+  const selectedModel = selectedHarnessId === currentHarnessId && session?.model
+    ? { ...session.model, ...(currentHarnessId ? { harnessId: currentHarnessId } : {}) }
+    : undefined;
   const remaining = useRemainingSeconds(limit.resumeAt);
   const [busy, setBusy] = useState<null | "resume" | "cancel" | "switch">(null);
 
@@ -1678,27 +1709,22 @@ function RateLimitNotice({ sessionId, limit }: { sessionId: string; limit: TurnL
     ? tr("timeline.rateLimit.headingProvider", { provider: providerLabel, scope: scopeLabel })
     : tr("timeline.rateLimit.heading", { scope: scopeLabel });
 
-  const modelItems = useMemo<PickerItem[]>(
-    () =>
-      models.map((m) => ({
-        id: `${m.providerID}/${m.modelID}`,
-        label: m.name,
-        group: m.providerName ?? m.providerID,
-      })),
-    [models],
-  );
-
   const run = (kind: "resume" | "cancel", op: Promise<unknown>) => {
     setBusy(kind);
     void op.finally(() => setBusy(null));
   };
-  const pickModel = (id: string) => {
-    // Item id is `${providerID}/${modelID}`; providerID never contains a slash,
-    // but some model ids do — split on the first separator only.
-    const slash = id.indexOf("/");
-    if (slash < 1) return;
+  const pickModel = (model?: { providerID: string; modelID: string; variant?: string; harnessId?: string }) => {
+    if (!model || busy) return;
+    const options = resumeOptionsForModel({
+      currentHarnessId,
+      selectedHarnessId: catalogHarnessId,
+      model,
+    });
+    // ModelPicker closes/fences on a harness change; this final guard keeps a
+    // late selection from its previously visible catalog out of the new route.
+    if (!options) return;
     setBusy("switch");
-    void resumeNow(sessionId, { providerID: id.slice(0, slash), modelID: id.slice(slash + 1) })
+    void resumeNow(sessionId, options)
       .finally(() => setBusy(null));
   };
 
@@ -1719,13 +1745,31 @@ function RateLimitNotice({ sessionId, limit }: { sessionId: string; limit: TurnL
             disabled={busy !== null}
             onClick={() => run("resume", resumeNow(sessionId))}
           >{tr("timeline.rateLimit.resumeNow")}</Button>
-          <Picker
-            label={tr("timeline.rateLimit.switchModel")}
-            items={modelItems}
-            onPick={pickModel}
-            disabled={busy !== null || modelItems.length === 0}
-            className="turn-rate-limit-model"
-          />
+          <span className="turn-rate-limit-model">
+            <ModelPicker
+              models={routeCatalog.models}
+              harnessId={catalogHarnessId}
+              value={selectedModel}
+              header={
+                <SlotHost
+                  slot="modelPicker.header"
+                  context={{
+                    spaceId,
+                    sessionId,
+                    projectId: session?.projectId,
+                    sessionStatus: session?.status,
+                    harnessSelection,
+                    resolvedHarnessId: selectedHarnessId,
+                    pendingHarnessSelection: harnessSelection,
+                    onSelectHarness: setHarnessSelection,
+                  }}
+                />
+              }
+              direction="up"
+              onPick={pickModel}
+              className="picker-chip"
+            />
+          </span>
           <Button
             size="sm"
             variant="quiet"
@@ -1754,6 +1798,18 @@ function RateLimitNotice({ sessionId, limit }: { sessionId: string; limit: TurnL
  *  between real rows (the 1px ghost bubble sandwiching two timeline gaps). */
 function blankAssistant(m: RenderMessage): boolean {
   return m.kind === "assistant" && m.finalized && m.text.trim() === "" && m.reasoning.trim() === "";
+}
+
+/** The fresh-turn anchor keeps continuity with the immediately preceding
+ * assistant answer. Do not reach across another user turn when unusual slot
+ * or recovery rows sit between messages. */
+function previousAssistantRow(prompt: HTMLElement): HTMLElement | null {
+  for (let row = prompt.previousElementSibling; row; row = row.previousElementSibling) {
+    if (!(row instanceof HTMLElement)) continue;
+    if (row.matches(".msg.user, .github-conflict-card")) return null;
+    if (row.matches(".msg.assistant")) return row;
+  }
+  return null;
 }
 
 export function timelineAfterSlotContext(input: {
@@ -1831,9 +1887,9 @@ export default function Timeline({
     until: number;
   } | null>(null);
   const expectedScrollTop = useRef<number | null>(null);
-  // A newly appended user prompt owns a fresh-sheet tail. Presentation-only
-  // padding lets that prompt sit at the reading top and yields, pixel for
-  // pixel, as the agent's response and action rows grow into the sheet.
+  // A newly appended user prompt owns a contextual fresh-turn tail.
+  // Presentation-only padding leaves the end of the previous answer above
+  // that prompt, then yields pixel for pixel as the new response grows.
   const turnSheetPromptId = useRef<string | null>(null);
   const turnSheetPadding = useRef(0);
   const observedPrompt = useRef({
@@ -1935,7 +1991,20 @@ export default function Timeline({
     const row = prompt.getBoundingClientRect();
     const paddingTop = Number.parseFloat(getComputedStyle(el).paddingTop) || 0;
     const promptContentTop = el.scrollTop + row.top - port.top;
-    const desiredScrollTop = Math.max(0, promptContentTop - paddingTop);
+    const previousAssistant = previousAssistantRow(prompt);
+    const answerBubble = previousAssistant?.querySelector<HTMLElement>(":scope > .bubble") ?? null;
+    const bubbleRect = answerBubble?.getBoundingClientRect();
+    const bubbleStyle = answerBubble ? getComputedStyle(answerBubble) : null;
+    const fontSize = Number.parseFloat(bubbleStyle?.fontSize ?? "") || 16;
+    const lineHeight = Number.parseFloat(bubbleStyle?.lineHeight ?? "") || fontSize * 1.6;
+    const contextOffset = bubbleRect ? freshTurnContextOffset({
+      viewportHeight: el.clientHeight,
+      promptHeight: row.height,
+      responseHeight: bubbleRect.height,
+      responseToPromptGap: Math.max(0, row.top - bubbleRect.bottom),
+      responseLineHeight: lineHeight,
+    }) : 0;
+    const desiredScrollTop = Math.max(0, promptContentTop - paddingTop - contextOffset);
     const padding = requiredTurnSheetPadding({
       scrollHeight: el.scrollHeight,
       currentPadding: turnSheetPadding.current,

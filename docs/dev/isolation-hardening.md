@@ -45,9 +45,25 @@ a parity claim or a replacement feature.
   missing/unowned/corrupt resources and unavailable origins remain visible.
   Recovery has an explicit POST action; GET remains observational. Managed origins
   are filtered, nested isolation and sharing its source through ordinary
-  create/fork are rejected, and delete waits for finalization. Project-default
+  create/fork are rejected. Project-default
   isolation preserves the selected harness. Status requests cannot apply another
   session's late response.
+
+### Explicit hard deletion — 2026-09-13
+
+Deleting an isolated chat is now one destructive operation across the owning
+boundaries. The Git package proves that the exact worktree path, marker and
+managed branch belong to that canonical session; the server obtains release
+proof for an execution still bound to that path; terminal processes, integration
+worktrees, the complete source worktree and its managed branch are then removed
+before the canonical session is tombstoned. Desktop and mobile confirmations name
+the isolation workspace and all files in it.
+
+If the exact worktree path is already absent, deletion skips runtime construction
+and rebind entirely, so `rebind-pending` and a missing historical release receipt
+cannot strand the chat. A present but unowned/replaced path is preserved. A
+present owned path is also preserved when exact execution release cannot be
+proven; explicit intent does not authorize deleting another process's live cwd.
 
 ## Durable state machine and compatibility
 

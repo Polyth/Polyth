@@ -1887,6 +1887,7 @@ export const ar: AppMessages = {
   "sidebar.sessionlist.sessionRenamedToValue": "تمت إعادة تسمية الجلسة إلى {t}",
   "sidebar.sessionlist.showMoreSessions": "عرض المزيد من الجلسات",
   "sidebar.sessionlist.theAgentIsStillRunningOr": "لا يزال الوكيل قيد التشغيل أو في انتظارك.",
+  "sidebar.sessionlist.theLocalIsolationWorkspaceAndEveryFileInItWillAlsoBePermanentlyDeleted": "سيتم أيضًا حذف مساحة العمل المعزولة المحلية وجميع الملفات الموجودة فيها نهائيًا.",
   "sidebar.sessionlist.unpin": "إلغاء التثبيت",
   "sidebar.sessionlist.unreadActivity": "نشاط غير مقروء",
   "sidebar.sessionlist.valueSessions": "{length} جلسة",

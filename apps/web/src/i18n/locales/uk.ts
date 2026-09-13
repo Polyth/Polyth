@@ -1887,6 +1887,7 @@ export const uk: AppMessages = {
   "sidebar.sessionlist.sessionRenamedToValue": "Сеанс перейменовано на {t}",
   "sidebar.sessionlist.showMoreSessions": "Показати більше сесій",
   "sidebar.sessionlist.theAgentIsStillRunningOr": "Агент усе ще працює або чекає на вас.",
+  "sidebar.sessionlist.theLocalIsolationWorkspaceAndEveryFileInItWillAlsoBePermanentlyDeleted": "Локальну теку ізоляції та всі файли в ній також буде остаточно видалено.",
   "sidebar.sessionlist.unpin": "Відкріпити",
   "sidebar.sessionlist.unreadActivity": "Непрочитана активність",
   "sidebar.sessionlist.valueSessions": "{length} сеансів",

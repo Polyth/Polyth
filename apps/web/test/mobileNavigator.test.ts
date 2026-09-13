@@ -67,6 +67,11 @@ test("session actions stay a nested menu and can copy the session id", async () 
 
   assert.match(source, /copyText\(session\.id\)/);
   assert.match(source, /id:\s*"copy-id"[\s\S]*?label:\s*tr\("sidebar\.sessionlist\.copySessionId"\)/);
+  assert.match(source, /id:\s*"delete"[\s\S]*?onSelect:\s*\(\) => void remove\(\)/);
+  assert.doesNotMatch(source, /if \(session\.isolation\) return;/,
+    "explicit hard-delete stays available while isolation recovery is pending");
+  assert.match(source, /session\.isolation[\s\S]*?theLocalIsolationWorkspaceAndEveryFileInItWillAlsoBePermanentlyDeleted/,
+    "mobile confirmation names the isolation workspace that will be removed");
   assert.match(source, /<Menu[\s\S]*?phonePresentation="popover"[\s\S]*?open=\{menuOpen\}/);
 });
 
@@ -85,4 +90,23 @@ test("phone chats are pinned-first, date-filtered, and grouped without row ages"
   assert.doesNotMatch(source, /mobile-nav-session-time/);
   assert.match(css, /\.mobile-nav-session-row\.is-pinned:not\(\.is-active\)/);
   assert.match(css, /\.mobile-nav-date-divider::before,[\s\S]*?background:\s*var\(--border-soft\)/);
+});
+
+test("phone navigator shares project sorting and exposes touch-safe manual reordering", async () => {
+  const [source, css] = await Promise.all([
+    read("../src/components/mobile/MobileNavigator.tsx"),
+    read("../src/components/mobile/MobileNavigator.css"),
+  ]);
+
+  assert.match(source, /useProjectSortMode\(\)/);
+  assert.match(source, /useProjectOrder\(\)/);
+  assert.match(source, /sort === "manual"\) return applyManualProjectOrder\(filtered, projectOrder\)/);
+  assert.match(source, /id: "manual"[\s\S]*?label: tr\("sidebar\.manualOrder"\)/);
+  assert.match(source, /setProjectOrder\(reorderManualProjects\(fullProjectOrder\(\), draggedId, targetId\)\)/);
+  assert.match(source, /className="mobile-nav-project-drag-handle"/);
+  assert.match(source, /onPointerMove=\{moveProjectDrag\}/);
+  assert.match(source, /onPointerUp=\{finishProjectDrag\}/);
+  assert.match(source, /data-project-id=\{project\.id\}/);
+  assert.match(css, /\.mobile-nav-project-drag-handle\s*\{[\s\S]*?width:\s*var\(--tap\);[\s\S]*?touch-action:\s*none;/);
+  assert.match(css, /\.mobile-nav-project\.is-drag-over\s*> \.mobile-nav-project-head/);
 });

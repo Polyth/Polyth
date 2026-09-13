@@ -1887,6 +1887,7 @@ export const bg: AppMessages = {
   "sidebar.sessionlist.sessionRenamedToValue": "Сесията е преименувана на {t}",
   "sidebar.sessionlist.showMoreSessions": "Показване на още сесии",
   "sidebar.sessionlist.theAgentIsStillRunningOr": "Агентът все още работи или те чака.",
+  "sidebar.sessionlist.theLocalIsolationWorkspaceAndEveryFileInItWillAlsoBePermanentlyDeleted": "Локалното изолирано работно пространство и всички файлове в него също ще бъдат изтрити окончателно.",
   "sidebar.sessionlist.unpin": "Откачи",
   "sidebar.sessionlist.unreadActivity": "Непрочетена активност",
   "sidebar.sessionlist.valueSessions": "{length} сесии",

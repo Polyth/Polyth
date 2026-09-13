@@ -16,6 +16,7 @@
 // - restart never treats ambiguous irreversible work as "not done"
 // - after publication, failures are finalization-pending, not "merge failed"
 import { existsSync } from "node:fs";
+import { lstat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type {
@@ -108,6 +109,17 @@ export interface IsolationIntegrationDeps {
 }
 
 const err = (code: string, message: string) => Object.assign(new Error(message), { code });
+
+const filesystemPathExists = async (path: string): Promise<boolean> => {
+  try {
+    await lstat(path);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return false;
+    throw error;
+  }
+};
 
 export function createKeyedLock() {
   const locks = new Map<string, Promise<void>>();
@@ -1060,6 +1072,65 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
           });
           throw error;
         }
+      });
+    },
+
+    /** Destructive half of canonical session deletion. The caller holds the
+     * session mutation lock and supplies the runtime-owner release fence; this
+     * package proves Git ownership before removing any filesystem resource. */
+    async cleanupForSessionDelete(
+      sessionId: string,
+      releaseExecution: (cwd: string) => Promise<void>,
+    ): Promise<void> {
+      return withSession(sessionId, async () => {
+        const { session, isolation } = await load(sessionId);
+        const project = await projectOf(session.projectId);
+        // An absent path is enough to prove that there is no filesystem
+        // resource left to release. If the path still exists, Git inspection
+        // must succeed and prove ownership; a transient Git error is never
+        // downgraded to "missing".
+        const source = await filesystemPathExists(isolation.worktreePath)
+          ? await inspectSource(session.id, isolation)
+          : { status: "missing" as const };
+        if (source.status === "unowned") {
+          throw err(
+            "conflict",
+            `refusing to delete an isolation workspace whose ownership is not proven (${source.reason})`,
+          );
+        }
+        const dependents = await sourceDependents(session.id, isolation);
+        if (dependents.length > 0) {
+          throw err(
+            "conflict",
+            "another session still depends on the isolated workspace; delete or move it first",
+          );
+        }
+        if (source.status === "owned") {
+          await releaseExecution(isolation.worktreePath);
+          await closeProcesses(isolation.worktreePath);
+        }
+        // Integration worktrees are also Polyth-owned resources for this
+        // session. Remove them before the source so a later failure never
+        // leaves a live canonical session pointing at an already-deleted cwd.
+        await managed.pruneIntegrationsForSession(project.path, session.id);
+        if (source.status === "owned") {
+          const removed = await managed.removeOwned(
+            project.path,
+            ownedRef(session.id, isolation),
+          );
+          if (removed.status === "unowned") {
+            throw err(
+              "conflict",
+              `isolation ownership changed during deletion (${removed.reason})`,
+            );
+          }
+        }
+        isolationLog("session-delete-cleanup", {
+          sessionId: session.id,
+          projectId: session.projectId,
+          worktreePath: isolation.worktreePath,
+          status: source.status === "missing" ? "already-gone" : "removed",
+        });
       });
     },
 
