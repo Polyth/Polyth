@@ -203,6 +203,17 @@ test("dashboard keeps OpenCode variants distinct with accurate labels", () => {
   );
 });
 
+test("dashboard resolves stored default provider ids to the serving provider", () => {
+  const placeholder = session("legacy-default", "default", now - DAY_MS, 1_000, .02);
+  placeholder.resolvedHarnessId = "claude";
+  const dashboard = buildUsageDashboardData([placeholder], [], 7, now);
+
+  assert.deepEqual(dashboard.providers.map(({ id, label }) => ({ id, label })), [
+    { id: "anthropic", label: "Claude" },
+  ]);
+  assert.doesNotMatch(JSON.stringify(dashboard), /"default"|"Default"/);
+});
+
 test("dashboard presents legacy Copilot add-on telemetry as GitHub Copilot", () => {
   const dashboard = buildUsageDashboardData([], [{
     ...anthropicQuota,

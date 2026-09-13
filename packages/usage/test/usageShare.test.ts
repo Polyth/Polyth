@@ -41,19 +41,22 @@ test("provider usage distribution groups project tokens into bounded shares", ()
   ]);
 });
 
-test("provider usage distribution uses a human default label and session fallback", () => {
+test("provider usage distribution resolves placeholder providers and skips unattributed sessions", () => {
+  const unresolved = session("a", undefined, 0);
+  unresolved.resolvedHarnessId = "claude";
   const distribution = providerUsageDistribution([
-    session("a", undefined, 0),
-    session("b", "openai", 0),
+    unresolved,
+    session("b", "default", 0),
+    session("c", "openai", 0),
   ]);
 
   assert.equal(distribution.metric, "sessions");
   assert.equal(distribution.total, 2);
   assert.deepEqual(distribution.providers.map(({ providerId, share }) => ({ providerId, share })), [
-    { providerId: "Default", share: .5 },
+    { providerId: "anthropic", share: .5 },
     { providerId: "openai", share: .5 },
   ]);
-  assert.doesNotMatch(JSON.stringify(distribution), /__default__/);
+  assert.doesNotMatch(JSON.stringify(distribution), /default|Default|__default__/i);
 });
 
 test("provider usage distribution clamps invalid counters before drawing shares", () => {

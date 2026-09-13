@@ -1,6 +1,12 @@
 import type { SessionProjection } from "@polyth/contracts";
 import type { QuotaSnapshotDto, QuotaWindowDto } from "@polyth/session/web-api";
-import { getLocale, tr } from "../../../../apps/web/src/i18n/index.ts";
+import { getLocale } from "../../../../apps/web/src/i18n/index.ts";
+import {
+  canonicalProviderId,
+  displayProvider,
+  isPlaceholderProviderId,
+  resolveSessionUsageProviderId,
+} from "../providerIdentity.ts";
 
 export type UsageRangeDays = 7 | 30 | 90;
 export type UsageChartMetric = "tokens" | "cost" | "sessions";
@@ -91,42 +97,16 @@ const sessionActivityAt = (session: SessionProjection): number =>
     ? session.lastTurnAt
     : session.updatedAt;
 
-const canonicalProviderId = (providerId: string): string => {
-  const normalized = providerId.trim().toLowerCase();
-  if (normalized === "claude" || normalized === "claude-code") return "anthropic";
-  if (normalized === "codex" || normalized === "chatgpt") return "openai";
-  if (normalized === "github-copilot-addon") return "github-copilot";
-  if (normalized === "gemini") return "google";
-  return providerId;
-};
-
-const sessionProviderId = (session: SessionProjection): string =>
-  canonicalProviderId(session.model?.providerID || "Default");
+const sessionProviderId = (session: SessionProjection): string | undefined =>
+  resolveSessionUsageProviderId(session);
 
 const sessionModelId = (session: SessionProjection): string =>
   session.model?.modelID?.trim() || "Automatic";
 
-const displayProvider = (providerId: string): string => {
-  const normalized = providerId.trim().toLowerCase();
-  if (normalized === "default") return tr("composer.default");
-  const known: Record<string, string> = {
-    anthropic: "Claude",
-    claude: "Claude",
-    "claude-code": "Claude",
-    openai: "OpenAI",
-    opencode: "OpenCode",
-    "opencode-go": "OpenCode Go",
-    "opencode-zen": "OpenCode Zen",
-    openrouter: "OpenRouter",
-    google: "Gemini",
-    gemini: "Gemini",
-    "github-copilot": "GitHub Copilot",
-    xai: "xAI",
-    default: "Default",
-  };
-  return known[normalized] ?? providerId
-    .replace(/[-_]+/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+const quotaProviderId = (providerId: string): string | undefined => {
+  if (isPlaceholderProviderId(providerId)) return undefined;
+  const canonical = canonicalProviderId(providerId);
+  return canonical || undefined;
 };
 
 const trendOf = (current: number, previous: number): UsageTrend | null => {
@@ -200,16 +180,25 @@ export function buildUsageDashboardData(
   const previousTotals = sumSessions(previous);
 
   const providerIds = new Set<string>();
-  for (const session of current) providerIds.add(sessionProviderId(session));
-  for (const session of previous) providerIds.add(sessionProviderId(session));
-  for (const snapshot of snapshots) providerIds.add(canonicalProviderId(snapshot.providerId));
+  for (const session of current) {
+    const id = sessionProviderId(session);
+    if (id) providerIds.add(id);
+  }
+  for (const session of previous) {
+    const id = sessionProviderId(session);
+    if (id) providerIds.add(id);
+  }
+  for (const snapshot of snapshots) {
+    const id = quotaProviderId(snapshot.providerId);
+    if (id) providerIds.add(id);
+  }
 
   const providers = [...providerIds].map((id): UsageProviderSummary => {
     const providerCurrent = current.filter((session) => sessionProviderId(session) === id);
     const providerPrevious = previous.filter((session) => sessionProviderId(session) === id);
     const currentTotals = sumSessions(providerCurrent);
     const previousProviderTotals = sumSessions(providerPrevious);
-    const snapshot = snapshots.find((item) => canonicalProviderId(item.providerId) === id);
+    const snapshot = snapshots.find((item) => quotaProviderId(item.providerId) === id);
     const quotaWindow = primaryQuotaWindow(snapshot);
     const remainingPercent = quotaWindow && quotaWindow.limit > 0
       ? Math.round(Math.max(0, 1 - Math.min(1, quotaWindow.used / quotaWindow.limit)) * 100)
@@ -239,6 +228,7 @@ export function buildUsageDashboardData(
   const byModel = new Map<string, UsageModelSummary>();
   for (const session of current) {
     const providerId = sessionProviderId(session);
+    if (!providerId) continue;
     const modelId = sessionModelId(session);
     const id = `${providerId}/${modelId}`;
     const summary = byModel.get(id) ?? {

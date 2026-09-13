@@ -1,5 +1,7 @@
 import type { SessionProjection } from "@polyth/contracts";
-import { tr } from "../../../apps/web/src/i18n/index.ts";
+import { resolveSessionUsageProviderId } from "./providerIdentity.ts";
+
+export { providerUsageLabel } from "./providerIdentity.ts";
 
 export interface ProviderUsageShare {
   providerId: string;
@@ -21,18 +23,16 @@ const finiteNonNegative = (value: number | undefined): number =>
 const sessionTokens = (session: SessionProjection): number =>
   finiteNonNegative(session.tokenTotals?.input) + finiteNonNegative(session.tokenTotals?.output);
 
-export function providerUsageLabel(providerId: string): string {
-  return providerId === "Default" ? tr("composer.default") : providerId;
-}
-
-/** Project usage grouped by the provider recorded on each session. Sessions
- * without an explicit model stay visible as the human-facing Default group. */
+/** Project usage grouped by the provider that actually served each session. */
 export function providerUsageDistribution(
   sessions: readonly SessionProjection[],
 ): ProviderUsageDistribution {
   const grouped = new Map<string, Omit<ProviderUsageShare, "share">>();
+  let attributedSessions = 0;
   for (const session of sessions) {
-    const providerId = session.model?.providerID || "Default";
+    const providerId = resolveSessionUsageProviderId(session);
+    if (!providerId) continue;
+    attributedSessions += 1;
     const current = grouped.get(providerId) ?? {
       providerId,
       sessions: 0,
@@ -47,7 +47,7 @@ export function providerUsageDistribution(
 
   const totalTokens = [...grouped.values()].reduce((sum, provider) => sum + provider.tokens, 0);
   const metric = totalTokens > 0 ? "tokens" : "sessions";
-  const total = metric === "tokens" ? totalTokens : sessions.length;
+  const total = metric === "tokens" ? totalTokens : attributedSessions;
   const providers = [...grouped.values()]
     .map((provider): ProviderUsageShare => ({
       ...provider,
