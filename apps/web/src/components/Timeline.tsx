@@ -1038,18 +1038,18 @@ function childForTool(tool: ToolMsg, subagents: SubagentState | null): SubagentS
 /** Matches --activity-live-exit: the floating row must stay mounted for the
  *  whole fold-away before it is handed to the block. */
 const ACTIVITY_LIVE_EXIT_MS = 280;
-/** Minimum time an arriving action stays outside the block — comfortably more
- *  than the longest rise, so the motion always completes and is read as one
- *  deliberate beat. Status alone cannot decide this: a tool whose call and
- *  result land in the same render batch is never observed running. */
-const ACTION_SHOW_MS = 900;
+/** Minimum time an arriving action stays outside the block — long enough to
+ *  rise, be read, and fold away as one deliberate beat rather than a flash.
+ *  Status alone cannot decide this: a tool whose call and result land in the
+ *  same render batch is never observed running. */
+const ACTION_SHOW_MS = 1_500;
 /** Quiet beat between two actions: the previous card is fully gone before the
  *  next rises, so a burst pulses evenly instead of stampeding. */
 const ACTION_GAP_MS = ACTIVITY_LIVE_EXIT_MS;
-/** A backlog longer than this stops queueing. Narrating a stale burst matters
- *  less than staying in step with what the agent is actually doing; the
- *  overflow folds straight into the block. */
-const ACTION_BACKLOG_MS = 2_400;
+/** At most two actions wait their turn. Narrating a stale burst matters less
+ *  than staying in step with what the agent is actually doing; the overflow
+ *  folds straight into the block. */
+const ACTION_BACKLOG_MS = 2 * (ACTION_SHOW_MS + ACTION_GAP_MS);
 
 /** An action is live while it is still executing. Live actions float above the
  *  activity block instead of expanding it, so the block can stay folded. */
@@ -1134,8 +1134,10 @@ function activityItemNode(
   live: boolean,
   entering: boolean,
 ) {
+  // An arriving action shows what it is, not its whole output: it stays folded
+  // outside the block exactly as it will be inside it.
   return item.kind === "tool"
-    ? <ExecutionRow key={item.id} message={item} subagent={childForTool(item, subagents)} defaultOpen={live} entering={entering} />
+    ? <ExecutionRow key={item.id} message={item} subagent={childForTool(item, subagents)} entering={entering} />
     : item.kind === "assistant"
       ? <Thinking key={item.id} m={item} live={live} entering={entering} />
       : <TaskActivityRow key={item.id} activity={item} entering={entering} />;
@@ -1239,6 +1241,49 @@ export function ActivityGroupView({
   );
 }
 
+/** True while the element is taller than its clamp. Measured only while the
+ *  clamp is on, so expanding never erases the control that collapses it. */
+function useClipped(ref: RefObject<HTMLElement | null>, clamped: boolean): boolean {
+  const [clipped, setClipped] = useState(false);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element || !clamped) return;
+    const measure = () => setClipped(element.scrollHeight - element.clientHeight > 1);
+    measure();
+    if (typeof ResizeObserver !== "function") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref, clamped]);
+  return clipped;
+}
+
+/** A sent prompt is a record, not a wall of text: the log keeps four lines and
+ *  the rest stays one tap away. */
+export function UserPrompt({ text, id }: { text: string; id: string }) {
+  const [open, setOpen] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const clipped = useClipped(bodyRef, !open);
+  return (
+    <>
+      <div className={`user-prompt${open ? " open" : clipped ? " clipped" : ""}`} ref={bodyRef}>
+        {renderMarkdown(text, id)}
+      </div>
+      {clipped && (
+        <button
+          type="button"
+          className="user-prompt-toggle"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+        >
+          {open ? tr("timeline.collapse") : tr("timeline.expand")}
+          <span aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronDown />}</span>
+        </button>
+      )}
+    </>
+  );
+}
+
 function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segmentStartedAt, live, entering, onRevert, onFork, revert, fork }: {
   m: RenderMessage;
   announce?: Announce;
@@ -1258,7 +1303,7 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segm
     return (
       <div className={`msg user${entering ? " timeline-row-enter" : ""}`} data-msg-id={m.id} role="article" aria-label={userArticleName(m.time)}>
         <div className="bubble" dir="auto">
-          {renderMarkdown(m.text, m.id)}
+          <UserPrompt text={m.text} id={m.id} />
           {m.raw && m.raw !== m.text && (
             <div className="user-expanded-hint">
               {tr("timeline.expandedFrom")}{" "}<code>{m.raw.split("\n")[0] ?? m.raw}</code>

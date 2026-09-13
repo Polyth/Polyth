@@ -56,7 +56,7 @@ test("every live action rises out of the composer and honours the motion switch"
 test("a burst of fast actions is paced, not stampeded", () => {
   const timeline = source("../src/components/Timeline.tsx");
   const controller = source("../src/chatMotion.ts");
-  const show = Number(/ACTION_SHOW_MS = (\d+)/.exec(timeline)?.[1]);
+  const show = Number(/ACTION_SHOW_MS = ([\d_]+)/.exec(timeline)?.[1]?.replaceAll("_", ""));
   const lift = Number(/SEND_LIFT_TOUCH_MS = (\d+)/.exec(controller)?.[1]);
   const stretch = Number(/Math\.min\(Math\.abs\(delta\) \/ 1200, (0\.\d+)\)/.exec(controller)?.[1]);
 
@@ -66,9 +66,11 @@ test("a burst of fast actions is paced, not stampeded", () => {
   // The pause between two actions is the fold itself: the previous card is
   // gone before the next one rises.
   assert.match(timeline, /const ACTION_GAP_MS = ACTIVITY_LIVE_EXIT_MS/);
-  // A queue this deep would lag behind the agent, so the overflow folds
-  // straight into the block instead of narrating stale work.
-  assert.match(timeline, /ACTION_BACKLOG_MS = 2_400/);
+  // A deeper queue would lag behind the agent, so the overflow folds straight
+  // into the block instead of narrating stale work.
+  assert.match(timeline, /ACTION_BACKLOG_MS = 2 \* \(ACTION_SHOW_MS \+ ACTION_GAP_MS\)/);
+  // An arriving action announces what it is; its output stays one tap away.
+  assert.doesNotMatch(timeline, /defaultOpen=\{live\}/);
 });
 
 test("the rise stays smooth over long travel and the block never clips it", () => {

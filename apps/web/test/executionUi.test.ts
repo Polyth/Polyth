@@ -10,9 +10,11 @@ import {
   executionGroupLabel,
   executionPathParts,
   executionPresentation,
+  isImagePath,
   middleTruncatePath,
   normalizedMcpResult,
   normalizedInputEntries,
+  readFragment,
   reasoningHead,
   reasoningTail,
 } from "../src/execution.ts";
@@ -42,6 +44,20 @@ test("file summaries keep the filename primary and make project paths relative",
     executionPathParts("src/components/Composer.tsx", "/workspace"),
     { filename: "Composer.tsx", directory: "src/components", relativePath: "src/components/Composer.tsx" },
   );
+});
+
+test("read output is stripped back to source and its real starting line", () => {
+  assert.deepEqual(
+    readFragment("<file>\n00012| const a = 1;\n00013| const b = 2;\n</file>"),
+    { code: "const a = 1;\nconst b = 2;", startLine: 12 },
+  );
+  assert.deepEqual(
+    readFragment("     1→export function x() {\n     2→  return 1;\n\n(File has more lines)"),
+    { code: "export function x() {\n  return 1;", startLine: 1 },
+  );
+  // Prose that merely contains numbers is not a numbered read.
+  assert.deepEqual(readFragment("all good\nno changes"), { code: "all good\nno changes", startLine: 1 });
+  assert.ok(isImagePath("docs/shot.PNG") && !isImagePath("icon.svg") && !isImagePath("a.ts"));
 });
 
 test("shell previews remove setup noise and keep raw commands in details only", () => {
@@ -335,7 +351,7 @@ register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { default: ExecutionRow } = await import("../src/components/ExecutionRow.tsx");
-const { ActivityGroupView } = await import("../src/components/Timeline.tsx");
+const { ActivityGroupView, UserPrompt } = await import("../src/components/Timeline.tsx");
 
 /** Build the derived activity projection the timeline hands to the group view. */
 const activityGroup = (
@@ -460,7 +476,7 @@ test("the running action floats out of the folded block while settled rows stay 
     const live = [...container.querySelectorAll(".activity-live .execution-row")];
     assert.equal(live.length, 1, "only the running action floats above the block");
     assert.equal(live[0]?.querySelector(".tool-preview")?.textContent, "Run tests");
-    assert.ok(live[0]?.classList.contains("open"), "a floating action shows its output while it runs");
+    assert.ok(!live[0]?.classList.contains("open"), "a floating action names itself without dumping its output");
     const toggle = container.querySelector<HTMLButtonElement>(".ui-run-summary")!;
     assert.equal(toggle.getAttribute("aria-expanded"), "false", "the block never opens itself while work runs");
     assert.equal(container.querySelectorAll(".execution-row").length, 1, "settled rows stay folded away");
@@ -471,6 +487,122 @@ test("the running action floats out of the folded block while settled rows stay 
     assert.notEqual(folded[0]?.querySelector(".tool-preview")?.textContent, "", "history never retypes from empty");
   } finally {
     await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test("a long sent prompt keeps four lines in the log and expands on demand", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const proto = dom.HTMLElement.prototype as unknown as HTMLElement;
+  const original = Object.getOwnPropertyDescriptor(proto, "scrollHeight");
+  // happy-dom has no layout: stand in for a body taller than its own clamp.
+  Object.defineProperty(proto, "scrollHeight", {
+    configurable: true,
+    get(this: HTMLElement) { return this.classList?.contains("user-prompt") ? 400 : 0; },
+  });
+  try {
+    await act(async () => root.render(createElement(UserPrompt, {
+      text: Array.from({ length: 40 }, (_, index) => `line ${index + 1}`).join("\n\n"),
+      id: "prompt-1",
+    })));
+    const body = container.querySelector(".user-prompt");
+    const toggle = container.querySelector<HTMLButtonElement>(".user-prompt-toggle");
+    assert.ok(body?.classList.contains("clipped"), "an overlong prompt is clamped and faded");
+    assert.ok(!body?.classList.contains("open"), "a sent prompt starts collapsed");
+    assert.ok(toggle, "and offers a way out of the clamp");
+    assert.equal(toggle.getAttribute("aria-expanded"), "false");
+
+    await act(async () => toggle.click());
+    assert.ok(container.querySelector(".user-prompt")?.classList.contains("open"), "it expands in place");
+    assert.equal(container.querySelector(".user-prompt-toggle")?.getAttribute("aria-expanded"), "true",
+      "and the control stays available to collapse it again");
+  } finally {
+    if (original) Object.defineProperty(proto, "scrollHeight", original);
+    else delete (proto as unknown as Record<string, unknown>).scrollHeight;
+    await act(async () => root.unmount());
+    container.remove();
+  }
+
+  // A prompt that fits carries no chrome at all.
+  const short = document.createElement("div");
+  document.body.appendChild(short);
+  const shortRoot = createRoot(short);
+  try {
+    await act(async () => shortRoot.render(createElement(UserPrompt, { text: "short", id: "prompt-2" })));
+    assert.equal(short.querySelector(".user-prompt-toggle"), null);
+    assert.equal(short.querySelector(".user-prompt")?.className, "user-prompt");
+  } finally {
+    await act(async () => shortRoot.unmount());
+    short.remove();
+  }
+});
+
+test("expanded actions read as the thing they did, not as raw transport", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const expand = async () => {
+    await act(async () => container.querySelector<HTMLButtonElement>(".execution-summary")!.click());
+  };
+  try {
+    // Shell: the command keeps its syntax roles instead of being flat text.
+    await act(async () => root.render(createElement(ExecutionRow, {
+      message: tool({ input: { command: 'rg --hidden "needle" apps/web' } }),
+    })));
+    await expand();
+    const command = container.querySelector(".execution-command");
+    assert.match(command?.innerHTML ?? "", /class="tok-str"/, "quoted arguments are highlighted");
+    assert.match(command?.innerHTML ?? "", /class="tok-punc">--hidden/, "flags read as modifiers");
+    assert.equal(command?.textContent, 'rg --hidden "needle" apps/web', "and it still reads as the real command");
+
+    // Read: a numbered fragment becomes source with a real gutter.
+    await act(async () => root.render(createElement(ExecutionRow, {
+      message: tool({
+        id: "call-read",
+        callId: "call-read",
+        tool: "read",
+        input: { filePath: "/workspace/apps/web/src/app.ts", offset: 12 },
+        output: "<file>\n00012| const answer = 42;\n00013| export default answer;\n</file>",
+      }),
+    })));
+    await expand();
+    const lines = [...container.querySelectorAll(".execution-code-line")];
+    assert.equal(lines.length, 2, "the fragment renders line by line");
+    assert.equal(lines[0]?.querySelector(".execution-code-ln")?.textContent, "12", "the gutter carries the file's own numbers");
+    assert.match(lines[0]?.innerHTML ?? "", /tok-kw/, "the fragment is highlighted");
+    assert.doesNotMatch(container.textContent ?? "", /00012\|/, "the read transport never reaches the reader");
+
+    // ...and the file itself is a destination, not a printed path.
+    const open = container.querySelector<HTMLButtonElement>(".execution-file-open");
+    assert.ok(open, "the file opens from the action");
+    await act(async () => open.click());
+    assert.equal(getState().editorFile, "/workspace/apps/web/src/app.ts");
+
+    // Image: shown as the image, opening the shared full-screen viewer.
+    activateProject("execution-image-project");
+    await act(async () => root.render(createElement(ExecutionRow, {
+      message: tool({
+        id: "call-image",
+        callId: "call-image",
+        tool: "read",
+        input: { filePath: "docs/shot.png" },
+        output: "[image content]",
+      }),
+    })));
+    await expand();
+    const thumb = container.querySelector<HTMLImageElement>(".execution-image-open img");
+    assert.ok(thumb, "the image is shown, not described");
+    assert.match(thumb.src, /\/api\/files\/raw\?projectId=execution-image-project&path=docs%2Fshot\.png/);
+    assert.equal(container.querySelector(".execution-output"), null, "and its byte payload is not printed alongside it");
+    await act(async () => container.querySelector<HTMLButtonElement>(".execution-image-open")!.click());
+    assert.ok(document.body.querySelector(".attachment-preview-dialog"), "clicking opens the same viewer attachments use");
+  } finally {
+    await act(async () => {
+      activateProject(null);
+      root.unmount();
+    });
     container.remove();
   }
 });
@@ -850,7 +982,7 @@ test("an action that arrives already finished still appears outside the block fi
 
     // ...and the queue drains: the waiting action takes the stage once the one
     // before it has finished and the gap between actions has passed.
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1_300)); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1_900)); });
     assert.equal(
       container.querySelector(".activity-live:not(.leaving) .tool-preview")?.textContent,
       "Run tests",
@@ -1030,8 +1162,8 @@ test("a subagent action opens while its canonical projection is still syncing", 
         label: "Research helper",
         status: "running",
       },
-      defaultOpen: true,
     })));
+    await act(async () => container.querySelector<HTMLButtonElement>(".execution-summary")!.click());
 
     const open = container.querySelector<HTMLButtonElement>(".execution-subagent-detail > button");
     assert.ok(open);

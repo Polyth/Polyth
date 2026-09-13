@@ -31,6 +31,9 @@ const ALIAS: Record<string, string> = {
 const HASH_CMT = new Set(["py", "sh", "yaml"]);
 const HTML_CMT = new Set(["html", "md"]);
 
+/** A shell line's most legible role after strings: the flags it passes. Without
+ *  it an ordinary command ("git diff --check") renders entirely uncoloured. */
+const SH_FLAG = String.raw`(?<![\w-])--?[A-Za-z][\w-]*`;
 const STR = `"(?:\\\\.|[^"\\\\\\n])*"?|'(?:\\\\.|[^'\\\\\\n])*'?|\`(?:\\\\.|[^\`\\\\])*\`?`;
 const NUM = String.raw`0[xXbBoO][\da-fA-F_]+|\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?`;
 const WORD = String.raw`[A-Za-z_$][\w$]*`;
@@ -53,7 +56,8 @@ export function highlight(code: string, lang: string): string {
   const cmt = HTML_CMT.has(fam) ? "<!--[\\s\\S]*?-->"
     : HASH_CMT.has(fam) ? "#[^\\n]*"
     : "\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/";
-  const re = new RegExp(`(${cmt})|(${STR})|(${NUM})|(${WORD})|(${PUNC})`, "g");
+  const flag = fam === "sh" ? SH_FLAG : "(?!)";
+  const re = new RegExp(`(${cmt})|(${STR})|(${flag})|(${NUM})|(${WORD})|(${PUNC})`, "g");
   let out = "";
   let last = 0;
   for (let m: RegExpExecArray | null; (m = re.exec(code)); ) {
@@ -61,8 +65,9 @@ export function highlight(code: string, lang: string): string {
     last = m.index + m[0].length;
     const type = m[1] !== undefined ? "cmt"
       : m[2] !== undefined ? "str"
-      : m[3] !== undefined ? "num"
-      : m[4] !== undefined ? (kw.has(m[4]) ? "kw" : "")
+      : m[3] !== undefined ? "punc"
+      : m[4] !== undefined ? "num"
+      : m[5] !== undefined ? (kw.has(m[5]) ? "kw" : "")
       : "punc";
     out += type ? `<span class="tok-${type}">${esc(m[0])}</span>` : esc(m[0]);
   }

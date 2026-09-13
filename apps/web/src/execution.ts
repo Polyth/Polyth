@@ -623,6 +623,37 @@ export function normalizedInputEntries(input: JsonObject): Array<{ key: string; 
     .map(([key, value]) => ({ key: key.replace(/_/g, " "), value: compactValue(value) }));
 }
 
+/** Extensions the files raw endpoint actually serves as an image. `.svg` is
+ *  deliberately out: the server hands it back as a download, and reading one
+ *  means reading its markup. */
+const IMAGE_PATH = /\.(?:avif|bmp|gif|ico|jpe?g|png|webp)$/i;
+
+export function isImagePath(path: string | undefined): boolean {
+  return path !== undefined && IMAGE_PATH.test(path);
+}
+
+// "00012| text" pads the separator with one space; "  12→text" does not.
+const NUMBERED_LINE = /^\s*(\d+)(?:\| ?|→)(.*)$/;
+
+/** Read tools ship a transport, not a document: the body is wrapped in
+ *  `<file>` tags and every line carries its own number ("00012| x", "  12→x").
+ *  Strip that back to real source plus the line the fragment starts at, so it
+ *  can be rendered with a real gutter and syntax colour. */
+export function readFragment(output: string): { code: string; startLine: number } {
+  const body = output
+    .replace(/^\s*<file>\r?\n?/, "")
+    .replace(/\r?\n?<\/file>\s*$/, "")
+    .replace(/\s+$/, "");
+  const lines = body.split(/\r?\n/);
+  const numbered = lines
+    .map((line) => NUMBERED_LINE.exec(line))
+    .filter((match): match is RegExpExecArray => match !== null);
+  // Trailing notes ("(File has more lines…)") are normal; a body that is only
+  // incidentally numeric is not a numbered read.
+  if (numbered.length < Math.max(2, lines.length - 2)) return { code: body, startLine: 1 };
+  return { code: numbered.map((match) => match[2]).join("\n"), startLine: Number(numbered[0]![1]) };
+}
+
 export function outputLineCount(output: string): number {
   return lineCount(output);
 }

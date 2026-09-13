@@ -147,6 +147,7 @@ import { pickNativeFiles, readNativeStagedFile, removeNativeStagedFile } from "@
 import { adoptServerDraft, loadScopedDraftRecord, scopedDraftCacheKey, updateScopedDraftRecord } from "../draftRecord.ts";
 import { flushClientPersistence, type PersistenceScope } from "../clientPersistence.ts";
 import { clientPersistenceScope } from "../reliabilityContext.ts";
+import { stripRecoveryContextBlocks } from "../recoveryDisplay.ts";
 
 // Per-project command/snippet catalog cache: the composer remounts on every
 // session change (including a fresh spawn), and each mount refetched both
@@ -605,7 +606,7 @@ export default function Composer({
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
   const sessionScopeKeyRef = useRef(scopedDraftCacheKey(session?.id ?? null));
   const [text, setText] = useState(() => (
-    session?.id ? loadDraft(session.id) : newSessionIntent?.draft ?? ""
+    stripRecoveryContextBlocks(session?.id ? loadDraft(session.id) : newSessionIntent?.draft ?? "")
   ));
   const [queueEdit, setQueueEdit] = useState<QueueEdit | null>(null);
   const [queueEditStarting, setQueueEditStarting] = useState(false);
@@ -782,8 +783,8 @@ export default function Composer({
         : loadDraft(session.id))
       : "";
     const t = session?.id
-      ? localDraft
-      : newSessionIntent?.draft ?? "";
+      ? stripRecoveryContextBlocks(localDraft)
+      : stripRecoveryContextBlocks(newSessionIntent?.draft ?? "");
     setText(t);
     inputRef.current?.replaceText(t);
     promptHistoryNav.reset();
@@ -1095,15 +1096,17 @@ export default function Composer({
   useEffect(() => {
     const replaceText = (detail: string) => {
       draftRevisionRef.current += 1;
-      setText(detail);
-      inputRef.current?.replaceText(detail);
+      const visible = sessionIdRef.current === null ? stripRecoveryContextBlocks(detail) : detail;
+      setText(visible);
+      inputRef.current?.replaceText(visible);
     };
     const insert = (detail: string) => {
       const h = inputRef.current;
       if (!h) return;
       draftRevisionRef.current += 1;
+      const visible = sessionIdRef.current === null ? stripRecoveryContextBlocks(detail) : detail;
       const cur = h.getText();
-      h.replaceText(cur ? `${cur} ${detail}` : detail);
+      h.replaceText(cur ? `${cur} ${visible}` : visible);
     };
     const queuedReplacement = drainComposerReplacement();
     if (queuedReplacement !== undefined) replaceText(queuedReplacement);

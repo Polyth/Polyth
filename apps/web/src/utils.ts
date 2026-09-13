@@ -8,12 +8,14 @@ import { writeNativeClipboard } from "@polyth/mobile/native";
 import { acknowledgeDraftRevision, loadScopedDraftRecord, recordLocalDraftEdit, scopedDraftCacheKey } from "./draftRecord.ts";
 import { clientPersistenceScope } from "./reliabilityContext.ts";
 import type { PersistenceScope } from "./clientPersistence.ts";
+import { stripRecoveryContextBlocks } from "./recoveryDisplay.ts";
 
 /** Text of the first user message in a session's event log, if any. */
 export function firstUserText(events: readonly SessionEvent[] | undefined): string | undefined {
   const ev = events?.find((e) => e.type === "user/message");
   const t = ev ? (ev.data as JsonObject).text : undefined;
-  return typeof t === "string" && t.trim() ? t : undefined;
+  const visible = typeof t === "string" ? stripRecoveryContextBlocks(t) : undefined;
+  return visible && visible.trim() ? visible : undefined;
 }
 
 // Event arrays are replaced (never mutated) on change, so the derived title is
@@ -36,7 +38,8 @@ export function lastUserText(events: readonly SessionEvent[] | undefined): strin
   for (let i = events.length - 1; i >= 0; i--) {
     if (events[i]!.type !== "user/message") continue;
     const t = (events[i]!.data as JsonObject).text;
-    if (typeof t === "string" && t.trim()) return t;
+    const visible = typeof t === "string" ? stripRecoveryContextBlocks(t) : undefined;
+    if (visible && visible.trim()) return visible;
   }
 }
 

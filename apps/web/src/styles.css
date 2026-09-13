@@ -1347,6 +1347,32 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   line-height: 1.5;
   box-shadow: var(--material-glass-highlight), var(--shadow-sm);
 }
+/* A sent prompt keeps four lines in the log; the rest is one tap away. The
+   fade only appears once the text really is taller than the clamp. */
+.user-prompt { max-height: 4lh; overflow: hidden; }
+.user-prompt.clipped {
+  -webkit-mask-image: linear-gradient(to bottom, #000 74%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 74%, transparent 100%);
+}
+.user-prompt.open { max-height: none; }
+.user-prompt > :first-child { margin-block-start: 0; }
+.user-prompt > :last-child { margin-block-end: 0; }
+.user-prompt-toggle {
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-block-start: var(--space-1);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--font-response-meta);
+  cursor: pointer;
+}
+.user-prompt-toggle:hover { color: var(--text); background: transparent; }
+.user-prompt-toggle svg { width: var(--icon-sm); height: var(--icon-sm); }
+
 /* Assistant answers are document prose on the content canvas. Reasoning stays
    quiet and technical output keeps the only opaque boundaries in the turn. */
 .msg.assistant > .bubble {
@@ -10738,8 +10764,128 @@ color: var(--text);
   user-select: text;
   white-space: pre;
 }
-.execution-command { font-size: calc(13.5px * var(--ui-font-scale, 1)); }
+/* The command reads as a terminal line, not as a quoted string: one prompt
+   mark, the tokenizer's colours, room for the glyph. */
+.execution-command {
+  display: flex;
+  gap: var(--space-2);
+  border: 1px solid var(--border-soft);
+  color: var(--text);
+  font-size: calc(13.5px * var(--ui-font-scale, 1));
+}
+.execution-command::before {
+  content: "$";
+  flex: none;
+  color: color-mix(in srgb, var(--accent) 70%, var(--muted));
+  user-select: none;
+}
+.execution-command code { min-width: 0; flex: 1; display: block; padding: 0; border: 0; background: none; font: inherit; }
 .execution-output.expanded { max-height: min(50vh, 560px); }
+
+/* Read output is source, so it is shown as source: real gutter, real syntax
+   colour, the same well the command block uses. */
+.execution-code {
+  max-width: 100%;
+  max-height: 240px;
+  overflow: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  font: 400 var(--font-code)/1.55 var(--mono);
+  tab-size: 2;
+  user-select: text;
+}
+.execution-code.expanded { max-height: min(50vh, 560px); }
+.execution-code-line { display: flex; gap: var(--space-3); padding-inline: var(--space-3); white-space: pre; }
+.execution-code-line:first-child { padding-top: var(--space-2); }
+.execution-code-line:last-child { padding-bottom: var(--space-2); }
+.execution-code-ln {
+  flex: none;
+  min-width: 3ch;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  user-select: none;
+}
+
+/* The file an action touched is a destination, not a printed string. */
+.execution-file-summary { display: flex; align-items: center; gap: var(--space-1); }
+.execution-file-open {
+  min-width: 0;
+  min-height: max(var(--control-h), var(--hit-min));
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  color: var(--text);
+  text-align: start;
+  cursor: pointer;
+}
+.execution-file-open:hover { border-color: var(--accent-line); background: var(--raised); }
+.execution-file-open-icon { display: grid; flex: none; place-items: center; color: var(--muted); }
+.execution-file-open-icon svg { width: var(--icon-md); height: var(--icon-md); }
+.execution-file-open-name { min-width: 0; display: grid; }
+.execution-file-open-name strong {
+  overflow: hidden;
+  font-size: var(--font-tool-label);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.execution-file-open-name span {
+  overflow: hidden;
+  color: var(--muted);
+  font: var(--font-technical)/var(--font-technical-lh) var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.execution-file-open-hint { flex: none; margin-inline-start: auto; color: var(--faint); font-size: var(--font-response-meta); }
+.execution-file-open-chevron { display: grid; flex: none; place-items: center; color: var(--faint); }
+.execution-file-open-chevron svg { width: var(--icon-sm); height: var(--icon-sm); }
+@media (max-width: 520px) { .execution-file-open-hint { display: none; } }
+
+/* An image the agent viewed is shown, captioned, and opens full-screen. */
+.execution-image-open {
+  width: 100%;
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--sunken);
+  cursor: zoom-in;
+}
+.execution-image-open:hover { border-color: var(--accent-line); }
+.execution-image-open img {
+  width: 100%;
+  max-height: 320px;
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+  object-fit: contain;
+}
+.execution-image-caption {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-response-meta);
+}
+.execution-image-caption strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-tool-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.execution-image-caption > span:last-child { margin-inline-start: auto; flex: none; }
+.execution-image-icon { display: grid; flex: none; place-items: center; }
+.execution-image-icon svg { width: var(--icon-sm); height: var(--icon-sm); }
 .execution-result.error {
   padding: 5px 0 9px;
   border-radius: var(--radius-control);
@@ -10747,8 +10893,7 @@ color: var(--text);
 }
 .execution-result.error .execution-detail-heading { color: var(--red); }
 .execution-result.error .execution-output { background: transparent; color: var(--text-dim); }
-.execution-output-actions,
-.execution-inline-actions {
+.execution-output-actions {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -10756,7 +10901,6 @@ color: var(--text);
   margin-top: 5px;
 }
 .execution-output-actions button,
-.execution-inline-actions button,
 .execution-metadata button {
   min-height: 44px;
   padding: 8px 0;
@@ -10766,20 +10910,10 @@ color: var(--text);
   font-size: calc(11.75px * var(--ui-font-scale, 1));
 }
 .execution-output-actions button:hover,
-.execution-inline-actions button:hover,
 .execution-metadata button:hover { color: var(--text); background: transparent; }
 .execution-output-actions > span {
   color: var(--faint);
   font-size: calc(11.75px * var(--ui-font-scale, 1));
-}
-.execution-file-summary > code {
-  display: block;
-  overflow: hidden;
-  color: var(--text-dim);
-  font-size: calc(13px * var(--ui-font-scale, 1));
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  user-select: text;
 }
 .execution-input dl { display: grid; gap: 5px; margin: 0; }
 .execution-input dl > div { min-width: 0; display: grid; grid-template-columns: minmax(80px, 120px) minmax(0, 1fr); gap: 10px; }
@@ -11080,9 +11214,10 @@ html[data-font] body :is(code, pre, .mono, .git-diff, .files-viewer-content, .sh
 html[data-font] body :is(
   .execution-command,
   .execution-output,
+  .execution-code,
   .execution-details .git-diff,
   .execution-file-path,
-  .execution-file-summary > code,
+  .execution-file-open-name span,
   .execution-search-list code,
   .execution-input dd,
   .execution-viewer > pre,

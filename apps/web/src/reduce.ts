@@ -20,6 +20,7 @@ import type {
 import { extractChangedFiles } from "./pendingChanges.ts";
 import { tr } from "./i18n/index.ts";
 import { runWebReducers } from "./packages/reducers.ts";
+import { stripRecoveryContextBlocks } from "./recoveryDisplay.ts";
 
 export interface UserMsg {
   kind: "user";
@@ -617,8 +618,9 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       break;
     }
     case "user/message": {
-      const text = str(d, "text") ?? "";
-      const raw = str(d, "raw");
+      const text = stripRecoveryContextBlocks(str(d, "text") ?? "");
+      const rawValue = str(d, "raw");
+      const raw = rawValue === undefined ? undefined : stripRecoveryContextBlocks(rawValue);
       if (d.githubConflictResolution !== true) {
         const msg: UserMsg = { kind: "user", id: ev.id, eventSeq: ev.seq, text, time: ev.time };
         if (raw !== undefined && raw !== text) msg.raw = raw;

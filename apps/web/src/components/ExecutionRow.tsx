@@ -6,24 +6,28 @@ import { fmtMs } from "../format.ts";
 import {
   executionPresentation,
   executionPathParts,
+  isImagePath,
   normalizedMcpResult,
   normalizedInputEntries,
   outputLineCount,
+  readFragment,
   type ExecutionKind,
 } from "../execution.ts";
 import { applyUnifiedDiff, visibleDiffRows, type DiffApplyDirection, type FileDiff } from "../diff.ts";
-import { highlight, langOf } from "../highlight.ts";
+import { highlight, highlightLines, langOf } from "../highlight.ts";
 import { tr } from "../i18n/index.ts";
 import { Icon } from "../icons.tsx";
 import { openSession } from "../init.ts";
 import { getState, openEditorFile, setUiError, useStore } from "../store.ts";
 import type { SubagentState, TaskListState, ToolMsg } from "../reduce.ts";
+import AttachmentPreview from "./AttachmentPreview.tsx";
 import CopyButton from "./CopyButton.tsx";
 import Dialog from "./a11y/Dialog.tsx";
 import { Button, Icon as ActionIcon, RedoIcon, StopIcon, Textarea, UndoIcon } from "./ui/index.ts";
 
-function ExecutionIcon({ kind }: { kind: ExecutionKind }) {
-  const Glyph = kind === "shell" ? Icon.term
+function ExecutionIcon({ kind, image = false }: { kind: ExecutionKind; image?: boolean }) {
+  const Glyph = image ? Icon.image
+    : kind === "shell" ? Icon.term
     : kind === "read" ? Icon.files
       : kind === "edit" || kind === "write" ? Icon.fileEdit
         : kind === "create" ? Icon.plus
@@ -175,7 +179,97 @@ function CommandDetail({ command }: { command: string }) {
   return (
     <section className="execution-detail-section">
       <DetailHeading label="Command" copy={command} />
-      <pre className="execution-command" tabIndex={0}>{command}</pre>
+      <pre className="execution-command" tabIndex={0}>
+        <code dangerouslySetInnerHTML={{ __html: highlight(command, "sh") }} />
+      </pre>
+    </section>
+  );
+}
+
+/** The file the action worked on, presented as the file itself: name first,
+ *  location second, one click into the editor. */
+function FileTarget({ path, parts, onOpen }: {
+  path: string;
+  parts?: { filename: string; directory: string };
+  onOpen: () => void;
+}) {
+  return (
+    <section className="execution-detail-section execution-file-summary" aria-label="File">
+      <button type="button" className="execution-file-open" onClick={onOpen} title={path}>
+        <span className="execution-file-open-icon" aria-hidden="true"><Icon.fileEdit /></span>
+        <span className="execution-file-open-name">
+          <strong>{parts?.filename ?? path}</strong>
+          {parts?.directory && <span>{parts.directory}</span>}
+        </span>
+        <span className="execution-file-open-hint">Open in editor</span>
+        <span className="execution-file-open-chevron" aria-hidden="true"><Icon.chevronRight /></span>
+      </button>
+      <CopyButton text={path} label="Copy file path" />
+    </section>
+  );
+}
+
+/** An image the agent looked at is shown as the image, not as a path plus a
+ *  base64 blob. Clicking it opens the same full-screen viewer attachments use. */
+function ImageDetail({ path, name }: { path: string; name: string }) {
+  const projectId = useStore((state) => state.activeProjectId);
+  const sessionId = useStore((state) => state.activeSessionId);
+  const [open, setOpen] = useState(false);
+  const url = projectId ? api.filesRawUrl(projectId, path, sessionId ?? undefined) : undefined;
+  if (!url) return null;
+  return (
+    <section className="execution-detail-section execution-image" aria-label="Image">
+      <button type="button" className="execution-image-open" onClick={() => setOpen(true)} title={path}>
+        <img src={url} alt={name} loading="lazy" />
+        <span className="execution-image-caption">
+          <span className="execution-image-icon" aria-hidden="true"><Icon.image /></span>
+          <strong>{name}</strong>
+          <span>View image</span>
+        </span>
+      </button>
+      {open && (
+        <AttachmentPreview
+          attachments={[{ id: path, name, mime: "image/*", size: 0, kind: "image", path, url }]}
+          start={0}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </section>
+  );
+}
+
+const FRAGMENT_PREVIEW_LINES = 14;
+
+/** Read output rendered as what it is — source, with a real gutter and the
+ *  file's own syntax colour. */
+function CodeFragment({ text, path, onOpenFull }: {
+  text: string;
+  path?: string;
+  onOpenFull: () => void;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const { code, startLine } = useMemo(() => readFragment(text), [text]);
+  const lines = useMemo(() => highlightLines(code, langOf(path ?? "")), [code, path]);
+  const shown = showAll ? lines : lines.slice(0, FRAGMENT_PREVIEW_LINES);
+  return (
+    <section className="execution-detail-section">
+      <DetailHeading label="Contents" copy={code} />
+      <div className={`execution-code${showAll ? " expanded" : ""}`} tabIndex={0} role="group" aria-label={`Contents of ${path ?? "file"}`}>
+        {shown.map((line, index) => (
+          <div key={startLine + index} className="execution-code-line">
+            <span className="execution-code-ln" aria-hidden="true">{startLine + index}</span>
+            <span dangerouslySetInnerHTML={{ __html: line || " " }} />
+          </div>
+        ))}
+      </div>
+      {lines.length > FRAGMENT_PREVIEW_LINES && (
+        <div className="execution-output-actions">
+          <button type="button" onClick={() => setShowAll((value) => !value)}>
+            {showAll ? "Collapse" : `Show all ${lines.length} lines`}
+          </button>
+          <button type="button" onClick={onOpenFull}>Open full output</button>
+        </div>
+      )}
     </section>
   );
 }
@@ -756,12 +850,10 @@ function isTrivialFileEditOutput(output: string | undefined, hasDiff: boolean): 
 export function ExecutionRow({
   message,
   subagent,
-  defaultOpen = false,
   entering = false,
 }: {
   message: ToolMsg;
   subagent?: Subagent;
-  defaultOpen?: boolean;
   /** Only the newest visible execution gets entrance and print-out motion. */
   entering?: boolean;
 }) {
@@ -795,11 +887,8 @@ export function ExecutionRow({
     const id = state.activeProjectId;
     return id ? state.projectRegistry.projects.find((project) => project.id === id)?.path ?? null : null;
   });
-  const [open, setOpen] = useState(defaultOpen);
-  const userToggled = useRef(false);
-  useEffect(() => {
-    if (!userToggled.current) setOpen(defaultOpen);
-  }, [defaultOpen]);
+  // Every row opens by hand only — folded while it runs, folded once settled.
+  const [open, setOpen] = useState(false);
   const [revertedPaths, setRevertedPaths] = useState<ReadonlySet<string>>(() => new Set());
   const detailsPresent = useCollapsePresence(open);
   const rowRef = useRef<HTMLDivElement>(null);
@@ -829,12 +918,15 @@ export function ExecutionRow({
         (candidate.status === "pending" || candidate.status === "active" || candidate.status === "done" || candidate.status === "failed");
     }).map((item) => ({ id: item.id, text: item.text, status: item.status })) : undefined;
   }, [message, message.rev]);
+  // Whatever the row already shows as a first-class surface is not repeated as
+  // a technical key/value: the file card carries the path, the fragment's own
+  // gutter carries the line range.
   const inputEntries = useMemo(() => {
-    const entries = normalizedInputEntries(message.input);
-    return presentation.files?.length
-      ? entries.filter((entry) => !isPathDetailKey(entry.key))
-      : entries;
-  }, [message, message.rev, presentation.files]);
+    const shown = Boolean(presentation.path) || Boolean(presentation.files?.length);
+    return normalizedInputEntries(message.input).filter((entry) =>
+      !(shown && isPathDetailKey(entry.key))
+      && !(presentation.kind === "read" && /^(?:offset|limit)$/i.test(entry.key)));
+  }, [message, message.rev, presentation.files, presentation.path, presentation.kind]);
   const inputJson = useMemo(() => JSON.stringify(message.input, null, 2), [message, message.rev]);
   const raw = useMemo(() => JSON.stringify({
     tool: message.tool,
@@ -852,6 +944,7 @@ export function ExecutionRow({
   // Only the newest collapsed summary prints out. Historical rows render in
   // full when session hydration remounts them.
   const summaryTitle = pathParts?.filename ?? presentation.label;
+  const image = isImagePath(presentation.path) && !presentation.files?.length;
   const summaryPreview = pathParts
     ? [presentation.label, pathParts.directory].filter(Boolean).join(" · ")
     : presentation.preview;
@@ -901,12 +994,9 @@ export function ExecutionRow({
             aria-label={`${open ? "Collapse" : "Expand"} ${summaryTitle}: ${summaryPreview}${
               hasLineChanges(stats) ? `, ${stats.add} added, ${stats.del} removed` : ""
             }`}
-            onClick={() => {
-              userToggled.current = true;
-              setOpen((value) => !value);
-            }}
+            onClick={() => setOpen((value) => !value)}
           >
-            <span className="tool-icon execution-icon" aria-hidden="true"><ExecutionIcon kind={presentation.kind} /></span>
+            <span className="tool-icon execution-icon" aria-hidden="true"><ExecutionIcon kind={presentation.kind} image={image} /></span>
             <span className="execution-main" title={presentation.path}>
               <span className="tool-name">
                 {summaryTitle}
@@ -937,14 +1027,9 @@ export function ExecutionRow({
               {presentation.command && <CommandDetail command={presentation.command} />}
               {subagent && <SubagentDetail subagent={subagent} />}
               {presentation.path && !presentation.files?.length && (
-                <section className="execution-detail-section execution-file-summary">
-                  <DetailHeading label="File" copy={presentation.path} />
-                  <code>{presentation.path}</code>
-                  <div className="execution-inline-actions">
-                    <button type="button" onClick={openFile}>Open in Files</button>
-                    <button type="button" onClick={openFile}>View full file</button>
-                  </div>
-                </section>
+                image
+                  ? <ImageDetail path={presentation.path} name={summaryTitle} />
+                  : <FileTarget path={presentation.path} parts={pathParts} onOpen={openFile} />
               )}
               {presentation.files && presentation.files.length > 0 && (
                 <FileChangesView
@@ -973,11 +1058,13 @@ export function ExecutionRow({
               {message.error !== undefined && (
                 <OutputPreview text={message.error} error animate={entering} onOpenFull={() => openViewer(`${presentation.label} error`, message.error ?? "")} />
               )}
-              {message.output !== undefined && !isTrivialFileEditOutput(message.output, Boolean(presentation.files?.length)) && (
+              {message.output !== undefined && !image && !isTrivialFileEditOutput(message.output, Boolean(presentation.files?.length)) && (
                 presentation.kind === "search"
                   ? <SearchResults text={message.output} onOpenFull={() => openViewer(`${presentation.label} results`, message.output ?? "")} />
                   : presentation.kind === "mcp"
                     ? <McpResult output={message.output} />
+                  : presentation.kind === "read"
+                    ? <CodeFragment text={message.output} path={presentation.path} onOpenFull={() => openViewer(`${presentation.label} output`, message.output ?? "")} />
                   : <OutputPreview text={message.output} animate={entering} onOpenFull={() => openViewer(`${presentation.label} output`, message.output ?? "")} />
               )}
               {!presentation.files?.length && presentation.kind !== "subagent" && (

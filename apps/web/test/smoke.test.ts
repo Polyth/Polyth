@@ -55,6 +55,7 @@ import { extractChangedFiles, selectPendingChanges, sessionEditedPaths } from ".
 import { sessionSurfaceKind, type SurfaceModel } from "../src/sessionSurface.ts";
 import { mergeThinking } from "../src/utils.ts";
 import { tr } from "../src/i18n/index.ts";
+import { stripRecoveryContextBlocks } from "../src/recoveryDisplay.ts";
 import {
   JUMP_TO_LATEST_NAME,
   OPEN_TIMELINE_NAME,
@@ -92,6 +93,25 @@ function ev(type: string, data: JsonObject, sessionId = "s1"): SessionEvent {
   seqCounter += 1;
   return { id: `e${seqCounter}`, sessionId, seq: seqCounter, time: 1_700_000_000_000 + seqCounter, type, data, v: 1 };
 }
+
+test("display text removes leading internal recovery blocks but keeps the prompt", () => {
+  const block = [
+    '<polyth-runtime-epoch-recovery epoch="1" marker-seq="13">',
+    "Recovery context",
+    "The execution runtime was replaced.",
+    "</polyth-runtime-epoch-recovery>",
+  ].join("\n");
+  assert.equal(
+    stripRecoveryContextBlocks(`${block}\n\nWhat are we working on in polyth?`),
+    "What are we working on in polyth?",
+  );
+  assert.equal(stripRecoveryContextBlocks(`Prompt includes\n${block}`), `Prompt includes\n${block}`);
+  assert.equal(stripRecoveryContextBlocks(`${block}\n\n${block}\n\ncontinue`), "continue");
+
+  const model = buildModel([ev("user/message", { text: `${block}\n\ncontinue` })]);
+  assert.equal(model.messages[0]?.kind, "user");
+  assert.equal((model.messages[0] as { text: string }).text, "continue");
+});
 
 test("assistant chunks stream into one message and finalize on assistant/message", () => {
   const events = [
