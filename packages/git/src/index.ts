@@ -65,6 +65,12 @@ export interface Worktree {
   isMain: boolean;
 }
 
+/** Outcome of an ordinary merge. `ok: false` means Git stopped inside the
+ *  working tree with conflict markers — the caller owns the next step. */
+export type GitMergeOutcome =
+  | { ok: true; alreadyUpToDate: boolean; fastForward: boolean; head: string }
+  | { ok: false; conflicted: string[] };
+
 export interface WorktreeService {
   list(root: string): Promise<Worktree[]>;
   create(root: string, input: { branch: string; path?: string; base?: string; newBranchOnly?: boolean }): Promise<{ path: string; branch: string }>;
@@ -132,6 +138,11 @@ export interface GitService {
   /** Snapshot HEAD plus the working tree without changing HEAD or the real index. */
   snapshotCommit(root: string, message: string, identity?: { name: string; email: string }): Promise<{ sha: string; created: boolean }>;
   mergeSquash(root: string, ref: string): Promise<{ ok: true } | { ok: false; conflicted: string[] }>;
+  /** Ordinary `git merge --no-edit` of `ref` into whatever is checked out at
+   *  `root`. Conflicts are reported, never thrown: the tree stays conflicted so
+   *  the caller can resolve it or call `abortMerge`. Refusals that leave the
+   *  tree untouched (dirty overlap, unborn HEAD) still throw. */
+  merge(root: string, ref: string): Promise<GitMergeOutcome>;
   abortMerge(root: string): Promise<void>;
   commitWithIdentity(root: string, message: string, identity?: { name: string; email: string }): Promise<{ sha: string }>;
   /** Commit the current index as a child of HEAD without moving HEAD or running hooks/signing. */
@@ -963,6 +974,32 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
         return { ok: false, conflicted };
       }
       throw Object.assign(new Error(shortErr(r.stderr || r.stdout || "merge --squash failed")), {
+        code: "git-failed",
+      });
+    },
+
+    async merge(root, ref) {
+      assertRev(ref);
+      const before = (await run(root, ["rev-parse", "HEAD"], true)).stdout.trim();
+      const result = await run(root, [
+        "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
+        "merge", "--no-edit", ref,
+      ], { allowFail: true, timeoutMs: Math.max(timeout, 120_000) });
+      if (result.code === 0) {
+        const head = (await run(root, ["rev-parse", "HEAD"], true)).stdout.trim();
+        const said = `${result.stdout}\n${result.stderr}`;
+        return {
+          ok: true,
+          alreadyUpToDate: head !== "" && head === before,
+          fastForward: /fast[- ]forward/i.test(said),
+          head,
+        };
+      }
+      // Git reports a stopped merge through the working tree, not the exit
+      // code: only an actually conflicted index means "resolve or abort".
+      const conflicted = (await service.status(root)).conflicted.map((file) => file.path);
+      if (conflicted.length > 0) return { ok: false, conflicted };
+      throw Object.assign(new Error(shortErr(result.stderr || result.stdout || "merge failed")), {
         code: "git-failed",
       });
     },

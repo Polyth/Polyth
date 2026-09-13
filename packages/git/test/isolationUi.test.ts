@@ -58,6 +58,12 @@ async function mountBadge(session: SessionProjection) {
 function buttons(container: ParentNode) {
   return [...container.querySelectorAll("button")];
 }
+// The overflow trigger is an icon button, so its name lives in aria-label
+// rather than in text. Match on the accessible name either way.
+function named(container: ParentNode, name: string) {
+  return buttons(container).find((button) =>
+    button.textContent === name || button.getAttribute("aria-label") === name);
+}
 
 test("IsolationListBadge names Isolated when isolation is present and is absent otherwise", async () => {
   const isolated = projection("list-badge", { ...base, state: "active" });
@@ -132,7 +138,7 @@ test("changes-ready shows integrate, review, continue and delete in overflow", a
     const integrate = buttons(mounted.container).find((b) => b.textContent === tr("isolation.integrateInto", { branch: base.targetBranch }));
     const review = buttons(mounted.container).find((b) => b.textContent === tr("isolation.reviewChanges"));
     const keep = buttons(mounted.container).find((b) => b.textContent === tr("isolation.continueWorking"));
-    const more = buttons(mounted.container).find((b) => b.textContent === tr("common.more"));
+    const more = named(mounted.container, tr("common.more"));
     assert.ok(integrate && !integrate.disabled);
     assert.ok(review && !review.disabled);
     assert.ok(keep && !keep.disabled);
@@ -486,7 +492,7 @@ test("discard confirmation closes when the session changes", async () => {
   });
   const mounted = await mount(projection("discard-session-a", isolation));
   try {
-    const more = buttons(mounted.container).find((button) => button.textContent === tr("common.more"));
+    const more = named(mounted.container, tr("common.more"));
     assert.ok(more);
     await act(async () => { more!.click(); await wait(); });
     const deleteEntry = [...document.querySelectorAll('[role="menuitem"]')]

@@ -334,7 +334,31 @@ export interface Worktree {
   branch: string | null;
   head: string;
   isMain: boolean;
+  /** Present only for `listWorktrees(projectId, { status: true })`, and only
+   *  for checkouts Git could describe. Absent means unknown, never zero. */
+  ahead?: number;
+  behind?: number;
+  changed?: number;
+  conflicted?: number;
+  upstream?: string;
 }
+
+export type GitMergeResult =
+  | { ok: true; alreadyUpToDate: boolean; fastForward: boolean; head: string }
+  | { ok: false; conflicted: string[] };
+
+/** Which checkout a Git call acts on. A session scopes to that session's
+ *  worktree; `worktreePath` names a checkout of the same project directly and
+ *  is validated server-side against Git's own worktree list. */
+export interface GitScope {
+  sessionId?: string;
+  worktreePath?: string;
+}
+
+const scoped = (scope?: GitScope): Record<string, string> => ({
+  ...(scope?.sessionId ? { sessionId: scope.sessionId } : {}),
+  ...(scope?.worktreePath ? { worktreePath: scope.worktreePath } : {}),
+});
 
 // ---- file types (§12) ------------------------------------------------------
 export interface FileEntry {
@@ -994,14 +1018,21 @@ export const api = {
     jfetch<{ ok: true }>(`/api/git/stash/apply`, json("POST", { projectId, ref, ...(sessionId ? { sessionId } : {}) })),
   gitStashDrop: (projectId: string, ref: string, sessionId?: string) =>
     jfetch<{ ok: true }>(`/api/git/stash/drop`, json("POST", { projectId, ref, ...(sessionId ? { sessionId } : {}) })),
-  gitFetch: (projectId: string, remote = "origin", sessionId?: string) =>
-    jfetch<{ ok: true }>(`/api/git/fetch`, json("POST", { projectId, remote, ...(sessionId ? { sessionId } : {}) })),
-  gitPull: (projectId: string, remote = "origin", sessionId?: string) =>
-    jfetch<{ ok: true }>(`/api/git/pull`, json("POST", { projectId, remote, ...(sessionId ? { sessionId } : {}) })),
-  gitPush: (projectId: string, remote = "origin", sessionId?: string) =>
-    jfetch<{ ok: true }>(`/api/git/push`, json("POST", { projectId, remote, ...(sessionId ? { sessionId } : {}) })),
-  gitSync: (projectId: string, remote = "origin", sessionId?: string) =>
-    jfetch<{ ok: true }>(`/api/git/sync`, json("POST", { projectId, remote, ...(sessionId ? { sessionId } : {}) })),
+  gitFetch: (projectId: string, remote = "origin", sessionId?: string, scope?: GitScope) =>
+    jfetch<{ ok: true }>(`/api/git/fetch`, json("POST", { projectId, remote, ...(sessionId ? { sessionId } : {}), ...scoped(scope) })),
+  gitPull: (projectId: string, remote = "origin", sessionId?: string, scope?: GitScope) =>
+    jfetch<{ ok: true }>(`/api/git/pull`, json("POST", { projectId, remote, ...(sessionId ? { sessionId } : {}), ...scoped(scope) })),
+  gitPush: (projectId: string, remote = "origin", sessionId?: string, scope?: GitScope) =>
+    jfetch<{ ok: true }>(`/api/git/push`, json("POST", { projectId, remote, ...(sessionId ? { sessionId } : {}), ...scoped(scope) })),
+  gitSync: (projectId: string, remote = "origin", sessionId?: string, scope?: GitScope) =>
+    jfetch<{ ok: true }>(`/api/git/sync`, json("POST", { projectId, remote, ...(sessionId ? { sessionId } : {}), ...scoped(scope) })),
+  /** Merge `ref` into whatever is checked out by `scope`. Resolves with
+   *  `ok: false` when Git stopped on conflicts — the checkout stays conflicted
+   *  until the caller resolves it or calls `gitMergeAbort`. */
+  gitMerge: (projectId: string, ref: string, scope?: GitScope) =>
+    jfetch<GitMergeResult>(`/api/git/merge`, json("POST", { projectId, ref, ...scoped(scope) })),
+  gitMergeAbort: (projectId: string, scope?: GitScope) =>
+    jfetch<{ ok: true }>(`/api/git/merge/abort`, json("POST", { projectId, ...scoped(scope) })),
   /** Local-conflict sibling of githubConflictAgent: hands a diverged pull or an
    *  in-progress merge/rebase to an agent session with a default prompt. */
   gitResolveConflictAgent: (input: {
@@ -1017,8 +1048,8 @@ export const api = {
     ),
 
   // ---- worktrees (§12) -----------------------------------------------------
-  listWorktrees: (projectId: string) =>
-    jfetch<Worktree[]>(`/api/worktrees?projectId=${encodeURIComponent(projectId)}`),
+  listWorktrees: (projectId: string, options?: { status?: boolean }) =>
+    jfetch<Worktree[]>(`/api/worktrees?projectId=${encodeURIComponent(projectId)}${options?.status ? "&status=1" : ""}`),
   createWorktree: (projectId: string, branch: string, wtPath?: string, base?: string) =>
     jfetch<Worktree>(`/api/worktrees`, json("POST", { projectId, branch, path: wtPath, base })),
   /** Rejects with code `worktree-dirty` when uncommitted changes would be lost; pass `force` after the user confirms.

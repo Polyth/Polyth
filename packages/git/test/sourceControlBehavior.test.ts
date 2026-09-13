@@ -598,9 +598,15 @@ test("GitView surfaces worktree cleanup warnings without claiming removal failed
       .find((tab) => (tab.textContent ?? "").includes("Branches"));
     assert.ok(branchesTab, "branches tab is present");
     await act(async () => { (branchesTab as HTMLElement).click(); await delay(20); });
-    const remove = view.container.querySelector<HTMLButtonElement>("button.danger, button[title='Remove worktree']");
+    // Removal is a destructive ending, so it lives in the worktree row's
+    // overflow rather than sitting exposed next to the everyday actions.
+    const overflow = view.container.querySelector<HTMLButtonElement>("button[aria-label='Actions for feat']");
+    assert.ok(overflow, "linked worktree overflow control is present");
+    await act(async () => { overflow!.click(); await delay(20); });
+    const remove = [...document.querySelectorAll('[role="menuitem"]')]
+      .find((entry) => (entry.textContent ?? "") === "Remove worktree");
     assert.ok(remove, "linked worktree remove control is present");
-    await act(async () => { remove!.click(); await delay(20); });
+    await act(async () => { (remove as HTMLButtonElement).click(); await delay(20); });
     const confirm = [...document.querySelectorAll("button")]
       .find((button) => (button.textContent ?? "") === "Remove worktree" && button.className.includes("danger"));
     assert.ok(confirm, "confirm dialog opened");

@@ -624,13 +624,73 @@ background: var(--raised);
 display: flex; flex-direction: column; gap: var(--space-2);
 }
 .git-page .git-wt-card {
-position: static; min-height: 70px; display: flex; align-items: center; gap: 8px; margin: 0; padding: 9px;
+position: static; min-height: 70px; display: flex; align-items: center; gap: var(--space-2); margin: 0; padding: 9px;
 }
 .git-wt-copy {
 display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px;
 }
 .git-wt-copy .muted {
 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-meta);
+}
+/* Branch name and its main/linked tag share the first line; the tag never
+   shrinks, so a long branch truncates instead of squashing the label. */
+.git-wt-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.git-wt-title strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-wt-title .tag {
+  flex: none;
+}
+.git-wt-path {
+  font-size: var(--font-meta);
+}
+/* Sync state: short HEAD plus only the counts that are non-zero, so a clean
+   checkout reads as one calm "In sync" instead of three zeros. */
+.git-wt-state {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--font-meta);
+  color: var(--muted);
+}
+.git-wt-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.git-wt-stat--dirty {
+  color: var(--amber);
+}
+/* Actions stay on one line and never shrink: the adaptive verb, the session
+   button and the overflow are all fixed-width next to elastic copy. */
+.git-wt-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+}
+/* Phone: the row becomes a stack and the actions take a full-width row so
+   every control clears the tap floor instead of competing with the path. */
+@container feature-panel (max-width: 560px) {
+  .git-page .git-wt-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .git-wt-actions {
+    justify-content: flex-end;
+  }
 }
 .git-new-session-btn {
 width: 100%; margin-top: var(--space-3);
@@ -1107,24 +1167,42 @@ color: var(--purple);
   .git-clone-panel .folder-source-hint { flex-direction: column; }
 }
 
+/* Isolation card — the one place a session says what will happen to its work.
+   It reads as a quiet stack: identity glyph + title, then optional detail,
+   then the actions. The glass dock owns the surface (border, background,
+   radius, shadow), so nothing here re-declares those. */
 .isolation-card {
   container: isolation-card / inline-size;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-3);
+  flex-direction: column;
+  gap: var(--space-2);
   min-width: 0;
   width: min(calc(100% - (2 * var(--conversation-chrome-inset))), var(--chat-measure));
   margin: var(--space-2) auto 0;
   padding: var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  background: var(--elevated);
   color: var(--text);
 }
+/* Warn states tint the edge only: the glyph already carries the meaning, so
+   the glass stays intact and nothing depends on color alone. */
 .isolation-card--warn {
-  border-color: color-mix(in srgb, var(--amber) 32%, var(--border));
-  background: var(--amber-wash);
+  border-color: color-mix(in srgb, var(--amber) 38%, var(--material-glass-border));
+}
+.isolation-card--warn .isolation-card-glyph {
+  color: var(--amber);
+}
+.isolation-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.isolation-card-glyph {
+  flex: none;
+  display: grid;
+  place-items: center;
+  /* Matches the title's first-line box so the glyph optically centres on it. */
+  min-height: calc(var(--font-label) * 1.35);
+  color: var(--accent);
 }
 .isolation-card-copy {
   display: flex;
@@ -1133,12 +1211,40 @@ color: var(--purple);
   min-width: 0;
   flex: 1 1 auto;
 }
-.isolation-card-copy strong {
+.isolation-card-title {
   font-size: var(--font-label);
   font-weight: 650;
+  line-height: 1.35;
+  text-wrap: balance;
 }
+/* The branch name is the one part worth truncating: the label before it is
+   short and fixed, the branch can be arbitrarily long. */
 .isolation-card-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  color: var(--text-dim);
   font-size: var(--font-meta);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.isolation-card-meta > :not(svg) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.isolation-card-note {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: 1.45;
+}
+.isolation-card-path {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  overflow-wrap: anywhere;
 }
 .isolation-card-progress {
   margin: 0;
@@ -1167,15 +1273,21 @@ color: var(--purple);
 .isolation-card-progress-done {
   color: var(--muted);
 }
+/* Actions sit at the end of the stack and align right, so the primary verb
+   lands nearest the thumb on desktop and reads as the resolution of the card. */
 .isolation-card-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--space-2);
   flex: none;
 }
+.isolation-card-actions:empty {
+  display: none;
+}
 .isolation-card-overflow {
-  margin-inline-start: auto;
+  flex: none;
 }
 .isolation-badge {
   display: inline-flex;
@@ -1200,10 +1312,20 @@ color: var(--purple);
   line-height: 1;
   white-space: nowrap;
 }
+/* Narrow: the primary verb takes its own full-width row at the bottom of the
+   card (it is last in DOM order), and the secondary verbs share the row above
+   it. Both stay at the tap floor, so this is the phone layout too. */
 @container isolation-card (max-width: 420px) {
   .isolation-card-actions {
     width: 100%;
-    justify-content: flex-start;
+    justify-content: stretch;
+  }
+  .isolation-card-actions > :not(.isolation-card-primary) {
+    flex: 1 1 auto;
+  }
+  .isolation-card-primary {
+    flex: 1 0 100%;
+    justify-content: center;
   }
 }
 

@@ -175,20 +175,40 @@ export function gitRoutes(deps: {
     if (!project) throw Object.assign(new Error("unknown project"), { code: "not-found" });
     return project.path;
   };
+  /** Resolve a client-named checkout to a root Git itself vouches for. The
+   *  supplied path is only ever a selector: it must match a row of this
+   *  project's live `git worktree list`, so a traversal, a symlink hop or
+   *  another project's checkout can never become an operating root. */
+  const worktreeRootOf = async (projectRoot: string, worktreePath: string): Promise<string> => {
+    if (!(await git.isRepo(projectRoot))) {
+      throw Object.assign(new Error("this project is not a git repository"), { code: "conflict" });
+    }
+    const wanted = resolve(worktreePath);
+    const match = (await git.worktrees.list(projectRoot))
+      .find((worktree) => resolve(worktree.path) === wanted);
+    if (!match) {
+      throw Object.assign(new Error("unknown worktree for this project"), { code: "not-found" });
+    }
+    return match.path;
+  };
   const rootOf = async (
     projectId: string | null | undefined,
     sessionId?: string | null,
+    worktreePath?: string | null,
   ): Promise<string> => {
     const projectRoot = await projectRootOf(projectId);
-    if (!sessionId) return projectRoot;
-    const session = await deps.sessions.snapshot(sessionId);
-    if (session.projectId !== projectId) {
-      throw Object.assign(new Error("session does not belong to this project"), { code: "invalid-input" });
+    if (sessionId) {
+      const session = await deps.sessions.snapshot(sessionId);
+      if (session.projectId !== projectId) {
+        throw Object.assign(new Error("session does not belong to this project"), { code: "invalid-input" });
+      }
+      if (session.worktreeState === "missing") {
+        throw Object.assign(new Error("session worktree is missing"), { code: "not-found" });
+      }
+      return session.worktreePath ?? projectRoot;
     }
-    if (session.worktreeState === "missing") {
-      throw Object.assign(new Error("session worktree is missing"), { code: "not-found" });
-    }
-    return session.worktreePath ?? projectRoot;
+    if (worktreePath) return worktreeRootOf(projectRoot, worktreePath);
+    return projectRoot;
   };
   const paths = (body: Record<string, unknown>): string[] =>
     Array.isArray(body.paths) ? body.paths.map((path) => assertGitRelativePath(String(path))) : [];
@@ -226,7 +246,7 @@ export function gitRoutes(deps: {
     if (!path.startsWith("/api/git") && !path.startsWith("/api/worktrees")) return false;
 
     if (path === "/api/git/status" && method === "GET") {
-      const root = await rootOf(query("projectId"), query("sessionId"));
+      const root = await rootOf(query("projectId"), query("sessionId"), query("worktreePath"));
       // Status is the Git interaction the UI makes most often, so it is where
       // an externally created or removed worktree is cheapest to notice. The
       // fingerprint is always taken on the project checkout, never on `root`,
@@ -294,10 +314,30 @@ export function gitRoutes(deps: {
       // worktrees" — an empty list and an unreadable repository are different
       // answers, and only one of them is safe to act on.
       const worktrees = (await git.isRepo(root)) ? await git.worktrees.list(root) : [];
+      // Per-checkout Git state is what makes push/merge meaningful, but it is
+      // one `git status` per worktree — only read it when a caller asks.
+      const withStatus = query("status") === "1";
       const visible = await Promise.all(worktrees.map(async (worktree) => {
         if (isManagedBranch(worktree.branch)) return null;
         const marker = await readManagedMarker(git, worktree.path);
-        return marker ? null : worktree;
+        if (marker) return null;
+        if (!withStatus) return worktree;
+        try {
+          const status = await git.status(worktree.path);
+          return {
+            ...worktree,
+            ahead: status.ahead,
+            behind: status.behind,
+            changed: status.staged.length + status.unstaged.length
+              + status.untracked.length + status.conflicted.length,
+            conflicted: status.conflicted.length,
+            ...(status.upstream ? { upstream: status.upstream } : {}),
+          };
+        } catch {
+          // A checkout Git cannot describe right now is still a real worktree.
+          // Omitting the counts says "unknown"; inventing zeros would not.
+          return worktree;
+        }
       }));
       json(200, visible.filter((worktree) => worktree !== null));
       return true;
@@ -388,7 +428,11 @@ export function gitRoutes(deps: {
     const projectId = String(input.projectId ?? "");
     const root = path.startsWith("/api/worktrees")
       ? await projectRootOf(projectId)
-      : await rootOf(projectId, input.sessionId ? String(input.sessionId) : undefined);
+      : await rootOf(
+        projectId,
+        input.sessionId ? String(input.sessionId) : undefined,
+        input.worktreePath ? String(input.worktreePath) : undefined,
+      );
 
     switch (path) {
       case "/api/git/stage": await git.stage(root, paths(input)); break;
@@ -426,6 +470,23 @@ export function gitRoutes(deps: {
       case "/api/git/pull": await git.pull(root, input.remote ? String(input.remote) : undefined); break;
       case "/api/git/push": await git.push(root, input.remote ? String(input.remote) : undefined); break;
       case "/api/git/sync": await git.sync(root, input.remote ? String(input.remote) : undefined); break;
+      case "/api/git/merge": {
+        const ref = String(input.ref ?? "").trim();
+        if (!ref) throw Object.assign(new Error("ref required"), { code: "invalid-input" });
+        // Managed isolation branches are published through the isolation
+        // service, which owns snapshotting, compare-and-swap and rebind. A raw
+        // merge would bypass every one of those guarantees.
+        if (isManagedBranch(ref)) {
+          throw Object.assign(new Error("isolated sessions are integrated from the session, not by a raw merge"), {
+            code: "invalid-input",
+          });
+        }
+        json(200, await git.merge(root, ref));
+        return true;
+      }
+      case "/api/git/merge/abort":
+        await git.abortMerge(root);
+        break;
       case "/api/git/identity":
         await git.setIdentity(root, { name: String(input.name ?? ""), email: String(input.email ?? "") });
         json(200, await git.identity(root));
@@ -592,6 +653,8 @@ export const GIT_REMOTE_ACCESS: RemoteAccessPolicy = {
     { methods: ["POST"], path: "/api/git/pull", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/git/push", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/git/sync", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/git/merge", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/git/merge/abort", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/git/identity", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/worktrees", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/worktrees/remove", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },

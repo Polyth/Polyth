@@ -29,12 +29,17 @@ import {
   Button,
   Checkbox,
   CloseIcon,
+  CombineIcon,
   DeleteIcon,
   Dialog,
   FetchIcon,
+  // The namespaced `Icon` map from icons.tsx already owns that name here, so
+  // the design-system glyph wrapper comes in aliased.
+  Icon as UiIcon,
   IconButton,
   Menu,
   MoreIcon,
+  type MenuEntry,
   PullIcon,
   PullRequestIcon,
   PushIcon,
@@ -339,6 +344,9 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
   const [branchLimits, setBranchLimits] = useState<Record<BranchGroup, number>>({ local: 30, remote: 30 });
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
   const [fileStats, setFileStats] = useState<Record<string, DiffLineStats>>({});
+  // Which worktree row is mid-action, as `<path>:<step>`. Keyed by path so one
+  // busy checkout never freezes the others' controls.
+  const [treeBusy, setTreeBusy] = useState<string | null>(null);
 
   const refresh = useCallback(async (showLoading = false): Promise<GitStatus | null> => {
     if (!projectId) return null;
@@ -357,7 +365,9 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
       }
       const [nextBranches, nextTrees, nextGraph, nextStashes] = await Promise.all([
         api.gitBranches(projectId, sessionId ?? undefined),
-        api.listWorktrees(projectId),
+        // Ahead/behind/dirty per checkout is what makes the per-worktree
+        // push/merge controls honest rather than decorative.
+        api.listWorktrees(projectId, { status: true }),
         api.gitGraph(projectId, GRAPH_PAGE, 0, sessionId ?? undefined),
         api.gitStashes(projectId, sessionId ?? undefined),
       ]);
@@ -529,6 +539,80 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
     } finally {
       setBusyRemote(null);
     }
+  };
+
+  // Remote steps aimed at one linked checkout. The path is a selector, not a
+  // trusted root: the server matches it against this project's own worktree
+  // list before Git touches anything.
+  const runTreeRemote = async (tree: Worktree, step: RemoteStep) => {
+    if (!projectId || treeBusy) return;
+    setTreeBusy(`${tree.path}:${step}`);
+    try {
+      const scope = { worktreePath: tree.path };
+      if (step === "fetch") await api.gitFetch(projectId, "origin", undefined, scope);
+      else if (step === "pull") await api.gitPull(projectId, "origin", undefined, scope);
+      else if (step === "push") await api.gitPush(projectId, "origin", undefined, scope);
+      else await api.gitSync(projectId, "origin", undefined, scope);
+      await refresh();
+    } catch (cause) {
+      setUiError(friendlyError(tr("gitview.worktreeActionFailed"), cause));
+    } finally {
+      setTreeBusy(null);
+    }
+  };
+
+  // Merge a linked checkout's branch into the branch this project has checked
+  // out. A conflict is an expected outcome, not an error: Git stops with the
+  // tree conflicted, so hand the user to the Changes tab where the conflict
+  // tools already live instead of silently aborting their merge.
+  const mergeTree = async (tree: Worktree) => {
+    if (!projectId || !tree.branch || treeBusy) return;
+    setTreeBusy(`${tree.path}:merge`);
+    try {
+      const result = await api.gitMerge(projectId, tree.branch);
+      await refresh();
+      if (!result.ok) {
+        setTab("changes");
+        setUiError(tr("gitview.mergeStoppedOnConflicts", { count: result.conflicted.length }));
+      }
+    } catch (cause) {
+      setUiError(friendlyError(tr("gitview.worktreeActionFailed"), cause));
+    } finally {
+      setTreeBusy(null);
+    }
+  };
+
+  // Removal keeps its two-step shape: the first refusal carries the dirty
+  // count, and only an explicit second confirmation destroys uncommitted work.
+  const requestRemoveTree = (tree: Worktree) => {
+    if (!projectId) return;
+    setConfirmRequest({
+      title: tr("gitview.removeWorktreeQuestion"),
+      description: tr("gitview.theLinkedWorktreeAtValue", { path: tree.path }),
+      confirmLabel: tr("gitview.removeWorktree"),
+      action: async () => {
+        const finish = async (force?: boolean) => {
+          const result = await api.removeWorktree(projectId, tree.path, true, force);
+          if (result.metadataCleanupFailed || result.branchCleanupFailed) {
+            setUiError(tr("gitview.couldntCleanUpAfterRemovingTheWorktree"));
+          }
+        };
+        try {
+          await finish();
+        } catch (err) {
+          if (errorCodeOf(err) !== "worktree-dirty") throw err;
+          const changes = errorChangesOf(err);
+          setConfirmRequest({
+            title: tr("gitview.removeWorktreeQuestion"),
+            description: changes > 0
+              ? tr("gitview.destroyDirtyWorktreeValue", { count: changes })
+              : tr("gitview.destroyDirtyWorktree"),
+            confirmLabel: tr("gitview.removeWorktree"),
+            action: () => finish(true),
+          });
+        }
+      },
+    });
   };
 
   const startConflictAgent = async (target: ConflictAgentTarget, problem?: string) => {
@@ -1153,44 +1237,112 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
               <div className="stat-label">{tr("gitview.worktreesValue", { count: visibleTrees.length })}</div>
               {!loadError && visibleTrees.length === 0 && <EmptyState title={tr("gitview.noLinkedWorktrees")} description={tr("gitview.newSessionsCurrentlyRunInThe")} />}
               <div className="git-worktree-list">
-                {visibleTrees.map((tree) => (
-                  <article key={tree.path} className="git-wt-card">
-                    <div className="git-wt-copy">
-                      <strong className="mono">{tree.branch ?? tr("gitview.detachedHead")}</strong>
-                      <span className="muted mono" title={tree.path}>{tree.path}</span>
-                      <span className="muted mono">{tree.head.slice(0, 7)}</span>
-                    </div>
-                    <span className={`tag ${tree.isMain ? "green" : ""}`}>{tree.isMain ? tr("gitview.main") : tr("gitview.linked")}</span>
-                    <Button size="sm" iconStart={SessionIcon} title={tr("gitview.newSessionInValue", { branch: tree.branch ?? tr("gitview.thisWorktree") })} onClick={() => openWorktreeSessionDialog(projectId, tree.path)}>{tr("gitview.session")}</Button>
-                    {!tree.isMain && <IconButton icon={DeleteIcon} size="sm" variant="danger" title={tr("gitview.removeWorktree")} label={tr("gitview.removeWorktreeValue", { branch: tree.branch ?? tree.path })} disabled={busy} onClick={() => setConfirmRequest({
-                      title: tr("gitview.removeWorktreeQuestion"),
-                      description: tr("gitview.theLinkedWorktreeAtValue", { path: tree.path }),
-                      confirmLabel: tr("gitview.removeWorktree"),
-                      action: async () => {
-                        const finish = async (force?: boolean) => {
-                          const result = await api.removeWorktree(projectId, tree.path, true, force);
-                          if (result.metadataCleanupFailed || result.branchCleanupFailed) {
-                            setUiError(tr("gitview.couldntCleanUpAfterRemovingTheWorktree"));
-                          }
-                        };
-                        try {
-                          await finish();
-                        } catch (err) {
-                          if (errorCodeOf(err) !== "worktree-dirty") throw err;
-                          const changes = errorChangesOf(err);
-                          setConfirmRequest({
-                            title: tr("gitview.removeWorktreeQuestion"),
-                            description: changes > 0
-                              ? tr("gitview.destroyDirtyWorktreeValue", { count: changes })
-                              : tr("gitview.destroyDirtyWorktree"),
-                            confirmLabel: tr("gitview.removeWorktree"),
-                            action: () => finish(true),
-                          });
-                        }
-                      },
-                    })} />}
-                  </article>
-                ))}
+                {visibleTrees.map((tree) => {
+                  const rowBusy = treeBusy?.startsWith(`${tree.path}:`) === true;
+                  const stepBusy = (step: string) => treeBusy === `${tree.path}:${step}`;
+                  const blocked = busy || treeBusy !== null;
+                  // `undefined` means this server did not report status, which
+                  // is different from a checkout that is genuinely in sync.
+                  const known = tree.ahead !== undefined;
+                  const ahead = tree.ahead ?? 0;
+                  const behind = tree.behind ?? 0;
+                  const changed = tree.changed ?? 0;
+                  // The branch this project has checked out is what a merge
+                  // lands into, so a worktree cannot be merged into itself.
+                  const into = branches.current;
+                  const canMerge = !tree.isMain && tree.branch !== null
+                    && into !== null && tree.branch !== into;
+                  const entries: MenuEntry[] = [];
+                  if (canMerge) {
+                    entries.push({
+                      id: "merge",
+                      label: tr("gitview.mergeIntoValue", { branch: into }),
+                      icon: CombineIcon,
+                      disabled: blocked,
+                      onSelect: () => setConfirmRequest({
+                        title: tr("gitview.mergeIntoValue", { branch: into }),
+                        description: tr("gitview.mergeWorktreeDescription", { branch: tree.branch ?? "", target: into }),
+                        confirmLabel: tr("gitview.merge"),
+                        action: () => mergeTree(tree),
+                      }),
+                    });
+                  }
+                  entries.push(
+                    { id: "fetch", label: tr("gitview.fetch"), icon: FetchIcon, disabled: blocked, onSelect: () => { void runTreeRemote(tree, "fetch"); } },
+                    { id: "pull", label: tr("gitview.pull"), icon: PullIcon, disabled: blocked, onSelect: () => { void runTreeRemote(tree, "pull"); } },
+                    { id: "push", label: tr("gitview.push"), icon: PushIcon, disabled: blocked, onSelect: () => { void runTreeRemote(tree, "push"); } },
+                    { id: "sync", label: tr("gitview.syncRepository"), icon: SyncIcon, disabled: blocked, onSelect: () => { void runTreeRemote(tree, "sync"); } },
+                  );
+                  if (!tree.isMain) {
+                    entries.push({
+                      id: "remove",
+                      label: tr("gitview.removeWorktree"),
+                      icon: DeleteIcon,
+                      danger: true,
+                      disabled: blocked,
+                      onSelect: () => requestRemoveTree(tree),
+                    });
+                  }
+                  return (
+                    <article key={tree.path} className="git-wt-card">
+                      <div className="git-wt-copy">
+                        <div className="git-wt-title">
+                          <strong className="mono">{tree.branch ?? tr("gitview.detachedHead")}</strong>
+                          <span className={`tag ${tree.isMain ? "green" : ""}`}>{tree.isMain ? tr("gitview.main") : tr("gitview.linked")}</span>
+                        </div>
+                        <span className="muted mono git-wt-path" title={tree.path}>{tree.path}</span>
+                        <div className="git-wt-state">
+                          <span className="muted mono">{tree.head.slice(0, 7)}</span>
+                          {known && ahead > 0 && (
+                            <span className="git-wt-stat" title={tr("gitview.commitsToPushValue", { count: ahead })}>
+                              <UiIcon icon={PushIcon} size="sm" />{ahead}
+                            </span>
+                          )}
+                          {known && behind > 0 && (
+                            <span className="git-wt-stat" title={tr("gitview.commitsToPullValue", { count: behind })}>
+                              <UiIcon icon={PullIcon} size="sm" />{behind}
+                            </span>
+                          )}
+                          {known && changed > 0 && (
+                            <span className="git-wt-stat git-wt-stat--dirty" title={tr("gitview.uncommittedChangesValue", { count: changed })}>
+                              {tr("gitview.changedValue", { count: changed })}
+                            </span>
+                          )}
+                          {known && ahead === 0 && behind === 0 && changed === 0 && (
+                            <span className="muted">{tr("gitview.inSync")}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="git-wt-actions">
+                        {/* One adaptive verb: whatever this checkout actually
+                            needs next. Everything else stays in the overflow. */}
+                        {known && ahead > 0 && (
+                          <Button size="sm" variant="primary" iconStart={PushIcon} busy={stepBusy("push")} disabled={blocked} onClick={() => void runTreeRemote(tree, "push")}>
+                            {tr("gitview.push")}
+                          </Button>
+                        )}
+                        {known && ahead === 0 && behind > 0 && (
+                          <Button size="sm" iconStart={PullIcon} busy={stepBusy("pull")} disabled={blocked} onClick={() => void runTreeRemote(tree, "pull")}>
+                            {tr("gitview.pull")}
+                          </Button>
+                        )}
+                        <Button size="sm" iconStart={SessionIcon} disabled={rowBusy} title={tr("gitview.newSessionInValue", { branch: tree.branch ?? tr("gitview.thisWorktree") })} onClick={() => openWorktreeSessionDialog(projectId, tree.path)}>{tr("gitview.session")}</Button>
+                        <Menu label={tr("common.more")} align="end" entries={entries}>
+                          {(trigger) => (
+                            <IconButton
+                              {...trigger}
+                              icon={MoreIcon}
+                              size="sm"
+                              busy={rowBusy && !stepBusy("push") && !stepBusy("pull")}
+                              disabled={busy}
+                              label={tr("gitview.worktreeActionsValue", { branch: tree.branch ?? tree.path })}
+                            />
+                          )}
+                        </Menu>
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
               <Button size="sm" className="git-new-session-btn" iconStart={SessionIcon} onClick={() => openWorktreeSessionDialog(projectId)}>{tr("isolation.workInIsolation")}</Button>
             </section>

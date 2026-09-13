@@ -5,7 +5,22 @@ import { api } from "@polyth/session/web-api";
 import { friendlyError } from "../../../apps/web/src/settings.ts";
 import { openChanges, setUiError, upsertSession, useStore } from "../../../apps/web/src/store.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
-import { Button, Dialog, Menu, confirmAlert } from "../../../apps/web/src/components/ui/index.ts";
+import {
+  BranchIcon,
+  Button,
+  CombineIcon,
+  DeleteIcon,
+  Dialog,
+  Icon,
+  IconButton,
+  Menu,
+  MoreIcon,
+  Spinner,
+  WarningIcon,
+  WorktreeIcon,
+  confirmAlert,
+  type MenuEntry,
+} from "../../../apps/web/src/components/ui/index.ts";
 
 const isolationOf = (session: SessionProjection | null | undefined): SessionIsolation | null =>
   session?.isolation?.kind === "git-worktree" ? session.isolation : null;
@@ -188,32 +203,85 @@ export function IsolationCard() {
 
   const showPath = unavailable || (recovering && busy === null);
   const steps = recovering ? recoverySteps(integrating, liveState) : null;
+  // One quiet identity glyph per state family. Recovery shows motion; every
+  // other state is legible without it, so nothing depends on color alone.
+  const glyph = recovering
+    ? <Spinner size="sm" />
+    : <Icon icon={unavailable ? WorktreeIcon : conflict || warn ? WarningIcon : CombineIcon} size="sm" />;
+
+  // Destructive endings live behind the overflow whenever a better action is
+  // on the card. They stay in the open only when they are the only way out.
+  const overflow: MenuEntry[] = [];
+  if (actions?.canDiscard === true && !unavailable && !recovering) {
+    overflow.push({
+      id: "discard",
+      label: tr("isolation.discardWorkspace"),
+      icon: DeleteIcon,
+      danger: true,
+      disabled: busy !== null || working,
+      onSelect: () => setConfirmingDiscard(true),
+    });
+  }
+  if (recovering && actions?.canAbandon === true) {
+    overflow.push({
+      id: "abandon",
+      label: tr("isolation.finishWithoutCleanup"),
+      icon: WorktreeIcon,
+      danger: true,
+      disabled: busy !== null || working,
+      onSelect: () => { void abandon(); },
+    });
+  }
 
   return (
     <>
-      <div className={`isolation-card${warn ? " isolation-card--warn" : ""}`} role="status">
-        <div className="isolation-card-copy">
-          <strong>{title}</strong>
-          {ready && (
-            <span className="isolation-card-meta muted">{tr("isolation.basedOn", { branch: targetBranch })}</span>
+      <section
+        className={`isolation-card ui-glass-dock${warn ? " isolation-card--warn" : ""}`}
+        role="status"
+        aria-label={title}
+      >
+        <div className="isolation-card-head">
+          <span className="isolation-card-glyph" aria-hidden="true">{glyph}</span>
+          <div className="isolation-card-copy">
+            <strong className="isolation-card-title">{title}</strong>
+            {ready && (
+              <span className="isolation-card-meta">
+                <Icon icon={BranchIcon} size="sm" />
+                {tr("isolation.basedOn", { branch: targetBranch })}
+              </span>
+            )}
+          </div>
+          {overflow.length > 0 && (
+            <Menu label={tr("common.more")} align="end" entries={overflow}>
+              {(trigger) => (
+                <IconButton
+                  {...trigger}
+                  icon={MoreIcon}
+                  size="sm"
+                  className="isolation-card-overflow"
+                  disabled={busy !== null || working}
+                  label={tr("common.more")}
+                />
+              )}
+            </Menu>
           )}
-          {detail && <span className="muted">{detail}</span>}
-          {steps && (
-            <ol className="isolation-card-progress">
-              {steps.map((step) => (
-                <li
-                  key={step.id}
-                  className={step.state === "done" ? "isolation-card-progress-done" : undefined}
-                  aria-current={step.state === "current" ? "step" : undefined}
-                >
-                  <span className="isolation-card-progress-mark" aria-hidden="true">{PROGRESS_MARK[step.state]}</span>
-                  {step.label}
-                </li>
-              ))}
-            </ol>
-          )}
-          {showPath && <span className="muted">{live.worktreePath}</span>}
         </div>
+        {detail && <p className="isolation-card-note">{detail}</p>}
+        {steps && (
+          <ol className="isolation-card-progress">
+            {steps.map((step) => (
+              <li
+                key={step.id}
+                className={step.state === "done" ? "isolation-card-progress-done" : undefined}
+                aria-current={step.state === "current" ? "step" : undefined}
+              >
+                <span className="isolation-card-progress-mark" aria-hidden="true">{PROGRESS_MARK[step.state]}</span>
+                {step.label}
+              </li>
+            ))}
+          </ol>
+        )}
+        {showPath && <p className="isolation-card-path mono">{live.worktreePath}</p>}
         <div className="isolation-card-actions">
           {(destinationUnavailable || dirtyBlocked) && (
             <Button size="sm" disabled={busy !== null} onClick={() => void refresh()}>
@@ -225,32 +293,6 @@ export function IsolationCard() {
               {conflict ? tr("isolation.reviewConflicts") : tr("isolation.reviewChanges")}
             </Button>
           ) : null}
-          {!conflict && !unavailable && !dirtyBlocked && ready && (
-            <Button
-              size="sm"
-              variant="primary"
-              disabled={busy !== null || working}
-              busy={busy === "merge"}
-              onClick={() => void run("merge", async () => {
-                applySession((await api.isolationMerge(sessionId)).session);
-              })}
-            >
-              {tr("isolation.integrateInto", { branch: targetBranch })}
-            </Button>
-          )}
-          {conflict && actions?.canResolve === true && (
-            <Button
-              size="sm"
-              variant="primary"
-              disabled={busy !== null || working}
-              busy={busy === "resolve"}
-              onClick={() => void run("resolve", async () => {
-                await api.isolationResolve(sessionId);
-              })}
-            >
-              {tr("isolation.resolveWithAgent")}
-            </Button>
-          )}
           {actions?.canKeep === true && !recovering && (
             <Button
               size="sm"
@@ -267,6 +309,7 @@ export function IsolationCard() {
             <Button
               size="sm"
               variant="danger"
+              className="isolation-card-primary"
               disabled={busy !== null || working}
               busy={busy === "discard"}
               onClick={() => setConfirmingDiscard(true)}
@@ -278,6 +321,7 @@ export function IsolationCard() {
             <Button
               size="sm"
               variant="primary"
+              className="isolation-card-primary"
               disabled={busy !== null || working}
               busy={busy === "recover"}
               onClick={() => void run("recover", async () => {
@@ -287,44 +331,37 @@ export function IsolationCard() {
               {tr("isolation.retryRecovery")}
             </Button>
           )}
-          {recovering && actions?.canAbandon === true && (
+          {conflict && actions?.canResolve === true && (
             <Button
               size="sm"
-              variant="danger"
+              variant="primary"
+              className="isolation-card-primary"
               disabled={busy !== null || working}
-              busy={busy === "abandon"}
-              onClick={() => { void abandon(); }}
+              busy={busy === "resolve"}
+              onClick={() => void run("resolve", async () => {
+                await api.isolationResolve(sessionId);
+              })}
             >
-              {tr("isolation.finishWithoutCleanup")}
+              {tr("isolation.resolveWithAgent")}
             </Button>
           )}
-          {!conflict && !unavailable && !dirtyBlocked && ready && actions?.canDiscard === true && (
-            <Menu
-              label={tr("common.more")}
-              align="end"
-              entries={[{
-                id: "discard",
-                label: tr("isolation.discardWorkspace"),
-                danger: true,
-                disabled: busy !== null || working,
-                onSelect: () => setConfirmingDiscard(true),
-              }]}
+          {!conflict && !unavailable && !dirtyBlocked && ready && (
+            <Button
+              size="sm"
+              variant="primary"
+              className="isolation-card-primary"
+              iconStart={CombineIcon}
+              disabled={busy !== null || working}
+              busy={busy === "merge"}
+              onClick={() => void run("merge", async () => {
+                applySession((await api.isolationMerge(sessionId)).session);
+              })}
             >
-              {(trigger) => (
-                <Button
-                  {...trigger}
-                  size="sm"
-                  className="isolation-card-overflow"
-                  disabled={busy !== null || working}
-                  aria-label={tr("common.more")}
-                >
-                  {tr("common.more")}
-                </Button>
-              )}
-            </Menu>
+              {tr("isolation.integrateInto", { branch: targetBranch })}
+            </Button>
           )}
         </div>
-      </div>
+      </section>
       {confirmingDiscard && (
         <Dialog
           title={tr("isolation.discardTitle")}
