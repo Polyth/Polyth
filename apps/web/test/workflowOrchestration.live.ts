@@ -665,6 +665,86 @@ test("current compact navigation exposes Workflows on phones and tablets", async
   }
 });
 
+test("phone Workspace is a full-width back-navigation destination", async () => {
+  const workspaceLayout = JSON.stringify({
+    version: 1,
+    items: [
+      { id: "launcher:files", definitionId: "launcher:files", type: "launcher", size: "compact", config: {} },
+      { id: "widget:usage.project", definitionId: "widget:usage.project", type: "widget", size: "large", config: {} },
+    ],
+  });
+  const page = await openApp({
+    width: 375,
+    height: 812,
+    sessionId: SESSIONS.main,
+    storage: { [`polyth.workspacePanel.v1.${PROJECT_ID}`]: workspaceLayout },
+  });
+  const tools = page.getByRole("button", { name: "Open tools" });
+  await tools.click();
+  const workspace = page.getByRole("dialog", { name: "Workspace" });
+  await workspace.waitFor({ state: "visible" });
+
+  const entrance = await workspace.evaluate((element) => {
+    const animation = element.getAnimations().find((candidate) => candidate instanceof CSSAnimation);
+    return {
+      name: getComputedStyle(element).animationName,
+      frames: animation?.effect instanceof KeyframeEffect
+        ? animation.effect.getKeyframes().map((frame) => frame.transform)
+        : [],
+    };
+  });
+  assert.equal(entrance.name, "mobile-tools-in");
+  assert.ok(entrance.frames.length === 0 || entrance.frames.some((transform) => transform?.includes("100%")),
+    `Workspace does not enter from the right edge: ${JSON.stringify(entrance)}`);
+  await workspace.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
+
+  const geometry = await workspace.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const backdrop = element.parentElement!.getBoundingClientRect();
+    const back = element.querySelector<HTMLElement>(".sheet-back")!.getBoundingClientRect();
+    const title = element.querySelector<HTMLElement>(".sheet-title")!.getBoundingClientRect();
+    const grabber = element.querySelector<HTMLElement>(".sheet-grabber");
+    const launcher = element.querySelector<HTMLElement>(".workspace-panel-launcher")!;
+    const stat = element.querySelector<HTMLElement>(".usage-widget-stat-grid > div");
+    const provider = element.querySelector<HTMLElement>(".provider-share-card");
+    return {
+      viewportWidth: document.documentElement.clientWidth,
+      rect: rect.toJSON(),
+      backdrop: backdrop.toJSON(),
+      pseudo: getComputedStyle(element, "::before").content,
+      grabber: grabber ? getComputedStyle(grabber).display : null,
+      back: back.toJSON(),
+      title: title.toJSON(),
+      launcherBackground: getComputedStyle(launcher).backgroundColor,
+      statBackground: stat ? getComputedStyle(stat).backgroundColor : null,
+      providerBackground: provider ? getComputedStyle(provider).backgroundColor : null,
+    };
+  });
+  assert.ok(Math.abs(geometry.rect.left) <= 0.5 && Math.abs(geometry.rect.width - geometry.viewportWidth) <= 0.5,
+    `Workspace is not edge-to-edge: ${JSON.stringify(geometry.rect)}`);
+  assert.ok(Math.abs(geometry.backdrop.width - geometry.viewportWidth) <= 0.5,
+    `Workspace backdrop is not viewport-wide: ${JSON.stringify(geometry.backdrop)}`);
+  assert.equal(geometry.grabber, null, "Workspace still renders bottom-sheet drag chrome");
+  assert.ok(geometry.pseudo === "none" || geometry.pseudo === "normal", `Workspace still paints drag chrome: ${geometry.pseudo}`);
+  assert.ok(geometry.title.top >= geometry.back.bottom - 1, "large Workspace title overlaps the navigation row");
+  assert.equal(await workspace.getByRole("button", { name: "Back" }).isVisible(), true);
+  assert.equal(await workspace.getByRole("button", { name: "Close Workspace" }).count(), 0);
+  for (const [label, background] of [
+    ["launcher", geometry.launcherBackground],
+    ["usage stat", geometry.statBackground],
+    ["provider share", geometry.providerBackground],
+  ] as const) {
+    assert.ok(background && background !== "rgba(0, 0, 0, 0)", `${label} lost its themed block background`);
+  }
+
+  await page.screenshot({ path: join(ARTIFACTS, "workspace_phone_375.png") });
+  await workspace.getByRole("button", { name: "Back" }).click();
+  await workspace.waitFor({ state: "detached" });
+  assert.equal(await tools.evaluate((element) => element === document.activeElement), true,
+    "Back does not restore focus to the Workspace trigger");
+  await page.context().close();
+});
+
 test("chat page load preserves a hidden workflow launcher placement", async () => {
   const staleLayout = JSON.stringify({
     version: 1,

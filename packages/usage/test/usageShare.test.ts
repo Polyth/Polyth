@@ -71,6 +71,21 @@ test("provider usage distribution clamps invalid counters before drawing shares"
   ]);
 });
 
+test("narrow Usage summaries retain themed block surfaces", async () => {
+  const styles = await readFile(new URL("../widgets/styles.css", import.meta.url), "utf8");
+
+  assert.match(
+    styles,
+    /\.usage-widget-stat-grid > div\s*\{[^}]*background:\s*var\(--surface-activity\)[^}]*box-shadow:\s*var\(--material-glass-highlight\),\s*var\(--shadow-sm\)/s,
+  );
+  assert.match(
+    styles,
+    /\.provider-share-card\s*\{[^}]*border:\s*1px solid var\(--material-glass-border\)[^}]*background:\s*var\(--surface-activity\)/s,
+  );
+  assert.match(styles, /@container usage-dashboard \(max-width: 520px\)/);
+  assert.match(styles, /\.usage-widget-stat-grid > div:last-child:nth-child\(odd\)\s*\{\s*grid-column:\s*1\s*\/\s*-1;/);
+});
+
 test("Usage settings keeps the Polyth shell and offers rich dashboard views", async () => {
   const source = await readFile(new URL("../widgets/usage/UsageDashboard.tsx", import.meta.url), "utf8");
   const quota = await readFile(new URL("../widgets/usage/quotaUi.tsx", import.meta.url), "utf8");

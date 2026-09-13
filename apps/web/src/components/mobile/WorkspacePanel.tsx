@@ -32,7 +32,7 @@ import {
 } from "../../workspacePanel.ts";
 import MoveControls from "../MoveControls.tsx";
 import ViewErrorBoundary from "../ViewErrorBoundary.ts";
-import { IconButton, MinusIcon, PlusIcon } from "../ui/index.ts";
+import { ChevronRightIcon, IconButton, MinusIcon, PlusIcon } from "../ui/index.ts";
 import Sheet from "./Sheet.tsx";
 
 function storedLayout(projectId: string | null, catalog: readonly PanelItemDefinition[], migrated: readonly string[]): WorkspacePanelLayout {
@@ -163,6 +163,7 @@ export default function WorkspacePanel({ onClose }: { onClose: () => void }) {
     size="tall"
     className="mobile-tools-sheet workspace-panel-sheet"
     onClose={onClose}
+    dismiss="back"
     action={{ label: editing ? "Done" : "Edit", pressed: editing, onClick: () => setEditing((value) => !value) }}
   >
     <p className="workspace-panel-subtitle">Tools &amp; widgets</p>
@@ -212,7 +213,7 @@ export default function WorkspacePanel({ onClose }: { onClose: () => void }) {
             <span>{definition.title}</span>
           </button> : definition.type === "widget" && widget ? <>
             <button className="workspace-panel-widget-head" type="button" disabled={editing || !definition.capabilityId} onClick={() => open(definition)}>
-              {Icon && <Icon />}<strong>{definition.title}</strong>{definition.capabilityId && <span aria-hidden="true">›</span>}
+              {Icon && <Icon />}<strong>{definition.title}</strong>{definition.capabilityId && <ChevronRightIcon className="workspace-panel-disclosure" aria-hidden="true" />}
             </button>
             <div className="workspace-panel-widget-body">
               <ViewErrorBoundary inline resetKey={`${item.id}:${projectId ?? ""}:${sessionId ?? ""}`}>
