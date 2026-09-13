@@ -3,7 +3,7 @@
 // (components/workspace/WorkspaceHost.ts) or a right-rail panel
 // (components/ContextRail.tsx). Packages supply a title, an optional
 // description / icon / actions and a body; the frame owns the shared header,
-// navigation affordances, and the scroll body. On phone a rail package is a
+// navigation affordances, and the scroll body. On phone every package is a
 // child of Workspace: Back returns to Workspace while Close dismisses it and
 // preserves it as the next Workspace resume target. Presentation and stacking
 // are realized in styles.css from `.module-view` + `--module-depth`.
@@ -58,7 +58,7 @@ export interface ModuleViewProps {
   onToggleFullscreen?: () => void;
   pinned?: boolean;
   fullscreen?: boolean;
-  /** Close/dismiss the module. Phone rail packages also get a separate Back. */
+  /** Close/dismiss the module. Phone modules also get a separate Back. */
   onClose: () => void;
   closeLabel?: string;
   /** "main" = WorkspaceHost surface, "rail" = ContextRail panel. */
@@ -100,13 +100,12 @@ export default function ModuleView(props: ModuleViewProps): ReactNode {
   } = props;
   const shellMode = useShellMode();
   const phone = shellMode === "phone";
-  const workspaceChild = phone && variant === "rail";
 
-  // Any phone package reached outside Workspace still becomes the natural
-  // resume target. Back deliberately clears this through showMobileWorkspaceHome().
+  // Every phone package is a child of Workspace. Reaching one by any route
+  // makes it the resume target; Back deliberately clears that target.
   useEffect(() => {
-    if (workspaceChild) rememberMobileWorkspacePackage(id);
-  }, [id, workspaceChild]);
+    if (phone) rememberMobileWorkspacePackage(id);
+  }, [id, phone]);
 
   // Both rail and workbench hosts already subscribe to the surface registry.
   // Resolve here, once per frame, so moving a page cannot turn it into an
@@ -115,7 +114,7 @@ export default function ModuleView(props: ModuleViewProps): ReactNode {
   const resolvedContentMode = surfaceContentMode(surface?.presentation, contentMode);
   const phoneBack = () => {
     onClose();
-    if (workspaceChild) showMobileWorkspaceHome();
+    showMobileWorkspaceHome();
   };
 
   return createElement(
@@ -155,9 +154,7 @@ export default function ModuleView(props: ModuleViewProps): ReactNode {
       phone
         ? [
           systemAction(BackIcon, tr("common.back"), phoneBack, undefined, "module-view-back", "phone-back"),
-          workspaceChild
-            ? systemAction(CloseIcon, closeLabel ?? tr("contextrail.closePanel"), onClose, undefined, "module-view-close module-view-dismiss", "phone-close")
-            : null,
+          systemAction(CloseIcon, closeLabel ?? tr("contextrail.closePanel"), onClose, undefined, "module-view-close module-view-dismiss", "phone-close"),
         ]
         : systemAction(CloseIcon, closeLabel ?? tr("contextrail.closePanel"), onClose, undefined, "module-view-close"),
     ),

@@ -4,12 +4,11 @@ import { readFile } from "node:fs/promises";
 
 const read = (rel: string) => readFile(new URL(rel, import.meta.url), "utf8");
 
-test("phone rail modules expose Back to Workspace and a separate dismiss control", async () => {
+test("phone modules expose Back to Workspace and a separate dismiss control", async () => {
   const moduleView = await read("../src/components/ui/ModuleView.ts");
 
   assert.match(moduleView, /const phone = shellMode === "phone"/);
-  assert.match(moduleView, /const workspaceChild = phone && variant === "rail"/);
-  assert.match(moduleView, /rememberMobileWorkspacePackage\(id\)/);
+  assert.match(moduleView, /if \(phone\) rememberMobileWorkspacePackage\(id\)/);
   assert.match(moduleView, /showMobileWorkspaceHome\(\)/);
   assert.match(moduleView, /systemAction\(BackIcon, tr\("common\.back"\), phoneBack/);
   assert.match(moduleView, /module-view-close module-view-dismiss/);
@@ -49,4 +48,15 @@ test("mobile Workspace navigation restores a dismissed package and keeps the roo
   assert.match(sessionHeader, /capability\.descriptor\.open\(\)/);
   assert.match(viewHeader, /workspaceNav\.lastPackageId/);
   assert.match(workspaceCss, /\.workspace-panel-sheet \.sheet-title\s*\{\s*display:\s*none;/s);
+});
+
+test("Source control mobile surface removes the giant card treatment and uses quiet tabs", async () => {
+  const css = await read("../../../packages/git/widgets/mobile.css");
+  const index = await read("../../../packages/git/widgets/index.tsx");
+
+  assert.match(index, /import "\.\/mobile\.css"/);
+  assert.match(css, /\.git-changes-layout > \.git-master-detail,[\s\S]*?border:\s*0;/);
+  assert.match(css, /\.source-tabs\s*\{[\s\S]*?border-bottom:\s*1px solid var\(--hair\)/);
+  assert.match(css, /\.source-tabs > \.ui-tab\.ui-tab--selected[\s\S]*?box-shadow:\s*inset 0 -2px 0 var\(--accent\)/);
+  assert.match(css, /\.source-sync-btn[\s\S]*?border-color:\s*transparent/);
 });
