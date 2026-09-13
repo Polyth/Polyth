@@ -11,6 +11,7 @@
 import { useActiveModel, useStore } from "../store.ts";
 import { fmtCost, fmtTokens } from "../format.ts";
 import type { SessionEvent } from "@polyth/contracts";
+import { resolveModelPresentation } from "@polyth/contracts/model-presentation";
 import {
   contextGaugeForTelemetry,
   contextTelemetryNotice,
@@ -86,10 +87,8 @@ function ContextView() {
     .filter((event): event is SessionEvent =>
       !!event && (event.type === "user/message" || event.type === "assistant/message"));
   const activeModel = model.contextUsage?.model ?? model.turn?.model ?? session.model;
-  const descriptor = activeModel
-    ? models.find((candidate) =>
-        candidate.providerID === activeModel.providerID && candidate.modelID === activeModel.modelID)
-    : undefined;
+  const modelPresentation = resolveModelPresentation(activeModel, models, session.resolvedHarnessId);
+  const descriptor = modelPresentation.descriptor;
   const telemetryStatus = contextTelemetryStatus(runtimeFeatures?.telemetry);
   const gauge = contextGaugeForTelemetry(model, descriptor?.context, session.contextWindow ?? null, telemetryStatus);
   const contextPercent = formatContextPercent(gauge);
@@ -107,7 +106,7 @@ function ContextView() {
       </div>
       <div className="stat-row">
         <span className="k">{tr("railsurfaces.model")}</span>
-        <span>{session.model ? `${session.model.providerID}/${session.model.modelID}` : "—"}</span>
+        <span>{activeModel ? modelPresentation.name : "—"}</span>
       </div>
       <div className="stat-row">
         <span className="k">{tr("railsurfaces.agent")}</span>
