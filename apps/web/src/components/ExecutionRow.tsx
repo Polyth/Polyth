@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { JsonObject, SessionProjection } from "@polyth/contracts";
+import { resolveModelPresentation } from "@polyth/models/presentation";
 import { api, errorCodeOf, httpStatusOf } from "@polyth/session/web-api";
 import { fmtMs } from "../format.ts";
 import {
@@ -718,12 +719,8 @@ function SubagentDetail({ subagent }: { subagent: Subagent }) {
     ? sessions.find((session) => session.id === childSession.parentId) ?? activeSession
     : activeSession;
   const model = childSession?.model ?? parentSession?.model;
-  const descriptor = model
-    ? models.find((candidate) =>
-        candidate.providerID === model.providerID && candidate.modelID === model.modelID)
-    : undefined;
-  const modelLabel = descriptor?.name
-    ?? (model ? `${model.providerID}/${model.modelID}` : "Unknown model");
+  const harnessId = childSession?.resolvedHarnessId ?? parentSession?.resolvedHarnessId;
+  const modelLabel = model ? resolveModelPresentation(model, models, harnessId).name : "Auto";
   const inheritedModel = childSession?.model === undefined;
   const parentLabel = parentSession?.title ?? "Current session";
   const openChild = () => {
