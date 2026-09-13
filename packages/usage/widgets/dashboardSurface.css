@@ -122,10 +122,12 @@
 }
 
 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-  html:not([data-reduce-animations="true"]) body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .usage-dashboard-toolbar {
-    background: color-mix(in srgb, var(--material-glass) 62%, transparent);
-    -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
-    backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
+  @media (prefers-reduced-motion: no-preference) {
+    html:not([data-reduce-animations="true"]) body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .usage-dashboard-toolbar {
+      background: color-mix(in srgb, var(--material-glass) 62%, transparent);
+      -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
+      backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
+    }
   }
 }
 
@@ -232,6 +234,10 @@
   min-height: 0;
   margin-top: var(--space-2);
   padding-top: 0;
+}
+
+.usage-provider-detail-card > footer:not(:has(> .ui-btn:nth-child(2))) {
+  margin-top: 0;
 }
 
 .usage-provider-detail-card > footer > .ui-btn:nth-child(2) {
