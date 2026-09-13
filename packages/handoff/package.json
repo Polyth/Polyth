@@ -23,7 +23,6 @@
   },
   "dependencies": {
     "@polyth/contracts": "0.1.0",
-    "@polyth/models": "0.1.0",
     "@polyth/plugins": "0.1.0",
     "@polyth/session": "0.1.0",
     "@polyth/web-sdk": "0.1.0"
