@@ -1,24 +1,21 @@
 /* Adaptive composer polish ---------------------------------------------------
-   This file is deliberately loaded after the core/module styles. The composer
-   is an extension host, so the final layout rules belong to the shell rather
-   than to individual packages/harnesses.
+   Loaded after the core/module styles. The shell owns the final composer
+   composition because the composer is an extension host.
 
    Contract:
-   - secondary controls are quiet/borderless;
-   - attachments/context stay outside and above the writing surface;
-   - Send / Queue / Stop own one stable primary-action slot;
-   - mobile exposes at most one inline extension lane; additional contributed
-     actions remain horizontally reachable without widening the composer;
-   - desktop keeps contributed actions compact while model + primary action
-     stay together at the trailing edge. */
+   - one unified writing surface, with text always starting from one origin;
+   - Add stays at the far left; execution + input-method + primary action stay
+     grouped at the trailing edge;
+   - phone execution order is Thinking -> Model -> Microphone -> Action;
+   - only the primary action is visually strong;
+   - Send / Queue / Stop share one stable primary-action slot;
+   - attachments remain visible above the writing surface. */
 
 .composer-simple .composer-card {
   position: relative;
 }
 
-/* Attachments are next-turn context, not text-field chrome. New chats place
-   them above project selection; existing chats place them directly above the
-   composer. Images are visual tiles, while text/files retain their names. */
+/* Attachments are next-turn context, not text-field chrome. */
 .composer-simple > .attachment-pills {
   min-width: 0;
   min-height: var(--control-h-sm);
@@ -78,14 +75,14 @@
   transform: translateY(-50%);
 }
 
-/* A composer is a single control surface. Only the primary action is filled;
-   add/config/package controls keep their hit area but lose decorative frames. */
+/* Quiet secondary controls -------------------------------------------------- */
 .composer-simple .composer-rail :is(
   .composer-add-trigger,
   .config-chip,
   .picker-chip,
   .model-picker-trigger,
   .composer-send-options,
+  .composer-effort-trigger,
   .icon-btn,
   .header-action,
   .ui-icon-btn,
@@ -101,6 +98,7 @@
   .picker-chip,
   .model-picker-trigger,
   .composer-send-options,
+  .composer-effort-trigger,
   .icon-btn,
   .header-action,
   .ui-icon-btn
@@ -114,6 +112,7 @@
   .picker-chip,
   .model-picker-trigger,
   .composer-send-options,
+  .composer-effort-trigger,
   .icon-btn,
   .header-action,
   .ui-icon-btn
@@ -128,15 +127,139 @@
   border: 0;
 }
 
-/* Queue replaces Send while a turn is active; it must not change the row's
-   geometry. The accessible name remains on the button, while the visible
-   label stays out of both phone and desktop layouts. */
+/* Thinking effort ----------------------------------------------------------- */
+.composer-effort-control {
+  position: relative;
+  min-width: var(--tap);
+  width: var(--tap);
+  height: var(--tap);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 var(--tap);
+}
+
+.composer-effort-trigger,
+.composer-effort-option {
+  min-width: var(--tap);
+  width: var(--tap);
+  min-height: var(--tap);
+  height: var(--tap);
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.composer-effort-trigger:hover,
+.composer-effort-trigger[aria-expanded="true"],
+.composer-effort-option:hover,
+.composer-effort-option.selected {
+  color: var(--text);
+  background: var(--surface-overlay-hover);
+}
+
+.composer-effort-option.selected {
+  color: var(--accent);
+  background: var(--surface-overlay-strong);
+}
+
+.composer-effort-meter {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  display: inline-flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: calc(var(--space-1) / 2);
+  flex: none;
+}
+
+.composer-effort-meter i {
+  width: calc(var(--space-1) / 2);
+  display: block;
+  border-radius: var(--radius-round);
+  background: var(--hair-strong);
+  opacity: .72;
+  transition:
+    height var(--motion-fast) var(--motion-ease),
+    background-color var(--motion-fast) var(--motion-ease),
+    opacity var(--motion-fast) var(--motion-ease);
+}
+
+.composer-effort-meter i:nth-child(1) { height: 28%; }
+.composer-effort-meter i:nth-child(2) { height: 48%; }
+.composer-effort-meter i:nth-child(3) { height: 72%; }
+.composer-effort-meter i:nth-child(4) { height: 96%; }
+.composer-effort-meter i.active { background: currentColor; opacity: 1; }
+
+/* Auto is intentionally static and neutral: it must never resemble progress. */
+.composer-effort-meter.auto i {
+  background: var(--faint);
+  opacity: .42;
+}
+.composer-effort-meter.auto i:nth-child(2),
+.composer-effort-meter.auto i:nth-child(4) {
+  opacity: .8;
+}
+
+.composer-effort-menu {
+  position: absolute;
+  z-index: var(--z-popover);
+  inset-inline-start: 50%;
+  inset-block-end: calc(100% + var(--space-1));
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  background: var(--material-glass-strong);
+  box-shadow: var(--material-glass-shadow);
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.composer-effort-range-fallback {
+  pointer-events: none;
+}
+
+/* Queue is a send with a small follow-up badge, not a separate unfamiliar
+   ListPlus action. The main glyph therefore stays exactly the normal Send. */
+.composer-simple .composer-queue {
+  position: relative;
+}
+
 .composer-simple .composer-queue .composer-action-label {
   display: none;
 }
 
+.composer-simple .composer-queue::after {
+  content: "+";
+  position: absolute;
+  inset-block-start: calc(var(--space-1) * -1);
+  inset-inline-end: calc(var(--space-1) * -1);
+  width: var(--space-3);
+  height: var(--space-3);
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-round);
+  color: var(--text);
+  background: var(--material-glass-strong);
+  font-size: var(--font-meta);
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: var(--shadow-sm);
+  pointer-events: none;
+}
+
 .composer-simple .composer-send-split {
-  gap: 2px;
+  gap: calc(var(--space-1) / 2);
 }
 
 .composer-simple .composer-send-options {
@@ -146,78 +269,224 @@
 
 /* Mobile ------------------------------------------------------------------ */
 @media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
-  /* The engaged phone composer uses one compact vertical rhythm: a two-line
-     writing area followed by a 44px action row. The core phone rules reserve
-     two full tap heights for the editor and then add toolbar padding, which
-     leaves an outsized empty band between a one-line draft and the actions. */
+  /* The resting and focused composer use the same geometry. Focus changes the
+     caret/keyboard, not the text origin or the shell shape. */
+  .composer-mobile .composer-card,
+  .composer-mobile.composer-collapsed .composer-card,
+  .composer-mobile.composer-expanded .composer-card {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    padding: 0;
+    overflow: visible;
+    border-color: var(--material-glass-border);
+    border-radius: var(--radius-composer);
+    background: var(--material-glass-strong);
+    box-shadow: none;
+  }
+
+  .composer-mobile .composer-card:focus-within {
+    border-color: var(--material-glass-border);
+    box-shadow: none;
+  }
+
+  .composer-mobile .composer-input,
+  .composer-mobile.composer-collapsed .composer-input {
+    order: 1;
+    width: 100%;
+    min-width: 0;
+    flex: 0 0 auto;
+  }
+
+  /* Invariant: placeholder, one-line drafts and long drafts all start at the
+     same top-left point. Never vertically center the single-line state. */
+  .composer-mobile .composer-card textarea,
+  .composer-mobile.composer-collapsed .composer-card textarea,
   .composer-mobile.composer-expanded .composer-card textarea {
-    min-height: calc(var(--control-h-lg) + var(--space-3));
-    padding: var(--space-2) var(--space-3) var(--space-1);
+    min-height: var(--control-h-sm);
+    max-height: min(var(--composer-max-input-height), 18dvh);
+    padding: var(--space-3) var(--space-4) 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    text-overflow: clip;
   }
 
+  .composer-mobile .composer-rail,
+  .composer-mobile.composer-collapsed .composer-rail,
   .composer-mobile.composer-expanded .composer-rail {
-    min-height: calc(var(--tap) + var(--space-3));
+    order: 2;
+    width: 100%;
+    min-height: var(--tap);
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
     gap: var(--space-1);
-    padding: var(--space-1) var(--space-2) var(--space-2);
-  }
-
-  .composer-mobile .composer-rail {
-    gap: var(--space-1);
+    padding: 0 var(--space-2) var(--space-2);
   }
 
   .composer-mobile .composer-leading-zone,
-  .composer-mobile .composer-actions,
-  .composer-mobile .composer-extensions,
-  .composer-mobile .composer-config,
-  .composer-mobile .composer-primary {
+  .composer-mobile.composer-collapsed .composer-leading-zone {
+    order: 1;
+    display: inline-flex;
+    align-items: center;
     gap: var(--space-1);
+    flex: none;
   }
 
-  /* Slot contributions may request a compact IconButton (24px visual box),
-     while the adjacent Add, model and primary controls use 44px boxes. Keep
-     the icon itself compact but normalize its layout box so centers and gaps
-     stay even and transparent coarse-pointer hit areas never overlap. */
-  .composer-mobile .composer-extensions .ui-icon-btn {
+  .composer-mobile .composer-execution,
+  .composer-mobile.composer-collapsed .composer-execution {
+    order: 2;
+    min-width: 0;
+    max-width: 56vw;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    flex: 0 1 auto;
+    margin-inline-start: auto;
+    overflow: visible;
+  }
+
+  .composer-mobile .composer-actions,
+  .composer-mobile.composer-collapsed .composer-actions {
+    order: 3;
+    display: flex;
+    align-items: center;
+    flex: none;
+    gap: var(--space-1);
+    margin-inline-start: 0;
+  }
+
+  .composer-mobile .composer-primary {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    gap: var(--space-1);
+    margin-inline-start: 0;
+  }
+
+  /* A required phone-only widget places effort into composer.execution. The
+     SlotHost wrapper becomes transparent so the meter can order before Model. */
+  .composer-mobile .composer-execution > .placed-mini-widget:has(.composer-effort-inline) {
+    display: contents;
+  }
+
+  .composer-mobile .composer-effort-inline {
+    order: -1;
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+  }
+
+  .composer-mobile .composer-effort-control,
+  .composer-mobile .composer-effort-trigger {
+    width: var(--tap);
+    min-width: var(--tap);
+    height: var(--tap);
+    min-height: var(--tap);
+  }
+
+  /* Model is a quiet text control. Provider identity and dropdown chevron are
+     already present inside the picker; repeating them in the composer is noise. */
+  .composer-mobile .composer-execution > .picker,
+  .composer-mobile .composer-execution .model-picker {
+    min-width: 0;
+    max-width: 34vw;
+    flex: 0 1 auto;
+  }
+
+  .composer-mobile .composer-execution .model-picker-trigger {
+    min-width: 0;
+    width: auto;
+    max-width: 34vw;
+    height: var(--tap);
+    min-height: var(--tap);
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    padding-inline: var(--space-1);
+    border: 0;
+    color: var(--text-dim);
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .composer-mobile .model-picker-trigger .model-trigger-logo,
+  .composer-mobile .model-picker-trigger .config-chip-caret {
+    display: none;
+  }
+
+  .composer-mobile .model-picker-trigger .model-trigger-name {
+    min-width: 0;
+    overflow: hidden;
+    color: inherit;
+    font-size: var(--font-label);
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Thinking now has its own direct control in the composer. Do not duplicate
+     it again inside the phone model sheet. */
+  .model-sheet .pkg-harnesses-mobile-config {
+    display: none;
+  }
+
+  /* The primary mobile row intentionally exposes only voice from contributed
+     trailing controls. Other package controls remain available on desktop and
+     through their package/settings surfaces rather than turning the composer
+     into a toolbar. */
+  .composer-mobile.composer-collapsed .composer-actions > .composer-extensions,
+  .composer-mobile .composer-mobile-extensions {
+    width: var(--tap);
+    max-width: var(--tap);
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 var(--tap);
+    overflow: visible;
+  }
+
+  .composer-mobile .composer-mobile-extensions > .placed-mini-widget {
+    display: none;
+  }
+
+  .composer-mobile .composer-mobile-extensions > .placed-mini-widget:has(.mic-btn) {
+    display: contents;
+  }
+
+  .composer-mobile .composer-mobile-extensions .mic-btn,
+  .composer-mobile.composer-has-draft .composer-mobile-extensions .mic-btn {
+    width: var(--tap);
+    min-width: var(--tap);
+    height: var(--tap);
+    min-height: var(--tap);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    color: var(--text-dim);
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .composer-mobile .composer-add-trigger,
+  .composer-mobile .composer-send-options,
+  .composer-mobile .composer-mobile-extensions :is(button, .ui-icon-btn) {
+    border: 0;
+    box-shadow: none;
+  }
+
+  .composer-mobile .composer-add-trigger {
     width: var(--tap);
     min-width: var(--tap);
     height: var(--tap);
     min-height: var(--tap);
     padding: 0;
-  }
-
-  .composer-mobile .composer-execution,
-  .composer-mobile .composer-execution > .picker {
-    min-width: 0;
-    max-width: 100%;
-  }
-
-  .composer-mobile .composer-execution .model-picker-trigger {
-    height: var(--tap);
-    min-height: var(--tap);
-    max-width: 100%;
-  }
-
-  /* One extension lane is intentionally visible on phone. Packages can
-     contribute more controls without widening the bar; the lane scrolls and
-     each action keeps a full touch target. */
-  .composer-mobile .composer-mobile-extensions {
-    width: var(--tap);
-    max-width: var(--tap);
-    flex: 0 0 var(--tap);
-    scroll-snap-type: x proximity;
-  }
-
-  .composer-mobile .composer-mobile-extensions > *,
-  .composer-mobile .composer-mobile-extensions .placed-mini-widget > * {
-    scroll-snap-align: start;
-  }
-
-  .composer-mobile .composer-mobile-extensions :is(button, .ui-icon-btn),
-  .composer-mobile .composer-add-trigger,
-  .composer-mobile .composer-send-options,
-  .composer-mobile .composer-config :is(button, .config-chip, .picker-chip) {
-    border: 0;
-    box-shadow: none;
+    background: transparent;
   }
 
   .composer-mobile .composer-action-label,
@@ -225,8 +494,7 @@
     display: none;
   }
 
-  /* Send and Queue use the same circular slot. The adjacent overflow trigger
-     remains a quiet touch target and never makes the primary button wider. */
+  /* Send, Queue and Stop always own the same final touch box. */
   .composer-mobile .composer-send-split .composer-queue,
   .composer-mobile .composer-primary > .send,
   .composer-mobile .composer-primary > .stop {
@@ -236,19 +504,32 @@
     min-height: var(--tap);
     flex: 0 0 var(--tap);
     padding: 0;
+    border-radius: var(--radius-round);
   }
 
-  .composer-mobile .composer-send-options {
+  /* Active-run alternatives are contextual and quiet. The familiar queued
+     Send remains the final, dominant action; the menu sits immediately before
+     it and contains Interrupt now / Stop. */
+  .composer-mobile .composer-send-split {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  .composer-mobile .composer-send-split .composer-send-options {
+    order: 1;
+    width: var(--tap);
+    min-width: var(--tap);
+    height: var(--tap);
+    min-height: var(--tap);
     flex: 0 0 var(--tap);
     margin-inline-start: 0;
+    color: var(--muted);
     background: transparent;
   }
 
-  /* With the software keyboard visible, favour writing space over chrome.
-     The model still remains reachable, but secondary extension slots do not
-     compete with the primary Queue/Send action. */
-  body[data-keyboard="open"] .composer-mobile .composer-mobile-extensions {
-    max-width: var(--tap);
+  .composer-mobile .composer-send-split .composer-queue {
+    order: 2;
   }
 
   .composer-mobile > .attachment-pills {
@@ -260,30 +541,16 @@
   }
 }
 
-/* At the narrowest supported phone width, two simultaneously visible trailing
-   extensions would squeeze the model trigger below a touch target. They share
-   one scrollable action slot here; the primary action remains pinned. */
+/* Tight phones keep the same semantic order and trim only the model label. */
 @media (max-width: 340px) {
-  .composer-mobile .composer-actions > .composer-extensions {
-    width: var(--tap);
-    max-width: var(--tap);
-    flex: 0 0 var(--tap);
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    overflow-y: hidden;
-    overscroll-behavior-inline: contain;
-    scroll-snap-type: x proximity;
-    scrollbar-width: none;
+  .composer-mobile .composer-execution {
+    max-width: 48vw;
   }
 
-  .composer-mobile .composer-actions > .composer-extensions::-webkit-scrollbar {
-    display: none;
-  }
-
-  .composer-mobile .composer-actions > .composer-extensions > *,
-  .composer-mobile .composer-actions > .composer-extensions .placed-mini-widget > * {
-    flex: none;
-    scroll-snap-align: start;
+  .composer-mobile .composer-execution > .picker,
+  .composer-mobile .composer-execution .model-picker,
+  .composer-mobile .composer-execution .model-picker-trigger {
+    max-width: 28vw;
   }
 }
 
@@ -303,8 +570,6 @@
     gap: var(--space-1);
   }
 
-  /* Package/harness actions may grow over time. They get a bounded strip;
-     model selection and the primary action are never pushed away or covered. */
   .composer-simple .composer-actions {
     margin-inline-start: auto;
     flex: 0 1 auto;
@@ -327,9 +592,6 @@
     display: none;
   }
 
-  /* The model belongs to the act of sending. Keep the config cluster directly
-     beside the primary button rather than visually distributing it through
-     the rest of the toolbar. */
   .composer-simple .composer-config {
     flex: 0 0 auto;
     margin-inline-start: var(--space-1);
@@ -346,10 +608,12 @@
   }
 
   .composer-simple .composer-config + .composer-primary {
-    margin-inline-start: 2px;
+    margin-inline-start: calc(var(--space-1) / 2);
   }
+}
 
-  .composer-simple .composer-send-split {
-    gap: 2px;
+@media (prefers-reduced-motion: reduce) {
+  .composer-effort-meter i {
+    transition: none;
   }
 }
