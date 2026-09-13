@@ -40,6 +40,7 @@ import backendAcp from "../../../packages/backend-acp/src/serverEntry.ts";
 
 import backendClaude from "../../../packages/backend-claude/src/serverEntry.ts";
 import backendCodex from "../../../packages/backend-codex/src/serverEntry.ts";
+import backendCommandCode from "../../../packages/backend-commandcode/src/serverEntry.ts";
 
 import backendCursor from "../../../packages/backend-cursor/src/serverEntry.ts";
 
@@ -68,6 +69,7 @@ export const desktopServerPackages = [
   entry("backend-acp", {"name": "ACP harnesses", "description": "Shared Agent Client Protocol transport and runtime", "core": false, "enabled": true, "icon": "network", "hasSettings": false}, backendAcp),
   entry("backend-claude", {"name": "Claude Code harness", "description": "Claude Code through its Agent SDK", "core": false, "enabled": true, "icon": "assist", "hasSettings": false}, backendClaude),
   entry("backend-codex", {"name": "Codex harness", "description": "Native Codex App Server execution", "core": false, "enabled": true, "icon": "code", "hasSettings": false}, backendCodex),
+  entry("backend-commandcode", {"name": "Command Code harness", "description": "Command Code through its official headless event stream and native mod bridge", "core": false, "enabled": true, "icon": "command", "hasSettings": false}, backendCommandCode),
   entry("backend-cursor", {"name": "Cursor harness", "description": "Cursor through shared ACP", "core": false, "enabled": true, "icon": "pointer", "hasSettings": false}, backendCursor),
   entry("backend-fx", {"name": "fx harness", "description": "fx through shared ACP", "core": false, "enabled": true, "icon": "command", "hasSettings": false}, backendFx),
   entry("backend-grok", {"name": "Grok Build harness", "description": "Grok Build through its native ACP stdio agent", "core": false, "enabled": true, "icon": "assist", "hasSettings": false}, backendGrok),
