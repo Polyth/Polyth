@@ -4,7 +4,6 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./presentation": "./src/presentation.ts",
     "./i18n": "./src/i18n/index.ts",
     "./model-picker": "./widgets/ModelPicker.tsx",
     "./model-picker-state": "./widgets/modelPickerState.ts",
