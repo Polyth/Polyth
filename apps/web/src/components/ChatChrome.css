@@ -19,6 +19,15 @@
   display: contents;
 }
 
+.chat-message-actions > .ui-tooltip-host,
+.chat-response-actions > .ui-tooltip-host,
+.chat-response-info > .ui-tooltip-host {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
 .chat-action-button.ui-icon-btn {
   color: var(--muted);
   background: transparent;
@@ -209,5 +218,17 @@
 
   .ui-tooltip.chat-action-tooltip {
     display: none;
+  }
+}
+
+/* Seven configured response actions cannot all retain independent 44px hit
+   regions inside a 320px phone reading column. Make that one edge case an
+   explicit, right-aligned 4-column grid rather than allowing accidental flex
+   wrapping or overlapping tap targets. */
+@media (max-width: 340px) and (pointer: coarse) {
+  .chat-response-actions {
+    display: grid;
+    grid-template-columns: repeat(4, var(--control-h-sm));
+    gap: var(--space-3);
   }
 }
