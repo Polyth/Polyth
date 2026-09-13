@@ -434,22 +434,19 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
     if (isolation.dismissedRevision && isolation.dismissedRevision === revision) {
       return { eligible: false, hasChanges: true, targetBranch, targetDirty: target.dirty, revision, reason: "dismissed" };
     }
-    if (target.dirty) {
-      return { eligible: false, hasChanges: true, targetBranch, targetDirty: true, revision, reason: "dirty-target" };
-    }
     if (isolation.state === "conflict") {
       const stopped = events ? lastCompletedTurn(events) : undefined;
       const reason = stopped?.data && typeof stopped.data === "object"
         ? (stopped.data as { reason?: unknown }).reason
         : undefined;
       if (events && stopped?.type === "turn/stopped" && reason === "completed") {
-        return { eligible: true, hasChanges: true, targetBranch, targetDirty: false, revision };
+        return { eligible: true, hasChanges: true, targetBranch, targetDirty: target.dirty, revision };
       }
       return {
         eligible: false,
         hasChanges: true,
         targetBranch,
-        targetDirty: false,
+        targetDirty: target.dirty,
         revision,
         reason: "conflict",
       };
@@ -460,12 +457,12 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         ? (stopped.data as { reason?: unknown }).reason
         : undefined;
       if (stopped?.type !== "turn/stopped" || reason !== "completed") {
-        return { eligible: false, hasChanges: true, targetBranch, targetDirty: false, revision, reason: "no-turn" };
+        return { eligible: false, hasChanges: true, targetBranch, targetDirty: target.dirty, revision, reason: "no-turn" };
       }
     } else if (isolation.state !== "merge-ready") {
-      return { eligible: false, hasChanges: true, targetBranch, targetDirty: false, revision, reason: "no-turn" };
+      return { eligible: false, hasChanges: true, targetBranch, targetDirty: target.dirty, revision, reason: "no-turn" };
     }
-    return { eligible: true, hasChanges: true, targetBranch, targetDirty: false, revision };
+    return { eligible: true, hasChanges: true, targetBranch, targetDirty: target.dirty, revision };
   };
 
   const derivedState = (
@@ -872,14 +869,27 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
     intent: IsolationPublishIntent,
   ): Promise<"published" | "target-moved"> => {
     const target = await inspectTarget(isolation);
-    if (target.dirty) {
-      throw err(
-        "conflict",
-        `${isolation.targetBranch} has local changes. Commit or discard them before integrating this session.`,
-      );
-    }
     if (target.liveHead !== intent.expectedTargetSha) return "target-moved";
     if (!intent.receiptRef) throw err("corrupt-isolation", "publication receipt is missing");
+    try {
+      // A real Git dry-run replaces the blanket dirty-tree block. Compatible
+      // staged, unstaged, and untracked work is carried forward; overlapping
+      // work remains untouched because this happens before the ref CAS.
+      await git.syncPublishedCheckout(target.path, {
+        branch: isolation.targetBranch,
+        expectedHead: intent.expectedTargetSha,
+        resultCommit: intent.resultCommit,
+        checkOnly: true,
+      });
+    } catch (error) {
+      const after = await inspectTarget(isolation).catch(() => null);
+      if (after && after.liveHead !== intent.expectedTargetSha) return "target-moved";
+      if (!after) throw error;
+      throw err(
+        "conflict",
+        `${isolation.targetBranch} has local changes that overlap this integration. The local changes were kept; move or resolve the overlap and try again.`,
+      );
+    }
     const updated = await git.publishRef(isolation.targetPath, {
       targetRef: intent.targetRef,
       expectedHead: intent.expectedTargetSha,
@@ -907,12 +917,6 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
     | { kind: "retry" }
   > => {
     const target = await inspectTarget(isolation);
-    if (target.dirty) {
-      throw err(
-        "conflict",
-        `${isolation.targetBranch} has local changes. Commit or discard them before integrating this session.`,
-      );
-    }
     const targetHead = target.liveHead;
     isolationLog("integration-started", {
       sessionId: session.id,
@@ -1116,7 +1120,6 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       const blocked = isolationBlocksUserMutation(session.status);
       const sourceReady = effectiveState !== "missing" && effectiveState !== "unowned" && effectiveState !== "corrupt";
       const hasChanges = suggestion?.hasChanges === true;
-      const targetReady = suggestion?.targetDirty !== true && suggestion?.reason !== "dirty-target";
       const conflict = isolation.state === "conflict";
       return {
         isolation,
@@ -1124,7 +1127,7 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         effectiveState,
         actions: {
           canReview: sourceReady,
-          canMerge: !blocked && sourceReady && destinationReady && targetReady && hasChanges && !conflict,
+          canMerge: !blocked && sourceReady && destinationReady && hasChanges && !conflict,
           canKeep: !blocked && sourceReady && USER_OPS.keep.has(isolation.state),
           canResolve: !blocked && sourceReady && isolation.state === "conflict",
           canDiscard: !blocked && destinationReady
@@ -1200,13 +1203,6 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         const targetHead = await git.revParse(isolation.targetPath, isolation.targetBranch);
         if (!(await git.hasUniqueChanges(isolation.worktreePath, targetHead))) {
           throw err("invalid-input", `No isolated changes to merge into ${isolation.targetBranch}.`);
-        }
-        const target = await inspectTarget(isolation);
-        if (target.dirty) {
-          throw err(
-            "conflict",
-            `${isolation.targetBranch} has local changes. Commit or discard them before integrating this session.`,
-          );
         }
         isolationLog("merge-requested", {
           sessionId,

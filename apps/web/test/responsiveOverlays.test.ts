@@ -724,6 +724,53 @@ test("context selectors give a long label room and shrink instead of overflowing
   await page.setViewportSize({ width: 390, height: 720 });
 });
 
+test("standalone isolation switch shares the context row without entering the worktree picker", { skip: !CHROME }, async () => {
+  assert.ok(page);
+  const css = `${await read("../src/styles.css")}\n${await read("../src/moduleContent.css")}`;
+  const selector = (kind: string, text: string) =>
+    `<div class="context-selector context-selector-${kind}"><button class="context-trigger">` +
+    `<span class="context-trigger-icon">•</span><span class="context-trigger-name">${text}</span>` +
+    `<span class="context-trigger-caret">v</span></button></div>`;
+  const isolation = `<span class="context-isolation-control" data-active="true">` +
+    `<span class="context-isolation-label">Work in isolation</span>` +
+    `<button class="switch ui-switch" role="switch" aria-checked="true">` +
+    `<span class="switch-track"><i></i></span></button></span>`;
+
+  for (const width of [320, 390, 1440]) {
+    await page.setViewportSize({ width, height: 720 });
+    const barWidth = Math.min(width - 16, 900);
+    await page.setContent(`<style>${css}</style>
+      <div class="session-context-bar" id="bar" style="width:${barWidth}px">
+        ${selector("project", "Polyth")}${selector("branch", "feature/a-rather-long-branch-name")}${isolation}
+      </div>`);
+    const geometry = await page.evaluate(() => {
+      const bar = document.querySelector<HTMLElement>("#bar")!;
+      const project = document.querySelector<HTMLElement>(".context-selector-project")!;
+      const branch = document.querySelector<HTMLElement>(".context-selector-branch")!;
+      const control = document.querySelector<HTMLElement>(".context-isolation-control")!;
+      return {
+        bar: bar.getBoundingClientRect().width,
+        scroll: bar.scrollWidth,
+        project: project.getBoundingClientRect().width,
+        branch: branch.getBoundingClientRect().width,
+        control: control.getBoundingClientRect().width,
+        controlRight: control.getBoundingClientRect().right,
+        barRight: bar.getBoundingClientRect().right,
+        background: getComputedStyle(control).backgroundColor,
+      };
+    });
+    assert.ok(geometry.scroll <= geometry.bar + 1, `${width}px: the context row does not overflow`);
+    assert.ok(
+      geometry.project >= 32 && geometry.branch >= 32,
+      `${width}px: selectors remain operable (${JSON.stringify(geometry)})`,
+    );
+    assert.ok(geometry.control >= 120, `${width}px: the isolation label and switch remain visible`);
+    assert.ok(geometry.controlRight <= geometry.barRight + 1, `${width}px: isolation stays beside the selectors`);
+    assert.notEqual(geometry.background, "rgba(0, 0, 0, 0)", `${width}px: active isolation has a visible surface`);
+  }
+  await page.setViewportSize({ width: 390, height: 720 });
+});
+
 test("compact model catalog sizes the list to unfiltered rows with the full chrome", { skip: !CHROME }, async () => {
   assert.ok(page);
   const css = `${await read("../src/styles.css")}\n${await read("../../../packages/models/widgets/styles.css")}`;

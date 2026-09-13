@@ -453,7 +453,7 @@ export const bg: GitMessages = {
   "isolation.integratingChanges": "Интегриране на промените",
   "isolation.basedOn": "Базирано на {branch} · в изолирано пространство",
   "isolation.cantIntegrateYet": "Все още не може да се интегрира в {branch}",
-  "isolation.dirtyTargetDetail": "Оригиналното работно пространство {branch} има непотвърдени промени. Изолираната ви работа е в безопасност.",
+  "isolation.dirtyTargetDetail": "Оригиналното работно пространство {branch} има непотвърдени промени. Можете да интегрирате, без да ги комитвате или отхвърляте.",
   "isolation.discardConfirmGeneric": "Промените в това изолирано пространство не са интегрирани. Ще бъдат изтрити завинаги.",
   "isolation.discardTargetUnchanged": "{branch} няма да бъде променен.",
   "isolation.cantReturnYet": "Все още не може да се върне към {branch}",

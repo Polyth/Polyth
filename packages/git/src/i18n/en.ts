@@ -455,7 +455,7 @@ export const en = {
   "isolation.integratingChanges": "Integrating changes",
   "isolation.basedOn": "Based on {branch} · in isolated workspace",
   "isolation.cantIntegrateYet": "Can't integrate into {branch} yet",
-  "isolation.dirtyTargetDetail": "The original {branch} workspace has uncommitted changes. Your isolated work is safe.",
+  "isolation.dirtyTargetDetail": "The original {branch} workspace has uncommitted changes. You can integrate without committing or discarding them.",
   "isolation.discardConfirmGeneric": "Changes in this isolated workspace have not been integrated. They will be permanently deleted.",
   "isolation.discardTargetUnchanged": "{branch} will not be changed.",
   "isolation.cantReturnYet": "Can't return to {branch} yet",

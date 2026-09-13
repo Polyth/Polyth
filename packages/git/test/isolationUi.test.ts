@@ -216,6 +216,29 @@ test("dirty target explains blocked integration without review changes", async (
   }
 });
 
+test("compatible dirty target stays mergeable and explains that parent work is preserved", async () => {
+  const originalStatus = api.isolationStatus;
+  const isolation: SessionIsolation = { ...base, state: "merge-ready" };
+  api.isolationStatus = async () => ({
+    isolation, effectiveState: isolation.state,
+    suggestion: { eligible: true, hasChanges: true, targetBranch: "main", targetDirty: true, revision: "rev" },
+    actions: { canReview: true, canMerge: true, canKeep: true, canResolve: false, canDiscard: true, canRecover: false, canAbandon: false },
+  });
+  const mounted = await mount(projection("dirty-mergeable-ui", isolation));
+  try {
+    const text = mounted.container.textContent ?? "";
+    assert.ok(text.includes(tr("isolation.changesAreReady")));
+    assert.ok(text.includes(tr("isolation.dirtyTargetDetail", { branch: base.targetBranch })));
+    assert.ok(buttons(mounted.container).some((button) =>
+      button.textContent === tr("isolation.integrateInto", { branch: base.targetBranch }) && !button.disabled));
+    assert.ok(buttons(mounted.container).some((button) =>
+      button.textContent === tr("isolation.reviewChanges") && !button.disabled));
+  } finally {
+    await mounted.close();
+    api.isolationStatus = originalStatus;
+  }
+});
+
 test("conflict offers review and resolve without integrate", async () => {
   const originalStatus = api.isolationStatus;
   const isolation: SessionIsolation = {

@@ -183,9 +183,9 @@ type NewSessionTarget =
   /** Check the branch out in a fresh linked worktree. `base` is set for a
    *  remote-only branch — the new local branch starts from that remote ref. */
   | { kind: "branch"; branch: string; base?: string }
-  /** Fork a brand-new linked worktree from `base` (any branch, including the
-   *  current one) — the "New worktree" checkbox inside the branch picker. */
-  | { kind: "new-worktree"; base: string };
+  /** Start the session in a Polyth-managed isolated worktree based on a
+   *  branch that already has a live checkout. */
+  | { kind: "isolation"; base: string };
 
 type LocationChoice = ContextChoice & {
   target: NewSessionTarget;
@@ -213,9 +213,10 @@ function useComposerLocation(session: SessionProjection | null): {
   const [selectedBranchId, setSelectedBranchId] = useState(
     intendedWorktree ? `worktree:${intendedWorktree}` : "main",
   );
-  // "New worktree" mode: a checkbox in the branch picker that turns every
-  // branch row into a fork point for a fresh linked worktree.
-  const [newWorktreeMode, setNewWorktreeMode] = useState(false);
+  // Isolation is a first-class location choice beside the selectors. When it
+  // is on, the worktree picker lists only live checkouts that can be returned
+  // to safely after merge-back.
+  const [workInIsolation, setWorkInIsolation] = useState(false);
   // Opening the branch picker pulls the remote once per project so branches
   // that only exist on the server show up as fork points.
   const remoteFetchedRef = useRef<string | null>(null);
@@ -223,7 +224,7 @@ function useComposerLocation(session: SessionProjection | null): {
   useEffect(() => {
     let active = true;
     setSelectedBranchId(intendedWorktree ? `worktree:${intendedWorktree}` : "main");
-    setNewWorktreeMode(false);
+    setWorkInIsolation(false);
     const sessionId = session?.id;
     const sessionBranch = session?.branch;
     // The context bar is hidden while a session is open, so its data is unused.
@@ -304,7 +305,7 @@ function useComposerLocation(session: SessionProjection | null): {
       remoteOnly.push({ short, ref: candidate.name });
     }
 
-    if (newWorktreeMode) {
+    if (workInIsolation) {
       // Isolation starts from a live checkout so merge-back has a truthful cwd.
       const seen = new Set<string>();
       const choices: LocationChoice[] = [];
@@ -314,7 +315,7 @@ function useComposerLocation(session: SessionProjection | null): {
           id: `branch:${currentBranchName}`,
           label: currentBranchName,
           detail: tr("gitview.current"),
-          target: { kind: "new-worktree", base: currentBranchName },
+          target: { kind: "isolation", base: currentBranchName },
         });
       }
       for (const worktree of userWorktrees) {
@@ -324,7 +325,7 @@ function useComposerLocation(session: SessionProjection | null): {
         choices.push({
           id: `branch:${name}`,
           label: name,
-          target: { kind: "new-worktree", base: name },
+          target: { kind: "isolation", base: name },
         });
       }
       return choices;
@@ -363,21 +364,21 @@ function useComposerLocation(session: SessionProjection | null): {
       });
     }
     return choices;
-  }, [worktrees, branches, branch, newWorktreeMode, currentBranchName]);
+  }, [worktrees, branches, branch, workInIsolation, currentBranchName]);
 
   const selectedChoice = branchChoices.find((choice) => choice.id === selectedBranchId);
   const newSessionTarget: NewSessionTarget = selectedChoice?.target
-    ?? (intendedWorktree
-      ? { kind: "worktree", path: intendedWorktree }
-      : { kind: "main" });
+    ?? (workInIsolation && currentBranchName
+      ? { kind: "isolation", base: currentBranchName }
+      : intendedWorktree
+        ? { kind: "worktree", path: intendedWorktree }
+        : { kind: "main" });
   const rawBranchLabel = selectedChoice?.label
     || session?.branch
     || branch
     || intendedWorktree?.split("/").pop()
     || tr("composer.mainWorkspace");
-  const branchName = newSessionTarget.kind === "new-worktree"
-    ? `${rawBranchLabel} · ${tr("worktreesessiondialog.newWorktree")}`
-    : rawBranchLabel;
+  const branchName = rawBranchLabel;
   const projectName = project?.name || project?.path || tr("composer.noProject");
   const projectChoices: ContextChoice[] = projects.map((candidate) => ({
     id: candidate.id,
@@ -402,20 +403,32 @@ function useComposerLocation(session: SessionProjection | null): {
         .catch((error) => setUiError(friendlyError(tr("composer.couldnTCreateTheWorktree"), error)))
         .finally(() => setBranchLoading(false));
     } else {
-      // Isolation fork point is recorded on send; don't create a workspace yet.
+      // The isolation origin is recorded on send; don't create a workspace yet.
     }
   };
 
-  // Toggling the mode keeps the selection meaningful: the current branch and
-  // the "main workspace" row are two views of the same checkout.
-  const toggleNewWorktree = (on: boolean) => {
-    setNewWorktreeMode(on);
+  // Toggling keeps the selected checkout meaningful across the ordinary and
+  // isolated views. An unchecked-out branch cannot be an isolation origin, so
+  // it falls back to the project's main checkout.
+  const toggleWorkInIsolation = (on: boolean) => {
+    setWorkInIsolation(on);
     setSelectedBranchId((prev) => {
-      if (on && prev === "main") {
+      if (on) {
+        if (prev === "main") return currentBranchName ? `branch:${currentBranchName}` : prev;
+        if (prev.startsWith("worktree:")) {
+          const path = prev.slice("worktree:".length);
+          const checkout = worktrees.find((candidate) => candidate.path === path);
+          if (checkout?.branch) return `branch:${checkout.branch}`;
+        }
+        const branch = prev.startsWith("branch:") ? prev.slice("branch:".length) : "";
+        if (branch && worktrees.some((candidate) => candidate.branch === branch)) return prev;
         return currentBranchName ? `branch:${currentBranchName}` : prev;
       }
-      if (!on && currentBranchName && prev === `branch:${currentBranchName}`) {
-        return "main";
+      if (prev.startsWith("branch:")) {
+        const branch = prev.slice("branch:".length);
+        const checkout = worktrees.find((candidate) => candidate.branch === branch);
+        if (checkout?.isMain) return "main";
+        if (checkout) return `worktree:${checkout.path}`;
       }
       return prev;
     });
@@ -434,8 +447,9 @@ function useComposerLocation(session: SessionProjection | null): {
       ...(branchLoading ? { branchLoading: true } : {}),
       onPickBranch: pickBranch,
       onBranchPickerOpen: refreshBranchesFromRemote,
-      newWorktreeMode,
-      onToggleNewWorktree: toggleNewWorktree,
+      workInIsolation,
+      onToggleWorkInIsolation: toggleWorkInIsolation,
+      isolationDisabled: !projectId || !currentBranchName || branchLoading,
     },
   };
 }
@@ -1482,7 +1496,7 @@ export default function Composer({
           }
         };
         let created: string;
-        if (newSessionTarget.kind === "new-worktree") {
+        if (newSessionTarget.kind === "isolation") {
           created = await startIsolatedSession(activeProjectId, {
             harness: creationHarness,
             ...(newSessionIntent?.title ? { title: newSessionIntent.title } : {}),

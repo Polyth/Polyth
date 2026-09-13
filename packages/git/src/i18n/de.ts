@@ -453,7 +453,7 @@ export const de: GitMessages = {
   "isolation.integratingChanges": "Änderungen integrieren",
   "isolation.basedOn": "Basierend auf {branch} · im isolierten Arbeitsbereich",
   "isolation.cantIntegrateYet": "Noch nicht in {branch} integrierbar",
-  "isolation.dirtyTargetDetail": "Der ursprüngliche Arbeitsbereich {branch} hat uncommittete Änderungen. Ihre isolierte Arbeit ist sicher.",
+  "isolation.dirtyTargetDetail": "Der ursprüngliche Arbeitsbereich {branch} hat uncommittete Änderungen. Du kannst integrieren, ohne sie zu committen oder zu verwerfen.",
   "isolation.discardConfirmGeneric": "Änderungen in diesem isolierten Arbeitsbereich wurden nicht integriert. Sie werden dauerhaft gelöscht.",
   "isolation.discardTargetUnchanged": "{branch} wird nicht geändert.",
   "isolation.cantReturnYet": "Noch nicht zu {branch} zurückkehren",

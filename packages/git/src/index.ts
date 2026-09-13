@@ -141,8 +141,16 @@ export interface GitService {
   updateRef(root: string, ref: string, newSha: string, expectedOldSha: string): Promise<boolean>;
   /** Atomically compare-and-swap a branch and record its publication receipt. */
   publishRef(root: string, input: { targetRef: string; expectedHead: string; newSha: string; receiptRef: string }): Promise<boolean>;
-  /** Repair a published branch checkout only when its old or new tree is pristine. */
-  syncPublishedCheckout(root: string, input: { branch: string; expectedHead: string; resultCommit: string }): Promise<void>;
+  /** Check or repair a published branch checkout while carrying compatible
+   * staged, unstaged, and untracked work forward. Conflicting local work is
+   * refused without being overwritten. */
+  syncPublishedCheckout(root: string, input: {
+    branch: string;
+    expectedHead: string;
+    resultCommit: string;
+    /** Verify Git's two-tree carry-forward before publication without writing. */
+    checkOnly?: boolean;
+  }): Promise<void>;
   /** `git merge-base --is-ancestor ancestor descendant`. */
   isAncestor(root: string, ancestor: string, descendant: string): Promise<boolean>;
   /** Remove exactly the ref value inspected by its owner; never a replacement. */
@@ -1019,7 +1027,7 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
       assertRev(branch);
       assertRev(input.expectedHead);
       assertRev(input.resultCommit);
-      const refuse = () => Object.assign(new Error("published checkout changed; restore its branch and pristine old or published tree before recovery"), { code: "conflict" });
+      const refuse = () => Object.assign(new Error("published checkout changed or has overlapping local work; restore its branch or resolve the overlap before recovery"), { code: "conflict" });
       const readBranchHead = async () => {
         const symbolic = await run(root, ["symbolic-ref", "-q", "HEAD"], true);
         if (symbolic.code !== 0 || symbolic.stdout.trim() !== `refs/heads/${branch}`) throw refuse();
@@ -1027,6 +1035,23 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
       };
       const live = await readBranchHead();
       const assertBranch = async () => { if (await readBranchHead() !== live) throw refuse(); };
+      const carryForward = async (checkOnly: boolean) => {
+        const result = await run(root, [
+          "read-tree",
+          ...(checkOnly ? ["--dry-run"] : []),
+          "-m",
+          "-u",
+          input.expectedHead,
+          input.resultCommit,
+        ], true);
+        if (!result.exited || result.code !== 0) throw refuse();
+      };
+      if (input.checkOnly) {
+        if (live !== input.expectedHead) throw refuse();
+        await carryForward(true);
+        await assertBranch();
+        return;
+      }
       if (live !== input.resultCommit) {
         // A later valid commit may already have synchronized the checkout. A
         // pristine descendant needs no repair, and must never be rolled back.
@@ -1037,19 +1062,13 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
         await assertBranch();
         return;
       }
-      const oldTree = (await run(root, ["rev-parse", `${input.expectedHead}^{tree}`])).stdout.trim();
-      const newTree = (await run(root, ["rev-parse", `${input.resultCommit}^{tree}`])).stdout.trim();
-      const indexTree = (await run(root, ["write-tree"])).stdout.trim();
-      if (indexTree !== oldTree && indexTree !== newTree) throw refuse();
-      const against = indexTree === newTree ? input.resultCommit : input.expectedHead;
-      if ((await run(root, ["diff", "--quiet", against, "--"], true)).code !== 0) throw refuse();
-      if (indexTree === newTree) { await assertBranch(); return; }
-      // Recheck after inspection; read-tree's two-tree update refuses local
-      // modifications or untracked obstructions instead of overwriting them.
+      // Git's two-tree carry-forward is deliberately used for both dirty and
+      // pristine checkouts. It retains compatible index/worktree changes and
+      // refuses an overlapping edit or untracked obstruction without writing.
+      await carryForward(true);
       await assertBranch();
-      await run(root, ["read-tree", "-m", "-u", input.expectedHead, input.resultCommit]);
+      await carryForward(false);
       await assertBranch();
-      if ((await run(root, ["diff", "--quiet", input.resultCommit, "--"], true)).code !== 0) throw refuse();
     },
 
     async isAncestor(root, ancestor, descendant) {

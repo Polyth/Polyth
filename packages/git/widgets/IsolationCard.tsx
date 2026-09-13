@@ -96,7 +96,10 @@ export function IsolationCard() {
   const conflict = liveState === "conflict" && suggestion?.eligible !== true;
   const unavailable = liveState === "missing" || liveState === "unowned" || liveState === "corrupt" || suggestion?.reason === "missing";
   const ownershipUnverified = liveState === "unowned" || liveState === "corrupt";
-  const dirty = suggestion?.reason === "dirty-target";
+  // New servers carry compatible dirty-target work forward. The reason is
+  // retained as a legacy block when this client talks to an older server.
+  const dirtyBlocked = suggestion?.reason === "dirty-target";
+  const targetDirty = suggestion?.targetDirty === true;
   const destinationUnavailable = suggestion?.reason === "destination-unavailable";
   const recovering = liveState === "merging" || liveState === "publishing" || liveState === "rebind-pending" || liveState === "cleanup-pending";
   const discarding = recovering && liveState !== "merging" && liveState !== "publishing" && !live.resultCommit;
@@ -113,9 +116,9 @@ export function IsolationCard() {
     canAbandon: false,
   } : undefined);
   const ready = actions?.canMerge === true;
-  if (!conflict && !unavailable && !dirty && !destinationUnavailable && !ready && !recovering) return null;
+  if (!conflict && !unavailable && !dirtyBlocked && !destinationUnavailable && !ready && !recovering) return null;
 
-  const warn = conflict || unavailable || dirty || destinationUnavailable;
+  const warn = conflict || unavailable || dirtyBlocked || destinationUnavailable;
 
   const run = async (kind: "merge" | "keep" | "resolve" | "recover" | "discard" | "abandon", action: () => Promise<void>) => {
     setBusy(kind);
@@ -163,7 +166,7 @@ export function IsolationCard() {
         ? tr("isolation.ownershipUnverified")
         : unavailable
           ? tr("isolation.missingWorkspace")
-          : dirty
+          : dirtyBlocked
             ? tr("isolation.cantIntegrateYet", { branch: targetBranch })
             : conflict
               ? tr("isolation.mergeNeedsAttention")
@@ -179,7 +182,7 @@ export function IsolationCard() {
           ? null
           : conflict
             ? (live.conflict?.message || tr("isolation.conflictDetail", { branch: targetBranch }))
-            : dirty
+            : dirtyBlocked || (targetDirty && ready)
               ? tr("isolation.dirtyTargetDetail", { branch: targetBranch })
               : null;
 
@@ -212,17 +215,17 @@ export function IsolationCard() {
           {showPath && <span className="muted">{live.worktreePath}</span>}
         </div>
         <div className="isolation-card-actions">
-          {(destinationUnavailable || dirty) && (
+          {(destinationUnavailable || dirtyBlocked) && (
             <Button size="sm" disabled={busy !== null} onClick={() => void refresh()}>
               {tr("gitview.checkAgain")}
             </Button>
           )}
-          {actions?.canReview === true && !recovering && !unavailable && !dirty ? (
+          {actions?.canReview === true && !recovering && !unavailable && !dirtyBlocked ? (
             <Button size="sm" disabled={busy !== null} onClick={() => openChanges()}>
               {conflict ? tr("isolation.reviewConflicts") : tr("isolation.reviewChanges")}
             </Button>
           ) : null}
-          {!conflict && !unavailable && !dirty && ready && (
+          {!conflict && !unavailable && !dirtyBlocked && ready && (
             <Button
               size="sm"
               variant="primary"
@@ -295,7 +298,7 @@ export function IsolationCard() {
               {tr("isolation.finishWithoutCleanup")}
             </Button>
           )}
-          {!conflict && !unavailable && !dirty && ready && actions?.canDiscard === true && (
+          {!conflict && !unavailable && !dirtyBlocked && ready && actions?.canDiscard === true && (
             <Menu
               label={tr("common.more")}
               align="end"

@@ -453,7 +453,7 @@ export const ar: GitMessages = {
   "isolation.integratingChanges": "تكامل التغييرات",
   "isolation.basedOn": "استنادًا إلى {branch} · في مساحة معزولة",
   "isolation.cantIntegrateYet": "لا يمكن التكامل في {branch} بعد",
-  "isolation.dirtyTargetDetail": "مساحة العمل الأصلية {branch} تحتوي على تغييرات غير مثبتة. عملك المعزول آمن.",
+  "isolation.dirtyTargetDetail": "مساحة العمل الأصلية {branch} تحتوي على تغييرات غير مثبتة. يمكنك الدمج دون تثبيتها أو تجاهلها.",
   "isolation.discardConfirmGeneric": "لم يتم تكامل التغييرات في هذه المساحة المعزولة. سيتم حذفها نهائيًا.",
   "isolation.discardTargetUnchanged": "لن يتغير {branch}.",
   "isolation.cantReturnYet": "لا يمكن العودة إلى {branch} بعد",

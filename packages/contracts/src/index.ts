@@ -1347,7 +1347,10 @@ export function isolationActions(status: IsolationStatusDto, sessionStatus?: Ses
   const active = state === "active" || state === "merge-ready" || state === "conflict";
   return {
     canReview: active,
-    canMerge: active && !blocked && status.suggestion?.hasChanges === true && !status.suggestion.targetDirty
+    // `targetDirty` is informational: Git carries compatible local work
+    // forward. Keep honoring the legacy blocking reason for older servers.
+    canMerge: active && !blocked && status.suggestion?.hasChanges === true
+      && status.suggestion.reason !== "dirty-target"
       && status.suggestion.reason !== "destination-unavailable",
     canKeep: active && !blocked,
     canResolve: state === "conflict" && !blocked && status.suggestion?.reason !== "destination-unavailable",

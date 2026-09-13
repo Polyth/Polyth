@@ -453,7 +453,7 @@ export const es: GitMessages = {
   "isolation.integratingChanges": "Integrando cambios",
   "isolation.basedOn": "Basado en {branch} · en espacio aislado",
   "isolation.cantIntegrateYet": "Aún no se puede integrar en {branch}",
-  "isolation.dirtyTargetDetail": "El espacio de trabajo original {branch} tiene cambios sin confirmar. Tu trabajo aislado está seguro.",
+  "isolation.dirtyTargetDetail": "El espacio de trabajo original {branch} tiene cambios sin confirmar. Puedes integrar sin confirmarlos ni descartarlos.",
   "isolation.discardConfirmGeneric": "Los cambios de este espacio aislado no se han integrado. Se eliminarán permanentemente.",
   "isolation.discardTargetUnchanged": "{branch} no se modificará.",
   "isolation.cantReturnYet": "Aún no se puede volver a {branch}",

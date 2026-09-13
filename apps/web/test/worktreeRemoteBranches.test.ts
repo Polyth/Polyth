@@ -28,10 +28,10 @@ test("new-session branch picker fetches the remote on open and lists remote bran
   assert.match(composer, /onBranchPickerOpen: refreshBranchesFromRemote/);
   assert.match(composer, /!worktree\.branch\?\.startsWith\("polyth\/isolate\/"\)/);
   assert.match(composer, /!candidate\.name\.startsWith\("polyth\/isolate\/"\)/);
-  // Isolation ("new worktree") only forks from a live checkout.
-  assert.match(composer, /target: \{ kind: "new-worktree", base: currentBranchName \}/);
-  assert.match(composer, /target: \{ kind: "new-worktree", base: name \}/);
-  assert.doesNotMatch(composer, /kind: "new-worktree", base: remote\.ref/);
+  // Isolation only forks from a live checkout.
+  assert.match(composer, /target: \{ kind: "isolation", base: currentBranchName \}/);
+  assert.match(composer, /target: \{ kind: "isolation", base: name \}/);
+  assert.doesNotMatch(composer, /kind: "isolation", base: remote\.ref/);
   // Remote-only branches remain available as ordinary linked worktrees.
   assert.match(composer, /id: `remote:\$\{remote\.ref\}`/);
   assert.match(composer, /target: \{ kind: "branch", branch: remote\.short, base: remote\.ref \}/);
@@ -40,6 +40,10 @@ test("new-session branch picker fetches the remote on open and lists remote bran
   assert.match(contextBar, /onBranchPickerOpen\?: \(\) => void;/);
   assert.match(contextBar, /\{\.\.\.\(onBranchPickerOpen \? \{ onOpen: onBranchPickerOpen \} : \{\}\)\}/);
   assert.match(contextBar, /\{\.\.\.\(onOpen \? \{ onOpen \} : \{\}\)\}/);
+  assert.match(contextBar, /className="context-isolation-control"/);
+  assert.match(contextBar, /tr\("isolation\.workInIsolation"\)/);
+  assert.match(contextBar, /<Switch/);
+  assert.doesNotMatch(contextBar, /popoverToggle|picker-toggle|worktreesessiondialog\.newWorktree/);
 });
 
 test("git catalog defines the remote-branch refresh strings", async () => {

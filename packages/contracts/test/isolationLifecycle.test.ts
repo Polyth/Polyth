@@ -82,6 +82,10 @@ test("state action policy forbids unavailable, busy and pending mutations", () =
   const unavailable = isolationActions({ isolation: active, suggestion: { eligible: false, hasChanges: true, targetDirty: false, targetBranch: "main", revision: "r", reason: "destination-unavailable" } }, "idle");
   assert.equal(unavailable.canMerge || unavailable.canDiscard, false);
   assert.equal(unavailable.canKeep, true);
+  const dirty = isolationActions({ isolation: active, suggestion: { eligible: true, hasChanges: true, targetDirty: true, targetBranch: "main", revision: "r" } }, "idle");
+  assert.equal(dirty.canMerge, true, "dirty target state is advisory when Git can carry it forward");
+  const legacyDirty = isolationActions({ isolation: active, suggestion: { eligible: false, hasChanges: true, targetDirty: true, targetBranch: "main", revision: "r", reason: "dirty-target" } }, "idle");
+  assert.equal(legacyDirty.canMerge, false, "older servers can still report the former explicit block");
 });
 
 test("managed origin filter recognizes full refs and leaves normal user branches", () => {

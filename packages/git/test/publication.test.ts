@@ -16,6 +16,8 @@ function repo(t: { after(fn: () => void): void }) {
   run(root, "config", "user.email", "test@example.com");
   run(root, "config", "commit.gpgsign", "false");
   writeFileSync(join(root, "file"), "old\n");
+  writeFileSync(join(root, "local-staged"), "old staged\n");
+  writeFileSync(join(root, "local-unstaged"), "old unstaged\n");
   run(root, "add", ".");
   run(root, "commit", "-qm", "old");
   return root;
@@ -42,6 +44,39 @@ test("publication atomically records target CAS and receipt; checkout repair is 
   assert.equal((await git.status(root)).clean, true);
 });
 
+test("publication preflight and repair preserve compatible staged, unstaged, and untracked work", async (t) => {
+  const root = repo(t);
+  const input = await prepared(root);
+  writeFileSync(join(root, "local-staged"), "user staged\n");
+  run(root, "add", "local-staged");
+  writeFileSync(join(root, "local-unstaged"), "user unstaged\n");
+  writeFileSync(join(root, "local-untracked"), "user untracked\n");
+  const indexBefore = readFileSync(join(root, ".git", "index"));
+
+  await git.syncPublishedCheckout(root, {
+    branch: "main",
+    expectedHead: input.expectedHead,
+    resultCommit: input.newSha,
+    checkOnly: true,
+  });
+  assert.equal(run(root, "rev-parse", "HEAD"), input.expectedHead);
+  assert.deepEqual(readFileSync(join(root, ".git", "index")), indexBefore);
+
+  assert.equal(await git.publishRef(root, input), true);
+  const repair = { branch: "main", expectedHead: input.expectedHead, resultCommit: input.newSha };
+  await git.syncPublishedCheckout(root, repair);
+  await git.syncPublishedCheckout(root, repair);
+
+  assert.equal(readFileSync(join(root, "file"), "utf8"), "published\n");
+  assert.equal(readFileSync(join(root, "local-staged"), "utf8"), "user staged\n");
+  assert.equal(readFileSync(join(root, "local-unstaged"), "utf8"), "user unstaged\n");
+  assert.equal(readFileSync(join(root, "local-untracked"), "utf8"), "user untracked\n");
+  const status = await git.status(root);
+  assert.deepEqual(status.staged.map((file) => file.path), ["local-staged"]);
+  assert.deepEqual(status.unstaged.map((file) => file.path), ["local-unstaged"]);
+  assert.deepEqual(status.untracked.map((file) => file.path), ["local-untracked"]);
+});
+
 test("receipt proves publication after restart and target rewind without a duplicate update", async (t) => {
   const root = repo(t);
   const input = await prepared(root);
@@ -64,14 +99,13 @@ test("target moves before publication: CAS leaves target intact and creates no r
   assert.throws(() => run(root, "rev-parse", "--verify", input.receiptRef));
 });
 
-for (const damage of ["unstaged", "staged", "branch", "new-index-dirty"] as const) {
+for (const damage of ["unstaged", "staged", "branch"] as const) {
   test(`published checkout repair preserves ${damage} external changes`, async (t) => {
     const root = repo(t);
     const input = await prepared(root);
     await git.publishRef(root, input);
     if (damage === "branch") run(root, "symbolic-ref", "HEAD", "refs/heads/other");
     else {
-      if (damage === "new-index-dirty") run(root, "read-tree", input.newSha);
       writeFileSync(join(root, "file"), "user work\n");
       if (damage === "staged") run(root, "add", "file");
     }

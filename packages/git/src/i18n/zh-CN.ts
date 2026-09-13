@@ -453,7 +453,7 @@ export const zhCN: GitMessages = {
   "isolation.integratingChanges": "正在集成更改",
   "isolation.basedOn": "基于 {branch} · 在隔离工作区中",
   "isolation.cantIntegrateYet": "暂时无法集成到 {branch}",
-  "isolation.dirtyTargetDetail": "原始 {branch} 工作区有未提交的更改。你的隔离工作不受影响。",
+  "isolation.dirtyTargetDetail": "原始 {branch} 工作区有未提交的更改。你无需提交或丢弃这些更改即可集成。",
   "isolation.discardConfirmGeneric": "此隔离工作区中的更改尚未集成，将被永久删除。",
   "isolation.discardTargetUnchanged": "{branch} 不会被更改。",
   "isolation.cantReturnYet": "暂时无法返回 {branch}",

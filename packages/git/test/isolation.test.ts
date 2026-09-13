@@ -480,22 +480,63 @@ test("target branch checked out in another clean worktree integrates there", asy
   assert.equal(existsSync(isoPath), false);
 });
 
-test("dirty checkout of the target branch refuses merge", async () => {
+test("dirty checkout of the target branch preserves compatible uncommitted work", async () => {
   const root = repo();
+  writeFileSync(join(root, "local-staged.txt"), "base staged\n");
+  writeFileSync(join(root, "local-unstaged.txt"), "base unstaged\n");
+  runGit(root, "add", ".");
+  runGit(root, "commit", "-qm", "local work fixtures");
   runGit(root, "branch", "feature");
   const featureWt = mkdtempSync(join(tmpdir(), "polyth-feature-dirty-"));
   dirs.push(featureWt);
   rmSync(featureWt, { recursive: true, force: true });
   await git.worktrees.create(root, { branch: "feature", path: featureWt });
-  writeFileSync(join(featureWt, "local.txt"), "dirty\n");
+  writeFileSync(join(featureWt, "local-staged.txt"), "user staged\n");
+  runGit(featureWt, "add", "local-staged.txt");
+  writeFileSync(join(featureWt, "local-unstaged.txt"), "user unstaged\n");
+  writeFileSync(join(featureWt, "local-untracked.txt"), "user untracked\n");
   const { isolation, sessions } = harness(root);
   const created = await isolation.createIsolatedSession({ projectId: "p1", targetBranch: "feature" });
   writeFileSync(join((await sessions.snapshot(created.id)).isolation!.worktreePath, "from-iso.txt"), "yes\n");
   const before = runGit(root, "rev-parse", "feature");
-  await assert.rejects(() => isolation.mergeBack(created.id), /local changes/);
-  assert.equal(runGit(root, "rev-parse", "feature"), before);
-  assert.equal(readFileSync(join(featureWt, "local.txt"), "utf8"), "dirty\n");
-  assert.equal(existsSync(join(featureWt, "from-iso.txt")), false);
+  const event = completedTurn(created.id);
+  sessions.events.push(event);
+  await isolation.onTurnCompleted(created.id, [event]);
+  const ready = await isolation.getStatus(created.id);
+  assert.equal(ready.suggestion?.eligible, true);
+  assert.equal(ready.suggestion?.targetDirty, true);
+  assert.equal(ready.actions?.canMerge, true);
+
+  const merged = await isolation.mergeBack(created.id);
+  assert.equal(merged.ok, true);
+  assert.notEqual(runGit(root, "rev-parse", "feature"), before);
+  assert.equal(readFileSync(join(featureWt, "from-iso.txt"), "utf8"), "yes\n");
+  assert.equal(readFileSync(join(featureWt, "local-staged.txt"), "utf8"), "user staged\n");
+  assert.equal(readFileSync(join(featureWt, "local-unstaged.txt"), "utf8"), "user unstaged\n");
+  assert.equal(readFileSync(join(featureWt, "local-untracked.txt"), "utf8"), "user untracked\n");
+  const status = await git.status(featureWt);
+  assert.deepEqual(status.staged.map((file) => file.path), ["local-staged.txt"]);
+  assert.deepEqual(status.unstaged.map((file) => file.path), ["local-unstaged.txt"]);
+  assert.deepEqual(status.untracked.map((file) => file.path), ["local-untracked.txt"]);
+});
+
+test("overlapping target changes stop before publication and remain untouched", async () => {
+  const root = repo();
+  const { isolation, sessions } = harness(root);
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const source = (await sessions.snapshot(created.id)).isolation!.worktreePath;
+  writeFileSync(join(source, "README.md"), "isolated\n");
+  writeFileSync(join(root, "README.md"), "parent work\n");
+  runGit(root, "add", "README.md");
+  const before = runGit(root, "rev-parse", "HEAD");
+  const indexBefore = readFileSync(join(root, ".git", "index"));
+
+  await assert.rejects(() => isolation.mergeBack(created.id), /overlap this integration/);
+  assert.equal(runGit(root, "rev-parse", "HEAD"), before);
+  assert.equal(readFileSync(join(root, "README.md"), "utf8"), "parent work\n");
+  assert.deepEqual(readFileSync(join(root, ".git", "index")), indexBefore);
+  assert.equal(existsSync(source), true);
+  assert.equal((await sessions.snapshot(created.id)).isolation?.state, "merge-ready");
 });
 
 test("unchecked-out and remote-only targets are refused so the session never fakes a cwd", async () => {

@@ -453,7 +453,7 @@ export const uk: GitMessages = {
   "isolation.integratingChanges": "Інтеграція змін",
   "isolation.basedOn": "На основі {branch} · в ізольованому просторі",
   "isolation.cantIntegrateYet": "Ще не можна інтегрувати в {branch}",
-  "isolation.dirtyTargetDetail": "Початковий робочий простір {branch} має незакомічені зміни. Ваша ізольована робота в безпеці.",
+  "isolation.dirtyTargetDetail": "Початковий робочий простір {branch} має незакомічені зміни. Ви можете інтегрувати їх без коміту чи відкидання.",
   "isolation.discardConfirmGeneric": "Зміни в цьому ізольованому просторі не інтегровано. Вони будуть остаточно видалені.",
   "isolation.discardTargetUnchanged": "{branch} не буде змінено.",
   "isolation.cantReturnYet": "Ще не можна повернутися до {branch}",

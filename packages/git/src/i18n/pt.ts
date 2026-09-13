@@ -453,7 +453,7 @@ export const pt: GitMessages = {
   "isolation.integratingChanges": "A integrar alterações",
   "isolation.basedOn": "Baseado em {branch} · em espaço isolado",
   "isolation.cantIntegrateYet": "Ainda não é possível integrar em {branch}",
-  "isolation.dirtyTargetDetail": "O espaço de trabalho original {branch} tem alterações por confirmar. O seu trabalho isolado está seguro.",
+  "isolation.dirtyTargetDetail": "O espaço de trabalho original {branch} tem alterações por confirmar. Pode integrar sem as confirmar nem descartar.",
   "isolation.discardConfirmGeneric": "As alterações neste espaço isolado não foram integradas. Serão eliminadas permanentemente.",
   "isolation.discardTargetUnchanged": "{branch} não será alterado.",
   "isolation.cantReturnYet": "Ainda não é possível regressar a {branch}",

@@ -3,10 +3,10 @@
 // Branch labels, no full-width fields in the middle of the screen. The whole
 // name is the touch target (never a 12px chevron), long names truncate with an
 // ellipsis instead of widening the viewport, and both open the shared sheet.
-import { useState } from "react";
+import { useId, useState } from "react";
 import Sheet, { SheetRow } from "./Sheet.tsx";
 import Picker from "../Picker.tsx";
-import Checkbox from "../ui/Checkbox.tsx";
+import Switch from "../ui/Switch.tsx";
 import { Icon } from "../../icons.tsx";
 import { dismissKeyboard } from "../../mobileViewport.ts";
 import { useSheetTrigger } from "./sheetTrigger.ts";
@@ -19,13 +19,6 @@ export interface ContextChoice {
   detail?: string;
 }
 
-export interface ContextToggle {
-  label: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  hint?: string;
-}
-
 function ContextSelector({
   kind,
   value,
@@ -36,7 +29,6 @@ function ContextSelector({
   ariaLabel,
   onPick,
   onOpen,
-  popoverToggle,
 }: {
   kind: "project" | "branch";
   value: string;
@@ -47,7 +39,6 @@ function ContextSelector({
   ariaLabel: string;
   onPick: (id: string) => void;
   onOpen?: () => void;
-  popoverToggle?: ContextToggle;
 }) {
   const phone = useShellMode() === "phone";
   const [open, setOpen] = useState(false);
@@ -74,7 +65,6 @@ function ContextSelector({
         ariaLabel={ariaLabel}
         disabled={disabled}
         triggerIcon={kind === "project" ? <Icon.files /> : <Icon.branch />}
-        {...(popoverToggle ? { popoverToggle } : {})}
       />
     );
   }
@@ -98,15 +88,6 @@ function ContextSelector({
       </button>
       {open && (
         <Sheet title={sheetTitle} className="context-sheet" onClose={() => setOpen(false)}>
-          {popoverToggle && (
-            <Checkbox
-              className="picker-toggle context-sheet-toggle"
-              checked={popoverToggle.checked}
-              onChange={popoverToggle.onChange}
-              label={popoverToggle.label}
-              {...(popoverToggle.hint ? { description: popoverToggle.hint } : {})}
-            />
-          )}
           <div role="listbox" aria-label={sheetTitle}>
             {choices.map((choice) => (
               <SheetRow
@@ -142,10 +123,11 @@ export interface SessionContextBarProps {
   /** Fired the first time the branch picker opens — used to fetch the remote
    *  so server-only branches appear in the list. */
   onBranchPickerOpen?: () => void;
-  /** "New worktree" mode: a checkbox inside the branch list. When on, picking
-   *  any branch forks a fresh linked worktree from it instead of switching. */
-  newWorktreeMode?: boolean;
-  onToggleNewWorktree?: (on: boolean) => void;
+  /** Start the new session in a managed checkout based on the selected live
+   *  worktree. This stays visible beside location instead of hiding in it. */
+  workInIsolation?: boolean;
+  onToggleWorkInIsolation?: (on: boolean) => void;
+  isolationDisabled?: boolean;
 }
 
 export default function SessionContextBar({
@@ -159,9 +141,11 @@ export default function SessionContextBar({
   branchLoading,
   onPickBranch,
   onBranchPickerOpen,
-  newWorktreeMode,
-  onToggleNewWorktree,
+  workInIsolation,
+  onToggleWorkInIsolation,
+  isolationDisabled,
 }: SessionContextBarProps) {
+  const isolationLabelId = useId();
   return (
     <div className="session-context-bar" aria-label={tr("mobile.sessioncontextbar.chatLocation")}>
       <ContextSelector
@@ -184,15 +168,24 @@ export default function SessionContextBar({
         ariaLabel={tr("mobile.sessioncontextbar.worktreeCurrentValue", { branchName })}
         onPick={onPickBranch}
         {...(onBranchPickerOpen ? { onOpen: onBranchPickerOpen } : {})}
-        {...(onToggleNewWorktree ? {
-          popoverToggle: {
-            label: tr("worktreesessiondialog.newWorktree"),
-            checked: newWorktreeMode ?? false,
-            onChange: onToggleNewWorktree,
-            hint: tr("composer.openInANewWorktree"),
-          },
-        } : {})}
       />
+      {onToggleWorkInIsolation && (
+        <span
+          className="context-isolation-control"
+          data-active={workInIsolation ? "true" : undefined}
+          title={tr("isolation.workInIsolationHint")}
+        >
+          <span id={isolationLabelId} className="context-isolation-label">
+            {tr("isolation.workInIsolation")}
+          </span>
+          <Switch
+            checked={workInIsolation ?? false}
+            onChange={onToggleWorkInIsolation}
+            labelledBy={isolationLabelId}
+            disabled={isolationDisabled}
+          />
+        </span>
+      )}
     </div>
   );
 }

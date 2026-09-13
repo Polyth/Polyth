@@ -453,7 +453,7 @@ export const fr: GitMessages = {
   "isolation.integratingChanges": "Intégration des modifications",
   "isolation.basedOn": "Basé sur {branch} · dans l’espace isolé",
   "isolation.cantIntegrateYet": "Impossible d’intégrer dans {branch} pour l’instant",
-  "isolation.dirtyTargetDetail": "L’espace de travail d’origine {branch} contient des modifications non validées. Votre travail isolé est en sécurité.",
+  "isolation.dirtyTargetDetail": "L’espace de travail d’origine {branch} contient des modifications non validées. Vous pouvez intégrer sans les valider ni les abandonner.",
   "isolation.discardConfirmGeneric": "Les modifications de cet espace isolé n’ont pas été intégrées. Elles seront supprimées définitivement.",
   "isolation.discardTargetUnchanged": "{branch} ne sera pas modifié.",
   "isolation.cantReturnYet": "Impossible de revenir à {branch} pour l’instant",

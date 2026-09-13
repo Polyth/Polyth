@@ -7636,7 +7636,7 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
 /* No hard half-width cap: a short project name stays compact while a long
    branch name can use the remaining space, and flex shrinking truncates the
    pair when both are long instead of stretching two full-width fields. */
-.context-selector { flex: 0 1 auto; min-width: 0; display: flex; }
+.context-selector { flex: 0 1 auto; min-width: max(var(--control-h-sm), var(--hit-min)); display: flex; }
 .context-selector .picker-chip {
   flex: 1;
   min-width: 0;
@@ -7659,6 +7659,28 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
 .context-selector .picker-chip-text { min-width: 0; flex: 1; }
 .context-selector .picker-caret { color: var(--faint); }
 .context-selector .picker-pop { width: min(320px, calc(100vw - 32px)); }
+.context-isolation-control {
+  flex: none;
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2) 0 var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--elevated);
+  color: var(--text-dim);
+  white-space: nowrap;
+  transition: background var(--motion-normal) var(--motion-ease), border-color var(--motion-normal) var(--motion-ease);
+}
+.context-isolation-control:hover { border-color: var(--border); background: var(--raised); }
+.context-isolation-control:has(.switch:disabled) { opacity: .6; }
+.context-isolation-control[data-active="true"] {
+  border-color: var(--accent-line);
+  background: var(--accent-wash);
+  color: var(--text);
+}
+.context-isolation-label { font-size: var(--font-label); font-weight: 570; }
 .context-trigger {
   flex: 1;
   min-width: 0;
