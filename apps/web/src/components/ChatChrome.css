@@ -46,7 +46,8 @@
   background: var(--surface-overlay-strong);
 }
 
-.chat-action-button.ui-icon-btn[aria-pressed="true"] {
+.chat-action-button.ui-icon-btn[aria-pressed="true"],
+.msg.user .chat-action-button.ui-icon-btn[aria-pressed="true"] {
   color: var(--accent);
   background: var(--accent-wash);
 }
