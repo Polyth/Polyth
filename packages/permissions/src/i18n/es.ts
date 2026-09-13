@@ -1,6 +1,11 @@
 import type { PermissionsMessages } from "./en.ts";
 
 export const es: PermissionsMessages = {
+  "permissionbanner.denyShort": "Denegar",
+  "permissionbanner.once": "Una vez",
+  "permissionbanner.session": "Sesión",
+  "permissionbanner.allSession": "Toda la sesión",
+  "permissionbanner.allowAllSession": "Permitir todas las acciones siguientes de esta sesión",
   "permissionbanner.agentWantsToUseBrowser": "El agente quiere usar el navegador",
   "permissionbanner.allowOnce": "Permitir una vez",
   "permissionbanner.always": "Siempre",

@@ -1,4 +1,5 @@
 import "./styles.css";
+import "./mobile.css";
 import { createElement } from "react";
 import { defineWebPackage } from "@polyth/web-sdk";
 import { withSurfaceContent } from "@polyth/web-sdk/surface-content";

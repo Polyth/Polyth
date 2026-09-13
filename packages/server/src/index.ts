@@ -2137,6 +2137,21 @@ export async function boot(opts: BootOptions = {}) {
         remote: Boolean(project?.remote),
       }, harnessId);
     },
+    cleanupSessionResources: async ({ projection, releaseExecution }) => {
+      if (projection.isolation?.kind !== "git-worktree") return;
+      const isolation = svc<{
+        cleanupForSessionDelete(
+          sessionId: string,
+          release: (cwd: string) => Promise<void>,
+        ): Promise<void>;
+      }>("isolation");
+      if (!isolation) {
+        throw Object.assign(new Error("git isolation cleanup is unavailable"), {
+          code: "unsupported",
+        });
+      }
+      await isolation.cleanupForSessionDelete(projection.id, releaseExecution);
+    },
     onSessionReleased: async ({ sessionId, projectId, cwd }) => {
       const project = await projects.get(projectId);
       const space = spaceGateway.resolveInternal(project?.spaceId);

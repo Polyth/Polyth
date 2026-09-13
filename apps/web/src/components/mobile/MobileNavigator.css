@@ -1,6 +1,11 @@
 /* Phone Navigator: the existing conversation remains mounted underneath one
- * continuous frosted navigation material. Individual rows create hierarchy by
- * type, rhythm, and luminance rather than nested cards. */
+ * continuous navigation material. Hierarchy comes from type, rhythm and
+ * luminance rather than nested cards, so no row is a box inside a box.
+ *
+ * Type sizes are roles from the canonical scale (never fixed pixels), so the
+ * navigator tracks the interface-size setting like the desktop sidebar does.
+ * Interactive controls keep the phone tap floor; only the space around them
+ * gets denser. */
 
 .mobile-nav-backdrop,
 .mobile-navigator {
@@ -15,6 +20,18 @@
 }
 
 .mobile-navigator {
+  --nav-gutter: var(--space-2);
+  --nav-project-size: var(--subheader-font-size, 16px);
+  --nav-session-size: var(--font-session-title);
+  --nav-session-lh: var(--font-session-title-lh);
+  --nav-meta-size: var(--font-meta);
+  /* Sessions sit just inside their project instead of under its icon column:
+     a phone title needs the width more than it needs a deep indent. */
+  --nav-session-indent: var(--space-3);
+  /* Default keeps the phone tap floor. A denser list is the user's explicit
+     Interface density choice, never a silently shrunk touch target. */
+  --nav-row-session: var(--tap);
+
   z-index: 110;
   display: flex;
   flex-direction: column;
@@ -23,9 +40,8 @@
   max-width: none;
   overflow: hidden;
   color: var(--text);
-  background: color-mix(in srgb, var(--bg) 82%, transparent);
-  -webkit-backdrop-filter: blur(28px) saturate(112%) brightness(1.045);
-  backdrop-filter: blur(28px) saturate(112%) brightness(1.045);
+  /* Readable opaque fallback; translucency is opt-in below. */
+  background: var(--material-glass-strong);
   border: 0;
   box-shadow: none;
   isolation: isolate;
@@ -36,32 +52,49 @@
   font: inherit;
 }
 
+/* ---- material ----------------------------------------------------------
+ * Quiet Glass: the navigator samples the conversation it covers, the toolbar
+ * is a thinner lamina over the navigator. Both stay a deliberate Appearance
+ * choice — "Glass off" and low-resource mode keep the opaque surface. */
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .mobile-navigator {
+    background: color-mix(in srgb, var(--material-glass-strong) 88%, transparent);
+    -webkit-backdrop-filter: blur(calc(var(--material-glass-blur) * 1.6)) saturate(var(--material-glass-saturation));
+    backdrop-filter: blur(calc(var(--material-glass-blur) * 1.6)) saturate(var(--material-glass-saturation));
+  }
+
+  body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .mobile-nav-toolbar {
+    background: color-mix(in srgb, var(--material-glass-chrome) 62%, transparent);
+    -webkit-backdrop-filter: blur(calc(var(--material-glass-blur) * 2)) saturate(var(--material-glass-saturation));
+    backdrop-filter: blur(calc(var(--material-glass-blur) * 2)) saturate(var(--material-glass-saturation));
+  }
+}
+
 .mobile-nav-toolbar {
   position: sticky;
   top: 0;
   z-index: 4;
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: calc(var(--space-1) / 2);
   flex: 0 0 auto;
-  min-height: calc(50px + var(--safe-top));
-  padding: calc(6px + var(--safe-top)) max(10px, var(--safe-right)) 6px max(10px, var(--safe-left));
-  background: color-mix(in srgb, var(--bg) 56%, transparent);
-  -webkit-backdrop-filter: blur(34px) saturate(114%);
-  backdrop-filter: blur(34px) saturate(114%);
+  min-height: calc(var(--control-h-lg) + var(--safe-top));
+  padding:
+    calc(var(--space-1) + var(--safe-top))
+    max(var(--nav-gutter), var(--safe-right))
+    var(--space-1)
+    max(var(--nav-gutter), var(--safe-left));
+  background: var(--material-glass-chrome);
 }
 
 .mobile-nav-toolbar::after {
   content: "";
   position: absolute;
-  inset: auto 10px 0;
-  height: .5px;
-  background: color-mix(in srgb, var(--text) 5%, transparent);
+  inset: auto var(--nav-gutter) 0;
+  height: 1px;
+  background: var(--material-glass-border);
+  opacity: .55;
   pointer-events: none;
-}
-
-.mobile-nav-toolbar.is-searching {
-  gap: 5px;
 }
 
 .mobile-nav-search {
@@ -70,17 +103,21 @@
   align-items: center;
   flex: 1 1 auto;
   min-width: 0;
-  height: 50px;
-  padding: 0 6px 0 15px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--panel) 44%, transparent);
-  box-shadow: inset 0 0 0 .5px color-mix(in srgb, white 22%, transparent);
+  height: var(--control-h-lg);
+  padding: 0 var(--space-1) 0 var(--space-3);
+  border-radius: var(--radius-round);
+  /* Same cut-glass edge shared controls use, without a second stacked blur. */
+  border: 1px solid var(--material-glass-border);
+  background: linear-gradient(145deg,
+    color-mix(in srgb, var(--material-glass) var(--material-glass-control-fill), transparent),
+    color-mix(in srgb, var(--material-glass) var(--material-glass-control-edge), transparent));
+  box-shadow: var(--material-glass-highlight);
 }
 
 .mobile-nav-search > svg {
   flex: 0 0 auto;
-  width: 21px;
-  height: 21px;
+  width: var(--icon-md);
+  height: var(--icon-md);
   color: var(--muted);
   stroke-width: 1.8;
 }
@@ -89,13 +126,14 @@
   min-width: 0;
   width: 100%;
   height: 100%;
-  padding: 0 8px 0 10px;
+  padding: 0 var(--space-2);
   color: var(--text);
   background: transparent;
   border: 0;
   outline: 0;
-  font-size: 16px;
-  line-height: 21px;
+  /* 16px minimum: anything smaller makes iOS zoom the page on focus. */
+  font-size: max(16px, var(--font-body));
+  line-height: 1.3;
 }
 
 .mobile-nav-search input::placeholder {
@@ -121,40 +159,31 @@
 }
 
 .mobile-nav-search-clear,
-.mobile-nav-filter {
+.mobile-nav-filter,
+.mobile-nav-tool {
   position: relative;
-  width: 42px;
-  height: 42px;
-  border-radius: 999px;
+  width: var(--tap);
+  height: var(--tap);
+  border-radius: var(--radius-round);
 }
 
 .mobile-nav-search-clear svg,
-.mobile-nav-filter svg {
-  width: 20px;
-  height: 20px;
+.mobile-nav-filter svg,
+.mobile-nav-tool svg,
+.mobile-nav-tool .ui-icon {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+  stroke-width: 1.8;
 }
 
 .mobile-nav-filter-dot {
   position: absolute;
-  top: 8px;
-  right: 7px;
+  top: 9px;
+  right: 8px;
   width: 5px;
   height: 5px;
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   background: var(--accent);
-}
-
-.mobile-nav-tool {
-  width: 48px;
-  height: 48px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--panel) 25%, transparent);
-}
-
-.mobile-nav-tool svg {
-  width: 21px;
-  height: 21px;
-  stroke-width: 1.85;
 }
 
 .mobile-nav-tool:active,
@@ -167,6 +196,13 @@
   background: color-mix(in srgb, var(--text) 7%, transparent);
 }
 
+.mobile-navigator :is(button, input):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* ---- list --------------------------------------------------------------- */
+
 .mobile-nav-scroll {
   flex: 1 1 auto;
   min-height: 0;
@@ -174,7 +210,11 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  padding: 12px max(10px, var(--safe-right)) calc(14px + var(--safe-bottom)) max(10px, var(--safe-left));
+  padding:
+    var(--space-2)
+    max(var(--nav-gutter), var(--safe-right))
+    calc(var(--space-4) + var(--safe-bottom))
+    max(var(--nav-gutter), var(--safe-left));
   scrollbar-width: none;
 }
 
@@ -183,60 +223,87 @@
 }
 
 .mobile-nav-empty {
-  padding: 40px 14px;
+  padding: var(--space-6) var(--space-4);
   color: var(--muted);
-  font-size: 15px;
-  line-height: 20px;
+  font-size: var(--font-body);
+  line-height: 1.4;
   text-align: center;
 }
 
 .mobile-nav-project {
   position: relative;
-  margin: 0 0 8px;
-  border-radius: 16px;
+  margin: 0 0 var(--space-1);
+  border-radius: var(--radius-surface);
   background: transparent;
 }
 
-.mobile-nav-project.is-current {
+/* The current project is not a card. Only its header gets a barely perceptible
+   material lift; its sessions continue into the shared navigator surface. */
+.mobile-nav-project.is-current > .mobile-nav-project-head {
+  border-radius: var(--radius-surface);
   background: color-mix(in srgb, var(--panel) 15%, transparent);
 }
 
 .mobile-nav-project-head {
   display: flex;
   align-items: center;
-  min-height: 64px;
+  min-height: var(--tap);
   padding: 0;
 }
 
 .mobile-nav-disclosure {
-  width: 38px;
-  height: 48px;
-  margin-left: -3px;
-  border-radius: 12px;
+  position: relative;
+  width: 30px;
+  height: var(--tap);
+  border-radius: var(--radius-control);
+  color: color-mix(in srgb, var(--muted) 80%, transparent);
 }
 
 .mobile-nav-disclosure svg {
-  width: 17px;
-  height: 17px;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
   stroke-width: 2;
 }
 
-.mobile-nav-project-icon {
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
-  margin-right: 7px;
-  border-radius: 12px;
-  color: var(--muted);
-  background: color-mix(in srgb, var(--panel) 24%, transparent);
+/* Project identity reuses the shared mark (custom icon, colour, emoji). A
+   project that has not chosen a colour stays quiet instead of painting the
+   whole list accent; an explicit project colour still wins (inline style). */
+.mobile-navigator .project-glyph {
+  margin-right: var(--space-1);
+  color: color-mix(in srgb, var(--muted) 90%, transparent);
 }
 
-.mobile-nav-project-icon svg {
-  width: 20px;
-  height: 20px;
-  stroke-width: 1.75;
+/* Transparent hit-area extension on coarse pointers (--hit-min is 0px on
+   fine): the chevron stays visually small without dropping below the tap
+   floor. It only overlaps the decorative project mark, never a control. */
+.mobile-nav-disclosure::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, var(--hit-min));
+  height: max(100%, var(--hit-min));
+  transform: translate(-50%, -50%);
+}
+
+.mobile-nav-project-drag-handle {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.mobile-nav-project-drag-handle:active {
+  cursor: grabbing;
+  color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.mobile-nav-project.is-dragging {
+  opacity: .58;
+}
+
+.mobile-nav-project.is-drag-over > .mobile-nav-project-head {
+  box-shadow: inset 0 2px 0 var(--accent);
 }
 
 .mobile-nav-project-main {
@@ -246,8 +313,8 @@
   align-items: flex-start;
   flex: 1 1 auto;
   min-width: 0;
-  min-height: 58px;
-  padding: 6px 3px;
+  min-height: var(--tap);
+  padding: var(--space-1) 2px;
   text-align: left;
   color: inherit;
   background: transparent;
@@ -259,23 +326,30 @@
   width: 100%;
   overflow: hidden;
   color: var(--text);
-  font-size: 20px;
-  font-weight: 600;
-  line-height: 24px;
+  font-size: var(--nav-project-size);
+  font-weight: 650;
+  line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
-  letter-spacing: -.015em;
+  letter-spacing: -.02em;
 }
 
 .mobile-nav-project-meta {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
   width: 100%;
-  margin-top: 2px;
-  overflow: hidden;
+  min-width: 0;
+  margin-top: 1px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--nav-meta-size);
   font-weight: 400;
-  line-height: 18px;
+  line-height: var(--font-meta-lh);
+}
+
+.mobile-nav-project-meta-copy {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -283,14 +357,14 @@
 .mobile-nav-project-rename {
   flex: 1 1 auto;
   min-width: 0;
-  height: 42px;
-  padding: 0 9px;
+  height: var(--control-h);
+  padding: 0 var(--space-2);
   color: var(--text);
   background: color-mix(in srgb, var(--panel) 34%, transparent);
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   outline: 0;
-  font-size: 19px;
+  font-size: max(16px, var(--nav-project-size));
   font-weight: 600;
 }
 
@@ -298,54 +372,89 @@
   display: flex;
   align-items: center;
   flex: 0 0 auto;
-  margin-right: -4px;
+  margin-right: -2px;
 }
 
 .mobile-nav-project-action {
-  width: 44px;
-  height: 48px;
-  border-radius: 12px;
+  width: var(--tap);
+  height: var(--tap);
+  border-radius: var(--radius-control);
 }
 
-.mobile-nav-project-action svg {
-  width: 19px;
-  height: 19px;
+.mobile-nav-project-action svg,
+.mobile-nav-project-action .ui-icon {
+  width: var(--icon-md);
+  height: var(--icon-md);
 }
 
-.mobile-nav-isolated-glyph {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
+/* Live work stays visible on the project line without stealing title space.
+   Finished means unread completed activity: once the result is viewed the
+   check disappears rather than leaving a permanent historical counter. */
+.mobile-nav-project-statuses {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: var(--space-1);
+  margin-left: auto;
 }
 
-.mobile-nav-isolated-glyph > svg:first-child {
-  width: 20px;
-  height: 20px;
+.mobile-nav-project-status {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--space-1) / 2);
+  min-width: 20px;
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-round);
+  font-size: var(--font-meta);
+  font-weight: 700;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
 }
 
-.mobile-nav-isolated-glyph > svg:last-child {
-  position: absolute;
-  right: -4px;
-  bottom: -4px;
-  width: 12px;
-  height: 12px;
-  padding: 1px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--bg) 90%, transparent);
-  stroke-width: 2.4;
+.mobile-nav-project-status.is-running {
+  color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.mobile-nav-project-status.is-waiting {
+  color: var(--amber-on-wash);
+  background: var(--amber-wash);
+}
+
+.mobile-nav-project-status.is-complete {
+  color: var(--green-on-wash);
+  background: var(--green-wash);
+}
+
+.mobile-nav-project-status.is-failed {
+  color: var(--red);
+  background: var(--red-wash);
+}
+
+.mobile-nav-project-status .mobile-nav-state-icon {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+.mobile-nav-project-status.is-running .mobile-nav-state-icon {
+  animation: mobile-nav-project-status-spin .85s linear infinite;
+}
+
+@keyframes mobile-nav-project-status-spin {
+  to { transform: rotate(360deg); }
 }
 
 .mobile-nav-project-body {
-  padding: 0 0 3px 20px;
+  padding: 0 0 0 var(--nav-session-indent);
 }
+
+/* ---- session rows ------------------------------------------------------- */
 
 .mobile-nav-session-swipe {
   position: relative;
-  min-height: 50px;
+  min-height: var(--nav-row-session);
   overflow: hidden;
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   touch-action: pan-y;
 }
 
@@ -355,7 +464,7 @@
   display: flex;
   justify-content: space-between;
   align-items: stretch;
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   overflow: hidden;
 }
 
@@ -367,11 +476,11 @@
 
 .mobile-nav-swipe-action {
   width: 82px;
-  padding: 0 7px;
+  padding: 0 var(--space-2);
   color: var(--muted);
   background: color-mix(in srgb, var(--panel) 42%, transparent);
   border: 0;
-  font-size: 13px;
+  font-size: var(--font-meta);
   font-weight: 600;
 }
 
@@ -384,8 +493,8 @@
   z-index: 1;
   display: flex;
   align-items: center;
-  min-height: 50px;
-  border-radius: 12px;
+  min-height: var(--nav-row-session);
+  border-radius: var(--radius-control);
   background: transparent;
   transition: transform 150ms cubic-bezier(.2,.75,.2,1), background-color 120ms ease;
   will-change: transform;
@@ -403,12 +512,12 @@
   content: "";
   position: absolute;
   left: 0;
-  top: 12px;
-  bottom: 12px;
-  width: 2.5px;
-  border-radius: 999px;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  border-radius: var(--radius-round);
   background: var(--accent);
-  opacity: .75;
+  opacity: .8;
 }
 
 .mobile-nav-session-row.is-failed {
@@ -418,11 +527,11 @@
 .mobile-nav-session-main {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-2);
   flex: 1 1 auto;
   min-width: 0;
-  min-height: 50px;
-  padding: 4px 0 4px 10px;
+  min-height: var(--nav-row-session);
+  padding: var(--space-1) 0 var(--space-1) var(--space-2);
   color: inherit;
   text-align: left;
   background: transparent;
@@ -431,35 +540,36 @@
 
 .mobile-nav-pin-icon {
   display: inline-grid;
-  width: 22px;
-  height: 22px;
-  flex: 0 0 22px;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
   place-items: center;
-  border: 1px solid var(--accent-line);
   border-radius: var(--radius-round);
   background: var(--accent-wash);
   color: var(--accent);
 }
 
 .mobile-nav-pin-icon svg {
-  width: 13px;
-  height: 13px;
+  width: 11px;
+  height: 11px;
 }
 
 .mobile-nav-session-title {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: var(--text);
-  font-size: 17px;
+  color: color-mix(in srgb, var(--text) 92%, transparent);
+  font-size: var(--nav-session-size);
   font-weight: 450;
-  line-height: 22px;
+  line-height: var(--nav-session-lh);
   text-overflow: ellipsis;
   white-space: nowrap;
   letter-spacing: -.01em;
 }
 
+.mobile-nav-session-row.is-active .mobile-nav-session-title,
 .mobile-nav-session-row.is-unread .mobile-nav-session-title {
+  color: var(--text);
   font-weight: 600;
 }
 
@@ -467,16 +577,15 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: var(--space-1);
   flex: 0 0 auto;
-  min-width: 28px;
 }
 
 .mobile-nav-duration {
   color: var(--muted);
-  font-size: 14px;
+  font-size: var(--font-meta);
   font-weight: 400;
-  line-height: 18px;
+  line-height: 1.4;
   font-variant-numeric: tabular-nums;
 }
 
@@ -488,20 +597,23 @@
   min-width: 0;
 }
 
+/* A date is a quiet label, not a rule across the list: one hairline trails it
+   so the eye lands on the first session instead of the divider. */
 .mobile-nav-date-divider {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: 26px;
-  padding: var(--space-1) var(--space-2) 0;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 560;
-  line-height: 18px;
+  min-height: 24px;
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  color: color-mix(in srgb, var(--muted) 85%, transparent);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: .04em;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
-.mobile-nav-date-divider::before,
 .mobile-nav-date-divider::after {
   content: "";
   height: 1px;
@@ -519,25 +631,24 @@
   color: var(--accent);
 }
 
-.mobile-nav-date-divider.is-pinned::before,
 .mobile-nav-date-divider.is-pinned::after {
   background: var(--accent-line);
 }
 
 .mobile-nav-date-divider.is-pinned svg {
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
 }
 
 .mobile-nav-session-state {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  min-height: 22px;
+  gap: var(--space-1);
+  min-height: 20px;
   color: var(--muted);
-  font-size: 16px;
+  font-size: var(--font-meta);
   font-weight: 600;
-  line-height: 20px;
+  line-height: 1.4;
 }
 
 .mobile-nav-state-icon {
@@ -549,21 +660,16 @@
 }
 
 .mobile-nav-running-ring {
-  width: 15px;
-  height: 15px;
+  width: 14px;
+  height: 14px;
   border: 1.6px solid color-mix(in srgb, var(--muted) 30%, transparent);
   border-top-color: color-mix(in srgb, var(--text) 68%, transparent);
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   animation: mobile-nav-spin .9s linear infinite;
 }
 
 @keyframes mobile-nav-spin {
   to { transform: rotate(360deg); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .mobile-nav-running-ring { animation: none; }
-  .mobile-nav-session-row { transition: none; }
 }
 
 .mobile-nav-session-state.is-attention {
@@ -578,147 +684,122 @@
 .mobile-nav-unread-dot {
   width: 6px;
   height: 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   background: currentColor;
   color: var(--accent);
 }
 
+/* Row-height follower: a 44px control here would hold the whole row open and
+   silently cancel a denser interface setting. */
 .mobile-nav-more {
-  width: 44px;
-  height: 50px;
-  border-radius: 12px;
+  width: var(--tap);
+  height: var(--nav-row-session);
+  border-radius: var(--radius-control);
 }
 
 .mobile-nav-more svg {
-  width: 18px;
-  height: 18px;
+  width: var(--icon-md);
+  height: var(--icon-md);
 }
 
 .mobile-nav-inline-rename {
   flex: 1 1 auto;
   min-width: 0;
-  height: 40px;
-  margin-left: 5px;
-  padding: 0 8px;
+  height: var(--control-h);
+  margin-left: var(--space-1);
+  padding: 0 var(--space-2);
   color: var(--text);
   background: color-mix(in srgb, var(--panel) 42%, transparent);
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   outline: 0;
-  font-size: 17px;
-  line-height: 22px;
+  font-size: max(16px, var(--nav-session-size));
+  line-height: var(--nav-session-lh);
 }
 
-.mobile-nav-more-sessions {
+.mobile-nav-more-sessions,
+.mobile-nav-isolated-toggle {
   display: flex;
   align-items: center;
-  gap: 4px;
-  min-height: 44px;
-  margin-left: 8px;
-  padding: 0 8px;
+  gap: var(--space-2);
+  min-height: var(--tap);
+  padding: 0 var(--space-2);
   color: var(--muted);
+  text-align: left;
   background: transparent;
   border: 0;
-  font-size: 15px;
-  font-weight: 500;
-  line-height: 20px;
+  font-size: var(--font-meta);
+  font-weight: 600;
+  letter-spacing: .01em;
 }
 
-.mobile-nav-more-sessions svg {
-  width: 16px;
-  height: 16px;
+.mobile-nav-more-count,
+.mobile-nav-isolated-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: var(--radius-round);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  font-size: var(--font-meta);
+  font-weight: 700;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
 }
 
 .mobile-nav-isolated-section {
-  margin: 5px 0 1px;
+  margin-top: var(--space-1);
 }
 
 .mobile-nav-isolated-head {
   display: flex;
   align-items: center;
-  min-height: 44px;
-  padding-left: 8px;
+  min-height: var(--tap);
 }
 
 .mobile-nav-isolated-toggle {
-  display: flex;
-  align-items: center;
-  gap: 5px;
   flex: 1 1 auto;
   min-width: 0;
-  min-height: 44px;
-  padding: 0;
-  color: var(--muted);
-  text-align: left;
-  background: transparent;
-  border: 0;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 18px;
 }
 
 .mobile-nav-isolated-toggle svg {
-  width: 15px;
-  height: 15px;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
 }
 
 .mobile-nav-isolated-add {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  width: var(--tap);
+  height: var(--tap);
+  border-radius: var(--radius-control);
 }
 
 .mobile-nav-isolated-add svg {
-  width: 17px;
-  height: 17px;
+  width: var(--icon-md);
+  height: var(--icon-md);
 }
 
 .mobile-nav-isolated-list {
   display: flex;
   flex-direction: column;
+  padding-left: var(--space-2);
 }
 
-.mobile-nav-isolated-item {
-  display: grid;
-  grid-template-columns: 20px minmax(0, 1fr);
-  align-items: center;
+/* Interface density: the same preference the desktop navigator honours. */
+:is(html, body)[data-density="balanced"] .mobile-navigator { --nav-row-session: 42px; }
+:is(html, body)[data-density="compact"] .mobile-navigator {
+  --nav-row-session: 40px;
+  --nav-session-indent: var(--space-2);
 }
 
-.mobile-nav-worktree-icon {
-  display: grid;
-  place-items: center;
-  color: color-mix(in srgb, var(--muted) 78%, transparent);
-}
-
-.mobile-nav-worktree-icon svg {
-  width: 15px;
-  height: 15px;
-  stroke-width: 1.6;
-}
-
-.mobile-nav-isolated-item .mobile-nav-session-swipe {
-  min-width: 0;
-}
-
-.mobile-nav-project + .mobile-nav-project {
-  margin-top: 2px;
+@media (prefers-reduced-motion: reduce) {
+  .mobile-nav-running-ring,
+  .mobile-nav-project-status.is-running .mobile-nav-state-icon { animation: none; }
+  .mobile-nav-session-row { transition: none; }
 }
 
 @media (max-width: 380px) {
-  .mobile-nav-toolbar {
-    gap: 1px;
-    padding-inline: 8px;
-  }
-
-  .mobile-nav-tool {
-    width: 44px;
-  }
-
-  .mobile-nav-project-actions .mobile-nav-project-action {
-    width: var(--tap);
-  }
-
-  .mobile-nav-project-body {
-    padding-left: var(--space-4);
+  .mobile-navigator {
+    --nav-gutter: var(--space-1);
+    --nav-session-indent: var(--space-2);
   }
 }

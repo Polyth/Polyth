@@ -609,7 +609,12 @@ test("phone views expose only floating power-on-demand controls", async () => {
   assert.match(mobileHeader, /<Tools/);
   assert.doesNotMatch(mobileHeader, /Icon\.plus/);
   assert.match(css, /\.mobile-session-floats\s*\{[^}]*position:\s*fixed/s);
-  assert.match(css, /\.mobile-tools-sheet\.sheet\s*\{[^}]*width:\s*calc\(100vw/s);
+  assert.match(css, /\.mobile-tools-sheet\.sheet\s*\{[^}]*width:\s*100%[^}]*border-radius:\s*0/s);
+  assert.match(
+    css,
+    /@keyframes mobile-tools-in\s*\{\s*from\s*\{\s*transform:\s*translate3d\(100%, 0, 0\)/s,
+    "Workspace enters as a full navigation destination from the right edge",
+  );
   // The reserved band clears the floating island: safe area, the island's own
   // height (never below the tap floor), and the chrome inset around it.
   assert.match(
@@ -646,6 +651,11 @@ test("the fresh-session screen is three zones with a sticky interaction dock", a
   assert.ok(!surface.includes("SessionContextBar"), "the fresh surface cannot fork composer controls");
   assert.ok(!surface.includes("new-session-targets"), "the full-width mid-page selectors are gone");
   assert.ok(!surface.includes("hero-mark"), "the decorative mark no longer competes with the headline");
+  assert.doesNotMatch(
+    surface,
+    /workspace\.builtinsurfaces\.(whatAreWeWorkingOnIn|startATaskOrContinueWhereYou)/,
+    "the fresh-session hero keeps the prompt area free of the removed copy",
+  );
   assert.ok(surface.includes("visibleStarters"), "chips come from the starter system");
   assert.ok(surface.includes('slot="session.empty.widgets"'), "idle content is a widget slot, not hero hardcode");
   assert.ok(surface.includes('registerSlot("session.empty.widgets", "builtin.hero-starters"'), "starters register as a widget");

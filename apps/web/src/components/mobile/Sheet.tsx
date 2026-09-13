@@ -1,8 +1,8 @@
-// UX-MOBILE-01 §28/§46: ONE bottom-sheet system for every mobile overlay —
-// model picker, agent/mode picker, project picker, branch picker, starter
-// picker. They share the radius, backdrop, grabber, swipe-to-dismiss, search
-// pattern, focus contract, and keyboard geometry, so behavior never depends on
-// which control was tapped.
+// UX-MOBILE-01 §28/§46: ONE surface system for mobile overlays — model picker,
+// agent/mode picker, project picker, branch picker, starter picker, and
+// full-screen navigation destinations. Transient sheets share the grabber and
+// swipe-to-dismiss contract; navigation destinations exchange those affordances
+// for Back while retaining the same focus and keyboard-safe geometry.
 //
 // Geometry rules that make the sheet keyboard-safe:
 //   * height is capped against --visual-vh (mobileViewport.ts), never 100vh;
@@ -17,6 +17,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useModalSurface } from "../a11y/Dialog.tsx";
+import Icon from "../ui/Icon.tsx";
+import { BackIcon, CloseIcon } from "../ui/icons.ts";
 import { tr } from "../../i18n/index.ts";
 
 /** Drag distance (CSS px) past which releasing dismisses the sheet. */
@@ -50,6 +52,8 @@ export interface SheetProps {
   size?: "auto" | "tall";
   /** Bottom sheets rise from the composer; top sheets drop from the island. */
   origin?: "bottom" | "top";
+  /** Full-screen navigation destinations use Back; transient sheets use Close. */
+  dismiss?: "close" | "back";
   /** Explicit focus destination after every close path. */
   restoreFocusRef?: RefObject<HTMLElement | null>;
 }
@@ -67,6 +71,7 @@ export default function Sheet({
   className,
   size = "auto",
   origin = "bottom",
+  dismiss = "close",
   restoreFocusRef,
 }: SheetProps) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -171,16 +176,23 @@ export default function Sheet({
           }
         }}
       >
-        <div
-          className="sheet-grabber"
-          onPointerDown={onGrabberDown}
-          onPointerMove={onGrabberMove}
-          onPointerUp={onGrabberUp}
-          onPointerCancel={() => { dragFrom.current = null; setDrag(0); }}
-        >
-          <i aria-hidden="true" />
-        </div>
+        {dismiss === "close" && (
+          <div
+            className="sheet-grabber"
+            onPointerDown={onGrabberDown}
+            onPointerMove={onGrabberMove}
+            onPointerUp={onGrabberUp}
+            onPointerCancel={() => { dragFrom.current = null; setDrag(0); }}
+          >
+            <i aria-hidden="true" />
+          </div>
+        )}
         <div className="sheet-head">
+          {dismiss === "back" && (
+            <button type="button" className="sheet-back" aria-label={tr("common.back")} onClick={onClose}>
+              <Icon icon={BackIcon} size="lg" />
+            </button>
+          )}
           <h2 className="sheet-title">{title}</h2>
           {action && (
             <button
@@ -192,11 +204,11 @@ export default function Sheet({
               {action.label}
             </button>
           )}
-          <button type="button" className="sheet-close" aria-label={tr("mobile.sheet.closeValue", { title: title })} onClick={onClose}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-              <path d="m6 6 12 12M18 6 6 18" />
-            </svg>
-          </button>
+          {dismiss === "close" && (
+            <button type="button" className="sheet-close" aria-label={tr("mobile.sheet.closeValue", { title: title })} onClick={onClose}>
+              <Icon icon={CloseIcon} size="lg" />
+            </button>
+          )}
         </div>
         {search && (
           <div className="sheet-search">

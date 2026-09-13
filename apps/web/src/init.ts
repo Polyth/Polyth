@@ -7,7 +7,7 @@ import { friendlyError } from "./settings.ts";
 import { formatAppUrl, parseAppUrl, settingsPageFromSearch } from "./router.ts";
 import * as store from "./store.ts";
 import { resolveActiveProjectId } from "./projectRegistry.ts";
-import type { AttachmentRef, HarnessSelection, JsonObject, ModelRef, Project, ProjectCloneInput, ProjectPatch, SessionEvent, SessionProjection } from "@polyth/contracts";
+import type { AttachmentRef, HarnessSelection, JsonObject, ModelRef, Project, ProjectCloneInput, ProjectPatch, ResumeTurnOptions, SessionEvent, SessionProjection } from "@polyth/contracts";
 import { suggestWorktreeBranch } from "./worktreeSessions.ts";
 import { installPushDeepLinks, registerServiceWorker } from "./push.ts";
 import { notificationCentre } from "./notificationCentre.ts";
@@ -1430,10 +1430,10 @@ export async function cancelResume(sessionId: string): Promise<void> {
   }
 }
 
-/** Rate-limit wait: resend the last message now, optionally on another model. */
-export async function resumeNow(sessionId: string, model?: JsonObject): Promise<void> {
+/** Rate-limit wait: resend the last message now on an optional model/route. */
+export async function resumeNow(sessionId: string, options?: ResumeTurnOptions): Promise<void> {
   try {
-    await api.resumeNow(sessionId, model as ModelRef | undefined);
+    await api.resumeNow(sessionId, options);
   } catch (err) {
     console.error("resume now failed", err);
     store.setUiError(friendlyError(tr("common.error"), err));

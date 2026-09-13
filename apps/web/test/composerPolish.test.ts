@@ -6,16 +6,34 @@ const read = (rel: string) => readFile(new URL(rel, import.meta.url), "utf8");
 
 test("phone composer keeps one text origin and one semantic control order", async () => {
   const css = await read("../src/composerAdaptive.css");
-  assert.match(css, /padding:\s*var\(--space-3\) var\(--space-4\) 0;/,
+  assert.match(css, /padding:\s*var\(--space-3\) var\(--space-4\) var\(--space-1\);/,
     "placeholder, short drafts and multiline drafts share the same top-left padding");
-  assert.match(css, /\.composer-mobile \.composer-execution[\s\S]*?margin-inline-start:\s*auto;/,
-    "execution controls stay grouped at the trailing edge");
+  assert.match(css, /\.composer-mobile \.composer-leading-zone,[\s\S]*?display:\s*contents;/,
+    "the leading wrapper cannot lock Add and Voice into the wrong visual group");
+  assert.match(css, /\.composer-mobile \.composer-add\s*\{[^}]*order:\s*1;/s,
+    "Add stays at the far left");
+  assert.match(css, /\.composer-mobile \.composer-execution[\s\S]*?order:\s*2;[\s\S]*?margin-inline-start:\s*auto;/,
+    "thinking and model start the right-aligned execution group");
+  assert.match(css, /\.composer-mobile \.composer-mobile-extensions\s*\{[^}]*order:\s*3;/s,
+    "voice follows the execution group");
+  assert.match(css, /\.composer-mobile \.composer-actions,[\s\S]*?order:\s*4;/,
+    "the primary action remains the final rail group");
   assert.match(css, /\.composer-mobile \.composer-effort-inline\s*\{[^}]*order:\s*-1;/s,
     "thinking effort renders immediately before the model");
   assert.match(css, /\.composer-mobile \.model-picker-trigger \.model-trigger-logo,[\s\S]*?display:\s*none;/,
     "the composer model trigger is text-only");
-  assert.match(css, /\.composer-mobile \.composer-mobile-extensions > \.placed-mini-widget:has\(\.mic-btn\)/,
-    "voice is the only inline trailing extension on phone");
+});
+
+test("phone composer never reserves empty widget slots or leaks desktop actions", async () => {
+  const css = await read("../src/composerAdaptive.css");
+  assert.match(css, /\.composer-mobile \.composer-mobile-extensions\s*\{[^}]*display:\s*none;[^}]*width:\s*0;/s,
+    "an empty leading extension host consumes no horizontal space");
+  assert.match(css, /\.composer-mobile \.composer-mobile-extensions:has\(\.mic-btn\)\s*\{[^}]*display:\s*inline-flex;/s,
+    "only the microphone makes the leading extension lane visible");
+  assert.match(css, /\.composer-mobile \.composer-actions > \.composer-extensions\s*\{[^}]*display:\s*none;[^}]*width:\s*0;/s,
+    "desktop trailing widgets do not reflow the phone composer");
+  assert.match(css, /\.composer-mobile \.composer-actions > \.composer-extensions:has\(\.mic-btn\)/,
+    "a user-moved microphone remains supported without exposing other widgets");
 });
 
 test("thinking effort is a static icon meter with an icon-only menu", async () => {

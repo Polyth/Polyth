@@ -6,6 +6,7 @@ import { formatNumber, tr } from "../../i18n/index.ts";
 import {
   buildIslandItems,
   eventsHaveCodeChanges,
+  latestStartedTask,
   notablePeers,
   promptExcerpt,
   recentSessionsForIsland,
@@ -22,6 +23,12 @@ import {
   refreshSessions,
 } from "../../init.ts";
 import { setRailPlugin, setSidebarOpen, startNewSession, useActiveModel, useStore } from "../../store.ts";
+import { useResolvedCapabilities } from "../../capabilities.ts";
+import {
+  hideMobileWorkspaceHome,
+  showMobileWorkspaceHome,
+  useMobileWorkspaceNavigation,
+} from "../../mobileWorkspaceNavigation.ts";
 import { firstUserTextCached, lastUserTextCached } from "../../utils.ts";
 import { ComposeIcon, GlassIsland, IconButton, LayersIcon, MenuIcon } from "../ui/index.ts";
 import Sheet, { SheetRow, SheetSection } from "./Sheet.tsx";
@@ -36,6 +43,36 @@ import ContextIndicator from "../ContextIndicator.tsx";
 import "./MobileSessionHeader.css";
 
 const SESSION_TITLE_POLL_MS = 2_000;
+const TASK_START_TITLE_MS = 1_800;
+
+/** Show only task starts that arrive while this session is already open.
+ *  Replaying or switching to an existing session must not resurrect an old
+ *  transient label in place of its title. */
+function useTaskStartTitle(sessionId: string | undefined, messages: Parameters<typeof latestStartedTask>[0]): string | undefined {
+  const latest = latestStartedTask(messages);
+  const latestKey = latest ? `${sessionId ?? ""}:${latest.id}` : null;
+  const sessionRef = useRef(sessionId);
+  const observedRef = useRef<string | null>(latestKey);
+  const [visible, setVisible] = useState<{ key: string; text: string } | null>(null);
+
+  useEffect(() => {
+    if (sessionRef.current !== sessionId) {
+      sessionRef.current = sessionId;
+      observedRef.current = latestKey;
+      setVisible(null);
+      return;
+    }
+    if (!latest || !latestKey || observedRef.current === latestKey) return;
+    observedRef.current = latestKey;
+    setVisible({ key: latestKey, text: latest.text });
+    const timer = window.setTimeout(() => {
+      setVisible((current) => current?.key === latestKey ? null : current);
+    }, TASK_START_TITLE_MS);
+    return () => window.clearTimeout(timer);
+  }, [latest?.text, latestKey, sessionId]);
+
+  return visible?.key === latestKey ? visible.text : undefined;
+}
 
 function SessionLiveIcon({ status }: { status: SessionRowStatus }) {
   if (status.kind === "working") {
@@ -183,7 +220,9 @@ export default function MobileSessionHeader() {
   const model = useActiveModel();
   const models = useStore((state) => state.models);
   const ui = useUiSettings();
-  const [surface, setSurface] = useState<"island" | "tools" | null>(null);
+  const capabilities = useResolvedCapabilities();
+  const workspaceNav = useMobileWorkspaceNavigation();
+  const [surface, setSurface] = useState<"island" | null>(null);
   const [promptVisible, setPromptVisible] = useState(promptIsVisible);
   const title = session
     ? displaySessionTitle(session.title, session.id, firstUserTextCached(events[session.id]))
@@ -254,8 +293,10 @@ export default function MobileSessionHeader() {
   }), []);
 
   const overviewTasks = tasksForIsland(model.tasks, model.messages);
-  // The pill title stays put; derived state only feeds the overview and status
-  // signals, so no secondary copy competes with the current session title.
+  const taskStartTitle = useTaskStartTitle(session?.id, model.messages);
+  const displayedTitle = taskStartTitle
+    ? `${tr("timeline.taskStarted")}: ${taskStartTitle}`
+    : title;
   const items = buildIslandItems({
     sessionTitle: title,
     hasSession: session !== null,
@@ -276,10 +317,25 @@ export default function MobileSessionHeader() {
   const telemetryStatus = contextTelemetryStatus(runtimeFeatures?.telemetry);
   const gauge = contextGaugeForTelemetry(model, descriptor?.context, session?.contextWindow ?? null, telemetryStatus);
 
+  const openWorkspaceNavigation = () => {
+    setSurface(null);
+    const remembered = workspaceNav.lastPackageId;
+    const capability = remembered
+      ? capabilities.find(({ descriptor: capabilityDescriptor }) => capabilityDescriptor.id === remembered && capabilityDescriptor.available())
+      : undefined;
+    if (capability) {
+      hideMobileWorkspaceHome();
+      capability.descriptor.open();
+      return;
+    }
+    showMobileWorkspaceHome();
+  };
+
   return <>
     <div className="mobile-session-floats" aria-label="Workspace navigation">
       <GlassIsland className="mobile-float-navigation">
         <IconButton icon={MenuIcon} label="Open navigation" size="lg" variant="ghost" aria-expanded={sidebarOpen} onClick={() => {
+          hideMobileWorkspaceHome();
           setRailPlugin(null);
           setSidebarOpen(true);
         }} />
@@ -293,13 +349,17 @@ export default function MobileSessionHeader() {
           onClick={() => setSurface("island")}
         >
           {session && <ContextIndicator gauge={gauge} mode={ui.contextIndicatorMode} providerID={activeModel?.providerID} providerName={descriptor?.providerName} harnessId={descriptor?.harnessId ?? session.resolvedHarnessId} active={sessionStatus?.kind === "working"} telemetryStatus={telemetryStatus} />}
-          <span className="mobile-island-text">{title}</span>
+          <span className={`mobile-island-text${taskStartTitle ? " task-start" : ""}`}>{displayedTitle}</span>
           <Icon.chevronDown />
         </button>
+        {taskStartTitle && <span className="sr-only" role="status" aria-live="polite">{displayedTitle}</span>}
       </GlassIsland>
       <GlassIsland className="mobile-float-actions">
-        <IconButton icon={ComposeIcon} label="New session" size="lg" variant="ghost" disabled={!projectId} onClick={() => projectId && startNewSession(projectId)} />
-        <IconButton icon={LayersIcon} label="Open tools" size="lg" variant="ghost" aria-expanded={surface === "tools"} onClick={() => setSurface("tools")} />
+        <IconButton icon={ComposeIcon} label="New session" size="lg" variant="ghost" disabled={!projectId} onClick={() => {
+          hideMobileWorkspaceHome();
+          if (projectId) startNewSession(projectId);
+        }} />
+        <IconButton icon={LayersIcon} label="Open tools" size="lg" variant="ghost" aria-expanded={workspaceNav.homeOpen} onClick={openWorkspaceNavigation} />
       </GlassIsland>
     </div>
     {surface === "island" && (
@@ -312,6 +372,6 @@ export default function MobileSessionHeader() {
         onClose={() => setSurface(null)}
       />
     )}
-    {surface === "tools" && <Tools onClose={() => setSurface(null)} />}
+    {workspaceNav.homeOpen && <Tools onClose={hideMobileWorkspaceHome} />}
   </>;
 }

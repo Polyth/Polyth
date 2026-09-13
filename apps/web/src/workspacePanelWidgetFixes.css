@@ -1,7 +1,13 @@
-/* Phone Workspace widgets use natural content height. The sheet scrolls;
- * individual widgets must not crop themselves into tiny nested scroll areas.
- * Inner package presentation stays package-owned. */
+/* Phone Workspace shell polish + natural widget content height. The sheet
+ * scrolls; individual widgets must not crop themselves into tiny nested
+ * scroll areas. Inner package presentation stays package-owned. */
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  /* Workspace is already identified by the Layers launcher; repeating a large
+     title costs useful mobile space. The dialog keeps its accessible label. */
+  .workspace-panel-sheet .sheet-title {
+    display: none;
+  }
+
   .workspace-panel-sheet .workspace-panel-item--widget,
   .workspace-panel-sheet .workspace-panel-widget-body {
     overflow: visible;

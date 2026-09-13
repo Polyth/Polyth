@@ -599,3 +599,18 @@ test("Claude browser-context uses materialized capture paths and formatted text"
     await rt.dispose();
     await rm(imagePath, { force: true });
 });
+
+test("a permission reply for a request the SDK no longer holds is a definitive non-application", async () => {
+    const sdk = { query() {
+            return { async *[Symbol.asyncIterator]() {}, initializationResult: async () => ({}), supportedModels: async () => [], setModel: async () => {}, interrupt: async () => {}, close() {} } as any;
+        }, getSessionInfo: async () => undefined, getSessionMessages: async () => [] };
+    const authority = { authorityId: "owned", generation: 1, receipts: {}, releasedAuthorities: [], spawn() { throw new Error("no spawn"); }, receipt: async () => {}, close: async () => {} } as Awaited<ReturnType<typeof createProcessAuthority>>;
+    const rt = await createClaudeRuntime(context, sdk, authority);
+    // Absence of the request is proven by the SDK's own pending map, so this is
+    // a known no-op — never `unknown`, which would wedge reconciliation.
+    assert.deepEqual(
+        await rt.replyPermissionOperation!("canonical", "tool-gone", "once", randomUUID()),
+        { kind: "rejected", code: "not-found", message: "Permission is no longer pending" },
+    );
+    await rt.dispose();
+});

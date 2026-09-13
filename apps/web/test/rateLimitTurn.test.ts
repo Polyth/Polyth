@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { JsonObject, SessionEvent } from "@polyth/contracts";
 import { buildModel } from "../src/reduce.ts";
+import { resumeOptionsForModel } from "../src/rateLimitRecovery.ts";
 
 let seq = 0;
 const ev = (type: string, data: JsonObject): SessionEvent => ({
@@ -74,4 +75,34 @@ test("the next turn/started clears a stale limit", () => {
   ]);
   assert.equal(model.turn?.status, "working");
   assert.equal(model.turn?.limit, undefined);
+});
+
+test("rate-limit recovery keeps model and harness identities separate", () => {
+  assert.deepEqual(
+    resumeOptionsForModel({
+      currentHarnessId: "claude",
+      selectedHarnessId: "codex",
+      model: { harnessId: "codex", providerID: "openai", modelID: "gpt-5.5-codex", variant: "high" },
+    }),
+    {
+      harness: { mode: "pinned", harnessId: "codex" },
+      model: { providerID: "openai", modelID: "gpt-5.5-codex", variant: "high" },
+    },
+  );
+  assert.deepEqual(
+    resumeOptionsForModel({
+      currentHarnessId: "claude",
+      selectedHarnessId: "claude",
+      model: { harnessId: "claude", providerID: "anthropic", modelID: "sonnet" },
+    }),
+    { model: { providerID: "anthropic", modelID: "sonnet" } },
+  );
+  assert.equal(
+    resumeOptionsForModel({
+      currentHarnessId: "claude",
+      selectedHarnessId: "codex",
+      model: { harnessId: "claude", providerID: "anthropic", modelID: "stale" },
+    }),
+    null,
+  );
 });

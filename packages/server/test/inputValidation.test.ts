@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
-import type { Project, ProjectService, SessionService, UserTurnInput } from "@polyth/contracts";
+import type { Project, ProjectService, ResumeTurnOptions, SessionService, UserTurnInput } from "@polyth/contracts";
 import { createGoalService } from "@polyth/goals";
 import { createHttpServer, type RouteHandler } from "../src/http.ts";
 import { goalRoutes } from "../../goals/src/serverEntry.ts";
@@ -161,6 +161,61 @@ test("browser message submissions validate and forward the staged harness route"
       }),
     });
     assert.equal(invalid.status, 400);
+    assert.equal(received, undefined);
+  } finally {
+    server.close();
+  }
+});
+
+test("rate-limit resume validates and forwards its model plus harness route", async () => {
+  let received: ResumeTurnOptions | undefined;
+  const sessions = {
+    resumeNow: async (_sessionId: string, options?: ResumeTurnOptions) => {
+      received = options;
+      return { turnId: "turn-1" };
+    },
+  } as unknown as SessionService;
+  const scoped = await testTenancy({ sessions: () => sessions });
+  scoped.sessionOwners.own("s1", scoped.defaultContext.spaceId);
+  const server = createHttpServer({
+    sessions,
+    spaces: scoped.gateway,
+    runtimes: {} as never,
+    capabilities: () => [],
+    webDist: mkdtempSync(join(tmpdir(), "polyth-resume-route-")),
+    version: "test",
+  });
+  server.listen(0);
+  await once(server, "listening");
+  const port = (server.address() as { port: number }).port;
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    const accepted = await fetch(`${base}/api/sessions/s1/resume/now`, {
+      method: "POST",
+      body: JSON.stringify({
+        harness: { mode: "pinned", harnessId: "codex" },
+        model: { providerID: "openai", modelID: "gpt-5.5-codex", variant: "high" },
+      }),
+    });
+    assert.equal(accepted.status, 200);
+    assert.deepEqual(received, {
+      harness: { mode: "pinned", harnessId: "codex" },
+      model: { providerID: "openai", modelID: "gpt-5.5-codex", variant: "high" },
+    });
+
+    received = undefined;
+    const invalidModel = await fetch(`${base}/api/sessions/s1/resume/now`, {
+      method: "POST",
+      body: JSON.stringify({ model: { providerID: "", modelID: "gpt-5" } }),
+    });
+    assert.equal(invalidModel.status, 400);
+    assert.equal(received, undefined);
+
+    const invalidHarness = await fetch(`${base}/api/sessions/s1/resume/now`, {
+      method: "POST",
+      body: JSON.stringify({ harness: { mode: "pinned", harnessId: "../escape" } }),
+    });
+    assert.equal(invalidHarness.status, 400);
     assert.equal(received, undefined);
   } finally {
     server.close();

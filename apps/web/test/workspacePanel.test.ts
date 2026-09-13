@@ -83,8 +83,24 @@ test("Workspace edit library remains in the same Sheet and does not open customi
   assert.match(source, /addPanelItem/);
   assert.match(source, /removePanelItem/);
   assert.match(source, /movePanelItem/);
+  assert.match(source, /dismiss="back"/);
   assert.doesNotMatch(source, /WidgetLibraryPanel|setOverlay\("settings"\)/);
   assert.doesNotMatch(oldTools, /Customize tools|\["Workspace"|\["Agent"|\["System"/);
+});
+
+test("phone Workspace owns full-width navigation geometry without sheet drag chrome", async () => {
+  const styles = await readFile(new URL("../src/workspacePanelPremium.css", import.meta.url), "utf8");
+  const coreStyles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  const sheet = await readFile(new URL("../src/components/mobile/Sheet.tsx", import.meta.url), "utf8");
+
+  assert.match(styles, /\.sheet-backdrop:has\(> \.workspace-panel-sheet\)\s*\{[^}]*padding:\s*0;/s);
+  assert.match(styles, /\.workspace-panel-sheet\.sheet\s*\{[^}]*width:\s*100%;[^}]*border-radius:\s*0;/s);
+  assert.doesNotMatch(styles, /\.workspace-panel-sheet\.sheet::before/);
+  assert.match(coreStyles, /\.mobile-tools-sheet\.sheet\s*\{[^}]*width:\s*100%;[^}]*height:\s*var\(--visual-vh,\s*100dvh\);/s);
+  assert.match(coreStyles, /@keyframes mobile-tools-in\s*\{[^}]*translate3d\(100%,\s*0,\s*0\)/s);
+  assert.match(sheet, /dismiss === "close"[\s\S]*className="sheet-grabber"/);
+  assert.match(sheet, /dismiss === "back"[\s\S]*className="sheet-back"/);
+  assert.match(sheet, /dismiss === "close"[\s\S]*className="sheet-close"/);
 });
 
 test("available item cells use metadata previews, not live widget renderers", async () => {

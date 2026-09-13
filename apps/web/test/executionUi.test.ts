@@ -377,6 +377,20 @@ const activityGroup = (
   ms,
   settled: !items.some((item) => item.kind === "tool" && (item.status === "pending" || item.status === "running")),
 });
+/** Viewport shell with the clipped live overlay the real timeline mounts beside the scroller. */
+const activityOverlayHost = () => {
+  const viewport = document.createElement("div");
+  viewport.className = "timeline-viewport";
+  const timeline = document.createElement("div");
+  timeline.className = "timeline";
+  const layer = document.createElement("div");
+  layer.className = "activity-live-layer";
+  const host = document.createElement("div");
+  timeline.appendChild(host);
+  viewport.append(timeline, layer);
+  document.body.appendChild(viewport);
+  return { viewport, timeline, layer, host };
+};
 const { default: PermissionBanner } = await import("../../../packages/permissions/widgets/PermissionBanner.tsx");
 const { activateProject, activateSession, applyEvent, getState, setSessions } = await import("../src/store.ts");
 
@@ -462,9 +476,8 @@ test("execution row renders collapsed value first, expands inline, and opens lev
 });
 
 test("the running action floats out of the folded block while settled rows stay inside it", async () => {
-  const container = document.createElement("div");
-  document.body.appendChild(container);
-  const root = createRoot(container);
+  const { viewport, host } = activityOverlayHost();
+  const root = createRoot(host);
   const first = tool({ id: "call-first", callId: "call-first", eventSeq: 1 });
   const latest = tool({
     id: "call-latest",
@@ -491,21 +504,21 @@ test("the running action floats out of the folded block while settled rows stay 
       state: "active",
       entering: true,
     })));
-    const live = [...container.querySelectorAll(".activity-live .execution-row")];
+    const live = [...viewport.querySelectorAll(".activity-live .execution-row")];
     assert.equal(live.length, 1, "only one running action floats above the block while the next waits");
     assert.equal(live[0]?.querySelector(".tool-preview")?.textContent, "Run tests");
     assert.ok(!live[0]?.classList.contains("open"), "a floating action names itself without dumping its output");
-    const toggle = container.querySelector<HTMLButtonElement>(".ui-run-summary")!;
+    const toggle = viewport.querySelector<HTMLButtonElement>(".ui-run-summary")!;
     assert.equal(toggle.getAttribute("aria-expanded"), "false", "the block never opens itself while work runs");
-    assert.equal(container.querySelectorAll(".execution-row").length, 1, "settled rows stay folded away");
+    assert.equal(viewport.querySelectorAll(".execution-row").length, 1, "settled rows stay folded away");
 
     await act(async () => toggle.click());
-    const folded = [...container.querySelectorAll(".activity-group-items .execution-row")];
+    const folded = [...viewport.querySelectorAll(".activity-group-items .execution-row")];
     assert.equal(folded.length, 1, "the block holds settled rows without exposing the queued action early");
     assert.notEqual(folded[0]?.querySelector(".tool-preview")?.textContent, "", "history never retypes from empty");
   } finally {
     await act(async () => root.unmount());
-    container.remove();
+    viewport.remove();
   }
 });
 
@@ -939,39 +952,85 @@ test("execution rows stay folded by default while running and after settling", a
   }
 });
 
+test("ActivityGroupView never mounts live flight inside the timeline scroller", async () => {
+  const timelineSource = await readFile(new URL("../src/components/Timeline.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(timelineSource, /\{!liveLayer && stage\}/,
+    "live rows must portal into the overlay or stay unmounted, never in-flow under .timeline");
+});
+
+test("a live action flies in the viewport overlay and leaves timeline scroll geometry alone", async () => {
+  const viewport = document.createElement("div");
+  viewport.className = "timeline-viewport";
+  const timeline = document.createElement("div");
+  timeline.className = "timeline";
+  const layer = document.createElement("div");
+  layer.className = "activity-live-layer";
+  const host = document.createElement("div");
+  timeline.appendChild(host);
+  viewport.append(timeline, layer);
+  document.body.appendChild(viewport);
+  const root = createRoot(host);
+  const running = tool({ status: "running", output: undefined, finishTime: undefined });
+  const baseScrollHeight = 640;
+  Object.defineProperty(timeline, "scrollHeight", {
+    configurable: true,
+    get: () => baseScrollHeight + (timeline.querySelector(".activity-live, .activity-live-stage") ? 240 : 0),
+  });
+  Object.defineProperty(timeline, "clientHeight", { configurable: true, get: () => 480 });
+  timeline.scrollTop = 160;
+  try {
+    await act(async () => root.render(createElement(ActivityGroupView, {
+      g: activityGroup("activity-overlay", [running]),
+      subagents: null,
+    })));
+    assert.equal(timeline.querySelector(".activity-live-stage"), null,
+      "the flying row is not a scroll child of the timeline");
+    assert.ok(layer.querySelector(".activity-live-stage"),
+      "it sits in the clipped viewport overlay beside the scroller");
+    assert.ok(layer.querySelector(".activity-live .execution-row"),
+      "the action itself is on screen");
+    assert.equal(timeline.contains(layer.querySelector(".activity-live")!), false,
+      "flight uses a non-scroller containing block");
+    assert.equal(timeline.scrollHeight, baseScrollHeight, "adding the live row does not grow scrollHeight");
+    assert.equal(timeline.clientHeight, 480, "and does not shrink the scrollport");
+    assert.equal(timeline.scrollTop, 160, "and does not move scrollTop");
+  } finally {
+    await act(async () => root.unmount());
+    viewport.remove();
+  }
+});
+
 test("a lone running action gets a stable summary and folds into it when it settles", async () => {
-  const container = document.createElement("div");
-  document.body.appendChild(container);
-  const root = createRoot(container);
+  const { viewport } = activityOverlayHost();
+  const root = createRoot(viewport.querySelector(".timeline")!.firstElementChild!);
   const running = tool({ status: "running", output: undefined, finishTime: undefined });
   const group = (message: ToolMsg) => activityGroup("activity-1", [message]);
   try {
     await act(async () => root.render(createElement(ActivityGroupView, { g: group(running), subagents: null })));
-    assert.ok(container.querySelector(".ui-run-summary"), "the summary mounts with the first action so later arrivals cannot shift it");
-    assert.ok(container.querySelector(".activity-group"), "the activity region has stable geometry from its first action");
-    assert.equal(container.querySelector(".activity-live .activity-group"), null, "and the action is never nested inside it");
-    assert.ok(container.querySelector(".activity-live .execution-row"), "the action itself is on screen");
+    assert.ok(viewport.querySelector(".ui-run-summary"), "the summary mounts with the first action so later arrivals cannot shift it");
+    assert.ok(viewport.querySelector(".activity-group"), "the activity region has stable geometry from its first action");
+    assert.equal(viewport.querySelector(".activity-live .activity-group"), null, "and the action is never nested inside it");
+    assert.ok(viewport.querySelector(".activity-live .execution-row"), "the action itself is on screen");
 
     await act(async () => root.render(createElement(ActivityGroupView, { g: group(tool()), subagents: null })));
-    const toggle = container.querySelector<HTMLButtonElement>(".ui-run-summary")!;
+    const toggle = viewport.querySelector<HTMLButtonElement>(".ui-run-summary")!;
     assert.ok(toggle, "the block appears as soon as something has settled into it");
     assert.equal(toggle.getAttribute("aria-expanded"), "false", "the block stays folded");
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1_550)); });
-    assert.ok(container.querySelector(".activity-live.leaving"), "the settled action folds up into the block");
-    assert.equal(container.querySelector(".activity-live.leaving")?.getAttribute("aria-hidden"), "true",
+    assert.ok(viewport.querySelector(".activity-live.leaving"), "the settled action folds up into the block");
+    assert.equal(viewport.querySelector(".activity-live.leaving")?.getAttribute("aria-hidden"), "true",
       "the outgoing copy is hidden from assistive technology during its visual fold");
     await act(async () => toggle.click());
     assert.equal(toggle.getAttribute("aria-expanded"), "true", "a hand toggle still opens it");
   } finally {
     await act(async () => root.unmount());
-    container.remove();
+    viewport.remove();
   }
 });
 
 test("an action that arrives already finished still appears outside the block first", async () => {
-  const container = document.createElement("div");
-  document.body.appendChild(container);
-  const root = createRoot(container);
+  const { viewport } = activityOverlayHost();
+  const root = createRoot(viewport.querySelector(".timeline")!.firstElementChild!);
   const settled = tool();
   // A fast tool can be called and answered inside one render batch, so it is
   // never observed running. Its own timestamp is old; what makes it an arrival
@@ -980,42 +1039,42 @@ test("an action that arrives already finished still appears outside the block fi
   const group = (items: ToolMsg[]) => activityGroup("activity-fast", items);
   try {
     await act(async () => root.render(createElement(ActivityGroupView, { g: group([settled]), subagents: null })));
-    assert.equal(container.querySelector(".activity-live"), null, "replayed history mounts folded inside the block");
+    assert.equal(viewport.querySelector(".activity-live"), null, "replayed history mounts folded inside the block");
 
     await act(async () => root.render(createElement(ActivityGroupView, { g: group([settled, fast]), subagents: null })));
-    const live = [...container.querySelectorAll(".activity-live:not(.leaving) .execution-row")];
+    const live = [...viewport.querySelectorAll(".activity-live:not(.leaving) .execution-row")];
     assert.equal(live.length, 1, "a finished action still gets its moment outside the block");
     assert.equal(
-      container.querySelector(".ui-run-summary")?.getAttribute("aria-expanded"),
+      viewport.querySelector(".ui-run-summary")?.getAttribute("aria-expanded"),
       "false",
       "the block stays folded while the action floats",
     );
 
     const next = tool({ id: "call-3", callId: "call-3", input: { command: "npm test" } });
     await act(async () => root.render(createElement(ActivityGroupView, { g: group([settled, fast, next]), subagents: null })));
-    const floating = [...container.querySelectorAll(".activity-live:not(.leaving)")];
+    const floating = [...viewport.querySelectorAll(".activity-live:not(.leaving)")];
     assert.equal(floating.length, 1, "a second arrival waits its turn instead of stacking or cutting in");
     assert.equal(
       floating[0]?.querySelector(".tool-preview")?.textContent,
       "Review changes",
       "the action already on screen keeps it for its full turn",
     );
-    assert.equal(container.querySelectorAll(".activity-live-stage").length, 1,
+    assert.equal(viewport.querySelectorAll(".activity-live-stage").length, 1,
       "the queue owns one stable visual stage");
-    assert.equal(container.querySelectorAll(".activity-live:not(.leaving)").length, 1,
+    assert.equal(viewport.querySelectorAll(".activity-live:not(.leaving)").length, 1,
       "only one action is exposed at a time");
 
     // ...and the queue drains: the waiting action takes the stage once the one
     // before it has finished and the gap between actions has passed.
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1_900)); });
     assert.equal(
-      container.querySelector(".activity-live:not(.leaving) .tool-preview")?.textContent,
+      viewport.querySelector(".activity-live:not(.leaving) .tool-preview")?.textContent,
       "Run tests",
       "the queued action rises after the one before it folds away",
     );
   } finally {
     await act(async () => root.unmount());
-    container.remove();
+    viewport.remove();
   }
 });
 
@@ -1238,7 +1297,7 @@ test("search results open the matching file and line from inline detail", async 
   }
 });
 
-test("approval is always action-required: intent, target, risk, and decisions visible without disclosure", async () => {
+test("approval keeps the target and four decisions in one compact row without provider decoration", async () => {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -1247,38 +1306,105 @@ test("approval is always action-required: intent, target, risk, and decisions vi
       permissions: [{
         sessionId: "session-1",
         requestId: "permission-1",
-        permission: "bash",
+        permission: "edit",
         tool: "Shell",
         patterns: ["rm -rf apps/web/dist"],
         status: "pending",
         time: 1,
-        preview: { title: "Delete build artifacts", lines: ["apps/web/dist"], risk: "medium" },
+        preview: { title: "Edit", lines: ["apps/web/dist"], risk: "medium" },
       }],
     })));
     const banner = container.querySelector(".perm-banner");
     assert.ok(banner);
     assert.equal(banner.getAttribute("role"), "alert");
-    // No expand step: intent, tool, target, and risk are readable immediately.
     assert.match(container.querySelector(".perm-title")?.textContent ?? "", /Permission requested/);
-    assert.match(container.querySelector(".permission-request-title")?.textContent ?? "", /Delete build artifacts/);
-    assert.match(container.querySelector(".permission-request-tool")?.textContent ?? "", /via Shell/);
-    assert.match(container.querySelector(".permission-risk")?.textContent ?? "", /medium risk/);
+    assert.equal(container.querySelector(".permission-request-title"), null, "a generic Edit label does not get its own row");
+    assert.equal(container.querySelector(".permission-request-tool"), null);
+    assert.equal(container.querySelector(".permission-risk"), null);
     assert.match(container.querySelector(".permission-preview")?.textContent ?? "", /apps\/web\/dist/);
-    // Decisions are rendered up front, in decision order.
     const actions = container.querySelector(".perm-actions");
     assert.ok(actions);
     assert.ok(actions.classList.contains("has-always"));
-    assert.match(actions.textContent ?? "", /Allow once.*Always.*Deny/s);
-    assert.ok(container.querySelector(".permission-request-copy"));
+    assert.match(actions.textContent ?? "", /Deny.*Allow once.*Always.*All session/s);
+    assert.equal(actions.children.length, 4);
     const allow = container.querySelector<HTMLButtonElement>(".perm-actions .permission-allow");
     const deny = container.querySelector<HTMLButtonElement>(".perm-actions .permission-deny");
     assert.ok(allow && allow.textContent?.includes("Allow once"));
     assert.ok(deny && deny.textContent?.includes("Deny"));
-    // Always scope stays an explicit choice, never a silent global.
-    const scopeChip = container.querySelector(".perm-always .picker-chip-text");
-    assert.ok(scopeChip);
-    assert.match(scopeChip.textContent ?? "", /this session/i);
+    assert.match(container.querySelector(".permission-always")?.getAttribute("aria-label") ?? "", /this session/i);
+    assert.match(container.querySelector(".permission-session")?.getAttribute("aria-label") ?? "", /every following action/i);
   } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test("all-session approval enables canonical auto-accept instead of remembering one pattern", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const originalFetch = globalThis.fetch;
+  let request: { url: string; method: string; body: string } | null = null;
+  try {
+    globalThis.fetch = async (input, init) => {
+      request = {
+        url: String(input),
+        method: String(init?.method ?? "GET"),
+        body: String(init?.body ?? ""),
+      };
+      return new Response(JSON.stringify({ setting: "on", effective: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    await act(async () => root.render(createElement(PermissionBanner, {
+      permissions: [{
+        sessionId: "session/all",
+        requestId: "permission-1",
+        permission: "edit",
+        patterns: ["src/*"],
+        status: "pending",
+        time: 1,
+      }],
+    })));
+    await act(async () => container.querySelector<HTMLButtonElement>(".permission-session")!.click());
+    assert.deepEqual(request, {
+      url: "/api/sessions/session%2Fall/permissions/auto-accept",
+      method: "PATCH",
+      body: JSON.stringify({ setting: "on" }),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test("a failed session-wide approval keeps every decision available and explains the failure", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => new Response(JSON.stringify({ error: { message: "Could not update approval policy" } }), {
+      status: 500,
+      headers: { "content-type": "application/json" },
+    });
+    await act(async () => root.render(createElement(PermissionBanner, {
+      permissions: [{
+        sessionId: "session-1",
+        requestId: "permission-1",
+        permission: "edit",
+        patterns: ["src/*"],
+        status: "pending",
+        time: 1,
+      }],
+    })));
+    await act(async () => container.querySelector<HTMLButtonElement>(".permission-session")!.click());
+    assert.match(container.querySelector(".permission-error")?.textContent ?? "", /Could not update approval policy/);
+    assert.equal(container.querySelectorAll(".perm-actions button:disabled").length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
     await act(async () => root.unmount());
     container.remove();
   }
@@ -1303,18 +1429,16 @@ test("browser approval names the browser and its bounded capabilities", async ()
     assert.match(container.querySelector(".permission-request-title")?.textContent ?? "", /Agent wants to use Browser/);
     assert.match(container.querySelector(".permission-browser-capabilities")?.textContent ?? "", /read visible content/i);
     assert.equal(container.querySelector(".permission-request-tool"), null);
-    assert.match(container.querySelector(".perm-actions")?.textContent ?? "", /Allow once.*Always.*Deny/s);
+    assert.match(container.querySelector(".perm-actions")?.textContent ?? "", /Deny.*Allow once.*Always.*All session/s);
   } finally {
     await act(async () => root.unmount());
     container.remove();
   }
 });
 
-test("compact permission actions override the wide decision rail", async () => {
+test("permission decisions remain a single row in narrow containers", async () => {
   const css = await readFile(new URL("../../../packages/permissions/widgets/styles.css", import.meta.url), "utf8");
-  const compact = css.slice(css.indexOf("@container permission-banner (max-width: 620px)"));
-  assert.match(
-    compact,
-    /\.perm-banner \.perm-actions,\s*\.perm-banner \.perm-actions\.has-always\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/,
-  );
+  assert.match(css, /\.perm-banner \.perm-actions\.has-always\s*\{\s*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\)/);
+  const compact = css.slice(css.indexOf("@container permission-banner (max-width: 420px)"));
+  assert.doesNotMatch(compact, /grid-template-columns:\s*minmax\(0, 1fr\)/);
 });

@@ -3,12 +3,13 @@
 display: grid;
   grid-template-columns: minmax(150px, 1fr) 150px minmax(180px, 1fr);
   align-items: center;
-  gap: 18px;
-  margin: 10px 0 18px;
-  padding: 14px 16px;
-  border: 0;
-  border-radius: var(--radius-card);
-  background: var(--panel);
+  gap: var(--space-4);
+  margin: var(--space-2) 0 var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-surface);
+  background: var(--surface-activity);
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
 }
 .provider-share-card p {
 margin: 5px 0 0; color: var(--muted); font-size: var(--font-meta);
@@ -62,7 +63,7 @@ overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 font-variant-numeric: tabular-nums;
 }
 .usage-widget-panel > .provider-share-card {
-margin: 2px 0 0;
+margin: var(--space-1) 0 0;
 }
 @container usage-dashboard (max-width: 760px) {
 .provider-share-card {
@@ -144,7 +145,7 @@ font-size: 19px; font-variant-numeric: tabular-nums;
 color: var(--amber);
 }
 .usage-widget-panel {
-min-height: 100%; padding: 10px;
+min-height: 100%; padding: var(--space-2);
   container: usage-dashboard / inline-size;
 }
 .usage-widget-panel > .usage-overview-grid {
@@ -1498,13 +1499,31 @@ width: 100%; justify-content: center;
 }
 
 /* Package-owned compact widget stat grid. */
-.usage-widget-stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-2); padding: var(--space-3); }
+.usage-widget-stat-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); padding: var(--space-3); }
 .usage-widget-stat-grid > div {
-  display: flex; flex-direction: column; gap: 2px; padding: 9px;
-  border: 0; border-radius: var(--radius-card); background: var(--sunken);
+  display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3);
+  border: 1px solid var(--material-glass-border); border-radius: var(--radius-card); background: var(--surface-activity);
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
 }
 .usage-widget-stat-grid span { color: var(--muted); font-size: var(--font-meta); }
 .usage-widget-stat-grid strong { font: 650 var(--font-label) var(--mono); }
+
+/* The project summary is often embedded in narrow Workspace surfaces. Keep
+ * its hierarchy crisp there without inventing a viewport-specific variant. */
+@container usage-dashboard (max-width: 520px) {
+  .usage-widget-panel { padding: var(--space-1) 0 0; }
+  .usage-widget-stat-grid { gap: var(--space-2); padding: 0; }
+  .usage-widget-stat-grid > div {
+    min-height: calc(var(--control-h-lg) + var(--space-3));
+  }
+  .usage-widget-stat-grid > div:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .usage-widget-panel > .provider-share-card {
+    gap: var(--space-4);
+    margin-top: var(--space-3);
+    padding: var(--space-4);
+  }
+  .provider-share-legend > div { min-height: var(--control-h-sm); }
+}
 
 /* Quota meta lines share the meta type role instead of inline pixel sizes. */
 .quota-meta {

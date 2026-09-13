@@ -19,7 +19,7 @@ test("desktop status shares the live chat column geometry", async () => {
   assert.doesNotMatch(styles, /\.timeline\s*\{[^}]*padding-inline-end:[^}]*--rail-strip-width-right/s);
 });
 
-test("session status headers keep the title fixed while overviews retain detail", async () => {
+test("desktop title stays fixed while the phone title can briefly present a task start", async () => {
   const [desktop, mobile, timeline] = await Promise.all([
     readFile(new URL("../src/components/DesktopSessionStatus.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/mobile/MobileSessionHeader.tsx", import.meta.url), "utf8"),
@@ -28,7 +28,9 @@ test("session status headers keep the title fixed while overviews retain detail"
   assert.match(desktop, /desktop-session-status-copy"><span>{title}<\/span>/);
   assert.doesNotMatch(desktop, /setInterval|nextSessionSwitcherIndex/);
   assert.match(mobile, /promptVisible \? undefined : prompt/);
-  assert.match(mobile, /mobile-island-text">{title}<\/span>/);
+  assert.match(mobile, /const displayedTitle = taskStartTitle/);
+  assert.match(mobile, />{displayedTitle}<\/span>/);
+  assert.match(timeline, /activity-live.*task-started/);
   assert.match(timeline, /row\.bottom > viewport\.top && row\.top < viewport\.bottom/);
 });
 
