@@ -88,7 +88,9 @@ export {
   Pin as PinIcon,
   Star as FavoriteIcon,
   Send as SendIcon,
-  ListPlus as QueueIcon,
+  // A queued follow-up is still a send action. The composer adds a tiny queue
+  // badge in CSS instead of replacing the familiar send glyph with ListPlus.
+  Send as QueueIcon,
   Mic as MicIcon,
   Play as PlayIcon,
   Square as StopIcon,
