@@ -76,6 +76,35 @@ export function readHarnessSnapshots(options: SnapshotRequest): Promise<HarnessS
   });
 }
 
+const peekLastKnownCatalog = (
+  projectId: string | undefined,
+  harnessId: string | undefined,
+  spaceId?: string,
+  cwd?: string,
+): Catalog | undefined => {
+  if (!projectId || !harnessId) return undefined;
+  for (const key of cwd
+    ? [previewCatalogKey(projectId, harnessId, spaceId, cwd)]
+    : [
+      previewCatalogKey(projectId, harnessId, spaceId, cwd),
+      previewCatalogKey(projectId, harnessId, spaceId),
+    ]) {
+    const hit = catalogCache.peek(key);
+    if (hit?.models.length) return hit;
+  }
+  const matchesScope = (snapshot: HarnessSnapshot) => snapshot.catalog?.models?.length
+    && (!spaceId || snapshot.context.spaceId === spaceId)
+    && (!cwd || snapshot.context.cwd === cwd);
+  for (const detail of [true, false] as const) {
+    const snapshot = peekHarnessSnapshots({ projectId, harnessId, spaceId, cwd, detail })?.[0];
+    if (snapshot && matchesScope(snapshot)) return catalogFromSnapshot(snapshot, harnessId);
+  }
+  const listed = peekHarnessSnapshots({ projectId, spaceId })?.find((row) =>
+    row.identity.id === harnessId && matchesScope(row));
+  if (listed) return catalogFromSnapshot(listed, harnessId);
+  return undefined;
+};
+
 const catalogFromSnapshot = (snapshot: HarnessSnapshot | undefined, harnessId?: string): Catalog => {
   if (!snapshot || !harnessId) return { ...unavailable, ready: true, discovery: { state: "unavailable", reason: "No engine is ready for this project" } };
   const catalog = snapshot.catalog;
@@ -189,6 +218,10 @@ export function useRuntimeCatalog(
   const key = routeKey ? JSON.stringify([activeBrowserAccountId(), prospective?.spaceId ?? "page", prospective?.projectId, prospective?.cwd,
     routeKey, catalogRevision]) : "";
   const requestedHarness = previewRoute ? prospective?.harnessId : session?.resolvedHarnessId ?? prospective?.harnessId;
+  const projectId = prospective?.projectId ?? session?.projectId;
+  const preloaded = requestedHarness && projectId
+    ? peekLastKnownCatalog(projectId, requestedHarness, prospective?.spaceId, prospective?.cwd)
+    : undefined;
   const fallbackModels = pickerCatalogModels(models, requestedHarness);
   const fallbackAgents = requestedHarness
     ? agents.filter((agent) => agent.harnessId === requestedHarness
@@ -196,24 +229,18 @@ export function useRuntimeCatalog(
     : agents;
   // Keep the visual route synchronous, but do not claim that an unanswered
   // metadata request is an authoritative empty catalog.
+  const warmedModels = fallbackModels.length > 0 ? fallbackModels : preloaded?.models ?? [];
   const fallback: Catalog = {
-    models: fallbackModels,
-    agents: fallbackAgents,
-    nativeDefault: false,
-    ready: fallbackModels.length > 0,
-    ...(requestedHarness ? { harnessId: requestedHarness } : {}),
-    discovery: fallbackModels.length > 0
+    models: warmedModels,
+    agents: fallbackModels.length > 0 ? fallbackAgents : preloaded?.agents ?? fallbackAgents,
+    nativeDefault: preloaded?.nativeDefault ?? false,
+    ready: warmedModels.length > 0,
+    ...(requestedHarness ? { harnessId: requestedHarness } : preloaded?.harnessId ? { harnessId: preloaded.harnessId } : {}),
+    ...(preloaded?.harnessName ? { harnessName: preloaded.harnessName } : {}),
+    discovery: warmedModels.length > 0
       ? { state: "available" }
       : { state: "pending" },
   };
-  const preloaded = requestedHarness && (prospective?.projectId ?? session?.projectId)
-    ? catalogCache.peek(previewCatalogKey(
-        prospective?.projectId ?? session!.projectId,
-        requestedHarness,
-        prospective?.spaceId,
-        prospective?.cwd,
-      ))
-    : undefined;
   const [result, setResult] = useState<{ key: string; catalog: Catalog }>();
   useEffect(() => {
     if (session?.harnessTransition) return;
@@ -233,7 +260,15 @@ export function useRuntimeCatalog(
         }));
     void normalized.then((catalog) => {
       if (controller.signal.aborted) return;
-      setResult({ key, catalog });
+      const keepWarm = catalog.models.length === 0
+        && fallback.models.length > 0
+        && catalog.discovery.state !== "empty";
+      setResult({
+        key,
+        catalog: keepWarm
+          ? { ...catalog, models: fallback.models, discovery: { state: "available" }, ready: true }
+          : catalog,
+      });
     }).catch((error: unknown) => {
       if (controller.signal.aborted) return;
       setResult({

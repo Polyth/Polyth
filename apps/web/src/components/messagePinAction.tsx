@@ -2,7 +2,8 @@ import { useState } from "react";
 import { api } from "@polyth/session/web-api";
 import { registerSlot } from "../slots.ts";
 import { applyEvent, setUiError, useStore } from "../store.ts";
-import { Icon } from "../icons.tsx";
+import { PinIcon } from "./ui/index.ts";
+import ChatActionButton from "./ChatActionButton.tsx";
 import { tr } from "../i18n/index.ts";
 
 function MessagePinAction({ sessionId, eventSeq }: { sessionId: string; eventSeq: number }) {
@@ -15,15 +16,16 @@ function MessagePinAction({ sessionId, eventSeq }: { sessionId: string; eventSeq
     if (event.type === "context/pinned") pinned = true;
     if (event.type === "context/unpinned") pinned = false;
   }
-  const label = pinned ? tr("messagepinaction.unpinMessageFromCompactionContext") : tr("messagepinaction.pinMessageForCompactionContext");
+  const label = pinned
+    ? tr("messagepinaction.unpinMessageFromCompactionContext")
+    : tr("messagepinaction.pinMessageForCompactionContext");
   return (
-    <button
-      className="msg-action-btn msg-bookmark-action"
-      aria-label={label}
-      title={label}
-      data-tooltip={label}
-      aria-pressed={pinned}
-      disabled={busy}
+    <ChatActionButton
+      className="msg-bookmark-action"
+      icon={PinIcon}
+      label={label}
+      pressed={pinned}
+      busy={busy}
       onClick={() => {
         setBusy(true);
         void (pinned ? api.unpinContext(sessionId, eventSeq) : api.pinContext(sessionId, eventSeq))
@@ -33,9 +35,7 @@ function MessagePinAction({ sessionId, eventSeq }: { sessionId: string; eventSeq
           })
           .finally(() => setBusy(false));
       }}
-    >
-      <span aria-hidden="true"><Icon.bookmark /></span>
-    </button>
+    />
   );
 }
 

@@ -211,10 +211,13 @@ export function createHarnessRegistry() {
                         || (entry.detailedAt !== undefined && now - entry.detailedAt < DETAIL_TTL_MS));
                 const needsDetail = Boolean(options.detail && provider.discover
                     && (options.force || !detailFresh));
-                if (!options.force && entry.pending && (!needsDetail || entry.pending.detail))
-                    return entry.pending.promise;
-                if (!options.force && summaryFresh && (!options.detail || detailFresh))
-                    return entry.current!;
+                const catalogPresentation = !options.force && needsDetail
+                    ? (entry.current?.catalog?.models?.length
+                        ? entry.current
+                        : entry.lastGood?.catalog?.models?.length
+                            ? entry.lastGood
+                            : undefined)
+                    : undefined;
 
                 const refresh = async (
                     detail: boolean,
@@ -346,25 +349,41 @@ export function createHarnessRegistry() {
                     }
                     return snapshot;
                 };
-                const previous = !options.force && needsDetail && entry.pending && !entry.pending.detail
-                    ? entry.pending
-                    : undefined;
-                const pending = {} as NonNullable<typeof entry.pending>;
-                const work = previous
-                    ? previous.promise.then((summary) => refresh(
-                        true,
-                        generation,
-                        summary.availability as HarnessProbe,
-                    ))
-                    : refresh(needsDetail, generation);
-                pending.detail = needsDetail;
-                pending.generation = generation;
-                pending.promise = work.finally(() => {
-                    if (entry.pending === pending)
-                        entry.pending = undefined;
-                });
-                entry.pending = pending;
-                return pending.promise;
+                const scheduleRefresh = (): NonNullable<typeof entry.pending> => {
+                    const previous = !options.force && needsDetail && entry.pending && !entry.pending.detail
+                        ? entry.pending
+                        : undefined;
+                    const pending = {} as NonNullable<typeof entry.pending>;
+                    const work = previous
+                        ? previous.promise.then((summary) => refresh(
+                            true,
+                            generation,
+                            summary.availability as HarnessProbe,
+                        ))
+                        : refresh(needsDetail, generation);
+                    pending.detail = needsDetail;
+                    pending.generation = generation;
+                    pending.promise = work.finally(() => {
+                        if (entry.pending === pending)
+                            entry.pending = undefined;
+                    });
+                    entry.pending = pending;
+                    return pending;
+                };
+                if (catalogPresentation) {
+                    const upgradingSummary = entry.pending && needsDetail && !entry.pending.detail;
+                    if (!upgradingSummary) {
+                        if (!entry.pending?.detail)
+                            scheduleRefresh();
+                        return { ...catalogPresentation, stale: true };
+                    }
+                }
+                if (!options.force && entry.pending && (!needsDetail || entry.pending.detail))
+                    return entry.pending.promise;
+                if (!options.force && summaryFresh && (!options.detail || detailFresh))
+                    return entry.current!;
+
+                return scheduleRefresh().promise;
             }));
         },
         invalidate(match: Partial<Pick<HarnessContext, "spaceId" | "projectId" | "cwd" | "remote">> & { harnessId?: string } = {}) {

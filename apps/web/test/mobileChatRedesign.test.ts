@@ -651,6 +651,11 @@ test("the fresh-session screen is three zones with a sticky interaction dock", a
   assert.ok(!surface.includes("SessionContextBar"), "the fresh surface cannot fork composer controls");
   assert.ok(!surface.includes("new-session-targets"), "the full-width mid-page selectors are gone");
   assert.ok(!surface.includes("hero-mark"), "the decorative mark no longer competes with the headline");
+  assert.doesNotMatch(
+    surface,
+    /workspace\.builtinsurfaces\.(whatAreWeWorkingOnIn|startATaskOrContinueWhereYou)/,
+    "the fresh-session hero keeps the prompt area free of the removed copy",
+  );
   assert.ok(surface.includes("visibleStarters"), "chips come from the starter system");
   assert.ok(surface.includes('slot="session.empty.widgets"'), "idle content is a widget slot, not hero hardcode");
   assert.ok(surface.includes('registerSlot("session.empty.widgets", "builtin.hero-starters"'), "starters register as a widget");

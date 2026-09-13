@@ -74,6 +74,7 @@ export {
   Repeat as SyncIcon,
   RotateCcw as UndoIcon,
   RotateCw as RedoIcon,
+  GitFork as ForkIcon,
   Search as SearchIcon,
   ListFilter as FilterIcon,
   ArrowUpDown as SortIcon,
@@ -110,6 +111,9 @@ export {
   // workspace objects that appear inside action controls
   House as HomeIcon,
   Folder as FolderIcon,
+  // "Add project" and "new chat" are different creations. A bare Plus for both
+  // reads as the same action twice, so each keeps the object it creates.
+  FolderPlus as AddProjectIcon,
   FolderUp as ParentFolderIcon,
   File as FileIcon,
   FileDiff as FileDiffIcon,
@@ -148,8 +152,8 @@ export {
   Cpu as CpuIcon,
   FileInput as FileInputIcon,
   FlaskConical as FlaskIcon,
-  // lucide-react does not export these brand marks. Keep semantic aliases backed
-  // by the closest distinct git workflow glyphs that the package does export.
+  // lucide-react does not export these brand marks. Keep compatibility aliases backed
+  // by distinct git workflow glyphs while action code uses the semantic ForkIcon above.
   GitFork as GithubIcon,
   GitMerge as GitlabIcon,
   History as HistoryIcon,

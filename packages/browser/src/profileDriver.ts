@@ -45,6 +45,27 @@ export interface ScreencastFrame {
   height: number;
 }
 
+export type ManualHandoffActionId = "add-to-agent" | "ask-agent" | "new-agent-chat";
+export type ManualHandoffScope = "selection" | "response" | "latest-response";
+
+export interface ManualHandoffExtraction {
+  text: string;
+  scope: ManualHandoffScope;
+  url: string;
+  title: string;
+  responseId?: string;
+}
+
+export interface ManualHandoffActionEvent extends ManualHandoffExtraction {
+  action: ManualHandoffActionId;
+}
+
+export interface ManualHandoffControlsOptions {
+  assistantMessageSelectors: readonly string[];
+  streamingSelectors?: readonly string[];
+  actions: ReadonlyArray<{ id: ManualHandoffActionId; label: string }>;
+}
+
 export interface ProfilePage {
   readonly tabId: string;
   readonly contentAccess: ContentAccessPolicy;
@@ -70,6 +91,19 @@ export interface ProfilePage {
   insertText(text: string): Promise<void>;
   resize(viewport: { width: number; height: number }): Promise<void>;
   copySelection(): Promise<string>;
+  /** Explicit user-triggered extraction for Chat Workspace only. This remains
+   * outside all agent Browser APIs and must never be projected as observation. */
+  extractManualHandoff?(input: {
+    scope: ManualHandoffScope;
+    assistantMessageSelectors: readonly string[];
+    responseId?: string;
+  }): Promise<ManualHandoffExtraction>;
+  /** Installs tiny provider-page controls whose callbacks only fire from a
+   * genuine click on those controls. No privileged bridge is exposed globally. */
+  installManualHandoffControls?(
+    options: ManualHandoffControlsOptions,
+    onAction: (event: ManualHandoffActionEvent) => void,
+  ): Promise<void>;
   startScreencast(opts: { quality: number; maxWidth: number; maxHeight: number }): Promise<void>;
   stopScreencast(): Promise<void>;
   onFrame(cb: (frame: ScreencastFrame) => void): () => void;

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import "./AgentStatusDock.css";
 
 export interface AgentStatusDockProps {
   icon: ReactNode;

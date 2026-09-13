@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { defineWebPackage, type WebPackageHost } from "@polyth/web-sdk";
 import { createApiTransport } from "@polyth/web-sdk";
 import { withSurfaceContent } from "@polyth/web-sdk/surface-content";
-import ChatWorkspaceView from "./ChatWorkspaceView.tsx";
+import ChatWorkspaceRuntimeShell from "./ChatWorkspaceRuntimeShell.tsx";
 import ChatWorkspaceSettingsPage from "./ChatWorkspaceSettingsPage.tsx";
 import { createChatWorkspaceCommands } from "./lib/commands.ts";
 import { enqueueChatWorkspaceCommand, type CopyContextResult } from "./lib/pendingCommands.ts";
@@ -52,7 +52,7 @@ export default defineWebPackage((host) => () => {
       shortLabel: "Chats",
       capabilityId: "chat-workspace",
       order: 5,
-      component: (props?: { active?: boolean }) => createElement(ChatWorkspaceView, {
+      component: (props?: { active?: boolean }) => createElement(ChatWorkspaceRuntimeShell, {
         host,
         active: props?.active ?? true,
       }),

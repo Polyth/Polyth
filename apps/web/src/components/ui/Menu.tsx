@@ -8,13 +8,12 @@
 // menuitemradio/menuitemcheckbox with aria-checked and a leading check glyph
 // rendered from `checked` (never a caller-passed icon). Checkbox entries keep
 // the menu open so several can be toggled in one visit.
-import { isValidElement, useRef, useState, type ReactNode, type Ref, type RefObject } from "react";
+import { useRef, useState, type ReactNode, type Ref, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { usePackageWindowOwner } from "./PackageWindowContext.ts";
 import { useDismissibleMenu } from "../a11y/Menu.ts";
 import { useShellMode } from "../../responsiveShell.ts";
 import { tapFeedback } from "../../haptics.ts";
-import { Icon as ChatIcon } from "../../icons.tsx";
 import Sheet from "../mobile/Sheet.tsx";
 import Icon from "./Icon.tsx";
 import { CheckIcon, type LucideIcon } from "./icons.ts";
@@ -87,20 +86,6 @@ function roleOf(action: MenuAction): "menuitem" | "menuitemradio" | "menuitemche
   return "menuitem";
 }
 
-const RESPONSE_QUICK_ICON = {
-  copy: ChatIcon.copy,
-  image: ChatIcon.image,
-  plan: ChatIcon.plan,
-  pin: ChatIcon.bookmark,
-  session: ChatIcon.newSession,
-  multirun: ChatIcon.multirun,
-} as const;
-
-function isResponseFooterOverflowTrigger(node: ReactNode): boolean {
-  if (!isValidElement<{ className?: string }>(node)) return false;
-  return node.props.className?.split(/\s+/).includes("response-footer-more") === true;
-}
-
 export default function Menu({
   label, title, entries, children, align = "start", className,
   phonePresentation = "sheet", open: controlledOpen, onOpenChange, returnFocusRef, footer,
@@ -148,37 +133,6 @@ export default function Menu({
     "aria-haspopup": asSheet ? "dialog" : "menu",
     "aria-expanded": open,
   });
-
-  // Timeline historically put secondary response actions behind one more-menu
-  // even though the footer already is an action strip. Flatten that legacy
-  // invocation here while preserving the persisted action ordering and each
-  // entry's existing command. The footer can then wrap naturally on phones
-  // instead of hiding functionality behind a second interaction model.
-  if (isResponseFooterOverflowTrigger(trigger)) {
-    return (
-      <>
-        {entries.map((entry, index) => {
-          if (entry === "separator" || isHeading(entry)) return null;
-          const Glyph = RESPONSE_QUICK_ICON[entry.id as keyof typeof RESPONSE_QUICK_ICON];
-          if (!Glyph) return null;
-          return (
-            <button
-              key={`${entry.id}-${index}`}
-              type="button"
-              className="response-footer-inline-action"
-              aria-label={entry.label}
-              title={entry.label}
-              data-tooltip={entry.label}
-              disabled={entry.disabled}
-              onClick={() => select(entry)}
-            >
-              <Glyph />
-            </button>
-          );
-        })}
-      </>
-    );
-  }
 
   const itemContent = (entry: MenuAction, iconSize: "sm" | "lg") => (
     <>

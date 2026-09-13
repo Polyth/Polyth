@@ -164,6 +164,94 @@ test("summary readiness is refined once, then reused by warm resolves", async ()
   assert.deepEqual(counters, { probes: 3, discovers: 2 });
 });
 
+test("stale detail catalog is served immediately while a slow rediscover runs", async (t) => {
+  let now = 10_000;
+  t.mock.method(Date, "now", () => now);
+  const discoverGate = deferred<void>();
+  const discoverStarted = deferred<void>();
+  let discovers = 0;
+  const registry = createHarnessRegistry();
+  registry.register({
+    ...provider({ probes: 0, discovers: 0 }),
+    async discover() {
+      discovers += 1;
+      if (discovers === 1) {
+        return {
+          state: "ready" as const,
+          catalog: { models: [{ providerID: "test", modelID: "warm", name: "Warm" }] },
+        };
+      }
+      discoverStarted.resolve();
+      await discoverGate.promise;
+      return {
+        state: "ready" as const,
+        catalog: { models: [{ providerID: "test", modelID: "fresh", name: "Fresh" }] },
+      };
+    },
+  });
+
+  await registry.snapshots(context, { harnessId: "fast", detail: true });
+  assert.equal(discovers, 1);
+  now += 5 * 60_000 + 1;
+
+  void registry.snapshots(context, { harnessId: "fast", detail: true });
+  await discoverStarted.promise;
+  const stale = (await registry.snapshots(context, { harnessId: "fast", detail: true }))[0]!;
+  assert.equal(stale.catalog?.models?.[0]?.modelID, "warm");
+  assert.equal(stale.stale, true);
+  discoverGate.resolve();
+  let fresh: string | undefined;
+  for (let attempt = 0; attempt < 50; attempt++) {
+    await new Promise((resolve) => setImmediate(resolve));
+    fresh = (await registry.snapshots(context, { harnessId: "fast", detail: true }))[0]?.catalog?.models?.[0]?.modelID;
+    if (fresh === "fresh") break;
+  }
+  assert.equal(discovers, 2);
+  assert.equal(fresh, "fresh");
+});
+
+test("forced detail still waits for a real rediscover even with a warm catalog", async (t) => {
+  let now = 10_000;
+  t.mock.method(Date, "now", () => now);
+  const discoverGate = deferred<void>();
+  const discoverStarted = deferred<void>();
+  let discovers = 0;
+  const registry = createHarnessRegistry();
+  registry.register({
+    ...provider({ probes: 0, discovers: 0 }),
+    async discover() {
+      discovers += 1;
+      if (discovers === 1) {
+        return {
+          state: "ready" as const,
+          catalog: { models: [{ providerID: "test", modelID: "warm", name: "Warm" }] },
+        };
+      }
+      discoverStarted.resolve();
+      await discoverGate.promise;
+      return {
+        state: "ready" as const,
+        catalog: { models: [{ providerID: "test", modelID: "forced", name: "Forced" }] },
+      };
+    },
+  });
+
+  await registry.snapshots(context, { harnessId: "fast", detail: true });
+  now += 5 * 60_000 + 1;
+  const forced = registry.snapshots(context, { harnessId: "fast", detail: true, force: true });
+  await discoverStarted.promise;
+  let nonForcedSettled = false;
+  void registry.snapshots(context, { harnessId: "fast", detail: true }).then(() => { nonForcedSettled = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(nonForcedSettled, true, "non-forced detail reuses warm catalog while forced rediscover runs");
+  let forcedSettled = false;
+  void forced.finally(() => { forcedSettled = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(forcedSettled, false, "forced detail waits for the real rediscover");
+  discoverGate.resolve();
+  assert.equal((await forced)[0]?.catalog?.models?.[0]?.modelID, "forced");
+});
+
 test("detail catalog stays warm across summary TTL refreshes and expires independently", async (t) => {
   let now = 10_000;
   t.mock.method(Date, "now", () => now);
@@ -180,7 +268,9 @@ test("detail catalog stays warm across summary TTL refreshes and expires indepen
   assert.deepEqual(counters, { probes: 2, discovers: 1 });
 
   now += 5 * 60_000;
-  await registry.snapshots(context, { harnessId: "fast", detail: true });
+  assert.equal((await registry.snapshots(context, { harnessId: "fast", detail: true }))[0]?.catalog?.models?.[0]?.modelID, "model");
+  for (let attempt = 0; attempt < 50 && counters.discovers < 2; attempt++)
+    await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(counters, { probes: 3, discovers: 2 });
 });
 

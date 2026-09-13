@@ -83,7 +83,9 @@
         "to": "polyth-link",
         "filter": [
           "polyth-link-host",
-          "polyth-link-host.exe"
+          "polyth-link-host.exe",
+          "polyth-link-client",
+          "polyth-link-client.exe"
         ]
       },
       {
@@ -119,7 +121,7 @@
       "icon": "build/icon.png",
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-      "x64ArchFiles": "{**/node_modules/{esbuild,@esbuild/*,node-pty/prebuilds/*}/**,**/Resources/opencode/darwin-*/opencode,**/Resources/chromium/**}",
+      "x64ArchFiles": "{**/node_modules/{esbuild,@esbuild/*,node-pty/prebuilds/*}/**,**/Resources/opencode/darwin-*/opencode,**/Resources/chromium/**,**/Resources/polyth-link/**}",
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Polyth uses the microphone only when you start dictation."
       }

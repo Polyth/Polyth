@@ -48,6 +48,41 @@ const snapshot = (harnessId: string, modelID: string, projectId = "p", spaceId =
   context: { projectId, spaceId, cwd, revision: "1", fetchedAt: 1 },
 }];
 
+test("first mount paints cached harness snapshots while detail discovery is still pending", async (t) => {
+  invalidateRuntimeCatalogs();
+  requests.length = 0;
+  pending.clear();
+  cheapSnapshots = [];
+  const warm = readHarnessSnapshots({ projectId: "p", harnessId: "cursor", spaceId: "space-a", cwd: "/p", detail: true });
+  for (let attempt = 0; attempt < 20 && !pending.has("cursor"); attempt++) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  pending.get("cursor")!(snapshot("cursor", "cached-choice", "p", "space-a", "/p"));
+  await warm;
+  requests.length = 0;
+  let catalog: ReturnType<typeof useRuntimeCatalog> | undefined;
+  function Harness() {
+    catalog = useRuntimeCatalog(null, models, agents, { projectId: "p", harnessId: "cursor", spaceId: "space-a", cwd: "/p" });
+    return null;
+  }
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(Harness)); });
+    assert.equal(catalog?.models[0]?.modelID, "cached-choice");
+    assert.deepEqual(catalog?.discovery, { state: "available" });
+    assert.equal(
+      requests.filter((path) => path.includes("harnessId=cursor") && path.includes("detail=1")).length,
+      0,
+      "a warm harness snapshot satisfies the route without another detail fetch",
+    );
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
 test("mounted draft A/B/A rejects stale publishes and reuses the pending catalog across remounts", async () => {
   invalidateRuntimeCatalogs();
   requests.length = 0;

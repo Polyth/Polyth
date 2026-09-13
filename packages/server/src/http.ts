@@ -12,7 +12,9 @@ import {
   type HarnessSelection,
   type JsonObject,
   type ModelDescriptor,
+  type ModelRef,
   type RequestIngress,
+  type ResumeTurnOptions,
   type RouteHandler,
   type RouteRequest,
   type SessionService,
@@ -103,6 +105,28 @@ const harnessSelectionInput = (value: unknown): HarnessSelection | undefined => 
     return { mode: "pinned", harnessId: raw.harnessId };
   }
   throw Object.assign(new Error("invalid harness selection"), { code: "invalid-input" });
+};
+
+/** Keep recovery's public JSON input small and serializable. The session
+ * service validates the selected model against the chosen runtime catalog. */
+const modelRefInput = (value: unknown): ModelRef | undefined => {
+  // Earlier clients serialized an absent picker choice as null; preserve that
+  // harmless no-selection payload while rejecting malformed model objects.
+  if (value === undefined || value === null) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw Object.assign(new Error("invalid model selection"), { code: "invalid-input" });
+  }
+  const raw = value as { providerID?: unknown; modelID?: unknown; variant?: unknown };
+  if (typeof raw.providerID !== "string" || raw.providerID.length === 0
+    || typeof raw.modelID !== "string" || raw.modelID.length === 0
+    || (raw.variant !== undefined && typeof raw.variant !== "string")) {
+    throw Object.assign(new Error("invalid model selection"), { code: "invalid-input" });
+  }
+  return {
+    providerID: raw.providerID,
+    modelID: raw.modelID,
+    ...(typeof raw.variant === "string" ? { variant: raw.variant } : {}),
+  };
 };
 
 /** Gzip cache keyed by path+mtime so a rebuilt dist never serves stale bytes. */
@@ -708,10 +732,13 @@ async function dispatchHttp(
           throw Object.assign(new Error("rate-limit resume unavailable"), { code: "unsupported" });
         }
         const b = await loadBody();
-        const model = b.model && typeof b.model === "object" && !Array.isArray(b.model)
-          ? (b.model as { providerID: string; modelID: string })
-          : undefined;
-        return json(res, 200, await resumeNow(m[1]!, model));
+        const model = modelRefInput(b.model);
+        const harness = harnessSelectionInput(b.harness);
+        const options: ResumeTurnOptions = {
+          ...(model ? { model } : {}),
+          ...(harness ? { harness } : {}),
+        };
+        return json(res, 200, await resumeNow(m[1]!, options));
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/fork$/);
       if (m && method === "POST") {

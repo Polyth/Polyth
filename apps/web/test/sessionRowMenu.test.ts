@@ -7,7 +7,8 @@
 // additional activity context for a running session. Quick archive/delete
 // buttons mount while a touch swipe is in progress or while Shift is held on
 // a desktop shell (shift-quick mode); Shift-quick delete skips confirmation
-// for background rows and keeps it for sessions with live agent activity.
+// for background rows and keeps it for sessions with live agent activity or
+// a package-owned isolation workspace.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
@@ -473,7 +474,12 @@ test("isolated sessions sit with main sessions, not worktree groups", async () =
   document.body.appendChild(container);
   const root = createRoot(container);
   try {
-    await act(async () => { root.render(createElement(SessionList, { projectId: "p1" })); });
+    await act(async () => {
+      root.render(createElement("div", null,
+        createElement(SessionList, { projectId: "p1" }),
+        createElement(AlertDialog),
+      ));
+    });
 
     const isolated = rowOf(container, "Isolated session");
     assert.equal(isolated.closest(".session-worktree-group"), null, "isolated rows are not worktree-grouped");
@@ -491,12 +497,15 @@ test("isolated sessions sit with main sessions, not worktree groups", async () =
       isolated.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, cancelable: true }));
     });
     const items = menuItems().map((item) => item.textContent?.trim());
-    assert.equal(items.includes("Delete"), false, "isolated rows omit Delete");
+    assert.equal(items.includes("Delete"), true, "explicit hard-delete remains available for isolated sessions");
     assert.equal(items.includes("Fork"), false, "isolated rows omit Fork");
+    const remove = menuItems().find((item) => item.textContent?.trim() === "Delete");
+    await act(async () => { remove!.click(); });
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Delete session"]');
+    assert.ok(dialog, "isolated session deletion confirms the filesystem cleanup");
+    assert.match(dialog.textContent ?? "", /isolation workspace and every file in it/i);
     await act(async () => {
-      document.activeElement!.dispatchEvent(new KeyboardEventCtor("keydown", {
-        key: "Escape", bubbles: true, cancelable: true,
-      }));
+      dialog.querySelector<HTMLButtonElement>(".ui-btn--quiet")!.click();
     });
 
     const pinnedIsolated = rowOf(container, "Pinned isolated");
@@ -692,7 +701,7 @@ test("pointer intent wires the bounded session-tail prefetch once", async () => 
   }
 });
 
-test("holding Shift mounts quick actions; delete skips confirm only for background rows", async () => {
+test("holding Shift skips confirmation only for non-isolated background rows", async () => {
   const { container, unmount } = await mountList();
   const pressShift = () => act(async () => {
     (dom as unknown as EventTarget).dispatchEvent(
@@ -754,10 +763,37 @@ test("holding Shift mounts quick actions; delete skips confirm only for backgrou
     });
     assert.equal(fetchCalls.filter((c) => c.method === "DELETE").length, 0, "declined confirm deletes nothing");
 
+    // Even an idle row keeps confirmation when the action will remove its
+    // complete isolation workspace.
+    await releaseShift();
+    await act(async () => {
+      setSessions("p1", [session({
+        id: "s-isolated-shift",
+        title: "Idle isolated session",
+        worktreePath: "/repo-isolated-shift",
+        branch: "polyth/isolate/shift",
+        isolation: gitIsolation({
+          worktreePath: "/repo-isolated-shift",
+          worktreeBranch: "polyth/isolate/shift",
+        }),
+      })]);
+    });
+    await pressShift();
+    const isolatedRow = rowOf(container, "Idle isolated session");
+    const isolatedDelete = isolatedRow.querySelector<HTMLButtonElement>(".session-quick .session-quick-btn.danger");
+    assert.ok(isolatedDelete, "isolated row mounts the Shift quick action");
+    await act(async () => { isolatedDelete!.click(); });
+    const isolatedDialog = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Delete session"]');
+    assert.ok(isolatedDialog, "filesystem deletion never bypasses confirmation");
+    assert.match(isolatedDialog.textContent ?? "", /isolation workspace and every file in it/i);
+    await act(async () => {
+      isolatedDialog.querySelector<HTMLButtonElement>(".ui-btn--quiet")!.click();
+    });
+
     // Releasing Shift disarms the quick layer.
     await releaseShift();
-    assert.equal(runRow.querySelector(".session-quick"), null, "quick layer unmounts on release");
-    assert.ok(!runRow.classList.contains("shift-quick"));
+    assert.equal(isolatedRow.querySelector(".session-quick"), null, "quick layer unmounts on release");
+    assert.ok(!isolatedRow.classList.contains("shift-quick"));
   } finally {
     await releaseShift();
     await unmount();

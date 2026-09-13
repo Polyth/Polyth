@@ -727,6 +727,80 @@ test("complete pending data alone cannot prove an unknown response was not appli
   await store.close();
 });
 
+test("a permission reply the runtime no longer holds expires the request instead of blocking admission", async () => {
+  const listeners = new Set<Listener>();
+  const emit = (sessionId: string, event: RuntimeEvent): void => {
+    for (const listener of listeners) listener(sessionId, event);
+  };
+  let submissions = 0;
+  const runtime = {
+    capabilities: async () => ({
+      streaming: true,
+      permissions: true,
+      questions: true,
+      compaction: false,
+      subagents: false,
+    }),
+    models: async () => [],
+    agents: async () => [],
+    ensureSession: async (input: { sessionId: string; backendSessionId?: string }) =>
+      input.backendSessionId ?? `backend-${input.sessionId}`,
+    sessions: async () => [],
+    history: async () => [],
+    startTurn: async () => undefined,
+    startTurnOperation: async (_request: unknown, operationId: string) => {
+      submissions += 1;
+      return {
+        kind: "confirmed",
+        value: { admissionId: operationId },
+        receipt: operationId,
+      } satisfies MutationOutcome<{ admissionId: string }>;
+    },
+    abort: async () => undefined,
+    replyPermission: async () => undefined,
+    // A live prompt can outlive an aborted turn; the runtime proves the request
+    // is gone (not merely absent from a snapshot) and must not report doubt.
+    replyPermissionOperation: async () => ({
+      kind: "rejected",
+      code: "not-found",
+      message: "Permission is no longer pending",
+    } satisfies MutationOutcome<Record<string, never>>),
+    replyQuestion: async () => undefined,
+    onEvent(callback: Listener) {
+      listeners.add(callback);
+      return { dispose: () => listeners.delete(callback) };
+    },
+    dispose: async () => undefined,
+  } as unknown as AgentRuntime;
+  const { sessions, store } = harness(runtime);
+  const created = await sessions.create({ projectId: "project-1", title: "Expired permission" });
+  emit(created.id, {
+    type: "permission/requested",
+    requestId: "permission-gone",
+    permission: "edit",
+    patterns: ["src/*"],
+  });
+  await waitFor(async () => (await store.events(created.id))
+    .some((event) => event.type === "permission/requested"));
+
+  await sessions.replyPermission(created.id, "permission-gone", "once");
+
+  const operations = await store.operations(created.id);
+  const reply = operations.find((operation) => operation.mutationKind === "permission-reply");
+  assert.equal(reply?.state, "rejected");
+  assert.equal(operations.some((operation) =>
+    operation.state === "prepared" || operation.state === "executing" || operation.state === "unknown"), false);
+  const events = await store.events(created.id);
+  assert.equal(events.some((event) => event.type === "permission/expired"), true);
+  assert.equal(events.some((event) => event.type === "permission/resolved"), false);
+  assert.equal(events.some((event) => event.type === "permission/response-failed"), true);
+  assert.equal(await store.responseIntent(created.id, "permission", "permission-gone"), undefined);
+
+  await sessions.send(created.id, { text: "keep going" });
+  assert.equal(submissions, 1);
+  await store.close();
+});
+
 test("an unknown question reply remains durable and is never sent twice", async () => {
   const listeners = new Set<Listener>();
   let questionReplies = 0;

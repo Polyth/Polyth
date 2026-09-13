@@ -1,0 +1,114 @@
+/* Phone Source control polish. Keep package content visually quiet so the
+   shared ModuleView chrome remains the only window frame. */
+@container feature-panel (max-width: 700px) {
+  .git-page {
+    padding: var(--space-2) var(--screen-gutter) var(--space-3);
+    gap: var(--space-2);
+  }
+
+  .source-control-head {
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: var(--space-2);
+    padding-block: var(--space-1);
+  }
+
+  .source-control-title {
+    width: auto;
+    flex: 1 1 auto;
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+
+  .source-branch {
+    max-width: 100%;
+  }
+
+  .source-remote-actions {
+    flex: none;
+    flex-wrap: nowrap;
+    gap: var(--space-1);
+  }
+
+  .git-page .source-sync-btn {
+    border-color: transparent;
+    background: var(--surface-overlay);
+    box-shadow: none;
+  }
+
+  .git-page .source-sync-btn:hover:not(:disabled),
+  .git-page .source-sync-btn:active:not(:disabled) {
+    border-color: transparent;
+    background: var(--surface-overlay-hover);
+  }
+
+  .source-tabs {
+    position: sticky;
+    top: 0;
+    z-index: 8;
+    gap: 0;
+    padding: 0;
+    border: 0;
+    border-bottom: 1px solid var(--hair);
+    border-radius: 0;
+    background: var(--bg);
+    box-shadow: none;
+  }
+
+  .source-tabs > .ui-tab {
+    flex: 0 0 auto;
+    min-width: var(--tap);
+    min-height: var(--tap);
+    padding-inline: var(--space-3);
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    color: var(--muted);
+  }
+
+  .source-tabs > .ui-tab:hover:not(:disabled) {
+    border-color: transparent;
+    background: var(--surface-overlay-hover);
+    color: var(--text);
+  }
+
+  .source-tabs > .ui-tab.ui-tab--selected,
+  .source-tabs > .ui-tab.ui-tab--selected:hover:not(:disabled) {
+    border-color: transparent;
+    background: transparent;
+    box-shadow: inset 0 -2px 0 var(--accent);
+    color: var(--text);
+  }
+
+  .git-changes-layout > .git-master-detail,
+  .git-changes-layout .git-master-pane {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .git-pane-toolbar {
+    padding: var(--space-2) var(--space-1);
+    border-bottom: 1px solid var(--hair);
+    background: var(--bg);
+  }
+
+  .git-change-group {
+    border-bottom-color: var(--hair);
+  }
+
+  .git-change-group-head {
+    padding-inline: var(--space-1);
+    letter-spacing: 0;
+  }
+
+  .git-change-group-body {
+    padding-inline: 0;
+  }
+
+  .git-page .git-file-row {
+    padding-inline: var(--space-1);
+  }
+}

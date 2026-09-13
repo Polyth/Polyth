@@ -143,11 +143,14 @@ test("fresh mobile chat exposes project targets and attachments use the platform
   assert.match(css, /\.composer-mobile\.composer-has-draft \.composer-workflow\s*\{\s*display:\s*inline-flex;/);
   assert.match(mobileHeader, /displaySessionTitle\(session\.title, session\.id, firstUserTextCached\(events\[session\.id\]\)\)/);
   assert.match(mobileHeader, /buildIslandItems\(/);
+  assert.match(mobileHeader, /useTaskStartTitle\(session\?\.id, model\.messages\)/);
+  assert.match(mobileHeader, /tr\("timeline\.taskStarted"\)/);
   assert.doesNotMatch(mobileHeader, /label="Recent sessions"/);
   assert.match(mobileHeader, /lastUserTextCached/);
   assert.match(mobileHeader, /origin="top"/);
   assert.match(mobileHeader, /tr\("mobile.island.tasks"\)/);
   assert.match(css, /\.mobile-float-navigation, \.mobile-float-actions \{ display: inline-grid; grid-auto-flow: column;/);
+  assert.match(css, /\.activity-live\.task-started\s*\{\s*display:\s*none;/);
   assert.match(mobileHeader, /label="Open navigation" size="lg" variant="ghost"/);
   assert.match(css, /\.mobile-float-navigation > \.ui-icon-btn,[\s\S]*?background: transparent !important;[\s\S]*?box-shadow: none;/);
   assert.match(css, /\.mobile-island-now\s*\{/s);

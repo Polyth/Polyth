@@ -9,6 +9,7 @@ import type {
   PendingQuestion,
   PendingSecret,
   RenderMessage,
+  TaskActivityMsg,
   TaskListState,
 } from "./reduce.ts";
 import { resolveSessionStatus, type SessionRowStatus } from "./sessionStatus.ts";
@@ -152,6 +153,15 @@ export function tasksForIsland(
 export function lastTask(tasks: IslandTask[] | undefined): IslandTask | undefined {
   if (!tasks || tasks.length === 0) return undefined;
   return tasks.find((task) => task.status === "active") ?? tasks[tasks.length - 1];
+}
+
+/** Latest explicit task start, used for the phone title's brief handoff. */
+export function latestStartedTask(messages: readonly RenderMessage[]): TaskActivityMsg | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.kind === "task" && message.action === "started") return message;
+  }
+  return undefined;
 }
 
 function requestLabel(permission: PendingPermission): string {

@@ -9,7 +9,7 @@
     "./i18n/*": "./widgets/i18n/*.ts"
   },
   "polyth": {
-    "serverEntry": "./src/serverEntry.ts",
+    "serverEntry": "./src/serverEntryWithDeviceRuntime.ts",
     "webEntry": "./widgets/index.tsx",
     "descriptor": {
       "name": "Chat Workspace",
@@ -27,7 +27,8 @@
     "@polyth/handoff": "0.1.0",
     "@polyth/plugins": "0.1.0",
     "@polyth/tenancy": "0.1.0",
-    "@polyth/web-sdk": "0.1.0"
+    "@polyth/web-sdk": "0.1.0",
+    "ws": "^8.18.0"
   },
   "peerDependencies": {
     "react": "^19.0.0"

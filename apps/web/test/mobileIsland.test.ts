@@ -5,6 +5,7 @@ import {
   buildIslandItems,
   eventsHaveCodeChanges,
   lastTask,
+  latestStartedTask,
   notablePeers,
   promptExcerpt,
   recentSessionsForIsland,
@@ -52,6 +53,18 @@ test("lastTask prefers the active item and otherwise keeps the latest snapshot r
   ];
   assert.equal(lastTask(items)?.id, "c");
   assert.equal(lastTask(items.slice(0, 2))?.id, "b");
+});
+
+test("latestStartedTask selects only the newest explicit task start", () => {
+  const messages = [
+    { kind: "task", id: "created", taskId: "a", action: "created", text: "Draft", time: NOW, eventSeq: 1 },
+    { kind: "task", id: "started-a", taskId: "a", action: "started", text: "Implement", time: NOW, eventSeq: 2 },
+    { kind: "task", id: "done-a", taskId: "a", action: "completed", text: "Implement", time: NOW, eventSeq: 3 },
+    { kind: "task", id: "started-b", taskId: "b", action: "started", text: "Verify", time: NOW, eventSeq: 4 },
+  ] as const;
+  assert.equal(latestStartedTask(messages)?.id, "started-b");
+  assert.equal(latestStartedTask(messages)?.text, "Verify");
+  assert.equal(latestStartedTask([]), undefined);
 });
 
 test("task overview falls back to TodoWrite tool state and keeps completed items visible", () => {

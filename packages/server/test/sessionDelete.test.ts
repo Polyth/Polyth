@@ -9,8 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createStore } from "@polyth/session";
-import type { AgentRuntime, Project, ProjectService, RuntimeEndpoint, RuntimeEvent } from "@polyth/contracts";
-import { createSessionService, type Broadcaster } from "../src/sessions.ts";
+import type { AgentRuntime, Project, ProjectService, RuntimeEndpoint, RuntimeEvent, SessionProjection } from "@polyth/contracts";
+import { createSessionService, type Broadcaster, type RuntimePool } from "../src/sessions.ts";
 import type { PermissionService } from "@polyth/permissions";
 
 type Emit = (sessionId: string, ev: RuntimeEvent) => void;
@@ -48,6 +48,11 @@ const flush = () => new Promise((r) => setTimeout(r, 20));
 function makeService(
   fake: ReturnType<typeof fakeRuntime>,
   runtimeFor: (projectId: string, cwd?: string) => Promise<AgentRuntime> = async () => fake.rt,
+  cleanupSessionResources?: (info: {
+    projection: SessionProjection;
+    releaseExecution(cwd: string): Promise<void>;
+  }) => Promise<void>,
+  runtimePool?: RuntimePool,
 ) {
   const dir = mkdtempSync(join(tmpdir(), "polyth-delete-"));
   const store = createStore(join(dir, "s.db"));
@@ -67,7 +72,8 @@ function makeService(
   const broadcast: Broadcaster = { event: () => {}, projection: () => {} };
   const sessions = createSessionService({
     store, projects, permissions, broadcast, queue: store,
-    runtimes: { forProject: runtimeFor },
+    runtimes: runtimePool ?? { forProject: runtimeFor },
+    ...(cleanupSessionResources ? { cleanupSessionResources } : {}),
   });
   return { sessions, store };
 }
@@ -175,4 +181,172 @@ test("delete removes a session whose worktree disappeared without constructing a
   await sessions.delete!(id);
 
   assert.equal(await store.projection(id), undefined);
+});
+
+test("explicit delete tombstones a rebind-pending session without reconstructing its released runtime", async () => {
+  const fake = fakeRuntime();
+  let runtimeConstructions = 0;
+  let cleanupCalls = 0;
+  const { sessions, store } = makeService(
+    fake,
+    async () => {
+      runtimeConstructions += 1;
+      throw Object.assign(new Error("Previous executor has no verified release receipt"), {
+        code: "runtime-release-unverified",
+      });
+    },
+    async ({ projection }) => {
+      cleanupCalls += 1;
+      assert.equal(projection.isolation?.state, "rebind-pending");
+      // The Git owner observed that this workspace is already absent, so it
+      // deliberately does not request a release receipt.
+    },
+  );
+  const id = "rebind-pending-delete";
+  const missingWorktree = join(tmpdir(), "polyth-delete-missing-isolation");
+  await store.upsertProjection({
+    id, projectId: "p1", title: "T", status: "idle", createdAt: 1, updatedAt: 1,
+    backendSessionId: "be_rebind-pending-delete",
+    worktreePath: missingWorktree,
+    branch: "polyth/isolate/delete",
+    runtimeBinding: {
+      backendSessionId: "be_rebind-pending-delete",
+      authorityId: "owned:released-without-receipt",
+      generation: 1,
+      continuity: "verified",
+      protocol: "legacy",
+      location: { directory: missingWorktree },
+    },
+    isolation: {
+      kind: "git-worktree",
+      worktreePath: missingWorktree,
+      worktreeBranch: "polyth/isolate/delete",
+      targetBranch: "main",
+      targetPath: join(tmpdir(), "polyth-delete-target"),
+      originPath: join(tmpdir(), "polyth-delete-target"),
+      baseCommit: "base",
+      createdAt: "2026-09-13T00:00:00.000Z",
+      state: "rebind-pending",
+    },
+  });
+
+  await sessions.delete!(id);
+
+  assert.equal(cleanupCalls, 1);
+  assert.equal(runtimeConstructions, 0, "hard delete must not create a runtime solely to delete it");
+  assert.equal(await store.projection(id), undefined);
+  assert.ok(await store.deletionTombstone(id), "unknown upstream state remains fenced after canonical deletion");
+});
+
+test("owned isolation cleanup receives verified execution release before canonical deletion", async () => {
+  const fake = fakeRuntime();
+  const order: string[] = [];
+  const id = "owned-isolation-delete";
+  const worktreePath = join(tmpdir(), "polyth-delete-owned-isolation");
+  const binding = {
+    canonicalSessionId: id,
+    backendSessionId: "be_owned-isolation-delete",
+    authorityId: "owned:isolation-delete",
+    generation: 4,
+    continuity: "verified" as const,
+    location: { directory: worktreePath },
+  };
+  const runtimePool: RuntimePool = {
+    forProject: async () => { throw new Error("delete must not construct a runtime"); },
+    releaseSessionExecution: async (_projection, actual) => {
+      order.push("release");
+      assert.deepEqual(actual, binding);
+      return { kind: "confirmed", value: binding };
+    },
+    retireSession: async () => { order.push("retire"); },
+  };
+  const { sessions, store } = makeService(
+    fake,
+    async () => { throw new Error("delete must not construct a runtime"); },
+    async ({ releaseExecution }) => {
+      await releaseExecution(worktreePath);
+      order.push("cleanup");
+    },
+    runtimePool,
+  );
+  await store.upsertProjection({
+    id, projectId: "p1", title: "T", status: "idle", createdAt: 1, updatedAt: 1,
+    backendSessionId: binding.backendSessionId,
+    worktreePath,
+    runtimeBinding: {
+      backendSessionId: binding.backendSessionId,
+      authorityId: binding.authorityId,
+      generation: binding.generation,
+      continuity: binding.continuity,
+      protocol: "legacy",
+      location: binding.location,
+    },
+    isolation: {
+      kind: "git-worktree", worktreePath, worktreeBranch: "polyth/isolate/delete",
+      targetBranch: "main", targetPath: "/target", originPath: "/target",
+      baseCommit: "base", createdAt: "2026-09-13T00:00:00.000Z", state: "active",
+    },
+  });
+
+  await sessions.delete!(id);
+
+  assert.deepEqual(order, ["release", "cleanup", "retire"]);
+  assert.equal(await store.projection(id), undefined);
+});
+
+test("isolation deletion preserves the session when release proof names another authority", async () => {
+  const fake = fakeRuntime();
+  const id = "isolation-delete-stale-release";
+  const worktreePath = join(tmpdir(), "polyth-delete-stale-release");
+  const binding = {
+    canonicalSessionId: id,
+    backendSessionId: "be_isolation-delete-stale-release",
+    authorityId: "owned:isolation-delete-current",
+    generation: 2,
+    continuity: "verified" as const,
+    location: { directory: worktreePath },
+  };
+  let cleanupReached = false;
+  const runtimePool: RuntimePool = {
+    forProject: async () => { throw new Error("delete must not construct a runtime"); },
+    releaseSessionExecution: async () => ({
+      kind: "confirmed",
+      value: { ...binding, authorityId: "owned:isolation-delete-stale" },
+    }),
+  };
+  const { sessions, store } = makeService(
+    fake,
+    async () => { throw new Error("delete must not construct a runtime"); },
+    async ({ releaseExecution }) => {
+      await releaseExecution(worktreePath);
+      cleanupReached = true;
+    },
+    runtimePool,
+  );
+  await store.upsertProjection({
+    id, projectId: "p1", title: "T", status: "idle", createdAt: 1, updatedAt: 1,
+    backendSessionId: binding.backendSessionId,
+    worktreePath,
+    runtimeBinding: {
+      backendSessionId: binding.backendSessionId,
+      authorityId: binding.authorityId,
+      generation: binding.generation,
+      continuity: binding.continuity,
+      protocol: "legacy",
+      location: binding.location,
+    },
+    isolation: {
+      kind: "git-worktree", worktreePath, worktreeBranch: "polyth/isolate/delete",
+      targetBranch: "main", targetPath: "/target", originPath: "/target",
+      baseCommit: "base", createdAt: "2026-09-13T00:00:00.000Z", state: "active",
+    },
+  });
+
+  await assert.rejects(
+    sessions.delete!(id),
+    (error: Error & { code?: string }) => error.code === "stale-evidence",
+  );
+
+  assert.equal(cleanupReached, false, "filesystem cleanup cannot follow mismatched release proof");
+  assert.ok(await store.projection(id), "canonical history remains when cleanup admission fails");
 });

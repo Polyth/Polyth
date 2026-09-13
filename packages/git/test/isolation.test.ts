@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -1283,6 +1283,64 @@ test("discard returns the session to the origin checkout", async () => {
   assert.equal(existsSync(isoPath), false);
   assert.equal(existsSync(join(featureWt, "gone.txt")), false);
   assert.equal(runGit(root, "rev-parse", "--abbrev-ref", "HEAD"), "main");
+});
+
+test("explicit session deletion removes the complete owned isolation workspace", async () => {
+  const root = repo();
+  const { isolation, sessions, closeCalls } = harness(root);
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const current = await sessions.snapshot(created.id);
+  const worktreePath = current.isolation!.worktreePath;
+  const worktreeBranch = current.isolation!.worktreeBranch;
+  mkdirSync(join(worktreePath, "nested"), { recursive: true });
+  writeFileSync(join(worktreePath, "nested", "delete-me.txt"), "gone\n");
+  let releases = 0;
+
+  await isolation.cleanupForSessionDelete(created.id, async (cwd) => {
+    releases += 1;
+    assert.equal(resolve(cwd), resolve(worktreePath));
+  });
+
+  assert.equal(releases, 1, "owned runtime execution is released before workspace removal");
+  assert.deepEqual(closeCalls.map((path) => resolve(path)), [resolve(worktreePath)]);
+  assert.equal(existsSync(worktreePath), false);
+  assert.equal((await git.branches(root)).branches.some((branch) => branch.name === worktreeBranch), false);
+  assert.ok(await sessions.snapshot(created.id), "canonical deletion remains owned by the session service");
+});
+
+test("session deletion treats an already absent isolation workspace as clean", async () => {
+  const root = repo();
+  const { isolation, sessions } = harness(root);
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const current = await sessions.snapshot(created.id);
+  await git.worktrees.remove(root, {
+    path: current.isolation!.worktreePath,
+    deleteBranch: false,
+    force: true,
+  });
+  let releases = 0;
+
+  await isolation.cleanupForSessionDelete(created.id, async () => { releases += 1; });
+
+  assert.equal(releases, 0, "an absent workspace needs no runtime release receipt");
+});
+
+test("session deletion refuses an isolation path whose ownership changed", async () => {
+  const root = repo();
+  const { isolation, sessions } = harness(root);
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const current = await sessions.snapshot(created.id);
+  const worktreePath = current.isolation!.worktreePath;
+  runGit(worktreePath, "branch", "-m", "user-preserved");
+  let releases = 0;
+
+  await assert.rejects(
+    isolation.cleanupForSessionDelete(created.id, async () => { releases += 1; }),
+    /ownership is not proven/,
+  );
+
+  assert.equal(releases, 0);
+  assert.equal(existsSync(worktreePath), true, "an unowned path is never removed");
 });
 
 test("notice append failure after publish does not report merge failure", async () => {

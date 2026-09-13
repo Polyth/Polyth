@@ -49,9 +49,10 @@ test("rail mounts as a sibling of the .timeline scroller, outside its overflow",
   assert.ok(src.includes('className="timeline-viewport"'), "Timeline must render the viewport wrapper");
   // The PromptNavigator mount must come AFTER the scroller's closing tag —
   // inside the scroller it would scroll away and be overpainted by bubbles.
+  // Other absolute siblings (the clipped live-action layer) may sit between.
   assert.match(
     src,
-    /<\/div>\s*\{showNav && \(\s*<PromptNavigator/,
+    /<\/div>\s*(?:<div[^>]*\/>\s*)*\{showNav && \(\s*<PromptNavigator/,
     "PromptNavigator must be a sibling of the closed .timeline scroller",
   );
 });

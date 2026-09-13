@@ -256,20 +256,25 @@ function SessionRow({
   };
 
   const quickDelete = async () => {
-    if (s.isolation) return;
     const label = s.title || tr("sidebar.sessionlist.session");
-    const activity = needsDestructiveConfirm(s) ? ` ${tr("sidebar.sessionlist.theAgentIsStillRunningOr")}` : "";
-    if (!await confirmAlert(tr("sidebar.sessionlist.deleteValueValueThisPermanentlyRemovesThe", { label: label, activity: activity }), { title: tr("sidebar.sessionlist.deleteSession"), confirmLabel: tr("common.delete") })) return;
+    const activity = [
+      s.isolation ? tr("sidebar.sessionlist.theLocalIsolationWorkspaceAndEveryFileInItWillAlsoBePermanentlyDeleted") : "",
+      needsDestructiveConfirm(s) ? tr("sidebar.sessionlist.theAgentIsStillRunningOr") : "",
+    ].filter(Boolean).join(" ");
+    if (!await confirmAlert(tr("sidebar.sessionlist.deleteValueValueThisPermanentlyRemovesThe", { label: label, activity: activity ? ` ${activity}` : "" }), { title: tr("sidebar.sessionlist.deleteSession"), confirmLabel: tr("common.delete") })) return;
     performDelete();
   };
 
   // Shift-hover quick delete: deliberate (modifier held), so it skips the
-  // confirmation unless the session is still active.
+  // confirmation unless the session is still active or owns a workspace.
   const shiftQuickDelete = async () => {
-    if (needsDestructiveConfirm(s)) {
+    if (s.isolation || needsDestructiveConfirm(s)) {
       const label = s.title || tr("sidebar.sessionlist.session");
-      const activity = ` ${tr("sidebar.sessionlist.theAgentIsStillRunningOr")}`;
-      if (!await confirmAlert(tr("sidebar.sessionlist.deleteValueValueThisPermanentlyRemovesThe", { label: label, activity: activity }), { title: tr("sidebar.sessionlist.deleteSession"), confirmLabel: tr("common.delete") })) return;
+      const activity = [
+        s.isolation ? tr("sidebar.sessionlist.theLocalIsolationWorkspaceAndEveryFileInItWillAlsoBePermanentlyDeleted") : "",
+        needsDestructiveConfirm(s) ? tr("sidebar.sessionlist.theAgentIsStillRunningOr") : "",
+      ].filter(Boolean).join(" ");
+      if (!await confirmAlert(tr("sidebar.sessionlist.deleteValueValueThisPermanentlyRemovesThe", { label: label, activity: ` ${activity}` }), { title: tr("sidebar.sessionlist.deleteSession"), confirmLabel: tr("common.delete") })) return;
     }
     performDelete();
   };
@@ -361,9 +366,7 @@ function SessionRow({
           onSelect: () => void restoreSession(s.id).then(onChanged).catch((e) => setUiError(friendlyError(tr("common.error"), e))),
         }
       : { id: "archive", label: tr("common.archive"), onSelect: () => void quickArchive() },
-    ...(!s.isolation
-      ? [{ id: "delete", label: tr("common.delete"), danger: true, onSelect: () => void quickDelete() } satisfies MenuEntry]
-      : []),
+    { id: "delete", label: tr("common.delete"), danger: true, onSelect: () => void quickDelete() },
     ...(labels.length > 0 ? [{ heading: tr("sidebar.sessionlist.labels") }] : []),
     ...labelEntries,
   ];
@@ -571,12 +574,12 @@ function SessionRow({
               onClick={quickArchive}
             ><Icon.download /></button>
           )}
-          {!s.isolation && <button
+          <button
             className="session-quick-btn danger"
             title={tr("sidebar.sessionlist.deleteValue", { value: s.title || tr("sidebar.sessionlist.session") })}
             aria-label={tr("sidebar.sessionlist.deleteValue", { value: s.title || tr("sidebar.sessionlist.session") })}
             onClick={shiftQuick && swipeX === null && !swipeRevealed ? shiftQuickDelete : quickDelete}
-          >✕</button>}
+          >✕</button>
         </span>
       )}
     </div>

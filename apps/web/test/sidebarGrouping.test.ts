@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import type { SessionProjection } from "@polyth/contracts";
 import {
   applyManualProjectOrder, BUILTIN_GROUPINGS, getGroupingMode, groupSessions, listGroupings,
-  parseGroupingMode, registerGrouping, setGroupingMode, reorderManualProjects,
+  parseGroupingMode, parseProjectSortMode, registerGrouping, setGroupingMode, reorderManualProjects,
 } from "../src/sidebarPrefs.ts";
 
 const session = (over: Partial<SessionProjection> & { id: string }): SessionProjection => ({
@@ -81,6 +81,14 @@ test("manual order keeps unknown items above stored ones and sorts them by creat
     session({ id: "c", createdAt: 200 }),
   ];
   assert.deepEqual(applyManualProjectOrder(sessions, ["b"]).map((item) => item.id), ["a", "c", "b"]);
+});
+
+test("project sort mode accepts activity, name, and manual with a recent fallback", () => {
+  assert.equal(parseProjectSortMode("recent"), "recent");
+  assert.equal(parseProjectSortMode("name"), "name");
+  assert.equal(parseProjectSortMode("manual"), "manual");
+  assert.equal(parseProjectSortMode("unknown"), "recent");
+  assert.equal(parseProjectSortMode(null), "recent");
 });
 
 test("plugin groupings need a pure keyOf, no duplicates; dispose falls back", () => {

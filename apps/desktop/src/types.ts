@@ -51,6 +51,50 @@ export interface DesktopWindowState {
   focused: boolean;
 }
 
+export interface DesktopChatWorkspaceConnection {
+  id?: string;
+  connectionId?: string;
+  hostEndpointId?: string;
+  hostLabel?: string;
+  pairingState?: string;
+  lastUsedAt?: number;
+  lastTransport?: string | null;
+  revoked?: boolean;
+  hasSecureIdentity?: boolean;
+}
+
+export interface DesktopChatWorkspaceConnectionsState {
+  activeConnectionId: string | null;
+  connections: DesktopChatWorkspaceConnection[];
+}
+
+export interface DesktopChatWorkspaceConnectResult {
+  connectionId: string;
+  origin: string;
+}
+
+export interface DesktopChatWorkspacePairingPreview {
+  hostLabel: string;
+  hostFingerprint: string;
+  expiresAt: string;
+}
+
+export interface DesktopChatWorkspacePairingAttempt {
+  attemptId: string;
+  safetyPhrase?: string[];
+  state: string;
+}
+
+export interface DesktopChatWorkspaceSurface {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  visible: boolean;
+  /** True while this renderer owns presentation, even when temporarily hidden behind native UI. */
+  claimed?: boolean;
+}
+
 export interface PolythDesktopApi {
   getInfo(): Promise<DesktopInfo>;
   getSettings(): Promise<DesktopSettings>;
@@ -59,6 +103,14 @@ export interface PolythDesktopApi {
   revealPath(path: string): Promise<void>;
   openPath(path: string): Promise<void>;
   openDataFolder(): Promise<void>;
+  chatWorkspaceConnections(): Promise<DesktopChatWorkspaceConnectionsState>;
+  connectChatWorkspace(connectionId: string): Promise<DesktopChatWorkspaceConnectResult>;
+  previewChatWorkspacePairing(ticket: string): Promise<DesktopChatWorkspacePairingPreview>;
+  beginChatWorkspacePairing(ticket: string, label: string): Promise<DesktopChatWorkspacePairingAttempt>;
+  confirmChatWorkspacePairing(attemptId: string): Promise<DesktopChatWorkspaceConnectResult>;
+  cancelChatWorkspacePairing(attemptId: string): Promise<{ ok: true }>;
+  disconnectChatWorkspace(): Promise<{ ok: true }>;
+  setChatWorkspaceSurface(surface: DesktopChatWorkspaceSurface): Promise<{ ok: true }>;
   quit(): Promise<void>;
   checkForUpdates(): Promise<DesktopUpdateState>;
   downloadUpdate(): Promise<DesktopUpdateState>;

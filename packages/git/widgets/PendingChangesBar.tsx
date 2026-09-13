@@ -4,7 +4,7 @@ import { selectPendingChanges, sessionEditedPaths } from "../../../apps/web/src/
 import { openChanges, openWorkspacePane, setUiError, useActiveModel, useStore } from "../../../apps/web/src/store.ts";
 import { friendlyError } from "../../../apps/web/src/settings.ts";
 import { fmtDuration } from "../../../apps/web/src/format.ts";
-import { resolveModelPresentation } from "../../../apps/web/src/modelPresentation.ts";
+import { resolveModelPresentation } from "@polyth/contracts/model-presentation";
 import { api } from "@polyth/session/web-api";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import ProviderLogo from "../../models/widgets/ProviderLogo.tsx";

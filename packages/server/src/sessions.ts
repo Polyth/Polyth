@@ -9,7 +9,7 @@ import { isDeepStrictEqual } from "node:util";
 import { continuityWorkspace } from "./continuityWorkspace.ts";
 import type {
   AgentProfile, AgentRuntime, AttachmentRef, AttachmentModality, AutoAcceptSetting, CanonicalEventInput, ChildSnapshotResult, ClientMutationStatusDto, ClientSettingsDto, ContextWindowState, CreateSessionInput, DeliveryMode,
-  Disposable, DurableOperation, HarnessSelection, HarnessTransition, ForkDraft, ForkResult, JsonObject, ModelRef, MutationOutcome, NotificationRecord,
+  Disposable, DurableOperation, HarnessSelection, HarnessTransition, ForkDraft, ForkResult, JsonObject, ModelRef, MutationOutcome, NotificationRecord, ResumeTurnOptions,
   PersistedRuntimeBinding,
   InstalledPluginDto, ModelDescriptor, PackageDescriptorDto, QueueItemDto, RateLimitRetry, RateLimitRetryHint, RuntimeEvent,
   RuntimeEpochTransitionResult, TurnResumeCancelledData,
@@ -83,6 +83,17 @@ const fingerprintClientAdmission = (input: UserTurnInput): string =>
   createHash("sha256")
     .update(JSON.stringify(canonicalClientValue(input)))
     .digest("hex");
+
+/** SessionService historically accepted a bare ModelRef for rate-limit
+ * recovery. Keep that call shape valid while giving new callers an explicit,
+ * serializable harness route that can flow through normal send admission. */
+const normalizeResumeOptions = (
+  input?: ResumeTurnOptions | ModelRef,
+): ResumeTurnOptions => {
+  if (!input) return {};
+  if ("providerID" in input || "modelID" in input) return { model: input };
+  return input;
+};
 
 const WORKSPACE_INSTRUCTIONS_CLOSE = "</polyth-workspace-instructions>";
 
@@ -412,6 +423,13 @@ export function createSessionService(deps: {
   workspaceInstructionsEnabled?: () => Promise<boolean>;
   /** Drop volatile provisioning state after the canonical session is gone. */
   onSessionReleased?: (info: { sessionId: string; projectId: string; cwd: string }) => void | Promise<void>;
+  /** Package-owned destructive resource cleanup performed under the canonical
+   * session lock before its durable rows are removed. The callback may request
+   * verified release only for the exact cwd it is about to delete. */
+  cleanupSessionResources?: (info: {
+    projection: SessionProjection;
+    releaseExecution(cwd: string): Promise<void>;
+  }) => void | Promise<void>;
   /** Drop volatile provisioning for one session-lifetime harness after this
    *  session released its execution occupancy. Physical-runtime targets are
    *  released only when the physical runtime is evicted. */
@@ -3985,6 +4003,10 @@ export function createSessionService(deps: {
         () => ({}),
         { type: "permission/resolved", data: { requestId: rid, reply: "reject" }, ignorable: true },
       );
+      if (runtimeRequestMissing(outcome)) {
+        await expirePermissionRequest(sessionId, rid);
+        continue;
+      }
       if (outcome.kind !== "confirmed") throw outcomeError(outcome);
     }
     for (const rid of [...facts.openQuestions.keys()]) {
@@ -4079,6 +4101,19 @@ export function createSessionService(deps: {
     await closeParentRequestMirror(sessionId, requestId, "question", data, true);
   }
 
+  /** The runtime no longer holds this permission request (already resolved or
+   *  cancelled), so a reply can have had no effect. Close the canonical request
+   *  instead of surfacing an error: a live user prompt that outlived its turn
+   *  must not become a permanent admission barrier. */
+  async function expirePermissionRequest(sessionId: string, requestId: string): Promise<void> {
+    const data = { requestId, reason: "runtime-request-not-found" };
+    if ((await logFacts(sessionId)).openPermissions.has(requestId)) {
+      await appendAndBroadcast(sessionId, "permission/expired", data, { ignorable: true });
+      await settleAfterLastRequest(sessionId);
+    }
+    await closeParentRequestMirror(sessionId, requestId, "permission", data, true);
+  }
+
   const replyPermissionCore = async (
     sessionId: string,
     requestId: string,
@@ -4153,6 +4188,10 @@ export function createSessionService(deps: {
           completion,
         );
     if (outcome.kind !== "confirmed") {
+      if (runtimeRequestMissing(outcome)) {
+        await expirePermissionRequest(sessionId, requestId);
+        return;
+      }
       if (outcome.kind === "unknown") {
         await updateProjection(sessionId, { status: "unknown" });
         if (rt) {
@@ -7187,9 +7226,10 @@ export function createSessionService(deps: {
       await withSessionLock(sessionId, () => clearResume(sessionId, "user"));
     },
 
-    async resumeNow(sessionId, model): Promise<SendResult> {
+    async resumeNow(sessionId, input): Promise<SendResult> {
+      const options = normalizeResumeOptions(input);
       const plan = await withSessionLock(sessionId, async (): Promise<
-        { text: string; attachments?: AttachmentRef[]; model?: ModelRef }
+        { text: string; attachments?: AttachmentRef[]; model?: ModelRef; harness?: HarnessSelection }
       > => {
         const proj = await store.projection(sessionId);
         if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
@@ -7199,13 +7239,19 @@ export function createSessionService(deps: {
           await clearResume(sessionId, "user");
           throw Object.assign(new Error("resume target is stale"), { code: "no-resume" });
         }
-        await clearResume(sessionId, model ? "model-switch" : "resumed");
+        await clearResume(sessionId, options.model || options.harness ? "model-switch" : "resumed");
         return {
           text: last.text,
           ...(last.attachments
             ? { attachments: last.attachments as unknown as AttachmentRef[] }
             : {}),
-          ...(model ?? proj.model ? { model: model ?? proj.model } : {}),
+          // A chosen route without a chosen model intentionally lets its
+          // adapter resolve its own default. Never carry the old harness's
+          // model across a route boundary and have it fail post-switch.
+          ...(options.model ?? (options.harness ? undefined : proj.model)
+            ? { model: options.model ?? proj.model }
+            : {}),
+          ...(options.harness ? { harness: options.harness } : {}),
         };
       });
       return service.send(sessionId, { ...plan, autoResume: true });
@@ -7500,32 +7546,125 @@ export function createSessionService(deps: {
     // Hard delete (UX-SHELL-CONSOLIDATION-02): destructive intent is confirmed
     // upstream (the UI confirms running/pending sessions before calling this).
     // Runs under the per-session lock so it can never interleave with a turn
-    // callback; a still-running turn is aborted before the log is removed.
+    // callback; an attached running turn is aborted before the log is removed.
     async delete(sessionId) {
       return withSessionLock(sessionId, async () => {
         const proj = await store.projection(sessionId);
         if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
-        if (proj.isolation) {
-          throw Object.assign(new Error("discard or merge the isolated workspace before deleting this session"), {
-            code: "conflict",
-          });
-        }
         const active = turnActive(sessionId);
         const project = await projects.get(proj.projectId);
         const cwd = proj.worktreePath ?? project?.path ?? process.cwd();
-        const rt = sessionRuntime.get(sessionId) ?? (proj.backendSessionId
-          // A removed worktree cannot construct a runtime. The canonical
-          // session can still be tombstoned; upstream deletion remains
-          // unconfirmed until a later reconciliation can prove it.
-          && proj.worktreeState !== "missing"
-          ? await runtimeFor(proj, cwd)
-          : undefined);
-        // Drop callbacks before abort/delete I/O. A synchronous turn/stopped
-        // emitted by abort must never be queued for the soon-tombstoned log.
-        unwire(sessionId);
-        lastTurnId.delete(sessionId);
-        admitting.delete(sessionId);
-        if (active && rt) {
+        // Explicit hard-delete is a canonical operation, not runtime
+        // recovery. Use an already attached runtime for best-effort abort and
+        // upstream deletion, but never construct/rebind one solely to obtain
+        // a release receipt. The tombstone below fences late observations
+        // from an executor whose release remains unknown.
+        const rt = sessionRuntime.get(sessionId);
+        let runtimeRetired = false;
+        let workspaceExecutionReleased = false;
+        let releasedWorkspaceCwd: string | undefined;
+        let releasedWorkspaceHarnessId: string | undefined;
+        const retireReleasedWorkspace = async () => {
+          if (!workspaceExecutionReleased || runtimeRetired) return;
+          unwire(sessionId);
+          lastTurnId.delete(sessionId);
+          admitting.delete(sessionId);
+          if (runtimes.retireSession) await runtimes.retireSession(sessionId);
+          else runtimes.forgetSession?.(sessionId);
+          runtimeRetired = true;
+          if (releasedWorkspaceCwd && releasedWorkspaceHarnessId) {
+            try {
+              await deps.onHarnessTargetReleased?.({
+                sessionId,
+                projectId: proj.projectId,
+                cwd: releasedWorkspaceCwd,
+                harnessId: releasedWorkspaceHarnessId,
+              });
+            } catch {
+              // Volatile provisioning cleanup cannot undo a proven execution
+              // release or make the owned directory unsafe to remove.
+            }
+          }
+        };
+        if (proj.isolation) {
+          if (!deps.cleanupSessionResources) {
+            throw Object.assign(new Error("isolated workspace cleanup is unavailable"), {
+              code: "unsupported",
+            });
+          }
+          let releaseCompleted = false;
+          try {
+            await deps.cleanupSessionResources({
+              projection: proj,
+              releaseExecution: async (releaseCwd) => {
+                if (releaseCompleted) return;
+                const persisted = proj.runtimeBinding;
+                if (!persisted) {
+                  if (rt) {
+                    throw Object.assign(new Error("runtime identity is missing; workspace release cannot be proven"), {
+                      code: "outcome-unknown",
+                    });
+                  }
+                  releaseCompleted = true;
+                  return;
+                }
+                if (resolve(persisted.location.directory) !== resolve(releaseCwd)) {
+                  releaseCompleted = true;
+                  return;
+                }
+                const binding: RuntimeSessionBinding = {
+                  canonicalSessionId: sessionId,
+                  backendSessionId: persisted.backendSessionId,
+                  authorityId: persisted.authorityId,
+                  generation: persisted.generation,
+                  continuity: persisted.continuity,
+                  location: persisted.location,
+                };
+                const operationId = [
+                  "session-delete-workspace-release",
+                  sessionId,
+                  binding.authorityId,
+                  String(binding.generation),
+                  binding.backendSessionId,
+                ].join(":");
+                const outcome = rt?.releaseExecution
+                  ? await boundedRuntimeAwait(rt.releaseExecution(binding, operationId), operationId)
+                  : await runtimes.releaseSessionExecution?.(proj, binding, operationId);
+                if (!outcome) {
+                  throw Object.assign(new Error("the current harness cannot prove workspace release"), {
+                    code: "unsupported",
+                  });
+                }
+                if (outcome.kind !== "confirmed") throw outcomeError(outcome);
+                if (
+                  outcome.value.authorityId !== binding.authorityId
+                  || outcome.value.generation !== binding.generation
+                  || outcome.value.backendSessionId !== binding.backendSessionId
+                ) {
+                  throw Object.assign(new Error("workspace release proof does not match the deleted session"), {
+                    code: "stale-evidence",
+                  });
+                }
+                workspaceExecutionReleased = true;
+                releasedWorkspaceCwd = releaseCwd;
+                releasedWorkspaceHarnessId = proj.resolvedHarnessId ?? rt?.harnessId;
+                releaseCompleted = true;
+              },
+            });
+          } catch (error) {
+            // Once a provider proved release, keeping its facade wired would
+            // misrepresent a dead execution even if later Git cleanup failed.
+            // The durable session remains and a retry can resume cleanup from
+            // the exact same ownership checks and release operation id.
+            if (workspaceExecutionReleased) {
+              try { await retireReleasedWorkspace(); } catch (retireError) {
+                console.error(`[polyth] released isolation runtime retirement failed for ${sessionId}`, retireError);
+              }
+            }
+            throw error;
+          }
+        }
+        if (active && rt && !workspaceExecutionReleased) {
           const abortPrepared = await broadcastTail(sessionId, () => durable.prepareOperation({
             sessionId,
             mutationKind: "turn-abort",
@@ -7543,9 +7682,17 @@ export function createSessionService(deps: {
             () => ({}),
           );
         }
+        // Drop callbacks only after package cleanup admission succeeds. A
+        // rejected ownership check therefore leaves the surviving session
+        // wired. Any synchronous abort callback queued behind this lock is
+        // invalidated before it can append to the soon-tombstoned log.
+        unwire(sessionId);
+        lastTurnId.delete(sessionId);
+        admitting.delete(sessionId);
+        await retireReleasedWorkspace();
         let binding: RuntimeSessionBinding | undefined;
-        let upstreamDeletionAllowed = true;
-        if (rt) {
+        let upstreamDeletionAllowed = !workspaceExecutionReleased;
+        if (rt && !workspaceExecutionReleased) {
           try {
             binding = await runtimeBinding(rt, proj, cwd);
           } catch (error) {
@@ -7595,9 +7742,11 @@ export function createSessionService(deps: {
           outcome = {
             kind: "unknown",
             operationId: deletion.operation.operationId,
-            message: upstreamDeletionAllowed
-              ? "runtime cannot prove upstream session deletion"
-              : "runtime identity changed; upstream session deletion was not attempted",
+            message: workspaceExecutionReleased
+              ? "runtime execution was released before upstream session deletion"
+              : upstreamDeletionAllowed
+                ? "runtime cannot prove upstream session deletion"
+                : "runtime identity changed; upstream session deletion was not attempted",
           };
         } else {
           try {
@@ -7625,8 +7774,10 @@ export function createSessionService(deps: {
           }
         }
         await settleOperation(deletion.operation, outcome);
-        if (runtimes.retireSession) await runtimes.retireSession(sessionId);
-        else runtimes.forgetSession?.(sessionId);
+        if (!runtimeRetired) {
+          if (runtimes.retireSession) await runtimes.retireSession(sessionId);
+          else runtimes.forgetSession?.(sessionId);
+        }
         if (outcome.kind === "confirmed") {
           await durable.retireDeletionTombstone(sessionId, { kind: "confirmed" });
         }

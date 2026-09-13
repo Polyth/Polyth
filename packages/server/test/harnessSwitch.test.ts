@@ -30,6 +30,7 @@ function fixture(path = ":memory:", options: {
   const registry = createHarnessRegistry();
   type FakeEngine = AgentRuntime & {
     complete(): void;
+    rateLimit(): void;
     requestPermission(requestId: string): void;
     requests: CanonicalTurnRequest[];
     permissionReplies: Array<{ requestId: string; reply: string }>;
@@ -108,6 +109,16 @@ function fixture(path = ":memory:", options: {
           emit({ type: "permission/requested", requestId, permission: "bash", patterns: ["git status"] });
         },
         complete() { emit({ type: "assistant/message", partId: randomUUID(), text: `confirmed answer from ${id}` }); executing.delete(authorityId); order++; emit({ type: "turn/stopped", reason: "completed" }); },
+        rateLimit() {
+          executing.delete(authorityId);
+          order++;
+          emit({
+            type: "turn/stopped",
+            reason: "error",
+            error: "rate limited",
+            retry: { scope: "rate", provider: id, retryAfterSec: 30 },
+          });
+        },
         abort: async () => {},
         abortOperation: async () => {
           // Acknowledgement alone does not stop this fake. A provider that
@@ -192,6 +203,35 @@ test("A1 A2 → B1 → A retains one canonical session, cwd and confirmed contex
   assert.equal(a.runtimeBinding!.location.directory, original.runtimeBinding!.location.directory);
   assert.equal((await f.store.projections()).length, 1);
   await f.close();
+});
+
+test("rate-limit recovery switches harness before resending the selected model", async () => {
+  const f = fixture();
+  try {
+    const { id } = await f.sessions.create({ projectId: "p" });
+    await f.sessions.send(id, { text: "continue this work" });
+    f.engines.at(-1)!.rateLimit();
+    await until(async () => Boolean((await f.store.projection(id))?.resume));
+
+    await f.sessions.resumeNow!(id, {
+      harness: { mode: "pinned", harnessId: "fake-b" },
+      model: { providerID: "other", modelID: "selected", variant: "high" },
+    });
+
+    await until(async () => f.engines.at(-1)?.harnessId === "fake-b"
+      && f.engines.at(-1)?.requests.length === 1);
+    const projection = await f.store.projection(id);
+    assert.equal(projection?.resolvedHarnessId, "fake-b");
+    assert.deepEqual(projection?.model, { providerID: "other", modelID: "selected", variant: "high" });
+    assert.equal(projection?.resume, undefined);
+    // A fresh harness leg receives canonical continuity before the retried
+    // user text; the visible/durable message itself remains unchanged below.
+    assert.match(f.engines.at(-1)!.requests[0]!.text, /continue this work$/);
+    const messages = (await f.store.events(id)).filter((event) => event.type === "user/message");
+    assert.equal((messages.at(-1)!.data as { autoResume?: boolean }).autoResume, true);
+  } finally {
+    await f.close();
+  }
 });
 
 test("each fresh harness leg receives current AGENTS.md once without changing visible chat", async () => {

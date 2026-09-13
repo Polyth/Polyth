@@ -1127,6 +1127,30 @@ test("groupActivity keeps technical work together and the terminal answer separa
   assert.equal(legacyGrouped[1], legacyAcpAnswer, "a late-finalized legacy ACP part remains a visible answer");
 });
 
+test("groupActivity starts a new block when a turn resumes after visible assistant prose", () => {
+  const firstTool = {
+    kind: "tool" as const, id: "first-tool", callId: "first-tool", eventSeq: 1,
+    tool: "read", input: {}, status: "done" as const, time: 100, finishTime: 180,
+  };
+  const progress = {
+    kind: "assistant" as const, id: "progress", partId: "progress", eventSeq: 2,
+    text: "I found the relevant file.", reasoning: "", finalized: true,
+    time: 200, completedAt: 240, rev: 0,
+  };
+  const resumedTool = {
+    kind: "tool" as const, id: "resumed-tool", callId: "resumed-tool", eventSeq: 3,
+    tool: "write", input: {}, status: "running" as const, time: 260,
+  };
+
+  const grouped = groupActivity([firstTool, progress, resumedTool]);
+  assert.equal(grouped.length, 3, "the visible prose sits between two activity blocks");
+  assert.deepEqual(grouped[0]?.kind === "activity" ? grouped[0].items : [], [firstTool]);
+  assert.equal(grouped[1], progress, "the completed prose remains a reading surface");
+  assert.deepEqual(grouped[2]?.kind === "activity" ? grouped[2].items : [], [resumedTool]);
+  assert.equal(grouped[2]?.kind === "activity" ? grouped[2].settled : true, false,
+    "the resumed block stays active while its tool is running");
+});
+
 test("draft helpers persist per session and remove empty drafts", () => {
   const values = new Map<string, string>();
   Object.defineProperty(globalThis, "localStorage", {

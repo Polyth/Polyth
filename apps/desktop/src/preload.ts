@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
+  DesktopChatWorkspaceConnectResult,
+  DesktopChatWorkspaceConnectionsState,
+  DesktopChatWorkspacePairingAttempt,
+  DesktopChatWorkspacePairingPreview,
+  DesktopChatWorkspaceSurface,
   DesktopInfo,
   DesktopSettings,
   DesktopUpdateState,
@@ -24,6 +29,22 @@ const api: PolythDesktopApi = {
   revealPath: (path) => ipcRenderer.invoke("desktop:path:reveal", path) as Promise<void>,
   openPath: (path) => ipcRenderer.invoke("desktop:path:open", path) as Promise<void>,
   openDataFolder: () => ipcRenderer.invoke("desktop:data:open") as Promise<void>,
+  chatWorkspaceConnections: () =>
+    ipcRenderer.invoke("desktop:chat-workspace:connections") as Promise<DesktopChatWorkspaceConnectionsState>,
+  connectChatWorkspace: (connectionId) =>
+    ipcRenderer.invoke("desktop:chat-workspace:connect", connectionId) as Promise<DesktopChatWorkspaceConnectResult>,
+  previewChatWorkspacePairing: (ticket) =>
+    ipcRenderer.invoke("desktop:chat-workspace:pairing:preview", ticket) as Promise<DesktopChatWorkspacePairingPreview>,
+  beginChatWorkspacePairing: (ticket, label) =>
+    ipcRenderer.invoke("desktop:chat-workspace:pairing:begin", ticket, label) as Promise<DesktopChatWorkspacePairingAttempt>,
+  confirmChatWorkspacePairing: (attemptId) =>
+    ipcRenderer.invoke("desktop:chat-workspace:pairing:confirm", attemptId) as Promise<DesktopChatWorkspaceConnectResult>,
+  cancelChatWorkspacePairing: (attemptId) =>
+    ipcRenderer.invoke("desktop:chat-workspace:pairing:cancel", attemptId) as Promise<{ ok: true }>,
+  disconnectChatWorkspace: () =>
+    ipcRenderer.invoke("desktop:chat-workspace:disconnect") as Promise<{ ok: true }>,
+  setChatWorkspaceSurface: (surface: DesktopChatWorkspaceSurface) =>
+    ipcRenderer.invoke("desktop:chat-workspace:surface", surface) as Promise<{ ok: true }>,
   quit: () => ipcRenderer.invoke("desktop:quit") as Promise<void>,
   checkForUpdates: () =>
     ipcRenderer.invoke("desktop:update:check") as Promise<DesktopUpdateState>,

@@ -241,15 +241,22 @@ export function HarnessTabs({
       .map((row) => ({ identity: row.identity, policy: row.policy, snapshot: row })),
   ];
   const ordered = pickerRows.toSorted((a, b) => a.policy.priority - b.policy.priority || a.identity.name.localeCompare(b.identity.name));
-  const firstExecutable = ordered.find((row) => row.policy.enabled && (!row.snapshot || canExecute(row.snapshot))) ?? ordered[0];
-  const resolvedTab = resolvedHarnessId && ordered.some((row) => row.identity.id === resolvedHarnessId)
+  const preserveTabIds = new Set<string>();
+  if (resolvedHarnessId) preserveTabIds.add(resolvedHarnessId);
+  if (activeSelection.mode === "pinned") preserveTabIds.add(activeSelection.harnessId);
+  if (transition?.targetHarnessId) preserveTabIds.add(transition.targetHarnessId);
+  if (pendingHarnessSelection?.mode === "pinned") preserveTabIds.add(pendingHarnessSelection.harnessId);
+  const isWorking = (row: PickerRow) => row.policy.enabled && Boolean(row.snapshot && canExecute(row.snapshot));
+  const visibleRows = ordered.filter((row) => preserveTabIds.has(row.identity.id) || isWorking(row));
+  const firstExecutable = ordered.find(isWorking);
+  const resolvedTab = resolvedHarnessId && visibleRows.some((row) => row.identity.id === resolvedHarnessId)
     ? resolvedHarnessId
     : firstExecutable?.identity.id;
   const requestedTab = activeSelection.mode === "pinned" ? activeSelection.harnessId : resolvedTab;
-  const activeTab = requestedTab && ordered.some((row) => row.identity.id === requestedTab)
+  const activeTab = requestedTab && visibleRows.some((row) => row.identity.id === requestedTab)
     ? requestedTab
     : resolvedTab ?? "";
-  const tabs = ordered.map((row) => ({
+  const tabs = visibleRows.map((row) => ({
     id: row.identity.id,
     label: <span title={row.identity.name}>
       <ProviderLogo providerID={row.identity.id} providerName={row.identity.name} size="compact" />
@@ -257,7 +264,7 @@ export function HarnessTabs({
     </span>,
     disabled: activeTab !== row.identity.id && (busy || Boolean(transition) || !row.policy.enabled || (row.snapshot ? !canExecute(row.snapshot) : false)),
   }));
-  const activeRow = ordered.find((row) => row.identity.id === activeTab);
+  const activeRow = visibleRows.find((row) => row.identity.id === activeTab);
   const chooseTab = (id: string) => {
     const next: HarnessSelection = { mode: "pinned", harnessId: id };
     if (!transition && id === activeTab) return;

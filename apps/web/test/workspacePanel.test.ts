@@ -79,13 +79,36 @@ test("Workspace edit library remains in the same Sheet and does not open customi
   const source = await readFile(new URL("../src/components/mobile/WorkspacePanel.tsx", import.meta.url), "utf8");
   const oldTools = await readFile(new URL("../src/components/mobile/MobileSessionHeader.tsx", import.meta.url), "utf8");
   assert.equal((source.match(/<Sheet/g) ?? []).length, 1);
+  assert.match(source, /Customize workspace/);
   assert.match(source, /Available items/);
   assert.match(source, /addPanelItem/);
   assert.match(source, /removePanelItem/);
   assert.match(source, /movePanelItem/);
-  assert.match(source, /dismiss="back"/);
+  assert.match(source, /dismiss=\{editing \? "close" : "back"\}/);
   assert.doesNotMatch(source, /WidgetLibraryPanel|setOverlay\("settings"\)/);
   assert.doesNotMatch(oldTools, /Customize tools|\["Workspace"|\["Agent"|\["System"/);
+});
+
+test("Workspace edit mode is metadata-only and has no per-item arrow toolbars", async () => {
+  const source = await readFile(new URL("../src/components/mobile/WorkspacePanel.tsx", import.meta.url), "utf8");
+  assert.match(source, /workspace-panel-editor-widget/);
+  assert.match(source, /workspace-panel-launcher--editor/);
+  assert.match(source, /widget\.render\(\{ projectId, sessionId, editing: false/);
+  assert.doesNotMatch(source, /<MoveControls|workspace-panel-edit-controls/);
+  assert.match(source, /workspace-panel-selection-bar/);
+});
+
+test("Workspace editor supports touch/native drag, library placement, resize, remove, and haptics", async () => {
+  const source = await readFile(new URL("../src/components/mobile/WorkspacePanel.tsx", import.meta.url), "utf8");
+  assert.match(source, /setPointerCapture/);
+  assert.match(source, /elementFromPoint/);
+  assert.match(source, /application\/x-polyth-panel-item/);
+  assert.match(source, /application\/x-polyth-panel-definition/);
+  assert.match(source, /data-workspace-remove/);
+  assert.match(source, /workspace-panel-size-handle/);
+  assert.match(source, /selectionFeedback/);
+  assert.match(source, /successFeedback/);
+  assert.match(source, /scrollBy\(\{ top: -30/);
 });
 
 test("phone Workspace owns full-width navigation geometry without sheet drag chrome", async () => {
@@ -101,6 +124,19 @@ test("phone Workspace owns full-width navigation geometry without sheet drag chr
   assert.match(sheet, /dismiss === "close"[\s\S]*className="sheet-grabber"/);
   assert.match(sheet, /dismiss === "back"[\s\S]*className="sheet-back"/);
   assert.match(sheet, /dismiss === "close"[\s\S]*className="sheet-close"/);
+});
+
+test("mobile Workspace editor CSS loads after widget fixes and keeps four-column direct manipulation", async () => {
+  const [main, styles] = await Promise.all([
+    readFile(new URL("../src/main.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/workspacePanelEditor.css", import.meta.url), "utf8"),
+  ]);
+  assert.ok(main.indexOf("workspacePanelEditor.css") > main.indexOf("workspacePanelWidgetFixes.css"));
+  assert.match(styles, /\.workspace-panel-items\.is-editing\s*\{[^}]*repeat\(4,/s);
+  assert.match(styles, /\.workspace-panel-drag-preview/);
+  assert.match(styles, /\.workspace-panel-remove-zone/);
+  assert.match(styles, /\.workspace-panel-selection-bar/);
+  assert.match(styles, /min-height:\s*var\(--tap\)/);
 });
 
 test("available item cells use metadata previews, not live widget renderers", async () => {

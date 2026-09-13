@@ -38,6 +38,10 @@ import type {
 import { assertUpdaterCapability } from "./updaterCapability.ts";
 import { resolveUpdaterChannel } from "./updaterChannel.ts";
 import { stagedChromiumExecutable } from "./chromiumResource.ts";
+import {
+  startDesktopChatWorkspaceRemoteCoordinator,
+  type DesktopChatWorkspaceRemoteCoordinator,
+} from "./chatWorkspaceRemoteCoordinator.ts";
 
 declare const __POLYTH_OPENCODE_VERSION__: string;
 const { autoUpdater } = electronUpdater;
@@ -55,8 +59,6 @@ if (process.env.POLYTH_DESKTOP_USER_DATA) {
 const startupSettings = readDesktopSettingsSync(join(app.getPath("userData"), "desktop", "settings.json"));
 const startupLowResourceMode = startupSettings.lowResourceMode;
 if (startupLowResourceMode) {
-  // Electron requires this call before ready. Software compositing is an
-  // explicit fallback for old/unsupported GPUs, never the default path.
   app.disableHardwareAcceleration();
   app.commandLine.appendSwitch("disk-cache-size", String(32 * 1024 * 1024));
   process.env.POLYTH_TERM_REPLAY_BYTES ??= String(64 * 1024);
@@ -71,6 +73,7 @@ let logPath = "";
 let settingsPath = "";
 let windowStatePath = "";
 let serverLifecycle: Awaited<ReturnType<typeof boot>> | null = null;
+let chatWorkspaceRemoteCoordinator: DesktopChatWorkspaceRemoteCoordinator | null = null;
 let updateState: DesktopUpdateState = { phase: "idle", message: "Updates are ready to check." };
 let quitting = false;
 let serverStopped = false;
@@ -91,9 +94,7 @@ const log = (message: string, error?: unknown): void => {
   try {
     mkdirSync(dirname(logPath), { recursive: true });
     appendFileSync(logPath, line, { encoding: "utf8", mode: 0o600 });
-  } catch {
-    // Logging must never take down the app.
-  }
+  } catch {}
 };
 
 const reservePort = (): Promise<number> => new Promise((resolvePort, reject) => {
@@ -135,9 +136,16 @@ const webPackagesPath = (): string => app.isPackaged
 const linkHostPath = (): string | undefined => {
   if (process.env.POLYTH_LINK_HOST) return process.env.POLYTH_LINK_HOST;
   const executable = process.platform === "win32" ? "polyth-link-host.exe" : "polyth-link-host";
+  return app.isPackaged ? packagedResource(join("polyth-link", executable)) : undefined;
+};
+
+const linkClientPath = (): string | undefined => {
+  if (process.env.POLYTH_LINK_CLIENT) return process.env.POLYTH_LINK_CLIENT;
+  if (process.platform === "win32") return undefined;
+  const executable = "polyth-link-client";
   return app.isPackaged
     ? packagedResource(join("polyth-link", executable))
-    : undefined;
+    : join(app.getAppPath(), "resources", "polyth-link", executable);
 };
 
 const readSavedWindowState = (): SavedWindowState => {
@@ -263,9 +271,7 @@ const checkForUpdates = async (): Promise<DesktopUpdateState> => {
   if (!app.isPackaged || isE2e) {
     return setUpdateState({
       phase: "disabled",
-      message: app.isPackaged
-        ? "Update checks are disabled in the desktop test harness."
-        : "Update checks are available in packaged builds.",
+      message: app.isPackaged ? "Update checks are disabled in the desktop test harness." : "Update checks are available in packaged builds.",
     });
   }
   try {
@@ -316,6 +322,8 @@ const shutdownServer = async (): Promise<void> => {
     powerSaveBlocker.stop(keepAwakeBlockerId);
   }
   keepAwakeBlockerId = null;
+  await chatWorkspaceRemoteCoordinator?.close().catch((error) => log("Chat Workspace remote worker shutdown failed", error));
+  chatWorkspaceRemoteCoordinator = null;
   await serverLifecycle?.shutdown().catch((error) => log("Server shutdown failed", error));
   serverLifecycle = null;
   log("Polyth server stopped");
@@ -330,55 +338,19 @@ function rebuildTrayMenu(): void {
   if (!tray) return;
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: mainWindow?.isVisible() ? "Focus Polyth" : "Show Polyth", click: showWindow },
-    {
-      label: "Hide",
-      enabled: mainWindow?.isVisible() ?? false,
-      click: () => {
-        mainWindow?.hide();
-        broadcastWindowState();
-      },
-    },
+    { label: "Hide", enabled: mainWindow?.isVisible() ?? false, click: () => { mainWindow?.hide(); broadcastWindowState(); } },
     { type: "separator" },
-    {
-      label: "Open data folder",
-      click: () => void shell.openPath(dataDir).then((error) => {
-        if (error) log(`Could not open data folder: ${error}`);
-      }),
-    },
-    {
-      label: "Close to tray",
-      type: "checkbox",
-      checked: settings.closeToTray,
-      click: ({ checked }) => void persistSettings({ closeToTray: checked }),
-    },
-    {
-      label: "Launch at login",
-      type: "checkbox",
-      visible: app.isPackaged && ["darwin", "linux", "win32"].includes(process.platform),
-      checked: settings.launchAtLogin,
-      click: ({ checked }) => void persistSettings({ launchAtLogin: checked }),
-    },
-    {
-      label: "Keep awake while running",
-      type: "checkbox",
-      checked: settings.keepAwake,
-      click: ({ checked }) => void persistSettings({ keepAwake: checked }),
-    },
+    { label: "Open data folder", click: () => void shell.openPath(dataDir).then((error) => { if (error) log(`Could not open data folder: ${error}`); }) },
+    { label: "Close to tray", type: "checkbox", checked: settings.closeToTray, click: ({ checked }) => void persistSettings({ closeToTray: checked }) },
+    { label: "Launch at login", type: "checkbox", visible: app.isPackaged && ["darwin", "linux", "win32"].includes(process.platform), checked: settings.launchAtLogin, click: ({ checked }) => void persistSettings({ launchAtLogin: checked }) },
+    { label: "Keep awake while running", type: "checkbox", checked: settings.keepAwake, click: ({ checked }) => void persistSettings({ keepAwake: checked }) },
     { type: "separator" },
     {
       label: updateState.phase === "downloading"
         ? `Downloading update${updateState.percent === undefined ? "…" : ` ${Math.round(updateState.percent)}%`}`
-        : updateState.phase === "downloaded"
-          ? "Restart to update"
-          : "Check for updates",
+        : updateState.phase === "downloaded" ? "Restart to update" : "Check for updates",
       enabled: updateState.phase !== "checking" && updateState.phase !== "downloading",
-      click: () => {
-        if (updateState.phase === "downloaded") {
-          void installUpdate();
-        } else {
-          void checkForUpdates();
-        }
-      },
+      click: () => { if (updateState.phase === "downloaded") void installUpdate(); else void checkForUpdates(); },
     },
     { type: "separator" },
     { label: "Quit Polyth", accelerator: "CommandOrControl+Q", click: quitApp },
@@ -390,12 +362,8 @@ const createTray = (): void => {
   tray = new Tray(icon);
   tray.setToolTip("Polyth");
   tray.on("click", () => {
-    if (mainWindow?.isVisible()) {
-      mainWindow.hide();
-      broadcastWindowState();
-    } else {
-      showWindow();
-    }
+    if (mainWindow?.isVisible()) { mainWindow.hide(); broadcastWindowState(); }
+    else showWindow();
   });
   tray.on("double-click", showWindow);
   rebuildTrayMenu();
@@ -411,60 +379,36 @@ const installApplicationMenu = (): void => {
         { type: "separator" as const },
         { label: "Check for Updates…", click: () => void checkForUpdates() },
         { type: "separator" as const },
-        { role: "hide" as const },
-        { role: "hideOthers" as const },
-        { role: "unhide" as const },
-        { type: "separator" as const },
-        { role: "quit" as const },
+        { role: "hide" as const }, { role: "hideOthers" as const }, { role: "unhide" as const },
+        { type: "separator" as const }, { role: "quit" as const },
       ],
     }] : []),
-    {
-      label: "File",
-      submenu: [
-        { label: "Show Polyth", accelerator: "CommandOrControl+Shift+P", click: showWindow },
-        { label: "Open Data Folder", click: () => void shell.openPath(dataDir) },
-        { type: "separator" },
-        { role: process.platform === "darwin" ? "close" : "quit" },
-      ],
-    },
-    {
-      label: "Edit",
-      submenu: [
-        { role: "undo" }, { role: "redo" }, { type: "separator" },
-        { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" },
-      ],
-    },
-    {
-      label: "View",
-      submenu: [
-        { role: "reload" },
-        ...(isE2e || !app.isPackaged ? [{ role: "toggleDevTools" as const }] : []),
-        { type: "separator" },
-        { role: "resetZoom" }, { role: "zoomIn" }, { role: "zoomOut" },
-        { type: "separator" }, { role: "togglefullscreen" },
-      ],
-    },
-    {
-      label: "Window",
-      submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "front" }],
-    },
+    { label: "File", submenu: [
+      { label: "Show Polyth", accelerator: "CommandOrControl+Shift+P", click: showWindow },
+      { label: "Open Data Folder", click: () => void shell.openPath(dataDir) },
+      { type: "separator" }, { role: process.platform === "darwin" ? "close" : "quit" },
+    ] },
+    { label: "Edit", submenu: [
+      { role: "undo" }, { role: "redo" }, { type: "separator" },
+      { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" },
+    ] },
+    { label: "View", submenu: [
+      { role: "reload" }, ...(isE2e || !app.isPackaged ? [{ role: "toggleDevTools" as const }] : []),
+      { type: "separator" }, { role: "resetZoom" }, { role: "zoomIn" }, { role: "zoomOut" },
+      { type: "separator" }, { role: "togglefullscreen" },
+    ] },
+    { label: "Window", submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "front" }] },
   ]));
 };
 
 const safeExternalUrl = (raw: string): boolean => {
-  try {
-    return ["https:", "http:", "mailto:"].includes(new URL(raw).protocol);
-  } catch {
-    return false;
-  }
+  try { return ["https:", "http:", "mailto:"].includes(new URL(raw).protocol); }
+  catch { return false; }
 };
 
 const isLocalNavigation = (raw: string): boolean => {
-  try {
-    return new URL(raw).origin === new URL(baseUrl).origin;
-  } catch {
-    return false;
-  }
+  try { return new URL(raw).origin === new URL(baseUrl).origin; }
+  catch { return false; }
 };
 
 const createWindow = async (): Promise<void> => {
@@ -492,62 +436,30 @@ const createWindow = async (): Promise<void> => {
     },
   });
   mainWindow = window;
-
   if (saved.maximized) window.maximize();
-  window.webContents.setWindowOpenHandler(({ url }) => {
-    if (safeExternalUrl(url)) void shell.openExternal(url);
-    return { action: "deny" };
-  });
-  window.webContents.on("will-navigate", (event, url) => {
-    if (isLocalNavigation(url)) return;
-    event.preventDefault();
-    if (safeExternalUrl(url)) void shell.openExternal(url);
-  });
-  window.webContents.on("render-process-gone", (_event, details) => {
-    log(`Renderer stopped: ${details.reason} (${details.exitCode})`);
-  });
-
+  window.webContents.setWindowOpenHandler(({ url }) => { if (safeExternalUrl(url)) void shell.openExternal(url); return { action: "deny" }; });
+  window.webContents.on("will-navigate", (event, url) => { if (isLocalNavigation(url)) return; event.preventDefault(); if (safeExternalUrl(url)) void shell.openExternal(url); });
+  window.webContents.on("render-process-gone", (_event, details) => log(`Renderer stopped: ${details.reason} (${details.exitCode})`));
   window.on("resize", scheduleWindowStateSave);
   window.on("move", scheduleWindowStateSave);
   window.on("maximize", broadcastWindowState);
   window.on("unmaximize", broadcastWindowState);
-  window.on("show", () => {
-    broadcastWindowState();
-    rebuildTrayMenu();
-  });
-  window.on("hide", () => {
-    broadcastWindowState();
-    rebuildTrayMenu();
-  });
+  window.on("show", () => { broadcastWindowState(); rebuildTrayMenu(); });
+  window.on("hide", () => { broadcastWindowState(); rebuildTrayMenu(); });
   window.on("focus", broadcastWindowState);
   window.on("blur", broadcastWindowState);
   window.on("close", (event) => {
-    if (!quitting && settings.closeToTray) {
-      event.preventDefault();
-      window.hide();
-      broadcastWindowState();
-      log("Window hidden to tray");
-    }
+    if (!quitting && settings.closeToTray) { event.preventDefault(); window.hide(); broadcastWindowState(); log("Window hidden to tray"); }
   });
-  window.on("closed", () => {
-    if (mainWindow === window) mainWindow = null;
-    rebuildTrayMenu();
-  });
+  window.on("closed", () => { if (mainWindow === window) mainWindow = null; rebuildTrayMenu(); });
   window.once("ready-to-show", () => {
-    if (!settings.startMinimized && !backgroundStart) {
-      window.show();
-      window.focus();
-    } else {
-      log(backgroundStart ? "Started in background from login item" : "Started hidden in system tray");
-    }
+    if (!settings.startMinimized && !backgroundStart) { window.show(); window.focus(); }
+    else log(backgroundStart ? "Started in background from login item" : "Started hidden in system tray");
     log("Desktop renderer ready");
   });
-
   for (let attempt = 1; ; attempt += 1) {
-    try {
-      await window.loadURL(baseUrl);
-      break;
-    } catch (error) {
+    try { await window.loadURL(baseUrl); break; }
+    catch (error) {
       if (attempt >= 3 || window.isDestroyed()) throw error;
       log(`Renderer navigation attempt ${attempt} failed; retrying`, error);
       await new Promise((resolveDelay) => setTimeout(resolveDelay, attempt * 250));
@@ -556,21 +468,20 @@ const createWindow = async (): Promise<void> => {
 };
 
 const ensureTrustedSender = (event: IpcMainInvokeEvent): void => {
-  if (!mainWindow || event.sender !== mainWindow.webContents) {
-    throw new Error("Untrusted desktop IPC sender");
-  }
+  if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error("Untrusted desktop IPC sender");
   const url = event.senderFrame?.url ?? "";
   if (!isLocalNavigation(url)) throw new Error("Untrusted desktop IPC sender");
 };
 
-const trustedHandle = <Args extends unknown[], Result>(
-  channel: string,
-  handler: (event: IpcMainInvokeEvent, ...args: Args) => Result | Promise<Result>,
-): void => {
-  ipcMain.handle(channel, (event, ...args: Args) => {
-    ensureTrustedSender(event);
-    return handler(event, ...args);
-  });
+const trustedHandle = <Args extends unknown[], Result>(channel: string, handler: (event: IpcMainInvokeEvent, ...args: Args) => Result | Promise<Result>): void => {
+  ipcMain.handle(channel, (event, ...args: Args) => { ensureTrustedSender(event); return handler(event, ...args); });
+};
+
+const requireChatWorkspaceCoordinator = (): DesktopChatWorkspaceRemoteCoordinator => {
+  if (!chatWorkspaceRemoteCoordinator) {
+    throw Object.assign(new Error("Desktop Polyth Link client is unavailable"), { code: "link-client-unavailable" });
+  }
+  return chatWorkspaceRemoteCoordinator;
 };
 
 const installUpdate = async (): Promise<void> => {
@@ -582,38 +493,25 @@ const installUpdate = async (): Promise<void> => {
 
 const installIpc = (): void => {
   trustedHandle("desktop:info", (): DesktopInfo => ({
-    appVersion: app.getVersion(),
-    opencodeVersion: __POLYTH_OPENCODE_VERSION__,
-    platform: process.platform,
-    arch: process.arch,
-    dataDir,
-    logPath,
-    packaged: app.isPackaged,
-    trayAvailable: tray !== null,
+    appVersion: app.getVersion(), opencodeVersion: __POLYTH_OPENCODE_VERSION__, platform: process.platform, arch: process.arch,
+    dataDir, logPath, packaged: app.isPackaged, trayAvailable: tray !== null,
     canLaunchAtLogin: app.isPackaged && ["darwin", "linux", "win32"].includes(process.platform),
-    keepAwakeActive: keepAwakeBlockerId !== null && powerSaveBlocker.isStarted(keepAwakeBlockerId),
-    lowResourceMode: startupLowResourceMode,
+    keepAwakeActive: keepAwakeBlockerId !== null && powerSaveBlocker.isStarted(keepAwakeBlockerId), lowResourceMode: startupLowResourceMode,
   }));
   trustedHandle("desktop:settings:get", () => settings);
   trustedHandle("desktop:settings:set", (_event, patch: unknown) => persistSettings(patch));
   trustedHandle("desktop:window", (_event, action: DesktopWindowAction) => {
     if (!mainWindow) return windowState();
     if (action === "minimize") mainWindow.minimize();
-    else if (action === "toggle-maximize") {
-      if (mainWindow.isMaximized()) mainWindow.unmaximize();
-      else mainWindow.maximize();
-    } else if (action === "close") mainWindow.close();
+    else if (action === "toggle-maximize") { if (mainWindow.isMaximized()) mainWindow.unmaximize(); else mainWindow.maximize(); }
+    else if (action === "close") mainWindow.close();
     else throw new Error("Unknown window action");
     return windowState();
   });
   trustedHandle("desktop:path:reveal", async (_event, path: unknown) => {
     const target = await validateAbsoluteLocalPath(path);
-    if (target.directory) {
-      const error = await shell.openPath(target.path);
-      if (error) throw new Error(error);
-    } else {
-      shell.showItemInFolder(target.path);
-    }
+    if (target.directory) { const error = await shell.openPath(target.path); if (error) throw new Error(error); }
+    else shell.showItemInFolder(target.path);
     log(`Revealed path in native file manager: ${target.path}`);
   });
   trustedHandle("desktop:path:open", async (_event, path: unknown) => {
@@ -621,13 +519,41 @@ const installIpc = (): void => {
     const error = await shell.openPath(target.path);
     if (error) throw new Error(error);
   });
-  trustedHandle("desktop:data:open", async () => {
-    const error = await shell.openPath(dataDir);
-    if (error) throw new Error(error);
+  trustedHandle("desktop:data:open", async () => { const error = await shell.openPath(dataDir); if (error) throw new Error(error); });
+  trustedHandle("desktop:chat-workspace:connections", async () => ({
+    activeConnectionId: chatWorkspaceRemoteCoordinator?.activeConnectionId() ?? null,
+    connections: await chatWorkspaceRemoteCoordinator?.listConnections() ?? [],
+  }));
+  trustedHandle("desktop:chat-workspace:connect", async (_event, rawConnectionId: unknown) => {
+    const connectionId = typeof rawConnectionId === "string" ? rawConnectionId.trim() : "";
+    if (!connectionId || connectionId.length > 200) throw new Error("Invalid Polyth Link connection id");
+    return requireChatWorkspaceCoordinator().connect(connectionId);
   });
-  trustedHandle("desktop:quit", () => {
-    setImmediate(quitApp);
+  trustedHandle("desktop:chat-workspace:pairing:preview", async (_event, rawTicket: unknown) => {
+    const ticket = typeof rawTicket === "string" ? rawTicket.trim() : "";
+    if (!ticket || ticket.length > 32_768) throw new Error("Invalid Polyth Link pairing ticket");
+    return requireChatWorkspaceCoordinator().parsePairingTicket(ticket);
   });
+  trustedHandle("desktop:chat-workspace:pairing:begin", async (_event, rawTicket: unknown, rawLabel: unknown) => {
+    const ticket = typeof rawTicket === "string" ? rawTicket.trim() : "";
+    const label = typeof rawLabel === "string" ? rawLabel.trim() : "";
+    if (!ticket || ticket.length > 32_768) throw new Error("Invalid Polyth Link pairing ticket");
+    if (!label || label.length > 120) throw new Error("Invalid pairing device label");
+    return requireChatWorkspaceCoordinator().beginPairing(ticket, label);
+  });
+  trustedHandle("desktop:chat-workspace:pairing:confirm", async (_event, rawAttemptId: unknown) => {
+    const attemptId = typeof rawAttemptId === "string" ? rawAttemptId.trim() : "";
+    if (!attemptId || attemptId.length > 200) throw new Error("Invalid pairing attempt id");
+    return requireChatWorkspaceCoordinator().confirmPairing(attemptId);
+  });
+  trustedHandle("desktop:chat-workspace:pairing:cancel", async (_event, rawAttemptId: unknown) => {
+    const attemptId = typeof rawAttemptId === "string" ? rawAttemptId.trim() : "";
+    if (!attemptId || attemptId.length > 200) throw new Error("Invalid pairing attempt id");
+    await requireChatWorkspaceCoordinator().cancelPairing(attemptId);
+    return { ok: true };
+  });
+  trustedHandle("desktop:chat-workspace:disconnect", async () => { await chatWorkspaceRemoteCoordinator?.disconnect(); return { ok: true }; });
+  trustedHandle("desktop:quit", () => { setImmediate(quitApp); });
   trustedHandle("desktop:update:check", checkForUpdates);
   trustedHandle("desktop:update:download", downloadUpdate);
   trustedHandle("desktop:update:install", installUpdate);
@@ -646,38 +572,23 @@ const configureUpdater = (): void => {
     debug: (message?: unknown) => log(`updater debug ${String(message ?? "")}`),
   };
   log(`Updater configured for ${updateChannel ?? "latest"} channel`);
-  autoUpdater.on("checking-for-update", () =>
-    setUpdateState({ phase: "checking", message: "Checking GitHub Releases…" }));
-  autoUpdater.on("update-available", (info) =>
-    setUpdateState({ phase: "available", message: `Polyth ${info.version} is available.`, version: info.version }));
-  autoUpdater.on("update-not-available", (info) =>
-    setUpdateState({ phase: "up-to-date", message: `Polyth ${info.version} is current.`, version: info.version }));
-  autoUpdater.on("download-progress", (progress) =>
-    setUpdateState({
-      phase: "downloading",
-      message: `Downloading Polyth ${updateState.version ?? "update"}…`,
-      ...(updateState.version ? { version: updateState.version } : {}),
-      percent: progress.percent,
-    }));
-  autoUpdater.on("update-downloaded", (info) =>
-    setUpdateState({ phase: "downloaded", message: "Update ready. Restart Polyth to install it.", version: info.version }));
-  autoUpdater.on("error", (error) =>
-    setUpdateState({ phase: "error", message: error.message }));
+  autoUpdater.on("checking-for-update", () => setUpdateState({ phase: "checking", message: "Checking GitHub Releases…" }));
+  autoUpdater.on("update-available", (info) => setUpdateState({ phase: "available", message: `Polyth ${info.version} is available.`, version: info.version }));
+  autoUpdater.on("update-not-available", (info) => setUpdateState({ phase: "up-to-date", message: `Polyth ${info.version} is current.`, version: info.version }));
+  autoUpdater.on("download-progress", (progress) => setUpdateState({
+    phase: "downloading", message: `Downloading Polyth ${updateState.version ?? "update"}…`,
+    ...(updateState.version ? { version: updateState.version } : {}), percent: progress.percent,
+  }));
+  autoUpdater.on("update-downloaded", (info) => setUpdateState({ phase: "downloaded", message: "Update ready. Restart Polyth to install it.", version: info.version }));
+  autoUpdater.on("error", (error) => setUpdateState({ phase: "error", message: error.message }));
   refreshAutomaticUpdateSchedule();
 };
 
 const startServer = async (): Promise<void> => {
   const binary = opencodePath();
   const webDist = webDistPath();
-  // A missing bundle used to be fatal, so a dev build that skipped the OpenCode
-  // download — or a pruned/quarantined resources dir — killed the whole app for
-  // a user whose own `opencode` works fine. Boot without the bundle instead and
-  // let the server discover an installed CLI; only a total miss fails, and it
-  // fails with the list of places it looked.
   const bundledOpenCode = existsSync(binary);
-  if (!bundledOpenCode) {
-    log(`Bundled OpenCode ${__POLYTH_OPENCODE_VERSION__} is missing at ${binary}; looking for an installed OpenCode instead`);
-  }
+  if (!bundledOpenCode) log(`Bundled OpenCode ${__POLYTH_OPENCODE_VERSION__} is missing at ${binary}; looking for an installed OpenCode instead`);
   if (!existsSync(join(webDist, "index.html"))) throw new Error(`Polyth web bundle is missing at ${webDist}`);
   const port = await reservePort();
   baseUrl = `http://127.0.0.1:${port}`;
@@ -689,32 +600,32 @@ const startServer = async (): Promise<void> => {
   if (app.isPackaged) {
     process.env.POLYTH_REQUIRE_BUNDLED_CHROMIUM = "1";
     if (bundledChromium) process.env.POLYTH_CHROMIUM_PATH = bundledChromium;
-    else {
-      // A packaged build must never reach out to an ambient user/system
-      // browser. The browser capability remains honestly unavailable instead.
-      delete process.env.POLYTH_CHROMIUM_PATH;
-      log("Staged Chromium is missing; browser capability will report unavailable");
-    }
+    else { delete process.env.POLYTH_CHROMIUM_PATH; log("Staged Chromium is missing; browser capability will report unavailable"); }
   }
   serverLifecycle = await boot({
-    port,
-    hostname: "127.0.0.1",
-    dataDir,
-    webDist,
-    webPackagesDir: webPackagesPath(),
-    serverPackages: desktopServerPackages,
+    port, hostname: "127.0.0.1", dataDir, webDist, webPackagesDir: webPackagesPath(), serverPackages: desktopServerPackages,
     ...(bundledOpenCode ? { opencode: { bin: binary, binarySource: "bundled" as const } } : {}),
   });
   log(`Polyth server started at ${baseUrl}`);
   if (bundledOpenCode) log(`Bundled OpenCode ${__POLYTH_OPENCODE_VERSION__}: ${binary}`);
 };
 
+const startChatWorkspaceRemoteCoordinator = async (): Promise<void> => {
+  const binary = linkClientPath();
+  if (!binary || !existsSync(binary)) {
+    log(process.platform === "win32" ? "Desktop Chat Workspace remote worker is disabled on Windows until Link client named-pipe IPC lands" : "Polyth Link client binary is unavailable; remote Chat Workspace device worker disabled");
+    return;
+  }
+  const desktopDir = join(app.getPath("userData"), "desktop");
+  chatWorkspaceRemoteCoordinator = await startDesktopChatWorkspaceRemoteCoordinator({
+    linkClientBinary: binary, dataDir, runtimeDir: join(desktopDir, "runtime"), webDist: webDistPath(), deviceName: app.getName(), log,
+  });
+  log("Desktop Chat Workspace remote coordinator ready");
+};
+
 const showFatalStartupError = (error: unknown): void => {
   log("Desktop startup failed", error);
-  dialog.showErrorBox(
-    "Polyth could not start",
-    `${error instanceof Error ? error.message : String(error)}\n\nSee ${logPath}`,
-  );
+  dialog.showErrorBox("Polyth could not start", `${error instanceof Error ? error.message : String(error)}\n\nSee ${logPath}`);
 };
 
 async function start(): Promise<void> {
@@ -728,25 +639,15 @@ async function start(): Promise<void> {
   if (startupLowResourceMode) log("Low-resource mode active");
   await applyLoginSetting();
   applyKeepAwakeSetting();
-
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
     const trusted = isLocalNavigation(webContents.getURL());
-    const mediaTypes = "mediaTypes" in details && Array.isArray(details.mediaTypes)
-      ? details.mediaTypes
-      : [];
-    callback(trusted && (
-      permission === "notifications"
-      || (permission === "media" && mediaTypes.length > 0 && mediaTypes.every((type) => type === "audio"))
-    ));
+    const mediaTypes = "mediaTypes" in details && Array.isArray(details.mediaTypes) ? details.mediaTypes : [];
+    callback(trusted && (permission === "notifications" || (permission === "media" && mediaTypes.length > 0 && mediaTypes.every((type) => type === "audio"))));
   });
   session.defaultSession.setPermissionCheckHandler((webContents, permission, _origin, details) =>
-    !!webContents && isLocalNavigation(webContents.getURL())
-    && (
-      permission === "notifications"
-      || (permission === "media" && details.mediaType === "audio")
-    ));
-
+    !!webContents && isLocalNavigation(webContents.getURL()) && (permission === "notifications" || (permission === "media" && details.mediaType === "audio")));
   await startServer();
+  await startChatWorkspaceRemoteCoordinator().catch((error) => log("Could not start Desktop Chat Workspace remote coordinator", error));
   installIpc();
   configureUpdater();
   createTray();
@@ -755,9 +656,8 @@ async function start(): Promise<void> {
 }
 
 const instanceLock = app.requestSingleInstanceLock();
-if (!instanceLock) {
-  app.quit();
-} else {
+if (!instanceLock) app.quit();
+else {
   app.on("second-instance", showWindow);
   app.on("activate", showWindow);
   app.on("before-quit", (event) => {
@@ -766,15 +666,11 @@ if (!instanceLock) {
     event.preventDefault();
     void shutdownServer().finally(() => app.quit());
   });
-  app.on("window-all-closed", () => {
-    if (!settings?.closeToTray && process.platform !== "darwin") quitApp();
+  app.on("window-all-closed", () => { if (!settings?.closeToTray && process.platform !== "darwin") quitApp(); });
+  void app.whenReady().then(start).catch(async (error) => {
+    showFatalStartupError(error);
+    quitting = true;
+    await shutdownServer();
+    app.exit(1);
   });
-  void app.whenReady()
-    .then(start)
-    .catch(async (error) => {
-      showFatalStartupError(error);
-      quitting = true;
-      await shutdownServer();
-      app.exit(1);
-    });
 }

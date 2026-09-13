@@ -1281,6 +1281,14 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column;
   overflow: hidden;
 }
+/* Clipped sibling of `.timeline`, not a scroll child. Live rows rise here so
+   a filled WAAPI transform cannot inflate the scroller's overflow. */
+.activity-live-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
 /* Centered reading measure: fluid up to 768px, minimum 16px logical gutters
    at narrow widths (§2.2). Bottom padding is the ≥32px (target 40px) tail
    clearance between the last surface and the composer boundary. */
@@ -9295,6 +9303,10 @@ color: var(--muted);
     white-space: nowrap;
     animation: island-swap var(--motion-normal) var(--motion-ease);
   }
+  /* A task start borrows the title island above. Its scheduled timeline copy
+     remains available to folded Activity history, but must never paint over
+     the response while it is transient. */
+  .activity-live.task-started { display: none; }
   .mobile-session-selector > .context-indicator { grid-column: 1; }
   .mobile-session-selector > svg { grid-column: 3; justify-self: center; width: var(--icon-sm); height: var(--icon-sm); color: var(--muted); }
   .mobile-island-dot {
@@ -9345,8 +9357,8 @@ color: var(--muted);
   .app.mode-chat.view-session .stage-new .hero-body { padding-top: calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height)) + var(--space-3)); }
   .app.mode-chat.view-session .timeline {
     padding-top: calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height)) + var(--space-4));
-    -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height))), #000 calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height)) + var(--space-2)));
-    mask-image: linear-gradient(to bottom, transparent calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height))), #000 calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height)) + var(--space-2)));
+    -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height))), #000 calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height)) + var(--space-4)));
+    mask-image: linear-gradient(to bottom, transparent calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height))), #000 calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height)) + var(--space-4)));
   }
   .mobile-tools-sheet.sheet {
     width: 100%;
@@ -12438,7 +12450,10 @@ html[data-font] body :is(
   background: var(--surface-activity);
   box-shadow: var(--shadow-sm);
 }
-.activity-group { background: transparent; }
+.activity-group {
+  position: relative;
+  background: transparent;
+}
 .activity-group.current { border-color: color-mix(in srgb, var(--accent-line) 58%, var(--border-soft)); }
 /* Nested summaries inherit the container's chrome. The surface is handed over
    through a variable so the shared hover state still wins the cascade. */
@@ -12468,10 +12483,10 @@ html[data-font] body :is(
 
 /* Live actions -------------------------------------------------------------
  * A running action is a bare row at the tail of the timeline, not a card:
- * nested in the block it added a second list to a surface meant to stay
- * folded, framed it read as a detached card. It rises out of the composer,
- * sits just under the block while it runs, then folds up into it. The block
- * itself never opens on its own. */
+ * entering the block's normal layout added a second list to a surface meant
+ * to stay folded, and framing it read as a detached card. It rises out of the
+ * composer, sits just under the block while it runs, then folds up into it.
+ * The block itself never opens on its own. */
 .activity-live {
   --activity-live-exit: 280ms;
   --activity-live-exit-ease: cubic-bezier(0.4, 0, 0.7, 0.2);
@@ -12479,6 +12494,7 @@ html[data-font] body :is(
   max-width: 100%;
   display: grid;
   grid-template-rows: 1fr;
+  pointer-events: auto;
   transform-origin: 50% 0;
   transition:
     grid-template-rows var(--activity-live-exit) var(--activity-live-exit-ease),
@@ -12488,16 +12504,21 @@ html[data-font] body :is(
     transform var(--activity-live-exit) var(--activity-live-exit-ease);
 }
 .activity-live-stage {
+  position: absolute;
+  inset-inline: 0;
   width: 100%;
   min-width: 0;
   display: grid;
 }
-.activity-live-stage > .activity-live { grid-area: 1 / 1; }
-/* Part of the block, so it sits against it: the timeline's row gap would push
-   it away and read as a separate turn. Only after the block or another live
-   row — a first lone action keeps its distance from the prompt above. */
-.timeline > .activity-group + .activity-live-stage {
-  margin-block-start: calc(var(--space-1) - var(--timeline-gap));
+/* Portaled into `.activity-live-layer`. Left/width/top track the block; the
+   gap sits in existing timeline tail padding instead of below the group's
+   border box (that previous inset grew scrollHeight). Inserting or growing a
+   live row must not change the scrollport or move every earlier row while
+   the composer-to-block rise is in flight. */
+.activity-live-layer > .activity-live-stage {
+  inset-inline: auto;
+  width: auto;
+  margin-block-start: var(--space-1);
 }
 .activity-live.leaving {
   grid-template-rows: 0fr;
