@@ -1,60 +1,204 @@
-/* Usage dashboard glass surfaces and compact provider-card refinements. */
+/* Usage dashboard surface polish: one quiet glass control island, aligned provider cards. */
 .usage-dashboard {
-  --usage-toolbar-bg: var(--material-glass-chrome);
+  --usage-toolbar-bg: var(--material-glass);
+  --usage-toolbar-control-bg: var(--material-glass-control-fill);
+  --usage-toolbar-control-edge: var(--material-glass-control-edge);
 }
 
+/* One glass surface owns the dashboard controls. Nested tabs stay borderless. */
 .usage-dashboard-toolbar {
-  border-bottom-color: color-mix(in srgb, var(--material-glass-border) 82%, transparent);
+  position: sticky;
+  z-index: 2;
+  top: var(--space-1);
+  width: auto;
+  min-height: 0;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) var(--gutter) 0;
+  padding: var(--space-1);
+  border: 1px solid color-mix(in srgb, var(--material-glass-border) 58%, transparent);
+  border-radius: var(--radius-island);
   background: var(--usage-toolbar-bg);
   box-shadow: var(--material-glass-highlight), var(--shadow-sm);
 }
 
-.usage-dashboard-toolbar :is(.usage-view-tabs, .usage-range-control, .usage-layout-control),
-.usage-dashboard-toolbar .usage-toolbar-controls > .ui-icon-btn {
-  border-color: color-mix(in srgb, var(--material-glass-border) 82%, transparent);
-  background: var(--material-glass-medium);
-  box-shadow: var(--material-glass-highlight);
+.usage-dashboard-toolbar :is(.usage-view-tabs, .usage-range-control, .usage-layout-control) {
+  gap: var(--space-1);
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .usage-dashboard-toolbar .ui-tab {
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  padding-inline: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
   background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font-family: var(--ui-font-family);
+  font-size: var(--font-meta);
+  font-weight: 620;
 }
 
-.usage-dashboard-toolbar .ui-tab--selected {
-  border-color: color-mix(in srgb, var(--material-glass-border) 90%, transparent);
-  background: var(--material-glass-strong);
+.usage-dashboard-toolbar .ui-tab:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--surface-overlay-hover);
+  color: var(--text);
+}
+
+.usage-dashboard-toolbar .ui-tab--selected,
+.usage-dashboard-toolbar .ui-tab--selected:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--usage-toolbar-control-bg);
   box-shadow: var(--material-glass-highlight);
+  color: var(--text);
+}
+
+.usage-view-tabs {
+  flex: 0 1 auto;
+}
+
+.usage-view-tabs .ui-tab {
+  gap: var(--space-2);
+  padding-inline: var(--space-3);
+  font-size: var(--font-label);
+}
+
+.usage-view-tabs svg,
+.usage-layout-control svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+.usage-toolbar-spacer {
+  min-width: var(--space-2);
+  flex: 1;
+}
+
+.usage-toolbar-controls {
+  min-width: 0;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+}
+
+.usage-range-control .ui-tab {
+  min-width: var(--control-h-sm);
+  padding-inline: var(--space-2);
+  font-family: var(--ui-font-family);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Density is secondary: keep it compact and icon-led on desktop. */
+.usage-layout-control .ui-tab span {
+  display: none;
+}
+
+.usage-layout-control .ui-tab {
+  min-width: var(--control-h-sm);
+  padding-inline: var(--space-2);
+}
+
+.usage-dashboard-toolbar .usage-toolbar-controls > .ui-icon-btn {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+}
+
+.usage-dashboard-toolbar .usage-toolbar-controls > .ui-icon-btn:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--surface-overlay-hover);
+  color: var(--text);
 }
 
 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-  body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .usage-dashboard-toolbar {
+  html:not([data-reduce-animations="true"]) body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .usage-dashboard-toolbar {
+    background: color-mix(in srgb, var(--material-glass) 62%, transparent);
     -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
     backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
   }
 }
 
-/* Empty quota data is absence, not a state that deserves permanent card space. */
+@media (prefers-reduced-motion: reduce) {
+  .usage-dashboard-toolbar {
+    background: var(--material-glass);
+  }
+}
+
+/* Empty quota data is absence, not a permanent empty-state block. */
 .usage-provider-no-quota {
   display: none;
 }
 
+/* Provider cards use one calm surface and typography instead of nested mini-cards. */
 .usage-provider-detail-card {
+  --usage-provider-action-size: max(var(--control-h-sm), var(--hit-min));
   position: relative;
+  padding: var(--space-3);
+  border-color: color-mix(in srgb, var(--material-glass-border) 56%, transparent);
+  background: var(--material-glass-medium);
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
 }
 
-/* Keep the visibility action discoverable without dedicating a full footer row to it. */
+.usage-provider-detail-card > header {
+  min-height: var(--tap);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  padding-inline-end: calc(var(--usage-provider-action-size) + var(--usage-provider-action-size) + var(--space-2));
+}
+
+.usage-provider-detail-card > header > div {
+  min-width: 0;
+}
+
+.usage-provider-detail-card h3,
+.usage-provider-detail-card header p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-status-pill {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.usage-status-pill.stale,
+.usage-status-pill.session-only {
+  border-color: transparent;
+}
+
+/* Pin and visibility are a single aligned action cluster without a footer-sized button. */
 .usage-provider-pin {
-  margin-inline-end: calc(var(--tap) + 2px);
+  position: absolute;
+  inset-block-start: var(--space-3);
+  inset-inline-end: calc(var(--space-3) + var(--usage-provider-action-size) + var(--space-1));
+  width: var(--usage-provider-action-size);
+  min-width: var(--usage-provider-action-size);
+  height: var(--usage-provider-action-size);
+  min-height: var(--usage-provider-action-size);
+  margin: 0;
 }
 
 .usage-provider-detail-card > footer > .ui-btn:first-child {
   position: absolute;
-  inset-block-start: 8px;
-  inset-inline-end: 8px;
-  inline-size: var(--tap);
-  min-inline-size: var(--tap);
-  block-size: var(--tap);
-  min-block-size: var(--tap);
+  inset-block-start: var(--space-3);
+  inset-inline-end: var(--space-3);
+  width: var(--usage-provider-action-size);
+  min-width: var(--usage-provider-action-size);
+  height: var(--usage-provider-action-size);
+  min-height: var(--usage-provider-action-size);
   justify-content: center;
   gap: 0;
   padding: 0;
@@ -70,44 +214,131 @@
 
 .usage-provider-detail-card > footer > .ui-btn:first-child::before {
   content: "";
-  inline-size: 18px;
-  block-size: 18px;
+  width: var(--icon-md);
+  height: var(--icon-md);
   flex: none;
   background: currentColor;
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E") center / contain no-repeat;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 
-.usage-provider-detail-card > footer > .ui-btn:first-child:hover {
-  background: var(--surface-overlay);
+.usage-provider-detail-card > footer > .ui-btn:first-child:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--surface-overlay-hover);
   color: var(--text);
 }
 
-.usage-provider-detail-card > footer:not(:has(> .ui-btn:nth-child(2))) {
+.usage-provider-detail-card > footer {
   min-height: 0;
-  margin-top: 0;
+  margin-top: var(--space-2);
   padding-top: 0;
+}
+
+.usage-provider-detail-card > footer > .ui-btn:nth-child(2) {
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  border-color: transparent;
+  background: transparent;
+}
+
+.usage-provider-detail-card > footer > .ui-btn:nth-child(2):hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--surface-overlay-hover);
+}
+
+.usage-provider-detail-stats {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: var(--space-3) 0 var(--space-2);
+}
+
+.usage-provider-detail-stats > div {
+  min-width: 0;
+  gap: var(--space-1);
+  padding: var(--space-1) 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.usage-provider-detail-stats strong {
+  font: 650 var(--font-label)/1.2 var(--mono);
+}
+
+.usage-provider-windows {
+  gap: var(--space-3);
+}
+
+/* Summary row is information, not another boxed card. */
+.usage-provider-view-intro {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.usage-provider-view-intro .ui-btn {
+  margin-left: 0;
 }
 
 @container usage-dashboard (max-width: 700px) {
   .usage-dashboard-toolbar {
-    gap: 6px;
-    padding: 8px 12px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-1);
+    margin: var(--space-2) var(--space-3) 0;
+    padding: var(--space-1);
+    border-radius: var(--radius-surface);
+  }
+
+  .usage-view-tabs {
+    width: 100%;
+    margin: 0;
+  }
+
+  .usage-view-tabs .ui-tab {
+    min-height: var(--tap);
+    flex: 1;
+  }
+
+  .usage-toolbar-spacer {
+    display: none;
   }
 
   .usage-toolbar-controls {
+    width: 100%;
+    display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 6px;
+    gap: var(--space-1);
   }
 
-  /* Density is a desktop concern; mobile already has a purpose-built responsive layout. */
+  .usage-range-control {
+    width: 100%;
+  }
+
+  .usage-range-control .ui-tab {
+    min-height: var(--tap);
+    flex: 1;
+  }
+
   .usage-layout-control {
     display: none;
   }
 
+  .usage-dashboard-toolbar .usage-toolbar-controls > .ui-icon-btn {
+    min-width: var(--tap);
+    min-height: var(--tap);
+  }
+
   .usage-provider-detail-card > header {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    gap: 4px 8px;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    align-items: center;
+    padding-inline-end: calc(var(--usage-provider-action-size) + var(--usage-provider-action-size) + var(--space-2));
   }
 
   .usage-provider-detail-card > header > .usage-provider-mark {
@@ -120,34 +351,34 @@
     grid-row: 1;
   }
 
-  .usage-provider-detail-card > header > div h3,
-  .usage-provider-detail-card > header > div p {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
   .usage-provider-detail-card > header .usage-status-pill {
     grid-column: 2;
     grid-row: 2;
     justify-self: start;
   }
 
-  .usage-provider-detail-card > header > .usage-provider-pin {
-    grid-column: 3;
-    grid-row: 1 / 3;
-    align-self: center;
+  .usage-provider-detail-stats {
+    margin-block: var(--space-2) var(--space-1);
   }
 
-  .usage-provider-detail-stats {
-    margin-block: 10px 2px;
+  .usage-provider-view-intro {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-3);
+    padding-inline: var(--space-1);
+  }
+
+  .usage-provider-view-intro .ui-btn {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-height: var(--tap);
+    justify-content: center;
   }
 }
 
 @container usage-dashboard (max-width: 480px) {
   .usage-provider-detail-stats {
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 4px;
+    gap: var(--space-1);
   }
 
   .usage-provider-detail-stats > div:last-child {
@@ -155,6 +386,6 @@
   }
 
   .usage-provider-detail-stats > div {
-    padding-inline: 6px;
+    padding-inline: var(--space-1);
   }
 }
