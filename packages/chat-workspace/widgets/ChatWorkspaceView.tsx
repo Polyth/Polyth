@@ -6,7 +6,7 @@ import type { WebPackageHost } from "@polyth/web-sdk";
 import { mostRecentProfile } from "./lib/commands.ts";
 import { workspaceFromDto } from "./lib/workspaceClient.ts";
 import { presetById, mergePresetSources, bundleCopyText } from "@polyth/handoff";
-import { createHandoffClient, SendSheet } from "@polyth/handoff/web";
+import { createHandoffClient, hashText, noteNewSessionHandoffPending, SendSheet } from "@polyth/handoff/web";
 import EmptyState from "../../../apps/web/src/components/EmptyState.tsx";
 import { useStore, getState } from "../../../apps/web/src/store.ts";
 import { ChatWorkspaceDock } from "./ChatWorkspaceDock.tsx";
@@ -15,7 +15,11 @@ import {
   ChatWorkspaceTabStrip,
   CustomChatDialog,
 } from "./ChatWorkspaceTabStrip.tsx";
-import { ChatWorkspaceViewport, ViewportFailure } from "./ChatWorkspaceViewport.tsx";
+import {
+  ChatWorkspaceViewport,
+  ViewportFailure,
+  type ChatWorkspaceSelectionAction,
+} from "./ChatWorkspaceViewport.tsx";
 import {
   registerChatWorkspaceCommandConsumer,
   type ChatWorkspacePendingCommand,
@@ -253,6 +257,33 @@ export default function ChatWorkspaceView(props: {
     : "chat";
   const providerId = activeProfile?.providerId ?? "custom";
 
+  const handoffSelection = async (rawText: string, action: ChatWorkspaceSelectionAction) => {
+    if (!projectId) return;
+    const text = rawText.replace(/\r\n?/g, "\n").trim();
+    if (!text) return;
+    const currentSession = sessionId ? getState().sessions.find((item) => item.id === sessionId) ?? null : null;
+    const provenance = {
+      sourceKind: "chat-workspace" as const,
+      provider: providerName,
+      profileName: activeProfile?.name ?? "Personal",
+    };
+    const source = `External ${providerName} chat${activeTab?.title ? ` — ${activeTab.title}` : ""}`;
+    const payload = action === "ask-agent"
+      ? `Review the following ${source} selection in the context of this project. Verify it rather than assuming it is correct.\n\n${text}`
+      : `${source}\n\n${text}`;
+    const target = action === "new-agent-chat"
+      ? "new-session"
+      : handoff.defaultTarget(currentSession);
+
+    await handoff.executeTarget(target, projectId, sessionId, payload);
+    if (target === "new-session") {
+      noteNewSessionHandoffPending(projectId, provenance, payload);
+    } else if (sessionId) {
+      await handoff.recordImport(sessionId, provenance, hashText(payload));
+    }
+    setBundleNotice(action === "new-agent-chat" ? "Started a new Polyth chat from the selection." : "Added the selection to Polyth.");
+  };
+
   if (!projectId) {
     return <EmptyState title="Chat Workspace" description="Open a project to use Chat Workspace." />;
   }
@@ -310,6 +341,7 @@ export default function ChatWorkspaceView(props: {
           profileLocked={profileLocked}
           onProfileLockedChange={setProfileLocked}
           onOpenProfileChooser={() => setAddPopoverOpen(true)}
+          onHandoffSelection={handoffSelection}
         />
       )}
       <ChatWorkspaceDock

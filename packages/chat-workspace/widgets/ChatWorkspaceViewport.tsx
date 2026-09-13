@@ -26,6 +26,8 @@ import {
   type TabOverlayModel,
 } from "./lib/tabOverlayState.ts";
 
+export type ChatWorkspaceSelectionAction = "add-to-agent" | "ask-agent" | "new-agent-chat";
+
 export function ChatWorkspaceViewport(props: {
   transport: ApiTransport;
   projectId: string;
@@ -37,6 +39,7 @@ export function ChatWorkspaceViewport(props: {
   profileLocked?: boolean;
   onProfileLockedChange?(locked: boolean): void;
   onOpenProfileChooser?(): void;
+  onHandoffSelection?(text: string, action: ChatWorkspaceSelectionAction): void | Promise<void>;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -48,6 +51,7 @@ export function ChatWorkspaceViewport(props: {
   const [imageRect, setImageRect] = useState({ left: 0, top: 0, width: 0, height: 0 });
   const [overlay, setOverlay] = useState<TabOverlayModel>(emptyOverlayModel());
   const [popupFrame, setPopupFrame] = useState<{ popupId: string; mime: string; data: string; width: number; height: number } | null>(null);
+  const [selection, setSelection] = useState<{ text: string; left: number; top: number } | null>(null);
   const activePopup = overlay.popups.at(-1) ?? null;
 
   const drawFrame = useCallback((mime: string, data: string, width: number, height: number, popupId?: string) => {
@@ -171,8 +175,42 @@ export function ChatWorkspaceViewport(props: {
     });
   };
 
+  const captureSelection = async (clientX: number, clientY: number) => {
+    if (!props.tabId || !props.onHandoffSelection) return;
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    try {
+      const res = await props.transport.post<{ text: string }>(
+        `/api/chat-workspace/tabs/${encodeURIComponent(props.tabId)}/clipboard/copy?projectId=${encodeURIComponent(props.projectId)}`,
+        {},
+      );
+      const text = res.text.trim();
+      if (!text) {
+        setSelection(null);
+        return;
+      }
+      const bounds = wrap.getBoundingClientRect();
+      const toolbarWidth = 310;
+      setSelection({
+        text,
+        left: Math.max(8, Math.min(clientX - bounds.left, Math.max(8, bounds.width - toolbarWidth - 8))),
+        top: Math.max(8, Math.min(clientY - bounds.top + 10, Math.max(8, bounds.height - 44))),
+      });
+    } catch {
+      setSelection(null);
+    }
+  };
+
+  const runSelectionAction = async (action: ChatWorkspaceSelectionAction) => {
+    if (!selection || !props.onHandoffSelection) return;
+    const text = selection.text;
+    setSelection(null);
+    await props.onHandoffSelection(text, action);
+  };
+
   const onWheel = async (e: React.WheelEvent) => {
     noteGesture();
+    setSelection(null);
     const pt = pointForEvent(e.clientX, e.clientY);
     if (!pt) return;
     e.preventDefault();
@@ -191,6 +229,7 @@ export function ChatWorkspaceViewport(props: {
 
   const onKeyDown = async (e: React.KeyboardEvent) => {
     noteGesture();
+    setSelection(null);
     const isCopy = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c";
     const isPaste = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "v";
     if (isCopy && props.tabId) {
@@ -260,6 +299,10 @@ export function ChatWorkspaceViewport(props: {
   }, [props.tabId, flushResize, scheduleResize]);
 
   useEffect(() => {
+    setSelection(null);
+  }, [props.tabId]);
+
+  useEffect(() => {
     if (props.profileLocked) {
       setOverlay((prev) => (prev.profileLocked ? prev : { ...prev, profileLocked: true }));
     }
@@ -290,14 +333,43 @@ export function ChatWorkspaceViewport(props: {
         className="chat-workspace-canvas"
         tabIndex={0}
         onPointerMove={(e) => void onPointer("move", e)}
-        onPointerDown={(e) => void onPointer("down", e)}
-        onPointerUp={(e) => void onPointer("up", e)}
+        onPointerDown={(e) => { setSelection(null); void onPointer("down", e); }}
+        onPointerUp={(e) => {
+          const clientX = e.clientX;
+          const clientY = e.clientY;
+          void onPointer("up", e).then(() => captureSelection(clientX, clientY));
+        }}
         onClick={(e) => { canvasRef.current?.focus(); void onPointer("click", e as unknown as React.PointerEvent); }}
         onDoubleClick={(e) => void onPointer("dblclick", e as unknown as React.PointerEvent)}
         onWheel={(e) => void onWheel(e)}
         onKeyDown={(e) => void onKeyDown(e)}
         onKeyUp={(e) => void onKeyUp(e)}
       />
+      {selection ? (
+        <div
+          role="toolbar"
+          aria-label="Use selected external chat text in Polyth"
+          style={{
+            position: "absolute",
+            left: selection.left,
+            top: selection.top,
+            zIndex: 12,
+            display: "flex",
+            alignItems: "center",
+            gap: 2,
+            padding: 3,
+            borderRadius: 10,
+            background: "var(--surface-raised, rgba(24,24,27,.94))",
+            boxShadow: "0 8px 24px rgba(0,0,0,.18)",
+            backdropFilter: "blur(16px)",
+          }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <Button size="sm" variant="ghost" onClick={() => void runSelectionAction("add-to-agent")}>Add to agent</Button>
+          <Button size="sm" variant="ghost" onClick={() => void runSelectionAction("ask-agent")}>Ask agent</Button>
+          <Button size="sm" variant="ghost" onClick={() => void runSelectionAction("new-agent-chat")}>New chat</Button>
+        </div>
+      ) : null}
       {overlay.approval ? (
         <div className="chat-workspace-overlay chat-workspace-overlay-approval">
           <p>This chat wants to open: {overlay.approval.origin}</p>

@@ -28,55 +28,50 @@ if (process.platform === "linux") {
   );
 }
 
+const repoRoot = join(here, "..", "..");
+const linkDir = join(here, "resources", "polyth-link");
 const linkHostName = process.platform === "win32" ? "polyth-link-host.exe" : "polyth-link-host";
-const linkHostSrc = join(here, "..", "..", "target", "release", linkHostName);
-const linkHostDir = join(here, "resources", "polyth-link");
-await mkdir(linkHostDir, { recursive: true });
+const linkClientName = process.platform === "win32" ? "polyth-link-client.exe" : "polyth-link-client";
+await mkdir(linkDir, { recursive: true });
+
 if (process.platform === "win32") {
-  console.warn("Polyth Link host is not packaged on Windows until named-pipe IPC exists.");
-} else {
-  const repoRoot = join(here, "..", "..");
-  const cargoArgs = ["build", "--release", "-p", "polyth-link-host"];
-  if (process.platform === "darwin" && process.env.POLYTH_MAC_UNIVERSAL === "1") {
-    for (const target of ["aarch64-apple-darwin", "x86_64-apple-darwin"]) {
-      const added = spawnSync("rustup", ["target", "add", target], { cwd: repoRoot, stdio: "inherit" });
-      if (added.status !== 0) {
-        throw new Error(`failed to add Rust target ${target}`);
-      }
-      const cargo = spawnSync("cargo", [...cargoArgs, "--target", target], {
+  console.warn("Polyth Link host/client are not packaged on Windows until the native client IPC has a named-pipe transport.");
+} else if (process.platform === "darwin" && process.env.POLYTH_MAC_UNIVERSAL === "1") {
+  for (const target of ["aarch64-apple-darwin", "x86_64-apple-darwin"]) {
+    const added = spawnSync("rustup", ["target", "add", target], { cwd: repoRoot, stdio: "inherit" });
+    if (added.status !== 0) throw new Error(`failed to add Rust target ${target}`);
+    for (const pkg of ["polyth-link-host", "polyth-link-client"]) {
+      const cargo = spawnSync("cargo", ["build", "--release", "-p", pkg, "--target", target], {
         cwd: repoRoot,
         stdio: "inherit",
       });
-      if (cargo.status !== 0) {
-        throw new Error(`failed to build the Polyth Link host binary for ${target}`);
-      }
+      if (cargo.status !== 0) throw new Error(`failed to build ${pkg} for ${target}`);
     }
-    const arm = join(repoRoot, "target", "aarch64-apple-darwin", "release", linkHostName);
-    const intel = join(repoRoot, "target", "x86_64-apple-darwin", "release", linkHostName);
-    if (!existsSync(arm) || !existsSync(intel)) {
-      throw new Error("universal Polyth Link host binaries missing after release build");
-    }
-    const lipo = spawnSync("lipo", ["-create", arm, intel, "-output", join(linkHostDir, linkHostName)], {
-      stdio: "inherit",
-    });
-    if (lipo.status !== 0) {
-      throw new Error("failed to create a universal Polyth Link host binary");
-    }
-  } else {
-    const cargo = spawnSync("cargo", cargoArgs, {
+  }
+  for (const name of [linkHostName, linkClientName]) {
+    const arm = join(repoRoot, "target", "aarch64-apple-darwin", "release", name);
+    const intel = join(repoRoot, "target", "x86_64-apple-darwin", "release", name);
+    if (!existsSync(arm) || !existsSync(intel)) throw new Error(`universal Polyth Link binary missing: ${name}`);
+    const lipo = spawnSync("lipo", ["-create", arm, intel, "-output", join(linkDir, name)], { stdio: "inherit" });
+    if (lipo.status !== 0) throw new Error(`failed to create universal Polyth Link binary: ${name}`);
+  }
+} else {
+  for (const pkg of ["polyth-link-host", "polyth-link-client"]) {
+    const cargo = spawnSync("cargo", ["build", "--release", "-p", pkg], {
       cwd: repoRoot,
       stdio: "inherit",
     });
-    if (cargo.status !== 0) {
-      throw new Error("failed to build the Polyth Link host binary");
-    }
-    if (!existsSync(linkHostSrc)) {
-      throw new Error(`Polyth Link host binary missing after release build: ${linkHostSrc}`);
-    }
-    await copyFile(linkHostSrc, join(linkHostDir, linkHostName));
+    if (cargo.status !== 0) throw new Error(`failed to build ${pkg}`);
   }
-  if (!existsSync(join(linkHostDir, linkHostName))) {
-    throw new Error(`Polyth Link host binary missing from package resources: ${join(linkHostDir, linkHostName)}`);
+  await copyFile(join(repoRoot, "target", "release", linkHostName), join(linkDir, linkHostName));
+  await copyFile(join(repoRoot, "target", "release", linkClientName), join(linkDir, linkClientName));
+}
+
+if (process.platform !== "win32") {
+  for (const name of [linkHostName, linkClientName]) {
+    if (!existsSync(join(linkDir, name))) {
+      throw new Error(`Polyth Link binary missing from package resources: ${join(linkDir, name)}`);
+    }
   }
 }
 
@@ -112,6 +107,17 @@ await Promise.all([
   build({
     entryPoints: [join(here, "src", "preload.ts")],
     outfile: join(dist, "preload.cjs"),
+    bundle: true,
+    platform: "node",
+    format: "cjs",
+    target: "node22",
+    external: ["electron"],
+    legalComments: "none",
+    logLevel: "info",
+  }),
+  build({
+    entryPoints: [join(here, "src", "chatWorkspaceProviderPreload.ts")],
+    outfile: join(dist, "chatWorkspaceProviderPreload.cjs"),
     bundle: true,
     platform: "node",
     format: "cjs",

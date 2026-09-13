@@ -4,7 +4,7 @@
 import type { PackageDescriptorDto } from "@polyth/contracts";
 import type { ServerPackageFactory } from "@polyth/plugins";
 import type { ServerPackageRegistration } from "@polyth/server";
-import chatWorkspace from "../../../packages/chat-workspace/src/serverEntry.ts";
+import chatWorkspace from "../../../packages/chat-workspace/src/serverEntryWithDeviceRuntime.ts";
 import handoff from "../../../packages/handoff/src/serverEntry.ts";
 import browser from "../../../packages/browser/src/serverEntry.ts";
 import commands from "../../../packages/commands/src/serverEntry.ts";
