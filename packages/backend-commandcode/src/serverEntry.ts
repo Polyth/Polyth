@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { HarnessContext, HarnessProvider, HarnessRegistry } from "@polyth/contracts";
 import { releaseProcessExecution } from "@polyth/harness-runtime";
 import { harnessExecutableChildEnv } from "@polyth/harness-runtime/executable-discovery";
@@ -19,10 +19,7 @@ import { COMMANDCODE_WORKER_SOURCE } from "./workerSource.ts";
 const writeGenerated = async (file: string, content: string): Promise<void> => {
   const current = await readFile(file, "utf8").catch(() => undefined);
   if (current === content) return;
-  await mkdir(join(file, ".."), { recursive: true }).catch(async () => {
-    const { dirname } = await import("node:path");
-    await mkdir(dirname(file), { recursive: true });
-  });
+  await mkdir(dirname(file), { recursive: true });
   const temp = `${file}.${process.pid}.tmp`;
   await writeFile(temp, content, { mode: 0o600 });
   await rename(temp, file);

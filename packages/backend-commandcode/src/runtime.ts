@@ -44,8 +44,10 @@ interface BindingState {
   bindingId: string;
   operationId: string;
   title: string;
+  createdAt?: number;
   nativeSessionId?: string;
   nativeBoundAt?: number;
+  acceptedOperations?: string[];
   updatedAt: number;
 }
 
@@ -65,7 +67,13 @@ const readBinding = async (file: string): Promise<BindingState | undefined> => {
       || typeof value.operationId !== "string"
       || typeof value.title !== "string"
       || typeof value.updatedAt !== "number"
+      || (value.createdAt !== undefined && typeof value.createdAt !== "number")
       || (value.nativeSessionId !== undefined && typeof value.nativeSessionId !== "string")
+      || (value.nativeBoundAt !== undefined && typeof value.nativeBoundAt !== "number")
+      || (value.acceptedOperations !== undefined && (
+        !Array.isArray(value.acceptedOperations)
+        || !value.acceptedOperations.every((operationId) => typeof operationId === "string" && operationId.length > 0)
+      ))
     ) return undefined;
     return value as BindingState;
   } catch (error) {
@@ -126,6 +134,9 @@ export function createCommandCodeRuntime(options: {
   let nativeSessionId = "";
   let createOperationId = "";
   let activeOperationId = "";
+  let activeSpawnConfirmed = false;
+  let activeFailure = "";
+  let abortRequested = false;
   let translateState: ReturnType<typeof createCommandCodeTranslateState> | undefined;
   let lastResult: Record<string, unknown> | undefined;
   let order = 0;
@@ -146,7 +157,29 @@ export function createCommandCodeRuntime(options: {
     for (const callback of listeners) callback(context.sessionId, event);
   };
 
+  const rememberAccepted = (operationId: string) => {
+    if (!operationId || accepted.some((entry) => entry.operationId === operationId)) return;
+    accepted.push({ operationId, mutationKind: "turn-submit" });
+  };
+
+  const clearActiveTurn = () => {
+    activeOperationId = "";
+    activeSpawnConfirmed = false;
+    activeFailure = "";
+    abortRequested = false;
+    translateState = undefined;
+    lastResult = undefined;
+  };
+
   const handleWorkerEvent = (message: CommandCodeWorkerEvent) => {
+    if (message.type === "turn-spawned" && message.operationId === activeOperationId) {
+      activeSpawnConfirmed = true;
+      return;
+    }
+    if ((message.type === "protocol-error" || message.type === "process-error") && message.operationId === activeOperationId) {
+      activeFailure = safeError(message.error);
+      return;
+    }
     if (message.type === "commandcode-record") {
       if (message.operationId !== activeOperationId || !translateState) return;
       const outer = message.record && typeof message.record === "object" && !Array.isArray(message.record)
@@ -158,19 +191,22 @@ export function createCommandCodeRuntime(options: {
     }
     if (message.type !== "turn-exit" || message.operationId !== activeOperationId) return;
     const turnId = activeOperationId;
-    activeOperationId = "";
-    translateState = undefined;
-    order++;
+    const failure = activeFailure;
+    const wasAborted = abortRequested;
+    const result = lastResult;
     const code = typeof message.code === "number" ? message.code : null;
-    const subtype = typeof lastResult?.subtype === "string" ? lastResult.subtype : undefined;
-    if (code === 130 || message.signal === "SIGINT" || message.signal === "SIGTERM") {
+    const subtype = typeof result?.subtype === "string" ? result.subtype : undefined;
+    clearActiveTurn();
+    order++;
+    if (failure) {
+      emit({ type: "turn/stopped", turnId, reason: "error", error: failure });
+    } else if (wasAborted || code === 130 || message.signal === "SIGINT") {
       emit({ type: "turn/stopped", turnId, reason: "aborted" });
     } else if (code === 0 && (!subtype || subtype === "success")) {
       emit({ type: "turn/stopped", turnId, reason: "completed" });
     } else {
-      emit({ type: "turn/stopped", turnId, reason: "error", error: exitMessage(code, message.stderr, lastResult) });
+      emit({ type: "turn/stopped", turnId, reason: "error", error: exitMessage(code, message.stderr, result) });
     }
-    lastResult = undefined;
   };
 
   const eventSubscription = rpc.onEvent(handleWorkerEvent);
@@ -185,6 +221,7 @@ export function createCommandCodeRuntime(options: {
       bindingId = recovered.bindingId;
       nativeSessionId = recovered.nativeSessionId ?? "";
       createOperationId = operationId;
+      for (const acceptedOperation of recovered.acceptedOperations ?? []) rememberAccepted(acceptedOperation);
       await rpc.receipt(operationId, bindingId);
       return { kind: "confirmed", value: { backendSessionId: bindingId }, receipt: bindingId };
     }
@@ -196,15 +233,19 @@ export function createCommandCodeRuntime(options: {
       bindingId = recovered.bindingId;
       nativeSessionId = recovered.nativeSessionId ?? "";
       createOperationId = operationId;
+      for (const acceptedOperation of recovered.acceptedOperations ?? []) rememberAccepted(acceptedOperation);
       return { kind: "confirmed", value: { backendSessionId: bindingId }, receipt: bindingId };
     }
     return mutation(operationId, async () => {
+      const now = Date.now();
       const next: BindingState = {
         version: 1,
         bindingId: `commandcode:${randomUUID()}`,
         operationId,
         title: canonical.title?.trim() || "Command Code session",
-        updatedAt: Date.now(),
+        createdAt: now,
+        acceptedOperations: [],
+        updatedAt: now,
       };
       await writeBinding(bindingFile, next);
       await rpc.receipt(operationId, next.bindingId);
@@ -230,6 +271,7 @@ export function createCommandCodeRuntime(options: {
       bindingId = state.bindingId;
       nativeSessionId = state.nativeSessionId ?? "";
       createOperationId = state.operationId;
+      for (const acceptedOperation of state.acceptedOperations ?? []) rememberAccepted(acceptedOperation);
       return bindingId;
     },
     createSessionOperation: createSession,
@@ -240,7 +282,7 @@ export function createCommandCodeRuntime(options: {
         id: state.bindingId,
         operationId: state.operationId,
         title: state.title,
-        createdAt: state.updatedAt,
+        createdAt: state.createdAt ?? state.updatedAt,
         updatedAt: state.updatedAt,
       }] : [];
     },
@@ -256,6 +298,9 @@ export function createCommandCodeRuntime(options: {
         return { kind: "rejected", code: "unsupported", message: "Command Code attachment translation is not enabled yet" };
       }
       activeOperationId = operationId;
+      activeSpawnConfirmed = false;
+      activeFailure = "";
+      abortRequested = false;
       lastResult = undefined;
       translateState = createCommandCodeTranslateState(operationId, request.model);
       try {
@@ -273,19 +318,27 @@ export function createCommandCodeRuntime(options: {
         }, 20_000);
         if (!result.nativeSessionId) throw Object.assign(new Error("Command Code admission omitted native session id"), { code: "outcome-unknown" });
         nativeSessionId = result.nativeSessionId;
-        accepted.push({ operationId, mutationKind: "turn-submit" });
+        rememberAccepted(operationId);
         return { kind: "confirmed", value: { admissionId: nativeSessionId } };
       } catch (error) {
-        activeOperationId = "";
-        translateState = undefined;
         const code = (error as { code?: string }).code;
-        return code === "runtime-rejected" || code === "busy"
-          ? { kind: "rejected", code: code ?? "runtime-rejected", message: safeError(error instanceof Error ? error.message : error) }
-          : { kind: "unknown", operationId, message: safeError(error instanceof Error ? error.message : error) };
+        if ((code === "busy" || code === "unsupported") && !activeSpawnConfirmed && activeOperationId === operationId) {
+          clearActiveTurn();
+          return { kind: "rejected", code, message: safeError(error instanceof Error ? error.message : error) };
+        }
+        // Once the worker has spawned Command Code, a lost admission response
+        // is not permission to clear the operation or submit another turn. The
+        // bridge may already have released native inference after durably
+        // recording this operation id. Keep the execution fenced until exact
+        // terminal evidence or release/reconciliation resolves it.
+        const durable = await readBinding(bindingFile).catch(() => undefined);
+        if (durable?.acceptedOperations?.includes(operationId)) rememberAccepted(operationId);
+        return { kind: "unknown", operationId, message: safeError(error instanceof Error ? error.message : error) };
       }
     },
     startTurn: async () => { throw new Error("operation-aware Command Code admission is required"); },
     async abort() {
+      if (activeOperationId) abortRequested = true;
       await rpc.request({ type: "abort" }, 65_000);
     },
     async abortOperation(_sessionId, operationId) {
@@ -301,6 +354,7 @@ export function createCommandCodeRuntime(options: {
       if (state) {
         bindingId = state.bindingId;
         nativeSessionId = state.nativeSessionId ?? "";
+        for (const acceptedOperation of state.acceptedOperations ?? []) rememberAccepted(acceptedOperation);
       }
       return {
         ...endpoint,

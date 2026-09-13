@@ -17,7 +17,7 @@
       "description": "Command Code through its official headless event stream and native mod bridge",
       "core": false,
       "enabled": true,
-      "icon": "command-code",
+      "icon": "command",
       "hasSettings": false
     }
   }

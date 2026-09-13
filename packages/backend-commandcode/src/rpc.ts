@@ -122,7 +122,9 @@ export async function createCommandCodeRpc(options: {
       pending.delete(message.id);
       if (entry.timer) clearTimeout(entry.timer);
       if (message.success === false) {
-        entry.reject(Object.assign(new Error(safeMessage(message.error)), { code: "runtime-rejected", rpcCommand: entry.command }));
+        const rawCode = typeof message.code === "string" ? message.code : "outcome-unknown";
+        const code = rawCode === "busy" || rawCode === "unsupported" ? rawCode : "outcome-unknown";
+        entry.reject(Object.assign(new Error(safeMessage(message.error)), { code, rpcCommand: entry.command }));
       } else entry.resolve(message.data);
       return;
     }

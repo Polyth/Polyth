@@ -11,7 +11,14 @@ let input = Buffer.alloc(0);
 let active = null;
 
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
-const response = (id, success, data, error) => send({ type: "response", id, success, ...(data !== undefined ? { data } : {}), ...(error ? { error } : {}) });
+const response = (id, success, data, error, code) => send({
+  type: "response",
+  id,
+  success,
+  ...(data !== undefined ? { data } : {}),
+  ...(error ? { error } : {}),
+  ...(code ? { code } : {}),
+});
 const safeError = (value) => String(value || "Command Code failed").replace(/[\\r\\n]+/g, " ").slice(0, 500);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -67,6 +74,7 @@ const startTurn = async (message) => {
     ...process.env,
     POLYTH_COMMANDCODE_BINDING_FILE: message.bindingPath,
     POLYTH_COMMANDCODE_TITLE: message.title || "",
+    POLYTH_COMMANDCODE_OPERATION_ID: message.operationId,
   };
   const child = spawn(command, args, {
     cwd: message.cwd,
@@ -83,6 +91,7 @@ const startTurn = async (message) => {
     closed: new Promise((resolve) => child.once("close", (code, signal) => resolve({ code, signal }))),
   };
   active = turn;
+  send({ type: "turn-spawned", operationId: turn.operationId });
   child.stdout.on("data", (chunk) => {
     try { parseOutput(turn, chunk); }
     catch (error) {
@@ -104,7 +113,7 @@ const startTurn = async (message) => {
     return { nativeSessionId };
   } catch (error) {
     if (child.exitCode === null && !child.signalCode) child.kill("SIGTERM");
-    throw error;
+    throw Object.assign(error instanceof Error ? error : new Error(String(error)), { code: "outcome-unknown" });
   }
 };
 
@@ -127,9 +136,11 @@ const handle = async (message) => {
       response(id, true, {});
       process.exit(0);
     }
-    return response(id, false, undefined, "unsupported worker request");
+    throw Object.assign(new Error("unsupported worker request"), { code: "unsupported" });
   } catch (error) {
-    return response(id, false, undefined, safeError(error));
+    const rawCode = error && typeof error === "object" ? error.code : undefined;
+    const code = rawCode === "busy" || rawCode === "unsupported" ? rawCode : "outcome-unknown";
+    return response(id, false, undefined, safeError(error), code);
   }
 };
 
