@@ -23,6 +23,12 @@ import {
   refreshSessions,
 } from "../../init.ts";
 import { setRailPlugin, setSidebarOpen, startNewSession, useActiveModel, useStore } from "../../store.ts";
+import { useResolvedCapabilities } from "../../capabilities.ts";
+import {
+  hideMobileWorkspaceHome,
+  showMobileWorkspaceHome,
+  useMobileWorkspaceNavigation,
+} from "../../mobileWorkspaceNavigation.ts";
 import { firstUserTextCached, lastUserTextCached } from "../../utils.ts";
 import { ComposeIcon, GlassIsland, IconButton, LayersIcon, MenuIcon } from "../ui/index.ts";
 import Sheet, { SheetRow, SheetSection } from "./Sheet.tsx";
@@ -214,7 +220,9 @@ export default function MobileSessionHeader() {
   const model = useActiveModel();
   const models = useStore((state) => state.models);
   const ui = useUiSettings();
-  const [surface, setSurface] = useState<"island" | "tools" | null>(null);
+  const capabilities = useResolvedCapabilities();
+  const workspaceNav = useMobileWorkspaceNavigation();
+  const [surface, setSurface] = useState<"island" | null>(null);
   const [promptVisible, setPromptVisible] = useState(promptIsVisible);
   const title = session
     ? displaySessionTitle(session.title, session.id, firstUserTextCached(events[session.id]))
@@ -309,10 +317,25 @@ export default function MobileSessionHeader() {
   const telemetryStatus = contextTelemetryStatus(runtimeFeatures?.telemetry);
   const gauge = contextGaugeForTelemetry(model, descriptor?.context, session?.contextWindow ?? null, telemetryStatus);
 
+  const openWorkspaceNavigation = () => {
+    setSurface(null);
+    const remembered = workspaceNav.lastPackageId;
+    const capability = remembered
+      ? capabilities.find(({ descriptor: capabilityDescriptor }) => capabilityDescriptor.id === remembered && capabilityDescriptor.available())
+      : undefined;
+    if (capability) {
+      hideMobileWorkspaceHome();
+      capability.descriptor.open();
+      return;
+    }
+    showMobileWorkspaceHome();
+  };
+
   return <>
     <div className="mobile-session-floats" aria-label="Workspace navigation">
       <GlassIsland className="mobile-float-navigation">
         <IconButton icon={MenuIcon} label="Open navigation" size="lg" variant="ghost" aria-expanded={sidebarOpen} onClick={() => {
+          hideMobileWorkspaceHome();
           setRailPlugin(null);
           setSidebarOpen(true);
         }} />
@@ -332,8 +355,11 @@ export default function MobileSessionHeader() {
         {taskStartTitle && <span className="sr-only" role="status" aria-live="polite">{displayedTitle}</span>}
       </GlassIsland>
       <GlassIsland className="mobile-float-actions">
-        <IconButton icon={ComposeIcon} label="New session" size="lg" variant="ghost" disabled={!projectId} onClick={() => projectId && startNewSession(projectId)} />
-        <IconButton icon={LayersIcon} label="Open tools" size="lg" variant="ghost" aria-expanded={surface === "tools"} onClick={() => setSurface("tools")} />
+        <IconButton icon={ComposeIcon} label="New session" size="lg" variant="ghost" disabled={!projectId} onClick={() => {
+          hideMobileWorkspaceHome();
+          if (projectId) startNewSession(projectId);
+        }} />
+        <IconButton icon={LayersIcon} label="Open tools" size="lg" variant="ghost" aria-expanded={workspaceNav.homeOpen} onClick={openWorkspaceNavigation} />
       </GlassIsland>
     </div>
     {surface === "island" && (
@@ -346,6 +372,6 @@ export default function MobileSessionHeader() {
         onClose={() => setSurface(null)}
       />
     )}
-    {surface === "tools" && <Tools onClose={() => setSurface(null)} />}
+    {workspaceNav.homeOpen && <Tools onClose={hideMobileWorkspaceHome} />}
   </>;
 }

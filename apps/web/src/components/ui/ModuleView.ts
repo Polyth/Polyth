@@ -3,19 +3,23 @@
 // (components/workspace/WorkspaceHost.ts) or a right-rail panel
 // (components/ContextRail.tsx). Packages supply a title, an optional
 // description / icon / actions and a body; the frame owns the shared header,
-// the single navigation affordance, and the scroll body. Phone presentation
-// (opaque full cover of the session, right-to-left slide-in, z-stacked so
-// several open modules overlap and dismiss together) is realized in
-// styles.css from `.module-view` + `--module-depth`.
+// navigation affordances, and the scroll body. On phone a rail package is a
+// child of Workspace: Back returns to Workspace while Close dismisses it and
+// preserves it as the next Workspace resume target. Presentation and stacking
+// are realized in styles.css from `.module-view` + `--module-depth`.
 //
 // createElement-based (a .ts file, not .tsx) so the DOM-free node:test suite
 // and the createElement-only WorkspaceHost can import it without the tsx
 // loader — the same rule ViewErrorBoundary.ts follows.
-import { createElement, type ReactNode } from "react";
+import { createElement, useEffect, type ReactNode } from "react";
 import { surfaceContentMode, type SurfaceContentMode } from "@polyth/web-sdk/surface-content";
 import { listSurfaces } from "../../surfaces.ts";
 import { tr } from "../../i18n/index.ts";
 import { useShellMode } from "../../responsiveShell.ts";
+import {
+  rememberMobileWorkspacePackage,
+  showMobileWorkspaceHome,
+} from "../../mobileWorkspaceNavigation.ts";
 import { BackIcon, CloseIcon, CollapseIcon, DockBottomIcon, DockSideIcon, ExpandIcon, PinIcon } from "./icons.ts";
 
 export type ModuleViewVariant = "main" | "rail";
@@ -54,7 +58,7 @@ export interface ModuleViewProps {
   onToggleFullscreen?: () => void;
   pinned?: boolean;
   fullscreen?: boolean;
-  /** Desktop closes the module; phone presents the same callback as Back. */
+  /** Close/dismiss the module. Phone rail packages also get a separate Back. */
   onClose: () => void;
   closeLabel?: string;
   /** "main" = WorkspaceHost surface, "rail" = ContextRail panel. */
@@ -96,11 +100,24 @@ export default function ModuleView(props: ModuleViewProps): ReactNode {
   } = props;
   const shellMode = useShellMode();
   const phone = shellMode === "phone";
+  const workspaceChild = phone && variant === "rail";
+
+  // Any phone package reached outside Workspace still becomes the natural
+  // resume target. Back deliberately clears this through showMobileWorkspaceHome().
+  useEffect(() => {
+    if (workspaceChild) rememberMobileWorkspacePackage(id);
+  }, [id, workspaceChild]);
+
   // Both rail and workbench hosts already subscribe to the surface registry.
   // Resolve here, once per frame, so moving a page cannot turn it into an
   // edge-to-edge canvas. Unknown/legacy surfaces retain the caller's fallback.
   const surface = listSurfaces().find((item) => item.id === (surfaceId ?? id));
   const resolvedContentMode = surfaceContentMode(surface?.presentation, contentMode);
+  const phoneBack = () => {
+    onClose();
+    if (workspaceChild) showMobileWorkspaceHome();
+  };
+
   return createElement(
     "section",
     {
@@ -135,13 +152,14 @@ export default function ModuleView(props: ModuleViewProps): ReactNode {
           ? systemAction(PinIcon, pinned ? "Unpin window" : "Pin window", onTogglePin, pinned, "module-view-system-action")
           : null,
       !phone && onToggleFullscreen ? systemAction(fullscreen ? CollapseIcon : ExpandIcon, fullscreen ? "Exit fullscreen" : "Enter fullscreen", onToggleFullscreen, fullscreen, "module-view-system-action") : null,
-      systemAction(
-        phone ? BackIcon : CloseIcon,
-        phone ? tr("common.back") : closeLabel ?? tr("contextrail.closePanel"),
-        onClose,
-        undefined,
-        `module-view-close${phone ? " module-view-back" : ""}`,
-      ),
+      phone
+        ? [
+          systemAction(BackIcon, tr("common.back"), phoneBack, undefined, "module-view-back", "phone-back"),
+          workspaceChild
+            ? systemAction(CloseIcon, closeLabel ?? tr("contextrail.closePanel"), onClose, undefined, "module-view-close module-view-dismiss", "phone-close")
+            : null,
+        ]
+        : systemAction(CloseIcon, closeLabel ?? tr("contextrail.closePanel"), onClose, undefined, "module-view-close"),
     ),
     createElement(
       "div",

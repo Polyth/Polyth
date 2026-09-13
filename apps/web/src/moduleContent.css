@@ -114,12 +114,20 @@
   /* The fixed phone layer already owns safe-left/right; adding them again here
      doubles the landscape notch gutter. */
   padding-inline: var(--screen-gutter);
-  border-bottom: 1px solid var(--material-glass-border);
-  background: var(--material-glass-chrome);
-  box-shadow: var(--material-glass-highlight);
-  -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
-  backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
+  border-bottom: 1px solid var(--hair);
+  background: var(--bg);
+  box-shadow: none;
 }
+
+/* Glass is an enhancement, not the visual identity of the package title bar.
+   Keep it deliberately lighter than persistent islands/chrome and honor both
+   the user's glass preference and the low-resource fallback. */
+body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .module-view--phone .module-view-head {
+  background: color-mix(in srgb, var(--material-glass) 78%, transparent);
+  -webkit-backdrop-filter: blur(calc(var(--material-glass-blur) * .45)) saturate(var(--material-glass-saturation));
+  backdrop-filter: blur(calc(var(--material-glass-blur) * .45)) saturate(var(--material-glass-saturation));
+}
+
 .module-view--phone .module-view-heading {
   flex: 1 1 auto;
   min-width: 0;
@@ -127,8 +135,9 @@
 .module-view--phone .module-view-title {
   overflow: hidden;
   font-size: var(--font-label);
-  font-weight: 650;
+  font-weight: 600;
   line-height: 1.25;
+  letter-spacing: -.01em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -142,7 +151,7 @@
 }
 .module-view--phone .module-view-actions {
   flex: 0 1 auto;
-  max-width: min(42vw, 168px);
+  max-width: min(38vw, 152px);
   margin-inline-start: auto;
   overflow-x: auto;
   overflow-y: hidden;
@@ -150,19 +159,29 @@
   scrollbar-width: none;
 }
 .module-view--phone .module-view-actions::-webkit-scrollbar { display: none; }
-.module-view--phone .module-view-back {
-  order: -2;
+.module-view--phone .module-view-back,
+.module-view--phone .module-view-dismiss {
   flex: 0 0 var(--tap);
   width: var(--tap);
   min-width: var(--tap);
   height: var(--tap);
   min-height: var(--tap);
-  margin-inline-end: var(--space-1);
   padding: 0;
   border-color: transparent;
   background: transparent;
 }
-.module-view--phone .module-view-back .ui-icon {
+.module-view--phone .module-view-back {
+  order: -2;
+  margin-inline-end: var(--space-1);
+}
+.module-view--phone .module-view-dismiss {
+  margin-inline-start: var(--space-1);
+}
+.module-view--phone :is(.module-view-back, .module-view-dismiss):is(:hover, :active) {
+  border-color: transparent;
+  background: var(--surface-overlay-hover);
+}
+.module-view--phone :is(.module-view-back, .module-view-dismiss) .ui-icon {
   width: var(--icon-lg);
   height: var(--icon-lg);
 }
