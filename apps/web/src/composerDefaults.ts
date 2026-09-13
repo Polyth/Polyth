@@ -1,5 +1,5 @@
 import type { AgentDescriptor, ModelDescriptor } from "@polyth/contracts";
-import { displayModelName, friendlyModelId } from "@polyth/models/presentation";
+import { displayModelName, friendlyModelId } from "@polyth/contracts/model-presentation";
 import { tr } from "./i18n/index.ts";
 
 interface ModelRef {
