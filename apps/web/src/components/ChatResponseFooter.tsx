@@ -207,6 +207,8 @@ export default function ChatResponseFooter({
           icon={InfoIcon}
           label={tr("timeline.showResponseMetadata")}
           pressed={metadataOpen}
+          aria-expanded={metadataOpen}
+          aria-haspopup="dialog"
           onClick={() => setMetadataOpen((open) => !open)}
         />
       </span>
@@ -218,6 +220,7 @@ export default function ChatResponseFooter({
         side="up"
         className="chat-response-metadata"
         ariaLabel={tr("timeline.responseMetadata")}
+        restoreFocus={false}
       >
         <dl>
           {harnessId && <><dt>Harness</dt><dd>{harnessId}</dd></>}
