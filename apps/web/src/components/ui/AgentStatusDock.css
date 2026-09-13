@@ -1,0 +1,28 @@
+/* Agent status identity polish belongs with the primitive, not chat overrides. */
+.agent-status-dock-primary {
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.agent-status-dock-primary strong {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(54%, 20rem);
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-status-dock-state {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+@media (max-width: 600px) {
+  .agent-status-dock-primary strong {
+    max-width: 48%;
+  }
+}
