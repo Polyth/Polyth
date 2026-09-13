@@ -19,7 +19,6 @@ import SlotHost from "./slots/SlotHost.ts";
 import ChatActionButton from "./ChatActionButton.tsx";
 import { CopyIcon, ForkIcon, UndoIcon } from "./ui/index.ts";
 import { tr } from "../i18n/index.ts";
-import "./ChatChrome.css";
 
 export default function MessageQuickActions({
   message,
@@ -54,7 +53,12 @@ export default function MessageQuickActions({
         {timeShort(message.time)}
       </time>
       {prefs.showMessageActions && (
-        <div className="chat-message-actions" role="group" aria-label={actionsMenuName(message)}>
+        <div
+          className="chat-message-actions"
+          role="group"
+          aria-label={actionsMenuName(message)}
+          data-actions-seq={message.eventSeq}
+        >
           <ChatActionButton
             icon={CopyIcon}
             label={copyActionName("user", copyFormat)}
