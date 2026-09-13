@@ -10,6 +10,7 @@ import "./composerAdaptive.css";
 import "./composerAddMenu.css";
 import "./workspacePanelPremium.css";
 import "./workspacePanelWidgetFixes.css";
+import "./workspacePanelEditor.css";
 import "./motion.css";
 import "./chatMotion.ts";
 
