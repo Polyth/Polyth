@@ -1,5 +1,5 @@
 import type { ModelDescriptor, ModelRef } from "@polyth/contracts";
-import { presentModelDescriptor } from "../src/presentation.ts";
+import { presentModelDescriptor } from "@polyth/contracts/model-presentation";
 
 export interface ModelPickerState {
   query: string;
