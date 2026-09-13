@@ -7672,12 +7672,12 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   min-height: max(var(--control-h-sm), var(--hit-min));
   gap: var(--space-2);
   padding: 0 var(--space-3);
-  border: 1px solid var(--border-soft);
+  border: 1px solid transparent;
   border-radius: var(--radius-control);
-  background: var(--elevated);
+  background: transparent;
   color: var(--text-dim);
 }
-.context-selector .picker-chip:hover { border-color: var(--border); background: var(--raised); }
+.context-selector .picker-chip:hover { border-color: var(--hair); background: var(--surface-activity); }
 .context-selector .picker-trigger-icon {
   flex: none;
   display: inline-flex;
@@ -7693,22 +7693,19 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 0 var(--space-2) 0 var(--space-3);
-  border: 1px solid var(--border-soft);
+  padding: 0;
+  border: 1px solid transparent;
   border-radius: var(--radius-control);
-  background: var(--elevated);
-  color: var(--text-dim);
+  background: transparent;
+  color: var(--muted);
   white-space: nowrap;
-  transition: background var(--motion-normal) var(--motion-ease), border-color var(--motion-normal) var(--motion-ease);
+  transition: color var(--motion-normal) var(--motion-ease);
 }
-.context-isolation-control:hover { border-color: var(--border); background: var(--raised); }
 .context-isolation-control:has(.switch:disabled) { opacity: .6; }
 .context-isolation-control[data-active="true"] {
-  border-color: var(--accent-line);
-  background: var(--accent-wash);
   color: var(--text);
 }
-.context-isolation-label { font-size: var(--font-label); font-weight: 570; }
+.context-isolation-label { font-size: var(--font-meta); font-weight: 540; }
 .context-trigger {
   flex: 1;
   min-width: 0;
@@ -7717,17 +7714,17 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   align-items: center;
   gap: var(--space-2);
   padding: 0 var(--space-3);
-  border: 1px solid var(--border-soft);
+  border: 1px solid transparent;
   border-radius: var(--radius-control);
-  background: var(--elevated);
+  background: transparent;
   color: var(--text-dim);
   font-size: var(--font-label);
-  font-weight: 570;
+  font-weight: 540;
   cursor: pointer;
   touch-action: manipulation;
 }
-.context-trigger:hover { border-color: var(--border); color: var(--text); background: var(--raised); }
-.context-trigger:active { background: var(--raised); }
+.context-trigger:hover { border-color: var(--hair); color: var(--text); background: var(--surface-activity); }
+.context-trigger:active { background: var(--surface-activity); }
 .context-trigger:disabled { opacity: .6; cursor: default; }
 .context-trigger-icon { flex: none; display: inline-flex; color: var(--muted); }
 .context-trigger-icon svg { width: 17px; height: 17px; }
@@ -7744,6 +7741,8 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
      the layout "fall apart" — not the zoom gesture itself. */
   input, textarea, select { font-size: max(16px, 1em); }
   button, a, [role="button"] { touch-action: manipulation; }
+  .composer-mobile .context-trigger { gap: var(--space-1); padding-inline: var(--space-2); }
+  .composer-mobile .context-trigger-caret { display: none; }
   /* Inline links still need a real, measurable touch box. The negative block
      margin keeps prose rhythm compact while the clickable element is 44px. */
   .file-ref {
@@ -10611,8 +10610,27 @@ color: var(--text);
 }
 .execution-summary-line > .execution-summary { min-width: 0; flex: 1 1 auto; }
 .execution-stop.ui-btn {
+  position: relative;
   flex: none;
+  min-height: var(--control-h-sm);
+  gap: var(--space-1);
+  padding-inline: var(--space-2);
+  border-color: color-mix(in srgb, var(--red) 24%, var(--border-soft));
+  background: color-mix(in srgb, var(--red-wash) 52%, transparent);
+  color: color-mix(in srgb, var(--red) 82%, var(--text));
+  font-weight: 560;
   box-shadow: var(--inset-hi);
+  transition: color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease);
+}
+.execution-stop.ui-btn::after {
+  content: "";
+  position: absolute;
+  inset: min(0px, calc((var(--hit-min) - var(--control-h-sm)) / -2));
+}
+.execution-stop.ui-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--red) 38%, var(--border-soft));
+  background: color-mix(in srgb, var(--red-wash) 72%, transparent);
+  color: var(--red);
 }
 .execution-summary.tool-disclosure {
   width: 100%;
@@ -12459,10 +12477,16 @@ html[data-font] body :is(
     opacity calc(var(--activity-live-exit) * 0.55) linear,
     transform var(--activity-live-exit) var(--activity-live-exit-ease);
 }
+.activity-live-stage {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+}
+.activity-live-stage > .activity-live { grid-area: 1 / 1; }
 /* Part of the block, so it sits against it: the timeline's row gap would push
    it away and read as a separate turn. Only after the block or another live
    row — a first lone action keeps its distance from the prompt above. */
-.timeline > :is(.activity-group, .activity-live) + .activity-live {
+.timeline > .activity-group + .activity-live-stage {
   margin-block-start: calc(var(--space-1) - var(--timeline-gap));
 }
 .activity-live.leaving {

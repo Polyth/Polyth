@@ -462,6 +462,7 @@ export const zhCN: GitMessages = {
   "isolation.dirtyTarget": "{branch} 有本地更改。请先提交或丢弃它们，然后再集成此会话。",
   "isolation.missingWorkspace": "隔离工作区缺失",
   "isolation.workInIsolation": "隔离工作",
+  "isolation.isolate": "隔离",
   "isolation.workInIsolationHint": "使用可在完成后合并回去的临时 Git 工作区。",
   "isolation.recoveryNeeded": "需要恢复工作区",
   "isolation.restoreOrigin": "请在 {path} 恢复 {branch} 的工作副本，然后重试。此会话及其历史记录已保留。",

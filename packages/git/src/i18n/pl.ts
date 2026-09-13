@@ -462,6 +462,7 @@ export const pl: GitMessages = {
   "isolation.dirtyTarget": "{branch} ma lokalne zmiany. Zatwierdź je lub odrzuć przed integracją tej sesji.",
   "isolation.missingWorkspace": "Brak izolowanej przestrzeni",
   "isolation.workInIsolation": "Pracuj w izolacji",
+  "isolation.isolate": "Izoluj",
   "isolation.workInIsolationHint": "Używa tymczasowej przestrzeni Git, którą można scalić po zakończeniu.",
   "isolation.recoveryNeeded": "Obszar roboczy wymaga odzyskania",
   "isolation.restoreOrigin": "Przywróć kopię roboczą gałęzi {branch} w {path}, a następnie spróbuj ponownie. Sesja i jej historia zostały zachowane.",

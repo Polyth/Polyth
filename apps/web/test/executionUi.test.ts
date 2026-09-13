@@ -328,6 +328,15 @@ test("execution code surfaces override the global prose font preference", async 
   assert.match(css, /\.reasoning-preview\s*\{[\s\S]*?-webkit-mask-image:\s*linear-gradient\(to right, #000 90%, transparent 100%\);[\s\S]*?mask-image:\s*linear-gradient\(to right, #000 90%, transparent 100%\);/);
 });
 
+test("the inline stop action is visually compact without shrinking its coarse-pointer hit area", async () => {
+  const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  const rule = /\.execution-stop\.ui-btn\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(rule, /min-height:\s*var\(--control-h-sm\)/);
+  assert.match(rule, /padding-inline:\s*var\(--space-2\)/);
+  assert.match(rule, /background:\s*color-mix\(in srgb, var\(--red-wash\) 52%, transparent\)/);
+  assert.match(css, /\.execution-stop\.ui-btn::after\s*\{[^}]*var\(--hit-min\)[^}]*var\(--control-h-sm\)/s);
+});
+
 const dom = new Window({ url: "http://localhost/" });
 Object.assign(globalThis, {
   window: dom as unknown as typeof globalThis & Window,
@@ -466,15 +475,24 @@ test("the running action floats out of the folded block while settled rows stay 
     output: undefined,
     finishTime: undefined,
   });
+  const queued = tool({
+    id: "call-queued",
+    callId: "call-queued",
+    eventSeq: 3,
+    input: { command: "npm run build" },
+    status: "running",
+    output: undefined,
+    finishTime: undefined,
+  });
   try {
     await act(async () => root.render(createElement(ActivityGroupView, {
-      g: activityGroup("activity-motion", [first, latest]),
+      g: activityGroup("activity-motion", [first, latest, queued]),
       subagents: null,
       state: "active",
       entering: true,
     })));
     const live = [...container.querySelectorAll(".activity-live .execution-row")];
-    assert.equal(live.length, 1, "only the running action floats above the block");
+    assert.equal(live.length, 1, "only one running action floats above the block while the next waits");
     assert.equal(live[0]?.querySelector(".tool-preview")?.textContent, "Run tests");
     assert.ok(!live[0]?.classList.contains("open"), "a floating action names itself without dumping its output");
     const toggle = container.querySelector<HTMLButtonElement>(".ui-run-summary")!;
@@ -483,7 +501,7 @@ test("the running action floats out of the folded block while settled rows stay 
 
     await act(async () => toggle.click());
     const folded = [...container.querySelectorAll(".activity-group-items .execution-row")];
-    assert.equal(folded.length, 1, "the block holds only the settled rows");
+    assert.equal(folded.length, 1, "the block holds settled rows without exposing the queued action early");
     assert.notEqual(folded[0]?.querySelector(".tool-preview")?.textContent, "", "history never retypes from empty");
   } finally {
     await act(async () => root.unmount());
@@ -921,7 +939,7 @@ test("execution rows stay folded by default while running and after settling", a
   }
 });
 
-test("a lone running action needs no block chrome and folds into the block when it settles", async () => {
+test("a lone running action gets a stable summary and folds into it when it settles", async () => {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -929,8 +947,8 @@ test("a lone running action needs no block chrome and folds into the block when 
   const group = (message: ToolMsg) => activityGroup("activity-1", [message]);
   try {
     await act(async () => root.render(createElement(ActivityGroupView, { g: group(running), subagents: null })));
-    assert.equal(container.querySelector(".ui-run-summary"), null, "a first single action carries no block around it");
-    assert.equal(container.querySelector(".activity-group"), null, "the block itself is not on screen yet");
+    assert.ok(container.querySelector(".ui-run-summary"), "the summary mounts with the first action so later arrivals cannot shift it");
+    assert.ok(container.querySelector(".activity-group"), "the activity region has stable geometry from its first action");
     assert.equal(container.querySelector(".activity-live .activity-group"), null, "and the action is never nested inside it");
     assert.ok(container.querySelector(".activity-live .execution-row"), "the action itself is on screen");
 
@@ -938,7 +956,10 @@ test("a lone running action needs no block chrome and folds into the block when 
     const toggle = container.querySelector<HTMLButtonElement>(".ui-run-summary")!;
     assert.ok(toggle, "the block appears as soon as something has settled into it");
     assert.equal(toggle.getAttribute("aria-expanded"), "false", "the block stays folded");
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1_550)); });
     assert.ok(container.querySelector(".activity-live.leaving"), "the settled action folds up into the block");
+    assert.equal(container.querySelector(".activity-live.leaving")?.getAttribute("aria-hidden"), "true",
+      "the outgoing copy is hidden from assistive technology during its visual fold");
     await act(async () => toggle.click());
     assert.equal(toggle.getAttribute("aria-expanded"), "true", "a hand toggle still opens it");
   } finally {
@@ -979,6 +1000,10 @@ test("an action that arrives already finished still appears outside the block fi
       "Review changes",
       "the action already on screen keeps it for its full turn",
     );
+    assert.equal(container.querySelectorAll(".activity-live-stage").length, 1,
+      "the queue owns one stable visual stage");
+    assert.equal(container.querySelectorAll(".activity-live:not(.leaving)").length, 1,
+      "only one action is exposed at a time");
 
     // ...and the queue drains: the waiting action takes the stage once the one
     // before it has finished and the gap between actions has passed.

@@ -462,6 +462,7 @@ export const fr: GitMessages = {
   "isolation.dirtyTarget": "{branch} a des modifications locales. Validez-les ou abandonnez-les avant d’intégrer cette session.",
   "isolation.missingWorkspace": "L’espace isolé est manquant",
   "isolation.workInIsolation": "Travailler isolément",
+  "isolation.isolate": "Isoler",
   "isolation.workInIsolationHint": "Utilise un espace Git temporaire qui peut être fusionné une fois terminé.",
   "isolation.recoveryNeeded": "Le rétablissement de l’espace de travail est nécessaire",
   "isolation.restoreOrigin": "Rétablissez la copie de travail de {branch} à {path}, puis réessayez. Cette session et son historique sont conservés.",

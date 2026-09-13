@@ -462,6 +462,7 @@ export const bg: GitMessages = {
   "isolation.dirtyTarget": "{branch} има локални промени. Комитирай или отхвърли ги преди да интегрираш тази сесия.",
   "isolation.missingWorkspace": "Липсва изолирано пространство",
   "isolation.workInIsolation": "Работа в изолация",
+  "isolation.isolate": "Изолирай",
   "isolation.workInIsolationHint": "Използва временно Git пространство, което може да се слее след приключване.",
   "isolation.recoveryNeeded": "Необходимо е възстановяване на работното пространство",
   "isolation.restoreOrigin": "Възстановете работното копие на {branch} в {path}, след което опитайте отново. Сесията и историята ѝ са запазени.",

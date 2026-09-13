@@ -462,6 +462,7 @@ export const uk: GitMessages = {
   "isolation.dirtyTarget": "У {branch} є локальні зміни. Закомітьте або відкиньте їх перед інтеграцією цієї сесії.",
   "isolation.missingWorkspace": "Ізольований простір відсутній",
   "isolation.workInIsolation": "Працювати ізольовано",
+  "isolation.isolate": "Ізолювати",
   "isolation.workInIsolationHint": "Використовує тимчасовий Git-простір, який можна злити після завершення.",
   "isolation.recoveryNeeded": "Потрібно відновити робочий простір",
   "isolation.restoreOrigin": "Відновіть робочу копію гілки {branch} за шляхом {path}, потім спробуйте ще раз. Сесію та її історію збережено.",

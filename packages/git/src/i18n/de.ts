@@ -462,6 +462,7 @@ export const de: GitMessages = {
   "isolation.dirtyTarget": "{branch} hat lokale Änderungen. Committe oder verwirf sie, bevor du diese Sitzung integrierst.",
   "isolation.missingWorkspace": "Isolierter Arbeitsbereich fehlt",
   "isolation.workInIsolation": "Isoliert arbeiten",
+  "isolation.isolate": "Isolieren",
   "isolation.workInIsolationHint": "Nutzt einen temporären Git-Arbeitsbereich, der sich nach Abschluss zurückmergen lässt.",
   "isolation.recoveryNeeded": "Arbeitsbereich muss wiederhergestellt werden",
   "isolation.restoreOrigin": "Stellen Sie den Checkout von {branch} unter {path} wieder her und versuchen Sie es erneut. Die Sitzung und ihr Verlauf bleiben erhalten.",

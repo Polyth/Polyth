@@ -464,6 +464,7 @@ export const en = {
   "isolation.dirtyTarget": "{branch} has local changes. Commit or discard them before integrating this session.",
   "isolation.missingWorkspace": "Isolated workspace is missing",
   "isolation.workInIsolation": "Work in isolation",
+  "isolation.isolate": "Isolate",
   "isolation.workInIsolationHint": "Uses a temporary Git workspace that can be merged back when finished.",
   "isolation.recoveryNeeded": "Workspace recovery needed",
   "isolation.restoreOrigin": "Restore the {branch} checkout at {path}, then try again. This session and its history are preserved.",

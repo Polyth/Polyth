@@ -176,7 +176,7 @@ export default function SessionContextBar({
           title={tr("isolation.workInIsolationHint")}
         >
           <span id={isolationLabelId} className="context-isolation-label">
-            {tr("isolation.workInIsolation")}
+            {tr("isolation.isolate")}
           </span>
           <Switch
             checked={workInIsolation ?? false}

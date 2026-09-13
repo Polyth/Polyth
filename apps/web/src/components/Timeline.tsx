@@ -1059,6 +1059,15 @@ function inFlight(item: ActivityItem): boolean {
   return item.action === "started";
 }
 
+interface ActionSchedule {
+  /** The one action currently presented to the reader. */
+  showing: Set<string>;
+  /** The previous action during its fold-away beat. */
+  leaving: Set<string>;
+  /** Showing, leaving, and not-yet-shown ids stay out of expanded history. */
+  scheduled: Set<string>;
+}
+
 /** Ids currently inside their turn outside the block. Arrivals are queued one
  *  at a time rather than shown the moment they land: without that, a burst of
  *  fast tools cuts each other's motion short and reads as flicker. Each action
@@ -1066,7 +1075,7 @@ function inFlight(item: ActivityItem): boolean {
  *  emphasised, not chaotic. Rows already present at mount are dated by their
  *  own timestamp so replayed history stays folded on scroll-back, clamped to
  *  now because a skewed clock must not park a row outside the block. */
-function useActionSchedule(items: ActivityItem[]): Set<string> {
+function useActionSchedule(items: ActivityItem[]): ActionSchedule {
   // id -> start of its turn outside the block; 0 means it never gets one.
   const turns = useRef(new Map<string, number>());
   const cursor = useRef(0);
@@ -1075,7 +1084,9 @@ function useActionSchedule(items: ActivityItem[]): Set<string> {
   const at = Date.now();
   for (const item of items) {
     if (turns.current.has(item.id)) continue;
-    const arrivedAt = mounted.current ? at : Math.min(at, item.time);
+    // A live action restored after navigation still deserves one visible turn;
+    // completed history uses its recorded time and stays folded on replay.
+    const arrivedAt = mounted.current || inFlight(item) ? at : Math.min(at, item.time);
     const startAt = Math.max(arrivedAt, cursor.current);
     if (at - arrivedAt >= ACTION_SHOW_MS || startAt - at > ACTION_BACKLOG_MS) {
       turns.current.set(item.id, 0);
@@ -1086,14 +1097,22 @@ function useActionSchedule(items: ActivityItem[]): Set<string> {
   }
   mounted.current = true;
   const showing = new Set<string>();
+  const leaving = new Set<string>();
+  const scheduled = new Set<string>();
   let next = Infinity;
   for (const item of items) {
     const startAt = turns.current.get(item.id) ?? 0;
     if (startAt === 0) continue;
+    const showEnd = startAt + ACTION_SHOW_MS;
+    const exitEnd = showEnd + ACTIVITY_LIVE_EXIT_MS;
+    if (at < exitEnd) scheduled.add(item.id);
     if (at < startAt) next = Math.min(next, startAt);
-    else if (at < startAt + ACTION_SHOW_MS) {
+    else if (at < showEnd) {
       showing.add(item.id);
-      next = Math.min(next, startAt + ACTION_SHOW_MS);
+      next = Math.min(next, showEnd);
+    } else if (at < exitEnd) {
+      leaving.add(item.id);
+      next = Math.min(next, exitEnd);
     }
   }
   // Wake on the next boundary only — a queue that polls would re-render the
@@ -1103,29 +1122,7 @@ function useActionSchedule(items: ActivityItem[]): Set<string> {
     const timer = window.setTimeout(() => redraw((value) => value + 1), Math.max(0, next - Date.now()));
     return () => window.clearTimeout(timer);
   }, [next]);
-  return showing;
-}
-
-/** Keeps ids mounted for one collapse beat after they stop being live, so the
- *  floating row folds into the block instead of vanishing. The removal timer is
- *  deliberately not cleared on re-run: a second action settling must not cancel
- *  the first row's exit and strand it on screen. */
-function useLingering(ids: string[], ms: number): string[] {
-  const [leaving, setLeaving] = useState<string[]>([]);
-  const previous = useRef(ids);
-  const timers = useRef<number[]>([]);
-  const key = ids.join("\u0000");
-  useEffect(() => {
-    const gone = previous.current.filter((id) => !ids.includes(id));
-    previous.current = ids;
-    if (gone.length === 0) return;
-    setLeaving((current) => [...current, ...gone]);
-    timers.current.push(window.setTimeout(
-      () => setLeaving((current) => current.filter((id) => !gone.includes(id))), ms));
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- key is the identity of ids
-  }, [key]);
-  useEffect(() => () => timers.current.forEach((timer) => window.clearTimeout(timer)), []);
-  return leaving;
+  return { showing, leaving, scheduled };
 }
 
 function activityItemNode(
@@ -1168,17 +1165,16 @@ export function ActivityGroupView({
   // rows below it; opening the block is a reader decision only.
   const [open, setOpen] = useState(false);
   const itemsPresent = useCollapsePresence(open);
-  const showing = useActionSchedule(g.items);
-  // Work that is genuinely still running always stays out: the queue paces
-  // arrivals, it never hides something the agent is doing right now.
-  const liveIds = g.items.filter((item) => showing.has(item.id) || (active && inFlight(item))).map((item) => item.id);
-  const leavingIds = useLingering(liveIds, ACTIVITY_LIVE_EXIT_MS);
+  const schedule = useActionSchedule(g.items);
+  const liveIds = g.items.filter((item) => schedule.showing.has(item.id)).map((item) => item.id);
+  const leavingIds = g.items.filter((item) => schedule.leaving.has(item.id)).map((item) => item.id);
   const floatingIds = new Set([...liveIds, ...leavingIds]);
   const floating = g.items.filter((item) => floatingIds.has(item.id));
-  const folded = g.items.filter((item) => !floatingIds.has(item.id));
-  // A first, single action needs no block chrome around it. The block appears
-  // as soon as anything has settled into it.
-  const showBlock = g.items.length > liveIds.length;
+  const folded = g.items.filter((item) => !schedule.scheduled.has(item.id));
+  // Mount the summary with the first action. Later arrivals then only update
+  // its text and enter the invisible queue; they cannot insert a new row above
+  // the currently visible action and shove the conversation down.
+  const showBlock = g.items.length > 0;
   const files = new Set(g.tools.flatMap((tool) => {
     const presentation = executionPresentation(tool);
     return [
@@ -1230,13 +1226,23 @@ export function ActivityGroupView({
           </div>
         </section>
       )}
-      {floating.map((item) => (
-        <div key={item.id} className={`activity-live${liveIds.includes(item.id) ? "" : " leaving"}`}>
-          <div className="activity-live-content">
-            {activityItemNode(item, subagents, liveIds.includes(item.id), false)}
-          </div>
+      {floating.length > 0 && (
+        <div className="activity-live-stage">
+          {floating.map((item) => {
+            const live = liveIds.includes(item.id);
+            return <div
+              key={item.id}
+              className={`activity-live${live ? "" : " leaving"}`}
+              aria-hidden={!live || undefined}
+              inert={!live}
+            >
+              <div className="activity-live-content">
+                {activityItemNode(item, subagents, live, false)}
+              </div>
+            </div>;
+          })}
         </div>
-      ))}
+      )}
     </>
   );
 }

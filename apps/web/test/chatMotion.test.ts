@@ -87,7 +87,8 @@ test("the rise stays smooth over long travel and the block never clips it", () =
   assert.match(css, /\.activity-group,\s*\.task-list \{/);
   const liveRule = /\n\.activity-live \{([^}]*)\}/.exec(css)?.[1] ?? "";
   assert.doesNotMatch(liveRule, /border|box-shadow|background/);
-  assert.match(css, /\.timeline > :is\(\.activity-group, \.activity-live\) \+ \.activity-live \{\s*margin-block-start: calc\(var\(--space-1\) - var\(--timeline-gap\)\)/);
+  assert.match(css, /\.activity-live-stage > \.activity-live \{ grid-area: 1 \/ 1; \}/);
+  assert.match(css, /\.timeline > \.activity-group \+ \.activity-live-stage \{\s*margin-block-start: calc\(var\(--space-1\) - var\(--timeline-gap\)\)/);
   assert.match(css, /--activity-live-exit: 280ms/);
   assert.match(css, /opacity calc\(var\(--activity-live-exit\) \* 0\.55\) linear/);
   assert.match(css, /\.activity-live\.leaving \{[^}]*grid-template-rows: 0fr[^}]*scale\(\.985\)/s);

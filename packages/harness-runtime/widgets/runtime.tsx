@@ -16,7 +16,7 @@ import ProviderLogo from "../../models/widgets/ProviderLogo.tsx";
 import { invalidateRuntimeCatalogs, peekHarnessRoster, peekHarnessSnapshots, readHarnessRoster, readHarnessSnapshots, useCatalogRevision } from "@polyth/models/runtime-catalog";
 import { activeBrowserAccountId } from "@polyth/web/account-storage";
 
-import { attachmentFacts, availabilityLabel, configurationSections, integrationLabel, orderedHarnesses, pendingLabel, projectionFacts, resolvedAuto, routingLabel, runtimeFacts, summaryFacts, type CapabilityFact } from "./presentation.ts";
+import { attachmentFacts, availabilityLabel, configurationSections, harnessDisplayName, integrationLabel, orderedHarnesses, pendingLabel, projectionFacts, resolvedAuto, routingLabel, runtimeFacts, summaryFacts, type CapabilityFact } from "./presentation.ts";
 
 const api = createApiTransport();
 
@@ -499,12 +499,22 @@ export function HarnessSettings({ host, settingsTarget }: { host: WebPackageHost
 
 function SwitchMarker({ event }: { event: SessionEvent }) {
   if (event.type !== "harness/switched") return null;
-  const from = String(event.data.from || "Previous harness");
-  const to = String(event.data.to || "New harness");
+  const from = String(event.data.from || "");
+  const to = String(event.data.to || "");
+  const fromLabel = harnessDisplayName(from) || "Previous harness";
+  const toLabel = harnessDisplayName(to) || "New harness";
   const closed = event.data.closedLeg as Record<string, unknown> | undefined;
   const leg = event.data.leg as Record<string, unknown> | undefined;
   return <details className="pkg-harnesses-switch-marker">
-    <summary><span><ProviderLogo providerID={from} size="compact" />{from} → <ProviderLogo providerID={to} size="compact" />{to} · continued here</span></summary>
+    <summary aria-label={`Switched from ${fromLabel} to ${toLabel}; continued here`}>
+      <span className="pkg-harnesses-switch-marker-label">
+        <span className="pkg-harnesses-switch-marker-leg"><ProviderLogo providerID={from || fromLabel} providerName={fromLabel} size="compact" /><span className="pkg-harnesses-switch-marker-name">{fromLabel}</span></span>
+        <span className="pkg-harnesses-switch-marker-arrow" aria-hidden="true">→</span>
+        <span className="pkg-harnesses-switch-marker-leg"><ProviderLogo providerID={to || toLabel} providerName={toLabel} size="compact" /><span className="pkg-harnesses-switch-marker-name">{toLabel}</span></span>
+        <span className="pkg-harnesses-switch-marker-separator" aria-hidden="true">·</span>
+        <span className="pkg-harnesses-switch-marker-continuity">continued here</span>
+      </span>
+    </summary>
     <dl><dt>Started</dt><dd><time dateTime={new Date(event.time).toISOString()}>{new Date(event.time).toLocaleTimeString()}</time></dd><dt>Continuity</dt><dd>Canonical Polyth history</dd>{Boolean(closed?.nativeSessionId) && <><dt>Previous native session</dt><dd>{String(closed!.nativeSessionId)}</dd></>}{Boolean(leg?.nativeSessionId) && <><dt>New native session</dt><dd>{String(leg!.nativeSessionId)}</dd></>}{Boolean(leg?.bootstrap) && <><dt>Bootstrap</dt><dd>{String(leg!.bootstrap)}</dd></>}</dl>
   </details>;
 }

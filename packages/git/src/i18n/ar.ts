@@ -462,6 +462,7 @@ export const ar: GitMessages = {
   "isolation.dirtyTarget": "لدى {branch} تغييرات محلية. ثبّتها أو تجاهلها قبل دمج هذه الجلسة.",
   "isolation.missingWorkspace": "المساحة المعزولة مفقودة",
   "isolation.workInIsolation": "العمل بمعزل",
+  "isolation.isolate": "عزل",
   "isolation.workInIsolationHint": "يستخدم مساحة Git مؤقتة يمكن دمجها عند الانتهاء.",
   "isolation.recoveryNeeded": "يلزم استعادة مساحة العمل",
   "isolation.restoreOrigin": "استعد نسخة العمل للفرع {branch} في {path}، ثم حاول مجددًا. تم الاحتفاظ بهذه الجلسة وسجلها.",

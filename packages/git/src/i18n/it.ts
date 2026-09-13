@@ -462,6 +462,7 @@ export const it: GitMessages = {
   "isolation.dirtyTarget": "{branch} ha modifiche locali. Esegui il commit o scartale prima di integrare questa sessione.",
   "isolation.missingWorkspace": "Spazio isolato mancante",
   "isolation.workInIsolation": "Lavora in isolamento",
+  "isolation.isolate": "Isola",
   "isolation.workInIsolationHint": "Usa uno spazio Git temporaneo che può essere unito al termine.",
   "isolation.recoveryNeeded": "È necessario ripristinare lo spazio di lavoro",
   "isolation.restoreOrigin": "Ripristina la copia di lavoro di {branch} in {path}, poi riprova. La sessione e la sua cronologia sono conservate.",

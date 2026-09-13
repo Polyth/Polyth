@@ -732,7 +732,7 @@ test("standalone isolation switch shares the context row without entering the wo
     `<span class="context-trigger-icon">•</span><span class="context-trigger-name">${text}</span>` +
     `<span class="context-trigger-caret">v</span></button></div>`;
   const isolation = `<span class="context-isolation-control" data-active="true">` +
-    `<span class="context-isolation-label">Work in isolation</span>` +
+    `<span class="context-isolation-label">Isolate</span>` +
     `<button class="switch ui-switch" role="switch" aria-checked="true">` +
     `<span class="switch-track"><i></i></span></button></span>`;
 
@@ -757,6 +757,7 @@ test("standalone isolation switch shares the context row without entering the wo
         controlRight: control.getBoundingClientRect().right,
         barRight: bar.getBoundingClientRect().right,
         background: getComputedStyle(control).backgroundColor,
+        trackBackground: getComputedStyle(control.querySelector<HTMLElement>(".switch-track")!).backgroundColor,
       };
     });
     assert.ok(geometry.scroll <= geometry.bar + 1, `${width}px: the context row does not overflow`);
@@ -764,9 +765,10 @@ test("standalone isolation switch shares the context row without entering the wo
       geometry.project >= 32 && geometry.branch >= 32,
       `${width}px: selectors remain operable (${JSON.stringify(geometry)})`,
     );
-    assert.ok(geometry.control >= 120, `${width}px: the isolation label and switch remain visible`);
+    assert.ok(geometry.control <= 96, `${width}px: isolation yields space to the location names`);
     assert.ok(geometry.controlRight <= geometry.barRight + 1, `${width}px: isolation stays beside the selectors`);
-    assert.notEqual(geometry.background, "rgba(0, 0, 0, 0)", `${width}px: active isolation has a visible surface`);
+    assert.equal(geometry.background, "rgba(0, 0, 0, 0)", `${width}px: isolation does not add another heavy card`);
+    assert.notEqual(geometry.trackBackground, "rgba(0, 0, 0, 0)", `${width}px: the switch still shows its active state`);
   }
   await page.setViewportSize({ width: 390, height: 720 });
 });

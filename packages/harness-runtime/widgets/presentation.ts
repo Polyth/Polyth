@@ -31,6 +31,23 @@ export const pendingLabel = (row: HarnessSnapshot): string => [
 export const integrationLabel = (row: HarnessSnapshot): string => !row.capabilitySupport ? "Integration not verified"
   : row.capabilitySupport.targetLifetime === "physical-runtime" ? "Runtime-managed integration" : "Session-scoped integration";
 
+const harnessDisplayLabels: Readonly<Record<string, string>> = {
+  claude: "Claude",
+  codex: "Codex",
+  cursor: "Cursor",
+  fx: "FX",
+  omp: "OMP",
+  opencode: "OpenCode",
+  pi: "Pi",
+};
+
+export function harnessDisplayName(value: string): string {
+  const normalized = value.trim();
+  if (!normalized) return "";
+  return harnessDisplayLabels[normalized.toLowerCase()]
+    ?? normalized.replace(/[-_]+/g, " ").replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+}
+
 const kindLabels: Record<AgentCapabilityKind, string> = { instruction: "Instructions", "mcp-server": "MCP", tool: "Polyth tools", skill: "Skills", context: "Context", extension: "Extensions" };
 const modeLabels: Record<CapabilityProjectionMode, string> = { native: "Native", mcp: "via MCP", prompt: "Prompt", filesystem: "Filesystem", config: "Config", emulated: "Emulated", unsupported: "Unsupported" };
 const modeDescriptions: Record<CapabilityProjectionMode, string> = {
