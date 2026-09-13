@@ -46,12 +46,19 @@ test("chat chrome is component-owned, compact and readable", () => {
   assert.doesNotMatch(css, /!important/);
 });
 
-test("chat and subagent activity share human model presentation", () => {
+test("chat, context and agent activity share human model presentation", () => {
   const footer = read("../src/components/ChatResponseFooter.tsx");
   const execution = read("../src/components/ExecutionRow.tsx");
+  const contextRail = read("../src/components/railSurfaces.tsx");
+  const statusDock = read("../src/components/ui/AgentStatusDock.tsx");
+  const statusCss = read("../src/components/ui/AgentStatusDock.css");
   assert.match(footer, /resolveModelPresentation\(modelRef, models, harnessId\)/);
   assert.match(execution, /resolveModelPresentation\(model, models, harnessId\)\.name/);
+  assert.match(contextRail, /resolveModelPresentation\(activeModel, models, session\.resolvedHarnessId\)/);
+  assert.doesNotMatch(contextRail, /session\.model\.providerID\}\/\$\{session\.model\.modelID/);
   assert.doesNotMatch(execution, /model \? `\$\{model\.providerID\}\/\$\{model\.modelID\}`/);
+  assert.match(statusDock, /import "\.\/AgentStatusDock\.css"/);
+  assert.match(statusCss, /\.agent-status-dock-primary strong/);
 });
 
 test("shell no longer mutates model catalog or imports override-only chrome", () => {
