@@ -269,8 +269,7 @@
 
 /* Mobile ------------------------------------------------------------------ */
 @media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
-  /* The resting and focused composer use the same geometry. Focus changes the
-     caret/keyboard, not the text origin or the shell shape. */
+  /* One surface, one geometry. Focus changes state, not the composer's shape. */
   .composer-mobile .composer-card,
   .composer-mobile.composer-collapsed .composer-card,
   .composer-mobile.composer-expanded .composer-card {
@@ -300,14 +299,13 @@
     flex: 0 0 auto;
   }
 
-  /* Invariant: placeholder, one-line drafts and long drafts all start at the
-     same top-left point. Never vertically center the single-line state. */
+  /* Placeholder, one-line drafts and long drafts share one top-left origin. */
   .composer-mobile .composer-card textarea,
   .composer-mobile.composer-collapsed .composer-card textarea,
   .composer-mobile.composer-expanded .composer-card textarea {
     min-height: var(--control-h-sm);
     max-height: min(var(--composer-max-input-height), 18dvh);
-    padding: var(--space-3) var(--space-4) 0;
+    padding: var(--space-3) var(--space-4) var(--space-1);
     overflow-x: hidden;
     overflow-y: auto;
     line-height: 1.45;
@@ -315,6 +313,8 @@
     text-overflow: clip;
   }
 
+  /* The rail is one optical baseline. Its children, not nested wrapper boxes,
+     own the order: Add | spacer | Thinking | Model | Mic | Action. */
   .composer-mobile .composer-rail,
   .composer-mobile.composer-collapsed .composer-rail,
   .composer-mobile.composer-expanded .composer-rail {
@@ -324,16 +324,19 @@
     display: flex;
     align-items: center;
     flex-wrap: nowrap;
-    gap: var(--space-1);
-    padding: 0 var(--space-2) var(--space-2);
+    gap: calc(var(--space-1) / 2);
+    padding: 0 var(--space-3) var(--space-2);
   }
 
+  /* Flatten the leading wrapper so Add and Voice can occupy independent
+     positions in the parent rail instead of being locked together. */
   .composer-mobile .composer-leading-zone,
   .composer-mobile.composer-collapsed .composer-leading-zone {
+    display: contents;
+  }
+
+  .composer-mobile .composer-add {
     order: 1;
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
     flex: none;
   }
 
@@ -341,30 +344,91 @@
   .composer-mobile.composer-collapsed .composer-execution {
     order: 2;
     min-width: 0;
-    max-width: 56vw;
+    max-width: 52vw;
     display: inline-flex;
     align-items: center;
-    gap: var(--space-1);
+    gap: calc(var(--space-1) / 2);
     flex: 0 1 auto;
     margin-inline-start: auto;
     overflow: visible;
   }
 
+  .composer-mobile .composer-mobile-extensions {
+    order: 3;
+    display: none;
+    width: 0;
+    min-width: 0;
+    height: var(--tap);
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+
+  /* An empty extension host must consume zero width. If voice exists, expose
+     exactly that one canonical input method in the rail. */
+  .composer-mobile .composer-mobile-extensions:has(.mic-btn) {
+    width: var(--tap);
+    min-width: var(--tap);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 var(--tap);
+  }
+
+  .composer-mobile .composer-mobile-extensions > .placed-mini-widget {
+    display: none;
+  }
+
+  .composer-mobile .composer-mobile-extensions > .placed-mini-widget:has(.mic-btn) {
+    display: contents;
+  }
+
   .composer-mobile .composer-actions,
   .composer-mobile.composer-collapsed .composer-actions {
-    order: 3;
+    order: 4;
     display: flex;
     align-items: center;
     flex: none;
-    gap: var(--space-1);
+    gap: calc(var(--space-1) / 2);
     margin-inline-start: 0;
+  }
+
+  /* Desktop-customizable trailing widgets must not leak back into the phone
+     primary row. They were the source of stacked Workflow/Assist icons in the
+     screenshot. If Voice was explicitly moved here, keep only Voice. */
+  .composer-mobile .composer-actions > .composer-extensions {
+    display: none;
+    width: 0;
+    min-width: 0;
+    flex: 0 0 auto;
+  }
+
+  .composer-mobile .composer-actions > .composer-extensions:has(.mic-btn) {
+    width: var(--tap);
+    min-width: var(--tap);
+    height: var(--tap);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 var(--tap);
+  }
+
+  .composer-mobile .composer-actions > .composer-extensions > .placed-mini-widget {
+    display: none;
+  }
+
+  .composer-mobile .composer-actions > .composer-extensions > .placed-mini-widget:has(.mic-btn) {
+    display: contents;
+  }
+
+  .composer-mobile .composer-actions > .composer-config {
+    display: none;
   }
 
   .composer-mobile .composer-primary {
     display: inline-flex;
     align-items: center;
     flex: none;
-    gap: var(--space-1);
+    gap: calc(var(--space-1) / 2);
     margin-inline-start: 0;
   }
 
@@ -389,23 +453,24 @@
     min-height: var(--tap);
   }
 
-  /* Model is a quiet text control. Provider identity and dropdown chevron are
-     already present inside the picker; repeating them in the composer is noise. */
+  /* Model is a quiet text control. The provider mark and caret belong in the
+     picker, not in the composer chrome. */
   .composer-mobile .composer-execution > .picker,
   .composer-mobile .composer-execution .model-picker {
     min-width: 0;
-    max-width: 34vw;
+    max-width: 32vw;
     flex: 0 1 auto;
   }
 
   .composer-mobile .composer-execution .model-picker-trigger {
     min-width: 0;
     width: auto;
-    max-width: 34vw;
+    max-width: 32vw;
     height: var(--tap);
     min-height: var(--tap);
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 0;
     padding-inline: var(--space-1);
     border: 0;
@@ -425,6 +490,7 @@
     color: inherit;
     font-size: var(--font-label);
     font-weight: 600;
+    letter-spacing: -.01em;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -435,30 +501,9 @@
     display: none;
   }
 
-  /* The primary mobile row intentionally exposes only voice from contributed
-     trailing controls. Other package controls remain available on desktop and
-     through their package/settings surfaces rather than turning the composer
-     into a toolbar. */
-  .composer-mobile.composer-collapsed .composer-actions > .composer-extensions,
-  .composer-mobile .composer-mobile-extensions {
-    width: var(--tap);
-    max-width: var(--tap);
-    display: inline-flex;
-    align-items: center;
-    flex: 0 0 var(--tap);
-    overflow: visible;
-  }
-
-  .composer-mobile .composer-mobile-extensions > .placed-mini-widget {
-    display: none;
-  }
-
-  .composer-mobile .composer-mobile-extensions > .placed-mini-widget:has(.mic-btn) {
-    display: contents;
-  }
-
   .composer-mobile .composer-mobile-extensions .mic-btn,
-  .composer-mobile.composer-has-draft .composer-mobile-extensions .mic-btn {
+  .composer-mobile.composer-has-draft .composer-mobile-extensions .mic-btn,
+  .composer-mobile .composer-actions > .composer-extensions .mic-btn {
     width: var(--tap);
     min-width: var(--tap);
     height: var(--tap);
@@ -475,7 +520,8 @@
 
   .composer-mobile .composer-add-trigger,
   .composer-mobile .composer-send-options,
-  .composer-mobile .composer-mobile-extensions :is(button, .ui-icon-btn) {
+  .composer-mobile .composer-mobile-extensions :is(button, .ui-icon-btn),
+  .composer-mobile .composer-actions > .composer-extensions :is(button, .ui-icon-btn) {
     border: 0;
     box-shadow: none;
   }
@@ -494,7 +540,7 @@
     display: none;
   }
 
-  /* Send, Queue and Stop always own the same final touch box. */
+  /* Send, Queue and Stop always own the same final touch box and baseline. */
   .composer-mobile .composer-send-split .composer-queue,
   .composer-mobile .composer-primary > .send,
   .composer-mobile .composer-primary > .stop {
@@ -507,13 +553,11 @@
     border-radius: var(--radius-round);
   }
 
-  /* Active-run alternatives are contextual and quiet. The familiar queued
-     Send remains the final, dominant action; the menu sits immediately before
-     it and contains Interrupt now / Stop. */
+  /* Active-run alternatives remain contextual and quiet. */
   .composer-mobile .composer-send-split {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-1);
+    gap: calc(var(--space-1) / 2);
   }
 
   .composer-mobile .composer-send-split .composer-send-options {
@@ -544,13 +588,13 @@
 /* Tight phones keep the same semantic order and trim only the model label. */
 @media (max-width: 340px) {
   .composer-mobile .composer-execution {
-    max-width: 48vw;
+    max-width: 46vw;
   }
 
   .composer-mobile .composer-execution > .picker,
   .composer-mobile .composer-execution .model-picker,
   .composer-mobile .composer-execution .model-picker-trigger {
-    max-width: 28vw;
+    max-width: 24vw;
   }
 }
 
