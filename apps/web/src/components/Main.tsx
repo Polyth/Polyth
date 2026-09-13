@@ -4,11 +4,14 @@
 // workspace/builtinSurfaces.tsx (imported for its registrations), so adding a
 // surface never edits this file.
 import WorkspaceHost from "./workspace/WorkspaceHost.ts";
+import ModelPresentationNormalizer from "./ModelPresentationNormalizer.tsx";
 import "./workspace/builtinSurfaces.tsx";
+import "./chatChromePolish.css";
 
 export default function Main() {
   return (
     <main className="main">
+      <ModelPresentationNormalizer />
       <WorkspaceHost />
     </main>
   );

@@ -4,6 +4,7 @@ import { selectPendingChanges, sessionEditedPaths } from "../../../apps/web/src/
 import { openChanges, openWorkspacePane, setUiError, useActiveModel, useStore } from "../../../apps/web/src/store.ts";
 import { friendlyError } from "../../../apps/web/src/settings.ts";
 import { fmtDuration } from "../../../apps/web/src/format.ts";
+import { resolveModelPresentation } from "../../../apps/web/src/modelPresentation.ts";
 import { api } from "@polyth/session/web-api";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import ProviderLogo from "../../models/widgets/ProviderLogo.tsx";
@@ -204,14 +205,15 @@ export default function PendingChangesBar() {
 
   if (working) {
     const modelRef = model.turn?.model ?? session?.model;
-    const descriptor = modelRef
-      ? models.find((candidate) =>
-          candidate.providerID === modelRef.providerID && candidate.modelID === modelRef.modelID)
-      : undefined;
-    // ACP runtimes such as Cursor omit the model from `turn/started` when the
-    // native Auto selection is active. Keep that intentional selection visible
-    // instead of falling through to the generic provider label.
-    const modelName = descriptor?.name ?? modelRef?.modelID ?? tr("composer.auto");
+    const runtimeHarnessId = model.turn?.harnessId ?? session?.resolvedHarnessId;
+    // ACP runtimes such as Cursor can omit the model from `turn/started` when
+    // native Auto is active. Otherwise use the same harness-aware, human
+    // presentation as completed response footers.
+    const presentation = modelRef
+      ? resolveModelPresentation(modelRef, models, runtimeHarnessId)
+      : { descriptor: undefined, name: tr("composer.auto") };
+    const descriptor = presentation.descriptor;
+    const modelName = presentation.name;
     const activeTask = model.tasks?.items.find((item) => item.status === "active");
     const activeSubagent = model.subagents?.agents.find((agent) => /^(?:working|running|active)$/i.test(agent.status));
     const activeTool = [...model.messages].reverse().find((message) =>
@@ -244,7 +246,7 @@ export default function PendingChangesBar() {
         icon={<ProviderLogo
           providerID={descriptor?.providerID ?? modelRef?.providerID}
           providerName={descriptor?.providerName}
-          harnessId={descriptor?.harnessId ?? session?.resolvedHarnessId}
+          harnessId={descriptor?.harnessId ?? runtimeHarnessId}
           size="regular"
         />}
         model={modelName}
