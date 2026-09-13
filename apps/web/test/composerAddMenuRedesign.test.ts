@@ -10,6 +10,9 @@ test("composer Add menu keeps quick shortcuts and labelled source-of-truth rows"
   for (const id of ["upload", "mention", "github", "goal"] as const) {
     assert.ok(source.includes(`{ id: "${id}"`), `${id} is available as a quick action`);
   }
+  for (const action of ["commands", "snippets", "shell"] as const) {
+    assert.ok(source.includes(`case "${action}"`), `${action} remains available from the labelled Compose section`);
+  }
   assert.ok(source.includes('className="add-menu-quick"'), "quick actions have their own bounded group");
   assert.ok(source.includes('className="add-menu-sections"'), "the complete labelled action list remains visible");
   assert.ok(source.includes('rows.map((row) => row.kind === "group"'),
