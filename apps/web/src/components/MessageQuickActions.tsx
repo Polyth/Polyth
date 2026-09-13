@@ -1,5 +1,6 @@
 import type { UserMsg } from "../reduce.ts";
 import {
+  actionsMenuName,
   copyActionName,
   copyAnnouncement,
   copyJson,
@@ -16,7 +17,7 @@ import { copyText } from "../utils.ts";
 import { useStore } from "../store.ts";
 import SlotHost from "./slots/SlotHost.ts";
 import ChatActionButton from "./ChatActionButton.tsx";
-import { CopyIcon, GithubIcon, UndoIcon } from "./ui/index.ts";
+import { CopyIcon, ForkIcon, UndoIcon } from "./ui/index.ts";
 import { tr } from "../i18n/index.ts";
 import "./ChatChrome.css";
 
@@ -53,7 +54,7 @@ export default function MessageQuickActions({
         {timeShort(message.time)}
       </time>
       {prefs.showMessageActions && (
-        <div className="chat-message-actions" role="group" aria-label={tr("timeline.answerActions")}>
+        <div className="chat-message-actions" role="group" aria-label={actionsMenuName(message)}>
           <ChatActionButton
             icon={CopyIcon}
             label={copyActionName("user", copyFormat)}
@@ -71,7 +72,7 @@ export default function MessageQuickActions({
           )}
           {onFork && (
             <ChatActionButton
-              icon={GithubIcon}
+              icon={ForkIcon}
               label={forkActionName(message.time)}
               disabled={fork?.enabled === false}
               onClick={() => onFork(message)}
