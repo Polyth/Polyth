@@ -292,6 +292,13 @@
   max-width: 46%;
 }
 
+@media (pointer: coarse) {
+  .add-menu-v2 .add-menu-quick-action,
+  .add-menu-v2 .add-menu-item {
+    min-height: var(--tap);
+  }
+}
+
 @media (max-width: 360px) {
   .composer-add-sheet .add-menu-quick {
     gap: var(--space-1);
