@@ -2,44 +2,31 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { createPortal } from "react-dom";
 import type { SessionEvent } from "@polyth/contracts";
 import { renderMarkdown } from "../markdown.tsx";
-import { fmtCost, fmtDuration, fmtTokens } from "../format.ts";
-import { groupActivity, mergeThinking, promptIndex, copyText, loadDraft, type ActivityGroup, type ActivityItem } from "../utils.ts";
+import { fmtDuration } from "../format.ts";
+import { groupActivity, mergeThinking, promptIndex, loadDraft, type ActivityGroup, type ActivityItem } from "../utils.ts";
 import { executionPresentation, reasoningHead, reasoningTail } from "../execution.ts";
 import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { cancelResume, forkSession, loadOlderEvents, resumeNow } from "../init.ts";
 import { markSessionPerformance } from "../sessionPerformance.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
 import {
-  applyEvent, openWorkspacePane, setUiError, startNewSession, useStore,
+  applyEvent, setUiError, useStore,
 } from "../store.ts";
 import { api } from "@polyth/session/web-api";
 import {
   COPY_REASONING_NAME,
   JUMP_TO_LATEST_NAME,
   PROMPT_NAV_NAME,
-  actionsMenuName,
   assistantArticleName,
   assistantTime,
-  completedName,
-  copyActionName,
-  copyAnnouncement,
-  copyJson,
-  copyMarkdown,
   draftStateOf,
-  forkActionName,
   forkAvailability,
   guardsFromModel,
   mutationErrorMessage,
   promptJumpName,
   reasoningToggleName,
-  normalizedDuration,
-  revertActionName,
   revertAvailability,
   rewindSeedKey,
-  sentName,
-  timeIso,
-  timeShort,
-  turnDurationMs,
   userArticleName,
   type ActionAvailability,
   type MutationGuards,
@@ -86,15 +73,15 @@ import type {
 } from "../reduce.ts";
 import { Icon } from "../icons.tsx";
 import "./messagePinAction.tsx";
-import ProviderLogo from "../../../../packages/models/widgets/ProviderLogo.tsx";
-import { seedMultiRunPrompt } from "@polyth/multirun/prompt-seed";
 import WorkflowTimelineCard from "../../../../packages/workflow/widgets/WorkflowTimelineCard.tsx";
 import { tr } from "../i18n/index.ts";
 import ExecutionRow, { DiffStat, useCollapsePresence } from "./ExecutionRow.tsx";
 import Picker from "./Picker.tsx";
 import type { PickerItem } from "../picker.ts";
-import { Button, InfoIcon, Menu, Notice, RunSummary, type RunSummaryState } from "./ui/index.ts";
+import { Button, Notice, RunSummary, type RunSummaryState } from "./ui/index.ts";
 import type { TurnLimitState } from "../reduce.ts";
+import ChatResponseFooter from "./ChatResponseFooter.tsx";
+import MessageQuickActions from "./MessageQuickActions.tsx";
 
 const EMPTY_SESSION_EVENTS: SessionEvent[] = [];
 
@@ -295,542 +282,6 @@ function Thinking({ m, live, entering = false }: { m: AssistantMsg; live: boolea
   );
 }
 
-interface MessageActionEntry {
-  key: string;
-  label: string;
-  name: string; // accessible purpose-and-target name
-  run: () => void;
-  disabledReason?: string;
-  dataAttr?: Record<string, string | number>;
-}
-
-/** The action set for one user message or finalized assistant answer. Shared
- *  by the hover/focus desktop row and the persistent touch menu so pointer,
- *  Enter, and Space always produce the same operation. */
-function messageActionEntries(
-  m: UserMsg | AssistantMsg,
-  opts: {
-    announce: Announce;
-    onRevert?: (message: UserMsg) => void;
-    onFork?: (message: UserMsg) => void;
-    revert?: ActionAvailability;
-    fork?: ActionAvailability;
-    copyFormat: "markdown" | "json";
-    onGallery?: () => void;
-    onRegenerate?: () => void;
-    galleryAvailable?: boolean;
-  },
-): MessageActionEntry[] {
-  const role = m.kind;
-  const doCopy = () => {
-    void copyText(opts.copyFormat === "markdown" ? copyMarkdown(m) : copyJson(m)).then((ok) => {
-      opts.announce(copyAnnouncement(ok ? opts.copyFormat : "failed"));
-    });
-  };
-  const entries: MessageActionEntry[] = [
-    {
-      key: "copy",
-      label: tr("timeline.copyAsValue", {
-        value: opts.copyFormat === "markdown" ? tr("common.markdown") : tr("common.json"),
-      }),
-      name: copyActionName(role, opts.copyFormat),
-      run: doCopy,
-    },
-  ];
-  if (m.kind === "assistant") {
-    entries.push({
-      key: "gallery",
-      label: tr("timeline.gallery"),
-      name: tr("timeline.openImagesFromThisAssistantAnswer"),
-      run: opts.onGallery ?? (() => {}),
-      ...(!opts.galleryAvailable ? { disabledReason: tr("timeline.noImagesInThisAnswer") } : {}),
-    });
-    if (opts.onRegenerate) {
-      entries.push({
-        key: "regenerate",
-        label: tr("timeline.regenerate"),
-        name: tr("timeline.regenerateThisAssistantAnswer"),
-        run: opts.onRegenerate,
-      });
-    }
-  }
-  if (m.kind === "user" && opts.onRevert) {
-    entries.push({
-      key: "revert",
-      label: tr("timeline.revertEdit"),
-      name: revertActionName(m.time),
-      run: () => opts.onRevert?.(m),
-      ...(opts.revert && !opts.revert.enabled ? { disabledReason: opts.revert.reason } : {}),
-      dataAttr: { "data-revert-seq": m.eventSeq },
-    });
-  }
-  if (m.kind === "user" && opts.onFork) {
-    entries.push({
-      key: "fork",
-      label: tr("timeline.forkEdit"),
-      name: forkActionName(m.time),
-      run: () => opts.onFork?.(m),
-      ...(opts.fork && !opts.fork.enabled ? { disabledReason: opts.fork.reason } : {}),
-    });
-  }
-  return entries;
-}
-
-function ActionButton({ entry, className }: { entry: MessageActionEntry; className: string }) {
-  const glyph = entry.key === "copy"
-    ? <Icon.copy />
-    : entry.key === "gallery"
-      ? <Icon.image />
-      : entry.key === "regenerate"
-        ? <Icon.regenerate />
-    : entry.key === "fork"
-      ? <Icon.fork />
-      : <Icon.rewind />;
-  return (
-    <button
-      className={className}
-      aria-label={entry.name}
-      title={entry.disabledReason ?? entry.name}
-      data-tooltip={entry.disabledReason ?? entry.label}
-      disabled={entry.disabledReason !== undefined}
-      onClick={entry.run}
-      {...(entry.dataAttr ?? {})}
-    >
-      <span aria-hidden="true">{glyph}</span>
-    </button>
-  );
-}
-
-// Semantic time + actions row under a user message or finalized answer. The
-// time stays visible; the desktop action buttons reveal on hover/focus-within
-// (hidden ones have no pointer hit area); the touch entry is persistent.
-//
-// UX-TIMELINE-LAYOUT-01 §2.5: the narrow action menu is bounded NORMAL-FLOW
-// content immediately after this footer — it pushes later content instead of
-// covering its message body, its block size is capped to the visible
-// scrollport (internally scrollable beyond that), and opening it reveals it
-// through the existing timeline scroll root. Escape/outside press close it,
-// action activation closes it, and focus returns to the opener (predecessor
-// UX-MSG-ACTIONS contract, placement only).
-function MessageMeta({
-  m,
-  announce,
-  onRevert,
-  onFork,
-  onGallery,
-  onRegenerate,
-  galleryAvailable,
-  revert,
-  fork,
-}: {
-  m: UserMsg | AssistantMsg;
-  announce: Announce;
-  onRevert?: (message: UserMsg) => void;
-  onFork?: (message: UserMsg) => void;
-  onGallery?: () => void;
-  onRegenerate?: () => void;
-  galleryAvailable?: boolean;
-  revert?: ActionAvailability;
-  fork?: ActionAvailability;
-}) {
-  const prefs = useUiSettings();
-  const sessionId = useStore((s) => s.activeSessionId);
-  const t = m.kind === "user" ? m.time : assistantTime(m);
-  const name = m.kind === "user" ? sentName(t) : completedName(t);
-  const entries = messageActionEntries(m, {
-    announce,
-    onRevert,
-    onFork,
-    revert,
-    fork,
-    copyFormat: prefs.messageCopyFormat,
-    onGallery,
-    onRegenerate,
-    galleryAvailable,
-  });
-  const [menuOpen, setMenuOpen] = useState(false);
-  const openerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const closeMenu = useCallback((refocus: boolean) => {
-    setMenuOpen(false);
-    if (refocus) openerRef.current?.focus();
-  }, []);
-  useEffect(() => {
-    if (!prefs.showMessageActions && menuOpen) setMenuOpen(false);
-  }, [prefs.showMessageActions, menuOpen]);
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape") { e.stopPropagation(); closeMenu(true); }
-    };
-    const onPress = (e: PointerEvent) => {
-      const target = e.target as Node;
-      if (menuRef.current?.contains(target) || openerRef.current?.contains(target)) return;
-      // Outside press closes AND restores the opener, matching Escape and
-      // action activation (UX-MSG-ACTIONS focus contract). One exception: a
-      // press on another interactive control must keep that control's own
-      // focus — restoring here would steal a deliberate target (and trap the
-      // composer). The restore runs after the press's default focus handling,
-      // which would otherwise land on the focusable timeline region.
-      const interactive = target instanceof Element
-        && target.closest("button, a[href], input, textarea, select, summary, [contenteditable]") !== null;
-      closeMenu(false);
-      if (!interactive) {
-        const opener = openerRef.current;
-        requestAnimationFrame(() => opener?.focus());
-      }
-    };
-    document.addEventListener("keydown", onKey, true);
-    document.addEventListener("pointerdown", onPress, true);
-    return () => {
-      document.removeEventListener("keydown", onKey, true);
-      document.removeEventListener("pointerdown", onPress, true);
-    };
-  }, [menuOpen, closeMenu]);
-  useEffect(() => {
-    if (!menuOpen) return;
-    const menu = menuRef.current;
-    if (!menu) return;
-    // Cap to the LIVE scrollport so the whole menu always sits inside it
-    // (rows beyond the cap scroll internally per §2.5), then reveal it
-    // through the existing timeline scroll root. The menu sits BELOW its
-    // footer in normal flow, so it can never extend behind the fixed header —
-    // even at scrollTop=0 — and never covers the body it belongs to. The
-    // reveal region can mount mid-open and shrink the port, so the cap tracks
-    // port resizes for as long as the menu stays open.
-    const port = menu.closest<HTMLElement>(".timeline");
-    const fit = () => {
-      if (port) menu.style.maxBlockSize = `${Math.max(44, port.clientHeight - 12)}px`;
-      menu.scrollIntoView({ block: "nearest" });
-    };
-    fit();
-    const ro = port && typeof ResizeObserver !== "undefined" ? new ResizeObserver(fit) : undefined;
-    if (ro && port) ro.observe(port);
-    menu.querySelector<HTMLElement>("button:not([disabled])")?.focus();
-    return () => ro?.disconnect();
-  }, [menuOpen]);
-  return (
-    <>
-      <div className="msg-meta">
-        <time className="msg-time" dateTime={timeIso(t)} aria-label={name}>{timeShort(t)}</time>
-        {prefs.showMessageActions && (
-          <>
-            <div className="msg-actions">
-              {entries.filter((entry) => entry.key !== "regenerate").map((entry) => (
-                <ActionButton key={entry.key} entry={entry} className="msg-action-btn" />
-              ))}
-              {m.kind === "assistant" && (
-                <SlotHost
-                  slot="session.message.actions"
-                  context={{ sessionId, kind: m.kind, messageId: m.id, eventSeq: m.eventSeq }}
-                />
-              )}
-              {entries.filter((entry) => entry.key === "regenerate").map((entry) => (
-                <ActionButton key={entry.key} entry={entry} className="msg-action-btn" />
-              ))}
-              {m.kind === "user" && (
-                <SlotHost
-                  slot="session.message.actions"
-                  context={{ sessionId, kind: m.kind, messageId: m.id, eventSeq: m.eventSeq }}
-                />
-              )}
-            </div>
-            <button
-              ref={openerRef}
-              className="msg-actions-entry"
-              aria-label={actionsMenuName(m)}
-              title={actionsMenuName(m)}
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              data-actions-seq={m.eventSeq}
-              onClick={() => setMenuOpen((v) => !v)}
-            >
-              <Icon.more />
-            </button>
-          </>
-        )}
-      </div>
-      {prefs.showMessageActions && menuOpen && (
-        <div ref={menuRef} className="msg-actions-popup" role="menu" aria-label={actionsMenuName(m)}>
-          {entries.map((entry) => (
-            <button
-              key={entry.key}
-              role="menuitem"
-              className="msg-actions-item"
-              aria-label={entry.name}
-              title={entry.disabledReason ?? entry.name}
-              disabled={entry.disabledReason !== undefined}
-              onClick={() => { entry.run(); closeMenu(true); }}
-            >
-              <span aria-hidden="true">
-                {entry.key === "copy"
-                  ? <Icon.copy />
-                  : entry.key === "gallery"
-                    ? <Icon.image />
-                    : entry.key === "regenerate"
-                      ? <Icon.regenerate />
-                  : entry.key === "fork"
-                    ? <Icon.fork />
-                    : <Icon.rewind />}
-              </span>
-              <span className="msg-actions-item-label">{entry.label}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </>
-  );
-}
-
-const RESPONSE_ACTION_ICON = {
-  copy: Icon.copy,
-  image: Icon.image,
-  plan: Icon.plan,
-  pin: Icon.bookmark,
-  session: Icon.newSession,
-  multirun: Icon.multirun,
-} as const;
-
-const RESPONSE_ACTION_LABEL = {
-  copy: tr("timeline.copyAnswer"),
-  image: tr("timeline.saveAsImage"),
-  plan: tr("timeline.saveAsPlan"),
-  pin: tr("timeline.pinIntoContext"),
-  session: tr("timeline.startNewSessionFromThisAnswer"),
-  multirun: tr("timeline.startNewMultiRunFromThisAnswer"),
-} as const;
-
-function downloadAnswerImage(text: string, title: string): boolean {
-  const canvas = document.createElement("canvas");
-  const context = canvas.getContext("2d");
-  if (!context) return false;
-  const width = 1200;
-  const padding = 72;
-  const lineHeight = 34;
-  context.font = "24px system-ui, sans-serif";
-  const lines: string[] = [];
-  for (const paragraph of text.split("\n")) {
-    const words = paragraph.split(/\s+/).filter(Boolean);
-    let line = "";
-    for (const word of words) {
-      const candidate = line ? `${line} ${word}` : word;
-      if (context.measureText(candidate).width > width - padding * 2 && line) {
-        lines.push(line);
-        line = word;
-      } else {
-        line = candidate;
-      }
-    }
-    lines.push(line);
-  }
-  canvas.width = width;
-  canvas.height = Math.max(260, padding * 2 + 54 + Math.min(lines.length, 120) * lineHeight);
-  context.fillStyle = "#111318";
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.fillStyle = "#f4f6fa";
-  context.font = "700 30px system-ui, sans-serif";
-  context.fillText(title, padding, padding);
-  context.fillStyle = "#d7dce5";
-  context.font = "24px system-ui, sans-serif";
-  lines.slice(0, 120).forEach((line, index) => context.fillText(line, padding, padding + 54 + index * lineHeight));
-  const link = document.createElement("a");
-  link.download = `polyth-answer-${Date.now()}.png`;
-  link.href = canvas.toDataURL("image/png");
-  link.click();
-  return true;
-}
-
-// Pin state per event array, computed once per applied batch and shared by
-// every assistant header (previously each header re-scanned the WHOLE log on
-// every store change). Selectors then return a primitive, so headers stop
-// re-rendering on unrelated streamed events.
-const pinnedBySource = new WeakMap<readonly SessionEvent[], Map<number, boolean>>();
-
-function pinnedState(events: readonly SessionEvent[] | undefined, seq: number): boolean {
-  if (!events) return false;
-  let map = pinnedBySource.get(events);
-  if (!map) {
-    map = new Map();
-    for (const event of events) {
-      if (event.type !== "context/pinned" && event.type !== "context/unpinned") continue;
-      const src = Number((event.data as { sourceEventSeq?: unknown }).sourceEventSeq);
-      if (!Number.isFinite(src)) continue;
-      map.set(src, event.type === "context/pinned");
-    }
-    pinnedBySource.set(events, map);
-  }
-  return map.get(seq) === true;
-}
-
-function AssistantAgentHeader({
-  m,
-  announce,
-  turn,
-  segmentStartedAt,
-  regeneratePrompt,
-}: {
-  m: AssistantMsg;
-  announce?: Announce;
-  /** Present only for the terminal assistant answer of the current turn. */
-  turn?: RenderModel["turn"];
-  /** Opening prompt time of the answer's turn — the fallback duration source
-   *  for terminal answers whose turn state is no longer in the store. */
-  segmentStartedAt?: number;
-  regeneratePrompt?: string;
-}) {
-  const session = useStore((state) =>
-    state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null);
-  const projectId = useStore((state) => state.activeProjectId);
-  const pinned = useStore((state) =>
-    pinnedState(session ? state.events[session.id] : undefined, m.eventSeq));
-  const models = useStore((state) => state.models);
-  const prefs = useUiSettings();
-  const [pinBusy, setPinBusy] = useState(false);
-  const [metadataOpen, setMetadataOpen] = useState(false);
-  useEffect(() => {
-    if (!metadataOpen) return;
-    const dismiss = () => queueMicrotask(() => setMetadataOpen(false));
-    document.addEventListener("click", dismiss, true);
-    return () => document.removeEventListener("click", dismiss, true);
-  }, [metadataOpen]);
-  const modelRef = turn?.model ?? m.model ?? session?.model;
-  const descriptor = modelRef
-    ? models.find((candidate) =>
-        candidate.providerID === modelRef.providerID && candidate.modelID === modelRef.modelID
-        && (!candidate.harnessId || !m.harnessId || candidate.harnessId === m.harnessId))
-    : undefined;
-  const modelName = descriptor?.name
-    ?? (modelRef ? `${modelRef.providerID}/${modelRef.modelID}` : "Unknown model");
-  const agent = (turn?.agent ?? m.agent ?? session?.agent ?? tr("composer.build")).replace(/[-_]+/g, " ");
-  const agentName = agent ? agent[0]!.toUpperCase() + agent.slice(1) : tr("composer.build");
-  const wholeTurnDuration = turnDurationMs(turn ?? null);
-  const fallbackStart = segmentStartedAt && segmentStartedAt > 0 ? segmentStartedAt : m.time;
-  const duration = wholeTurnDuration !== null
-    ? normalizedDuration(wholeTurnDuration)
-    : m.completedAt !== undefined
-      ? normalizedDuration(Math.max(0, m.completedAt - fallbackStart))
-      : null;
-  const usage = turn?.usage?.tokens ?? m.tokens;
-  const cost = turn?.usage?.cost ?? m.cost;
-  const hasUsage = usage !== undefined && (usage.input > 0 || usage.output > 0);
-  const runAction = (id: (typeof prefs.responseActions)[number]) => {
-    if (id === "copy") {
-      void copyText(m.text).then((ok) => announce?.(ok ? tr("timeline.answerCopied") : tr("timeline.couldnTCopyAnswer")));
-      return;
-    }
-    if (id === "image") {
-      announce?.(downloadAnswerImage(m.text, modelName) ? tr("timeline.answerImageSaved") : tr("timeline.couldnTSaveAnswerImage"));
-      return;
-    }
-    if (id === "plan") {
-      if (!projectId) return;
-      void api.knowledgeCreate({
-        projectId,
-        kind: "plan",
-        title: tr("timeline.valuePlanValue", { modelName: modelName, value: timeShort(assistantTime(m)) }),
-        body: m.text,
-        ...(session ? { sourceSessionId: session.id } : {}),
-      }).then(() => announce?.(tr("timeline.answerSavedAsAPlan")))
-        .catch((error) => setUiError(error instanceof Error ? error.message : String(error)));
-      return;
-    }
-    if (id === "pin") {
-      if (!session || pinBusy) return;
-      setPinBusy(true);
-      void (pinned ? api.unpinContext(session.id, m.eventSeq) : api.pinContext(session.id, m.eventSeq))
-        .then(applyEvent)
-        .catch((error) => setUiError(error instanceof Error ? error.message : String(error)))
-        .finally(() => setPinBusy(false));
-      return;
-    }
-    if (id === "session") {
-      if (projectId) startNewSession(projectId, { draft: m.text });
-      return;
-    }
-    seedMultiRunPrompt(m.text);
-    openWorkspacePane("multirun");
-  };
-  const directActions = prefs.responseActions.filter((id) => id === "copy" || id === "pin");
-  const overflowActions = prefs.responseActions.filter((id) => id !== "copy" && id !== "pin");
-  const actionLabel = (id: (typeof prefs.responseActions)[number]) =>
-    id === "pin" && pinned ? tr("timeline.unpinFromContext") : RESPONSE_ACTION_LABEL[id];
-  const actionDisabled = (id: (typeof prefs.responseActions)[number]) =>
-    (id === "pin" && pinBusy) || ((id === "plan" || id === "session") && !projectId);
-  return (
-    <footer className="response-footer">
-      <div className="response-footer-row">
-        <ProviderLogo
-          providerID={descriptor?.providerID ?? modelRef?.providerID}
-          providerName={descriptor?.providerName}
-          harnessId={descriptor?.harnessId ?? m.harnessId ?? turn?.harnessId}
-          className="response-footer-mark"
-        />
-        <span className="response-footer-model">{modelName}</span>
-        {duration && <span className="response-footer-duration">{duration}</span>}
-        <div className="response-footer-metadata">
-          <button
-            type="button"
-            className="response-footer-metadata-trigger"
-            aria-label={tr("timeline.showResponseMetadata")}
-            title={tr("timeline.responseMetadata")}
-            aria-expanded={metadataOpen}
-            onClick={() => setMetadataOpen((open) => !open)}
-          ><InfoIcon /></button>
-          {metadataOpen && <div className="response-footer-metadata-grid">
-            {(m.harnessId ?? turn?.harnessId) && <><span>Harness</span><strong>{m.harnessId ?? turn?.harnessId}</strong></>}
-            {(m.profileId ?? turn?.profileId) && <><span>Profile</span><code>{m.profileId ?? turn?.profileId}</code></>}
-            {(m.runtimeLegId ?? turn?.runtimeLegId) && <><span>Runtime leg</span><code>{m.runtimeLegId ?? turn?.runtimeLegId}</code></>}
-            <span>{tr("timeline.agent")}</span><strong>{agentName}</strong>
-            <span>{tr("timeline.completed")}</span><time dateTime={timeIso(assistantTime(m))}>{timeShort(assistantTime(m))}</time>
-            {hasUsage && <><span>{tr("timeline.input")}</span><strong>{fmtTokens(usage.input)}</strong><span>{tr("timeline.output")}</span><strong>{fmtTokens(usage.output)}</strong></>}
-            {usage?.cacheRead ? <><span>{tr("timeline.cached")}</span><strong>{fmtTokens(usage.cacheRead)}</strong></> : null}
-            {cost ? <><span>{tr("timeline.cost")}</span><strong>{fmtCost(cost)}</strong></> : null}
-            {turn?.turnId ? <><span>Run</span><code>{turn.turnId}</code></> : null}
-          </div>}
-        </div>
-        <span className="response-footer-actions" aria-label={tr("timeline.answerActions")}>
-          {directActions.map((id) => {
-            const Glyph = RESPONSE_ACTION_ICON[id];
-            const label = actionLabel(id);
-            return (
-              <button
-                key={id}
-                className={id === "pin" && pinned ? "active" : ""}
-                aria-label={label}
-                title={label}
-                aria-pressed={id === "pin" ? pinned : undefined}
-                disabled={actionDisabled(id)}
-                onClick={() => runAction(id)}
-              ><Glyph /></button>
-            );
-          })}
-          {regeneratePrompt && (
-            <button
-              aria-label={tr("timeline.regenerateThisAssistantAnswer")}
-              title={tr("timeline.regenerateThisAssistantAnswer")}
-              onClick={() => requestComposerReplace(regeneratePrompt)}
-            ><Icon.regenerate /></button>
-          )}
-          {overflowActions.length > 0 && (
-            <Menu
-              label={tr("timeline.moreResponseActions")}
-              align="end"
-              entries={overflowActions.map((id) => ({
-                id,
-                label: actionLabel(id),
-                disabled: actionDisabled(id),
-                onSelect: () => runAction(id),
-              }))}
-            >
-              {(trigger) => <button className="response-footer-more" aria-label={tr("timeline.moreResponseActions")} title={tr("timeline.moreResponseActions")} {...trigger}><Icon.more /></button>}
-            </Menu>
-          )}
-        </span>
-      </div>
-    </footer>
-  );
-}
-
 const TASK_MARK = { done: "✓", active: "●", failed: "×", pending: "○" } as const;
 
 function TodoWriteList({ items }: { items: NonNullable<RenderModel["tasks"]>["items"] }) {
@@ -947,7 +398,7 @@ function AssistantView({
         </div>
       )}
       {m.finalized && hasAnswer && terminal && (
-        <AssistantAgentHeader m={m} announce={announce} turn={turn} segmentStartedAt={segmentStartedAt} regeneratePrompt={regeneratePrompt} />
+        <ChatResponseFooter m={m} announce={announce} turn={turn} segmentStartedAt={segmentStartedAt} regeneratePrompt={regeneratePrompt} />
       )}
       {m.finalized && m.text !== "" && announce && galleryAvailable && (
         <button className="assistant-gallery-shortcut" onClick={openGallery}><Icon.image /> {tr("timeline.openAnswerImages")}</button>
@@ -1323,7 +774,7 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segm
           <AttachmentPills attachments={m.attachments} />
         )}
         {announce && (
-          <MessageMeta m={m} announce={announce} onRevert={onRevert} onFork={onFork} revert={revert} fork={fork} />
+          <MessageQuickActions message={m} announce={announce} onRevert={onRevert} onFork={onFork} revert={revert} fork={fork} />
         )}
       </div>
     );

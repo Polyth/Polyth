@@ -74,6 +74,7 @@ export {
   Repeat as SyncIcon,
   RotateCcw as UndoIcon,
   RotateCw as RedoIcon,
+  GitFork as ForkIcon,
   Search as SearchIcon,
   ListFilter as FilterIcon,
   ArrowUpDown as SortIcon,
@@ -148,8 +149,8 @@ export {
   Cpu as CpuIcon,
   FileInput as FileInputIcon,
   FlaskConical as FlaskIcon,
-  // lucide-react does not export these brand marks. Keep semantic aliases backed
-  // by the closest distinct git workflow glyphs that the package does export.
+  // lucide-react does not export these brand marks. Keep compatibility aliases backed
+  // by distinct git workflow glyphs while action code uses the semantic ForkIcon above.
   GitFork as GithubIcon,
   GitMerge as GitlabIcon,
   History as HistoryIcon,
