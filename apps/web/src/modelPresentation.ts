@@ -5,4 +5,4 @@ export {
   presentModelDescriptor,
   resolveModelPresentation,
   type RuntimeModelPresentation,
-} from "@polyth/models/presentation";
+} from "../../../packages/models/src/presentation.ts";
