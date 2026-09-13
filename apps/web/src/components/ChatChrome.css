@@ -110,6 +110,7 @@
   grid-area: info;
   display: inline-flex;
   align-items: center;
+  justify-self: end;
 }
 
 .chat-response-actions {
@@ -183,5 +184,16 @@
 
   .chat-response-actions {
     margin-block-start: 0;
+  }
+
+  .msg.user .msg-meta {
+    flex-wrap: nowrap;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .chat-message-actions,
+  .chat-response-actions {
+    gap: var(--space-2);
   }
 }
