@@ -36,9 +36,11 @@ import { announce } from "../a11y/live.tsx";
 import { useModalSurface } from "../a11y/Dialog.tsx";
 import UiIcon from "../ui/Icon.tsx";
 import {
+  AddProjectIcon,
   ErrorIcon,
   HelpIcon,
   LoaderIcon,
+  NewChatIcon,
   RefreshIcon,
   ShieldIcon,
   SuccessIcon,
@@ -744,7 +746,7 @@ export default function MobileNavigator() {
                 aria-label={tr("sidebar.addProject")}
                 onClick={() => { setSidebarOpen(false); setOverlay("project-picker"); }}
               >
-                <Icon.plus />
+                <UiIcon icon={AddProjectIcon} size="lg" />
               </button>
               <button
                 className="mobile-nav-tool"
@@ -792,17 +794,14 @@ export default function MobileNavigator() {
             }).length;
             const completedCount = matching.filter((session) => resolveSessionStatus(session, now).kind === "unread").length;
             const failedCount = matching.filter((session) => resolveSessionStatus(session, now).kind === "failed").length;
-            const collapsedStatusLabel = [
+            // Counts are shown as status pills, never as concatenated words:
+            // "3 active" only reads correctly in English.
+            const statusLabel = [
               activeCount > 0 ? `${activeCount} ${tr("common.running")}` : "",
               waitingCount > 0 ? `${waitingCount} ${tr("sidebar.needsAttention")}` : "",
               completedCount > 0 ? `${completedCount} ${tr("sidebar.sessionlist.unreadActivity")}` : "",
               failedCount > 0 ? `${failedCount} ${tr("common.error")}` : "",
             ].filter(Boolean).join(", ");
-            const metadata = [
-              tr("sidebar.sessionlist.valueSessions", { length: matching.length }),
-              activeCount > 0 ? `${activeCount} active` : "",
-              waitingCount > 0 ? `${waitingCount} waiting` : "",
-            ].filter(Boolean).join(" · ");
             const pinnedSessions = all.filter((session) => !!session.pinned);
             const normalDateGroups = groupSessionsByActivityDate(visibleNormal);
             const isolatedDateGroups = groupSessionsByActivityDate(isolated);
@@ -819,6 +818,11 @@ export default function MobileNavigator() {
                 id: "copy-path",
                 label: tr("editor.filepane.copyPath"),
                 onSelect: () => { void navigator.clipboard?.writeText(project.path); },
+              },
+              {
+                id: "isolate",
+                label: tr("sidebar.newSessionInWorktree"),
+                onSelect: () => openWorktreeSessionDialog(project.id),
               },
               "separator",
               {
@@ -859,36 +863,17 @@ export default function MobileNavigator() {
                   >
                     {expanded ? <Icon.chevronDown /> : <Icon.chevronRight />}
                   </button>
-                  {manualReorder ? (
-                    <button
-                      type="button"
-                      className="mobile-nav-project-drag-handle"
-                      aria-label={tr("sidebar.reorderValue", { value: project.name || project.path })}
-                      aria-keyshortcuts="Alt+Shift+ArrowUp Alt+Shift+ArrowDown"
-                      draggable={manualReorder}
-                      onPointerDown={(event) => startProjectDrag(event, project.id)}
-                      onPointerMove={moveProjectDrag}
-                      onPointerUp={finishProjectDrag}
-                      onPointerCancel={cancelProjectDrag}
-                      onLostPointerCapture={clearProjectDrag}
-                      onDragStart={(event) => startProjectNativeDrag(event, project.id)}
-                      onDragEnd={clearProjectDrag}
-                      onKeyDown={(event) => {
-                        if (!event.altKey || !event.shiftKey) return;
-                        if (event.key === "ArrowUp") {
-                          event.preventDefault();
-                          moveProjectBy(project.id, -1);
-                        } else if (event.key === "ArrowDown") {
-                          event.preventDefault();
-                          moveProjectBy(project.id, 1);
-                        }
-                      }}
-                    >
-                      <Icon.pull />
-                    </button>
-                  ) : (
-                    <span className="mobile-nav-project-icon" aria-hidden="true"><Icon.files /></span>
-                  )}
+                  {/* Same project mark as the desktop navigator: the chosen
+                      icon and colour are project identity, not decoration. */}
+                  <span className="project-glyph" style={project.color ? { color: project.color } : undefined}>
+                    {project.icon
+                      ? project.icon.startsWith("/assets/project-icons/")
+                        ? <span className="project-glyph-mask" aria-hidden="true" style={{ WebkitMaskImage: `url("${project.icon}")`, maskImage: `url("${project.icon}")` }} />
+                        : project.icon.startsWith("data:image/")
+                          ? <img src={project.icon} alt="" />
+                          : <span aria-hidden="true">{project.icon}</span>
+                      : <Icon.files />}
+                  </span>
                   {renamingProjectId === project.id ? (
                     <input
                       className="mobile-nav-project-rename"
@@ -909,10 +894,10 @@ export default function MobileNavigator() {
                       <span className="mobile-nav-project-name">{project.name || project.path}</span>
                       <span className="mobile-nav-project-meta">
                         <span className="mobile-nav-project-meta-copy">
-                          {expanded ? metadata : tr("sidebar.sessionlist.valueSessions", { length: matching.length })}
+                          {tr("sidebar.sessionlist.valueSessions", { length: matching.length })}
                         </span>
-                        {!expanded && collapsedStatusLabel && (
-                          <span className="mobile-nav-project-statuses" aria-label={collapsedStatusLabel}>
+                        {!expanded && statusLabel && (
+                          <span className="mobile-nav-project-statuses" aria-label={statusLabel}>
                             {activeCount > 0 && (
                               <span className="mobile-nav-project-status is-running" title={`${activeCount} ${tr("common.running")}`}>
                                 {statusIcon("working")}
@@ -943,19 +928,42 @@ export default function MobileNavigator() {
                     </button>
                   )}
                   <div className="mobile-nav-project-actions">
-                    <button
-                      className="mobile-nav-project-action is-isolated"
-                      aria-label={tr("isolation.workInIsolation")}
-                      onClick={() => openWorktreeSessionDialog(project.id)}
-                    >
-                      <span className="mobile-nav-isolated-glyph"><Icon.package /><Icon.plus /></span>
-                    </button>
+                    {/* Reordering lives on the trailing edge with the other row
+                        actions, so the leading edge stays project identity. */}
+                    {manualReorder && (
+                      <button
+                        type="button"
+                        className="mobile-nav-project-action mobile-nav-project-drag-handle"
+                        aria-label={tr("sidebar.reorderValue", { value: project.name || project.path })}
+                        aria-keyshortcuts="Alt+Shift+ArrowUp Alt+Shift+ArrowDown"
+                        draggable={manualReorder}
+                        onPointerDown={(event) => startProjectDrag(event, project.id)}
+                        onPointerMove={moveProjectDrag}
+                        onPointerUp={finishProjectDrag}
+                        onPointerCancel={cancelProjectDrag}
+                        onLostPointerCapture={clearProjectDrag}
+                        onDragStart={(event) => startProjectNativeDrag(event, project.id)}
+                        onDragEnd={clearProjectDrag}
+                        onKeyDown={(event) => {
+                          if (!event.altKey || !event.shiftKey) return;
+                          if (event.key === "ArrowUp") {
+                            event.preventDefault();
+                            moveProjectBy(project.id, -1);
+                          } else if (event.key === "ArrowDown") {
+                            event.preventDefault();
+                            moveProjectBy(project.id, 1);
+                          }
+                        }}
+                      >
+                        <Icon.pull />
+                      </button>
+                    )}
                     <button
                       className="mobile-nav-project-action"
                       aria-label={tr("sidebar.newChatInValue", { value: project.name || project.path })}
                       onClick={() => { startNewSession(project.id); setSidebarOpen(false); }}
                     >
-                      <Icon.plus />
+                      <UiIcon icon={NewChatIcon} size="lg" />
                     </button>
                     <Menu label={tr("sidebar.actionsForValue", { value: project.name || project.path })} align="end" entries={projectEntries}>
                       {(trigger) => (
@@ -1009,8 +1017,8 @@ export default function MobileNavigator() {
                         className="mobile-nav-more-sessions"
                         onClick={() => setShowAllProjects((current) => new Set(current).add(project.id))}
                       >
-                        <span>{hiddenCount} more sessions</span>
-                        <Icon.chevronRight />
+                        <span>{tr("sidebar.sessionlist.showMoreSessions")}</span>
+                        <span className="mobile-nav-more-count">{hiddenCount}</span>
                       </button>
                     )}
 
@@ -1027,7 +1035,9 @@ export default function MobileNavigator() {
                               return next;
                             })}
                           >
-                            <span>Isolated · {isolated.length}</span>
+                            <Icon.branch />
+                            <span>{tr("sidebar.isolated")}</span>
+                            <span className="mobile-nav-isolated-count">{isolated.length}</span>
                             {isolationExpanded ? <Icon.chevronDown /> : <Icon.chevronRight />}
                           </button>
                           <button
@@ -1043,17 +1053,18 @@ export default function MobileNavigator() {
                               return (
                                 <div className="mobile-nav-date-group" key={group.key}>
                                   <div className="mobile-nav-date-divider" role="separator" aria-label={label}><span>{label}</span></div>
+                                  {/* The section header already says these are
+                                      isolated; a per-row branch glyph only
+                                      repeats it and costs title width. */}
                                   {group.sessions.map((session) => (
-                                    <div className="mobile-nav-isolated-item" key={session.id}>
-                                      <span className="mobile-nav-worktree-icon" aria-hidden="true"><Icon.branch /></span>
-                                      <SessionRow
-                                        session={session}
-                                        active={session.id === activeSessionId}
-                                        now={now}
-                                        pinnedSessions={pinnedSessions}
-                                        onChanged={() => refreshProject(project.id)}
-                                      />
-                                    </div>
+                                    <SessionRow
+                                      key={session.id}
+                                      session={session}
+                                      active={session.id === activeSessionId}
+                                      now={now}
+                                      pinnedSessions={pinnedSessions}
+                                      onChanged={() => refreshProject(project.id)}
+                                    />
                                   ))}
                                 </div>
                               );

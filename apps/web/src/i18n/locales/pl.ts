@@ -1802,6 +1802,7 @@ export const pl: AppMessages = {
   "sidebar.filter": "Filtr",
   "sidebar.filterSessions": "Filtruj sesje",
   "sidebar.importSessions": "Importuj sesje…",
+  "sidebar.isolated": "Izolowane",
   "sidebar.listOptions": "Sortowanie i filtrowanie",
   "sidebar.manualOrder": "Kolejność niestandardowa",
   "sidebar.loadingProjects": "Ładowanie projektów…",

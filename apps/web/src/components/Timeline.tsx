@@ -69,6 +69,7 @@ import {
   freshTurnContextOffset,
   requiredTurnSheetPadding,
   timelineFollowState,
+  timelineMutationAffectsFollow,
 } from "../timelineFollow.ts";
 import AttachmentPills from "./AttachmentPills.tsx";
 import CopyButton from "./CopyButton.tsx";
@@ -1024,9 +1025,10 @@ function GithubConflictCard({ message, entering = false }: { message: GithubConf
   );
 }
 
-// Technical work is projected into one run-level activity group. Settled runs
-// collapse to a summary; the current run opens without promoting every tool to
-// a separate card.
+// Contiguous technical work is projected into an activity group. Settled runs
+// collapse to a summary; the current run shows one live row without promoting
+// every tool to a separate card. A turn may contain several such groups when
+// the agent resumes work after a visible assistant message.
 function childForTool(tool: ToolMsg, subagents: SubagentState | null): SubagentState["agents"][number] | undefined {
   if (!subagents || executionPresentation(tool).kind !== "subagent") return undefined;
   const metadataId = ["sessionId", "sessionID", "childSessionId", "child_session_id"]
@@ -1143,6 +1145,21 @@ function activityItemNode(
       : <TaskActivityRow key={item.id} activity={item} entering={entering} />;
 }
 
+function liveLayerFor(group: Element | null): HTMLElement | null {
+  const layer = group?.closest(".timeline-viewport")?.querySelector(":scope > .activity-live-layer");
+  return layer instanceof HTMLElement ? layer : null;
+}
+
+function syncLiveStage(stage: HTMLElement, group: HTMLElement): void {
+  const layer = stage.parentElement;
+  if (!layer?.classList.contains("activity-live-layer")) return;
+  const groupBox = group.getBoundingClientRect();
+  const layerBox = layer.getBoundingClientRect();
+  stage.style.left = `${groupBox.left - layerBox.left}px`;
+  stage.style.width = `${Math.max(0, groupBox.width)}px`;
+  stage.style.top = `${groupBox.bottom - layerBox.top}px`;
+}
+
 function derivedActivityState(g: ActivityGroup): RunSummaryState {
   const latestTasks = new Map(g.tasks.map((task) => [task.taskId, task]));
   if (g.tools.some((tool) => tool.status === "error" && /cancel(?:led|ed)|aborted|stopped|interrupted/i.test(tool.error ?? ""))) return "cancelled";
@@ -1198,12 +1215,62 @@ export function ActivityGroupView({
     fmtDuration(g.ms),
   ].join(" · ");
   // A live action is its own visual timeline row, not part of the folded
-  // block's layout. Its positioned stage is anchored to the block while it
-  // runs, then the row folds away into the block.
+  // block's layout. It is portaled into the clipped viewport overlay so
+  // flight cannot grow timeline overflow; then it folds away into the block.
+  const groupRef = useRef<HTMLElement | null>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [liveLayer, setLiveLayer] = useState<HTMLElement | null>(() => {
+    if (typeof document === "undefined") return null;
+    const layer = document.querySelector(".timeline-viewport > .activity-live-layer");
+    return layer instanceof HTMLElement ? layer : null;
+  });
+  const bindGroupRef = useCallback((node: HTMLElement | null) => {
+    groupRef.current = node;
+    if (!node) return;
+    const layer = liveLayerFor(node);
+    setLiveLayer((current) => (current === layer ? current : layer));
+  }, []);
+  useLayoutEffect(() => {
+    setLiveLayer(liveLayerFor(groupRef.current));
+  }, [showBlock, floating.length]);
+  useLayoutEffect(() => {
+    const group = groupRef.current;
+    const stage = stageRef.current;
+    if (!group || !stage || !liveLayer) return;
+    const sync = () => syncLiveStage(stage, group);
+    sync();
+    const timeline = group.closest(".timeline");
+    const resize = typeof ResizeObserver === "function" ? new ResizeObserver(sync) : null;
+    resize?.observe(group);
+    timeline?.addEventListener("scroll", sync, { passive: true });
+    window.addEventListener("resize", sync);
+    return () => {
+      resize?.disconnect();
+      timeline?.removeEventListener("scroll", sync);
+      window.removeEventListener("resize", sync);
+    };
+  }, [liveLayer, floating.length]);
+  const stage = floating.length > 0 ? (
+    <div className="activity-live-stage" ref={stageRef}>
+      {floating.map((item) => {
+        const live = liveIds.includes(item.id);
+        return <div
+          key={item.id}
+          className={`activity-live${item.kind === "task" && item.action === "started" ? " task-started" : ""}${live ? "" : " leaving"}`}
+          aria-hidden={!live || undefined}
+          inert={!live}
+        >
+          <div className="activity-live-content">
+            {activityItemNode(item, subagents, live, false)}
+          </div>
+        </div>;
+      })}
+    </div>
+  ) : null;
   return (
     <>
       {showBlock && (
-        <section className={`msg assistant activity-group${entering ? " timeline-row-enter" : ""}${open ? " open" : ""}${active ? " current" : ""}`} aria-label={tr("timeline.agentActivity")}>
+        <section ref={bindGroupRef} className={`msg assistant activity-group${entering ? " timeline-row-enter" : ""}${open ? " open" : ""}${active ? " current" : ""}`} aria-label={tr("timeline.agentActivity")}>
           <RunSummary
             title={tr("timeline.activity")}
             meta={meta}
@@ -1227,25 +1294,9 @@ export function ActivityGroupView({
               )}
             </div>
           </div>
-          {floating.length > 0 && (
-            <div className="activity-live-stage">
-              {floating.map((item) => {
-                const live = liveIds.includes(item.id);
-                return <div
-                  key={item.id}
-                  className={`activity-live${live ? "" : " leaving"}`}
-                  aria-hidden={!live || undefined}
-                  inert={!live}
-                >
-                  <div className="activity-live-content">
-                    {activityItemNode(item, subagents, live, false)}
-                  </div>
-                </div>;
-              })}
-            </div>
-          )}
         </section>
       )}
+      {liveLayer && stage ? createPortal(stage, liveLayer) : null}
     </>
   );
 }
@@ -2082,7 +2133,10 @@ export default function Timeline({
     };
     observeRows();
     const mutations = typeof MutationObserver === "function"
-      ? new MutationObserver(() => { observeRows(); refresh(); })
+      ? new MutationObserver((records) => {
+        observeRows();
+        if (timelineMutationAffectsFollow(records)) refresh();
+      })
       : null;
     mutations?.observe(el, {
       childList: true,
@@ -2577,10 +2631,10 @@ export default function Timeline({
 
   // One timeline, one scroll root (§2.1): the shell stacks the reserved
   // utility region, the single `.timeline` scrollport, and the reserved
-  // latest-reveal region as normal-flow siblings. The only exception is the
-  // prompt rail: `.timeline-viewport` is a non-scrolling positioning context
-  // wrapping the scrollport, and the rail is an absolute SIBLING of the
-  // scroller pinned to the right gutter (never over the reading column).
+  // latest-reveal region as normal-flow siblings. Absolute siblings of the
+  // scroller live in `.timeline-viewport`: the prompt rail in the right
+  // gutter, and the clipped live-action layer so flight cannot grow
+  // scrollHeight.
   return (
     <div className="timeline-shell">
       <div className="timeline-viewport">
@@ -2785,6 +2839,7 @@ export default function Timeline({
         <div className="msg-live" role="status" aria-live="polite">{liveText}</div>
         <SlotHost slot="session.timeline.after" context={slotSummary} customizable />
       </div>
+      <div className="activity-live-layer" />
       {showNav && (
         <PromptNavigator
           prompts={prompts}

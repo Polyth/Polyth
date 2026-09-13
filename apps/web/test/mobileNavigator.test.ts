@@ -26,10 +26,7 @@ test("session swipe actions (Pin to top / Archive) stay hidden until actually sw
 });
 
 test("phone navigator uses the canonical viewport, safe-area, and semantic color seams", async () => {
-  const [css, polish] = await Promise.all([
-    read("../src/components/mobile/MobileNavigator.css"),
-    read("../src/components/mobile/MobileNavigatorPolish.css"),
-  ]);
+  const css = await read("../src/components/mobile/MobileNavigator.css");
 
   assert.match(css, /\.mobile-navigator\s*\{[^}]*height:\s*var\(--visual-vh, 100dvh\);/s);
   assert.match(css, /var\(--safe-top\)/);
@@ -37,15 +34,13 @@ test("phone navigator uses the canonical viewport, safe-area, and semantic color
   assert.doesNotMatch(css, /env\(safe-area-inset-/);
   for (const deprecated of ["--surface", "--text-muted", "--danger", "--warning"]) {
     assert.doesNotMatch(css, new RegExp(`var\\(${deprecated}(?:[,\\)])`), `${deprecated} is deprecated in Navigator CSS`);
-    assert.doesNotMatch(polish, new RegExp(`var\\(${deprecated}(?:[,\\)])`), `${deprecated} is deprecated in Navigator polish CSS`);
   }
 });
 
-test("phone navigator uses a compact rhythm and vector status icons", async () => {
-  const [source, css, polish] = await Promise.all([
+test("phone navigator keeps the tap floor while compacting its rhythm", async () => {
+  const [source, css] = await Promise.all([
     read("../src/components/mobile/MobileNavigator.tsx"),
     read("../src/components/mobile/MobileNavigator.css"),
-    read("../src/components/mobile/MobileNavigatorPolish.css"),
   ]);
 
   assert.match(source, /function statusIcon\(kind: MobileStatusKind\)/);
@@ -55,11 +50,58 @@ test("phone navigator uses a compact rhythm and vector status icons", async () =
   assert.doesNotMatch(source, />(?:↩|◇|✓|!|⚠|↻)</,
     "mobile navigator state marks should not be platform-font glyphs");
   assert.match(css, /\.mobile-nav-state-icon\s*\{[^}]*color:\s*currentColor;/);
-  assert.match(polish, /\.mobile-nav-project\s*\{[^}]*margin:\s*0 0 var\(--space-1\);/s);
-  assert.match(polish, /\.mobile-nav-project-head\s*\{[^}]*min-height:\s*var\(--tap\);/s);
-  assert.match(polish, /\.mobile-nav-session-swipe,[\s\S]*?\.mobile-nav-session-main,[\s\S]*?min-height:\s*var\(--tap\);/s);
-  assert.match(polish, /\.mobile-nav-project-action\s*\{[^}]*width:\s*var\(--tap\);[^}]*height:\s*var\(--tap\);/s);
-  assert.match(polish, /\.mobile-nav-project-body\s*\{[^}]*padding-left:\s*var\(--space-4\);/s);
+  assert.match(css, /\.mobile-nav-project\s*\{[^}]*margin:\s*0 0 var\(--space-1\);/s);
+  // Denser type and gutters must never shrink a touch target below the floor.
+  for (const control of [
+    "\\.mobile-nav-project-head",
+    "\\.mobile-nav-project-main",
+    "\\.mobile-nav-isolated-head",
+  ]) {
+    assert.match(css, new RegExp(`${control}[^{]*\\{[^}]*min-height:\\s*var\\(--tap\\);`, "s"), `${control} keeps the tap floor`);
+  }
+  // Session rows are only denser when the user asks for it: the default value
+  // of the row variable is the tap floor, and the smaller values live behind
+  // the shared interface-density preference.
+  assert.match(css, /\.mobile-navigator\s*\{[^}]*--nav-row-session:\s*var\(--tap\);/s);
+  for (const control of ["\\.mobile-nav-session-swipe", "\\.mobile-nav-session-row", "\\.mobile-nav-session-main"]) {
+    assert.match(css, new RegExp(`${control}[^{]*\\{[^}]*min-height:\\s*var\\(--nav-row-session\\);`, "s"), `${control} follows the density row height`);
+  }
+  for (const match of css.match(/--nav-row-session:\s*[^;]+;/g) ?? []) {
+    assert.ok(
+      /var\(--tap\)/.test(match) || /\[data-density=/.test(css.slice(Math.max(0, css.indexOf(match) - 200), css.indexOf(match))),
+      `${match} must be the tap floor or a density opt-in`,
+    );
+  }
+  assert.match(css, /\.mobile-nav-project-action\s*\{[^}]*width:\s*var\(--tap\);[^}]*height:\s*var\(--tap\);/s);
+  // Type comes from the shared role scale, so the interface-size setting works.
+  assert.doesNotMatch(css, /font-size:\s*\d\d(?:\.\d+)?px/,
+    "navigator type must use role tokens, not fixed pixel sizes");
+});
+
+test("phone navigator glass is an appearance choice with a readable fallback", async () => {
+  const css = await read("../src/components/mobile/MobileNavigator.css");
+
+  assert.match(css, /\.mobile-navigator\s*\{[^}]*background:\s*var\(--material-glass-strong\);/s);
+  // Blur only inside @supports, and only while glass is on and the client is
+  // not in low-resource mode (the shared Quiet Glass contract).
+  const blurBlocks = css.match(/backdrop-filter:[^;]+;/g) ?? [];
+  assert.ok(blurBlocks.length > 0);
+  const supports = css.slice(css.indexOf("@supports"));
+  for (const rule of blurBlocks) assert.ok(supports.includes(rule), `${rule} is gated by @supports`);
+  assert.match(supports, /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\) \.mobile-navigator/);
+});
+
+test("adding a project and starting a chat are visibly different actions", async () => {
+  const source = await read("../src/components/mobile/MobileNavigator.tsx");
+
+  assert.match(source, /aria-label=\{tr\("sidebar\.addProject"\)\}[\s\S]{0,220}?icon=\{AddProjectIcon\}/,
+    "add project uses the folder-plus glyph");
+  assert.match(source, /aria-label=\{tr\("sidebar\.newChatInValue"[\s\S]{0,220}?icon=\{NewChatIcon\}/,
+    "new chat uses the chat-plus glyph");
+  // The isolation shortcut moved into the project menu; the row must not carry
+  // a second unlabelled plus-like glyph next to "new chat".
+  assert.doesNotMatch(source, /mobile-nav-isolated-glyph/);
+  assert.match(source, /id:\s*"isolate"[\s\S]*?openWorktreeSessionDialog\(project\.id\)/);
 });
 
 test("session actions stay a nested menu and can copy the session id", async () => {
@@ -89,7 +131,7 @@ test("phone chats are pinned-first, date-filtered, and grouped without row ages"
   assert.doesNotMatch(source, /function activityLabel/);
   assert.doesNotMatch(source, /mobile-nav-session-time/);
   assert.match(css, /\.mobile-nav-session-row\.is-pinned:not\(\.is-active\)/);
-  assert.match(css, /\.mobile-nav-date-divider::before,[\s\S]*?background:\s*var\(--border-soft\)/);
+  assert.match(css, /\.mobile-nav-date-divider::after\s*\{[\s\S]*?background:\s*var\(--border-soft\)/);
 });
 
 test("phone navigator shares project sorting and exposes touch-safe manual reordering", async () => {
@@ -103,10 +145,12 @@ test("phone navigator shares project sorting and exposes touch-safe manual reord
   assert.match(source, /sort === "manual"\) return applyManualProjectOrder\(filtered, projectOrder\)/);
   assert.match(source, /id: "manual"[\s\S]*?label: tr\("sidebar\.manualOrder"\)/);
   assert.match(source, /setProjectOrder\(reorderManualProjects\(fullProjectOrder\(\), draggedId, targetId\)\)/);
-  assert.match(source, /className="mobile-nav-project-drag-handle"/);
+  // The handle sits in the trailing action group, so it inherits that group's
+  // --tap box instead of declaring its own.
+  assert.match(source, /className="mobile-nav-project-action mobile-nav-project-drag-handle"/);
   assert.match(source, /onPointerMove=\{moveProjectDrag\}/);
   assert.match(source, /onPointerUp=\{finishProjectDrag\}/);
   assert.match(source, /data-project-id=\{project\.id\}/);
-  assert.match(css, /\.mobile-nav-project-drag-handle\s*\{[\s\S]*?width:\s*var\(--tap\);[\s\S]*?touch-action:\s*none;/);
+  assert.match(css, /\.mobile-nav-project-drag-handle\s*\{[^}]*touch-action:\s*none;/s);
   assert.match(css, /\.mobile-nav-project\.is-drag-over\s*> \.mobile-nav-project-head/);
 });

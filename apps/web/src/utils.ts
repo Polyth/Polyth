@@ -304,13 +304,56 @@ export function promptIndex(messages: RenderMessage[]): Array<{ id: string; prev
     });
 }
 
-/** Project one turn into an activity stream followed by its final reading
- * surface. Interim assistant prose, reasoning, tools, and task deltas become
- * one expandable group; the last textual assistant message remains the final
- * response. This is display-only derivation over already-recorded events. */
+function activityEnd(item: ActivityItem): number {
+  return item.kind === "tool"
+    ? item.finishTime ?? item.time
+    : item.kind === "assistant"
+      ? item.completedAt ?? item.time
+      : item.time;
+}
+
+/** A finalized assistant part can be a visible progress answer even though
+ *  the same turn later resumes with more tools. The reducer's completion time
+ *  distinguishes that shape from the legacy case where one assistant part
+ *  started before a tool and was finalized after it. */
+function isCompletedTextAnswer(item: ActivityItem): item is AssistantMsg {
+  return item.kind === "assistant"
+    && item.finalized
+    && item.text.trim() !== ""
+    && item.completedAt !== undefined;
+}
+
+/** Project one turn into alternating activity groups and reading surfaces.
+ * Interim assistant prose, reasoning, tools, and task deltas become an
+ * expandable group. A finalized textual part followed by later activity is a
+ * reading surface in its own right, so the resumed work gets a new group
+ * below it instead of overlaying that text. This is display-only derivation
+ * over already-recorded events. */
 export function groupActivity(messages: RenderMessage[]): Array<RenderMessage | ActivityGroup> {
   const out: Array<RenderMessage | ActivityGroup> = [];
   let segment: ActivityItem[] = [];
+
+  const pushActivity = (items: ActivityItem[]) => {
+    if (items.length === 0) return;
+    const first = items[0]!;
+    const end = Math.max(...items.map(activityEnd));
+    const latestTasks = new Map(
+      items.filter((item): item is TaskActivityMsg => item.kind === "task")
+        .map((task) => [task.taskId, task]),
+    );
+    out.push({
+      kind: "activity",
+      id: `activity-${first.id}`,
+      items,
+      tools: items.filter((item): item is ToolMsg => item.kind === "tool"),
+      tasks: items.filter((item): item is TaskActivityMsg => item.kind === "task"),
+      thoughts: items.filter((item): item is AssistantMsg => item.kind === "assistant"),
+      ms: Math.max(0, end - first.time),
+      settled: items.every((item) => item.kind !== "tool" || (item.status !== "pending" && item.status !== "running"))
+        && items.every((item) => item.kind !== "assistant" || item.finalized)
+        && [...latestTasks.values()].every((task) => task.action !== "started"),
+    });
+  };
 
   const flush = () => {
     if (segment.length === 0) return;
@@ -326,50 +369,53 @@ export function groupActivity(messages: RenderMessage[]): Array<RenderMessage | 
           || candidate.text.trim() === "" || candidate.completedAt === undefined) return false;
         return segment.every((item, itemIndex) => {
           if (itemIndex === candidateIndex) return true;
-          const endedAt = item.kind === "tool"
-            ? item.finishTime ?? item.time
-            : item.kind === "assistant" ? item.completedAt ?? item.time : item.time;
+          const endedAt = activityEnd(item);
           return candidate.completedAt! > endedAt;
         });
       });
     }
-    const final = finalIndex >= 0 ? segment[finalIndex] as AssistantMsg : undefined;
-    const activity: ActivityItem[] = [];
-    for (let index = 0; index < segment.length; index++) {
+    const answerIndexes = new Set<number>();
+    for (let index = 0; index < segment.length; index += 1) {
       const item = segment[index]!;
-      if (index !== finalIndex) {
+      if (index === finalIndex || !isCompletedTextAnswer(item)) continue;
+      // This part completed before a later item started. It is a real reading
+      // surface in the middle of the turn, not activity to hide in a fold.
+      if (segment.slice(index + 1).some((later) => later.time >= item.completedAt!)) {
+        answerIndexes.add(index);
+      }
+    }
+    if (finalIndex >= 0) answerIndexes.add(finalIndex);
+
+    // A legacy part can be stored at its first-chunk position even though its
+    // completion happened after the tools that follow it. Keep that answer at
+    // the end, as the old projection did, while normal mid-turn answers stay
+    // in event order.
+    const finalCandidate = finalIndex >= 0 ? segment[finalIndex] : undefined;
+    const deferredFinal = finalIndex >= 0
+      && finalIndex < segment.length - 1
+      && finalCandidate?.kind === "assistant"
+      && finalCandidate.completedAt !== undefined
+      && !segment.slice(finalIndex + 1).some((later) => later.time >= finalCandidate.completedAt!);
+    let activity: ActivityItem[] = [];
+    const emitAnswer = (item: AssistantMsg) => {
+      if (item.reasoning.trim() !== "") activity.push({ ...item, text: "" });
+      pushActivity(activity);
+      activity = [];
+      out.push(item.reasoning ? { ...item, reasoning: "" } : item);
+    };
+    for (let index = 0; index < segment.length; index += 1) {
+      const item = segment[index]!;
+      if (deferredFinal && index === finalIndex) continue;
+      if (!answerIndexes.has(index)) {
         activity.push(item);
         continue;
       }
-      if (item.kind === "assistant" && item.reasoning.trim() !== "") {
-        activity.push({ ...item, text: "" });
-      }
+      emitAnswer(item as AssistantMsg);
     }
-    if (activity.length > 0) {
-      const first = activity[0]!;
-      const end = Math.max(...activity.map((item) => item.kind === "tool"
-        ? item.finishTime ?? item.time
-        : item.kind === "assistant" ? item.completedAt ?? item.time : item.time));
-      const latestTasks = new Map(
-        activity.filter((item): item is TaskActivityMsg => item.kind === "task")
-          .map((task) => [task.taskId, task]),
-      );
-      out.push({
-        kind: "activity",
-        id: `activity-${first.id}`,
-        items: activity,
-        tools: activity.filter((item): item is ToolMsg => item.kind === "tool"),
-        tasks: activity.filter((item): item is TaskActivityMsg => item.kind === "task"),
-        thoughts: activity.filter((item): item is AssistantMsg => item.kind === "assistant"),
-        ms: Math.max(0, end - first.time),
-        settled: final?.finalized === true || (
-          activity.every((item) => item.kind !== "tool" || (item.status !== "pending" && item.status !== "running")) &&
-          activity.every((item) => item.kind !== "assistant" || item.finalized) &&
-          [...latestTasks.values()].every((task) => task.action !== "started")
-        ),
-      });
+    pushActivity(activity);
+    if (deferredFinal && finalCandidate?.kind === "assistant") {
+      out.push(finalCandidate.reasoning ? { ...finalCandidate, reasoning: "" } : finalCandidate);
     }
-    if (final) out.push(final.reasoning ? { ...final, reasoning: "" } : final);
     segment = [];
   };
 

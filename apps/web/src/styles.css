@@ -1281,6 +1281,14 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column;
   overflow: hidden;
 }
+/* Clipped sibling of `.timeline`, not a scroll child. Live rows rise here so
+   a filled WAAPI transform cannot inflate the scroller's overflow. */
+.activity-live-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
 /* Centered reading measure: fluid up to 768px, minimum 16px logical gutters
    at narrow widths (§2.2). Bottom padding is the ≥32px (target 40px) tail
    clearance between the last surface and the composer boundary. */
@@ -9295,6 +9303,10 @@ color: var(--muted);
     white-space: nowrap;
     animation: island-swap var(--motion-normal) var(--motion-ease);
   }
+  /* A task start borrows the title island above. Its scheduled timeline copy
+     remains available to folded Activity history, but must never paint over
+     the response while it is transient. */
+  .activity-live.task-started { display: none; }
   .mobile-session-selector > .context-indicator { grid-column: 1; }
   .mobile-session-selector > svg { grid-column: 3; justify-self: center; width: var(--icon-sm); height: var(--icon-sm); color: var(--muted); }
   .mobile-island-dot {
@@ -9345,8 +9357,8 @@ color: var(--muted);
   .app.mode-chat.view-session .stage-new .hero-body { padding-top: calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height)) + var(--space-3)); }
   .app.mode-chat.view-session .timeline {
     padding-top: calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height)) + var(--space-4));
-    -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height))), #000 calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height)) + var(--space-2)));
-    mask-image: linear-gradient(to bottom, transparent calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height))), #000 calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height)) + var(--space-2)));
+    -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height))), #000 calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height)) + var(--space-4)));
+    mask-image: linear-gradient(to bottom, transparent calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height))), #000 calc(var(--safe-top) + var(--conversation-chrome-inset) + max(var(--tap), var(--mobile-island-height)) + var(--space-4)));
   }
   .mobile-tools-sheet.sheet {
     width: 100%;
@@ -12440,7 +12452,6 @@ html[data-font] body :is(
 }
 .activity-group {
   position: relative;
-  overflow: visible;
   background: transparent;
 }
 .activity-group.current { border-color: color-mix(in srgb, var(--accent-line) 58%, var(--border-soft)); }
@@ -12483,6 +12494,7 @@ html[data-font] body :is(
   max-width: 100%;
   display: grid;
   grid-template-rows: 1fr;
+  pointer-events: auto;
   transform-origin: 50% 0;
   transition:
     grid-template-rows var(--activity-live-exit) var(--activity-live-exit-ease),
@@ -12494,15 +12506,20 @@ html[data-font] body :is(
 .activity-live-stage {
   position: absolute;
   inset-inline: 0;
-  inset-block-start: calc(100% + var(--space-1));
   width: 100%;
   min-width: 0;
   display: grid;
-  z-index: 1;
 }
-/* The stage is an overlay anchored to the block, not a flex item. Inserting or
-   growing a live row must not change the scrollport or move every earlier row
-   while the composer-to-block rise is in flight. */
+/* Portaled into `.activity-live-layer`. Left/width/top track the block; the
+   gap sits in existing timeline tail padding instead of below the group's
+   border box (that previous inset grew scrollHeight). Inserting or growing a
+   live row must not change the scrollport or move every earlier row while
+   the composer-to-block rise is in flight. */
+.activity-live-layer > .activity-live-stage {
+  inset-inline: auto;
+  width: auto;
+  margin-block-start: var(--space-1);
+}
 .activity-live.leaving {
   grid-template-rows: 0fr;
   opacity: 0;

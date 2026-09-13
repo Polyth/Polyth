@@ -54,6 +54,8 @@ test("every live action rises out of the composer and honours the motion switch"
   assert.match(controller, /playActionRise/);
   assert.match(controller, /composerAnchor\(\)/);
   assert.match(controller, /function playActionRise[^}]*motionDisabled\(\)/s);
+  assert.match(controller, /element\.closest\("\.timeline"\) && !element\.closest\("\.activity-live-layer"\)/,
+    "rise is skipped while the row is still a scroller descendant");
   assert.match(css, /html\[data-reduce-animations="true"\] \.activity-live/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.activity-live \{ transition: none; \}/);
 });
@@ -78,23 +80,31 @@ test("a burst of fast actions is paced, not stampeded", () => {
   assert.doesNotMatch(timeline, /defaultOpen=\{live\}/);
 });
 
-test("the rise stays smooth over long travel and the block never clips it", () => {
+test("the rise stays smooth over long travel and flies outside the scroller", () => {
   const controller = source("../src/chatMotion.ts");
   const css = source("../src/styles.css");
+  const timeline = source("../src/components/Timeline.tsx");
 
   // Opacity lands on its own early offset; transform keeps the full duration.
   assert.match(controller, /\{ opacity: 1, offset: settle \? 0\.28 : 0\.32 \}/);
   // Longer travel, longer duration: a fixed one reads as a teleport.
   assert.match(controller, /Math\.min\(Math\.abs\(delta\) \/ 1200, 0\.45\)/);
-  // A live action is a bare row anchored to the block, not a nested list in
-  // the folded block's layout whose clipping would swallow the travel — and it
-  // wears no frame of its own: the block is the only framed surface there.
+  // After portal the flying row is not a `.timeline` descendant; the viewport
+  // still owns the composer seam used as the rise origin.
+  assert.match(controller, /function actionRiseTimeline/);
+  assert.match(controller, /closest\("\.timeline-viewport"\)\?\.querySelector<HTMLElement>\(":scope > \.timeline"\)/);
+  // Follow/sheet ignore overlay mutations so they cannot chase transform overflow.
+  assert.match(timeline, /timelineMutationAffectsFollow/);
+  // A live action is a bare row, not a nested list in the folded block — and
+  // it wears no frame of its own. Flight is painted in a clipped sibling of
+  // the scroller so fill:both cannot grow scrollHeight.
   assert.match(css, /\.activity-group,\s*\.task-list \{/);
   const liveRule = /\n\.activity-live \{([^}]*)\}/.exec(css)?.[1] ?? "";
   assert.doesNotMatch(liveRule, /border|box-shadow|background/);
-  assert.match(css, /\.activity-group \{\s*position: relative;\s*overflow: visible;/);
-  assert.match(css, /\.activity-live-stage \{\s*position: absolute;\s*inset-inline: 0;\s*inset-block-start: calc\(100% \+ var\(--space-1\)\);/);
-  assert.match(css, /Inserting or\s+growing a live row must not change the scrollport/s);
+  assert.match(css, /\.activity-live-layer \{[^}]*position: absolute;[^}]*inset: 0;[^}]*overflow: hidden;/s);
+  assert.match(css, /\.activity-live-stage \{[^}]*position: absolute;/s);
+  assert.doesNotMatch(css, /inset-block-start: calc\(100% \+ var\(--space-1\)\)/);
+  assert.match(css, /Inserting or\s+growing a\s+live row must not change the scrollport/s);
   assert.match(css, /--activity-live-exit: 280ms/);
   assert.match(css, /opacity calc\(var\(--activity-live-exit\) \* 0\.55\) linear/);
   assert.match(css, /\.activity-live\.leaving \{[^}]*grid-template-rows: 0fr[^}]*scale\(\.985\)/s);

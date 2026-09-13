@@ -1802,6 +1802,7 @@ export const uk: AppMessages = {
   "sidebar.filter": "Фільтр",
   "sidebar.filterSessions": "Фільтрувати сеанси",
   "sidebar.importSessions": "Імпорт сеансів…",
+  "sidebar.isolated": "Ізольовані",
   "sidebar.listOptions": "Сортування та фільтри",
   "sidebar.manualOrder": "Довільний порядок",
   "sidebar.loadingProjects": "Завантаження проектів…",

@@ -1802,6 +1802,7 @@ export const ar: AppMessages = {
   "sidebar.filter": "فلتر",
   "sidebar.filterSessions": "جلسات التصفية",
   "sidebar.importSessions": "استيراد الجلسات…",
+  "sidebar.isolated": "معزولة",
   "sidebar.listOptions": "الترتيب والتصفية",
   "sidebar.manualOrder": "ترتيب مخصص",
   "sidebar.loadingProjects": "جارٍ تحميل المشاريع…",

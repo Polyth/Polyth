@@ -244,11 +244,23 @@ function composerOrigin(element: HTMLElement, timeline: HTMLElement): number {
   return (anchor ? Math.min(anchor.top, floor) : floor) - rect.top;
 }
 
+/** The flying row lives in `.activity-live-layer`, a sibling of the scroller.
+ *  `closest(".timeline")` therefore misses after portal; the viewport still
+ *  owns the composer seam used as the rise origin. */
+function actionRiseTimeline(element: HTMLElement): HTMLElement | null {
+  return element.closest<HTMLElement>(".timeline")
+    ?? element.closest(".timeline-viewport")?.querySelector<HTMLElement>(":scope > .timeline")
+    ?? null;
+}
+
 /** Every agent action enters the way a prompt does: it rises out of the
  *  composer, then folds into the activity block when it settles. */
 function playActionRise(element: HTMLElement): void {
   if (animated.has(element) || motionDisabled()) return;
-  const timeline = element.closest<HTMLElement>(".timeline");
+  // A transient in-flow mount would inflate scroller overflow; only rise once
+  // the row lives in the clipped viewport overlay beside the scroller.
+  if (element.closest(".timeline") && !element.closest(".activity-live-layer")) return;
+  const timeline = actionRiseTimeline(element);
   const delta = timeline ? composerOrigin(element, timeline) : 0;
   // A long travel needs longer. Held at the short duration, a row crossing the
   // whole timeline reads as a teleport instead of a lift.
@@ -355,9 +367,9 @@ function animateAddedNode(node: Node, suppressChat = false): void {
   const set = new Set(all);
 
   for (const element of all) {
-    // Live actions may be positioned inside their activity group so their
-    // rise cannot reflow the timeline. They still need their own animation;
-    // handle them before the nested-subtree de-duplication below.
+    // Live actions fly in the viewport overlay, not as scroller descendants.
+    // They still need their own rise; handle them before nested-subtree
+    // de-duplication below.
     if (element.matches(".activity-live")) {
       if (!suppressChat && now() >= quietUntil) playActionRise(element);
       continue;

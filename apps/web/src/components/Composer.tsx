@@ -880,7 +880,11 @@ export default function Composer({
   // History browsing overlays recalled refs locally; the canonical store is
   // untouched until a genuine edit or send.
   const pending = usePendingAttachments(session?.id ?? null);
-  const attachments = promptHistoryNav.displayedAttachments ?? pending;
+  // Submitted attachments remain in the scoped draft until admission finishes
+  // so a failed request can be recovered, but they are no longer composer UI.
+  const attachments = creatingSession || sendPending
+    ? []
+    : promptHistoryNav.displayedAttachments ?? pending;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pendingLargePaste, setPendingLargePaste] = useState<{
     text: string;
@@ -1546,6 +1550,11 @@ export default function Composer({
           await flushClientPersistence();
         }
         clearNewSessionDraft(activeProjectId, reliabilityScopeAtSend);
+        // clearNewSessionDraft updates persistence directly; clear the live
+        // hero entry too, or a later New Chat would resurrect the sent pill.
+        if (scopedDraftCacheKey(null) === scopedDraftCacheKey(null, reliabilityScopeAtSend)) {
+          clearAttachments(null);
+        }
         clearDraftExecutionConfig(activeProjectId);
         if (newSessionAutoApprove) {
           assertScopeStillCurrent();
@@ -1998,6 +2007,7 @@ export default function Composer({
       header={<SlotHost slot="modelPicker.header" context={executionPickerContext} />}
       direction="up"
       usage={model.contextUsage ? contextTokensUsed(model) : undefined}
+      catalogLoading={modelCatalog.state === "loading"}
       onPick={pickComposerModel}
     />
   ) : null;

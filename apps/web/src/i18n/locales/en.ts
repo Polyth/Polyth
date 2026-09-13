@@ -1805,6 +1805,7 @@ export const en = {
   "sidebar.filter": "Filter",
   "sidebar.filterSessions": "Filter sessions",
   "sidebar.importSessions": "Import sessions…",
+  "sidebar.isolated": "Isolated",
   "sidebar.listOptions": "Sort and filter",
   "sidebar.manualOrder": "Custom order",
   "sidebar.loadingProjects": "Loading projects…",

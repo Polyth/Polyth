@@ -110,6 +110,9 @@ export {
   // workspace objects that appear inside action controls
   House as HomeIcon,
   Folder as FolderIcon,
+  // "Add project" and "new chat" are different creations. A bare Plus for both
+  // reads as the same action twice, so each keeps the object it creates.
+  FolderPlus as AddProjectIcon,
   FolderUp as ParentFolderIcon,
   File as FileIcon,
   FileDiff as FileDiffIcon,

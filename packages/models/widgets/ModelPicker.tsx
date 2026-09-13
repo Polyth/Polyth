@@ -196,6 +196,8 @@ interface ModelPickerProps {
   direction?: "up" | "down";
   /** Current session input tokens for the details context meter. */
   usage?: number;
+  /** Catalog is still discovering; an empty list is not authoritative. */
+  catalogLoading?: boolean;
   className?: string;
 }
 
@@ -208,6 +210,7 @@ export default function ModelPicker({
   header,
   direction = "down",
   usage,
+  catalogLoading = false,
   className,
 }: ModelPickerProps) {
   const models = useMemo(() => pickerCatalogModels(catalogModels, harnessId), [catalogModels, harnessId]);
@@ -863,7 +866,11 @@ export default function ModelPicker({
                   </section>
                 );
               })}
-              {filtered.length === 0 && <p className="sheet-empty">{tr("modelpicker.noModelsFound")}</p>}
+              {filtered.length === 0 && (
+                <p className="sheet-empty">
+                  {catalogLoading ? tr("common.loading") : tr("modelpicker.noModelsFound")}
+                </p>
+              )}
               {hiddenMatchCount > 0 && (
                 <p className="picker-more">{hiddenMatchCount} {tr("picker.moreRefineTheFilter")}</p>
               )}
@@ -954,7 +961,11 @@ export default function ModelPicker({
                     </section>
                   );
                 })}
-                {filtered.length === 0 && <div className="palette-empty">{tr("modelpicker.noModelsFound")}</div>}
+                {filtered.length === 0 && (
+                  <div className="palette-empty">
+                    {catalogLoading ? tr("common.loading") : tr("modelpicker.noModelsFound")}
+                  </div>
+                )}
                 {hiddenMatchCount > 0 && (
                   <div className="picker-more">{hiddenMatchCount} {tr("picker.moreRefineTheFilter")}</div>
                 )}

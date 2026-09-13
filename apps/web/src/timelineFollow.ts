@@ -81,3 +81,38 @@ export function freshTurnContextOffset(input: FreshTurnContextInput): number {
   const maxOffset = Math.max(0, viewportHeight - Math.min(promptHeight, viewportHeight) - nextAnswerRunway);
   return Math.min(gap + responsePeek, maxOffset);
 }
+
+/** Live action flight is painted in a clipped viewport overlay. Those nodes
+ *  must not drive tail-follow or turn-sheet compensation. */
+export function isLiveTimelineOverlay(node: Node): boolean {
+  let current: Node | null = node.nodeType === 1 ? node : node.parentNode;
+  while (current) {
+    if (current.nodeType === 1) {
+      const className = (current as { className?: unknown }).className;
+      if (typeof className === "string"
+        && /(?:^|\s)(activity-live|activity-live-stage|activity-live-layer)(?:\s|$)/.test(className)) {
+        return true;
+      }
+    }
+    current = current.parentNode;
+  }
+  return false;
+}
+
+/** True when a timeline mutation is in-flow content that follow/sheet may
+ *  chase. Additions, folds and transforms of the live overlay are ignored. */
+export function timelineMutationAffectsFollow(records: Iterable<{
+  addedNodes: ArrayLike<Node>;
+  removedNodes: ArrayLike<Node>;
+  target: Node;
+}>): boolean {
+  for (const record of records) {
+    if (record.addedNodes.length > 0 || record.removedNodes.length > 0) {
+      const nodes = [...Array.from(record.addedNodes), ...Array.from(record.removedNodes)];
+      if (nodes.some((node) => !isLiveTimelineOverlay(node))) return true;
+      continue;
+    }
+    if (!isLiveTimelineOverlay(record.target)) return true;
+  }
+  return false;
+}

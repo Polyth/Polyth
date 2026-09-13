@@ -32,6 +32,28 @@ register("./tsxHooks.mjs", import.meta.url);
 
 const read = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
 
+test("pending catalog discovery shows loading instead of an authoritative empty state", async () => {
+  phoneMode = true;
+  const { act, createElement } = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { default: ModelPicker } = await import("../../../packages/models/widgets/ModelPicker.tsx");
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => {
+      root.render(createElement(ModelPicker, { models: [], catalogLoading: true, onPick: () => {} }));
+    });
+    await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
+    assert.match(document.body.querySelector(".sheet-empty")?.textContent ?? "", /loading/i);
+    assert.doesNotMatch(document.body.textContent ?? "", /no models found/i);
+  } finally {
+    phoneMode = false;
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
 test("native catalog updates preserve Luna, flat rows, and the existing picker surface", async () => {
   const { act, createElement } = await import("react");
   const { createRoot } = await import("react-dom/client");
