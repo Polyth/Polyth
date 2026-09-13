@@ -6,13 +6,18 @@ const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf
 
 test("visible chat actions use direct canonical controls", () => {
   const timeline = read("../src/components/Timeline.tsx");
+  const actionButton = read("../src/components/ChatActionButton.tsx");
   const messageActions = read("../src/components/MessageQuickActions.tsx");
   const responseFooter = read("../src/components/ChatResponseFooter.tsx");
   const pin = read("../src/components/messagePinAction.tsx");
 
   assert.match(timeline, /<MessageQuickActions/);
   assert.match(timeline, /<ChatResponseFooter/);
+  assert.match(actionButton, /IconButton/);
+  assert.match(actionButton, /Tooltip/);
+  assert.match(actionButton, /import "\.\/ChatChrome\.css"/);
   assert.match(messageActions, /className="chat-message-actions"/);
+  assert.match(messageActions, /data-actions-seq=\{message\.eventSeq\}/);
   assert.match(messageActions, /<ChatActionButton/);
   assert.doesNotMatch(messageActions, /Icon\.more|Menu|actions-popup/);
   assert.match(responseFooter, /className="chat-response-actions"/);
@@ -24,7 +29,7 @@ test("visible chat actions use direct canonical controls", () => {
 
 test("generic Menu contains no response-footer special case", () => {
   const menu = read("../src/components/ui/Menu.tsx");
-  assert.doesNotMatch(menu, /response-footer|RESPONSE_QUICK_ICON|isResponseFooterOverflowTrigger/);
+  assert.doesNotMatch(menu, /response-footer|RESPONSE_QUICK_ICON|isResponseFooterOverflowTrigger|ChatIcon/);
 });
 
 test("chat chrome is component-owned, compact and readable", () => {
@@ -33,10 +38,20 @@ test("chat chrome is component-owned, compact and readable", () => {
   assert.match(css, /\.chat-response-footer\s*\{[^}]*display:\s*grid;/s);
   assert.match(css, /grid-template-areas:\s*"identity info actions"/);
   assert.match(css, /@media \(max-width:\s*600px\)[\s\S]*"identity info"[\s\S]*"\. actions"/s);
+  assert.match(css, /@media \(max-width:\s*340px\) and \(pointer:\s*coarse\)[\s\S]*grid-template-columns:\s*repeat\(4, var\(--control-h-sm\)\)/s);
+  assert.match(css, /@media \(hover:\s*none\), \(pointer:\s*coarse\)[\s\S]*\.ui-tooltip\.chat-action-tooltip\s*\{\s*display:\s*none;/s);
   assert.match(css, /\.ui-popover\.chat-response-metadata\s*\{[^}]*background:\s*var\(--elevated\);/s);
   assert.match(css, /\.ui-tooltip\.chat-action-tooltip\s*\{[^}]*background:\s*var\(--elevated\);/s);
   assert.match(footer, /<Popover/);
   assert.doesNotMatch(css, /!important/);
+});
+
+test("chat and subagent activity share human model presentation", () => {
+  const footer = read("../src/components/ChatResponseFooter.tsx");
+  const execution = read("../src/components/ExecutionRow.tsx");
+  assert.match(footer, /resolveModelPresentation\(modelRef, models, harnessId\)/);
+  assert.match(execution, /resolveModelPresentation\(model, models, harnessId\)\.name/);
+  assert.doesNotMatch(execution, /model \? `\$\{model\.providerID\}\/\$\{model\.modelID\}`/);
 });
 
 test("shell no longer mutates model catalog or imports override-only chrome", () => {
