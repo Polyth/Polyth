@@ -84,6 +84,7 @@ import { tr } from "../i18n/index.ts";
 import ExecutionRow, { DiffStat, useCollapsePresence } from "./ExecutionRow.tsx";
 import { Button, Notice, RunSummary, type RunSummaryState } from "./ui/index.ts";
 import type { TurnLimitState } from "../reduce.ts";
+import { TRANSIENT_TURN_NOTICE_MS, transientTurnNoticeKey } from "../turnNotice.ts";
 import ChatResponseFooter from "./ChatResponseFooter.tsx";
 import MessageQuickActions from "./MessageQuickActions.tsx";
 
@@ -1805,6 +1806,23 @@ export default function Timeline({
     return bySeq;
   }, [visibleMessages]);
   const turnBroken = turn && (turn.status === "failed" || turn.status === "aborted");
+  // Ordinary terminal notices are presentation-only. Keep the rate-limit
+  // recovery panel persistent because it owns active resume/cancel controls.
+  const transientTurnKey = transientTurnNoticeKey(sessionId, turn?.limit ? null : turn);
+  const [visibleTransientTurnKey, setVisibleTransientTurnKey] = useState<string | null>(transientTurnKey);
+  useEffect(() => {
+    if (transientTurnKey === null) {
+      setVisibleTransientTurnKey(null);
+      return;
+    }
+    setVisibleTransientTurnKey(transientTurnKey);
+    const timer = setTimeout(() => {
+      setVisibleTransientTurnKey((current) => current === transientTurnKey ? null : current);
+    }, TRANSIENT_TURN_NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [transientTurnKey]);
+  const showTransientTurnNotice = transientTurnKey !== null
+    && visibleTransientTurnKey === transientTurnKey;
   const lastPromptBoundary = [...model.messages].reverse()
     .find((message) => message.kind === "user" || message.kind === "github-conflict");
   const lastUser = lastPromptBoundary?.kind === "user" ? lastPromptBoundary : undefined;
@@ -2263,7 +2281,7 @@ export default function Timeline({
         {turnBroken && turn.status === "failed" && turn.limit && sessionId && (
           <RateLimitNotice sessionId={sessionId} limit={turn.limit} />
         )}
-        {turnBroken && !(turn.status === "failed" && turn.limit) && (
+        {showTransientTurnNotice && turnBroken && !(turn.status === "failed" && turn.limit) && (
           <Notice
             tone="error"
             className="turn-error"
