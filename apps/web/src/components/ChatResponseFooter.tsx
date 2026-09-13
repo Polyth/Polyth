@@ -31,7 +31,6 @@ import {
   TasksIcon,
   type LucideIcon,
 } from "./ui/index.ts";
-import "./ChatChrome.css";
 
 const RESPONSE_ACTION_ICON: Record<string, LucideIcon> = {
   copy: CopyIcon,
