@@ -206,4 +206,8 @@
   .chat-response-footer {
     row-gap: var(--space-3);
   }
+
+  .ui-tooltip.chat-action-tooltip {
+    display: none;
+  }
 }
