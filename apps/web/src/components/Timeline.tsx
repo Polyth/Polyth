@@ -95,34 +95,19 @@ import Picker from "./Picker.tsx";
 import type { PickerItem } from "../picker.ts";
 import { Button, InfoIcon, Menu, Notice, RunSummary, type RunSummaryState } from "./ui/index.ts";
 import type { TurnLimitState } from "../reduce.ts";
+import ChatResponseFooter from "./ChatResponseFooter.tsx";
+import MessageQuickActions from "./MessageQuickActions.tsx";
 
 const EMPTY_SESSION_EVENTS: SessionEvent[] = [];
 
-/** One announcement per copy/mutation outcome; text is the accessible record,
- *  checkmarks only supplement it. Screen readers ignore repeats, so identical
- *  text gets an invisible nudge (same trick as a11y/live.tsx). */
 type Announce = (text: string) => void;
 
-/** True when streamed text must not be smoothed: accessibility settings and
- *  the desktop low-resource mode both get the raw target directly. */
 function smoothTextOff(): boolean {
   if (typeof document !== "undefined" && document.body.dataset.desktopLowResource === "true") return true;
   if (typeof document !== "undefined" && document.documentElement.dataset.reduceAnimations === "true") return true;
   return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-/** Super-fast typewriter: the rendered text chases the streamed target at a
- *  rate set once per chunk arrival (backlog ÷ ~18 frames), so any backlog
- *  catches up in a fixed ~300ms and new arrivals re-rate — the visible text
- *  lags the stream by a bounded ~300ms and reads as one continuous fast
- *  type-out instead of blocks popping in. Shrinking targets (rewind) and
- *  motion-off snap immediately.
- *  `fromEmpty` mounts the chase at "" instead of the full target: a fresh
- *  live block types its FIRST backlog over a watchable ~90 frames (~1.5s at
- *  60fps) so a one-shot thought reads as typing, not a pop-in; after that
- *  first catch-up the rate returns to the bounded ~300ms chase.
- *  ponytail: re-parses one message's markdown per reveal frame; per-block
- *  memo caching in markdown/render.tsx is the upgrade if profiling complains. */
 function useSmoothText(target: string, fromEmpty = false): string {
   const initial = fromEmpty && !smoothTextOff() ? "" : target;
   const [shown, setShown] = useState(initial);
@@ -140,9 +125,6 @@ function useSmoothText(target: string, fromEmpty = false): string {
       return;
     }
     if (shownRef.current.length >= target.length) return;
-    // Fixed-time catch-up from THIS arrival's backlog; the floor keeps short
-    // drips visibly typing instead of teleporting. The initial reveal spans
-    // ~90 frames so the first full thought is readable while it types.
     const frames = revealRef.current ? 90 : 18;
     rateRef.current = Math.max(4, Math.ceil((target.length - shownRef.current.length) / frames));
     const step = () => {
@@ -162,27 +144,9 @@ function useSmoothText(target: string, fromEmpty = false): string {
     raf.current = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf.current);
   }, [target]);
-  // Render guard: never show more text than the target holds.
   return target.length < shown.length ? target : shown;
 }
 
-// Merged thinking block (P2-W2): progressive disclosure over the REAL
-// reasoning stream. While the thought FORMS the block mounts expanded and its
-// text types out (useSmoothText fromEmpty reveal); as soon as the thought is
-// formed — the reasoning part finalized, the answer text started, or the
-// stream went quiet — the block folds to a single line: the brain mark plus
-// the first thought, faded out toward the line end. Expanded it renders the
-// reasoning as secondary-styled markdown inside a height-capped,
-// self-following scroll well, so long thinking never breaks the page.
-// UX-MSG-ACTIONS: the disclosure is a native, keyboard-operable control with
-// a purpose-and-target name and truthful expanded state; expanding/collapsing
-// appends no event.
-
-/** Reasoning reveals that already played in this app session. A remount of
- *  the same (or grown) reasoning — row-key change on the reasoning→answer
- *  merge, switching away and back mid-turn — must never re-type from empty.
- *  ponytail: unbounded module set, one string per revealed thought; cap or
- *  per-session reset if long-running tabs ever matter. */
 const revealedReasoning = new Set<string>();
 function reasoningSeen(text: string): boolean {
   for (const seen of revealedReasoning) {
@@ -194,15 +158,9 @@ function reasoningSeen(text: string): boolean {
 function Thinking({ m, live, entering = false }: { m: AssistantMsg; live: boolean; entering?: boolean }) {
   const prefs = useUiSettings();
   const source = m.reasoning || m.text;
-  // Fresh live thought: its row is the turn's live latest, the answer has not
-  // started, and this reasoning never revealed before → type out from empty.
   const fresh = live && m.text === "" && !reasoningSeen(source);
   const reasoning = useSmoothText(source, fresh);
   const typing = reasoning.length < source.length;
-  // Block stays expanded while the thought is forming: either the reveal is
-  // still typing, or the reasoning part has not finalized yet (turn working,
-  // latest row). Pauses in the stream do NOT collapse — only a real
-  // finalization (part-final / answer started / turn ended) folds it.
   const active = typing || (!m.finalized && live && m.text === "");
   const [open, setOpen] = useState(active || prefs.thinkingDefaultExpanded);
   const userToggled = useRef(false);
@@ -210,8 +168,6 @@ function Thinking({ m, live, entering = false }: { m: AssistantMsg; live: boolea
   const reasoningAtBottom = useRef(true);
   const bodyPresent = useCollapsePresence(open);
   const head = active ? reasoningTail(reasoning) : reasoningHead(reasoning);
-  // Expanded while forming; auto-folds when the thought is formed unless the
-  // reader pinned it by hand.
   useEffect(() => {
     if (active) {
       userToggled.current = false;
@@ -220,13 +176,9 @@ function Thinking({ m, live, entering = false }: { m: AssistantMsg; live: boolea
       setOpen(prefs.thinkingDefaultExpanded);
     }
   }, [active, prefs.thinkingDefaultExpanded]);
-  // A played reveal registers its reasoning so any remount shows it formed.
   useEffect(() => {
     if (fresh && !typing) revealedReasoning.add(source);
   }, [fresh, typing, source]);
-  // Streaming follow mirrors the conversation reader contract: follow while
-  // the well is at its tail, but preserve an intentional scroll-up position.
-  // Deps track the SMOOTHED text so the well follows the per-frame reveal.
   useEffect(() => {
     if (!open || !active || !reasoningAtBottom.current) return;
     const el = bodyRef.current;
@@ -246,8 +198,7 @@ function Thinking({ m, live, entering = false }: { m: AssistantMsg; live: boolea
         tabIndex={0}
         onScroll={(event) => {
           const el = event.currentTarget;
-          reasoningAtBottom.current =
-            el.scrollHeight - el.scrollTop - el.clientHeight < 16;
+          reasoningAtBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 16;
         }}
       >
         {renderMarkdown(reasoning, `${m.id}-reasoning`)}
@@ -298,15 +249,12 @@ function Thinking({ m, live, entering = false }: { m: AssistantMsg; live: boolea
 interface MessageActionEntry {
   key: string;
   label: string;
-  name: string; // accessible purpose-and-target name
+  name: string;
   run: () => void;
   disabledReason?: string;
   dataAttr?: Record<string, string | number>;
 }
 
-/** The action set for one user message or finalized assistant answer. Shared
- *  by the hover/focus desktop row and the persistent touch menu so pointer,
- *  Enter, and Space always produce the same operation. */
 function messageActionEntries(
   m: UserMsg | AssistantMsg,
   opts: {
@@ -327,16 +275,12 @@ function messageActionEntries(
       opts.announce(copyAnnouncement(ok ? opts.copyFormat : "failed"));
     });
   };
-  const entries: MessageActionEntry[] = [
-    {
-      key: "copy",
-      label: tr("timeline.copyAsValue", {
-        value: opts.copyFormat === "markdown" ? tr("common.markdown") : tr("common.json"),
-      }),
-      name: copyActionName(role, opts.copyFormat),
-      run: doCopy,
-    },
-  ];
+  const entries: MessageActionEntry[] = [{
+    key: "copy",
+    label: tr("timeline.copyAsValue", { value: opts.copyFormat === "markdown" ? tr("common.markdown") : tr("common.json") }),
+    name: copyActionName(role, opts.copyFormat),
+    run: doCopy,
+  }];
   if (m.kind === "assistant") {
     entries.push({
       key: "gallery",
@@ -345,34 +289,28 @@ function messageActionEntries(
       run: opts.onGallery ?? (() => {}),
       ...(!opts.galleryAvailable ? { disabledReason: tr("timeline.noImagesInThisAnswer") } : {}),
     });
-    if (opts.onRegenerate) {
-      entries.push({
-        key: "regenerate",
-        label: tr("timeline.regenerate"),
-        name: tr("timeline.regenerateThisAssistantAnswer"),
-        run: opts.onRegenerate,
-      });
-    }
-  }
-  if (m.kind === "user" && opts.onRevert) {
-    entries.push({
-      key: "revert",
-      label: tr("timeline.revertEdit"),
-      name: revertActionName(m.time),
-      run: () => opts.onRevert?.(m),
-      ...(opts.revert && !opts.revert.enabled ? { disabledReason: opts.revert.reason } : {}),
-      dataAttr: { "data-revert-seq": m.eventSeq },
+    if (opts.onRegenerate) entries.push({
+      key: "regenerate",
+      label: tr("timeline.regenerate"),
+      name: tr("timeline.regenerateThisAssistantAnswer"),
+      run: opts.onRegenerate,
     });
   }
-  if (m.kind === "user" && opts.onFork) {
-    entries.push({
-      key: "fork",
-      label: tr("timeline.forkEdit"),
-      name: forkActionName(m.time),
-      run: () => opts.onFork?.(m),
-      ...(opts.fork && !opts.fork.enabled ? { disabledReason: opts.fork.reason } : {}),
-    });
-  }
+  if (m.kind === "user" && opts.onRevert) entries.push({
+    key: "revert",
+    label: tr("timeline.revertEdit"),
+    name: revertActionName(m.time),
+    run: () => opts.onRevert?.(m),
+    ...(opts.revert && !opts.revert.enabled ? { disabledReason: opts.revert.reason } : {}),
+    dataAttr: { "data-revert-seq": m.eventSeq },
+  });
+  if (m.kind === "user" && opts.onFork) entries.push({
+    key: "fork",
+    label: tr("timeline.forkEdit"),
+    name: forkActionName(m.time),
+    run: () => opts.onFork?.(m),
+    ...(opts.fork && !opts.fork.enabled ? { disabledReason: opts.fork.reason } : {}),
+  });
   return entries;
 }
 
@@ -383,9 +321,9 @@ function ActionButton({ entry, className }: { entry: MessageActionEntry; classNa
       ? <Icon.image />
       : entry.key === "regenerate"
         ? <Icon.regenerate />
-    : entry.key === "fork"
-      ? <Icon.fork />
-      : <Icon.rewind />;
+        : entry.key === "fork"
+          ? <Icon.fork />
+          : <Icon.rewind />;
   return (
     <button
       className={className}
@@ -401,17 +339,6 @@ function ActionButton({ entry, className }: { entry: MessageActionEntry; classNa
   );
 }
 
-// Semantic time + actions row under a user message or finalized answer. The
-// time stays visible; the desktop action buttons reveal on hover/focus-within
-// (hidden ones have no pointer hit area); the touch entry is persistent.
-//
-// UX-TIMELINE-LAYOUT-01 §2.5: the narrow action menu is bounded NORMAL-FLOW
-// content immediately after this footer — it pushes later content instead of
-// covering its message body, its block size is capped to the visible
-// scrollport (internally scrollable beyond that), and opening it reveals it
-// through the existing timeline scroll root. Escape/outside press close it,
-// action activation closes it, and focus returns to the opener (predecessor
-// UX-MSG-ACTIONS contract, placement only).
 function MessageMeta({
   m,
   announce,
@@ -438,15 +365,8 @@ function MessageMeta({
   const t = m.kind === "user" ? m.time : assistantTime(m);
   const name = m.kind === "user" ? sentName(t) : completedName(t);
   const entries = messageActionEntries(m, {
-    announce,
-    onRevert,
-    onFork,
-    revert,
-    fork,
-    copyFormat: prefs.messageCopyFormat,
-    onGallery,
-    onRegenerate,
-    galleryAvailable,
+    announce, onRevert, onFork, revert, fork, copyFormat: prefs.messageCopyFormat,
+    onGallery, onRegenerate, galleryAvailable,
   });
   const [menuOpen, setMenuOpen] = useState(false);
   const openerRef = useRef<HTMLButtonElement>(null);
@@ -466,12 +386,6 @@ function MessageMeta({
     const onPress = (e: PointerEvent) => {
       const target = e.target as Node;
       if (menuRef.current?.contains(target) || openerRef.current?.contains(target)) return;
-      // Outside press closes AND restores the opener, matching Escape and
-      // action activation (UX-MSG-ACTIONS focus contract). One exception: a
-      // press on another interactive control must keep that control's own
-      // focus — restoring here would steal a deliberate target (and trap the
-      // composer). The restore runs after the press's default focus handling,
-      // which would otherwise land on the focusable timeline region.
       const interactive = target instanceof Element
         && target.closest("button, a[href], input, textarea, select, summary, [contenteditable]") !== null;
       closeMenu(false);
@@ -491,13 +405,6 @@ function MessageMeta({
     if (!menuOpen) return;
     const menu = menuRef.current;
     if (!menu) return;
-    // Cap to the LIVE scrollport so the whole menu always sits inside it
-    // (rows beyond the cap scroll internally per §2.5), then reveal it
-    // through the existing timeline scroll root. The menu sits BELOW its
-    // footer in normal flow, so it can never extend behind the fixed header —
-    // even at scrollTop=0 — and never covers the body it belongs to. The
-    // reveal region can mount mid-open and shrink the port, so the cap tracks
-    // port resizes for as long as the menu stays open.
     const port = menu.closest<HTMLElement>(".timeline");
     const fit = () => {
       if (port) menu.style.maxBlockSize = `${Math.max(44, port.clientHeight - 12)}px`;
@@ -519,21 +426,11 @@ function MessageMeta({
               {entries.filter((entry) => entry.key !== "regenerate").map((entry) => (
                 <ActionButton key={entry.key} entry={entry} className="msg-action-btn" />
               ))}
-              {m.kind === "assistant" && (
-                <SlotHost
-                  slot="session.message.actions"
-                  context={{ sessionId, kind: m.kind, messageId: m.id, eventSeq: m.eventSeq }}
-                />
-              )}
+              {m.kind === "assistant" && <SlotHost slot="session.message.actions" context={{ sessionId, kind: m.kind, messageId: m.id, eventSeq: m.eventSeq }} />}
               {entries.filter((entry) => entry.key === "regenerate").map((entry) => (
                 <ActionButton key={entry.key} entry={entry} className="msg-action-btn" />
               ))}
-              {m.kind === "user" && (
-                <SlotHost
-                  slot="session.message.actions"
-                  context={{ sessionId, kind: m.kind, messageId: m.id, eventSeq: m.eventSeq }}
-                />
-              )}
+              {m.kind === "user" && <SlotHost slot="session.message.actions" context={{ sessionId, kind: m.kind, messageId: m.id, eventSeq: m.eventSeq }} />}
             </div>
             <button
               ref={openerRef}
@@ -544,9 +441,7 @@ function MessageMeta({
               aria-expanded={menuOpen}
               data-actions-seq={m.eventSeq}
               onClick={() => setMenuOpen((v) => !v)}
-            >
-              <Icon.more />
-            </button>
+            ><Icon.more /></button>
           </>
         )}
       </div>
@@ -563,15 +458,10 @@ function MessageMeta({
               onClick={() => { entry.run(); closeMenu(true); }}
             >
               <span aria-hidden="true">
-                {entry.key === "copy"
-                  ? <Icon.copy />
-                  : entry.key === "gallery"
-                    ? <Icon.image />
-                    : entry.key === "regenerate"
-                      ? <Icon.regenerate />
-                  : entry.key === "fork"
-                    ? <Icon.fork />
-                    : <Icon.rewind />}
+                {entry.key === "copy" ? <Icon.copy />
+                  : entry.key === "gallery" ? <Icon.image />
+                    : entry.key === "regenerate" ? <Icon.regenerate />
+                      : entry.key === "fork" ? <Icon.fork /> : <Icon.rewind />}
               </span>
               <span className="msg-actions-item-label">{entry.label}</span>
             </button>
@@ -617,9 +507,7 @@ function downloadAnswerImage(text: string, title: string): boolean {
       if (context.measureText(candidate).width > width - padding * 2 && line) {
         lines.push(line);
         line = word;
-      } else {
-        line = candidate;
-      }
+      } else line = candidate;
     }
     lines.push(line);
   }
@@ -640,12 +528,7 @@ function downloadAnswerImage(text: string, title: string): boolean {
   return true;
 }
 
-// Pin state per event array, computed once per applied batch and shared by
-// every assistant header (previously each header re-scanned the WHOLE log on
-// every store change). Selectors then return a primitive, so headers stop
-// re-rendering on unrelated streamed events.
 const pinnedBySource = new WeakMap<readonly SessionEvent[], Map<number, boolean>>();
-
 function pinnedState(events: readonly SessionEvent[] | undefined, seq: number): boolean {
   if (!events) return false;
   let map = pinnedBySource.get(events);
@@ -663,26 +546,17 @@ function pinnedState(events: readonly SessionEvent[] | undefined, seq: number): 
 }
 
 function AssistantAgentHeader({
-  m,
-  announce,
-  turn,
-  segmentStartedAt,
-  regeneratePrompt,
+  m, announce, turn, segmentStartedAt, regeneratePrompt,
 }: {
   m: AssistantMsg;
   announce?: Announce;
-  /** Present only for the terminal assistant answer of the current turn. */
   turn?: RenderModel["turn"];
-  /** Opening prompt time of the answer's turn — the fallback duration source
-   *  for terminal answers whose turn state is no longer in the store. */
   segmentStartedAt?: number;
   regeneratePrompt?: string;
 }) {
-  const session = useStore((state) =>
-    state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null);
+  const session = useStore((state) => state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null);
   const projectId = useStore((state) => state.activeProjectId);
-  const pinned = useStore((state) =>
-    pinnedState(session ? state.events[session.id] : undefined, m.eventSeq));
+  const pinned = useStore((state) => pinnedState(session ? state.events[session.id] : undefined, m.eventSeq));
   const models = useStore((state) => state.models);
   const prefs = useUiSettings();
   const [pinBusy, setPinBusy] = useState(false);
@@ -695,12 +569,10 @@ function AssistantAgentHeader({
   }, [metadataOpen]);
   const modelRef = turn?.model ?? m.model ?? session?.model;
   const descriptor = modelRef
-    ? models.find((candidate) =>
-        candidate.providerID === modelRef.providerID && candidate.modelID === modelRef.modelID
+    ? models.find((candidate) => candidate.providerID === modelRef.providerID && candidate.modelID === modelRef.modelID
         && (!candidate.harnessId || !m.harnessId || candidate.harnessId === m.harnessId))
     : undefined;
-  const modelName = descriptor?.name
-    ?? (modelRef ? `${modelRef.providerID}/${modelRef.modelID}` : "Unknown model");
+  const modelName = descriptor?.name ?? (modelRef ? `${modelRef.providerID}/${modelRef.modelID}` : "Unknown model");
   const agent = (turn?.agent ?? m.agent ?? session?.agent ?? tr("composer.build")).replace(/[-_]+/g, " ");
   const agentName = agent ? agent[0]!.toUpperCase() + agent.slice(1) : tr("composer.build");
   const wholeTurnDuration = turnDurationMs(turn ?? null);
@@ -895,34 +767,21 @@ function TaskList({ plan }: { plan: NonNullable<RenderModel["tasks"]> }) {
   );
 }
 
-/** Text alternative for the task glyph so state never rides on shape alone. */
 function VisuallyHiddenStatus({ status }: { status: "done" | "active" | "failed" }) {
   const label = status === "done" ? "completed" : status === "active" ? "in progress" : "failed";
   return <span className="sr-only">({label})</span>;
 }
 
 function AssistantView({
-  m,
-  announce,
-  plan,
-  regeneratePrompt,
-  turn,
-  terminal = false,
-  segmentStartedAt,
-  live = false,
-  entering = false,
+  m, announce, plan, regeneratePrompt, turn, terminal = false, segmentStartedAt, live = false, entering = false,
 }: {
   m: AssistantMsg;
   announce?: Announce;
   plan?: NonNullable<RenderModel["tasks"]>;
   regeneratePrompt?: string;
   turn?: RenderModel["turn"];
-  /** Terminal answer of a completed turn: the only row that carries the
-   *  identity panel (one per turn, rendered after the turn completes). */
   terminal?: boolean;
   segmentStartedAt?: number;
-  /** True while this row is the latest assistant row of a working turn: its
-   *  thinking block is the live thought and reveals with the typing effect. */
   live?: boolean;
   entering?: boolean;
 }) {
@@ -947,7 +806,7 @@ function AssistantView({
         </div>
       )}
       {m.finalized && hasAnswer && terminal && (
-        <AssistantAgentHeader m={m} announce={announce} turn={turn} segmentStartedAt={segmentStartedAt} regeneratePrompt={regeneratePrompt} />
+        <ChatResponseFooter m={m} announce={announce} turn={turn} segmentStartedAt={segmentStartedAt} regeneratePrompt={regeneratePrompt} />
       )}
       {m.finalized && m.text !== "" && announce && galleryAvailable && (
         <button className="assistant-gallery-shortcut" onClick={openGallery}><Icon.image /> {tr("timeline.openAnswerImages")}</button>
@@ -961,11 +820,7 @@ function shellCommandText(input: ToolMsg["input"]): string {
   return typeof input.command === "string" ? input.command : JSON.stringify(input, null, 2);
 }
 
-export function shellCardCopyText(
-  input: ToolMsg["input"],
-  output?: string,
-  error?: string,
-): string {
+export function shellCardCopyText(input: ToolMsg["input"], output?: string, error?: string): string {
   const command = shellCommandText(input);
   return [command, output, error].filter((part): part is string => typeof part === "string" && part.length > 0).join("\n\n");
 }
@@ -1021,9 +876,6 @@ function GithubConflictCard({ message, entering = false }: { message: GithubConf
   );
 }
 
-// Technical work is projected into one run-level activity group. Settled runs
-// collapse to a summary; the current run opens without promoting every tool to
-// a separate card.
 function childForTool(tool: ToolMsg, subagents: SubagentState | null): SubagentState["agents"][number] | undefined {
   if (!subagents || executionPresentation(tool).kind !== "subagent") return undefined;
   const metadataId = ["sessionId", "sessionID", "childSessionId", "child_session_id"]
@@ -1031,43 +883,21 @@ function childForTool(tool: ToolMsg, subagents: SubagentState | null): SubagentS
     .find((value): value is string => typeof value === "string");
   if (metadataId) return subagents.agents.find((agent) => agent.sessionId === metadataId);
   const description = typeof tool.input.description === "string" ? tool.input.description : undefined;
-  return subagents.agents.find((agent) =>
-    agent.label === description || agent.currentTask === tool.input.prompt);
+  return subagents.agents.find((agent) => agent.label === description || agent.currentTask === tool.input.prompt);
 }
 
-/** Matches --activity-live-exit: the floating row must stay mounted for the
- *  whole fold-away before it is handed to the block. */
 const ACTIVITY_LIVE_EXIT_MS = 280;
-/** Minimum time an arriving action stays outside the block — long enough to
- *  rise, be read, and fold away as one deliberate beat rather than a flash.
- *  Status alone cannot decide this: a tool whose call and result land in the
- *  same render batch is never observed running. */
 const ACTION_SHOW_MS = 1_500;
-/** Quiet beat between two actions: the previous card is fully gone before the
- *  next rises, so a burst pulses evenly instead of stampeding. */
 const ACTION_GAP_MS = ACTIVITY_LIVE_EXIT_MS;
-/** At most two actions wait their turn. Narrating a stale burst matters less
- *  than staying in step with what the agent is actually doing; the overflow
- *  folds straight into the block. */
 const ACTION_BACKLOG_MS = 2 * (ACTION_SHOW_MS + ACTION_GAP_MS);
 
-/** An action is live while it is still executing. Live actions float above the
- *  activity block instead of expanding it, so the block can stay folded. */
 function inFlight(item: ActivityItem): boolean {
   if (item.kind === "tool") return item.status === "pending" || item.status === "running";
   if (item.kind === "assistant") return !item.finalized;
   return item.action === "started";
 }
 
-/** Ids currently inside their turn outside the block. Arrivals are queued one
- *  at a time rather than shown the moment they land: without that, a burst of
- *  fast tools cuts each other's motion short and reads as flicker. Each action
- *  gets the full show, then a gap, then the next one rises — fast work is
- *  emphasised, not chaotic. Rows already present at mount are dated by their
- *  own timestamp so replayed history stays folded on scroll-back, clamped to
- *  now because a skewed clock must not park a row outside the block. */
 function useActionSchedule(items: ActivityItem[]): Set<string> {
-  // id -> start of its turn outside the block; 0 means it never gets one.
   const turns = useRef(new Map<string, number>());
   const cursor = useRef(0);
   const mounted = useRef(false);
@@ -1096,8 +926,6 @@ function useActionSchedule(items: ActivityItem[]): Set<string> {
       next = Math.min(next, startAt + ACTION_SHOW_MS);
     }
   }
-  // Wake on the next boundary only — a queue that polls would re-render the
-  // whole group for nothing while the agent works.
   useEffect(() => {
     if (!Number.isFinite(next)) return;
     const timer = window.setTimeout(() => redraw((value) => value + 1), Math.max(0, next - Date.now()));
@@ -1106,10 +934,6 @@ function useActionSchedule(items: ActivityItem[]): Set<string> {
   return showing;
 }
 
-/** Keeps ids mounted for one collapse beat after they stop being live, so the
- *  floating row folds into the block instead of vanishing. The removal timer is
- *  deliberately not cleared on re-run: a second action settling must not cancel
- *  the first row's exit and strand it on screen. */
 function useLingering(ids: string[], ms: number): string[] {
   const [leaving, setLeaving] = useState<string[]>([]);
   const previous = useRef(ids);
@@ -1120,22 +944,13 @@ function useLingering(ids: string[], ms: number): string[] {
     previous.current = ids;
     if (gone.length === 0) return;
     setLeaving((current) => [...current, ...gone]);
-    timers.current.push(window.setTimeout(
-      () => setLeaving((current) => current.filter((id) => !gone.includes(id))), ms));
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- key is the identity of ids
+    timers.current.push(window.setTimeout(() => setLeaving((current) => current.filter((id) => !gone.includes(id))), ms));
   }, [key]);
   useEffect(() => () => timers.current.forEach((timer) => window.clearTimeout(timer)), []);
   return leaving;
 }
 
-function activityItemNode(
-  item: ActivityItem,
-  subagents: SubagentState | null,
-  live: boolean,
-  entering: boolean,
-) {
-  // An arriving action shows what it is, not its whole output: it stays folded
-  // outside the block exactly as it will be inside it.
+function activityItemNode(item: ActivityItem, subagents: SubagentState | null, live: boolean, entering: boolean) {
   return item.kind === "tool"
     ? <ExecutionRow key={item.id} message={item} subagent={childForTool(item, subagents)} entering={entering} />
     : item.kind === "assistant"
@@ -1152,10 +967,7 @@ function derivedActivityState(g: ActivityGroup): RunSummaryState {
 }
 
 export function ActivityGroupView({
-  g,
-  subagents,
-  state: stateOverride,
-  entering = false,
+  g, subagents, state: stateOverride, entering = false,
 }: {
   g: ActivityGroup;
   subagents: SubagentState | null;
@@ -1164,20 +976,14 @@ export function ActivityGroupView({
 }) {
   const state = stateOverride ?? derivedActivityState(g);
   const active = state === "active" || state === "waiting";
-  // The block never opens itself. Running work is shown by the floating live
-  // rows below it; opening the block is a reader decision only.
   const [open, setOpen] = useState(false);
   const itemsPresent = useCollapsePresence(open);
   const showing = useActionSchedule(g.items);
-  // Work that is genuinely still running always stays out: the queue paces
-  // arrivals, it never hides something the agent is doing right now.
   const liveIds = g.items.filter((item) => showing.has(item.id) || (active && inFlight(item))).map((item) => item.id);
   const leavingIds = useLingering(liveIds, ACTIVITY_LIVE_EXIT_MS);
   const floatingIds = new Set([...liveIds, ...leavingIds]);
   const floating = g.items.filter((item) => floatingIds.has(item.id));
   const folded = g.items.filter((item) => !floatingIds.has(item.id));
-  // A first, single action needs no block chrome around it. The block appears
-  // as soon as anything has settled into it.
   const showBlock = g.items.length > liveIds.length;
   const files = new Set(g.tools.flatMap((tool) => {
     const presentation = executionPresentation(tool);
@@ -1198,9 +1004,6 @@ export function ActivityGroupView({
     ...(files > 0 ? [files === 1 ? tr("timeline.valueFileCount", { count: files }) : tr("timeline.valueFilesCount", { count: files })] : []),
     fmtDuration(g.ms),
   ].join(" · ");
-  // A live action is its own timeline card, not a lodger inside the block:
-  // nesting it there made the folded block grow a second, differently framed
-  // list. It stands alone while it runs, then folds away into the block.
   return (
     <>
       {showBlock && (
@@ -1212,9 +1015,7 @@ export function ActivityGroupView({
             expanded={open}
             additions={lineStats.add}
             deletions={lineStats.del}
-            label={open
-              ? tr("timeline.collapseActivityValue", { value: meta })
-              : tr("timeline.expandActivityValue", { value: meta })}
+            label={open ? tr("timeline.collapseActivityValue", { value: meta }) : tr("timeline.expandActivityValue", { value: meta })}
             diffLabel={tr("timeline.valueAdditionsValueDeletions", { additions: lineStats.add, deletions: lineStats.del })}
             onToggle={() => setOpen((value) => !value)}
           />
@@ -1222,8 +1023,7 @@ export function ActivityGroupView({
             <div className="activity-group-collapse-content">
               {itemsPresent && (
                 <div className="activity-group-items">
-                  {folded.map((item, index) =>
-                    activityItemNode(item, subagents, false, entering && active && index === folded.length - 1))}
+                  {folded.map((item, index) => activityItemNode(item, subagents, false, entering && active && index === folded.length - 1))}
                 </div>
               )}
             </div>
@@ -1232,17 +1032,13 @@ export function ActivityGroupView({
       )}
       {floating.map((item) => (
         <div key={item.id} className={`activity-live${liveIds.includes(item.id) ? "" : " leaving"}`}>
-          <div className="activity-live-content">
-            {activityItemNode(item, subagents, liveIds.includes(item.id), false)}
-          </div>
+          <div className="activity-live-content">{activityItemNode(item, subagents, liveIds.includes(item.id), false)}</div>
         </div>
       ))}
     </>
   );
 }
 
-/** True while the element is taller than its clamp. Measured only while the
- *  clamp is on, so expanding never erases the control that collapses it. */
 function useClipped(ref: RefObject<HTMLElement | null>, clamped: boolean): boolean {
   const [clipped, setClipped] = useState(false);
   useEffect(() => {
@@ -1258,8 +1054,6 @@ function useClipped(ref: RefObject<HTMLElement | null>, clamped: boolean): boole
   return clipped;
 }
 
-/** A sent prompt is a record, not a wall of text: the log keeps four lines and
- *  the rest stays one tap away. */
 export function UserPrompt({ text, id }: { text: string; id: string }) {
   const [open, setOpen] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -1270,12 +1064,7 @@ export function UserPrompt({ text, id }: { text: string; id: string }) {
         {renderMarkdown(text, id)}
       </div>
       {clipped && (
-        <button
-          type="button"
-          className="user-prompt-toggle"
-          aria-expanded={open}
-          onClick={() => setOpen((value) => !value)}
-        >
+        <button type="button" className="user-prompt-toggle" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
           {open ? tr("timeline.collapse") : tr("timeline.expand")}
           <span aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronDown />}</span>
         </button>
@@ -1305,19 +1094,13 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segm
         <div className="bubble" dir="auto">
           <UserPrompt text={m.text} id={m.id} />
           {m.raw && m.raw !== m.text && (
-            <div className="user-expanded-hint">
-              {tr("timeline.expandedFrom")}{" "}<code>{m.raw.split("\n")[0] ?? m.raw}</code>
-            </div>
+            <div className="user-expanded-hint">{tr("timeline.expandedFrom")}{" "}<code>{m.raw.split("\n")[0] ?? m.raw}</code></div>
           )}
-          {m.uncertain && (
-            <div className="runtime-recovery-caption">{tr("runtimeRecovery.uncertainTurn")}</div>
-          )}
+          {m.uncertain && <div className="runtime-recovery-caption">{tr("runtimeRecovery.uncertainTurn")}</div>}
         </div>
-        {m.attachments && m.attachments.length > 0 && (
-          <AttachmentPills attachments={m.attachments} />
-        )}
+        {m.attachments && m.attachments.length > 0 && <AttachmentPills attachments={m.attachments} />}
         {announce && (
-          <MessageMeta m={m} announce={announce} onRevert={onRevert} onFork={onFork} revert={revert} fork={fork} />
+          <MessageQuickActions message={m} announce={announce} onRevert={onRevert} onFork={onFork} revert={revert} fork={fork} />
         )}
       </div>
     );
@@ -1331,13 +1114,6 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segm
   return <ExecutionRow message={m} entering={entering} />;
 }
 
-// ---- memoized rows -----------------------------------------------------------
-// reduceEvent mutates message objects IN PLACE, so identity checks cannot see
-// changes: each row captures a scalar `rev` prop at render time (bumped by
-// every in-place mutation, accumulated by mergeThinking for merged rows) and
-// falls back to snapshot-field comparison for rows that merge re-creates.
-// Net effect: a streamed chunk re-renders ONE row instead of the whole log.
-
 function availabilityEqual(a?: ActionAvailability, b?: ActionAvailability): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
@@ -1349,11 +1125,8 @@ function availabilityEqual(a?: ActionAvailability, b?: ActionAvailability): bool
 function sameMessage(a: RenderMessage, b: RenderMessage): boolean {
   if (a.kind !== b.kind || a.id !== b.id || a.eventSeq !== b.eventSeq || a.time !== b.time) return false;
   if (a.undone !== b.undone || a.rewindMarkerSeq !== b.rewindMarkerSeq) return false;
-  if (a === b) return true; // same object → the rev prop covers mutations
-  if (a.kind === "user" && b.kind === "user") {
-    return a.text === b.text && a.raw === b.raw && a.attachments === b.attachments
-      && a.uncertain === b.uncertain;
-  }
+  if (a === b) return true;
+  if (a.kind === "user" && b.kind === "user") return a.text === b.text && a.raw === b.raw && a.attachments === b.attachments && a.uncertain === b.uncertain;
   if (a.kind === "assistant" && b.kind === "assistant") {
     return a.text === b.text && a.reasoning === b.reasoning && a.finalized === b.finalized
       && a.completedAt === b.completedAt && a.tokens === b.tokens && a.cost === b.cost
@@ -1364,13 +1137,9 @@ function sameMessage(a: RenderMessage, b: RenderMessage): boolean {
       && a.title === b.title && a.metadata === b.metadata && a.input === b.input
       && a.finishTime === b.finishTime && a.changedFiles === b.changedFiles;
   }
-  if (a.kind === "task" && b.kind === "task") {
-    return a.action === b.action && a.text === b.text;
-  }
-  if (a.kind === "notice" && b.kind === "notice") {
-    return a.topic === b.topic && a.branch === b.branch && a.commit === b.commit;
-  }
-  return true; // github-conflict: immutable after creation
+  if (a.kind === "task" && b.kind === "task") return a.action === b.action && a.text === b.text;
+  if (a.kind === "notice" && b.kind === "notice") return a.topic === b.topic && a.branch === b.branch && a.commit === b.commit;
+  return true;
 }
 
 const MessageRow = memo(function MessageRow(props: Parameters<typeof MessageView>[0] & { rev: number }) {
@@ -1380,7 +1149,6 @@ const MessageRow = memo(function MessageRow(props: Parameters<typeof MessageView
   prev.rev === next.rev
   && sameMessage(prev.m, next.m)
   && prev.plan === next.plan
-  // model.turn mutates in place: any row holding it must always re-render
   && prev.turn === undefined && next.turn === undefined
   && prev.terminal === next.terminal
   && prev.live === next.live
@@ -1393,7 +1161,6 @@ const MessageRow = memo(function MessageRow(props: Parameters<typeof MessageView
   && availabilityEqual(prev.revert, next.revert)
   && availabilityEqual(prev.fork, next.fork));
 
-/** Sum of item revs + count: strictly grows on any member mutation/addition. */
 function activityRev(g: ActivityGroup): number {
   let rev = g.items.length;
   for (const item of g.items) rev += item.rev ?? 0;
@@ -1402,18 +1169,11 @@ function activityRev(g: ActivityGroup): number {
 
 function sameActivity(a: ActivityGroup, b: ActivityGroup): boolean {
   if (a.id !== b.id || a.ms !== b.ms || a.settled !== b.settled || a.items.length !== b.items.length) return false;
-  for (let i = 0; i < a.items.length; i += 1) {
-    if (!sameMessage(a.items[i]!, b.items[i]!)) return false;
-  }
+  for (let i = 0; i < a.items.length; i += 1) if (!sameMessage(a.items[i]!, b.items[i]!)) return false;
   return true;
 }
 
-const ActivityRow = memo(function ActivityRow({
-  g,
-  subagents,
-  state,
-  entering,
-}: {
+const ActivityRow = memo(function ActivityRow({ g, subagents, state, entering }: {
   rev: number;
   g: ActivityGroup;
   subagents: SubagentState | null;
@@ -1424,15 +1184,6 @@ const ActivityRow = memo(function ActivityRow({
 }, (prev, next) => prev.rev === next.rev && sameActivity(prev.g, next.g)
   && prev.subagents === next.subagents && prev.state === next.state && prev.entering === next.entering);
 
-// Right-edge prompt rail (WP4, restyled after polyth PromptNavigatorRail):
-// a thin vertical tape of ticks in a 28px gutter hugging the right edge of the
-// chat viewport, vertically centered. It is a SIBLING of the .timeline scroller
-// (absolute within .timeline-viewport), so it never scrolls away and never
-// competes with right-aligned user bubbles. Each tick is one real user prompt
-// from this session; the active turn is tracked against the timeline scroll
-// position, ticks swell in a proximity wave under the cursor, and hover/focus
-// reveals a recent-turns panel. Click jumps via the existing
-// jump()/scrollIntoView path. Presentation-only — no SessionEvent.
 function PromptNavigator({ prompts, onJump, containerRef, canLoadOlder, olderBusy, onLoadOlder }: {
   prompts: Array<{ id: string; preview: string; text: string }>;
   onJump: (id: string) => void;
@@ -1446,11 +1197,6 @@ function PromptNavigator({ prompts, onJump, containerRef, canLoadOlder, olderBus
   const [open, setOpen] = useState(false);
   const [panelStart, setPanelStart] = useState(0);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Scroll-spy: the active turn is the last prompt at/above the viewport
-  // midline; at the very bottom the newest rendered prompt always wins (its
-  // top may never cross the midline). rAF-throttled; rows hidden by L13
-  // windowing count as "above" (see activePromptIndex).
   useEffect(() => {
     const el = containerRef.current;
     if (el === null) return;
@@ -1465,18 +1211,13 @@ function PromptNavigator({ prompts, onJump, containerRef, canLoadOlder, olderBus
       });
       let index = activePromptIndex(tops, line);
       if (el.scrollTop + el.clientHeight >= el.scrollHeight - 8) {
-        for (let i = tops.length - 1; i >= 0; i--) {
-          if (tops[i] !== null) { index = i; break; }
-        }
+        for (let i = tops.length - 1; i >= 0; i--) if (tops[i] !== null) { index = i; break; }
       }
       setActive(index);
     };
     const onScroll = () => { if (raf === 0) raf = requestAnimationFrame(measure); };
     el.addEventListener("scroll", onScroll, { passive: true });
     measure();
-    // Timeline restores the tail in its own effect. Measure once more after
-    // that first layout so a long chat gets its initial tick window immediately
-    // instead of waiting for the reader to scroll.
     const initialMeasure = requestAnimationFrame(measure);
     return () => {
       el.removeEventListener("scroll", onScroll);
@@ -1491,15 +1232,10 @@ function PromptNavigator({ prompts, onJump, containerRef, canLoadOlder, olderBus
     setPanelStart(Math.max(0, prompts.length - RAIL_PANEL_ROWS));
     setOpen(true);
   };
-  // 160ms leave grace so the pointer can cross the gap into the panel.
   const scheduleClose = () => {
     if (closeTimer.current !== null) clearTimeout(closeTimer.current);
     closeTimer.current = setTimeout(() => { closeTimer.current = null; setOpen(false); setHovered(-1); }, 160);
   };
-
-  // Hovering a text row can target a prompt outside the current 30-tick
-  // window; center the tape on that same prompt so the two representations
-  // always have a visible counterpart.
   const { start, end } = railWindow(prompts.length, hovered >= 0 ? hovered : active);
   const visible = prompts.slice(start, end);
   const hasEarlier = canLoadOlder || start > 0;
@@ -1514,9 +1250,7 @@ function PromptNavigator({ prompts, onJump, containerRef, canLoadOlder, olderBus
     if (start > 0 && earlierPrompt) { jumpTo(earlierPrompt.id); return; }
     if (canLoadOlder) onLoadOlder();
   };
-  const showLater = () => {
-    if (laterPrompt) jumpTo(laterPrompt.id);
-  };
+  const showLater = () => { if (laterPrompt) jumpTo(laterPrompt.id); };
 
   return (
     <nav
@@ -1528,14 +1262,7 @@ function PromptNavigator({ prompts, onJump, containerRef, canLoadOlder, olderBus
       onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) scheduleClose(); }}
     >
       {hasEarlier && (
-        <button
-          type="button"
-          className="prompt-nav-page prompt-nav-edge"
-          aria-label={start > 0 ? tr("timeline.showEarlierMessages") : tr("timeline.loadEarlierHistory")}
-          title={start > 0 ? tr("timeline.showEarlierMessages") : tr("timeline.loadEarlierHistory")}
-          disabled={olderBusy}
-          onClick={showEarlier}
-        >↑</button>
+        <button type="button" className="prompt-nav-page prompt-nav-edge" aria-label={start > 0 ? tr("timeline.showEarlierMessages") : tr("timeline.loadEarlierHistory")} title={start > 0 ? tr("timeline.showEarlierMessages") : tr("timeline.loadEarlierHistory")} disabled={olderBusy} onClick={showEarlier}>↑</button>
       )}
       <div
         className="prompt-nav-tape"
@@ -1562,24 +1289,12 @@ function PromptNavigator({ prompts, onJump, containerRef, canLoadOlder, olderBus
               onBlur={() => setHovered(-1)}
               onClick={() => jumpTo(p.id)}
             >
-              <span
-                className="prompt-nav-tick-bar"
-                aria-hidden="true"
-                style={{ width: `${tickWidth(index, active, hovered)}px` }}
-              />
+              <span className="prompt-nav-tick-bar" aria-hidden="true" style={{ width: `${tickWidth(index, active, hovered)}px` }} />
             </button>
           );
         })}
       </div>
-      {hasLater && (
-        <button
-          type="button"
-          className="prompt-nav-page prompt-nav-edge"
-          aria-label={tr("timeline.showLaterMessages")}
-          title={tr("timeline.showLaterMessages")}
-          onClick={showLater}
-        >↓</button>
-      )}
+      {hasLater && <button type="button" className="prompt-nav-page prompt-nav-edge" aria-label={tr("timeline.showLaterMessages")} title={tr("timeline.showLaterMessages")} onClick={showLater}>↓</button>}
       {open && panelPrompts.length > 0 && (
         <div className="prompt-nav-panel">
           {(currentPanelStart > 0 || canLoadOlder) && (
@@ -1616,13 +1331,7 @@ function PromptNavigator({ prompts, onJump, containerRef, canLoadOlder, olderBus
             );
           })}
           {currentPanelStart < maxPanelStart && (
-            <button
-              type="button"
-              className="prompt-nav-page"
-              aria-label={tr("timeline.showLaterMessages")}
-              title={tr("timeline.showLaterMessages")}
-              onClick={() => setPanelStart((value) => Math.min(maxPanelStart, value + RAIL_PANEL_ROWS))}
-            >↓</button>
+            <button type="button" className="prompt-nav-page" aria-label={tr("timeline.showLaterMessages")} title={tr("timeline.showLaterMessages")} onClick={() => setPanelStart((value) => Math.min(maxPanelStart, value + RAIL_PANEL_ROWS))}>↓</button>
           )}
         </div>
       )}
@@ -1630,8 +1339,6 @@ function PromptNavigator({ prompts, onJump, containerRef, canLoadOlder, olderBus
   );
 }
 
-/** Live seconds remaining until `target` (ms epoch); ticks once a second and
- *  stops at zero. */
 function useRemainingSeconds(target: number): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -1651,51 +1358,34 @@ function formatWait(totalSeconds: number): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 }
 
-/** Provider capacity stop: countdown to the server's auto-resume, with
- *  cancel-wait and continue-on-another-model actions. Replaces the generic
- *  "Last turn failed" line while `turn.limit` is set. */
 function RateLimitNotice({ sessionId, limit }: { sessionId: string; limit: TurnLimitState }) {
   const models = useStore((s) => s.models);
   const remaining = useRemainingSeconds(limit.resumeAt);
   const [busy, setBusy] = useState<null | "resume" | "cancel" | "switch">(null);
-
-  const providerLabel = limit.provider
-    ? limit.provider.charAt(0).toUpperCase() + limit.provider.slice(1)
-    : undefined;
-  const scopeLabel =
-    limit.scope === "quota"
-      ? tr("timeline.rateLimit.scopeQuota")
-      : limit.scope === "overloaded"
-        ? tr("timeline.rateLimit.scopeOverloaded")
-        : tr("timeline.rateLimit.scopeRate");
+  const providerLabel = limit.provider ? limit.provider.charAt(0).toUpperCase() + limit.provider.slice(1) : undefined;
+  const scopeLabel = limit.scope === "quota"
+    ? tr("timeline.rateLimit.scopeQuota")
+    : limit.scope === "overloaded"
+      ? tr("timeline.rateLimit.scopeOverloaded")
+      : tr("timeline.rateLimit.scopeRate");
   const heading = providerLabel
     ? tr("timeline.rateLimit.headingProvider", { provider: providerLabel, scope: scopeLabel })
     : tr("timeline.rateLimit.heading", { scope: scopeLabel });
-
-  const modelItems = useMemo<PickerItem[]>(
-    () =>
-      models.map((m) => ({
-        id: `${m.providerID}/${m.modelID}`,
-        label: m.name,
-        group: m.providerName ?? m.providerID,
-      })),
-    [models],
-  );
-
+  const modelItems = useMemo<PickerItem[]>(() => models.map((m) => ({
+    id: `${m.providerID}/${m.modelID}`,
+    label: m.name,
+    group: m.providerName ?? m.providerID,
+  })), [models]);
   const run = (kind: "resume" | "cancel", op: Promise<unknown>) => {
     setBusy(kind);
     void op.finally(() => setBusy(null));
   };
   const pickModel = (id: string) => {
-    // Item id is `${providerID}/${modelID}`; providerID never contains a slash,
-    // but some model ids do — split on the first separator only.
     const slash = id.indexOf("/");
     if (slash < 1) return;
     setBusy("switch");
-    void resumeNow(sessionId, { providerID: id.slice(0, slash), modelID: id.slice(slash + 1) })
-      .finally(() => setBusy(null));
+    void resumeNow(sessionId, { providerID: id.slice(0, slash), modelID: id.slice(slash + 1) }).finally(() => setBusy(null));
   };
-
   return (
     <Notice
       tone="warning"
@@ -1705,47 +1395,18 @@ function RateLimitNotice({ sessionId, limit }: { sessionId: string; limit: TurnL
       heading={heading}
       actions={
         <>
-          <Button
-            size="sm"
-            variant="quiet"
-            className="turn-rate-limit-action"
-            busy={busy === "resume"}
-            disabled={busy !== null}
-            onClick={() => run("resume", resumeNow(sessionId))}
-          >{tr("timeline.rateLimit.resumeNow")}</Button>
-          <Picker
-            label={tr("timeline.rateLimit.switchModel")}
-            items={modelItems}
-            onPick={pickModel}
-            disabled={busy !== null || modelItems.length === 0}
-            className="turn-rate-limit-model"
-          />
-          <Button
-            size="sm"
-            variant="quiet"
-            className="turn-rate-limit-action"
-            busy={busy === "cancel"}
-            disabled={busy !== null}
-            onClick={() => run("cancel", cancelResume(sessionId))}
-          >{tr("timeline.rateLimit.cancelWait")}</Button>
+          <Button size="sm" variant="quiet" className="turn-rate-limit-action" busy={busy === "resume"} disabled={busy !== null} onClick={() => run("resume", resumeNow(sessionId))}>{tr("timeline.rateLimit.resumeNow")}</Button>
+          <Picker label={tr("timeline.rateLimit.switchModel")} items={modelItems} onPick={pickModel} disabled={busy !== null || modelItems.length === 0} className="turn-rate-limit-model" />
+          <Button size="sm" variant="quiet" className="turn-rate-limit-action" busy={busy === "cancel"} disabled={busy !== null} onClick={() => run("cancel", cancelResume(sessionId))}>{tr("timeline.rateLimit.cancelWait")}</Button>
         </>
       }
     >
-      {remaining > 0
-        ? tr("timeline.rateLimit.resumesIn", { time: formatWait(remaining) })
-        : tr("timeline.rateLimit.resuming")}
+      {remaining > 0 ? tr("timeline.rateLimit.resumesIn", { time: formatWait(remaining) }) : tr("timeline.rateLimit.resuming")}
       {limit.attempt > 1 ? ` · ${tr("timeline.rateLimit.attempt", { n: String(limit.attempt) })}` : ""}
     </Notice>
   );
 }
 
-// Footer under the last message once the turn ended: exactly one terminal
-// turn's own start/stop and usage (UX-MSG-ACTIONS) — see turnFooterLine().
-
-/** A finalized assistant row with only whitespace (no text, no reasoning) is
- *  an invisible no-op — the model emitted blank lines between blocks. It stays
- *  in the log but is dropped from the timeline so it can't open a second gap
- *  between real rows (the 1px ghost bubble sandwiching two timeline gaps). */
 function blankAssistant(m: RenderMessage): boolean {
   return m.kind === "assistant" && m.finalized && m.text.trim() === "" && m.reasoning.trim() === "";
 }
@@ -1775,37 +1436,22 @@ export function timelineAfterSlotContext(input: {
   };
 }
 
-export default function Timeline({
-  model,
-  latestRevealTarget,
-}: {
+export default function Timeline({ model, latestRevealTarget }: {
   model: RenderModel;
-  /** An optional dock anchor places the latest-reveal control above the composer. */
   latestRevealTarget?: HTMLElement | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
   const prefs = useUiSettings();
   const sessionId = useStore((s) => s.activeSessionId);
-  const sessionEvents = useStore((s) => s.activeSessionId
-    ? s.events[s.activeSessionId] ?? EMPTY_SESSION_EVENTS
-    : EMPTY_SESSION_EVENTS);
-  const latestUserMessage = [...model.messages].reverse()
-    .find((message) => message.kind === "user" && !message.undone);
+  const sessionEvents = useStore((s) => s.activeSessionId ? s.events[s.activeSessionId] ?? EMPTY_SESSION_EVENTS : EMPTY_SESSION_EVENTS);
+  const latestUserMessage = [...model.messages].reverse().find((message) => message.kind === "user" && !message.undone);
   useSlotVersion();
-  // L13 windowing: only the last `limit` rows render (see timelineWindow.ts).
-  const initialLimit = initialTimelineWindow(
-    typeof document !== "undefined" && document.body.dataset.desktopLowResource === "true",
-  );
+  const initialLimit = initialTimelineWindow(typeof document !== "undefined" && document.body.dataset.desktopLowResource === "true");
   const [limit, setLimit] = useState(initialLimit);
   useEffect(() => {
-    // Desktop settings arrive over IPC and can race the first React render.
-    // Re-read the DOM marker after subscribing so low-resource startup always
-    // releases the extra Markdown/tool subtrees even when IPC resolves late.
     const applyResourceMode = () => {
-      if (document.body.dataset.desktopLowResource === "true") {
-        setLimit((current) => Math.min(current, LOW_RESOURCE_TIMELINE_WINDOW));
-      }
+      if (document.body.dataset.desktopLowResource === "true") setLimit((current) => Math.min(current, LOW_RESOURCE_TIMELINE_WINDOW));
     };
     window.addEventListener("polyth:desktop-performance-changed", applyResourceMode);
     applyResourceMode();
@@ -1814,28 +1460,15 @@ export default function Timeline({
   const anchor = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
   const pendingJump = useRef<string | null>(null);
   const pendingJumpFocus = useRef(false);
-  // Reader intent is separate from proximity. In particular, one slow wheel
-  // tick upward must stay detached even while it is only a pixel from the end.
   const readerDetached = useRef(false);
   const lastScrollTop = useRef(0);
   const touchY = useRef<number | null>(null);
   const scrollbarPointer = useRef(false);
-  const readerIntent = useRef<{
-    direction: "toward-history" | "toward-tail";
-    until: number;
-  } | null>(null);
+  const readerIntent = useRef<{ direction: "toward-history" | "toward-tail"; until: number } | null>(null);
   const expectedScrollTop = useRef<number | null>(null);
-  // A newly appended user prompt owns a fresh-sheet tail. Presentation-only
-  // padding lets that prompt sit at the reading top and yields, pixel for
-  // pixel, as the agent's response and action rows grow into the sheet.
   const turnSheetPromptId = useRef<string | null>(null);
   const turnSheetPadding = useRef(0);
-  const observedPrompt = useRef({
-    sessionId,
-    seq: latestUserMessage?.eventSeq ?? 0,
-  });
-  // Latest-reveal state (§2.4): true while the reader holds a position away
-  // from the tail, mounting the reserved Jump to latest region.
+  const observedPrompt = useRef({ sessionId, seq: latestUserMessage?.eventSeq ?? 0 });
   const [showJump, setShowJump] = useState(false);
   useEffect(() => {
     const releaseScrollbar = () => { scrollbarPointer.current = false; };
@@ -1846,18 +1479,11 @@ export default function Timeline({
       window.removeEventListener("pointercancel", releaseScrollbar);
     };
   }, []);
-  // UX-PANE-MODEL stable anchor: session switches adjust during render so the
-  // outgoing anchor is captured from the STILL-CURRENT DOM (before commit) and
-  // the incoming one is ready before the first paint of the new session.
-  // Pane dock/expand/full-screen transitions never remount this tree, so the
-  // live scroll position carries itself; this record covers reload + switch.
   const restoreRef = useRef<TimelineAnchor | null>(null);
   const [anchorSession, setAnchorSession] = useState<string | null | undefined>(undefined);
   if (anchorSession !== sessionId) {
     const el = ref.current;
-    if (anchorSession !== undefined && anchorSession !== null && el !== null) {
-      saveTimelineAnchor(anchorSession, captureTimelineAnchor(el, atBottom.current));
-    }
+    if (anchorSession !== undefined && anchorSession !== null && el !== null) saveTimelineAnchor(anchorSession, captureTimelineAnchor(el, atBottom.current));
     setAnchorSession(sessionId);
     setLimit(initialLimit);
     const stored = sessionId !== null ? loadTimelineAnchor(sessionId) : null;
@@ -1880,9 +1506,7 @@ export default function Timeline({
   useEffect(() => {
     if (sessionId === null || !hasMessages || typeof requestAnimationFrame !== "function") return;
     let second = 0;
-    const first = requestAnimationFrame(() => {
-      second = requestAnimationFrame(() => markSessionPerformance("first_message_painted", sessionId));
-    });
+    const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => markSessionPerformance("first_message_painted", sessionId)); });
     return () => {
       cancelAnimationFrame(first);
       if (second) cancelAnimationFrame(second);
@@ -1896,13 +1520,7 @@ export default function Timeline({
     if (Math.abs(el.scrollTop - target) >= 0.5) {
       expectedScrollTop.current = target;
       el.scrollTop = target;
-    } else {
-      // A no-op assignment emits no scroll event; never leave a stale
-      // programmatic target that could swallow the reader's next End/drag.
-      expectedScrollTop.current = null;
-    }
-    // A no-op assignment emits no scroll event, so keep the direction sample
-    // current here as well as in onScroll.
+    } else expectedScrollTop.current = null;
     lastScrollTop.current = el.scrollTop;
   }, []);
 
@@ -1918,8 +1536,7 @@ export default function Timeline({
     const el = ref.current;
     const promptId = turnSheetPromptId.current;
     if (!el || !promptId) return;
-    const prompt = [...el.querySelectorAll<HTMLElement>(".msg.user")]
-      .find((row) => row.dataset.msgId === promptId);
+    const prompt = [...el.querySelectorAll<HTMLElement>(".msg.user")].find((row) => row.dataset.msgId === promptId);
     if (!prompt) {
       turnSheetPromptId.current = null;
       setTurnSheetPadding(0);
@@ -1941,16 +1558,11 @@ export default function Timeline({
       if (Math.abs(el.scrollTop - desiredScrollTop) >= 0.5) {
         expectedScrollTop.current = desiredScrollTop;
         el.scrollTop = desiredScrollTop;
-      } else {
-        expectedScrollTop.current = null;
-      }
+      } else expectedScrollTop.current = null;
       lastScrollTop.current = el.scrollTop;
     }
   }, [setTurnSheetPadding]);
 
-  // Session changes restore their saved anchor. A later, monotonically newer
-  // user event in the SAME session starts a fresh sheet and deliberately takes
-  // focus away from whatever older reading position was held.
   useLayoutEffect(() => {
     const latestSeq = latestUserMessage?.eventSeq ?? 0;
     if (observedPrompt.current.sessionId !== sessionId) {
@@ -1970,9 +1582,6 @@ export default function Timeline({
     syncTurnSheet(true);
   }, [sessionId, latestUserMessage?.id, latestUserMessage?.eventSeq, setTurnSheetPadding, syncTurnSheet]);
 
-  // Model commits cover durable/streamed rows. Resize observation additionally
-  // covers local disclosure animation and smoothed text renders, so an open
-  // live action cannot grow underneath the composer/status dock.
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -2006,16 +1615,8 @@ export default function Timeline({
       }
     };
     observeRows();
-    const mutations = typeof MutationObserver === "function"
-      ? new MutationObserver(() => { observeRows(); refresh(); })
-      : null;
-    mutations?.observe(el, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-      attributes: true,
-      attributeFilter: ["class", "open", "aria-expanded"],
-    });
+    const mutations = typeof MutationObserver === "function" ? new MutationObserver(() => { observeRows(); refresh(); }) : null;
+    mutations?.observe(el, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["class", "open", "aria-expanded"] });
     return () => {
       resize?.disconnect();
       mutations?.disconnect();
@@ -2024,12 +1625,8 @@ export default function Timeline({
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const noteReaderIntent = (direction: "toward-history" | "toward-tail") => {
-    // One physical gesture can deliver several scroll events (wheel momentum,
-    // touch inertia, scrollbar drag). Keep its direction briefly, but never
-    // infer intent from geometry alone: reflow emits the same scroll event.
     readerIntent.current = { direction, until: Date.now() + 700 };
   };
-
   const stopFollowing = () => {
     const el = ref.current;
     if (!el || el.scrollHeight - el.clientHeight <= TIMELINE_TAIL_EPSILON) return;
@@ -2039,7 +1636,6 @@ export default function Timeline({
     atBottom.current = false;
     setShowJump(true);
   };
-
   const onScroll = () => {
     const el = ref.current;
     if (!el) return;
@@ -2049,8 +1645,7 @@ export default function Timeline({
     const lease = readerIntent.current;
     const intent = lease !== null && lease.until >= Date.now() ? lease.direction : null;
     if (lease !== null && intent === null) readerIntent.current = null;
-    const programmatic = intent === null && expectedScrollTop.current !== null
-      && Math.abs(el.scrollTop - expectedScrollTop.current) < 1;
+    const programmatic = intent === null && expectedScrollTop.current !== null && Math.abs(el.scrollTop - expectedScrollTop.current) < 1;
     expectedScrollTop.current = null;
     if (!programmatic) {
       const distanceFromEnd = Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight);
@@ -2066,8 +1661,6 @@ export default function Timeline({
       setShowJump(next.showJump);
     }
     lastScrollTop.current = el.scrollTop;
-    // Scroll-up lazy loading: nearing the top with every cached row already
-    // rendered pulls the next page of older history from the server.
     if (el.scrollTop < 160 && canLoadOlder && start === 0 && !olderBusy) void loadOlder();
     if (sessionId === null) return;
     if (saveTimer.current !== null) clearTimeout(saveTimer.current);
@@ -2078,7 +1671,6 @@ export default function Timeline({
     }, 200);
   };
 
-  // Debounce safety: reload and unmount flush the stable anchor immediately.
   useEffect(() => {
     if (sessionId === null) return;
     const flush = () => {
@@ -2094,9 +1686,6 @@ export default function Timeline({
     };
   }, [sessionId]);
 
-  // One timeline live region: copy results and mutation outcomes are announced
-  // as text (visual checkmarks only supplement). Identical repeats get an
-  // invisible nudge so assistive tech re-announces them.
   const [liveText, setLiveText] = useState("");
   const liveRef = useRef("");
   const liveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -2104,30 +1693,14 @@ export default function Timeline({
     liveRef.current = text === liveRef.current ? `${text}\u00a0` : text;
     setLiveText(liveRef.current);
     clearTimeout(liveTimer.current);
-    // The visible chip fades after the announcement has been delivered; the
-    // region itself stays mounted so the next announcement still fires.
     liveTimer.current = setTimeout(() => setLiveText(""), 4000);
   }, []);
   useEffect(() => () => clearTimeout(liveTimer.current), []);
 
-  // Truthful eligibility (UX-MSG-ACTIONS): guards derive from the live render
-  // model plus the authoritative queue; the server re-validates inside the
-  // per-session lock, so a raced action returns a typed conflict, not a lie.
   const archived = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId)?.status === "archived");
-  // The assistant identity panel is a completed-turn artifact: while the
-  // runtime is actively generating (or paused mid-turn on a request) no
-  // answer shows any metadata row, and the panel appears once the turn
-  // completes. A turn stranded by an unclear session state (unknown /
-  // reconciling / idle without a stop) still counts as completed and shows
-  // the panel.
-  const sessionStatus = useStore((s) =>
-    s.activeSessionId === null ? undefined : s.sessions.find((x) => x.id === s.activeSessionId)?.status);
-  const isolated = useStore((s) =>
-    s.activeSessionId !== null && s.sessions.find((x) => x.id === s.activeSessionId)?.isolation?.kind === "git-worktree");
+  const sessionStatus = useStore((s) => s.activeSessionId === null ? undefined : s.sessions.find((x) => x.id === s.activeSessionId)?.status);
+  const isolated = useStore((s) => s.activeSessionId !== null && s.sessions.find((x) => x.id === s.activeSessionId)?.isolation?.kind === "git-worktree");
   const sessionActive = sessionStatus === "working" || sessionStatus === "waiting";
-  // Paginated hydration caches only the newest window; true while the server
-  // still holds events OLDER than the cached window (primitive selector, so
-  // streamed appends don't re-render the shell through this subscription).
   const canLoadOlder = useStore((s) => {
     if (s.activeSessionId === null) return false;
     const list = s.events[s.activeSessionId];
@@ -2136,11 +1709,7 @@ export default function Timeline({
   const pendingQuestion = model.questions.some((question) => question.status === "pending");
   const pendingPermission = model.permissions.some((permission) => permission.status === "pending");
   const pendingSecret = model.secrets.some((secret) => secret.status === "pending");
-  const emptyCopy = archived
-    ? tr("timeline.archivedSessionNoMessages")
-    : pendingQuestion
-      ? tr("timeline.answerPendingQuestion")
-      : tr("timeline.noMessagesYet");
+  const emptyCopy = archived ? tr("timeline.archivedSessionNoMessages") : pendingQuestion ? tr("timeline.answerPendingQuestion") : tr("timeline.noMessagesYet");
   const [queuedCount, setQueuedCount] = useState(0);
   const revertPendingRef = useRef<string | null>(null);
   const [revertPendingSession, setRevertPendingSession] = useState<string | null>(null);
@@ -2150,17 +1719,13 @@ export default function Timeline({
       setRevertPendingSession(null);
     }
   }, [sessionId]);
-  // model.queueVersion bumps only on queue-affecting events, so this REST
-  // read runs per session switch / queue change — not per streamed chunk.
   useEffect(() => {
     if (!sessionId) { setQueuedCount(0); return; }
     let cancelled = false;
     void api.queueList(sessionId).then((items) => { if (!cancelled) setQueuedCount(items.length); });
     return () => { cancelled = true; };
   }, [sessionId, model.queueVersion]);
-  const sessionBlocked = sessionStatus === "unknown"
-    || sessionStatus === "reconciling"
-    || sessionStatus === "epoch-pending";
+  const sessionBlocked = sessionStatus === "unknown" || sessionStatus === "reconciling" || sessionStatus === "epoch-pending";
   const guards: MutationGuards = guardsFromModel(model, { queuedCount, archived, sessionBlocked });
   const revertPending = sessionId !== null && revertPendingSession === sessionId;
   const revertOk = revertPending
@@ -2176,20 +1741,9 @@ export default function Timeline({
   const undoneMessages = useMemo(() => model.messages.filter((message) => message.undone && !blankAssistant(message)), [model]);
   const rows = useMemo(() => groupActivity(mergeThinking(visibleMessages)), [visibleMessages]);
   const undoneRows = useMemo(() => groupActivity(mergeThinking(undoneMessages)), [undoneMessages]);
-  // A running turn keeps producing canonical activity after its soft rewind
-  // marker. Those rows remain excluded from effective model history, but the
-  // latest group stays visible so Revert never masquerades as Stop.
   const rewoundLiveActivity = model.rewind && turnWorking
-    ? undoneRows.findLast((row): row is ActivityGroup =>
-        row.kind === "activity"
-        && row.items.some((item) => item.time >= (turn.startedAt ?? Number.POSITIVE_INFINITY)))
+    ? undoneRows.findLast((row): row is ActivityGroup => row.kind === "activity" && row.items.some((item) => item.time >= (turn.startedAt ?? Number.POSITIVE_INFINITY)))
     : undefined;
-  // One identity panel per completed turn, on the turn's terminal answer only.
-  // The terminal answer is the last assistant message before the next prompt
-  // (or the log tail); the map also records the opening prompt time so the
-  // panel's duration stays truthful when the turn state is no longer in the
-  // store. While the session is actively working no answer shows any metadata
-  // row; panels appear once the turn completes.
   const terminalAnswers = useMemo(() => {
     const terminal = new Map<number, number>();
     let openAt = 0;
@@ -2199,21 +1753,13 @@ export default function Timeline({
         if (lastAssistant !== null) terminal.set(lastAssistant.eventSeq, openAt);
         lastAssistant = null;
         openAt = message.time;
-      } else if (message.kind === "assistant") {
-        lastAssistant = message;
-      }
+      } else if (message.kind === "assistant") lastAssistant = message;
     }
     if (lastAssistant !== null) terminal.set(lastAssistant.eventSeq, openAt);
     return terminal;
   }, [visibleMessages]);
   const prompts = useMemo(() => promptIndex(visibleMessages), [visibleMessages]);
-  // An unloaded older tail is enough reason to mount the navigator: the rail's
-  // load arrow is the only discoverable way to reach prompts outside the
-  // initial event page when fewer than three prompts are cached.
-  const showNav = prefs.promptNavigator === "on"
-    || (prefs.promptNavigator === "auto" && (prompts.length >= 3 || canLoadOlder));
-  // Regenerate resends the user prompt that produced each answer. One forward
-  // pass — never a reverse scan per assistant row per streaming render.
+  const showNav = prefs.promptNavigator === "on" || (prefs.promptNavigator === "auto" && (prompts.length >= 3 || canLoadOlder));
   const regenerateSources = useMemo(() => {
     const bySeq = new Map<number, string>();
     let lastUserText: string | undefined;
@@ -2225,8 +1771,7 @@ export default function Timeline({
     return bySeq;
   }, [visibleMessages]);
   const turnBroken = turn && (turn.status === "failed" || turn.status === "aborted");
-  const lastPromptBoundary = [...model.messages].reverse()
-    .find((message) => message.kind === "user" || message.kind === "github-conflict");
+  const lastPromptBoundary = [...model.messages].reverse().find((message) => message.kind === "user" || message.kind === "github-conflict");
   const lastUser = lastPromptBoundary?.kind === "user" ? lastPromptBoundary : undefined;
   useEffect(() => {
     const el = ref.current;
@@ -2247,9 +1792,6 @@ export default function Timeline({
     };
   }, [sessionId, lastUser?.id, limit]);
 
-  // L13 windowing: rows render as a suffix; revealing earlier rows keeps the
-  // viewport anchored (scrollTop compensates for the height that appeared
-  // above), and a jump to a hidden prompt grows the window first.
   const start = windowStart(rows.length, limit);
   const shownRows = start > 0 ? rows.slice(start) : rows;
   const timelineEventTypes = new Set(listSlots("session.timeline.event").flatMap((item) => {
@@ -2280,10 +1822,7 @@ export default function Timeline({
       : turn?.status === "failed" ? "failed"
         : turn?.status === "aborted" ? "cancelled"
           : turn?.status === "stopped" ? "completed"
-          : undefined;
-  // A reveal activated from the keyboard can unmount its own control (the
-  // final Show earlier chunk, or Show all): focus must then hand off to the
-  // named timeline region — never fall to BODY (a11y criteria 6–7).
+            : undefined;
   const revealHadFocus = useRef(false);
   const reveal = (next: number) => {
     const el = ref.current;
@@ -2310,20 +1849,10 @@ export default function Timeline({
     pendingJumpFocus.current = false;
     if (revealHadFocus.current) {
       revealHadFocus.current = false;
-      // The bar survives a partial reveal and keeps focus itself; only its
-      // unmount hands focus to the region (preserving the anchored position).
-      if (el && el.querySelector(".timeline-earlier") === null) {
-        el.focus({ preventScroll: true });
-      }
+      if (el && el.querySelector(".timeline-earlier") === null) el.focus({ preventScroll: true });
     }
   }, [limit]);
 
-  // Scroll-up lazy loading: once every cached row is rendered (start === 0)
-  // but older history remains on the server, fetch the next page backward.
-  // The prepended events first land WITHOUT changing the visible suffix
-  // (windowStart absorbs them); the effect below then grows the window over
-  // the new rows via reveal(), whose anchor keeps the viewport pinned to the
-  // previously-visible content.
   const [olderBusy, setOlderBusy] = useState(false);
   const revealAfterLoad = useRef(false);
   useEffect(() => {
@@ -2343,10 +1872,6 @@ export default function Timeline({
     }
   }, [sessionId]);
 
-  // Reapply the stored stable anchor once its row exists: grow the window to
-  // include it if needed, then align the row to the remembered usable-edge
-  // offset (timelineAnchor.ts owns the inset invariant). Runs every commit
-  // but is a no-op unless a restore is pending.
   useLayoutEffect(() => {
     const a = restoreRef.current;
     const el = ref.current;
@@ -2358,12 +1883,9 @@ export default function Timeline({
         const next = limitToInclude(rows.length, limit, index);
         if (next !== limit) {
           setLimit(next);
-          return; // retry after the window grows
+          return;
         }
       }
-      // Initial hydration is a newest-first window. An older saved anchor can
-      // be absent until background backfill lands, so retain it while the
-      // server still advertises earlier canonical events.
       if (rows.length > 0 && !canLoadOlder) restoreRef.current = null;
       return;
     }
@@ -2387,10 +1909,6 @@ export default function Timeline({
       node.focus({ preventScroll: true });
     }
   };
-  // Jump to latest (§2.4): scroll to the true final surface (error/retry and
-  // turn footer included — they precede the tail clearance), mark follow mode
-  // active, and hand focus to the latest message container since this control
-  // unmounts. Appends no event.
   const jumpToLatest = () => {
     const el = ref.current;
     if (!el) return;
@@ -2408,26 +1926,19 @@ export default function Timeline({
   };
   const latestReveal = showJump && !pendingQuestion && !pendingPermission && !pendingSecret ? (
     <div className="timeline-reveal">
-      <button className={`jump-latest${model.turn?.status === "working" ? " agent-working" : ""}`} aria-label={JUMP_TO_LATEST_NAME} title={JUMP_TO_LATEST_NAME} onClick={jumpToLatest}>
-        ↓
-      </button>
+      <button className={`jump-latest${model.turn?.status === "working" ? " agent-working" : ""}`} aria-label={JUMP_TO_LATEST_NAME} title={JUMP_TO_LATEST_NAME} onClick={jumpToLatest}>↓</button>
     </div>
   ) : null;
-  // Revert and edit: append the marker, then seed the composer with the exact
-  // raw prompt + attachments (marker-owned; replay derives the same draft).
-  // Stable identity (useCallback) so memoized rows don't re-render per commit.
   const revert = useCallback((message: UserMsg) => {
     if (!sessionId) return;
     if (revertPendingRef.current === sessionId) return;
     revertPendingRef.current = sessionId;
     setRevertPendingSession(sessionId);
     void api.rewind(sessionId, message.eventSeq).then((marker) => {
-      applyEvent(marker); // WS re-delivery dedupes by seq
+      applyEvent(marker);
       const draft = {
         text: message.raw ?? message.text,
-        ...(message.attachments && message.attachments.length > 0
-          ? { attachments: message.attachments }
-          : {}),
+        ...(message.attachments && message.attachments.length > 0 ? { attachments: message.attachments } : {}),
       };
       applyComposerSeed(sessionId, rewindSeedKey(marker.seq), draft);
       requestComposerReplace(draft.text);
@@ -2442,8 +1953,6 @@ export default function Timeline({
       }
     });
   }, [sessionId, announce]);
-  // Fork and edit: navigation happens only after the child is published; a
-  // failure keeps the source selected with a bounded explanation (spec).
   const fork = useCallback((message: UserMsg) => {
     if (!sessionId) return;
     void forkSession(sessionId, message.eventSeq).catch((err) => {
@@ -2452,10 +1961,6 @@ export default function Timeline({
       setUiError(text);
     });
   }, [sessionId, announce]);
-  // Restore original timeline. An untouched seed is cleared silently; an
-  // edited draft asks first (both outcomes named in the dock confirmation).
-  // Focus lands on the invoking control when it survives, otherwise on the
-  // restored target's Revert action — never on BODY.
   const [confirmRestore, setConfirmRestore] = useState(false);
   const restore = (opts?: { confirmed?: boolean; invoker?: HTMLElement | null }) => {
     if (!sessionId || !model.rewind) return;
@@ -2475,10 +1980,9 @@ export default function Timeline({
       requestAnimationFrame(() => {
         if (invoker && document.contains(invoker)) { invoker.focus(); return; }
         const el = ref.current;
-        const target = el?.querySelector<HTMLElement>(`[data-revert-seq="${atSeq}"]`)
-          ?? el?.querySelector<HTMLElement>(`[data-actions-seq="${atSeq}"]`);
+        const target = el?.querySelector<HTMLElement>(`[data-revert-seq="${atSeq}"]`) ?? el?.querySelector<HTMLElement>(`[data-actions-seq="${atSeq}"]`);
         if (target) { target.focus(); return; }
-        if (el) { el.focus(); }
+        if (el) el.focus();
       });
     }).catch((err) => {
       const text = mutationErrorMessage("restore", err);
@@ -2487,10 +1991,6 @@ export default function Timeline({
     });
   };
 
-  // Bounded, already-reduced summary for the timeline before/after hosts —
-  // contributions never receive live events or a mutable model reference.
-  // Pending approvals/secrets belong here: permissions and secure-safe render
-  // in `session.timeline.after` from this context, not from a live store.
   const slotSummary = timelineAfterSlotContext({
     sessionId,
     messageCount: model.messages.length,
@@ -2500,12 +2000,6 @@ export default function Timeline({
     secrets: model.secrets,
   });
 
-  // One timeline, one scroll root (§2.1): the shell stacks the reserved
-  // utility region, the single `.timeline` scrollport, and the reserved
-  // latest-reveal region as normal-flow siblings. The only exception is the
-  // prompt rail: `.timeline-viewport` is a non-scrolling positioning context
-  // wrapping the scrollport, and the rail is an absolute SIBLING of the
-  // scroller pinned to the right gutter (never over the reading column).
   return (
     <div className="timeline-shell">
       <div className="timeline-viewport">
@@ -2517,8 +2011,6 @@ export default function Timeline({
         ref={ref}
         onScroll={onScroll}
         onWheelCapture={(event) => {
-          // Trackpad pinch zoom and a predominantly horizontal gesture are
-          // viewport/content actions, not a request to leave tail follow.
           if (event.ctrlKey || Math.abs(event.deltaY) < Math.abs(event.deltaX)) return;
           if (event.deltaY < 0) stopFollowing();
           else if (event.deltaY > 0) noteReaderIntent("toward-tail");
@@ -2526,14 +2018,10 @@ export default function Timeline({
         onKeyDownCapture={(event) => {
           const target = event.target as HTMLElement;
           if (target.matches("input, textarea, select, [contenteditable=true]")) return;
-          const towardHistory = event.key === "ArrowUp"
-            || event.key === "PageUp"
-            || event.key === "Home"
+          const towardHistory = event.key === "ArrowUp" || event.key === "PageUp" || event.key === "Home"
             || ((event.key === " " || event.key === "Spacebar") && event.shiftKey)
             || (event.metaKey && event.key === "ArrowUp");
-          const towardTail = event.key === "ArrowDown"
-            || event.key === "PageDown"
-            || event.key === "End"
+          const towardTail = event.key === "ArrowDown" || event.key === "PageDown" || event.key === "End"
             || ((event.key === " " || event.key === "Spacebar") && !event.shiftKey)
             || (event.metaKey && event.key === "ArrowDown");
           if (towardHistory) stopFollowing();
@@ -2544,11 +2032,8 @@ export default function Timeline({
           const rect = el.getBoundingClientRect();
           const direction = getComputedStyle(el).direction;
           const gutter = Math.max(12, el.offsetWidth - el.clientWidth);
-          const inScrollbar = direction === "rtl"
-            ? event.clientX <= rect.left + gutter
-            : event.clientX >= rect.right - gutter;
-          scrollbarPointer.current = event.button === 1
-            || (event.button === 0 && inScrollbar && el.scrollHeight > el.clientHeight);
+          const inScrollbar = direction === "rtl" ? event.clientX <= rect.left + gutter : event.clientX >= rect.right - gutter;
+          scrollbarPointer.current = event.button === 1 || (event.button === 0 && inScrollbar && el.scrollHeight > el.clientHeight);
         }}
         onPointerUpCapture={() => { scrollbarPointer.current = false; }}
         onPointerCancelCapture={() => { scrollbarPointer.current = false; }}
@@ -2557,8 +2042,6 @@ export default function Timeline({
           const y = event.touches[0]?.clientY;
           if (touchY.current !== null && y !== undefined) {
             const deltaY = y - touchY.current;
-            // Ignore tap jitter, but accumulate it against the last accepted
-            // sample so a slow deliberate drag still wins after a few pixels.
             if (deltaY > 2) {
               stopFollowing();
               touchY.current = y;
@@ -2572,53 +2055,30 @@ export default function Timeline({
         onTouchCancelCapture={() => { touchY.current = null; }}
       >
         <SlotHost slot="session.timeline.before" context={slotSummary} customizable />
-        {model.messages.length === 0 && !model.workflowRun && (
-          <div className="empty">
-            <div>{emptyCopy}</div>
-          </div>
-        )}
+        {model.messages.length === 0 && !model.workflowRun && <div className="empty"><div>{emptyCopy}</div></div>}
         {start > 0 && (
           <div className="timeline-earlier">
-            <Button size="sm" onClick={() => reveal(grownLimit(rows.length, limit))}>
-              {tr("timeline.show")}{" "}{Math.min(TIMELINE_CHUNK, start)} {tr("timeline.earlier")}</Button>
-            <Button size="sm" onClick={() => reveal(rows.length)}>
-              {tr("timeline.showAll2")}{start} {tr("timeline.hidden")}</Button>
+            <Button size="sm" onClick={() => reveal(grownLimit(rows.length, limit))}>{tr("timeline.show")} {Math.min(TIMELINE_CHUNK, start)} {tr("timeline.earlier")}</Button>
+            <Button size="sm" onClick={() => reveal(rows.length)}>{tr("timeline.showAll2")}{start} {tr("timeline.hidden")}</Button>
           </div>
         )}
         {start === 0 && canLoadOlder && (
           <div className="timeline-earlier">
-            <Button size="sm" busy={olderBusy} onClick={() => void loadOlder()}>
-              {olderBusy ? tr("timeline.loadingEarlierHistory") : tr("timeline.loadEarlierHistory")}</Button>
+            <Button size="sm" busy={olderBusy} onClick={() => void loadOlder()}>{olderBusy ? tr("timeline.loadingEarlierHistory") : tr("timeline.loadEarlierHistory")}</Button>
           </div>
         )}
         {chronologicalRows.map((entry) => {
-          if (entry.kind === "timeline-event") {
-            return <SlotHost
-              key={entry.id}
-              slot="session.timeline.event"
-              context={{ ...slotSummary, event: entry.event }}
-            />;
-          }
+          if (entry.kind === "timeline-event") return <SlotHost key={entry.id} slot="session.timeline.event" context={{ ...slotSummary, event: entry.event }} />;
           const r = entry.row;
           return r.kind === "activity"
-            ? <ActivityRow
-                key={r.id}
-                rev={activityRev(r)}
-                g={r}
-                subagents={model.subagents}
-                state={r.id === latestActivityId ? currentActivityState : undefined}
-                entering={r.id === latestRowId}
-              />
-            : (
-              <MessageRow
+            ? <ActivityRow key={r.id} rev={activityRev(r)} g={r} subagents={model.subagents} state={r.id === latestActivityId ? currentActivityState : undefined} entering={r.id === latestRowId} />
+            : <MessageRow
                 key={r.id}
                 rev={r.rev ?? 0}
                 m={r}
                 plan={r.kind === "assistant" && r.id === latestAssistantId && model.tasks ? model.tasks : undefined}
                 regeneratePrompt={r.kind === "assistant" ? regenerateSources.get(r.eventSeq) : undefined}
                 turn={r.kind === "assistant" && r.id === latestAssistantId && turn?.status !== "working" ? turn : undefined}
-                // The latest assistant row of a working turn owns the live
-                // thinking reveal; every other row shows its thought formed.
                 live={r.kind === "assistant" && turnWorking && r.id === latestAssistantId}
                 entering={r.id === latestRowId}
                 terminal={r.kind === "assistant" && !sessionActive && terminalAnswers.has(r.eventSeq)}
@@ -2628,61 +2088,33 @@ export default function Timeline({
                 onFork={fork}
                 revert={revertOk}
                 fork={forkOk}
-              />
-            );
+              />;
         })}
-        {rewoundLiveActivity && (
-          <ActivityRow
-            key={`rewound-live-${rewoundLiveActivity.id}`}
-            rev={activityRev(rewoundLiveActivity)}
-            g={rewoundLiveActivity}
-            subagents={model.subagents}
-            state={currentActivityState}
-          />
-        )}
+        {rewoundLiveActivity && <ActivityRow key={`rewound-live-${rewoundLiveActivity.id}`} rev={activityRev(rewoundLiveActivity)} g={rewoundLiveActivity} subagents={model.subagents} state={currentActivityState} />}
         {model.workflowRun && <WorkflowTimelineCard run={model.workflowRun} />}
-        {/* The dock confirmation sits OUTSIDE the collapsible tail: it must be
-            visible even while the reverted items stay folded away. */}
         {confirmRestore && model.rewind && undoneRows.length > 0 && (
           <div className="rewound-confirm" role="group" aria-label={tr("timeline.confirmRestore")}>
             <span>{tr("timeline.youEditedTheDraftRestoringTheOriginal")}</span>
-            <Button
-              size="sm"
-              onClick={(event) => restore({ confirmed: true, invoker: event.currentTarget })}
-            >{tr("timeline.restoreAndDiscardTheEditedDraft")}</Button>
-            <Button size="sm" onClick={() => setConfirmRestore(false)}>
-              {tr("timeline.keepEditingTheDraft")}</Button>
+            <Button size="sm" onClick={(event) => restore({ confirmed: true, invoker: event.currentTarget })}>{tr("timeline.restoreAndDiscardTheEditedDraft")}</Button>
+            <Button size="sm" onClick={() => setConfirmRestore(false)}>{tr("timeline.keepEditingTheDraft")}</Button>
           </div>
         )}
-        {/* The collapsed tail exists only while the revert is ACTIVE. After a
-            replacement the originals stay on disk (and out of model history)
-            but no longer occupy the visible timeline. */}
         {model.rewind && undoneRows.length > 0 && (
           <details className="rewound-tail">
             <summary>
-              <span>{undoneMessages.length} {tr("timeline.revertedTimeline")}{" "}{undoneMessages.length === 1 ? tr("timeline.item") : tr("timeline.items")}</span>
+              <span>{undoneMessages.length} {tr("timeline.revertedTimeline")} {undoneMessages.length === 1 ? tr("timeline.item") : tr("timeline.items")}</span>
               {model.rewind && !confirmRestore && (
-                <Button
-                  size="sm"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    restore({ invoker: event.currentTarget });
-                  }}
-                >{tr("timeline.restoreOriginalTimeline")}</Button>
+                <Button size="sm" onClick={(event) => { event.preventDefault(); restore({ invoker: event.currentTarget }); }}>{tr("timeline.restoreOriginalTimeline")}</Button>
               )}
             </summary>
             <div className="rewound-tail-body">
-              {undoneRows.map((row) => (
-                row.kind === "activity"
-                  ? <ActivityRow key={row.id} rev={activityRev(row)} g={row} subagents={model.subagents} />
-                  : <MessageRow key={row.id} rev={row.rev ?? 0} m={row} announce={announce} />
-              ))}
+              {undoneRows.map((row) => row.kind === "activity"
+                ? <ActivityRow key={row.id} rev={activityRev(row)} g={row} subagents={model.subagents} />
+                : <MessageRow key={row.id} rev={row.rev ?? 0} m={row} announce={announce} />)}
             </div>
           </details>
         )}
-        {turnBroken && turn.status === "failed" && turn.limit && sessionId && (
-          <RateLimitNotice sessionId={sessionId} limit={turn.limit} />
-        )}
+        {turnBroken && turn.status === "failed" && turn.limit && sessionId && <RateLimitNotice sessionId={sessionId} limit={turn.limit} />}
         {turnBroken && !(turn.status === "failed" && turn.limit) && (
           <Notice
             tone="error"
@@ -2710,16 +2142,7 @@ export default function Timeline({
         <div className="msg-live" role="status" aria-live="polite">{liveText}</div>
         <SlotHost slot="session.timeline.after" context={slotSummary} customizable />
       </div>
-      {showNav && (
-        <PromptNavigator
-          prompts={prompts}
-          onJump={jump}
-          containerRef={ref}
-          canLoadOlder={canLoadOlder}
-          olderBusy={olderBusy}
-          onLoadOlder={() => void loadOlder()}
-        />
-      )}
+      {showNav && <PromptNavigator prompts={prompts} onJump={jump} containerRef={ref} canLoadOlder={canLoadOlder} olderBusy={olderBusy} onLoadOlder={() => void loadOlder()} />}
       {latestReveal && (latestRevealTarget ? createPortal(latestReveal, latestRevealTarget) : latestReveal)}
       </div>
       <SelectionMenu container={ref} />
