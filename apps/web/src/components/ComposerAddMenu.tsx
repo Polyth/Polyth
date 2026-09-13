@@ -12,6 +12,7 @@ import {
 } from "../composer/discovery.ts";
 import type { SnippetDef } from "@polyth/session/web-api";
 import { parseGithubUrl, type GithubAttachResult } from "@polyth/github/attachments";
+import { openSettingsPage } from "../store.ts";
 import { tr } from "../i18n/index.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import { dismissKeyboard } from "../mobileViewport.ts";
@@ -48,8 +49,8 @@ export interface ComposerAddMenuProps {
   onInsertSnippet: () => void;
   onEnterShell: () => void;
   onAttachGoal: () => void;
-  /** Opens the broader harness/tool configuration surface. */
-  onMoreControls: () => void;
+  /** Optional override for the broader harness/tool configuration surface. */
+  onMoreControls?: () => void;
   /** Link-only GitHub attach; the dialog reports each failure verbatim. */
   attachGithub: (url: string) => Promise<GithubAttachResult>;
 }
@@ -222,7 +223,7 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
           className="add-menu-item add-menu-more"
           onClick={() => {
             setOpen(false);
-            props.onMoreControls();
+            (props.onMoreControls ?? (() => openSettingsPage("harnesses")))();
           }}
         >
           <span className="add-menu-more-icon" aria-hidden="true"><SettingsIcon /></span>
