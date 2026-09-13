@@ -609,7 +609,12 @@ test("phone views expose only floating power-on-demand controls", async () => {
   assert.match(mobileHeader, /<Tools/);
   assert.doesNotMatch(mobileHeader, /Icon\.plus/);
   assert.match(css, /\.mobile-session-floats\s*\{[^}]*position:\s*fixed/s);
-  assert.match(css, /\.mobile-tools-sheet\.sheet\s*\{[^}]*width:\s*calc\(100vw/s);
+  assert.match(css, /\.mobile-tools-sheet\.sheet\s*\{[^}]*width:\s*100%[^}]*border-radius:\s*0/s);
+  assert.match(
+    css,
+    /@keyframes mobile-tools-in\s*\{\s*from\s*\{\s*transform:\s*translate3d\(100%, 0, 0\)/s,
+    "Workspace enters as a full navigation destination from the right edge",
+  );
   // The reserved band clears the floating island: safe area, the island's own
   // height (never below the tap floor), and the chrome inset around it.
   assert.match(
