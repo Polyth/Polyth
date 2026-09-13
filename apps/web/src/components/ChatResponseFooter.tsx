@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import type { SessionEvent } from "@polyth/contracts";
-import { resolveModelPresentation } from "@polyth/models/presentation";
+import { resolveModelPresentation } from "@polyth/contracts/model-presentation";
 import { seedMultiRunPrompt } from "@polyth/multirun/prompt-seed";
 import { api } from "@polyth/session/web-api";
 import { fmtCost, fmtTokens } from "../format.ts";
