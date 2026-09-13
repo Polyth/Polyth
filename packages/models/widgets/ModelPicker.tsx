@@ -42,15 +42,18 @@ import {
   ChevronUpIcon,
   FavoriteIcon,
   IconButton,
+  Menu,
   ResponsiveOverlay,
   SheetRow,
   SheetSection,
   TextInput,
+  type MenuEntry,
 } from "@polyth/web/ui";
 import { useEscape } from "../../../apps/web/src/useEscape.ts";
 import { Icon } from "@polyth/web/icons";
 import ProviderLogo from "./ProviderLogo.tsx";
 import { tr } from "@polyth/web/i18n";
+import { modelSupportsThinking, thinkingVariantLabel } from "./modelPresentation.ts";
 import {
   initialModelPickerState,
   modelPickerReducer,
@@ -385,10 +388,15 @@ export default function ModelPicker({
   };
   const choose = (model: ModelDescriptor) => {
     if (phone) tapFeedback();
+    const sameModel = selectedModel ? modelKey(selectedModel) === modelKey(model) : false;
+    const variant = sameModel && selectedRef?.variant && model.variants?.includes(selectedRef.variant)
+      ? selectedRef.variant
+      : undefined;
     onPick({
       providerID: model.providerID,
       modelID: model.modelID,
       ...(model.harnessId ? { harnessId: model.harnessId } : {}),
+      ...(variant ? { variant } : {}),
     });
     noteModelUsed(modelKey(model));
     close();
@@ -397,6 +405,76 @@ export default function ModelPicker({
   const isSelected = (model: ModelDescriptor) => selectedModel
     ? modelKey(selectedModel) === modelKey(model)
     : false;
+
+  const pickVariant = (model: ModelDescriptor, variant?: string) => {
+    if (phone) tapFeedback();
+    onPick({
+      providerID: model.providerID,
+      modelID: model.modelID,
+      ...(model.harnessId ? { harnessId: model.harnessId } : {}),
+      ...(variant ? { variant } : {}),
+    });
+    noteModelUsed(modelKey(model));
+  };
+
+  const variantMenu = (model: ModelDescriptor) => {
+    if (!modelSupportsThinking(model)) return null;
+    const variants = [...new Set(model.variants ?? [])];
+    if (variants.length === 0) return null;
+    const selected = isSelected(model);
+    const explicitVariant = selected && selectedRef?.variant && variants.includes(selectedRef.variant)
+      ? selectedRef.variant
+      : undefined;
+    const defaultVariant = model.defaultVariant && variants.includes(model.defaultVariant)
+      ? model.defaultVariant
+      : undefined;
+    const displayVariant = explicitVariant ?? defaultVariant;
+    const displayLabel = displayVariant ? thinkingVariantLabel(displayVariant) : tr("composer.auto");
+    const entries: MenuEntry[] = [
+      {
+        id: "auto",
+        label: tr("composer.auto"),
+        kind: "radio",
+        checked: selected && explicitVariant === undefined,
+        onSelect: () => pickVariant(model),
+      },
+      ...variants.map((variant): MenuEntry => ({
+        id: variant,
+        label: thinkingVariantLabel(variant),
+        kind: "radio",
+        checked: selected && explicitVariant === variant,
+        onSelect: () => pickVariant(model, variant),
+      })),
+    ];
+    return (
+      <Menu
+        label={tr("composer.thinking")}
+        title={tr("composer.thinking")}
+        entries={entries}
+        align="end"
+        phonePresentation="popover"
+        className="model-thinking-menu"
+      >
+        {({ ref, onClick, ...triggerProps }) => (
+          <button
+            ref={ref}
+            type="button"
+            className="model-thinking-trigger"
+            title={tr("composer.thinkingEffortValue", { value: displayLabel })}
+            aria-label={tr("composer.thinkingEffortValue", { value: displayLabel })}
+            {...triggerProps}
+            onClick={(event) => {
+              event.stopPropagation();
+              onClick();
+            }}
+          >
+            <span>{displayLabel}</span>
+            <Icon.chevronDown />
+          </button>
+        )}
+      </Menu>
+    );
+  };
 
   const startDrag = (event: DragEvent, kind: ModelPickerDragKind, id: string) => {
     event.dataTransfer.effectAllowed = "move";
@@ -516,14 +594,14 @@ export default function ModelPicker({
         aria-selected={selected}
         tabIndex={-1}
         onClick={() => choose(model)}
-          onMouseEnter={(event: MouseEvent<HTMLDivElement>) => {
-            const index = flatRowIndex.get(key);
-            if (index !== undefined) {
-              setDetail(null);
-              setDetailAnchor(null);
-              setActive(index);
-              setShowDetails(true);
-            }
+        onMouseEnter={(event: MouseEvent<HTMLDivElement>) => {
+          const index = flatRowIndex.get(key);
+          if (index !== undefined) {
+            setDetail(null);
+            setDetailAnchor(null);
+            setActive(index);
+            setShowDetails(true);
+          }
         }}
         {...(favoriteDrag ? {
           draggable: !phone && !q,
@@ -566,6 +644,11 @@ export default function ModelPicker({
     const target = favorites[index + delta];
     if (target) reorderModelFavorites(key, modelKey(target));
   };
+  const moveProvider = (providerId: string, delta: number) => {
+    const index = providerIds.indexOf(providerId);
+    const target = providerIds[index + delta];
+    if (target) reorderModelProviders(providerIds, providerId, target);
+  };
   const sheetRow = (model: ModelDescriptor, group: "favorites" | "recent" | "provider") => (
     <SheetRow
       key={`${group}:${modelKey(model)}`}
@@ -601,6 +684,7 @@ export default function ModelPicker({
         </span>
       ) : (
         <span className="sheet-row-tools">
+          {variantMenu(model)}
           {capabilityIcons(model)}
           {infoButton(model, "sheet")}
           {!flatCatalog && star(model, "sheet")}
@@ -654,10 +738,10 @@ export default function ModelPicker({
           <LazyModelDetails
             model={detail}
             selected={isSelected(detail)}
-             {...(usage !== undefined ? { usage } : {})}
-             onUse={() => choose(detail)}
-             onBack={() => closeDetails(true)}
-             focusBack={phone}
+            {...(usage !== undefined ? { usage } : {})}
+            onUse={() => choose(detail)}
+            onBack={() => closeDetails(true)}
+            focusBack={phone}
           />
         )
         : (
@@ -666,44 +750,46 @@ export default function ModelPicker({
             favorite={isFavorite(prefs, modelKey(detailsPanelModel))}
             showFavorite={!flatCatalog}
           />
-         )}
+        )}
     </Suspense>
   );
+
+  const reorderableOnPhone = favorites.length > 1 || providerIds.length > 1;
 
   return (
     <span className={`picker picker-model model-picker${open ? " open" : ""}`}>
       {trigger}
       <ResponsiveOverlay
-          open={open}
-          title={tr("modelpicker.model")}
-          onClose={close}
-          anchorRef={triggerRef}
-          restoreFocusRef={triggerRef}
-          side={direction === "up" ? "up" : "down"}
-          align="start"
-          stableAnchor
-          className={phone ? "model-sheet" : `model-pop${compactCatalog ? " model-pop--compact" : ""}${emptyCompactCatalog ? " model-pop--empty" : ""}`}
-          popoverOverflow="visible"
-          initialFocus={!phone ? ".model-pop-search input" : undefined}
-          sheetSize={compactCatalog ? "auto" : "tall"}
-          sheetSearch={{
-            value: pickerState.query,
-            onChange: (query: string) => {
-              dispatchPicker({ type: "search", query });
-              setActive(0);
-              closeDetails();
-            },
-            placeholder: tr("modelpicker.searchModels"),
-            ariaLabel: tr("modelpicker.searchModels"),
-          }}
-          {...(favorites.length > 1 ? {
-            sheetAction: {
-              label: editing ? tr("common.done") : tr("common.edit"),
-              pressed: editing,
-              onClick: () => setEditing((value) => !value),
-            },
-          } : {})}
-        >
+        open={open}
+        title={tr("modelpicker.model")}
+        onClose={close}
+        anchorRef={triggerRef}
+        restoreFocusRef={triggerRef}
+        side={direction === "up" ? "up" : "down"}
+        align="start"
+        stableAnchor
+        className={phone ? "model-sheet" : `model-pop${compactCatalog ? " model-pop--compact" : ""}${emptyCompactCatalog ? " model-pop--empty" : ""}`}
+        popoverOverflow="visible"
+        initialFocus={!phone ? ".model-pop-search input" : undefined}
+        sheetSize={compactCatalog ? "auto" : "tall"}
+        sheetSearch={{
+          value: pickerState.query,
+          onChange: (query: string) => {
+            dispatchPicker({ type: "search", query });
+            setActive(0);
+            closeDetails();
+          },
+          placeholder: tr("modelpicker.searchModels"),
+          ariaLabel: tr("modelpicker.searchModels"),
+        }}
+        {...(reorderableOnPhone ? {
+          sheetAction: {
+            label: editing ? tr("common.done") : tr("common.edit"),
+            pressed: editing,
+            onClick: () => setEditing((current) => !current),
+          },
+        } : {})}
+      >
         <div ref={pickerShellRef} className="model-picker-shell" style={compactShellStyle}>
           {header && <div className="model-picker-header">{header}</div>}
           {phone ? (detail ? detailsPanelContent : (
@@ -724,6 +810,7 @@ export default function ModelPicker({
                 if (items.length === 0) return null;
                 const expanded = isExpanded(provider.id);
                 const shown = items.filter((model) => flatRowIndex.has(modelKey(model)));
+                const providerIndex = providerIds.indexOf(provider.id);
                 return (
                   <section className="sheet-section" key={provider.id}>
                     <h3 className="sheet-section-head">
@@ -741,10 +828,36 @@ export default function ModelPicker({
                         />
                         <span>{provider.name}</span>
                         <small>{items.length}</small>
-                        <span className={`sheet-section-caret${expanded ? " open" : ""}`} aria-hidden="true">
-                          <Icon.chevronDown />
-                        </span>
+                        {!editing && (
+                          <span className={`sheet-section-caret${expanded ? " open" : ""}`} aria-hidden="true">
+                            <Icon.chevronDown />
+                          </span>
+                        )}
                       </button>
+                      {editing && !q && (
+                        <span className="sheet-section-tools">
+                          <IconButton
+                            type="button"
+                            className="sheet-row-tool"
+                            icon={ChevronUpIcon}
+                            size="sm"
+                            variant="ghost"
+                            label={tr("modelpicker.moveValueUp", { name: provider.name })}
+                            disabled={providerIndex <= 0}
+                            onClick={() => moveProvider(provider.id, -1)}
+                          />
+                          <IconButton
+                            type="button"
+                            className="sheet-row-tool"
+                            icon={ChevronDownIcon}
+                            size="sm"
+                            variant="ghost"
+                            label={tr("modelpicker.moveValueDown", { name: provider.name })}
+                            disabled={providerIndex >= providerIds.length - 1}
+                            onClick={() => moveProvider(provider.id, 1)}
+                          />
+                        </span>
+                      )}
                     </h3>
                     {expanded && shown.map((model) => sheetRow(model, "provider"))}
                   </section>
