@@ -1,5 +1,5 @@
 import type { ModelDescriptor, SessionProjection } from "@polyth/contracts";
-import { modelDisplayName } from "../../../../apps/web/src/composer/discovery.ts";
+import { resolveModelPresentation } from "@polyth/contracts/model-presentation";
 
 export function formatTokenEstimate(tokens: number): string {
   if (tokens < 1000) return `≈${tokens}`;
@@ -16,18 +16,8 @@ export function deriveSessionTargetLabel(
 ): string | null {
   if (!session) return null;
   const harnessLabel = harnessName ?? session.resolvedHarnessId ?? "Agent";
-  const descriptor = session.model
-    ? models.find((model) => model.providerID === session.model!.providerID && model.modelID === session.model!.modelID)
-    : null;
   const modelLabel = session.model
-    ? modelDisplayName(
-      descriptor ?? {
-        providerID: session.model.providerID,
-        modelID: session.model.modelID,
-        name: session.model.modelID,
-      },
-      models,
-    )
+    ? resolveModelPresentation(session.model, models, session.resolvedHarnessId).name
     : null;
   const status = session.status === "working" ? "Working" : session.status === "waiting" ? "Waiting" : "Idle";
   return modelLabel ? `${harnessLabel} · ${modelLabel} · ${status}` : `${harnessLabel} · ${status}`;

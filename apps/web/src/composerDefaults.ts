@@ -1,4 +1,5 @@
 import type { AgentDescriptor, ModelDescriptor } from "@polyth/contracts";
+import { displayModelName, friendlyModelId } from "@polyth/contracts/model-presentation";
 import { tr } from "./i18n/index.ts";
 
 interface ModelRef {
@@ -16,7 +17,7 @@ export function modelPickerDefaultLabel(
   const descriptor = models.find(
     (model) => model.providerID === resolved.providerID && model.modelID === resolved.modelID,
   );
-  const name = descriptor?.name || resolved.modelID;
+  const name = descriptor ? displayModelName(descriptor) : friendlyModelId(resolved.modelID);
   return sessionModel ? name : tr("composerDefaults.defaultValue", { value: name });
 }
 
