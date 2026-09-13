@@ -19,6 +19,9 @@ import SlotHost from "./slots/SlotHost.ts";
 import ChatActionButton from "./ChatActionButton.tsx";
 import { CopyIcon, ForkIcon, UndoIcon } from "./ui/index.ts";
 
+const actionLabel = (name: string, availability?: ActionAvailability): string =>
+  availability?.enabled === false ? `${name}. ${availability.reason}` : name;
+
 export default function MessageQuickActions({
   message,
   announce,
@@ -63,7 +66,7 @@ export default function MessageQuickActions({
           {onRevert && (
             <ChatActionButton
               icon={UndoIcon}
-              label={revertActionName(message.time)}
+              label={actionLabel(revertActionName(message.time), revert)}
               disabled={revert?.enabled === false}
               data-revert-seq={message.eventSeq}
               onClick={() => onRevert(message)}
@@ -72,7 +75,7 @@ export default function MessageQuickActions({
           {onFork && (
             <ChatActionButton
               icon={ForkIcon}
-              label={forkActionName(message.time)}
+              label={actionLabel(forkActionName(message.time), fork)}
               disabled={fork?.enabled === false}
               onClick={() => onFork(message)}
             />
