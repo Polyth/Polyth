@@ -1,3 +1,6 @@
+import type { ModelDescriptor, ModelRef } from "@polyth/contracts";
+import { presentModelDescriptor } from "@polyth/contracts/model-presentation";
+
 export interface ModelPickerState {
   query: string;
   /** Explicit choices made during this picker session, including collapses. */
@@ -46,7 +49,6 @@ export function providerIsExpanded(inputs: ProviderExpansionInputs): boolean {
   if (inputs.persistedExpanded) return true;
   return inputs.selectedProvider;
 }
-import type { ModelDescriptor, ModelRef } from "@polyth/contracts";
 
 /** Session ModelRef predates harness qualification. Match it inside the
  * current catalog without discarding an explicit, qualified selection. */
@@ -55,9 +57,11 @@ export function pickerModelMatches(model: ModelDescriptor, ref: ModelRef & { har
     && (!ref.harnessId || (model.harnessId ?? "opencode") === ref.harnessId);
 }
 
+/** Routing truth stays untouched; the picker consumes presentation copies. */
 export function pickerCatalogModels(models: readonly ModelDescriptor[], harnessId?: string): ModelDescriptor[] {
   return models.filter((model) => (!harnessId || (model.harnessId ?? "opencode") === harnessId)
-    && ((model.harnessId ?? harnessId ?? "opencode") !== "opencode" || model.connected !== false));
+    && ((model.harnessId ?? harnessId ?? "opencode") !== "opencode" || model.connected !== false))
+    .map(presentModelDescriptor);
 }
 
 export function flatModelCatalog(models: readonly ModelDescriptor[], harnessId?: string): boolean {

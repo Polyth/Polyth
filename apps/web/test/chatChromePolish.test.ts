@@ -4,27 +4,57 @@ import { readFileSync } from "node:fs";
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
 
-test("message overflow affordances are removed from visible chat chrome", () => {
-  const css = read("../src/components/chatChromePolish.css");
-  assert.match(css, /\.msg-actions-entry,\s*\.msg-actions-popup,\s*\.response-footer-more\s*\{\s*display:\s*none !important;/s);
-  assert.match(css, /\.msg-action-btn\s*\{[^}]*width:\s*32px;[^}]*height:\s*32px;[^}]*border:\s*0;[^}]*background:\s*transparent;/s);
-  assert.match(css, /@media \(hover: none\), \(pointer: coarse\)[\s\S]*?width:\s*var\(--tap\);/s);
+test("visible chat actions use direct canonical controls", () => {
+  const timeline = read("../src/components/Timeline.tsx");
+  const actionButton = read("../src/components/ChatActionButton.tsx");
+  const messageActions = read("../src/components/MessageQuickActions.tsx");
+  const responseFooter = read("../src/components/ChatResponseFooter.tsx");
+  const pin = read("../src/components/messagePinAction.tsx");
+
+  assert.match(timeline, /<MessageQuickActions/);
+  assert.match(timeline, /<ChatResponseFooter/);
+  assert.match(actionButton, /IconButton/);
+  assert.match(actionButton, /Tooltip/);
+  assert.match(actionButton, /import "\.\/ChatChrome\.css"/);
+  assert.match(messageActions, /className="chat-message-actions"/);
+  assert.match(messageActions, /data-actions-seq=\{message\.eventSeq\}/);
+  assert.match(messageActions, /<ChatActionButton/);
+  assert.doesNotMatch(messageActions, /Icon\.more|Menu|actions-popup/);
+  assert.match(responseFooter, /className="chat-response-actions"/);
+  assert.match(responseFooter, /prefs\.responseActions\.map/);
+  assert.doesNotMatch(responseFooter, /overflowActions|response-footer-more|<Menu/);
+  assert.match(pin, /ChatActionButton/);
+  assert.match(pin, /PinIcon/);
 });
 
-test("response footer overflow entries are flattened into direct icon controls", () => {
+test("generic Menu contains no response-footer special case", () => {
   const menu = read("../src/components/ui/Menu.tsx");
-  assert.match(menu, /isResponseFooterOverflowTrigger\(trigger\)/);
-  assert.match(menu, /className="response-footer-inline-action"/);
-  assert.match(menu, /data-tooltip=\{entry\.label\}/);
-  assert.match(menu, /image:\s*ChatIcon\.image/);
-  assert.match(menu, /plan:\s*ChatIcon\.plan/);
-  assert.match(menu, /session:\s*ChatIcon\.newSession/);
-  assert.match(menu, /multirun:\s*ChatIcon\.multirun/);
+  assert.doesNotMatch(menu, /response-footer|RESPONSE_QUICK_ICON|isResponseFooterOverflowTrigger|ChatIcon/);
 });
 
-test("response metadata surface is opaque and action geometry is consistent", () => {
-  const css = read("../src/components/chatChromePolish.css");
-  assert.match(css, /\.response-footer \.response-footer-metadata-grid\s*\{[^}]*background:\s*var\(--elevated\);[^}]*backdrop-filter:\s*none;/s);
-  assert.match(css, /\.response-footer-actions button\s*\{[\s\S]*?width:\s*32px;[\s\S]*?height:\s*32px;/s);
-  assert.match(css, /\.response-footer-model\s*\{[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s);
+test("chat chrome is component-owned, compact and readable", () => {
+  const css = read("../src/components/ChatChrome.css");
+  const footer = read("../src/components/ChatResponseFooter.tsx");
+  assert.match(css, /\.chat-response-footer\s*\{[^}]*display:\s*grid;/s);
+  assert.match(css, /grid-template-areas:\s*"identity info actions"/);
+  assert.match(css, /@media \(max-width:\s*600px\)[\s\S]*"identity info"[\s\S]*"\. actions"/s);
+  assert.match(css, /@media \(max-width:\s*340px\) and \(pointer:\s*coarse\)[\s\S]*grid-template-columns:\s*repeat\(4, var\(--control-h-sm\)\)/s);
+  assert.match(css, /@media \(hover:\s*none\), \(pointer:\s*coarse\)[\s\S]*\.ui-tooltip\.chat-action-tooltip\s*\{\s*display:\s*none;/s);
+  assert.match(css, /\.ui-popover\.chat-response-metadata\s*\{[^}]*background:\s*var\(--elevated\);/s);
+  assert.match(css, /\.ui-tooltip\.chat-action-tooltip\s*\{[^}]*background:\s*var\(--elevated\);/s);
+  assert.match(footer, /<Popover/);
+  assert.doesNotMatch(css, /!important/);
+});
+
+test("chat and subagent activity share human model presentation", () => {
+  const footer = read("../src/components/ChatResponseFooter.tsx");
+  const execution = read("../src/components/ExecutionRow.tsx");
+  assert.match(footer, /resolveModelPresentation\(modelRef, models, harnessId\)/);
+  assert.match(execution, /resolveModelPresentation\(model, models, harnessId\)\.name/);
+  assert.doesNotMatch(execution, /model \? `\$\{model\.providerID\}\/\$\{model\.modelID\}`/);
+});
+
+test("shell no longer mutates model catalog or imports override-only chrome", () => {
+  const main = read("../src/components/Main.tsx");
+  assert.doesNotMatch(main, /ModelPresentationNormalizer|chatChromePolish/);
 });
