@@ -2049,9 +2049,10 @@ export async function boot(opts: BootOptions = {}) {
   const workspaceInstructions = svc<NonNullable<SessionDeps["workspaceInstructions"]>>(
     "files.workspace-instructions",
   );
-  // Workspace policy is fail-closed: without the files-owned reader Polyth
-  // cannot establish that AGENTS.md is absent, so it must not admit a turn as
-  // though no repository instructions existed.
+  // Workspace policy is fail-closed when its opt-in setting is enabled:
+  // without the files-owned reader Polyth cannot establish that AGENTS.md is
+  // absent, so it must not admit a turn as though no repository instructions
+  // existed.
   const requiredWorkspaceInstructions: NonNullable<SessionDeps["workspaceInstructions"]> =
     workspaceInstructions ?? {
       async read() {
@@ -2171,6 +2172,14 @@ export async function boot(opts: BootOptions = {}) {
     notify: pushNotifier,
     ...(attachmentGuard ? { attachments: attachmentGuard } : {}),
     workspaceInstructions: requiredWorkspaceInstructions,
+    workspaceInstructionsEnabled: async () => {
+      try {
+        return (await behavior.workspaceInstructionsPolicy()).enabled;
+      } catch {
+        // A missing or unreadable setting must not turn an opt-in feature on.
+        return false;
+      }
+    },
     browserArtifacts: { resolve: resolveBrowserArtifact, commit: commitBrowserArtifacts },
     ...(commandService ? {
       expand: async (projectId: string, text: string) => {

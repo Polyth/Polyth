@@ -845,10 +845,17 @@ export function BehaviorPage() {
   const ui = useUiSettings();
   const [favoriteSubagents, setFavoriteSubagents] = useState(true);
   const [savingFavoriteSubagents, setSavingFavoriteSubagents] = useState(false);
+  const [workspaceInstructions, setWorkspaceInstructions] = useState(false);
+  const [savingWorkspaceInstructions, setSavingWorkspaceInstructions] = useState(false);
   useEffect(() => {
     void api.subagentPolicyGet()
       .then((policy) => setFavoriteSubagents(policy.enabled))
       .catch((error) => setUiError(friendlyError("Couldn’t load subagent policy", error)));
+  }, []);
+  useEffect(() => {
+    void api.workspaceInstructionsPolicyGet()
+      .then((policy) => setWorkspaceInstructions(policy.enabled))
+      .catch((error) => setUiError(friendlyError("Couldn’t load workspace instruction policy", error)));
   }, []);
   const changeFavoriteSubagents = async (enabled: boolean) => {
     if (savingFavoriteSubagents) return;
@@ -862,6 +869,18 @@ export function BehaviorPage() {
       setSavingFavoriteSubagents(false);
     }
   };
+  const changeWorkspaceInstructions = async (enabled: boolean) => {
+    if (savingWorkspaceInstructions) return;
+    setSavingWorkspaceInstructions(true);
+    try {
+      const policy = await api.workspaceInstructionsPolicyPut(enabled);
+      setWorkspaceInstructions(policy.enabled);
+    } catch (error) {
+      setUiError(friendlyError("Couldn’t save workspace instruction policy", error));
+    } finally {
+      setSavingWorkspaceInstructions(false);
+    }
+  };
   return (
     <>
       <PageHead title={tr("settings.pages.behavior")} blurb={tr("settings.pages.workspaceSafetyFlowAndGlobalAgentInstructions")} />
@@ -873,6 +892,17 @@ export function BehaviorPage() {
       </Row>
       <Row label="Require favorite subagents" hint="Agents must choose the best favorite for each delegated task, then switch favorites if it fails." itemId="behavior.favoriteSubagents">
         <Toggle on={favoriteSubagents} onChange={(value) => void changeFavoriteSubagents(value)} label="Require favorite subagents" />
+      </Row>
+      <Row
+        label="Include workspace AGENTS.md"
+        hint="When enabled, the active workspace's AGENTS.md is hidden in the first prompt of each runtime leg. Off by default."
+        itemId="behavior.workspaceInstructions"
+      >
+        <Toggle
+          on={workspaceInstructions}
+          onChange={(value) => void changeWorkspaceInstructions(value)}
+          label="Include workspace AGENTS.md"
+        />
       </Row>
       <BehaviorInstructionsEditor />
       <Row label={tr("settings.pages.slashCommandsSnippets")} hint={tr("settings.pages.manageReusablePromptsUnderCommands")}>

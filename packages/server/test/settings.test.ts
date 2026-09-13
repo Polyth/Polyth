@@ -129,6 +129,28 @@ test("behavior: favorite subagent policy is enabled by default and applied; proj
   assert.deepEqual(await svc.subagentPolicy(), { enabled: true });
 });
 
+test("behavior: workspace AGENTS.md policy is disabled by default and persists independently", async () => {
+  const dir = tmp();
+  const policyFile = join(dir, "behavior-policy.json");
+  const svc = createBehaviorService({
+    file: join(dir, "behavior.md"),
+    policyFile,
+  });
+
+  assert.deepEqual(await svc.workspaceInstructionsPolicy(), { enabled: false });
+  assert.deepEqual(await svc.subagentPolicy(), { enabled: true });
+  assert.deepEqual(await svc.putWorkspaceInstructionsPolicy(true), { enabled: true });
+  assert.deepEqual(await svc.workspaceInstructionsPolicy(), { enabled: true });
+  assert.deepEqual(await svc.subagentPolicy(), { enabled: true });
+
+  assert.deepEqual(await svc.putSubagentPolicy(false), { enabled: false });
+  assert.deepEqual(await svc.workspaceInstructionsPolicy(), { enabled: true });
+
+  const reopened = createBehaviorService({ file: join(dir, "behavior.md"), policyFile });
+  assert.deepEqual(await reopened.workspaceInstructionsPolicy(), { enabled: true });
+  assert.deepEqual(await reopened.subagentPolicy(), { enabled: false });
+});
+
 test("mcp: CRUD with revisions; secrets stored but never returned", async () => {
   const dir = tmp();
   const space = spaceOf(dir);
@@ -328,4 +350,40 @@ test("mcp settings route is owned by rc.space", async () => {
   assert.equal((fromA.body as unknown[]).length, 1);
   assert.equal(fromB.code, 200);
   assert.deepEqual(fromB.body, []);
+});
+
+test("workspace instruction policy settings route validates and persists the toggle", async () => {
+  const dir = tmp();
+  const behavior = createBehaviorService({
+    file: join(dir, "behavior.md"),
+    policyFile: join(dir, "behavior-policy.json"),
+  });
+  const routes = settingsRoutes({ behavior, mcp: {} as never, systemInfo: () => ({
+    version: "test", applicationUrl: "http://127.0.0.1:1", tunnelUrl: null,
+    dataDirLabel: "data", capabilities: [],
+  }) });
+  const invoke = async (method: "GET" | "PUT", body?: unknown) => {
+    let code = 0;
+    let response: unknown;
+    const rc = {
+      req: {} as never,
+      res: {} as never,
+      url: new URL("http://polyth.test/api/settings/behavior/workspace-instructions"),
+      path: "/api/settings/behavior/workspace-instructions",
+      method,
+      ingress: { kind: "public-http", listenerId: "public", loopback: true, secure: true },
+      principal: { kind: "local-user", trustedLoopback: true },
+      space: spaceOf(dir),
+      requireCapability() {},
+      body: async () => body ?? {},
+      json(nextCode: number, nextBody: unknown) { code = nextCode; response = nextBody; },
+    } as unknown as RouteRequest;
+    await routes(rc);
+    return { code, response };
+  };
+
+  assert.deepEqual((await invoke("GET")).response, { enabled: false });
+  assert.deepEqual((await invoke("PUT", { enabled: true })).response, { enabled: true });
+  assert.deepEqual((await invoke("GET")).response, { enabled: true });
+  await assert.rejects(() => invoke("PUT", { enabled: "yes" }), { code: "invalid-input" });
 });

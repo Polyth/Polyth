@@ -13,11 +13,18 @@ export interface BehaviorState {
   pathLabel: string;
 }
 
+export interface WorkspaceInstructionsPolicy {
+  enabled: boolean;
+}
+
 export interface BehaviorService {
   get(): Promise<BehaviorState>;
   put(text: string, expectedRevision: string): Promise<BehaviorState>;
   subagentPolicy(): Promise<{ enabled: boolean }>;
   putSubagentPolicy(enabled: boolean): Promise<{ enabled: boolean }>;
+  /** Whether workspace-root AGENTS.md is included in fresh runtime-leg prompts. */
+  workspaceInstructionsPolicy(): Promise<WorkspaceInstructionsPolicy>;
+  putWorkspaceInstructionsPolicy(enabled: boolean): Promise<WorkspaceInstructionsPolicy>;
   refresh(): Promise<void>;
   /** Current revision+digest for the model-visible instructions-applied event. */
   current(): Promise<{ revision: string; digest: string } | null>;
@@ -55,17 +62,27 @@ export function createBehaviorService(opts: {
   };
 
   const pathLabel = "global behavior";
-  const readPolicy = async (): Promise<{ enabled: boolean }> => {
-    if (!opts.policyFile) return { enabled: false };
+  const readPolicy = async (): Promise<{ enabled: boolean; workspaceInstructionsEnabled: boolean }> => {
+    if (!opts.policyFile) return { enabled: false, workspaceInstructionsEnabled: false };
     try {
-      const value = JSON.parse(await readFile(opts.policyFile, "utf8")) as { enabled?: unknown };
-      return { enabled: value.enabled !== false };
+      const value = JSON.parse(await readFile(opts.policyFile, "utf8")) as {
+        enabled?: unknown;
+        workspaceInstructionsEnabled?: unknown;
+      };
+      return {
+        enabled: value.enabled !== false,
+        // This setting was added after the original policy file. Preserve the
+        // safe default for existing files that do not carry it.
+        workspaceInstructionsEnabled: value.workspaceInstructionsEnabled === true,
+      };
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return { enabled: true };
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        return { enabled: true, workspaceInstructionsEnabled: false };
+      }
       throw err;
     }
   };
-  const writePolicy = async (policy: { enabled: boolean }): Promise<void> => {
+  const writePolicy = async (policy: { enabled: boolean; workspaceInstructionsEnabled: boolean }): Promise<void> => {
     if (!opts.policyFile) return;
     await atomicWrite(opts.policyFile, `${JSON.stringify(policy, null, 2)}\n`);
   };
@@ -106,13 +123,27 @@ export function createBehaviorService(opts: {
       return { text, revision: behaviorRevision(text), pathLabel };
     },
 
-    subagentPolicy: readPolicy,
+    subagentPolicy: async () => ({ enabled: (await readPolicy()).enabled }),
 
     async putSubagentPolicy(enabled: boolean): Promise<{ enabled: boolean }> {
-      const next = { enabled };
+      const current = await readPolicy();
+      const next = { enabled, workspaceInstructionsEnabled: current.workspaceInstructionsEnabled };
       await writePolicy(next);
       await apply();
-      return next;
+      return { enabled };
+    },
+
+    workspaceInstructionsPolicy: async () => ({
+      enabled: (await readPolicy()).workspaceInstructionsEnabled,
+    }),
+
+    async putWorkspaceInstructionsPolicy(enabled: boolean): Promise<WorkspaceInstructionsPolicy> {
+      const current = await readPolicy();
+      const next = { enabled: current.enabled, workspaceInstructionsEnabled: enabled };
+      await writePolicy(next);
+      // This setting is consumed at session admission; changing it does not
+      // require reprovisioning any already-running harness.
+      return { enabled };
     },
 
     refresh: apply,

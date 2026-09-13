@@ -838,11 +838,24 @@ test("an action that arrives already finished still appears outside the block fi
       "the block stays folded while the action floats",
     );
 
-    const next = tool({ id: "call-3", callId: "call-3" });
+    const next = tool({ id: "call-3", callId: "call-3", input: { command: "npm test" } });
     await act(async () => root.render(createElement(ActivityGroupView, { g: group([settled, fast, next]), subagents: null })));
     const floating = [...container.querySelectorAll(".activity-live:not(.leaving)")];
-    assert.equal(floating.length, 1, "the next arrival replaces it instead of stacking a second list");
-    assert.ok(container.querySelector(".activity-live.leaving"), "the previous action folds into the block");
+    assert.equal(floating.length, 1, "a second arrival waits its turn instead of stacking or cutting in");
+    assert.equal(
+      floating[0]?.querySelector(".tool-preview")?.textContent,
+      "Review changes",
+      "the action already on screen keeps it for its full turn",
+    );
+
+    // ...and the queue drains: the waiting action takes the stage once the one
+    // before it has finished and the gap between actions has passed.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1_300)); });
+    assert.equal(
+      container.querySelector(".activity-live:not(.leaving) .tool-preview")?.textContent,
+      "Run tests",
+      "the queued action rises after the one before it folds away",
+    );
   } finally {
     await act(async () => root.unmount());
     container.remove();

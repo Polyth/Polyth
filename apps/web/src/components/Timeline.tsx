@@ -1038,11 +1038,18 @@ function childForTool(tool: ToolMsg, subagents: SubagentState | null): SubagentS
 /** Matches --activity-live-exit: the floating row must stay mounted for the
  *  whole fold-away before it is handed to the block. */
 const ACTIVITY_LIVE_EXIT_MS = 280;
-/** How long a freshly arrived action stays outside the block. Status alone is
- *  not enough: a tool whose call and result land in the same render batch is
- *  never observed running, and would otherwise appear straight inside the
- *  block. Every action gets its moment outside first. */
-const ARRIVAL_DWELL_MS = 1100;
+/** Minimum time an arriving action stays outside the block — comfortably more
+ *  than the longest rise, so the motion always completes and is read as one
+ *  deliberate beat. Status alone cannot decide this: a tool whose call and
+ *  result land in the same render batch is never observed running. */
+const ACTION_SHOW_MS = 900;
+/** Quiet beat between two actions: the previous card is fully gone before the
+ *  next rises, so a burst pulses evenly instead of stampeding. */
+const ACTION_GAP_MS = ACTIVITY_LIVE_EXIT_MS;
+/** A backlog longer than this stops queueing. Narrating a stale burst matters
+ *  less than staying in step with what the agent is actually doing; the
+ *  overflow folds straight into the block. */
+const ACTION_BACKLOG_MS = 2_400;
 
 /** An action is live while it is still executing. Live actions float above the
  *  activity block instead of expanding it, so the block can stay folded. */
@@ -1052,30 +1059,51 @@ function inFlight(item: ActivityItem): boolean {
   return item.action === "started";
 }
 
-/** Ids still inside their arrival dwell, measured from first sight. Rows that
- *  were already there at mount are dated by their own timestamp instead, so
- *  replayed history stays folded on scroll-back while a group that mounts with
- *  its first action still plays the arrival. The timestamp is clamped to now:
- *  a skewed clock must not park a row outside the block indefinitely. */
-function useArrivals(items: ActivityItem[], ms: number): Set<string> {
-  const seen = useRef(new Map<string, number>());
+/** Ids currently inside their turn outside the block. Arrivals are queued one
+ *  at a time rather than shown the moment they land: without that, a burst of
+ *  fast tools cuts each other's motion short and reads as flicker. Each action
+ *  gets the full show, then a gap, then the next one rises — fast work is
+ *  emphasised, not chaotic. Rows already present at mount are dated by their
+ *  own timestamp so replayed history stays folded on scroll-back, clamped to
+ *  now because a skewed clock must not park a row outside the block. */
+function useActionSchedule(items: ActivityItem[]): Set<string> {
+  // id -> start of its turn outside the block; 0 means it never gets one.
+  const turns = useRef(new Map<string, number>());
+  const cursor = useRef(0);
   const mounted = useRef(false);
   const [, redraw] = useState(0);
   const at = Date.now();
   for (const item of items) {
-    if (!seen.current.has(item.id)) seen.current.set(item.id, mounted.current ? at : Math.min(at, item.time));
+    if (turns.current.has(item.id)) continue;
+    const arrivedAt = mounted.current ? at : Math.min(at, item.time);
+    const startAt = Math.max(arrivedAt, cursor.current);
+    if (at - arrivedAt >= ACTION_SHOW_MS || startAt - at > ACTION_BACKLOG_MS) {
+      turns.current.set(item.id, 0);
+      continue;
+    }
+    turns.current.set(item.id, startAt);
+    cursor.current = startAt + ACTION_SHOW_MS + ACTION_GAP_MS;
   }
   mounted.current = true;
-  const fresh = items.filter((item) => at - seen.current.get(item.id)! < ms);
-  // Wake on the earliest expiry, not on a fixed beat: a second arrival must not
-  // extend the first row's stay outside the block.
-  const soonest = Math.min(...fresh.map((item) => seen.current.get(item.id)! + ms));
+  const showing = new Set<string>();
+  let next = Infinity;
+  for (const item of items) {
+    const startAt = turns.current.get(item.id) ?? 0;
+    if (startAt === 0) continue;
+    if (at < startAt) next = Math.min(next, startAt);
+    else if (at < startAt + ACTION_SHOW_MS) {
+      showing.add(item.id);
+      next = Math.min(next, startAt + ACTION_SHOW_MS);
+    }
+  }
+  // Wake on the next boundary only — a queue that polls would re-render the
+  // whole group for nothing while the agent works.
   useEffect(() => {
-    if (!Number.isFinite(soonest)) return;
-    const timer = window.setTimeout(() => redraw((value) => value + 1), Math.max(0, soonest - Date.now()));
+    if (!Number.isFinite(next)) return;
+    const timer = window.setTimeout(() => redraw((value) => value + 1), Math.max(0, next - Date.now()));
     return () => window.clearTimeout(timer);
-  }, [soonest]);
-  return new Set(fresh.map((item) => item.id));
+  }, [next]);
+  return showing;
 }
 
 /** Keeps ids mounted for one collapse beat after they stop being live, so the
@@ -1138,12 +1166,10 @@ export function ActivityGroupView({
   // rows below it; opening the block is a reader decision only.
   const [open, setOpen] = useState(false);
   const itemsPresent = useCollapsePresence(open);
-  const arrived = useArrivals(g.items, ARRIVAL_DWELL_MS);
-  // Only the newest arrival lingers outside the block. A settled action folds
-  // in when its dwell ends or when the next action arrives, whichever comes
-  // first, so a burst of fast tools never stacks up into a second list.
-  const newest = g.items.filter((item) => arrived.has(item.id)).at(-1)?.id;
-  const liveIds = g.items.filter((item) => item.id === newest || (active && inFlight(item))).map((item) => item.id);
+  const showing = useActionSchedule(g.items);
+  // Work that is genuinely still running always stays out: the queue paces
+  // arrivals, it never hides something the agent is doing right now.
+  const liveIds = g.items.filter((item) => showing.has(item.id) || (active && inFlight(item))).map((item) => item.id);
   const leavingIds = useLingering(liveIds, ACTIVITY_LIVE_EXIT_MS);
   const floatingIds = new Set([...liveIds, ...leavingIds]);
   const floating = g.items.filter((item) => floatingIds.has(item.id));

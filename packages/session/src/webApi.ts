@@ -751,6 +751,9 @@ export const api = {
   subagentPolicyGet: () => jfetch<{ enabled: boolean }>("/api/settings/behavior/subagents"),
   subagentPolicyPut: (enabled: boolean) =>
     jfetch<{ enabled: boolean }>("/api/settings/behavior/subagents", json("PUT", { enabled })),
+  workspaceInstructionsPolicyGet: () => jfetch<{ enabled: boolean }>("/api/settings/behavior/workspace-instructions"),
+  workspaceInstructionsPolicyPut: (enabled: boolean) =>
+    jfetch<{ enabled: boolean }>("/api/settings/behavior/workspace-instructions", json("PUT", { enabled })),
   systemInfo: () => jfetch<SystemInfoDto>("/api/system/info"),
   mcpList: () => jfetch<McpServerDto[]>("/api/mcp/servers").catch((): McpServerDto[] => []),
   mcpCreate: (input: { name: string; transport: McpTransport; secrets?: Record<string, string>; enabled?: boolean }) =>

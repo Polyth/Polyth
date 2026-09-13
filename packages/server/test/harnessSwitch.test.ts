@@ -21,6 +21,7 @@ function fixture(path = ":memory:", options: {
   workspaceInstructions?: {
     read(root: string, projectId: string): Promise<string | null>;
   };
+  workspaceInstructionsEnabled?: boolean;
 } = {}) {
   let store = createStore(path);
   const detach: Array<() => void> = [];
@@ -158,6 +159,9 @@ function fixture(path = ":memory:", options: {
     queue: store,
     isShuttingDown: () => shuttingDown,
     ...(options.workspaceInstructions ? { workspaceInstructions: options.workspaceInstructions } : {}),
+    ...(options.workspaceInstructionsEnabled !== undefined
+      ? { workspaceInstructionsEnabled: async () => options.workspaceInstructionsEnabled! }
+      : {}),
   });
   let sessions = makeSessions();
   const drain = () => new Promise((resolve) => setTimeout(resolve, 40));
@@ -200,6 +204,7 @@ test("each fresh harness leg receives current AGENTS.md once without changing vi
         return policy;
       },
     },
+    workspaceInstructionsEnabled: true,
   });
   const { id } = await f.sessions.create({ projectId: "p" });
 

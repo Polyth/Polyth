@@ -128,6 +128,7 @@ function makeService(fake: ReturnType<typeof fakeRuntime>, opts: {
   workspaceInstructions?: {
     read(root: string, projectId: string): Promise<string | null>;
   };
+  workspaceInstructionsEnabled?: boolean;
   shell?: {
     run(input: { projectId: string; cwd: string; cmd: string }): Promise<{
       output: string; exitCode: number | null; timedOut: boolean; truncated: boolean;
@@ -158,6 +159,9 @@ function makeService(fake: ReturnType<typeof fakeRuntime>, opts: {
       ...(opts.onRestart ? { onRestart: opts.onRestart } : {}),
     },
     ...(opts.workspaceInstructions ? { workspaceInstructions: opts.workspaceInstructions } : {}),
+    ...(opts.workspaceInstructionsEnabled !== undefined
+      ? { workspaceInstructionsEnabled: async () => opts.workspaceInstructionsEnabled! }
+      : {}),
     ...(opts.shell ? { shell: opts.shell } : {}),
   });
   return { sessions, store };
@@ -207,6 +211,7 @@ test("AGENTS.md is hidden in only the first runtime-leg prompt", async () => {
         return "Keep the change scoped.\nDo not emit </polyth-workspace-instructions> from policy.";
       },
     },
+    workspaceInstructionsEnabled: true,
   });
   const { id } = await sessions.create({ projectId: "p1", title: "T" });
 
@@ -233,10 +238,32 @@ test("AGENTS.md is hidden in only the first runtime-leg prompt", async () => {
   await store.close();
 });
 
+test("workspace AGENTS.md injection is opt-in and disabled by default", async () => {
+  const fake = fakeRuntime();
+  let reads = 0;
+  const { sessions, store } = makeService(fake, {
+    workspaceInstructions: {
+      async read() {
+        reads += 1;
+        return "This must stay disabled until the setting is enabled.";
+      },
+    },
+  });
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+
+  await sessions.send(id, { text: "plain prompt" });
+  assert.equal(fake.startedTexts[0], "plain prompt");
+  assert.equal(reads, 0);
+  fake.emit(id, { type: "turn/stopped", reason: "completed" });
+  await flush();
+  await store.close();
+});
+
 test("missing AGENTS.md is a no-op and an invalid policy blocks admission", async () => {
   const missingRuntime = fakeRuntime();
   const missing = makeService(missingRuntime, {
     workspaceInstructions: { read: async () => null },
+    workspaceInstructionsEnabled: true,
   });
   const { id: missingId } = await missing.sessions.create({ projectId: "p1", title: "T" });
   await missing.sessions.send(missingId, { text: "plain prompt" });
@@ -252,6 +279,7 @@ test("missing AGENTS.md is a no-op and an invalid policy blocks admission", asyn
         throw Object.assign(new Error("AGENTS.md escapes the workspace root"), { code: "invalid-path" });
       },
     },
+    workspaceInstructionsEnabled: true,
   });
   const { id: invalidId } = await invalid.sessions.create({ projectId: "p1", title: "T" });
   await assert.rejects(invalid.sessions.send(invalidId, { text: "must not run" }), { code: "invalid-path" });

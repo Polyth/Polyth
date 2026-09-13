@@ -408,6 +408,8 @@ export function createSessionService(deps: {
   workspaceInstructions?: {
     read(root: string, projectId: string): Promise<string | null>;
   };
+  /** Server-owned setting gate. Omitted means disabled (the safe default). */
+  workspaceInstructionsEnabled?: () => Promise<boolean>;
   /** Drop volatile provisioning state after the canonical session is gone. */
   onSessionReleased?: (info: { sessionId: string; projectId: string; cwd: string }) => void | Promise<void>;
   /** Drop volatile provisioning for one session-lifetime harness after this
@@ -4595,7 +4597,11 @@ export function createSessionService(deps: {
       ? proj.runtimeLeg.bootstrap !== "native-resume"
       : !recoveryEvents.some((event) => event.type === "turn/started");
     let workspaceInstructions: string | null = null;
-    if (firstTurnOfRuntimeLeg && deps.workspaceInstructions) {
+    let workspaceInstructionsEnabled = false;
+    if (firstTurnOfRuntimeLeg && deps.workspaceInstructions && deps.workspaceInstructionsEnabled) {
+      workspaceInstructionsEnabled = await deps.workspaceInstructionsEnabled().catch(() => false);
+    }
+    if (workspaceInstructionsEnabled && deps.workspaceInstructions) {
       const project = await projects.get(proj.projectId);
       if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
       workspaceInstructions = workspaceInstructionsContext(await deps.workspaceInstructions.read(

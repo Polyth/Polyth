@@ -53,6 +53,24 @@ test("every live action rises out of the composer and honours the motion switch"
   assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.activity-live \{ transition: none; \}/);
 });
 
+test("a burst of fast actions is paced, not stampeded", () => {
+  const timeline = source("../src/components/Timeline.tsx");
+  const controller = source("../src/chatMotion.ts");
+  const show = Number(/ACTION_SHOW_MS = (\d+)/.exec(timeline)?.[1]);
+  const lift = Number(/SEND_LIFT_TOUCH_MS = (\d+)/.exec(controller)?.[1]);
+  const stretch = Number(/Math\.min\(Math\.abs\(delta\) \/ 1200, (0\.\d+)\)/.exec(controller)?.[1]);
+
+  // An action must outlast its own longest possible rise, or the motion is cut
+  // short by the fold and the burst reads as flicker.
+  assert.ok(show > lift * (1 + stretch), `${show}ms outside must exceed the ${lift * (1 + stretch)}ms rise`);
+  // The pause between two actions is the fold itself: the previous card is
+  // gone before the next one rises.
+  assert.match(timeline, /const ACTION_GAP_MS = ACTIVITY_LIVE_EXIT_MS/);
+  // A queue this deep would lag behind the agent, so the overflow folds
+  // straight into the block instead of narrating stale work.
+  assert.match(timeline, /ACTION_BACKLOG_MS = 2_400/);
+});
+
 test("the rise stays smooth over long travel and the block never clips it", () => {
   const controller = source("../src/chatMotion.ts");
   const css = source("../src/styles.css");
