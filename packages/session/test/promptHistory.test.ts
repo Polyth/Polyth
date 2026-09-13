@@ -121,12 +121,12 @@ test("prompt history respects canonical rewind hiding", async () => {
   await store.append("s1", "session/rewound", { atSeq: hiddenStart.seq });
   await store.append("s1", "user/message", { text: "after-rewind" });
   const active = await store.listPromptHistory({ spaceId: "sp", sessionId: "s1", limit: 40 });
-  assert.deepEqual(active.map((e) => e.text), ["keep", "after-rewind"]);
+  assert.deepEqual(active.map((e) => e.text), ["keep"]);
 
   await store.append("s1", "session/rewind-cleared", { replaced: true });
   await store.append("s1", "user/message", { text: "after-replace" });
   const replaced = await store.listPromptHistory({ spaceId: "sp", sessionId: "s1", limit: 40 });
-  assert.deepEqual(replaced.map((e) => e.text), ["keep", "after-rewind", "after-replace"]);
+  assert.deepEqual(replaced.map((e) => e.text), ["keep", "after-replace"]);
   await store.close();
 });
 
@@ -281,7 +281,7 @@ test("space-wide prompt history loads rewind hiders only for scanned sessions", 
   await store.append("sHide", "session/rewound", { atSeq: hiddenStart.seq });
   await store.append("sHide", "user/message", { text: "visible-b" });
   const space = await store.listPromptHistory({ spaceId: "sp", limit: 40 });
-  assert.deepEqual(space.map((e) => e.text), ["visible-a", "visible-b"]);
+  assert.deepEqual(space.map((e) => e.text), ["visible-a"]);
   await store.close();
 });
 

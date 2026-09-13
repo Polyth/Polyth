@@ -255,7 +255,7 @@ test("state matrix: completed/failed/empty/active/waiting/queued/active-revert r
       await closePage(page);
     }
 
-    // -- active turn: disabled with the running-turn reason -------------------
+    // -- active turn: soft rewind remains available ---------------------------
     {
       const page = await openApp({ width: w, height: h, session: SESSIONS.active, ready: ".msg.user" });
       const ctx = ctxOf("active");
@@ -264,8 +264,7 @@ test("state matrix: completed/failed/empty/active/waiting/queued/active-revert r
         return b ? { disabled: b.disabled, title: b.title } : null;
       });
       assert.ok(btn, `${ctx}: revert control missing`);
-      assert.equal(btn.disabled, true, `${ctx}: revert enabled during an active turn`);
-      assert.match(btn.title, /while a turn is running/, `${ctx}: reason "${btn.title}" is not truthful`);
+      assert.equal(btn.disabled, false, `${ctx}: revert unavailable during an active turn`);
       await closePage(page);
     }
 

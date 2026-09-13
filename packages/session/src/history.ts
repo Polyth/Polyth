@@ -37,7 +37,12 @@ export function effectiveHistory(events: readonly SessionEvent[]): EffectiveHist
       }
       continue;
     }
-    visibleEvents.push(ev);
+    // A rewind can be staged while its current turn is still producing
+    // events. Keep that entire stale tail behind the marker until the user
+    // either restores it or submits a replacement; otherwise late output from
+    // the old runtime leg would leak into the replacement branch history.
+    if (hidden) hidden.events.push(ev);
+    else visibleEvents.push(ev);
   }
 
   return { events: visibleEvents, hidden: hidden?.events ?? [], rewind: hidden ? { markerSeq: hidden.markerSeq, atSeq: hidden.atSeq } : null };

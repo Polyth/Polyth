@@ -153,13 +153,16 @@ export function rewindVisibility(
       const markerMatches = data.rewindSeq === undefined
         || Number(data.rewindSeq) === hidden.markerSeq;
       if (!markerMatches) continue;
-      if (data.replaced === true) ranges.push({ from: hidden.atSeq, to: hidden.markerSeq });
+      // A running turn may continue appending after the marker. Replacement
+      // discards that whole stale tail through the resolving clear event, not
+      // only the rows that existed when Revert was pressed.
+      if (data.replaced === true) ranges.push({ from: hidden.atSeq, to: ev.seq });
       hidden = null;
     }
   }
   const active = hidden;
   return (seq) => {
-    if (active && seq >= active.atSeq && seq < active.markerSeq) return true;
+    if (active && seq >= active.atSeq) return true;
     return ranges.some((range) => seq >= range.from && seq < range.to);
   };
 }

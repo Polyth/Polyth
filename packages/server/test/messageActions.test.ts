@@ -286,7 +286,7 @@ test("fork validation: assistant targets, invalid seqs, and active rewinds are r
   await store.close();
 });
 
-test("truthful guards: a stale working projection does not block, a live turn does", async () => {
+test("truthful guards: soft rewind is allowed during a live turn while fork stays blocked", async () => {
   const fake = fakeRuntime();
   const { sessions, store } = makeService(fake);
   const { id } = await sessions.create({ projectId: "p1", title: "T" });
@@ -301,10 +301,13 @@ test("truthful guards: a stale working projection does not block, a live turn do
   assert.equal(marker.type, "session/rewound");
   await sessions.clearRewind!(id);
 
-  // a real active turn blocks both actions
+  // A real active turn can stage a soft rewind without affecting execution;
+  // Fork still needs an idle, settled source.
   await sessions.send(id, { text: "third" });
   await flush();
-  await assert.rejects(() => sessions.rewind!(id, second.seq), /while a turn is running/);
+  const liveMarker = await sessions.rewind!(id, second.seq);
+  assert.equal(liveMarker.type, "session/rewound");
+  await sessions.clearRewind!(id);
   await assert.rejects(() => sessions.fork(id, second.seq), /while a turn is running/);
   fake.emit(id, { type: "turn/stopped", reason: "completed" });
   await flush();

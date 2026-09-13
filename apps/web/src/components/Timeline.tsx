@@ -2125,10 +2125,20 @@ export default function Timeline({
     ? { enabled: false as const, reason: "Fork is unavailable while this session is isolated" }
     : forkAvailability(guards);
 
+  const turn = model.turn;
+  const turnWorking = turn?.status === "working";
   const visibleMessages = useMemo(() => model.messages.filter((message) => !message.undone && !blankAssistant(message)), [model]);
   const undoneMessages = useMemo(() => model.messages.filter((message) => message.undone && !blankAssistant(message)), [model]);
   const rows = useMemo(() => groupActivity(mergeThinking(visibleMessages)), [visibleMessages]);
   const undoneRows = useMemo(() => groupActivity(mergeThinking(undoneMessages)), [undoneMessages]);
+  // A running turn keeps producing canonical activity after its soft rewind
+  // marker. Those rows remain excluded from effective model history, but the
+  // latest group stays visible so Revert never masquerades as Stop.
+  const rewoundLiveActivity = model.rewind && turnWorking
+    ? undoneRows.findLast((row): row is ActivityGroup =>
+        row.kind === "activity"
+        && row.items.some((item) => item.time >= (turn.startedAt ?? Number.POSITIVE_INFINITY)))
+    : undefined;
   // One identity panel per completed turn, on the turn's terminal answer only.
   // The terminal answer is the last assistant message before the next prompt
   // (or the log tail); the map also records the opening prompt time so the
@@ -2169,8 +2179,6 @@ export default function Timeline({
     }
     return bySeq;
   }, [visibleMessages]);
-  const turn = model.turn;
-  const turnWorking = turn?.status === "working";
   const turnBroken = turn && (turn.status === "failed" || turn.status === "aborted");
   const lastPromptBoundary = [...model.messages].reverse()
     .find((message) => message.kind === "user" || message.kind === "github-conflict");
@@ -2578,6 +2586,15 @@ export default function Timeline({
               />
             );
         })}
+        {rewoundLiveActivity && (
+          <ActivityRow
+            key={`rewound-live-${rewoundLiveActivity.id}`}
+            rev={activityRev(rewoundLiveActivity)}
+            g={rewoundLiveActivity}
+            subagents={model.subagents}
+            state={currentActivityState}
+          />
+        )}
         {model.workflowRun && <WorkflowTimelineCard run={model.workflowRun} />}
         {/* The dock confirmation sits OUTSIDE the collapsible tail: it must be
             visible even while the reverted items stay folded away. */}

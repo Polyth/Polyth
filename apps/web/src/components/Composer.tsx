@@ -537,6 +537,7 @@ export default function Composer({
   const { contextBar, newSessionTarget } = useComposerLocation(session);
   const model = useActiveModel();
   const working = model.turn?.status === "working";
+  const rewindActive = model.rewind !== null;
   // The session projection can lag the event log (e.g. a re-attach marks the
   // session `unknown` after the turn already stopped). A terminal turn status
   // is authoritative: never offer Stop for a turn the log has already closed.
@@ -1314,7 +1315,13 @@ export default function Composer({
       ? loadScopedDraftRecord(target).nativeStaged ?? []
       : [];
     const draftRevisionAtSend = draftRevisionRef.current;
-    const delivery = working ? deliveryOverride ?? getUiSettings().followUpBehavior : undefined;
+    // Revert is only a visual/history marker while the current turn runs.
+    // Submitting its edited prompt is the commit point: interrupt the stale
+    // runtime leg so the server can branch from the rewound prefix before it
+    // admits this replacement.
+    const delivery = working
+      ? rewindActive ? "interrupt" : deliveryOverride ?? getUiSettings().followUpBehavior
+      : undefined;
     const cfgSent = cfg;
     const selectedProfileId = cfgSent.profile.kind === "id"
       ? cfgSent.profile.id
@@ -1567,7 +1574,7 @@ export default function Composer({
     acTokenRef.current = null;
     selectedCommandRef.current = undefined;
   }, [
-    text, attachments, cfg, profileMissing, noModels, runtimeUnavailable, working, activeProjectId, queueEdit, queueEditSaving,
+    text, attachments, cfg, profileMissing, noModels, runtimeUnavailable, working, rewindActive, activeProjectId, queueEdit, queueEditSaving,
     emptySteerItem, steerQueuedItem, promptHistoryNav, sendPending, failedSend,
     session?.model, session?.status, session?.runtimeControl, preferredModel,
     sessionDefaults.defaultThinking, chatModels, creatingSession, newSessionTarget,

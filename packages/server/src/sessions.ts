@@ -3802,6 +3802,7 @@ export function createSessionService(deps: {
    *  offered action into a deterministic 409. */
   const assertMutable = async (
     sessionId: string,
+    opts: { allowActiveTurn?: boolean } = {},
   ): Promise<{ proj: SessionProjection; events: SessionEvent[] }> => {
     const proj = await store.projection(sessionId);
     if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
@@ -3833,7 +3834,7 @@ export function createSessionService(deps: {
         { code: "conflict" },
       );
     }
-    if (turnActive(sessionId)) {
+    if (turnActive(sessionId) && !opts.allowActiveTurn) {
       throw Object.assign(new Error("unavailable while a turn is running"), { code: "conflict" });
     }
     const events = await store.events(sessionId);
@@ -4354,6 +4355,88 @@ export function createSessionService(deps: {
     return { queueId: item.id, queued: true };
   };
 
+  /** Commit a staged rewind after the old turn has released execution. The
+   * caller owns the session lock. Branch first, then publish the replacement
+   * clear; failures leave both the marker and any queued replacement intact. */
+  const replaceRewoundRuntimeUnderLock = async (
+    sessionId: string,
+    projection: SessionProjection,
+    rt: AgentRuntime,
+  ): Promise<SessionProjection> => {
+    const events = await store.events(sessionId);
+    const rewind = activeRewind(events);
+    let current = (await store.projection(sessionId)) ?? projection;
+    if (!rewind) return current;
+    if (turnActive(sessionId)) {
+      throw Object.assign(new Error("cannot replace rewound history while a turn is running"), { code: "conflict" });
+    }
+    if (!rt.branchSession) {
+      throw Object.assign(new Error("runtime cannot branch rewound history"), { code: "unsupported" });
+    }
+    const project = await projects.get(current.projectId);
+    const cwd = current.worktreePath ?? project?.path ?? process.cwd();
+    // effectiveHistory keeps output that arrived after a running-turn marker
+    // in the hidden tail, so this is exactly the confirmed prefix before the
+    // reverted prompt — never late output from the retired turn.
+    const request = {
+      sourceSessionId: sessionId,
+      target: {
+        projectId: current.projectId,
+        title: current.title,
+        sessionId,
+        cwd,
+        ...(current.model ? { model: current.model } : {}),
+        ...(current.agent ? { agent: current.agent } : {}),
+      },
+      history: deriveMessages(events),
+    };
+    const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
+      sessionId,
+      mutationKind: "session-revert",
+      intentEvent: {
+        type: "session/replacement-intended",
+        data: { rewindSeq: rewind.markerSeq, atSeq: rewind.atSeq },
+        ignorable: true,
+      },
+    }));
+    const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(
+      prepared.operation,
+      (operationId) => rt.branchSessionOperation
+        ? rt.branchSessionOperation(request, operationId)
+        : rt.branchSession!(request),
+      (backendSessionId) => ({ backendSessionId }),
+    );
+    if (outcome.kind !== "confirmed") {
+      if (outcome.kind === "unknown") {
+        await updateProjection(sessionId, { status: "unknown" });
+        scheduleReconciliation(sessionId, current, rt, "revert-outcome-unknown");
+      }
+      throw outcomeError(outcome);
+    }
+    const backendSessionId = outcome.value.backendSessionId;
+    // The branch replaces the native conversation authority for this
+    // canonical session; observations from the old backend are fenced out.
+    const rewoundBinding = current.runtimeBinding
+      ? { ...current.runtimeBinding, backendSessionId, historyBaseline: "copied" as const }
+      : undefined;
+    await updateProjection(sessionId, {
+      backendSessionId,
+      status: "idle",
+      ...(rewoundBinding ? { runtimeBinding: rewoundBinding } : {}),
+    });
+    current = {
+      ...current,
+      backendSessionId,
+      status: "idle",
+      ...(rewoundBinding ? { runtimeBinding: rewoundBinding } : {}),
+    };
+    await appendAndBroadcast(sessionId, "session/rewind-cleared", {
+      rewindSeq: rewind.markerSeq,
+      replaced: true,
+    });
+    return current;
+  };
+
   const runtimeEpochRecoveryPlan = async (
     sessionId: string,
     events: readonly SessionEvent[],
@@ -4413,7 +4496,17 @@ export function createSessionService(deps: {
           || reconciliation?.state === "blocked"
           || reconciliation?.state === "unknown") return;
         const queued = await deps.queue!.queueList(sessionId);
+        if (!queued[0]) return;
         if (queued[0] && queueEditHeld(sessionId, queued[0].id)) return;
+        // A replacement submitted while the old turn was running is queued
+        // ahead of its abort. Only after the confirmed stop reaches this idle
+        // dispatcher do we branch and resolve the soft rewind.
+        let rt: AgentRuntime | undefined;
+        if ((await logFacts(sessionId)).rewind) {
+          rt = await ensureWired(sessionId, proj);
+          proj = await replaceRewoundRuntimeUnderLock(sessionId, proj, rt);
+          if (turnActive(sessionId) || proj.status !== "idle") return;
+        }
         const reserved = await broadcastTail(
           sessionId,
           () => deps.queue!.reserveQueueHead({ sessionId, mutationKind: "turn-submit" }),
@@ -4421,11 +4514,7 @@ export function createSessionService(deps: {
         if (reserved.kind === "empty") return;
         if (reserved.kind === "held") return;
         if (reserved.kind === "blocked" && reserved.reservation.operation.state !== "prepared") return;
-        const rt = await ensureWired(
-          sessionId,
-          proj,
-          reserved.reservation.operation.operationId,
-        );
+        rt ??= await ensureWired(sessionId, proj, reserved.reservation.operation.operationId);
         const current = await store.projection(sessionId);
         if (!current || current.status !== "idle" || turnActive(sessionId)) return;
         // Re-prepare on dispatch: a queued `_inbox/*` upload was materialized at
@@ -6439,7 +6528,7 @@ export function createSessionService(deps: {
       assertIsolationExecutable(proj);
       if (input.autoResume !== true) await clearResume(sessionId, "user");
       let stoppedTurnRecorded = hasPersistedStoppedTurn(await store.events(sessionId));
-      const delivery: DeliveryMode = input.delivery ?? "normal";
+      let delivery: DeliveryMode = input.delivery ?? "normal";
       // Queue admission can bind this same client UUID to its durable queue
       // row. Steer/interrupt are live/destructive and therefore never replay.
       if (input.clientOperationId && delivery !== "normal" && delivery !== "queue") {
@@ -6717,88 +6806,6 @@ export function createSessionService(deps: {
         return queueBehindBlockingOperation(readyOperation);
       }
 
-      // A replacement send after rewind must not continue in the backend's
-      // stale conversation — and it must not reset into an EMPTY backend
-      // either. Prepare a backend branch that holds the exact canonical
-      // effective history before the target, then resolve the marker and admit
-      // the new tail. If branch preparation fails the rewind and draft remain
-      // active and no event is appended. The facts cache answers "is a rewind
-      // active" with a tail read; the full log is only replayed on the rare
-      // rewound path below.
-      if ((await logFacts(sessionId)).rewind) {
-        proj = await withSessionLock(sessionId, async () => {
-          const events = await store.events(sessionId);
-          const rewind = activeRewind(events);
-          let current = (await store.projection(sessionId)) ?? proj!;
-          if (!rewind) return current; // resolved concurrently — plain send
-          if (!rt.branchSession) {
-            throw Object.assign(new Error("runtime cannot branch rewound history"), { code: "unsupported" });
-          }
-          const project = await projects.get(current.projectId);
-          const cwd = current.worktreePath ?? project?.path ?? process.cwd();
-          // deriveMessages already applies the active marker, so this is the
-          // exact effective model history before the reverted prompt.
-          const request = {
-            sourceSessionId: sessionId,
-            target: {
-              projectId: current.projectId,
-              title: current.title,
-              sessionId,
-              cwd,
-              ...(current.model ? { model: current.model } : {}),
-              ...(current.agent ? { agent: current.agent } : {}),
-            },
-            history: deriveMessages(events),
-          };
-          const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
-            sessionId,
-            mutationKind: "session-revert",
-            intentEvent: {
-              type: "session/replacement-intended",
-              data: { rewindSeq: rewind.markerSeq, atSeq: rewind.atSeq },
-              ignorable: true,
-            },
-          }));
-          const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(
-            prepared.operation,
-            (operationId) => rt.branchSessionOperation
-              ? rt.branchSessionOperation(request, operationId)
-              : rt.branchSession!(request),
-            (backendSessionId) => ({ backendSessionId }),
-          );
-          if (outcome.kind !== "confirmed") {
-            if (outcome.kind === "unknown") {
-              await updateProjection(sessionId, { status: "unknown" });
-              scheduleReconciliation(sessionId, current, rt, "revert-outcome-unknown");
-            }
-            throw outcomeError(outcome);
-          }
-          const backendSessionId = outcome.value.backendSessionId;
-          // The rewind branch replaces the backend session; the durable
-          // runtime binding must follow, or the observation fence rejects
-          // every event from the new session as stale-evidence forever.
-          const rewoundBinding = current.runtimeBinding
-            ? { ...current.runtimeBinding, backendSessionId, historyBaseline: "copied" as const }
-            : undefined;
-          await updateProjection(sessionId, {
-            backendSessionId,
-            status: "idle",
-            ...(rewoundBinding ? { runtimeBinding: rewoundBinding } : {}),
-          });
-          current = {
-            ...current,
-            backendSessionId,
-            status: "idle",
-            ...(rewoundBinding ? { runtimeBinding: rewoundBinding } : {}),
-          };
-          await appendAndBroadcast(sessionId, "session/rewind-cleared", {
-            rewindSeq: rewind.markerSeq,
-            replaced: true,
-          });
-          return current;
-        });
-      }
-
       const userSelectedModel = input.model;
       const userSelectedAgent = input.agent;
 
@@ -6863,6 +6870,23 @@ export function createSessionService(deps: {
       if (input.dismissPending) await dismissPendingRequests(sessionId, rt);
 
       const active = turnActive(sessionId);
+      const rewindPending = (await logFacts(sessionId)).rewind !== null;
+      if (rewindPending) {
+        if (active) {
+          if (!deps.queue) {
+            throw Object.assign(new Error("rewound replacement requires the delivery queue while a turn is running"), {
+              code: "unsupported",
+            });
+          }
+          // Revert itself never stops work. Submitting the edited draft is the
+          // commit point, so it always uses the proven interrupt path: enqueue
+          // first, request abort second, branch only after turn/stopped.
+          delivery = "interrupt";
+        } else {
+          proj = await withSessionLock(sessionId, () =>
+            replaceRewoundRuntimeUnderLock(sessionId, proj!, rt));
+        }
+      }
 
       if (active && deps.queue) {
         if (delivery === "queue") {
@@ -7376,7 +7400,7 @@ export function createSessionService(deps: {
 
     async rewind(sessionId, atSeq): Promise<SessionEvent> {
       return withSessionLock(sessionId, async () => {
-        const { events } = await assertMutable(sessionId);
+        const { events } = await assertMutable(sessionId, { allowActiveTurn: true });
         if (!Number.isSafeInteger(atSeq) || atSeq <= 0) {
           throw Object.assign(new Error("atSeq must be a positive event sequence"), { code: "invalid-input" });
         }
@@ -7408,7 +7432,7 @@ export function createSessionService(deps: {
 
     async clearRewind(sessionId): Promise<SessionEvent> {
       return withSessionLock(sessionId, async () => {
-        const { events } = await assertMutable(sessionId);
+        const { events } = await assertMutable(sessionId, { allowActiveTurn: true });
         const rewind = activeRewind(events);
         if (!rewind) throw Object.assign(new Error("session has no active rewind"), { code: "conflict" });
         return appendAndBroadcast(sessionId, "session/rewind-cleared", { rewindSeq: rewind.markerSeq });

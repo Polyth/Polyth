@@ -555,6 +555,7 @@ function finalizeOrphanedTools(model: RenderModel, status: TurnState["status"], 
 
 export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
   const d = ev.data;
+  const messageCountBefore = model.messages.length;
   // Queue events carry no message payload (the durable queue is REST-read);
   // this counter is the refetch signal. They still reach package reducers.
   if (ev.type.startsWith("queue/") || ev.type === "delivery/fallback-queued") {
@@ -1320,6 +1321,20 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
     default:
       runWebReducers(model, ev);
       break; // Unregistered session/*, context/*, compaction/*, etc. are ignored.
+  }
+  // A soft rewind may be staged while the runtime is still working. Any new
+  // rows from that stale turn remain part of the reversible hidden tail until
+  // Restore or the replacement send resolves the marker. Timeline selects the
+  // current activity group back out for live presentation without making it
+  // effective model history.
+  if (model.rewind && ev.seq > model.rewind.markerSeq) {
+    for (let index = messageCountBefore; index < model.messages.length; index += 1) {
+      const message = model.messages[index]!;
+      if (message.undone) continue;
+      message.undone = true;
+      message.rewindMarkerSeq = model.rewind.markerSeq;
+      touch(message);
+    }
   }
   model.version += 1;
   return model;

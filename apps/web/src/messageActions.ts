@@ -209,13 +209,19 @@ export interface MutationGuards {
 
 export type ActionAvailability = { enabled: true } | { enabled: false; reason: string };
 
-function mutationAvailability(action: "Revert" | "Fork", g: MutationGuards): ActionAvailability {
+function mutationAvailability(
+  action: "Revert" | "Fork",
+  g: MutationGuards,
+  opts: { allowWorking?: boolean } = {},
+): ActionAvailability {
   if (g.archived) return { enabled: false, reason: `${action} unavailable in an archived session` };
   if (g.sessionBlocked) return { enabled: false, reason: `${action} unavailable while the session is recovering` };
   // A pending request outranks the open turn it is blocking: "answer the
   // request" is the actionable reason, "a turn is running" is its symptom.
   if (g.pendingRequest) return { enabled: false, reason: `${action} unavailable while a request is waiting` };
-  if (g.turnWorking) return { enabled: false, reason: `${action} unavailable while a turn is running` };
+  if (g.turnWorking && !opts.allowWorking) {
+    return { enabled: false, reason: `${action} unavailable while a turn is running` };
+  }
   if (g.queuedCount > 0) return { enabled: false, reason: `${action} unavailable while messages are queued` };
   if (g.rewindActive) {
     return { enabled: false, reason: tr("messageActions.restoreOrReplaceCurrentRevertFirst") };
@@ -223,7 +229,11 @@ function mutationAvailability(action: "Revert" | "Fork", g: MutationGuards): Act
   return { enabled: true };
 }
 
-export const revertAvailability = (g: MutationGuards): ActionAvailability => mutationAvailability("Revert", g);
+/** Revert is a soft marker until the edited prompt is submitted, so creating
+ * one does not interrupt a live turn. The replacement send owns the eventual
+ * interrupt + backend branch. */
+export const revertAvailability = (g: MutationGuards): ActionAvailability =>
+  mutationAvailability("Revert", g, { allowWorking: true });
 /** Fork uses the same idle/waiting/queue/archive/active-rewind guards. */
 export const forkAvailability = (g: MutationGuards): ActionAvailability => mutationAvailability("Fork", g);
 

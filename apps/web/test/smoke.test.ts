@@ -905,6 +905,25 @@ test("rewind collapses its target tail, redo restores it, replacement keeps it h
     draft: { text: "second" },
   });
 
+  const lateActivity = ev("tool/call", { callId: "late", tool: "read", input: { path: "late.ts" } });
+  reduceEvent(rewound, lateActivity);
+  assert.deepEqual(
+    rewound.messages.find((message) => message.id === "late"),
+    {
+      kind: "tool",
+      id: "late",
+      callId: "late",
+      eventSeq: lateActivity.seq,
+      tool: "read",
+      input: { path: "late.ts" },
+      status: "running",
+      time: lateActivity.time,
+      undone: true,
+      rewindMarkerSeq: marker.seq,
+      rev: 1,
+    },
+  );
+
   const redone = reduceEvent(rewound, ev("session/rewind-cleared", { rewindSeq: marker.seq }));
   assert.equal(redone.rewind, null);
   assert.equal(redone.messages.some((message) => message.undone), false);
@@ -1765,7 +1784,7 @@ test("truthful guards explain exactly why revert/fork are unavailable", () => {
   assert.deepEqual(forkAvailability(idle), { enabled: true });
   assert.deepEqual(
     revertAvailability({ ...idle, turnWorking: true }),
-    { enabled: false, reason: "Revert unavailable while a turn is running" },
+    { enabled: true },
   );
   assert.deepEqual(
     revertAvailability({ ...idle, pendingRequest: true }),

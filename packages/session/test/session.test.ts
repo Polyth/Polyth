@@ -10,6 +10,7 @@ import {
   compactionRecoveryText,
   createStore,
   deriveMessages,
+  effectiveHistory,
   latestCompletedExchange,
   rewindDraft,
   unrestoredCompactionSeq,
@@ -301,6 +302,37 @@ test("deriveMessages soft-rewind, redo, and replacement are replay-deterministic
   ]);
 });
 
+test("a running-turn rewind keeps late output hidden until restore or replacement", () => {
+  const staged: SessionEvent[] = [
+    ev(1, "user/message", { text: "keep" }),
+    ev(2, "assistant/message", { partId: "a1", text: "kept" }),
+    ev(3, "user/message", { text: "replace" }),
+    ev(4, "assistant/message", { partId: "a2", text: "before click" }),
+    ev(5, "session/rewound", { atSeq: 3 }),
+    ev(6, "assistant/message", { partId: "a2", text: "after click" }),
+    ev(7, "turn/stopped", { turnId: "t2", reason: "completed" }),
+  ];
+  assert.deepEqual(deriveMessages(staged).map((message) => message.parts), [
+    [{ type: "text", text: "keep" }],
+    [{ type: "text", text: "kept" }],
+  ]);
+  assert.deepEqual(effectiveHistory(staged).hidden.map((event) => event.seq), [3, 4, 6, 7]);
+
+  const restored = [...staged, ev(8, "session/rewind-cleared", { rewindSeq: 5 })];
+  assert.deepEqual(effectiveHistory(restored).events.map((event) => event.seq), [1, 2, 3, 4, 6, 7]);
+
+  const replaced = [
+    ...staged,
+    ev(8, "session/rewind-cleared", { rewindSeq: 5, replaced: true }),
+    ev(9, "user/message", { text: "replacement" }),
+  ];
+  assert.deepEqual(deriveMessages(replaced).map((message) => message.parts), [
+    [{ type: "text", text: "keep" }],
+    [{ type: "text", text: "kept" }],
+    [{ type: "text", text: "replacement" }],
+  ]);
+});
+
 test("fork copied after an active rewind derives the same truncated history", async () => {
   const dir = freshDir();
   const store = createStore(join(dir, "t.db"));
@@ -396,4 +428,3 @@ test("exportJsonl returns events as JSONL", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
-

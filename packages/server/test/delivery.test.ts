@@ -811,13 +811,17 @@ test("sending an edited queue item now interrupts the active turn", async () => 
   await store.close();
 });
 
-test("rewind rejects running turns, supports redo, and branches backend before replacement", async () => {
+test("rewind stays soft during a running turn, supports redo, and branches before replacement", async () => {
   const fake = fakeRuntime();
   const { sessions, store } = makeService(fake);
   const { id } = await sessions.create({ projectId: "p1", title: "T" });
   await sessions.send(id, { text: "first" });
   await flush();
-  await assert.rejects(() => sessions.rewind!(id, 2), /while a turn is running/);
+  const runningTarget = (await store.events(id)).find((event) => event.type === "user/message")!;
+  const runningMarker = await sessions.rewind!(id, runningTarget.seq);
+  assert.equal(runningMarker.type, "session/rewound");
+  assert.equal(fake.aborted, 0, "pressing Revert must not stop the active turn");
+  await sessions.clearRewind!(id);
   fake.emit(id, { type: "assistant/message", partId: "a1", text: "one" });
   fake.emit(id, { type: "turn/stopped", reason: "completed" });
   await flush();
@@ -865,6 +869,63 @@ test("rewind rejects running turns, supports redo, and branches backend before r
   assert.deepEqual(deriveMessages(after).map((m) => m.parts[0]), [
     { type: "text", text: "first" },
     { type: "text", text: "one" },
+    { type: "text", text: "replacement" },
+  ]);
+  await store.close();
+});
+
+test("submitting a running-turn rewind interrupts only at send and drops late stale output", async () => {
+  const fake = fakeRuntime();
+  const { sessions, store } = makeService(fake);
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+
+  await sessions.send(id, { text: "keep" });
+  await flush();
+  fake.emit(id, { type: "assistant/message", partId: "a1", text: "kept answer" });
+  fake.emit(id, { type: "turn/stopped", reason: "completed" });
+  await flush();
+
+  await sessions.send(id, { text: "replace me" });
+  await flush();
+  fake.emit(id, { type: "assistant/message", partId: "a2", text: "work before click" });
+  await flush();
+  const target = (await store.events(id)).filter((event) => event.type === "user/message")[1]!;
+  const marker = await sessions.rewind!(id, target.seq);
+  assert.equal(fake.aborted, 0, "the soft marker must leave the turn running");
+
+  // Output arriving after the click remains recoverable by Restore, but it is
+  // not effective history for the eventual replacement branch.
+  fake.emit(id, { type: "assistant/message", partId: "a2", text: " and after click" });
+  await flush();
+  assert.deepEqual(deriveMessages(await store.events(id)), [
+    { role: "user", parts: [{ type: "text", text: "keep" }] },
+    { role: "assistant", parts: [{ type: "text", text: "kept answer" }] },
+  ]);
+
+  // Even a stale client requesting queue delivery is promoted to the safe
+  // commit path: enqueue, abort, confirmed stop, branch, then admission.
+  const submitted = await sessions.send(id, { text: "replacement", delivery: "queue" });
+  assert.equal(submitted.queued, true);
+  await flush();
+  assert.equal(fake.aborted, 1);
+  assert.deepEqual(fake.branchRequests[0]?.history, [
+    { role: "user", parts: [{ type: "text", text: "keep" }] },
+    { role: "assistant", parts: [{ type: "text", text: "kept answer" }] },
+  ]);
+  assert.deepEqual(fake.startedTexts, ["keep", "replace me", "replacement"]);
+  assert.deepEqual(await sessions.queueList!(id), []);
+
+  const events = await store.events(id);
+  const clear = events.findLast((event) =>
+    event.type === "session/rewind-cleared"
+    && (event.data as { rewindSeq?: number; replaced?: boolean }).rewindSeq === marker.seq);
+  const replacement = events.findLast((event) =>
+    event.type === "user/message" && (event.data as { text?: string }).text === "replacement");
+  assert.equal((clear?.data as { replaced?: boolean } | undefined)?.replaced, true);
+  assert.ok(clear && replacement && clear.seq < replacement.seq);
+  assert.deepEqual(deriveMessages(events).map((message) => message.parts[0]), [
+    { type: "text", text: "keep" },
+    { type: "text", text: "kept answer" },
     { type: "text", text: "replacement" },
   ]);
   await store.close();
