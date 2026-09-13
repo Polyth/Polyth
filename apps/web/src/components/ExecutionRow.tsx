@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { JsonObject, SessionProjection } from "@polyth/contracts";
-import { resolveModelPresentation } from "@polyth/models/presentation";
+import { resolveModelPresentation } from "@polyth/contracts/model-presentation";
 import { api, errorCodeOf, httpStatusOf } from "@polyth/session/web-api";
 import { fmtMs } from "../format.ts";
 import {
@@ -795,8 +795,6 @@ function FullOutputViewer({ title, text, mode = "text", scrollAnchor, restoreTar
         const restore = () => {
           if (scrollAnchor.element.isConnected) scrollAnchor.element.scrollTop = scrollAnchor.scrollTop;
         };
-        // Chromium may defer the opener's focus scroll until the next frame.
-        // Reapply once after that scroll and once after the resulting layout.
         requestAnimationFrame(() => {
           restore();
           requestAnimationFrame(restore);
@@ -884,7 +882,6 @@ export function ExecutionRow({
     const id = state.activeProjectId;
     return id ? state.projectRegistry.projects.find((project) => project.id === id)?.path ?? null : null;
   });
-  // Every row opens by hand only — folded while it runs, folded once settled.
   const [open, setOpen] = useState(false);
   const [revertedPaths, setRevertedPaths] = useState<ReadonlySet<string>>(() => new Set());
   const detailsPresent = useCollapsePresence(open);
@@ -897,9 +894,6 @@ export function ExecutionRow({
     scrollAnchor?: TimelineScrollAnchor;
     restoreTarget?: HTMLElement;
   } | null>(null);
-  // Tool messages mutate in place; `rev` bumps on every mutation, so these
-  // derivations (JSON.stringify of potentially large outputs) run once per
-  // actual change instead of on every parent render.
   const presentation = useMemo(() => executionPresentation(message), [message, message.rev]);
   const pathParts = useMemo(
     () => presentation.path ? executionPathParts(presentation.path, projectRoot) : undefined,
@@ -915,9 +909,6 @@ export function ExecutionRow({
         (candidate.status === "pending" || candidate.status === "active" || candidate.status === "done" || candidate.status === "failed");
     }).map((item) => ({ id: item.id, text: item.text, status: item.status })) : undefined;
   }, [message, message.rev]);
-  // Whatever the row already shows as a first-class surface is not repeated as
-  // a technical key/value: the file card carries the path, the fragment's own
-  // gutter carries the line range.
   const inputEntries = useMemo(() => {
     const shown = Boolean(presentation.path) || Boolean(presentation.files?.length);
     return normalizedInputEntries(message.input).filter((entry) =>
@@ -938,8 +929,6 @@ export function ExecutionRow({
   const stats = presentation.stats;
   const elapsed = fmtMs(Math.max(0, (message.finishTime ?? Date.now()) - message.time));
   const webUrl = typeof message.input.url === "string" ? message.input.url : undefined;
-  // Only the newest collapsed summary prints out. Historical rows render in
-  // full when session hydration remounts them.
   const summaryTitle = pathParts?.filename ?? presentation.label;
   const image = isImagePath(presentation.path) && !presentation.files?.length;
   const summaryPreview = pathParts
