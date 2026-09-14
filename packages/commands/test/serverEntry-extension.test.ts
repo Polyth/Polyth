@@ -4,7 +4,7 @@ import type { ProjectService, SpaceContext } from "@polyth/contracts";
 import { snippetRoutes } from "../src/serverEntry.ts";
 import type { CommandService } from "../src/index.ts";
 import type { SkillService } from "../src/skills.ts";
-import type { SlashCommand } from "../src/catalog.ts";
+import { parseExtensionCommandId, type SlashCommand } from "../src/catalog.ts";
 
 const project = { id: "p1", path: "/tmp/project" };
 const projects = {
@@ -32,8 +32,7 @@ const extension: SlashCommand = {
   description: "Review through extension",
   prompt: "",
   scope: "builtin",
-  owner: "extension",
-  extension: { packageId: "com-example", contributionId: "review" },
+  owner: "builtin",
 };
 
 async function get(path: "/api/commands" | "/api/snippets", extensionCommands: () => Promise<SlashCommand[]>) {
@@ -53,7 +52,7 @@ async function get(path: "/api/commands" | "/api/snippets", extensionCommands: (
   return { handled, status, payload };
 }
 
-test("command discovery appends Space-scoped extension descriptors", async () => {
+test("command discovery appends Space-scoped extension descriptors without widening the legacy DTO", async () => {
   let calls = 0;
   const response = await get("/api/commands", async () => {
     calls += 1;
@@ -62,10 +61,15 @@ test("command discovery appends Space-scoped extension descriptors", async () =>
   assert.equal(response.handled, true);
   assert.equal(response.status, 200);
   assert.equal(calls, 1);
-  assert.deepEqual(
-    (response.payload as SlashCommand[]).map((item) => [item.name, item.owner]),
-    [["builtin", "builtin"], ["review", "extension"]],
-  );
+  const items = response.payload as SlashCommand[];
+  assert.deepEqual(items.map((item) => [item.name, item.owner]), [
+    ["builtin", "builtin"],
+    ["review", "builtin"],
+  ]);
+  assert.deepEqual(parseExtensionCommandId(items[1]?.id ?? ""), {
+    packageId: "com-example",
+    contributionId: "review",
+  });
 });
 
 test("snippet discovery never leaks extension command descriptors", async () => {
