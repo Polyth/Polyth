@@ -22,3 +22,12 @@ test("scoped Polyth tool credentials stay in the worker-owned MCP child, not Com
   assert.ok(commandEnv, "Command Code child environment block must be present");
   assert.doesNotMatch(commandEnv, /POLYTH_AGENT_TOOLS_URL|POLYTH_AGENT_TOOLS_TOKEN/);
 });
+
+test("tool relay handles asynchronous pipe and bridge process failures", () => {
+  assert.match(COMMANDCODE_WORKER_SOURCE, /requests\.on\("error", failRelay\)/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /responses\.on\("error", failRelay\)/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /bridge\.stdin\.on\("error", failRelay\)/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /bridge\.stdout\.on\("error", failRelay\)/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /bridge\.on\("error", failRelay\)/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /if \(bridge\.exitCode === null && !bridge\.signalCode\) bridge\.kill\("SIGTERM"\)/);
+});
