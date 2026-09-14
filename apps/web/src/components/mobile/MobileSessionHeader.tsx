@@ -6,7 +6,6 @@ import { formatNumber, tr } from "../../i18n/index.ts";
 import {
   buildIslandItems,
   eventsHaveCodeChanges,
-  latestStartedTask,
   notablePeers,
   promptExcerpt,
   recentSessionsForIsland,
@@ -15,6 +14,12 @@ import {
   type IslandItem,
   type IslandTask,
 } from "../../mobileIsland.ts";
+import {
+  deriveTaskProgressEvent,
+  taskProgressSnapshot,
+  taskProgressSnapshotKey,
+  type TaskProgressEvent,
+} from "../../mobileTaskProgress.ts";
 import { resolveSessionStatus, type SessionRowStatus } from "../../sessionStatus.ts";
 import {
   openSession,
@@ -43,35 +48,77 @@ import ContextIndicator from "../ContextIndicator.tsx";
 import "./MobileSessionHeader.css";
 
 const SESSION_TITLE_POLL_MS = 2_000;
-const TASK_START_TITLE_MS = 1_800;
+const TASK_ACTIVE_TITLE_MS = 1_600;
+const TASK_COMPLETED_TITLE_MS = 950;
+const TASK_ALL_COMPLETE_TITLE_MS = 1_200;
 
-/** Show only task starts that arrive while this session is already open.
- *  Replaying or switching to an existing session must not resurrect an old
- *  transient label in place of its title. */
-function useTaskStartTitle(sessionId: string | undefined, messages: Parameters<typeof latestStartedTask>[0]): string | undefined {
-  const latest = latestStartedTask(messages);
-  const latestKey = latest ? `${sessionId ?? ""}:${latest.id}` : null;
+type TaskTitleTone = TaskProgressEvent["kind"];
+
+interface TaskTitleCue {
+  sessionId: string | undefined;
+  key: string;
+  text: string;
+  tone: TaskTitleTone;
+}
+
+/**
+ * Borrow the compact session title for task transitions that happen while the
+ * reader is already in this session. The source is the normalized task
+ * snapshot, not provider-specific task events, so TodoWrite-only harnesses get
+ * the same behavior. Switching sessions seeds the baseline and never replays
+ * an old task cue.
+ */
+function useTaskProgressTitle(sessionId: string | undefined, tasks: readonly IslandTask[]): TaskTitleCue | null {
+  const snapshot = taskProgressSnapshot(tasks);
+  const snapshotKey = taskProgressSnapshotKey(snapshot);
   const sessionRef = useRef(sessionId);
-  const observedRef = useRef<string | null>(latestKey);
-  const [visible, setVisible] = useState<{ key: string; text: string } | null>(null);
+  const previousRef = useRef(snapshot);
+  const [visible, setVisible] = useState<TaskTitleCue | null>(null);
 
   useEffect(() => {
     if (sessionRef.current !== sessionId) {
       sessionRef.current = sessionId;
-      observedRef.current = latestKey;
+      previousRef.current = snapshot;
       setVisible(null);
       return;
     }
-    if (!latest || !latestKey || observedRef.current === latestKey) return;
-    observedRef.current = latestKey;
-    setVisible({ key: latestKey, text: latest.text });
-    const timer = window.setTimeout(() => {
-      setVisible((current) => current?.key === latestKey ? null : current);
-    }, TASK_START_TITLE_MS);
-    return () => window.clearTimeout(timer);
-  }, [latest?.text, latestKey, sessionId]);
 
-  return visible?.key === latestKey ? visible.text : undefined;
+    const previous = previousRef.current;
+    previousRef.current = snapshot;
+    const event = deriveTaskProgressEvent(previous, snapshot);
+    if (!event) {
+      setVisible(null);
+      return;
+    }
+
+    const text = event.kind === "all-complete"
+      ? `✓ ${tr("timeline.valueCompleteOfValue", { completed: event.completed, total: event.total })}`
+      : event.kind === "completed"
+        ? `✓ ${event.text}`
+        : event.kind === "failed"
+          ? `× ${event.text}`
+          : `● ${event.text}`;
+    const cue: TaskTitleCue = {
+      sessionId,
+      key: `${sessionId ?? "new"}:${event.key}:${snapshotKey}`,
+      text,
+      tone: event.kind,
+    };
+    setVisible(cue);
+
+    if (event.kind === "failed") return;
+    const duration = event.kind === "active"
+      ? TASK_ACTIVE_TITLE_MS
+      : event.kind === "all-complete"
+        ? TASK_ALL_COMPLETE_TITLE_MS
+        : TASK_COMPLETED_TITLE_MS;
+    const timer = window.setTimeout(() => {
+      setVisible((current) => current?.key === cue.key ? null : current);
+    }, duration);
+    return () => window.clearTimeout(timer);
+  }, [sessionId, snapshotKey]);
+
+  return visible?.sessionId === sessionId ? visible : null;
 }
 
 function SessionLiveIcon({ status }: { status: SessionRowStatus }) {
@@ -293,10 +340,8 @@ export default function MobileSessionHeader() {
   }), []);
 
   const overviewTasks = tasksForIsland(model.tasks, model.messages);
-  const taskStartTitle = useTaskStartTitle(session?.id, model.messages);
-  const displayedTitle = taskStartTitle
-    ? `${tr("timeline.taskStarted")}: ${taskStartTitle}`
-    : title;
+  const taskProgressTitle = useTaskProgressTitle(session?.id, overviewTasks);
+  const displayedTitle = taskProgressTitle?.text ?? title;
   const items = buildIslandItems({
     sessionTitle: title,
     hasSession: session !== null,
@@ -349,10 +394,13 @@ export default function MobileSessionHeader() {
           onClick={() => setSurface("island")}
         >
           {session && <ContextIndicator gauge={gauge} mode={ui.contextIndicatorMode} providerID={activeModel?.providerID} providerName={descriptor?.providerName} harnessId={descriptor?.harnessId ?? session.resolvedHarnessId} active={sessionStatus?.kind === "working"} telemetryStatus={telemetryStatus} />}
-          <span className={`mobile-island-text${taskStartTitle ? " task-start" : ""}`}>{displayedTitle}</span>
+          <span
+            key={taskProgressTitle?.key ?? `title:${session?.id ?? "new"}`}
+            className={`mobile-island-text${taskProgressTitle ? ` task-progress ${taskProgressTitle.tone}` : ""}`}
+          >{displayedTitle}</span>
           <Icon.chevronDown />
         </button>
-        {taskStartTitle && <span className="sr-only" role="status" aria-live="polite">{displayedTitle}</span>}
+        {taskProgressTitle && <span className="sr-only" role="status" aria-live="polite">{displayedTitle}</span>}
       </GlassIsland>
       <GlassIsland className="mobile-float-actions">
         <IconButton icon={ComposeIcon} label="New session" size="lg" variant="ghost" disabled={!projectId} onClick={() => {

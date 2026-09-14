@@ -19,19 +19,22 @@ test("desktop status shares the live chat column geometry", async () => {
   assert.doesNotMatch(styles, /\.timeline\s*\{[^}]*padding-inline-end:[^}]*--rail-strip-width-right/s);
 });
 
-test("desktop title stays fixed while the phone title can briefly present a task start", async () => {
-  const [desktop, mobile, timeline] = await Promise.all([
+test("desktop title stays fixed while the phone title presents normalized task transitions", async () => {
+  const [desktop, mobile, mobileStyles] = await Promise.all([
     readFile(new URL("../src/components/DesktopSessionStatus.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/mobile/MobileSessionHeader.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../src/components/Timeline.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/mobile/MobileSessionHeader.css", import.meta.url), "utf8"),
   ]);
   assert.match(desktop, /desktop-session-status-copy"><span>{title}<\/span>/);
   assert.doesNotMatch(desktop, /setInterval|nextSessionSwitcherIndex/);
   assert.match(mobile, /promptVisible \? undefined : prompt/);
-  assert.match(mobile, /const displayedTitle = taskStartTitle/);
-  assert.match(mobile, />{displayedTitle}<\/span>/);
-  assert.match(timeline, /activity-live.*task-started/);
-  assert.match(timeline, /row\.bottom > viewport\.top && row\.top < viewport\.bottom/);
+  assert.match(mobile, /const overviewTasks = tasksForIsland\(model\.tasks, model\.messages\)/);
+  assert.match(mobile, /const taskProgressTitle = useTaskProgressTitle\(session\?\.id, overviewTasks\)/);
+  assert.match(mobile, /const displayedTitle = taskProgressTitle\?\.text \?\? title/);
+  assert.match(mobile, /task-progress \$\{taskProgressTitle\.tone\}/);
+  assert.match(mobileStyles, /\.timeline \.task-list\s*\{\s*display: none;/s);
+  assert.match(mobileStyles, /\.activity-live\.task-started\s*\{\s*display: none;/s);
+  assert.match(mobileStyles, /\.msg\.assistant:not\(\.activity-group\):has\(\+ \.activity-group\) > \.bubble/);
 });
 
 test("the wide session title expands only prompt-derived fallbacks", async () => {
