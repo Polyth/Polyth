@@ -7,10 +7,13 @@ import { harnessExecutableChildEnv } from "@polyth/harness-runtime/executable-di
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { COMMANDCODE_BRIDGE_SOURCE } from "./bridgeSource.ts";
 import {
+  commandCodeCompatibility,
+  commandCodeCompatibilityMessage,
   commandCodeStatus,
   commandCodeVersion,
   discoverCommandCodeModels,
   resolveCommandCodeBinary,
+  type CommandCodeCompatibility,
 } from "./discovery.ts";
 import { createCommandCodeRpc } from "./rpc.ts";
 import { COMMANDCODE_CAPABILITIES, createCommandCodeRuntime } from "./runtime.ts";
@@ -24,6 +27,9 @@ const writeGenerated = async (file: string, content: string): Promise<void> => {
   await writeFile(temp, content, { mode: 0o600 });
   await rename(temp, file);
 };
+
+const compatibilityOrUndefined = async (command: string): Promise<CommandCodeCompatibility | undefined> =>
+  commandCodeCompatibility(command).catch(() => undefined);
 
 export default function registerPackage(host: ServerPackageHost) {
   const registry = host.services.require(serverServiceKey<HarnessRegistry>("harnesses"));
@@ -70,29 +76,80 @@ export default function registerPackage(host: ServerPackageHost) {
       if (context.remote) {
         return { harnessId: "commandcode", installed: false, authenticated: "unknown", healthy: false, message: "Local execution only" };
       }
+      let command: string;
       try {
-        const command = await resolveCommandCodeBinary();
-        const [version, status] = await Promise.all([
-          commandCodeVersion(command),
-          commandCodeStatus(command).catch(() => ({ authenticated: "unknown" as const })),
-        ]);
+        command = await resolveCommandCodeBinary();
+      } catch {
+        return {
+          harnessId: "commandcode",
+          installed: false,
+          authenticated: "unknown",
+          healthy: false,
+          state: "not-installed" as const,
+        };
+      }
+      const [version, status, compatibility] = await Promise.all([
+        commandCodeVersion(command),
+        commandCodeStatus(command).catch(() => ({ authenticated: "unknown" as const })),
+        compatibilityOrUndefined(command),
+      ]);
+      if (!compatibility) {
         return {
           harnessId: "commandcode",
           installed: true,
           authenticated: status.authenticated,
-          healthy: true,
-          state: status.authenticated === false ? "auth-required" : "unknown",
+          healthy: false,
+          state: "degraded" as const,
           ...(version ? { version } : {}),
-          ...(status.accountLabel ? { message: `Signed in as ${status.accountLabel}` } : {}),
+          message: "Command Code is installed, but Polyth could not verify its documented CLI surface",
         };
-      } catch {
-        return { harnessId: "commandcode", installed: false, authenticated: "unknown", healthy: false };
       }
+      if (!compatibility.compatible) {
+        return {
+          harnessId: "commandcode",
+          installed: true,
+          authenticated: status.authenticated,
+          healthy: false,
+          state: "incompatible" as const,
+          ...(version ? { version } : {}),
+          message: commandCodeCompatibilityMessage(compatibility),
+        };
+      }
+      return {
+        harnessId: "commandcode",
+        installed: true,
+        authenticated: status.authenticated,
+        healthy: true,
+        state: status.authenticated === false ? "auth-required" as const : "unknown" as const,
+        ...(version ? { version } : {}),
+        ...(status.accountLabel ? { message: `Signed in as ${status.accountLabel}` } : {}),
+      };
     },
     async discover(context) {
       if (context.remote) throw Object.assign(new Error("Local execution only"), { code: "unsupported" });
       const command = await resolveCommandCodeBinary();
-      const status = await commandCodeStatus(command).catch(() => ({ authenticated: "unknown" as const }));
+      const [status, compatibility] = await Promise.all([
+        commandCodeStatus(command).catch(() => ({ authenticated: "unknown" as const })),
+        compatibilityOrUndefined(command),
+      ]);
+      if (!compatibility) {
+        return {
+          state: "degraded" as const,
+          authenticated: status.authenticated,
+          capabilities: COMMANDCODE_CAPABILITIES,
+          catalog: { models: [], agents: [] },
+          message: "Polyth could not verify the installed Command Code CLI surface",
+        };
+      }
+      if (!compatibility.compatible) {
+        return {
+          state: "incompatible" as const,
+          authenticated: status.authenticated,
+          capabilities: COMMANDCODE_CAPABILITIES,
+          catalog: { models: [], agents: [] },
+          message: commandCodeCompatibilityMessage(compatibility),
+        };
+      }
       if (status.authenticated === false) {
         return {
           state: "auth-required" as const,
@@ -114,6 +171,16 @@ export default function registerPackage(host: ServerPackageHost) {
     async createRuntime(context) {
       if (!context.space || context.remote) throw Object.assign(new Error("Local Space context required"), { code: "unsupported" });
       const command = await resolveCommandCodeBinary();
+      const compatibility = await compatibilityOrUndefined(command);
+      if (!compatibility) {
+        throw Object.assign(
+          new Error("Polyth could not verify the installed Command Code CLI surface; update Command Code and retry"),
+          { code: "unsupported" },
+        );
+      }
+      if (!compatibility.compatible) {
+        throw Object.assign(new Error(commandCodeCompatibilityMessage(compatibility)), { code: "unsupported" });
+      }
       const env = await harnessExecutableChildEnv(command);
       const p = await materialize(context);
       const rpc = await createCommandCodeRpc({
