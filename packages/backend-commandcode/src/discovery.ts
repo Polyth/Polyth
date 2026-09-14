@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import type { Dirent } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, extname, join } from "node:path";
@@ -262,7 +263,7 @@ export function parseCommandCodeAgentFile(filename: string, text: string): Agent
 }
 
 const discoverAgentDir = async (dir: string): Promise<AgentDescriptor[]> => {
-  let entries: Awaited<ReturnType<typeof readdir>>;
+  let entries: Dirent[];
   try {
     entries = await readdir(dir, { withFileTypes: true, encoding: "utf8" });
   } catch (error) {
