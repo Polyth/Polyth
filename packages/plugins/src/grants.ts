@@ -1,11 +1,21 @@
 import { existsSync } from "node:fs";
 import type { PackageCapabilityGrantDto, SpaceStorage } from "@polyth/contracts";
-import { expandedCapabilities, isPackageCapabilityName, type DeclaredCapability, type PackageConnectionContribution } from "@polyth/package-sdk/manifest";
+import {
+  expandedCapabilities,
+  isPackageCapabilityName,
+  type CapabilityConstraints,
+  type DeclaredCapability,
+  type PackageConnectionContribution,
+} from "@polyth/package-sdk/manifest";
 import { connectionFingerprint, fingerprintsStale } from "./connectionFingerprint.ts";
 import { readJsonFile, spacePackageFile, writeJsonFile } from "./spaceJson.ts";
 
+export interface ScopedPackageCapabilityGrant extends Omit<PackageCapabilityGrantDto, "constraints"> {
+  constraints?: CapabilityConstraints;
+}
+
 interface GrantsFile {
-  grants?: PackageCapabilityGrantDto[];
+  grants?: ScopedPackageCapabilityGrant[];
   connectionFingerprints?: Record<string, string>;
 }
 
@@ -23,7 +33,7 @@ function saveGrantState(storage: SpaceStorage, packageId: string, state: GrantsF
   });
 }
 
-export function readGrants(storage: SpaceStorage, packageId: string): PackageCapabilityGrantDto[] {
+export function readGrants(storage: SpaceStorage, packageId: string): ScopedPackageCapabilityGrant[] {
   const parsed = loadGrantState(storage, packageId);
   return Array.isArray(parsed.grants) ? parsed.grants : [];
 }
@@ -38,7 +48,7 @@ export function readConnectionFingerprints(
 export function writeGrants(
   storage: SpaceStorage,
   packageId: string,
-  grants: PackageCapabilityGrantDto[],
+  grants: ScopedPackageCapabilityGrant[],
   connectionFingerprints?: Record<string, string>,
 ): void {
   const previous = loadGrantState(storage, packageId);
@@ -78,27 +88,48 @@ export function connectionReviewRequired(
   return fingerprintsStale(readConnectionFingerprints(storage, packageId), specs);
 }
 
+const mergedStrings = (previous: readonly string[] | undefined, next: readonly string[] | undefined): string[] | undefined => {
+  const merged = [...new Set([...(previous ?? []), ...(next ?? [])])];
+  return merged.length ? merged : undefined;
+};
+
+function mergeConstraints(
+  previous: CapabilityConstraints | undefined,
+  next: CapabilityConstraints | undefined,
+): CapabilityConstraints | undefined {
+  if (!previous && !next) return undefined;
+  const origins = mergedStrings(previous?.origins, next?.origins);
+  const paths = mergedStrings(previous?.paths, next?.paths);
+  const methods = mergedStrings(previous?.methods, next?.methods) as CapabilityConstraints["methods"];
+  const modelClasses = mergedStrings(previous?.modelClasses, next?.modelClasses) as CapabilityConstraints["modelClasses"];
+  const maxOutputTokens = Math.max(previous?.maxOutputTokens ?? 0, next?.maxOutputTokens ?? 0) || undefined;
+  return {
+    ...(origins ? { origins } : {}),
+    ...(paths ? { paths } : {}),
+    ...(methods ? { methods } : {}),
+    ...(modelClasses ? { modelClasses } : {}),
+    ...(maxOutputTokens ? { maxOutputTokens } : {}),
+  };
+}
+
 export function grantCapabilities(
   storage: SpaceStorage,
   packageId: string,
   requested: DeclaredCapability[],
   grantedBy?: string,
-): PackageCapabilityGrantDto[] {
+): ScopedPackageCapabilityGrant[] {
   const file = loadGrantState(storage, packageId);
   const existing = Array.isArray(file.grants) ? file.grants : [];
   const now = Date.now();
   const byName = new Map(existing.map((item) => [item.name, item]));
   for (const item of requested) {
     const prev = byName.get(item.name);
-    const origins = [...new Set([
-      ...(prev?.constraints?.origins ?? []),
-      ...(item.constraints?.origins ?? []),
-    ])];
+    const constraints = mergeConstraints(prev?.constraints, item.constraints);
     byName.set(item.name, {
       name: item.name,
-      ...(origins.length ? { constraints: { origins } } : {}),
+      ...(constraints ? { constraints } : {}),
       grantedAt: now,
-      ...(grantedBy ? { grantedBy } : {}),
+      ...(grantedBy ? { grantedBy } : prev?.grantedBy ? { grantedBy: prev.grantedBy } : {}),
     });
   }
   const next = [...byName.values()];
@@ -109,23 +140,30 @@ export function grantCapabilities(
   return next;
 }
 
-export function grantsAsDeclared(grants: readonly PackageCapabilityGrantDto[]): DeclaredCapability[] {
+export function grantsAsDeclared(grants: readonly ScopedPackageCapabilityGrant[]): DeclaredCapability[] {
   const out: DeclaredCapability[] = [];
   for (const grant of grants) {
     if (!isPackageCapabilityName(grant.name)) continue;
     out.push({
       name: grant.name,
-      ...(grant.constraints?.origins?.length ? { constraints: { origins: grant.constraints.origins } } : {}),
+      ...(grant.constraints ? { constraints: grant.constraints } : {}),
     });
   }
   return out;
 }
 
 export function missingGrants(
-  grants: readonly PackageCapabilityGrantDto[],
-  required: readonly DeclaredCapability[],
+  grants: readonly ScopedPackageCapabilityGrant[],
+  requested: readonly DeclaredCapability[],
 ): DeclaredCapability[] {
-  return expandedCapabilities(grantsAsDeclared(grants), required);
+  return expandedCapabilities(grantsAsDeclared(grants), requested);
+}
+
+export function missingRequiredGrants(
+  grants: readonly ScopedPackageCapabilityGrant[],
+  requested: readonly DeclaredCapability[],
+): DeclaredCapability[] {
+  return missingGrants(grants, requested.filter((capability) => capability.required !== false));
 }
 
 export function deleteGrants(storage: SpaceStorage, packageId: string): void {
