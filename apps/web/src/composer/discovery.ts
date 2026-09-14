@@ -3,9 +3,13 @@
 // safe token-insertion decisions for the Add menu, stable autocomplete option
 // ids plus honest status copy, and contract-bounded model detail formatting.
 // No DOM, no fetch, no send path — components project this module's decisions.
-import type { SlashCommand, SnippetDef, StrictListResult } from "@polyth/session/web-api";
-import type { ModelDescriptor, ModelDiscoveryState, RuntimeCommandDescriptor } from "@polyth/contracts";
-import { commandPrecedence } from "@polyth/commands/catalog";
+import type { SnippetDef, StrictListResult } from "@polyth/session/web-api";
+import type { ModelDescriptor, ModelDiscoveryState } from "@polyth/contracts";
+import {
+  commandPrecedence,
+  extensionCommandId,
+  type CatalogCommand,
+} from "@polyth/commands/catalog";
 import { filterSnippets, type AutocompleteItem } from "../utils.ts";
 import { tr } from "../i18n/index.ts";
 
@@ -224,7 +228,7 @@ export function autocompleteOptionId(kind: "cmd" | "snip" | "file", identity: st
   return `composer-ac-${kind}-${safe}`;
 }
 
-export type ComposerCommand = SlashCommand | RuntimeCommandDescriptor;
+export type ComposerCommand = CatalogCommand;
 
 export interface AutocompleteOption extends AutocompleteItem {
   id: string;
@@ -260,11 +264,14 @@ export function commandAutocomplete(
     })
     .map((command) => {
       const native = "invocation" in command;
+      const extension = !native && command.owner === "extension" ? command.extension : undefined;
       const identity = command.id
         ?? `polyth:${"scope" in command ? command.scope : "builtin"}:${command.name}`;
       const detail = native
         ? [command.description, `native · ${command.harnessId}`].filter(Boolean).join(" · ")
-        : [command.description, "scope" in command ? command.scope : undefined].filter(Boolean).join(" · ");
+        : extension
+          ? [command.description, `extension · ${extension.packageId}`].filter(Boolean).join(" · ")
+          : [command.description, "scope" in command ? command.scope : undefined].filter(Boolean).join(" · ");
       return {
         label: `/${command.name}`,
         detail,
@@ -281,6 +288,9 @@ export function commandAutocomplete(
 
 export { commandPrecedence, mergeCommandCatalog } from "@polyth/commands/catalog";
 
+/** Resolve the exact catalog command selected/typed into the compact command
+ * wire shape. Native runtime commands keep their runtime id; extension
+ * commands use a host-reserved id that is intercepted before session admission. */
 export function nativeCommandInput(
   text: string,
   catalog: readonly ComposerCommand[],
@@ -290,17 +300,27 @@ export function nativeCommandInput(
   const match = firstLine.match(/^\/([A-Za-z0-9_-]+)(?:[ \t]+(.*))?$/);
   if (!match) return undefined;
   const name = match[1]!;
-  const selectedMatch = selected && "invocation" in selected
+  const selectedMatch = selected
     && selected.name.toLowerCase() === name.toLowerCase()
+    && ("invocation" in selected || selected.owner === "extension")
     ? selected
     : undefined;
   const winner = selectedMatch ?? commandPrecedence(name, catalog);
-  if (!winner || !("invocation" in winner)) return undefined;
+  if (!winner) return undefined;
   const args = match[2]?.trim();
-  return {
-    id: winner.id,
-    ...(args ? { args } : {}),
-  };
+  if ("invocation" in winner) {
+    return {
+      id: winner.id,
+      ...(args ? { args } : {}),
+    };
+  }
+  if (winner.owner === "extension" && winner.extension) {
+    return {
+      id: extensionCommandId(winner.extension),
+      ...(args ? { args } : {}),
+    };
+  }
+  return undefined;
 }
 
 export function snippetAutocomplete(
