@@ -189,7 +189,7 @@ const toolModDocument = (
     'responses.on("close", () => failAll("Polyth tool bridge disconnected"));',
     'lines.on("line", (line) => {',
     '  let message;',
-    '  try { message = JSON.parse(line); } catch { return; }',
+    '  try { message = JSON.parse(line); } catch { failAll("Polyth tool bridge returned malformed response"); return; }',
     '  const id = typeof message?.id === "string" ? message.id : String(message?.id ?? "");',
     '  const entry = pending.get(id);',
     '  if (!entry) return;',
