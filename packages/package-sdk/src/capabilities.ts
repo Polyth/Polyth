@@ -70,8 +70,11 @@ export function expandedCapabilities(
 
     const currentConstraints = granted.constraints;
     const requested = item.constraints;
-    if (!requested) continue;
     if (!currentConstraints) continue;
+    if (!requested) {
+      extra.push(item);
+      continue;
+    }
 
     const origins = missingStrings(currentConstraints.origins, requested.origins);
     const paths = missingStrings(currentConstraints.paths, requested.paths);
