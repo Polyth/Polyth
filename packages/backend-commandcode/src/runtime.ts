@@ -270,7 +270,7 @@ export function createCommandCodeRuntime(options: {
     order++;
     if (failure) {
       emit({ type: "turn/stopped", turnId, reason: "error", error: failure, code: "unknown" });
-    } else if (wasAborted || code === 130 || message.signal === "SIGINT" || message.signal === "SIGTERM") {
+    } else if (wasAborted || code === 130 || message.signal === "SIGINT") {
       emit({ type: "turn/stopped", turnId, reason: "aborted" });
     } else if (code === 0 && (!subtype || subtype === "success")) {
       emit({ type: "turn/stopped", turnId, reason: "completed" });
