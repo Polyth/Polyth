@@ -222,7 +222,13 @@ const validToolBridge = (value) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const url = typeof value.url === "string" ? value.url.trim() : "";
   const token = typeof value.token === "string" ? value.token.trim() : "";
-  if (!url || url.length > 8192 || !token || token.length > 8192) return undefined;
+  const rawCapabilityIds = Array.isArray(value.capabilityIds) ? value.capabilityIds : undefined;
+  if (!url || url.length > 8192 || !token || token.length > 8192 || !rawCapabilityIds
+    || rawCapabilityIds.length === 0 || rawCapabilityIds.length > 256) return undefined;
+  const capabilityIds = rawCapabilityIds.map((item) => typeof item === "string" ? item.trim() : "");
+  if (capabilityIds.some((item) => !item || item.length > 512) || new Set(capabilityIds).size !== capabilityIds.length) {
+    return undefined;
+  }
   let target;
   try { target = new URL(url); } catch { return undefined; }
   const host = target.hostname.toLowerCase();
@@ -230,7 +236,7 @@ const validToolBridge = (value) => {
   if ((target.protocol !== "http:" && target.protocol !== "https:") || !loopback || target.pathname !== AGENT_TOOLS_PATH) {
     return undefined;
   }
-  return { url: target.toString(), token };
+  return { url: target.toString(), token, capabilityIds: new Set(capabilityIds) };
 };
 
 const toolErrorResult = (message) => ({
@@ -331,7 +337,7 @@ const attachToolRelay = (turn) => {
     const capabilityId = typeof message?.capabilityId === "string" && message.capabilityId ? message.capabilityId : "";
     const toolName = typeof message?.name === "string" && message.name ? message.name : "";
     const callInput = message?.input && typeof message.input === "object" && !Array.isArray(message.input) ? message.input : {};
-    if (!id || !capabilityId || !toolName || pending.has(id)) {
+    if (!id || !capabilityId || !toolName || !turn.toolBridge.capabilityIds.has(capabilityId) || pending.has(id)) {
       writeResponse({ id, result: toolErrorResult("Invalid Polyth tool request") });
       return;
     }
