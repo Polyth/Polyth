@@ -217,6 +217,8 @@ function declarativeToolTree(
     content = { type: "code", language: "json", text: displayValue(value) };
   } else if (output === "code") {
     content = { type: "code", text: displayValue(raw) };
+  } else if (output === "markdown") {
+    content = { type: "markdown", text: displayValue(raw) };
   } else {
     content = { type: "text", text: displayValue(raw) };
   }
@@ -364,6 +366,82 @@ function LauncherContribution({
         <ContributionBody execution={execution} />
       </ResponsiveOverlay>
     </>
+  );
+}
+
+/** Imperative command submissions reuse the same execution hook, result
+ * application, RemoteUI renderer, and adaptive overlay as slot-launched
+ * contributions. The caller owns only the temporary React root. */
+export function SandboxCommandInvocationOverlay({
+  plugin,
+  contributionId,
+  label,
+  query,
+  arguments: commandArguments,
+  sessionId,
+  projectId,
+  onClose,
+}: {
+  plugin: InstalledPluginDto;
+  contributionId: string;
+  label: string;
+  query: string;
+  arguments?: string;
+  sessionId?: string;
+  projectId?: string;
+  onClose: () => void;
+}) {
+  const descriptor = useMemo<ContributionDescriptor>(() => ({
+    kind: "command",
+    id: contributionId,
+    label,
+    title: label,
+  }), [contributionId, label]);
+  const hostProps = useMemo<Record<string, unknown>>(() => ({
+    ...(sessionId ? { sessionId } : {}),
+    ...(projectId ? { projectId } : {}),
+    query,
+    arguments: commandArguments ?? "",
+  }), [sessionId, projectId, query, commandArguments]);
+  const execution = useContributionExecution(plugin, descriptor, hostProps);
+  const [completed, setCompleted] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    setCompleted(false);
+    void execution.run().finally(() => {
+      if (active) setCompleted(true);
+    });
+    return () => {
+      active = false;
+      execution.dispose();
+    };
+  // The invocation identity is immutable for this mounted command root.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plugin.id, plugin.version, contributionId, query, commandArguments, sessionId, projectId]);
+
+  const close = () => {
+    execution.dispose();
+    onClose();
+  };
+  const emptySuccess = completed
+    && !execution.busy
+    && !execution.error
+    && !execution.tree
+    && execution.result === undefined;
+  return (
+    <ResponsiveOverlay
+      open
+      onClose={close}
+      title={`${plugin.name} · ${label}`}
+      desktop="dialog"
+      sheetSize="tall"
+      dialogSize="md"
+    >
+      {emptySuccess
+        ? <Badge tone="success">Command completed</Badge>
+        : <ContributionBody execution={execution} />}
+    </ResponsiveOverlay>
   );
 }
 
