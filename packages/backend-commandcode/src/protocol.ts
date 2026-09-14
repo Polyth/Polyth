@@ -190,6 +190,7 @@ const structuredQuestions = (input: JsonObject): JsonObject[] => {
       type: raw.multiSelect === true ? "multi" : options.length ? "single" : "text",
       ...(options.length ? { options } : {}),
       required: true,
+      // Command Code always allows a free-text reply in addition to options.
       ...(options.length ? { allowOther: true } : {}),
     } satisfies JsonObject];
   });
@@ -226,6 +227,8 @@ const toolIdentity = (
   return { callId, tool };
 };
 
+/** Translate one official headless NDJSON record. Unknown future events are ignored.
+ * Native thinking frames are intentionally excluded from canonical Polyth history. */
 export function translateCommandCodeRecord(
   record: unknown,
   state: CommandCodeTranslateState,
@@ -236,6 +239,8 @@ export function translateCommandCodeRecord(
     const tokens = usage(outer.usage);
     const finalText = stringValue(outer.finalText, outer.final_text);
     const out: RuntimeEvent[] = [];
+    // Chunks are provisional. A missing message_end on the final native round
+    // must not leave canonical history without a finalized assistant message.
     if (finalText && !state.assistantFinalized) {
       state.assistantText = finalText;
       state.assistantFinalized = true;
@@ -246,6 +251,9 @@ export function translateCommandCodeRecord(
         ...(tokens ? { tokens } : {}),
       });
     }
+    // model_request_end is the preferred per-round additive accounting path.
+    // The documented final result usage is a fallback only when no such frame
+    // was observed, so a normal tool loop cannot double-count lifetime usage.
     const fallbackModel = state.activeModel ?? state.model;
     if (tokens && fallbackModel && state.usageFrames === 0) {
       out.push({ type: "usage/recorded", model: fallbackModel, tokens });
@@ -284,6 +292,8 @@ export function translateCommandCodeRecord(
     case "thinking_start":
     case "thinking_delta":
     case "thinking_end":
+      // Command Code may stream private model reasoning. It is provider-internal
+      // telemetry, not canonical dialogue, and must never be persisted by Polyth.
       return [];
     case "message_end": {
       ensureAssistantMessage(state);
@@ -292,7 +302,11 @@ export function translateCommandCodeRecord(
       if (!text) return [];
       state.assistantText = text;
       state.assistantFinalized = true;
-      return [{ type: "assistant/message", partId: assistantPartId(state), text }];
+      return [{
+        type: "assistant/message",
+        partId: assistantPartId(state),
+        text,
+      }];
     }
     case "tool_queued": {
       const callId = stringValue(event.toolCallId, event.tool_call_id, event.id);
@@ -322,6 +336,9 @@ export function translateCommandCodeRecord(
     }
     case "tool_hook_blocked": {
       const { callId, tool } = toolIdentity(state, event);
+      // Our transient Mod intentionally blocks ask_user_question after the
+      // Polyth answer is captured; the block text is the successful tool result
+      // delivered to the model, not an error the user should see.
       if (tool === "ask_user_question") return [];
       const error = safeDiagnostic(event.error)
         ?? safeDiagnostic(event.message)
@@ -344,12 +361,22 @@ export function translateCommandCodeRecord(
         : [];
     }
     case "compaction_start":
-      return [{ type: "context/updated", source: "unknown", updatedAt: Date.now(), compaction: { active: true } }];
+      return [{
+        type: "context/updated",
+        source: "unknown",
+        updatedAt: Date.now(),
+        compaction: { active: true },
+      }];
     case "compaction_done": {
       const now = Date.now();
       return [
         { type: "session/compacted" },
-        { type: "context/updated", source: "unknown", updatedAt: now, compaction: { active: false, lastAt: now } },
+        {
+          type: "context/updated",
+          source: "unknown",
+          updatedAt: now,
+          compaction: { active: false, lastAt: now },
+        },
       ];
     }
     case "subagent_start": {
