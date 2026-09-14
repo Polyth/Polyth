@@ -25,6 +25,7 @@ const AGENT_TOOLS_CAPABILITY_ID = "polyth.agent-tools";
 export interface CommandCodeToolBridge {
   url: string;
   token: string;
+  capabilityIds: string[];
 }
 
 export interface CommandCodeLaunchOverlay {
@@ -34,7 +35,6 @@ export interface CommandCodeLaunchOverlay {
   skillCapabilityIds: string[];
   toolModFile?: string;
   toolCapabilityIds: string[];
-  toolNames?: Record<string, string>;
   toolBridge?: CommandCodeToolBridge;
 }
 
@@ -45,19 +45,16 @@ const support = (_context: HarnessContext): HarnessCapabilitySupport => ({
   harnessId: "commandcode",
   targetLifetime: "session",
   kinds: {
-    // Command Code starts a fresh headless process for every Polyth turn. The
-    // next admission can therefore pick up a newer transient Mod immediately.
     instruction: { modes: ["prompt"], mutability: "immediate", configScope: "session" },
     context: { modes: ["prompt"], mutability: "immediate", remote: false, configScope: "session" },
-    // The documented CLI accepts repeatable, session-local --skill roots.
     skill: { modes: ["native"], mutability: "immediate", remote: false, configScope: "session" },
-    // Ambient native MCP remains Command Code-owned. The unsupported entry still
-    // carries session scope so the shared controller can mint its reserved,
-    // scoped AgentTool grant without broadening it beyond this canonical session.
+    // Ambient native MCP remains Command Code-owned. Session scope is retained
+    // so the shared controller can mint its reserved scoped AgentTool grant.
     "mcp-server": { modes: ["unsupported"], mutability: "immutable", remote: false, configScope: "session" },
-    // The shared controller uses its MCP-mode AgentTool grant seam for authz and
+    // The shared controller's MCP-mode grant seam supplies canonical authz and
     // tenancy. Command Code itself sees native addTool registrations over a
-    // private FD relay; the bearer never enters the native process environment.
+    // private FD relay. apply() narrows projection to non-mutating tools because
+    // native dont-ask would deny a mutating custom tool before our run().
     tool: { modes: ["mcp"], mutability: "immediate", remote: false, configScope: "session" },
     extension: { modes: ["unsupported"], mutability: "immutable" },
   },
@@ -167,7 +164,6 @@ const toolModDocument = (
     name: tool.name,
     description: tool.description,
     inputSchema: tool.inputSchema,
-    mutating: tool.mutating,
   }));
   return [
     'import { randomUUID } from "node:crypto";',
@@ -231,7 +227,7 @@ const toolModDocument = (
     '  for (const tool of tools) {',
     '    cmd.addTool({',
     '      schema: { name: tool.name, description: tool.description, input_schema: tool.inputSchema },',
-    '      readOnly: tool.mutating !== true,',
+    '      readOnly: true,',
     '      run: ({ input, signal }) => invoke(tool.id, tool.name, input, signal),',
     '    });',
     '  }',
@@ -310,9 +306,7 @@ export function createCommandCodeProvisioner(): HarnessProvisioner {
           writeRevisionFile(promptModFile, promptModDocument(promptFile));
           overlay.promptModFile = promptModFile;
           overlay.promptCapabilityIds = promptItems.map((item) => item.capability.id);
-          for (const item of promptItems) {
-            records.push(record(item, "pending", "Staged for transient Command Code appendSystemPrompt projection"));
-          }
+          for (const item of promptItems) records.push(record(item, "pending", "Staged for transient Command Code appendSystemPrompt projection"));
         } catch (error) {
           const reason = error instanceof Error ? error.message : "Could not stage Command Code prompt projection";
           for (const item of promptItems) records.push(record(item, "failed", reason));
@@ -324,9 +318,7 @@ export function createCommandCodeProvisioner(): HarnessProvisioner {
         if (item.capability.kind !== "skill") return [];
         const name = item.capability.name;
         return skillItems.some((candidate, candidateIndex) =>
-          candidateIndex !== index
-          && candidate.capability.kind === "skill"
-          && candidate.capability.name === name)
+          candidateIndex !== index && candidate.capability.kind === "skill" && candidate.capability.name === name)
           ? [name]
           : [];
       }));
@@ -362,13 +354,21 @@ export function createCommandCodeProvisioner(): HarnessProvisioner {
       if (skillRoot && overlay.skillCapabilityIds.length) overlay.skillRoot = skillRoot;
 
       const toolItems = plan.items.filter((item) => item.capability.kind === "tool");
-      const projectedTools = toolItems.filter((item) => item.capability.kind === "tool" && item.mode === "mcp");
+      const mutatingTools = toolItems.filter((item) =>
+        item.capability.kind === "tool" && item.mode === "mcp" && item.capability.mutating === true);
+      for (const item of mutatingTools) {
+        records.push(record(
+          item,
+          "unsupported",
+          "Command Code dont-ask can deny a mutating custom tool before Polyth authorization; transient native permission delegation is unavailable",
+        ));
+      }
+      const projectedTools = toolItems.filter((item) =>
+        item.capability.kind === "tool" && item.mode === "mcp" && item.capability.mutating === false);
       if (projectedTools.length) {
         const bridgeEnv = secrets.mcpSecrets(AGENT_TOOLS_CAPABILITY_ID);
         if (!bridgeEnv.POLYTH_AGENT_TOOLS_URL || !bridgeEnv.POLYTH_AGENT_TOOLS_TOKEN) {
-          for (const item of projectedTools) {
-            records.push(record(item, "failed", "Scoped Polyth agent-tool bridge is unavailable"));
-          }
+          for (const item of projectedTools) records.push(record(item, "failed", "Scoped Polyth agent-tool bridge is unavailable"));
         } else {
           try {
             const tools = projectedTools.map((item) => item.capability)
@@ -377,18 +377,16 @@ export function createCommandCodeProvisioner(): HarnessProvisioner {
             writeRevisionFile(toolModFile, toolModDocument(tools));
             overlay.toolModFile = toolModFile;
             overlay.toolCapabilityIds = tools.map((tool) => tool.id);
-            overlay.toolNames = Object.fromEntries(tools.map((tool) => [tool.id, tool.name]));
             overlay.toolBridge = {
               url: bridgeEnv.POLYTH_AGENT_TOOLS_URL,
               token: bridgeEnv.POLYTH_AGENT_TOOLS_TOKEN,
+              capabilityIds: [...overlay.toolCapabilityIds],
             };
             for (const item of projectedTools) {
-              records.push(record(item, "pending", "Staged for native Command Code addTool backed by the scoped Polyth tool bridge"));
+              records.push(record(item, "pending", "Staged for native read-only Command Code addTool backed by the scoped Polyth tool bridge"));
             }
           } catch {
-            for (const item of projectedTools) {
-              records.push(record(item, "failed", "Could not stage the transient Command Code tool Mod"));
-            }
+            for (const item of projectedTools) records.push(record(item, "failed", "Could not stage the transient Command Code tool Mod"));
           }
         }
       }
