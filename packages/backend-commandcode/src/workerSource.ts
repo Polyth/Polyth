@@ -236,6 +236,14 @@ const startTurn = async (message) => {
     "--tools-enable", "todo_write,ask_user_question",
     "--mod", bridgePath,
   ];
+  if (typeof message.capabilityModPath === "string" && message.capabilityModPath.trim()) {
+    args.push("--mod", message.capabilityModPath);
+  }
+  if (Array.isArray(message.skillRoots)) {
+    for (const root of message.skillRoots.slice(0, 64)) {
+      if (typeof root === "string" && root.trim()) args.push("--skill", root);
+    }
+  }
   if (message.nativeSessionId) args.push("--resume", message.nativeSessionId);
   if (message.model) args.push("--model", message.model);
   if (message.effort) args.push("--effort", message.effort);

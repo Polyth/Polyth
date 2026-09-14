@@ -16,6 +16,8 @@ import {
   resolveCommandCodeBinary,
   type CommandCodeCompatibility,
 } from "./discovery.ts";
+import { createCommandCodeCapabilitySync } from "./capabilitySync.ts";
+import { createCommandCodeProvisioner } from "./provisioner.ts";
 import { createCommandCodeRpc } from "./rpc.ts";
 import { COMMANDCODE_CAPABILITIES, createCommandCodeRuntime } from "./runtime.ts";
 import { createCommandCodeTitleSync } from "./titleSync.ts";
@@ -202,7 +204,8 @@ export default function registerPackage(host: ServerPackageHost) {
         stableAuthority: true,
       });
       try {
-        const titleSync = createCommandCodeTitleSync(rpc);
+        const capabilitySync = createCommandCodeCapabilitySync(context, rpc);
+        const titleSync = createCommandCodeTitleSync(capabilitySync);
         const runtime = decorateCommandCodeTurnInput(createCommandCodeRuntime({
           context,
           rpc: titleSync.rpc,
@@ -256,6 +259,7 @@ export default function registerPackage(host: ServerPackageHost) {
         throw error;
       }
     },
+    provisioner: createCommandCodeProvisioner(),
     async releaseExecution(context, binding, operationId) {
       if (!context.space || context.remote) return { kind: "rejected", code: "unsupported", message: "Local Space context required" };
       if (process.platform !== "linux") {
