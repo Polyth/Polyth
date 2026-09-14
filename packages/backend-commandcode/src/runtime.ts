@@ -20,7 +20,7 @@ export const COMMANDCODE_CAPABILITIES: RuntimeCapabilities = {
   compaction: false,
   subagents: false,
   mcp: false,
-  steering: false,
+  steering: true,
   resume: true,
   usage: true,
   cost: false,
@@ -39,6 +39,11 @@ export const COMMANDCODE_CAPABILITIES: RuntimeCapabilities = {
   contextOccupancy: "unknown",
 };
 
+type CommandCodeAcceptedMutation = {
+  operationId: string;
+  mutationKind: "turn-submit" | "turn-steer";
+};
+
 interface BindingState {
   version: 1;
   bindingId: string;
@@ -48,6 +53,7 @@ interface BindingState {
   nativeSessionId?: string;
   nativeBoundAt?: number;
   acceptedOperations?: string[];
+  acceptedMutations?: CommandCodeAcceptedMutation[];
   updatedAt: number;
 }
 
@@ -57,6 +63,18 @@ const safeError = (value: unknown): string => String(value ?? "Command Code fail
   .replace(/\s+/g, " ")
   .trim()
   .slice(0, 500);
+
+const validAcceptedMutation = (value: unknown): value is CommandCodeAcceptedMutation => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const entry = value as Partial<CommandCodeAcceptedMutation>;
+  return typeof entry.operationId === "string" && entry.operationId.length > 0
+    && (entry.mutationKind === "turn-submit" || entry.mutationKind === "turn-steer");
+};
+
+const bindingMutations = (state: BindingState): CommandCodeAcceptedMutation[] => {
+  if (state.acceptedMutations?.length) return state.acceptedMutations;
+  return (state.acceptedOperations ?? []).map((operationId) => ({ operationId, mutationKind: "turn-submit" }));
+};
 
 const readBinding = async (file: string): Promise<BindingState | undefined> => {
   try {
@@ -73,6 +91,10 @@ const readBinding = async (file: string): Promise<BindingState | undefined> => {
       || (value.acceptedOperations !== undefined && (
         !Array.isArray(value.acceptedOperations)
         || !value.acceptedOperations.every((operationId) => typeof operationId === "string" && operationId.length > 0)
+      ))
+      || (value.acceptedMutations !== undefined && (
+        !Array.isArray(value.acceptedMutations)
+        || !value.acceptedMutations.every(validAcceptedMutation)
       ))
     ) return undefined;
     return value as BindingState;
@@ -157,10 +179,24 @@ export function createCommandCodeRuntime(options: {
     for (const callback of listeners) callback(context.sessionId, event);
   };
 
-  const rememberAccepted = (operationId: string) => {
-    if (!operationId || accepted.some((entry) => entry.operationId === operationId)) return;
-    accepted.push({ operationId, mutationKind: "turn-submit" });
+  const rememberAccepted = (
+    operationId: string,
+    mutationKind: CommandCodeAcceptedMutation["mutationKind"] = "turn-submit",
+  ) => {
+    if (!operationId || accepted.some((entry) => entry.operationId === operationId && entry.mutationKind === mutationKind)) return;
+    accepted.push({ operationId, mutationKind });
   };
+
+  const rememberBindingAccepted = (state: BindingState) => {
+    for (const entry of bindingMutations(state)) rememberAccepted(entry.operationId, entry.mutationKind);
+  };
+
+  const hasBindingReceipt = (
+    state: BindingState | undefined,
+    operationId: string,
+    mutationKind: CommandCodeAcceptedMutation["mutationKind"],
+  ): boolean => Boolean(state && bindingMutations(state).some((entry) =>
+    entry.operationId === operationId && entry.mutationKind === mutationKind));
 
   const clearActiveTurn = () => {
     activeOperationId = "";
@@ -221,7 +257,7 @@ export function createCommandCodeRuntime(options: {
       bindingId = recovered.bindingId;
       nativeSessionId = recovered.nativeSessionId ?? "";
       createOperationId = operationId;
-      for (const acceptedOperation of recovered.acceptedOperations ?? []) rememberAccepted(acceptedOperation);
+      rememberBindingAccepted(recovered);
       await rpc.receipt(operationId, bindingId);
       return { kind: "confirmed", value: { backendSessionId: bindingId }, receipt: bindingId };
     }
@@ -233,7 +269,7 @@ export function createCommandCodeRuntime(options: {
       bindingId = recovered.bindingId;
       nativeSessionId = recovered.nativeSessionId ?? "";
       createOperationId = operationId;
-      for (const acceptedOperation of recovered.acceptedOperations ?? []) rememberAccepted(acceptedOperation);
+      rememberBindingAccepted(recovered);
       return { kind: "confirmed", value: { backendSessionId: bindingId }, receipt: bindingId };
     }
     return mutation(operationId, async () => {
@@ -245,6 +281,7 @@ export function createCommandCodeRuntime(options: {
         title: canonical.title?.trim() || "Command Code session",
         createdAt: now,
         acceptedOperations: [],
+        acceptedMutations: [],
         updatedAt: now,
       };
       await writeBinding(bindingFile, next);
@@ -271,7 +308,7 @@ export function createCommandCodeRuntime(options: {
       bindingId = state.bindingId;
       nativeSessionId = state.nativeSessionId ?? "";
       createOperationId = state.operationId;
-      for (const acceptedOperation of state.acceptedOperations ?? []) rememberAccepted(acceptedOperation);
+      rememberBindingAccepted(state);
       return bindingId;
     },
     createSessionOperation: createSession,
@@ -318,7 +355,7 @@ export function createCommandCodeRuntime(options: {
         }, 20_000);
         if (!result.nativeSessionId) throw Object.assign(new Error("Command Code admission omitted native session id"), { code: "outcome-unknown" });
         nativeSessionId = result.nativeSessionId;
-        rememberAccepted(operationId);
+        rememberAccepted(operationId, "turn-submit");
         return { kind: "confirmed", value: { admissionId: nativeSessionId } };
       } catch (error) {
         const code = (error as { code?: string }).code;
@@ -332,11 +369,41 @@ export function createCommandCodeRuntime(options: {
         // recording this operation id. Keep the execution fenced until exact
         // terminal evidence or release/reconciliation resolves it.
         const durable = await readBinding(bindingFile).catch(() => undefined);
-        if (durable?.acceptedOperations?.includes(operationId)) rememberAccepted(operationId);
+        if (durable) rememberBindingAccepted(durable);
         return { kind: "unknown", operationId, message: safeError(error instanceof Error ? error.message : error) };
       }
     },
     startTurn: async () => { throw new Error("operation-aware Command Code admission is required"); },
+    async steer(_sessionId, text) {
+      if (!activeOperationId) return false;
+      const operationId = `compat-steer:${randomUUID()}`;
+      const outcome = await runtime.steerOperation!(_sessionId, text, operationId);
+      if (outcome.kind === "confirmed") return true;
+      if (outcome.kind === "rejected") return false;
+      throw Object.assign(new Error(outcome.message), { code: "outcome-unknown", operationId });
+    },
+    async steerOperation(_sessionId, text, operationId) {
+      if (!connected) return { kind: "unknown", operationId, message: "Command Code worker is disconnected" };
+      if (!activeOperationId) {
+        return { kind: "rejected", code: "runtime-rejected", message: "Command Code has no active turn to steer" };
+      }
+      try {
+        await rpc.request({ type: "steer", operationId, text }, 7_500);
+        rememberAccepted(operationId, "turn-steer");
+        return { kind: "confirmed", value: {} };
+      } catch (error) {
+        const code = (error as { code?: string }).code;
+        if (code === "runtime-rejected" || code === "busy" || code === "unsupported") {
+          return { kind: "rejected", code, message: safeError(error instanceof Error ? error.message : error) };
+        }
+        const durable = await readBinding(bindingFile).catch(() => undefined);
+        if (hasBindingReceipt(durable, operationId, "turn-steer")) {
+          rememberAccepted(operationId, "turn-steer");
+          return { kind: "confirmed", value: {} };
+        }
+        return { kind: "unknown", operationId, message: safeError(error instanceof Error ? error.message : error) };
+      }
+    },
     async abort() {
       if (activeOperationId) abortRequested = true;
       await rpc.request({ type: "abort" }, 65_000);
@@ -354,7 +421,7 @@ export function createCommandCodeRuntime(options: {
       if (state) {
         bindingId = state.bindingId;
         nativeSessionId = state.nativeSessionId ?? "";
-        for (const acceptedOperation of state.acceptedOperations ?? []) rememberAccepted(acceptedOperation);
+        rememberBindingAccepted(state);
       }
       return {
         ...endpoint,
