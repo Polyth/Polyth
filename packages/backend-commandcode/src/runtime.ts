@@ -43,7 +43,11 @@ export const COMMANDCODE_CAPABILITIES: RuntimeCapabilities = {
     },
   },
   commands: { discovery: "unsupported", invoke: "unsupported" },
-  contextOccupancy: "unknown",
+  // model_request_end carries provider-reported input usage for every native
+  // inference. Command Code's documented headless model catalog does not expose
+  // a reliable per-model limit, so Polyth reports exact used tokens without
+  // inventing a denominator.
+  contextOccupancy: "native",
 };
 
 export type CommandCodePermissionMode = "auto-accept" | "dont-ask";
@@ -365,6 +369,12 @@ export function createCommandCodeRuntime(options: {
       if (request.attachments?.length) {
         return { kind: "rejected", code: "unsupported", message: "Command Code attachment translation is not enabled yet" };
       }
+      // Command Code documents slash commands as an interactive CLI surface.
+      // Sending `/name` as print-mode prompt text is not command invocation and
+      // could accidentally become model-visible user input, so reject it here.
+      if (request.command) {
+        return { kind: "rejected", code: "unsupported", message: "Command Code headless mode does not expose native slash-command invocation" };
+      }
       let permissionMode: CommandCodePermissionMode = "dont-ask";
       try {
         permissionMode = await options.permissionMode?.() ?? "dont-ask";
@@ -381,7 +391,7 @@ export function createCommandCodeRuntime(options: {
           type: "start_turn",
           operationId,
           cwd: context.cwd,
-          text: request.command ? `/${request.command.name}${request.command.args ? ` ${request.command.args}` : ""}` : request.text,
+          text: request.text,
           bindingPath: bindingFile,
           bridgePath,
           title: state.title,
