@@ -16,7 +16,7 @@ export interface CommandCodeStatus {
 }
 
 export const COMMANDCODE_REQUIRED_FLAGS = [
-  "--print",
+  "-p",
   "--output-format",
   "--skip-onboarding",
   "--no-auto-update",
