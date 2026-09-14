@@ -49,6 +49,17 @@ const errorText = (value: unknown): string | undefined => {
   return stringValue(row?.message, row?.error)?.trim();
 };
 
+const safeDiagnostic = (value: unknown): string | undefined => {
+  const text = errorText(value);
+  if (!text) return undefined;
+  return text
+    .replace(/((?:authorization|cookie|credential|password|secret|token|api[-_ ]?key)\s*[=:]\s*)\S+/gi, "$1[redacted]")
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 2_000);
+};
+
 export interface CommandCodeTranslateState {
   operationId: string;
   model?: ModelRef;
@@ -214,7 +225,10 @@ export function translateCommandCodeRecord(
     case "tool_denied":
     case "tool_hook_blocked": {
       const { callId, tool } = toolIdentity(state, event);
-      const error = stringValue(event.error, event.message, event.hookOutput) ?? (event.type === "tool_denied" ? "Command Code denied the tool call" : "Command Code tool failed");
+      const error = safeDiagnostic(event.error)
+        ?? safeDiagnostic(event.message)
+        ?? safeDiagnostic(event.hookOutput)
+        ?? (event.type === "tool_denied" ? "Command Code denied the tool call" : "Command Code tool failed");
       return [{ type: "tool/error", callId, tool, error }];
     }
     case "session_titled": {
