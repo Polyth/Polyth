@@ -7,13 +7,8 @@ export const PACKAGE_CAPABILITY_NAMES = [
   "composer.send",
   "session.read",
   "session.appendContext",
-  "session.messages.read",
-  "session.create",
-  "session.prompt",
   "context.append",
   "project.readMetadata",
-  "project.files.read",
-  "project.files.write",
   "attachments.create",
   "model.generate",
   "storage.package",
@@ -32,9 +27,8 @@ export function isPackageCapabilityName(value: string): value is PackageCapabili
 
 export interface CapabilityConstraints {
   origins?: string[];
-  paths?: string[];
   methods?: Array<"GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE">;
-  modelClasses?: Array<"utility" | "standard">;
+  modelClasses?: Array<"utility">;
   maxOutputTokens?: number;
 }
 
@@ -77,7 +71,6 @@ export function expandedCapabilities(
     }
 
     const origins = missingStrings(currentConstraints.origins, requested.origins);
-    const paths = missingStrings(currentConstraints.paths, requested.paths);
     const methods = missingStrings(currentConstraints.methods, requested.methods) as CapabilityConstraints["methods"];
     const modelClasses = missingStrings(currentConstraints.modelClasses, requested.modelClasses) as CapabilityConstraints["modelClasses"];
     const tokenExpansion = typeof requested.maxOutputTokens === "number"
@@ -85,13 +78,12 @@ export function expandedCapabilities(
       ? requested.maxOutputTokens
       : undefined;
 
-    if (origins.length || paths.length || methods?.length || modelClasses?.length || tokenExpansion !== undefined) {
+    if (origins.length || methods?.length || modelClasses?.length || tokenExpansion !== undefined) {
       extra.push({
         name: item.name,
         ...(item.required === false ? { required: false } : {}),
         constraints: {
           ...(origins.length ? { origins } : {}),
-          ...(paths.length ? { paths } : {}),
           ...(methods?.length ? { methods } : {}),
           ...(modelClasses?.length ? { modelClasses } : {}),
           ...(tokenExpansion !== undefined ? { maxOutputTokens: tokenExpansion } : {}),
