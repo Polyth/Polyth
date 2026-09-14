@@ -1,4 +1,4 @@
-import type { JsonObject, RouteHandler } from "@polyth/contracts";
+import type { JsonObject, RouteHandler, SessionEvent } from "@polyth/contracts";
 import type {
   ContributionInvocation,
   ContributionInvocationKind,
@@ -75,12 +75,89 @@ function boundedString(value: unknown, max: number): string {
   return typeof value === "string" ? value.slice(0, max) : "";
 }
 
+async function canonicalEvent(host: ServerPackageHost, sessionId: string, rawSeq: unknown): Promise<SessionEvent> {
+  const seq = Number(rawSeq);
+  if (!Number.isSafeInteger(seq) || seq < 1) fail("invalid-input", "canonical event sequence is required");
+  const events = await host.sessions.events(sessionId, seq - 1, { beforeSeq: seq + 1, limit: 2 });
+  const event = events.find((item) => item.seq === seq);
+  if (!event) throw notFound("message or tool target no longer exists");
+  return event;
+}
+
+function canonicalMessage(event: SessionEvent): {
+  id: string;
+  role: "user" | "assistant" | "tool";
+  text?: string;
+  toolName?: string;
+} {
+  const data = event.data as Record<string, unknown>;
+  if (event.type === "user/message") {
+    return {
+      id: event.id,
+      role: "user",
+      ...(typeof data.text === "string" ? { text: data.text.slice(0, 24_000) } : {}),
+    };
+  }
+  if (event.type === "assistant/message") {
+    return {
+      id: event.id,
+      role: "assistant",
+      ...(typeof data.text === "string" ? { text: data.text.slice(0, 24_000) } : {}),
+    };
+  }
+  if (event.type === "tool/result") {
+    return {
+      id: event.id,
+      role: "tool",
+      ...(typeof data.output === "string" ? { text: data.output.slice(0, 24_000) } : {}),
+      ...(typeof data.tool === "string" ? { toolName: data.tool.slice(0, 160) } : {}),
+    };
+  }
+  if (event.type === "tool/error") {
+    return {
+      id: event.id,
+      role: "tool",
+      ...(typeof data.error === "string" ? { text: data.error.slice(0, 24_000) } : {}),
+      ...(typeof data.tool === "string" ? { toolName: data.tool.slice(0, 160) } : {}),
+    };
+  }
+  fail("invalid-input", "selected event is not a message action target");
+}
+
+function canonicalTool(event: SessionEvent): {
+  callId: string;
+  name: string;
+  input?: PackageJsonObject;
+  output?: unknown;
+  error?: string;
+} {
+  if (event.type !== "tool/call" && event.type !== "tool/result" && event.type !== "tool/error") {
+    fail("invalid-input", "selected event is not a tool renderer target");
+  }
+  const data = event.data as Record<string, unknown>;
+  const callId = boundedString(data.callId, 240);
+  const name = boundedString(data.tool, 240);
+  if (!callId || !name) fail("invalid-input", "canonical tool target is incomplete");
+  const input = boundedObject(data.input, 16 * 1024);
+  const output = event.type === "tool/result" && data.output !== undefined
+    ? JSON.parse(JSON.stringify(data.output))
+    : undefined;
+  return {
+    callId,
+    name,
+    ...(input ? { input } : {}),
+    ...(output !== undefined ? { output } : {}),
+    ...(event.type === "tool/error" && typeof data.error === "string"
+      ? { error: data.error.slice(0, 8_000) }
+      : {}),
+  };
+}
+
 async function buildInvocation(input: {
   manifest: PackageManifest;
   kind: ContributionInvocationKind;
   contributionId: string;
   body: Record<string, unknown>;
-  spaceId: string;
   sessionId?: string;
   projectId?: string;
   host: ServerPackageHost;
@@ -99,26 +176,11 @@ async function buildInvocation(input: {
 
   if (input.kind === "message-action") {
     if (!input.sessionId) fail("invalid-input", "message action requires a session");
-    const message = data.message && typeof data.message === "object" && !Array.isArray(data.message)
-      ? data.message as Record<string, unknown>
-      : {};
-    const id = boundedString(message.id, 240);
-    const role = message.role;
-    if (!id || (role !== "user" && role !== "assistant" && role !== "tool")) {
-      fail("invalid-input", "message action target is invalid");
-    }
+    const event = await canonicalEvent(input.host, input.sessionId, data.eventSeq);
+    const message = canonicalMessage(event);
     const roles = Array.isArray(contribution.roles) ? contribution.roles : [];
-    if (roles.length && !roles.includes(role)) fail("invalid-input", "message role is not accepted by this action");
-    return {
-      ...base,
-      kind: "message-action",
-      message: {
-        id,
-        role,
-        ...(typeof message.text === "string" ? { text: message.text.slice(0, 24_000) } : {}),
-        ...(typeof message.toolName === "string" ? { toolName: message.toolName.slice(0, 160) } : {}),
-      },
-    };
+    if (roles.length && !roles.includes(message.role)) fail("invalid-input", "message role is not accepted by this action");
+    return { ...base, kind: "message-action", message };
   }
 
   if (input.kind === "session-action") {
@@ -145,32 +207,18 @@ async function buildInvocation(input: {
   }
 
   if (input.kind === "tool-renderer") {
-    const tool = data.tool && typeof data.tool === "object" && !Array.isArray(data.tool)
-      ? data.tool as Record<string, unknown>
-      : {};
-    const callId = boundedString(tool.callId, 240);
-    const name = boundedString(tool.name, 240);
-    if (!callId || !name) fail("invalid-input", "tool renderer target is invalid");
+    if (!input.sessionId) fail("invalid-input", "tool renderer requires a session");
+    const event = await canonicalEvent(input.host, input.sessionId, data.eventSeq);
+    const tool = canonicalTool(event);
     const matcher = contribution.matcher && typeof contribution.matcher === "object"
       ? contribution.matcher as Record<string, unknown>
       : {};
     const tools = Array.isArray(matcher.tools) ? matcher.tools.filter((item): item is string => typeof item === "string") : [];
     const prefix = typeof matcher.prefix === "string" ? matcher.prefix : "";
-    if ((tools.length || prefix) && !tools.includes(name) && !(prefix && name.startsWith(prefix))) {
+    if ((tools.length || prefix) && !tools.includes(tool.name) && !(prefix && tool.name.startsWith(prefix))) {
       fail("invalid-input", "tool renderer does not match this tool");
     }
-    const output = tool.output === undefined ? undefined : JSON.parse(JSON.stringify(tool.output));
-    return {
-      ...base,
-      kind: "tool-renderer",
-      tool: {
-        callId,
-        name,
-        ...(boundedObject(tool.input, 16 * 1024) ? { input: boundedObject(tool.input, 16 * 1024) } : {}),
-        ...(output !== undefined ? { output } : {}),
-        ...(typeof tool.error === "string" ? { error: tool.error.slice(0, 8_000) } : {}),
-      },
-    };
+    return { ...base, kind: "tool-renderer", tool };
   }
 
   if (input.kind === "attachment-provider" || input.kind === "context-provider") {
@@ -250,14 +298,14 @@ export function managedPluginRoutes(
       if (!storage || !registry.isEnabled(id, storage)) fail("PACKAGE_DISABLED", "package is disabled");
       const manifest = registry.canonicalManifest(id);
       if (manifest.runtime?.kind !== "sandboxed") fail("invalid-input", "host-scoped invocations are for sandboxed packages");
-      const input = await request.body();
-      const kind = typeof input.kind === "string" && invocationKinds.has(input.kind as ContributionInvocationKind)
-        ? input.kind as ContributionInvocationKind
+      const requestBody = await request.body();
+      const kind = typeof requestBody.kind === "string" && invocationKinds.has(requestBody.kind as ContributionInvocationKind)
+        ? requestBody.kind as ContributionInvocationKind
         : fail("invalid-input", "contribution kind is invalid");
-      const contributionId = boundedString(input.contributionId, 64);
+      const contributionId = boundedString(requestBody.contributionId, 64);
       if (!contributionId) fail("invalid-input", "contribution id is required");
-      const sessionId = typeof input.sessionId === "string" ? input.sessionId : undefined;
-      const projectId = typeof input.projectId === "string" ? input.projectId : undefined;
+      const sessionId = typeof requestBody.sessionId === "string" ? requestBody.sessionId : undefined;
+      const projectId = typeof requestBody.projectId === "string" ? requestBody.projectId : undefined;
       if (sessionId) {
         let snap;
         try { snap = await host.sessions.snapshot(sessionId); } catch { throw notFound("session not found"); }
@@ -271,8 +319,7 @@ export function managedPluginRoutes(
         manifest,
         kind,
         contributionId,
-        body: input,
-        spaceId: request.space.spaceId,
+        body: requestBody,
         sessionId,
         projectId,
         host,
