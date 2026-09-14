@@ -22,6 +22,7 @@ export type RemoteUiType =
   | "list"
   | "listItem"
   | "table"
+  | "markdown"
   | "code"
   | "progress"
   | "spinner"
@@ -64,7 +65,7 @@ export interface RemoteUiNode {
 const TYPES = new Set<string>([
   "stack", "inline", "text", "heading", "button", "input", "textarea",
   "select", "checkbox", "radioGroup", "badge", "card", "list", "listItem",
-  "table", "code", "progress", "spinner", "separator", "empty",
+  "table", "markdown", "code", "progress", "spinner", "separator", "empty",
 ]);
 
 const clampString = (value: unknown, fallback = ""): string => {
