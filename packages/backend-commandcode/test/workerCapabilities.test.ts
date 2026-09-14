@@ -21,10 +21,18 @@ test("scoped Polyth tool bearer stays only in worker memory", () => {
   assert.match(COMMANDCODE_WORKER_SOURCE, /type: "polyth-tool-invoked"/);
   assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /spawn\(spec\.command/);
   assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /startToolBridge/);
+  assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /agentToolsMcp\.mjs/);
 
   const commandEnv = /const env = \{([\s\S]*?)\n  \};\n  const child = spawn/.exec(COMMANDCODE_WORKER_SOURCE)?.[1] ?? "";
   assert.ok(commandEnv, "Command Code child environment block must be present");
   assert.doesNotMatch(commandEnv, /POLYTH_AGENT_TOOLS_URL|POLYTH_AGENT_TOOLS_TOKEN/);
+});
+
+test("direct tool relay uses the scoped capability id and canonical loopback route", () => {
+  assert.match(COMMANDCODE_WORKER_SOURCE, /JSON\.stringify\(\{ id: call\.capabilityId, arguments: call\.input \?\? \{\} \}\)/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /method: "POST"/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /AGENT_TOOLS_PATH = "\/internal\/agent-tools"/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /if \(outcome\.observed\) send\(\{ type: "polyth-tool-invoked"/);
 });
 
 test("direct tool relay is bounded, cancellable and fail-closed", () => {
