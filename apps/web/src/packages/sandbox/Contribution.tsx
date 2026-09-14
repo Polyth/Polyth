@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { InstalledPluginDto, UiSlotItem } from "@polyth/contracts";
+import type { InstalledPluginDto, SessionEvent, UiSlotItem } from "@polyth/contracts";
 import type {
   ContributionInvocationKind,
   ContributionResult,
@@ -14,6 +14,17 @@ import { applyContributionResult } from "./extensionResults.ts";
 import { RemoteUiView } from "./RemoteUi.tsx";
 import { acquireSandboxRuntime, type SandboxRuntime } from "./runtime.ts";
 
+interface ToolMatcher {
+  tools?: string[];
+  prefix?: string;
+}
+
+interface ToolPresentation {
+  title?: string;
+  subtitle?: string;
+  output?: "auto" | "text" | "json" | "markdown" | "code" | "table";
+}
+
 interface ContributionDescriptor {
   kind: ContributionInvocationKind;
   id: string;
@@ -21,10 +32,18 @@ interface ContributionDescriptor {
   title: string;
   description?: string;
   dynamic?: boolean;
+  roles?: Array<"user" | "assistant" | "tool">;
+  matcher?: ToolMatcher;
+  presentation?: ToolPresentation;
 }
 
 const asRecord = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+
+const positiveInteger = (value: unknown): number | undefined => {
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number > 0 ? number : undefined;
+};
 
 function descriptorOf(item: UiSlotItem): ContributionDescriptor | null {
   const props = asRecord(item.props);
@@ -39,6 +58,21 @@ function descriptorOf(item: UiSlotItem): ContributionDescriptor | null {
     : typeof props.title === "string" && props.title.trim()
       ? props.title.trim()
       : id;
+  const matcherRaw = asRecord(props.matcher);
+  const tools = Array.isArray(matcherRaw.tools)
+    ? matcherRaw.tools.filter((tool): tool is string => typeof tool === "string" && tool.length > 0)
+    : undefined;
+  const prefix = typeof matcherRaw.prefix === "string" && matcherRaw.prefix ? matcherRaw.prefix : undefined;
+  const presentationRaw = asRecord(props.presentation);
+  const output = presentationRaw.output === "auto" || presentationRaw.output === "text"
+    || presentationRaw.output === "json" || presentationRaw.output === "markdown"
+    || presentationRaw.output === "code" || presentationRaw.output === "table"
+    ? presentationRaw.output
+    : undefined;
+  const roles = Array.isArray(props.roles)
+    ? props.roles.filter((role): role is "user" | "assistant" | "tool" =>
+      role === "user" || role === "assistant" || role === "tool")
+    : undefined;
   return {
     kind: kind as ContributionInvocationKind,
     id,
@@ -46,6 +80,15 @@ function descriptorOf(item: UiSlotItem): ContributionDescriptor | null {
     title: typeof props.title === "string" && props.title.trim() ? props.title.trim() : label,
     ...(typeof props.description === "string" && props.description.trim() ? { description: props.description.trim() } : {}),
     ...(props.dynamic === true ? { dynamic: true } : {}),
+    ...(roles?.length ? { roles } : {}),
+    ...(tools?.length || prefix ? { matcher: { ...(tools?.length ? { tools } : {}), ...(prefix ? { prefix } : {}) } } : {}),
+    ...(Object.keys(presentationRaw).length ? {
+      presentation: {
+        ...(typeof presentationRaw.title === "string" ? { title: presentationRaw.title.slice(0, 240) } : {}),
+        ...(typeof presentationRaw.subtitle === "string" ? { subtitle: presentationRaw.subtitle.slice(0, 500) } : {}),
+        ...(output ? { output } : {}),
+      },
+    } : {}),
   };
 }
 
@@ -56,22 +99,20 @@ function scopeOf(hostProps: Record<string, unknown>): { sessionId?: string; proj
   return { ...(sessionId ? { sessionId } : {}), ...(projectId ? { projectId } : {}) };
 }
 
+function eventOf(hostProps: Record<string, unknown>): SessionEvent | null {
+  const raw = hostProps.event;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const event = raw as Partial<SessionEvent>;
+  return typeof event.type === "string" && positiveInteger(event.seq) ? event as SessionEvent : null;
+}
+
 function invocationData(
   descriptor: ContributionDescriptor,
   hostProps: Record<string, unknown>,
 ): PackageJsonObject | undefined {
   if (descriptor.kind === "message-action") {
-    const id = typeof hostProps.messageId === "string" ? hostProps.messageId : "";
-    const role = hostProps.messageRole === "assistant" || hostProps.messageRole === "tool" ? hostProps.messageRole : "user";
-    if (!id) return undefined;
-    return {
-      message: {
-        id,
-        role,
-        ...(typeof hostProps.messageText === "string" ? { text: hostProps.messageText.slice(0, 24_000) } : {}),
-        ...(typeof hostProps.toolName === "string" ? { toolName: hostProps.toolName.slice(0, 160) } : {}),
-      },
-    };
+    const eventSeq = positiveInteger(hostProps.eventSeq);
+    return eventSeq ? { eventSeq } : undefined;
   }
   if (descriptor.kind === "command") {
     return {
@@ -80,18 +121,8 @@ function invocationData(
     };
   }
   if (descriptor.kind === "tool-renderer") {
-    const tool = asRecord(hostProps.tool);
-    if (!tool.callId || !tool.name) return undefined;
-    const data: PackageJsonObject = {
-      tool: {
-        callId: String(tool.callId).slice(0, 240),
-        name: String(tool.name).slice(0, 240),
-        ...(tool.input && typeof tool.input === "object" ? { input: JSON.parse(JSON.stringify(tool.input)) } : {}),
-        ...(tool.output !== undefined ? { output: JSON.parse(JSON.stringify(tool.output)) } : {}),
-        ...(typeof tool.error === "string" ? { error: tool.error.slice(0, 8_000) } : {}),
-      },
-    };
-    return data;
+    const eventSeq = eventOf(hostProps)?.seq;
+    return eventSeq ? { eventSeq } : undefined;
   }
   if (descriptor.kind === "attachment-provider" || descriptor.kind === "context-provider") {
     return typeof hostProps.query === "string" ? { query: hostProps.query.slice(0, 1_000) } : undefined;
@@ -99,6 +130,102 @@ function invocationData(
   const input = asRecord(hostProps.input);
   if (Object.keys(input).length === 0) return undefined;
   return JSON.parse(JSON.stringify(input)) as PackageJsonObject;
+}
+
+function toolName(event: SessionEvent | null): string {
+  if (!event || (event.type !== "tool/call" && event.type !== "tool/result" && event.type !== "tool/error")) return "";
+  const value = (event.data as Record<string, unknown>).tool;
+  return typeof value === "string" ? value : "";
+}
+
+function toolMatches(descriptor: ContributionDescriptor, hostProps: Record<string, unknown>): boolean {
+  if (descriptor.kind !== "tool-renderer") return true;
+  const name = toolName(eventOf(hostProps));
+  if (!name) return false;
+  const matcher = descriptor.matcher;
+  if (!matcher || (!matcher.tools?.length && !matcher.prefix)) return true;
+  return Boolean(matcher.tools?.includes(name) || (matcher.prefix && name.startsWith(matcher.prefix)));
+}
+
+function messageRoleAllowed(descriptor: ContributionDescriptor, hostProps: Record<string, unknown>): boolean {
+  if (descriptor.kind !== "message-action" || !descriptor.roles?.length) return true;
+  const role = hostProps.messageRole;
+  return (role === "user" || role === "assistant" || role === "tool") && descriptor.roles.includes(role);
+}
+
+function template(value: string | undefined, event: SessionEvent, name: string): string | undefined {
+  if (!value) return undefined;
+  const data = event.data as Record<string, unknown>;
+  const title = typeof data.title === "string" ? data.title : "";
+  const callId = typeof data.callId === "string" ? data.callId : "";
+  return value
+    .replaceAll("{{tool}}", name)
+    .replaceAll("{{title}}", title)
+    .replaceAll("{{callId}}", callId)
+    .slice(0, 500);
+}
+
+function displayValue(value: unknown): string {
+  if (typeof value === "string") return value.slice(0, 4_000);
+  if (value === undefined) return "";
+  try {
+    return JSON.stringify(value, null, 2).slice(0, 4_000);
+  } catch {
+    return String(value).slice(0, 4_000);
+  }
+}
+
+function tableNode(value: unknown): RemoteUiNode | null {
+  let parsed = value;
+  if (typeof value === "string") {
+    try { parsed = JSON.parse(value); } catch { return null; }
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) return null;
+  const objects = parsed.filter((row): row is Record<string, unknown> =>
+    row !== null && typeof row === "object" && !Array.isArray(row)).slice(0, 100);
+  if (!objects.length) return null;
+  const columns = [...new Set(objects.flatMap((row) => Object.keys(row)))].slice(0, 12);
+  if (!columns.length) return null;
+  return {
+    type: "table",
+    columns,
+    rows: objects.map((row) => columns.map((column) => displayValue(row[column]).replace(/\s+/g, " ").slice(0, 500))),
+  };
+}
+
+function declarativeToolTree(
+  descriptor: ContributionDescriptor,
+  hostProps: Record<string, unknown>,
+): RemoteUiNode | null {
+  const event = eventOf(hostProps);
+  const name = toolName(event);
+  if (!event || !name || !toolMatches(descriptor, hostProps)) return null;
+  const data = event.data as Record<string, unknown>;
+  const raw = event.type === "tool/error" ? data.error : event.type === "tool/result" ? data.output : data.input;
+  const requested = descriptor.presentation?.output ?? "auto";
+  const output = requested === "auto"
+    ? (raw !== null && typeof raw === "object" ? "json" : "text")
+    : requested;
+  let content: RemoteUiNode;
+  if (output === "table") {
+    content = tableNode(raw) ?? { type: "code", language: "json", text: displayValue(raw) };
+  } else if (output === "json") {
+    let value = raw;
+    if (typeof raw === "string") {
+      try { value = JSON.parse(raw); } catch { value = raw; }
+    }
+    content = { type: "code", language: "json", text: displayValue(value) };
+  } else if (output === "code") {
+    content = { type: "code", text: displayValue(raw) };
+  } else {
+    content = { type: "text", text: displayValue(raw) };
+  }
+  return {
+    type: "card",
+    title: template(descriptor.presentation?.title, event, name) ?? (typeof data.title === "string" ? data.title : name),
+    ...(template(descriptor.presentation?.subtitle, event, name) ? { subtitle: template(descriptor.presentation?.subtitle, event, name) } : {}),
+    children: [content],
+  };
 }
 
 function useContributionExecution(
@@ -134,6 +261,10 @@ function useContributionExecution(
     setBusy(true);
     const surfaceId = `contribution:${descriptor.kind}:${descriptor.id}:${crypto.randomUUID()}`;
     try {
+      const data = invocationData(descriptor, hostProps);
+      if ((descriptor.kind === "message-action" || descriptor.kind === "tool-renderer") && !data) {
+        throw new Error("This extension contribution is no longer bound to a canonical conversation item.");
+      }
       const runtime = await acquireSandboxRuntime(plugin, surfaceId);
       if (execution !== executionRef.current) {
         runtime.dispose();
@@ -144,7 +275,6 @@ function useContributionExecution(
         if (execution === executionRef.current && next) setTree(next);
       });
       const scope = scopeOf(hostProps);
-      const data = invocationData(descriptor, hostProps);
       const next = await runtime.invokeContribution({
         kind: descriptor.kind,
         contributionId: descriptor.id,
@@ -275,8 +405,12 @@ export function SandboxContributionSlot({
   if (!descriptor) return null;
   const selected = typeof hostProps.selectedContributionId === "string" ? hostProps.selectedContributionId : undefined;
   if (selected && selected !== descriptor.id) return null;
+  if (!messageRoleAllowed(descriptor, hostProps) || !toolMatches(descriptor, hostProps)) return null;
   if (descriptor.kind === "tool-renderer") {
-    if (!descriptor.dynamic) return null;
+    if (!descriptor.dynamic) {
+      const tree = declarativeToolTree(descriptor, hostProps);
+      return tree ? <RemoteUiView tree={tree} onAction={() => undefined} /> : null;
+    }
     return <InlineContribution plugin={plugin} descriptor={descriptor} hostProps={hostProps} />;
   }
   if (
