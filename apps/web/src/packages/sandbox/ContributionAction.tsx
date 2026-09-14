@@ -240,7 +240,6 @@ function ContributionOverlay(props: {
       active = false;
       unsubscribe?.();
       acquired?.dispose();
-      setRuntime(null);
     };
   }, [props.open, props.plugin.id, props.plugin.version, props.plugin.sandbox?.integrity, JSON.stringify(props.request)]);
 
@@ -255,7 +254,7 @@ function ContributionOverlay(props: {
       className="polyth-extension-contribution"
     >
       {error ? (
-        <Notice tone="danger" title="Extension action failed">{error}</Notice>
+        <Notice tone="error" heading="Extension action failed">{error}</Notice>
       ) : tree ? (
         <RemoteUiView tree={tree} onAction={(action) => runtime?.sendAction(action)} />
       ) : (
