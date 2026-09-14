@@ -32,7 +32,7 @@ const native = (name: string): RuntimeCommandDescriptor => ({
   description: "native command",
   harnessId: "test",
   owner: "native",
-  invocation: { kind: "native", name },
+  invocation: "raw-native-input",
 });
 
 test("extension command ids round-trip opaque package and contribution ids", () => {
