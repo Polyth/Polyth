@@ -27,13 +27,18 @@ Polyth uses documented Command Code local CLI / Mod surfaces only:
   question interception, and live steering.
 - an additional transient capability `--mod` using `appendSystemPrompt` for
   Polyth instruction/context projection.
+- a transient Polyth tool `--mod` using documented `cmd.addTool(...)` for scoped
+  package tools. Calls cross private fd3/fd4 to the Polyth-owned worker, which
+  invokes the canonical loopback AgentTool authority; the scoped bearer never
+  enters Command Code environment variables or generated Mod files.
 - Mod `cmd.queueMessage({ content, deliverAs: "steer" })` for a follow-up that
   must join the currently active native run.
 - native `ask_user_question` plus Mod `beforeToolCall` interception for a
   structured Polyth question lifecycle.
-- native `read_file` for already-project-relative file, range, and PDF/document
-  references. Polyth never exposes an absolute host path in the provider-bound
-  attachment instruction.
+- native `read_file` for project file, range, and PDF/document references. The
+  provider-only instruction supplies a project-relative reference and tells the
+  model to resolve it inside the current workspace before calling `read_file`;
+  Polyth never exposes an absolute host path in that instruction.
 - native Command Code project/user MCP, custom agents, skills, and `AGENTS.md`
   through Command Code's normal cwd/config discovery.
 
@@ -56,9 +61,9 @@ The integration must not:
 - append `--trust`, `--yolo`, or an equivalent permission bypass silently.
 - enable automatic Command Code updates inside a Polyth turn.
 - rewrite user/project Command Code settings merely to install hooks,
-  instructions, skills, or MCP servers.
-- claim Polyth-managed transient MCP/tool projection when only ambient native
-  Command Code MCP configuration is being consumed.
+  instructions, skills, tools, or MCP servers.
+- claim Polyth-managed transient **vendor MCP server** projection when only
+  ambient native Command Code MCP configuration is being consumed.
 - adopt an ambient Command Code process as Polyth execution authority.
 - retry an outcome-unknown turn, steering mutation, or question answer
   speculatively.
@@ -83,7 +88,9 @@ artifacts inside Space-owned runtime storage:
 
 - rendered system prompt text;
 - a tiny capability Mod whose only job is `appendSystemPrompt`;
-- native skill directories containing `SKILL.md`.
+- native skill directories containing `SKILL.md`;
+- a generated tool Mod containing only tool ids/names/descriptions/JSON schemas
+  and fd3/fd4 relay code. It contains no AgentTool URL or bearer token.
 
 Those artifacts are Polyth-owned and revision-addressed. They do not mutate
 Command Code user/project settings.
@@ -122,7 +129,10 @@ For every turn, including resumed turns:
    and the exact current operation receipt.
 9. Capability provisioning is settled only after the same native admission
    boundary. Prompt/skill application is marked `unverifiable` where native
-   consumption/discovery has no authoritative headless readback.
+   consumption/discovery has no authoritative headless readback. A Polyth tool
+   starts `unverifiable` at admission and becomes `applied` only after the
+   private relay observes a real AgentTool HTTP response for that exact turn and
+   capability revision.
 
 A resumed turn must never treat the session ID left by a previous turn as proof
 that the new turn was admitted.
@@ -150,7 +160,7 @@ The Space-owned binding contains non-secret execution metadata only:
   `question-reply`, `question-reject`).
 
 It must not contain Command Code auth tokens, provider credentials, native
-transcript copies, taste files, or MCP secrets.
+transcript copies, taste files, AgentTool bearer tokens, or MCP secrets.
 
 Writes are atomic rename-based writes with restrictive file mode. The Mod
 serializes binding updates so question/steering metadata cannot clobber the
@@ -231,20 +241,28 @@ per-tool permission bridge.
 
 ## Permissions and workspace trust
 
-Polyth does not fake a per-tool permission bridge.
+Polyth does not fake a per-tool bridge for Command Code's **native built-in**
+permission prompts.
 
 Command Code native permission checks occur before Mod `beforeToolCall`, and the
 documented Hooks configuration lives in user/project settings. Mutating those
 settings automatically would violate the integration boundary.
 
-Current mapping:
+Current native mapping:
 
 - Polyth effective auto-accept -> Command Code `--permission-mode auto-accept`.
 - otherwise -> `--permission-mode dont-ask`.
 
 `dont-ask` is the fail-closed default. Native allow/deny rules still apply;
-unresolved permission prompts become denied instead of blocking an invisible
-headless UI.
+unresolved native permission prompts become denied instead of blocking an
+invisible headless UI.
+
+Polyth-provided package tools are different: their native `cmd.addTool`
+registration is only presentation. Execution crosses the private relay into the
+canonical AgentTool route, which revalidates the scoped grant, live capability
+revision, active session and Polyth permission policy immediately before the
+package executor runs. Mutating or non-pure package tools therefore do not gain a
+permission bypass from Command Code auto-accept.
 
 Polyth never appends `--trust`. A workspace that Command Code has not trusted is
 a user-action/setup condition. When Command Code rejects before `run_start`, the
@@ -268,12 +286,16 @@ events, but they do not replace the canonical identity model.
 Polyth currently transports project-relative file/range/PDF references by
 adding provider-only instructions to use Command Code's native `read_file` tool.
 The canonical user message is not rewritten in history, and absolute host paths
-are never included in the provider-bound prompt.
+are never included in the provider-bound prompt. The model resolves the safe
+relative reference against the current workspace to satisfy `read_file`'s native
+absolute-in-workspace path requirement.
 
 Supported attachment modalities through this adapter are therefore:
 
-- `file`: native for project-relative references;
-- `pdf`: native for project-relative document references;
+- `file`: **emulated** transport for project-relative references, with native
+  `read_file` performing the actual read;
+- `pdf`: **emulated** transport for project-relative document references, with
+  native `read_file` performing document extraction;
 - `image`, `url`, `audio`: unsupported;
 - arbitrary uploaded files without a canonical project-relative path:
   unsupported / invalid attachment.
@@ -291,7 +313,11 @@ Supported projections:
 
 - instruction -> transient prompt via `appendSystemPrompt` Mod;
 - context -> transient prompt via `appendSystemPrompt` Mod;
-- skill -> native repeatable `--skill` root.
+- skill -> native repeatable `--skill` root;
+- package tool -> native `cmd.addTool` schema backed by the existing scoped
+  Polyth AgentTool authority. The tool Mod speaks only a bounded private fd3/fd4
+  protocol to the owned worker. URL/bearer state remains memory-only in the
+  worker, and execution still passes through canonical Polyth authorization.
 
 Because every Polyth turn starts a fresh Command Code headless process, a new
 revision can be applied at the next native admission without mutating persistent
@@ -299,16 +325,21 @@ Command Code configuration. Provisioned artifacts live under Space-owned
 revision storage, reject symlink escape, and are immutable for a given desired
 revision.
 
+A native `mod_error` for `mod:polyth-tools` fails the exact admitted tool
+revision instead of silently falling back to an existing Command Code tool with
+the same name. Conversely, a real scoped AgentTool HTTP response upgrades only
+the exact invoked capability/revision to `applied` evidence.
+
 Not supported for Polyth-managed projection:
 
-- MCP server configuration;
-- Polyth tool bridge through MCP;
+- vendor MCP server configuration;
 - arbitrary extensions.
 
 Command Code may still consume the user's/project's own native MCP configuration
 from the cwd. That is why runtime `mcp:true` is compatible with provisioning
-`mcp-server: unsupported`: the former describes native consumption, the latter
-would require Polyth to modify or transiently inject vendor configuration.
+`mcp-server: unsupported`: the former describes native consumption, while the
+latter would require a verified transient vendor-MCP projection. Polyth package
+tools do **not** require mutating Command Code MCP configuration.
 
 ## Failure semantics
 
@@ -343,17 +374,18 @@ user abort.
 | Subagents | yes | native lifecycle observability; custom agents are not Polyth primary agents |
 | Steering | yes | native Mod queue steering + durable receipt |
 | MCP consumption | yes | Command Code consumes its own ambient native MCP config |
-| Polyth-managed MCP provisioning | no | no verified transient native projection; vendor config is not rewritten |
+| Polyth-managed MCP provisioning | no | no verified transient vendor-MCP projection; vendor config is not rewritten |
+| Polyth package tools | yes | transient native `addTool`, scoped canonical AgentTool execution/authorization |
 | Token usage | yes | native per-model-request token usage |
 | Native title | yes | latest canonical title projected on every start/resume + native title events |
-| Interactive Polyth permissions | no | native permission engine only |
+| Interactive native permissions | no | Command Code native permission engine only; Polyth package tools keep Polyth authorization |
 | Questions | yes | structured `ask_user_question` bridge + durable reply/reject receipts |
 | Manual compaction | no | automatic compaction may still be observed |
 | Context occupancy | unknown | no verified native current-occupancy contract |
 | Cost | no | no documented stable cost telemetry used |
 | Fork/rewind/checkpoints | no | native tree controls are not canonical Polyth history controls |
-| Project files | yes | project-relative references through native `read_file` |
-| Project PDFs | yes | project-relative documents through native `read_file` |
+| Project files | yes | emulated attachment transport -> native `read_file` |
+| Project PDFs | yes | emulated attachment transport -> native `read_file` document extraction |
 | Images / URLs / audio | no | no verified adapter transport |
 | Native slash commands | no | headless command invocation is not claimed |
 | Account-wide quota | no | no documented credential-free machine surface used |
@@ -375,8 +407,11 @@ Provider-local tests cover:
   pending-question reconciliation;
 - canonical title injection on exact resume;
 - project-relative attachment fencing and custom-agent primary-selection refusal;
-- transient prompt/context + native skill provisioning, revision immutability,
-  and symlink-boundary rejection;
+- transient prompt/context + native skill provisioning, native package-tool
+  staging, revision immutability, and symlink-boundary rejection;
+- tool-bearer confinement (not in generated Mod/Command Code env), bounded FD
+  relay/cancellation, exact-revision invocation evidence, and native Mod
+  collision failure;
 - protocol framing/translation, private-thinking exclusion, task/subagent state,
   title filtering, and documented telemetry boundary;
 - explicit regression coverage that token usage is **not** context occupancy;
