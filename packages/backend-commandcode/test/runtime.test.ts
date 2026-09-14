@@ -7,11 +7,16 @@ import type { RuntimeEvent } from "@polyth/contracts";
 import type { CommandCodeRpc, CommandCodeWorkerEvent } from "../src/rpc.ts";
 import { createCommandCodeRuntime } from "../src/runtime.ts";
 
-const fakeRpc = (options: { unknownAdmission?: boolean } = {}) => {
+const fakeRpc = (options: {
+  unknownAdmission?: boolean;
+  unknownSteerAfterReceipt?: boolean;
+  rejectSteer?: boolean;
+} = {}) => {
   const receipts: Record<string, string> = {};
   const events = new Set<(event: CommandCodeWorkerEvent) => void>();
   const closes = new Set<() => void>();
   let bindingPath = "";
+  const steerCalls: Array<{ operationId: string; text: string }> = [];
   const emit = (event: CommandCodeWorkerEvent) => { for (const callback of events) callback(event); };
   const rpc: CommandCodeRpc = {
     authorityId: "cc-authority",
@@ -29,12 +34,37 @@ const fakeRpc = (options: { unknownAdmission?: boolean } = {}) => {
           nativeSessionId: "cc-native",
           nativeBoundAt: Date.now(),
           acceptedOperations: [...new Set([...(state.acceptedOperations ?? []), operationId])],
+          acceptedMutations: [
+            ...(state.acceptedMutations ?? []),
+            { operationId, mutationKind: "turn-submit" },
+          ],
           updatedAt: Date.now(),
         }));
         if (options.unknownAdmission) {
           throw Object.assign(new Error("worker response was lost"), { code: "outcome-unknown" });
         }
         return { nativeSessionId: "cc-native" } as T;
+      }
+      if (command.type === "steer") {
+        const operationId = String(command.operationId);
+        const text = String(command.text);
+        steerCalls.push({ operationId, text });
+        if (options.rejectSteer) {
+          throw Object.assign(new Error("native run already stopped"), { code: "runtime-rejected" });
+        }
+        const state = JSON.parse(await readFile(bindingPath, "utf8"));
+        await writeFile(bindingPath, JSON.stringify({
+          ...state,
+          acceptedMutations: [
+            ...(state.acceptedMutations ?? []),
+            { operationId, mutationKind: "turn-steer" },
+          ],
+          updatedAt: Date.now(),
+        }));
+        if (options.unknownSteerAfterReceipt) {
+          throw Object.assign(new Error("steering acknowledgement was lost"), { code: "outcome-unknown" });
+        }
+        return {} as T;
       }
       if (command.type === "abort" || command.type === "shutdown") return {} as T;
       throw Object.assign(new Error("unsupported"), { code: "unsupported" });
@@ -44,7 +74,7 @@ const fakeRpc = (options: { unknownAdmission?: boolean } = {}) => {
     onClose(callback) { closes.add(callback); return { dispose: () => closes.delete(callback) }; },
     async close() { for (const callback of closes) callback(); },
   };
-  return { rpc, emit, bindingPath: () => bindingPath };
+  return { rpc, emit, bindingPath: () => bindingPath, steerCalls };
 };
 
 const context = (cwd: string) => ({ spaceId: "space", projectId: "project", sessionId: "canonical", cwd });
@@ -86,6 +116,8 @@ test("Command Code creates a durable adapter binding before the provider session
     const bound = JSON.parse(await readFile(bindingFile, "utf8"));
     assert.equal(bound.nativeSessionId, "cc-native");
     assert.deepEqual(bound.acceptedOperations, ["turn-op"]);
+    assert.ok(bound.acceptedMutations.some((entry: { operationId: string; mutationKind: string }) =>
+      entry.operationId === "turn-op" && entry.mutationKind === "turn-submit"));
 
     fake.emit({ type: "commandcode-record", operationId: "turn-op", record: { type: "event", event: { type: "turn_start" } } });
     fake.emit({ type: "commandcode-record", operationId: "turn-op", record: { type: "event", event: { type: "text_delta", delta: "Hi" } } });
@@ -96,6 +128,61 @@ test("Command Code creates a durable adapter binding before the provider session
     assert.ok(events.some((event) => event.type === "assistant/chunk" && event.text === "Hi"));
     assert.ok(events.some((event) => event.type === "assistant/message" && event.text === "Hi"));
     assert.ok(events.some((event) => event.type === "turn/stopped" && event.reason === "completed"));
+  } finally {
+    await runtime.dispose();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("Command Code native steering is operation-aware and durably reconciled", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "polyth-commandcode-steer-"));
+  const fake = fakeRpc();
+  const { runtime, bindingFile, created } = await createRuntime(dir, fake);
+  try {
+    const capabilities = await runtime.capabilities();
+    assert.equal(capabilities.steering, true);
+    const admitted = await runtime.startTurnOperation!({ sessionId: "canonical", text: "start" }, "turn-steer-base");
+    assert.equal(admitted.kind, "confirmed");
+
+    const steered = await runtime.steerOperation!("canonical", "focus on tests", "steer-op");
+    assert.deepEqual(steered, { kind: "confirmed", value: {} });
+    assert.deepEqual(fake.steerCalls, [{ operationId: "steer-op", text: "focus on tests" }]);
+    const state = JSON.parse(await readFile(bindingFile, "utf8"));
+    assert.ok(state.acceptedMutations.some((entry: { operationId: string; mutationKind: string }) =>
+      entry.operationId === "steer-op" && entry.mutationKind === "turn-steer"));
+
+    const endpoint = await runtime.endpoint!();
+    const snapshot = await runtime.reconcile!({
+      canonicalSessionId: "canonical",
+      backendSessionId: created.value.backendSessionId,
+      authorityId: endpoint.authorityId,
+      generation: endpoint.generation,
+      continuity: endpoint.continuity,
+      location: endpoint.location,
+      reconciliationOrdinal: 1,
+    });
+    assert.ok(snapshot.acceptedOperations.some((entry) =>
+      entry.operationId === "steer-op" && entry.mutationKind === "turn-steer"));
+
+    fake.emit({ type: "turn-exit", operationId: "turn-steer-base", code: 0, signal: null, stderr: "" });
+    const afterStop = await runtime.steerOperation!("canonical", "too late", "steer-late");
+    assert.equal(afterStop.kind, "rejected");
+  } finally {
+    await runtime.dispose();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("lost native steering acknowledgement recovers confirmed from the durable bridge receipt", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "polyth-commandcode-steer-receipt-"));
+  const fake = fakeRpc({ unknownSteerAfterReceipt: true });
+  const { runtime } = await createRuntime(dir, fake);
+  try {
+    const admitted = await runtime.startTurnOperation!({ sessionId: "canonical", text: "start" }, "turn-receipt-base");
+    assert.equal(admitted.kind, "confirmed");
+    const steered = await runtime.steerOperation!("canonical", "keep going", "steer-receipt");
+    assert.deepEqual(steered, { kind: "confirmed", value: {} });
+    assert.deepEqual(fake.steerCalls, [{ operationId: "steer-receipt", text: "keep going" }]);
   } finally {
     await runtime.dispose();
     await rm(dir, { recursive: true, force: true });
