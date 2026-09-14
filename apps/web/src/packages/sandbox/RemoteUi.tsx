@@ -3,7 +3,13 @@ import type { RemoteUiAction, RemoteUiNode } from "@polyth/package-sdk";
 import {
   Badge,
   Button,
+  Checkbox,
   EmptyState,
+  Progress,
+  Select,
+  Separator,
+  Spinner,
+  Textarea,
   TextInput,
 } from "../../components/ui/index.ts";
 import { tr } from "../../i18n/index.ts";
@@ -58,7 +64,33 @@ function RemoteNode({ node, onAction }: { node: RemoteUiNode; onAction: (action:
         </Button>
       );
     case "input":
-      return <HostOwnedInput node={node} onAction={onAction} />;
+      return <HostOwnedTextField node={node} onAction={onAction} multiline={false} />;
+    case "textarea":
+      return <HostOwnedTextField node={node} onAction={onAction} multiline />;
+    case "select":
+      return (
+        <Select
+          label={node.label ?? node.title ?? tr("packages.plugins.input")}
+          ariaLabel={node.label ?? node.title ?? tr("packages.plugins.input")}
+          value={node.value}
+          options={node.options ?? []}
+          placeholder={node.placeholder}
+          disabled={node.disabled}
+          onChange={(value) => emit(value)}
+        />
+      );
+    case "checkbox":
+      return (
+        <Checkbox
+          checked={node.checked ?? false}
+          disabled={node.disabled}
+          label={node.label ?? node.text ?? ""}
+          description={node.subtitle}
+          onChange={(checked) => emit(checked)}
+        />
+      );
+    case "radioGroup":
+      return <HostOwnedRadioGroup node={node} onAction={onAction} />;
     case "badge":
       return (
         <Badge tone={node.tone === "danger" ? "danger" : node.tone === "success" ? "success" : node.tone === "warning" ? "warning" : node.tone === "info" ? "info" : "neutral"}>
@@ -76,8 +108,19 @@ function RemoteNode({ node, onAction }: { node: RemoteUiNode; onAction: (action:
         </article>
       );
     case "list":
-      return <div className="polyth-remote-ui-list">{kids}</div>;
+      return <div className="polyth-remote-ui-list" role="list">{kids}</div>;
     case "listItem":
+      if (!node.action) {
+        return (
+          <div className="polyth-remote-ui-item" role="listitem">
+            <span>
+              <strong>{node.title ?? node.label}</strong>
+              {node.subtitle && <small>{node.subtitle}</small>}
+            </span>
+            {node.trailing && <RemoteNode node={node.trailing} onAction={onAction} />}
+          </div>
+        );
+      }
       return (
         <button
           type="button"
@@ -92,6 +135,22 @@ function RemoteNode({ node, onAction }: { node: RemoteUiNode; onAction: (action:
           {node.trailing && <RemoteNode node={node.trailing} onAction={onAction} />}
         </button>
       );
+    case "table":
+      return <RemoteTable node={node} />;
+    case "code":
+      return (
+        <pre className="polyth-remote-ui-code" aria-label={node.label ?? node.title}>
+          <code data-language={node.language}>{node.text ?? node.body ?? ""}</code>
+        </pre>
+      );
+    case "progress": {
+      const max = node.max && node.max > 0 ? node.max : 1;
+      return <Progress value={(node.progress ?? 0) / max} label={node.label ?? node.title ?? tr("packages.plugins.loading")} />;
+    }
+    case "spinner":
+      return <Spinner label={node.label ?? node.text} />;
+    case "separator":
+      return <Separator />;
     case "empty":
       return (
         <EmptyState
@@ -105,12 +164,14 @@ function RemoteNode({ node, onAction }: { node: RemoteUiNode; onAction: (action:
   }
 }
 
-function HostOwnedInput({
+function HostOwnedTextField({
   node,
   onAction,
+  multiline,
 }: {
   node: RemoteUiNode;
   onAction: (action: RemoteUiAction) => void;
+  multiline: boolean;
 }) {
   const [value, setValue] = useState(node.value ?? "");
   const focused = useRef(false);
@@ -150,6 +211,7 @@ function HostOwnedInput({
     value,
     placeholder: node.placeholder,
     disabled: node.disabled,
+    "aria-label": node.label ?? node.placeholder ?? tr("packages.plugins.input"),
     onChange: (event: { target: { value: string } }) => {
       const next = event.target.value;
       setValue(next);
@@ -160,15 +222,74 @@ function HostOwnedInput({
       focused.current = false;
       emit(value, true);
     },
-    onKeyDown: (event: { key: string }) => {
-      if (event.key === "Enter") emit(value, true);
-    },
   };
+  if (multiline) {
+    return (
+      <Textarea
+        {...shared}
+        minRows={3}
+        maxRows={10}
+        autoGrow
+      />
+    );
+  }
   return (
     <TextInput
       uiSize="sm"
-      aria-label={node.label ?? node.placeholder ?? tr("packages.plugins.input")}
       {...shared}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") emit(value, true);
+      }}
     />
+  );
+}
+
+function HostOwnedRadioGroup({
+  node,
+  onAction,
+}: {
+  node: RemoteUiNode;
+  onAction: (action: RemoteUiAction) => void;
+}) {
+  const name = `remote-ui-${node.id ?? node.action ?? "choice"}`;
+  return (
+    <fieldset className="polyth-remote-ui-radio" disabled={node.disabled}>
+      {node.label && <legend>{node.label}</legend>}
+      {(node.options ?? []).map((option) => (
+        <label key={option.value}>
+          <input
+            type="radio"
+            name={name}
+            value={option.value}
+            checked={node.value === option.value}
+            onChange={() => {
+              if (node.action) onAction({ id: node.action, value: option.value });
+            }}
+          />
+          <span>{option.label}</span>
+          {option.detail && <small>{option.detail}</small>}
+        </label>
+      ))}
+    </fieldset>
+  );
+}
+
+function RemoteTable({ node }: { node: RemoteUiNode }) {
+  if (!node.columns?.length) return null;
+  return (
+    <div className="polyth-remote-ui-table-wrap">
+      <table className="polyth-remote-ui-table">
+        <thead>
+          <tr>{node.columns.map((column) => <th key={column} scope="col">{column}</th>)}</tr>
+        </thead>
+        <tbody>
+          {(node.rows ?? []).map((row, rowIndex) => (
+            <tr key={rowIndex}>
+              {row.map((cell, columnIndex) => <td key={`${rowIndex}-${columnIndex}`}>{cell}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
