@@ -25,6 +25,7 @@ const response = (id, success, data, error, code) => send({
 const safeError = (value) => String(value || "Command Code failed").replace(/[\\r\\n]+/g, " ").slice(0, 500);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const runtimeRejected = (message) => Object.assign(new Error(message), { code: "runtime-rejected" });
+const outcomeUnknown = (message) => Object.assign(new Error(message), { code: "outcome-unknown" });
 
 const readNativeSessionId = async (path) => {
   try {
@@ -78,8 +79,8 @@ const controlDescriptor = async (turn) => {
   return { port };
 };
 
-const deliverQueuedMessage = async (turn, content, deliverAs) => {
-  if (!content.trim() || Buffer.byteLength(content, "utf8") > 48 * 1024) {
+const deliverQueuedMessage = async (turn, content, deliverAs, operationId) => {
+  if (!operationId || !content.trim() || Buffer.byteLength(content, "utf8") > 48 * 1024) {
     throw runtimeRejected("Command Code steering message is invalid");
   }
   const { port } = await controlDescriptor(turn);
@@ -88,44 +89,62 @@ const deliverQueuedMessage = async (turn, content, deliverAs) => {
     const socket = connect({ host: "127.0.0.1", port });
     let bytes = Buffer.alloc(0);
     let settled = false;
+    let sent = false;
+    let timer;
     const finish = (error) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       socket.destroy();
       error ? reject(error) : resolve();
     };
-    const timer = setTimeout(() => finish(runtimeRejected("Command Code native steering bridge timed out")), 5_000);
+    timer = setTimeout(() => finish(sent
+      ? outcomeUnknown("Command Code steering acknowledgement timed out")
+      : runtimeRejected("Command Code native steering bridge timed out")), 5_000);
     timer.unref?.();
     socket.once("connect", () => {
-      socket.write(JSON.stringify({
-        id,
-        token: turn.controlToken,
-        type: "queue",
-        content,
-        deliverAs,
-      }) + "\\n");
+      sent = true;
+      try {
+        socket.write(JSON.stringify({
+          id,
+          token: turn.controlToken,
+          type: "queue",
+          operationId,
+          content,
+          deliverAs,
+        }) + "\\n");
+      } catch {
+        finish(outcomeUnknown("Command Code steering request write outcome is unknown"));
+      }
     });
     socket.on("data", (chunk) => {
       bytes = Buffer.concat([bytes, chunk]);
       if (bytes.length > MAX_CONTROL_LINE) {
-        finish(runtimeRejected("Command Code native steering response is too large"));
+        finish(outcomeUnknown("Command Code native steering response is too large"));
         return;
       }
       const end = bytes.indexOf(10);
       if (end < 0) return;
       let value;
       try { value = JSON.parse(bytes.subarray(0, end).toString("utf8")); }
-      catch { finish(runtimeRejected("Command Code native steering response is malformed")); return; }
-      if (value?.id !== id || value?.ok !== true) {
+      catch { finish(outcomeUnknown("Command Code native steering response is malformed")); return; }
+      if (value?.id !== id) {
+        finish(outcomeUnknown("Command Code native steering response id does not match"));
+        return;
+      }
+      if (value?.ok !== true) {
         finish(runtimeRejected("Command Code rejected the steering message"));
         return;
       }
       finish();
     });
-    socket.once("error", () => finish(runtimeRejected("Command Code native steering bridge is unavailable")));
+    socket.once("error", () => finish(sent
+      ? outcomeUnknown("Command Code steering connection failed after submission")
+      : runtimeRejected("Command Code native steering bridge is unavailable")));
     socket.once("close", () => {
-      if (!settled) finish(runtimeRejected("Command Code native steering bridge closed before acknowledgement"));
+      if (!settled) finish(sent
+        ? outcomeUnknown("Command Code native steering bridge closed before acknowledgement")
+        : runtimeRejected("Command Code native steering bridge is unavailable"));
     });
   });
 };
@@ -201,7 +220,7 @@ const handle = async (message) => {
     if (message.type === "steer") {
       const turn = active;
       if (!turn) throw runtimeRejected("Command Code has no active turn to steer");
-      await deliverQueuedMessage(turn, String(message.text || ""), "steer");
+      await deliverQueuedMessage(turn, String(message.text || ""), "steer", String(message.operationId || ""));
       return response(id, true, {});
     }
     if (message.type === "abort") {
