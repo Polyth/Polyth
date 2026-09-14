@@ -12,7 +12,6 @@ import {
   MAX_IN_FLIGHT,
   PROTOCOL_CHANNEL,
   PROTOCOL_VERSION,
-  REQUEST_TIMEOUT_MS,
   createMethodRegistry,
   REMOTE_UI_MAX_UPDATES_PER_SEC,
   createRateLimiter,
@@ -246,10 +245,11 @@ ${source}
       if (runtime.disposed || !runtime.port) throw new Error("extension runtime is unavailable");
       const invocation = await issueContributionInvocation(plugin, request);
       return new Promise<ContributionResult | undefined>((resolve, reject) => {
+        const interactiveMs = Math.max(1_000, invocation.expiresAt - Date.now());
         const timer = setTimeout(() => {
           runtime.pendingContributions.delete(invocation.invocationId);
           reject(new Error("extension contribution timed out"));
-        }, REQUEST_TIMEOUT_MS);
+        }, interactiveMs);
         runtime.pendingContributions.set(invocation.invocationId, { invocation, resolve, reject, timer });
         runtime.port!.postMessage(eventEnvelope("contribution.invoke", invocation));
       });
