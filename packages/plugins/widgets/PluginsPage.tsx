@@ -192,16 +192,48 @@ function isInstallSource(value: string): boolean {
   return isSupportedInstallSource(value);
 }
 
+interface CapabilityReviewView {
+  required: boolean;
+  origins: string[];
+  methods: string[];
+  modelClasses: string[];
+  maxOutputTokens?: number;
+}
+
+/** The server manifest parser already validates these fields. The root
+ * contracts DTO predates v2 constraints, so the settings UI re-validates the
+ * JSON-compatible extension before presenting it instead of relying on an
+ * unsafe cast or pretending optional authority is required. */
+function capabilityReviewView(capability: PackageCapabilityRequestDto): CapabilityReviewView {
+  const raw = capability as unknown as Record<string, unknown>;
+  const constraints = raw.constraints && typeof raw.constraints === "object" && !Array.isArray(raw.constraints)
+    ? raw.constraints as Record<string, unknown>
+    : {};
+  const strings = (value: unknown): string[] => Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+  const maxOutputTokens = typeof constraints.maxOutputTokens === "number" && Number.isFinite(constraints.maxOutputTokens)
+    ? constraints.maxOutputTokens
+    : undefined;
+  return {
+    required: raw.required !== false,
+    origins: strings(constraints.origins),
+    methods: strings(constraints.methods),
+    modelClasses: strings(constraints.modelClasses),
+    ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+  };
+}
+
 function capabilityLine(capability: PackageCapabilityRequestDto): string {
   const label = tr(`packages.plugins.capability.${capability.name}` as Parameters<typeof tr>[0]);
-  const constraints = capability.constraints;
+  const view = capabilityReviewView(capability);
   const detail = [
-    ...(constraints?.origins?.length ? [`origins: ${constraints.origins.join(", ")}`] : []),
-    ...(constraints?.methods?.length ? [`methods: ${constraints.methods.join(", ")}`] : []),
-    ...(constraints?.modelClasses?.length ? [`models: ${constraints.modelClasses.join(", ")}`] : []),
-    ...(constraints?.maxOutputTokens !== undefined ? [`max output: ${constraints.maxOutputTokens} tokens`] : []),
+    ...(view.origins.length ? [`origins: ${view.origins.join(", ")}`] : []),
+    ...(view.methods.length ? [`methods: ${view.methods.join(", ")}`] : []),
+    ...(view.modelClasses.length ? [`models: ${view.modelClasses.join(", ")}`] : []),
+    ...(view.maxOutputTokens !== undefined ? [`max output: ${view.maxOutputTokens} tokens`] : []),
   ];
-  const requirement = capability.required === false ? "optional" : "required";
+  const requirement = view.required ? "required" : "optional";
   return `${label} · ${requirement}${detail.length ? ` · ${detail.join(" · ")}` : ""}`;
 }
 
@@ -263,9 +295,12 @@ function PermissionList({
     <div className="plugin-permission-block">
       <strong>{title}</strong>
       <ul>
-        {items.map((item) => (
-          <li key={`${item.name}:${item.required !== false}:${JSON.stringify(item.constraints ?? {})}`}>{capabilityLine(item)}</li>
-        ))}
+        {items.map((item) => {
+          const view = capabilityReviewView(item);
+          return (
+            <li key={`${item.name}:${view.required}:${JSON.stringify(item.constraints ?? {})}`}>{capabilityLine(item)}</li>
+          );
+        })}
       </ul>
     </div>
   );
@@ -322,7 +357,7 @@ export function ManagedPluginsSection() {
     if (!review) return;
     try {
       const capabilities = review.capabilities
-        .filter((item) => options.includeOptional || item.required !== false)
+        .filter((item) => options.includeOptional || capabilityReviewView(item).required)
         .map((item) => item.name);
       const connections = review.connections.map((item) => item.id);
       await api.pluginsGrant(plugin.id, capabilities, connections);
@@ -402,7 +437,7 @@ export function ManagedPluginsSection() {
   const hasReview = (plugin: InstalledPluginDto) => Boolean(plugin.permissions.review);
   const needsReviewToEnable = (plugin: InstalledPluginDto) =>
     sandboxed(plugin) && !plugin.enabled && plugin.permissions.requested.some(
-      (item) => item.required !== false && !plugin.permissions.effective.includes(item.name),
+      (item) => capabilityReviewView(item).required && !plugin.permissions.effective.includes(item.name),
     );
   const detailTabs = (plugin: InstalledPluginDto) => {
     const tabs: Array<{ id: string; label: string }> = [
@@ -561,20 +596,20 @@ export function ManagedPluginsSection() {
                       {selectedPlugin.update
                         ? <>
                             <Button size="sm" onClick={() => void approveReview(selectedPlugin)}>{tr("packages.plugins.reviewUpdate")}</Button>
-                            {selectedPlugin.permissions.review.capabilities.some((item) => item.required === false) && (
+                            {selectedPlugin.permissions.review.capabilities.some((item) => !capabilityReviewView(item).required) && (
                               <Button size="sm" variant="quiet" onClick={() => void approveReview(selectedPlugin, { includeOptional: true })}>Approve update + optional access</Button>
                             )}
                           </>
                         : !selectedPlugin.enabled
                           ? <>
                               <Button size="sm" onClick={() => void approveReview(selectedPlugin, { enableAfter: true })}>{tr("packages.plugins.reviewAndEnable")}</Button>
-                              {selectedPlugin.permissions.review.capabilities.some((item) => item.required === false) && (
+                              {selectedPlugin.permissions.review.capabilities.some((item) => !capabilityReviewView(item).required) && (
                                 <Button size="sm" variant="quiet" onClick={() => void approveReview(selectedPlugin, { enableAfter: true, includeOptional: true })}>Enable + optional access</Button>
                               )}
                             </>
                           : <>
                               <Button size="sm" onClick={() => void approveReview(selectedPlugin)}>{tr("packages.plugins.approveAccess")}</Button>
-                              {selectedPlugin.permissions.review.capabilities.some((item) => item.required === false) && (
+                              {selectedPlugin.permissions.review.capabilities.some((item) => !capabilityReviewView(item).required) && (
                                 <Button size="sm" variant="quiet" onClick={() => void approveReview(selectedPlugin, { includeOptional: true })}>Approve optional access too</Button>
                               )}
                             </>}
