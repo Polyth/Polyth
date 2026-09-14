@@ -277,7 +277,7 @@ export async function invokePackageRpc(
         const url = typeof body.url === "string" ? body.url : "";
         const methodName = (typeof body.method === "string" ? body.method : "GET").toUpperCase();
         const allowedMethods = network.constraints?.methods;
-        if (allowedMethods?.length && !allowedMethods.includes(methodName as NonNullable<CapabilityConstraints["methods"]>[number])) {
+        if (allowedMethods !== undefined && !allowedMethods.includes(methodName as NonNullable<CapabilityConstraints["methods"]>[number])) {
           fail("CAPABILITY_DENIED", `network method ${methodName} is not granted`);
         }
         const origins = network.constraints?.origins ?? [];
