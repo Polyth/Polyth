@@ -5,13 +5,15 @@ import {
 } from "../opencodeAuth.ts";
 import { createStandardProviders, type DiscoverableProvider } from "./adapters.ts";
 import { createClaudeProvider } from "./claude.ts";
+import { createCommandCodeProvider } from "./commandcode.ts";
 import { createXaiProvider } from "./xai.ts";
 
 const registry = (opts: QuotaDiscoveryOptions = {}): DiscoverableProvider[] => {
   const runtime = resolveQuotaRuntime(opts);
   return [
     createClaudeProvider(runtime),
-    ...createStandardProviders(runtime),
+    createCommandCodeProvider(runtime),
+    ...createStandardProviders(runtime).filter((provider) => provider.id !== "command-code"),
     createXaiProvider(runtime),
   ];
 };

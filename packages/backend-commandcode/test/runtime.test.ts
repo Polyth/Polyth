@@ -1,0 +1,162 @@
+import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import type { RuntimeEvent } from "@polyth/contracts";
+import type { CommandCodeRpc, CommandCodeWorkerEvent } from "../src/rpc.ts";
+import { createCommandCodeRuntime } from "../src/runtime.ts";
+
+const fakeRpc = (options: { unknownAdmission?: boolean } = {}) => {
+  const receipts: Record<string, string> = {};
+  const events = new Set<(event: CommandCodeWorkerEvent) => void>();
+  const closes = new Set<() => void>();
+  let bindingPath = "";
+  const emit = (event: CommandCodeWorkerEvent) => { for (const callback of events) callback(event); };
+  const rpc: CommandCodeRpc = {
+    authorityId: "cc-authority",
+    generation: 4,
+    receipts,
+    releasedAuthorities: [],
+    async request<T>(command) {
+      if (command.type === "start_turn") {
+        bindingPath = String(command.bindingPath);
+        const operationId = String(command.operationId);
+        emit({ type: "turn-spawned", operationId });
+        const state = JSON.parse(await readFile(bindingPath, "utf8"));
+        await writeFile(bindingPath, JSON.stringify({
+          ...state,
+          nativeSessionId: "cc-native",
+          nativeBoundAt: Date.now(),
+          acceptedOperations: [...new Set([...(state.acceptedOperations ?? []), operationId])],
+          updatedAt: Date.now(),
+        }));
+        if (options.unknownAdmission) {
+          throw Object.assign(new Error("worker response was lost"), { code: "outcome-unknown" });
+        }
+        return { nativeSessionId: "cc-native" } as T;
+      }
+      if (command.type === "abort" || command.type === "shutdown") return {} as T;
+      throw Object.assign(new Error("unsupported"), { code: "unsupported" });
+    },
+    async receipt(operationId, id) { receipts[operationId] = id; },
+    onEvent(callback) { events.add(callback); return { dispose: () => events.delete(callback) }; },
+    onClose(callback) { closes.add(callback); return { dispose: () => closes.delete(callback) }; },
+    async close() { for (const callback of closes) callback(); },
+  };
+  return { rpc, emit, bindingPath: () => bindingPath };
+};
+
+const context = (cwd: string) => ({ spaceId: "space", projectId: "project", sessionId: "canonical", cwd });
+
+async function createRuntime(dir: string, fake: ReturnType<typeof fakeRpc>) {
+  const bindingFile = join(dir, "binding.json");
+  const runtime = createCommandCodeRuntime({
+    context: context(dir),
+    rpc: fake.rpc,
+    bindingFile,
+    bridgePath: join(dir, "bridge.ts"),
+    models: async () => [],
+  });
+  const created = await runtime.createSessionOperation!({ projectId: "project", sessionId: "canonical", title: "Useful title", cwd: dir }, "create-op");
+  assert.equal(created.kind, "confirmed");
+  if (created.kind !== "confirmed") throw new Error("session creation failed");
+  return { runtime, bindingFile, created };
+}
+
+test("Command Code creates a durable adapter binding before the provider session exists", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "polyth-commandcode-"));
+  const fake = fakeRpc();
+  const { runtime, bindingFile, created } = await createRuntime(dir, fake);
+  try {
+    assert.equal(created.receipt, created.value.backendSessionId);
+    assert.equal(fake.rpc.receipts["create-op"], created.value.backendSessionId);
+    const state = JSON.parse(await readFile(bindingFile, "utf8"));
+    assert.equal(state.nativeSessionId, undefined);
+    assert.equal(state.title, "Useful title");
+
+    const events: RuntimeEvent[] = [];
+    runtime.onEvent((_sessionId, event) => events.push(event));
+    const admitted = await runtime.startTurnOperation!({
+      sessionId: "canonical",
+      text: "hello",
+      model: { providerID: "moonshotai", modelID: "moonshotai/Kimi-K3", variant: "high" },
+    }, "turn-op");
+    assert.equal(admitted.kind, "confirmed");
+    const bound = JSON.parse(await readFile(bindingFile, "utf8"));
+    assert.equal(bound.nativeSessionId, "cc-native");
+    assert.deepEqual(bound.acceptedOperations, ["turn-op"]);
+
+    fake.emit({ type: "commandcode-record", operationId: "turn-op", record: { type: "event", event: { type: "turn_start" } } });
+    fake.emit({ type: "commandcode-record", operationId: "turn-op", record: { type: "event", event: { type: "text_delta", delta: "Hi" } } });
+    fake.emit({ type: "commandcode-record", operationId: "turn-op", record: { type: "event", event: { type: "message_end", message: { content: [{ type: "text", text: "Hi" }] } } } });
+    fake.emit({ type: "commandcode-record", operationId: "turn-op", record: { type: "result", subtype: "success", finalText: "Hi" } });
+    fake.emit({ type: "turn-exit", operationId: "turn-op", code: 0, signal: null, stderr: "" });
+    assert.ok(events.some((event) => event.type === "turn/started"));
+    assert.ok(events.some((event) => event.type === "assistant/chunk" && event.text === "Hi"));
+    assert.ok(events.some((event) => event.type === "assistant/message" && event.text === "Hi"));
+    assert.ok(events.some((event) => event.type === "turn/stopped" && event.reason === "completed"));
+  } finally {
+    await runtime.dispose();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("lost admission response stays fenced and reconciles from the durable native receipt", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "polyth-commandcode-unknown-"));
+  const fake = fakeRpc({ unknownAdmission: true });
+  const { runtime, bindingFile, created } = await createRuntime(dir, fake);
+  try {
+    const outcome = await runtime.startTurnOperation!({ sessionId: "canonical", text: "mutate files" }, "turn-unknown");
+    assert.equal(outcome.kind, "unknown");
+    const state = JSON.parse(await readFile(bindingFile, "utf8"));
+    assert.equal(state.nativeSessionId, "cc-native");
+    assert.deepEqual(state.acceptedOperations, ["turn-unknown"]);
+
+    const endpoint = await runtime.endpoint!();
+    const running = await runtime.reconcile!({
+      canonicalSessionId: "canonical",
+      backendSessionId: created.value.backendSessionId,
+      authorityId: endpoint.authorityId,
+      generation: endpoint.generation,
+      continuity: endpoint.continuity,
+      location: endpoint.location,
+      reconciliationOrdinal: 1,
+    });
+    assert.equal(running.state.value, "running");
+    assert.ok(running.acceptedOperations.some((entry) => entry.operationId === "turn-unknown"));
+
+    fake.emit({ type: "turn-exit", operationId: "turn-unknown", code: 0, signal: null, stderr: "" });
+    const idle = await runtime.reconcile!({
+      canonicalSessionId: "canonical",
+      backendSessionId: created.value.backendSessionId,
+      authorityId: endpoint.authorityId,
+      generation: endpoint.generation,
+      continuity: endpoint.continuity,
+      location: endpoint.location,
+      reconciliationOrdinal: 2,
+    });
+    assert.equal(idle.state.value, "idle");
+  } finally {
+    await runtime.dispose();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("worker protocol failure is terminal error, not a user abort", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "polyth-commandcode-protocol-"));
+  const fake = fakeRpc();
+  const { runtime } = await createRuntime(dir, fake);
+  const events: RuntimeEvent[] = [];
+  runtime.onEvent((_sessionId, event) => events.push(event));
+  try {
+    const outcome = await runtime.startTurnOperation!({ sessionId: "canonical", text: "hello" }, "turn-protocol");
+    assert.equal(outcome.kind, "confirmed");
+    fake.emit({ type: "protocol-error", operationId: "turn-protocol", error: "malformed native frame" });
+    fake.emit({ type: "turn-exit", operationId: "turn-protocol", code: null, signal: "SIGTERM", stderr: "" });
+    assert.ok(events.some((event) => event.type === "turn/stopped" && event.reason === "error" && event.error === "malformed native frame"));
+  } finally {
+    await runtime.dispose();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

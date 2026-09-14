@@ -1,0 +1,24 @@
+{
+  "name": "@polyth/backend-commandcode",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@polyth/contracts": "0.1.0",
+    "@polyth/harness-runtime": "0.1.0",
+    "@polyth/plugins": "0.1.0"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "descriptor": {
+      "name": "Command Code harness",
+      "description": "Command Code through its official headless event stream and native mod bridge",
+      "core": false,
+      "enabled": true,
+      "icon": "command",
+      "hasSettings": false
+    }
+  }
+}
