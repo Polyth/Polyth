@@ -19,9 +19,7 @@ export interface SlashCommand {
   model?: string;
   scope: CommandScope;
   id?: string;
-  owner?: "builtin" | "user" | "project" | "extension";
-  /** Host-owned invocation identity. Never contains executable extension code. */
-  extension?: ExtensionCommandBinding;
+  owner?: "builtin" | "user" | "project";
 }
 
 export type CatalogCommand = SlashCommand | RuntimeCommandDescriptor;
@@ -54,6 +52,10 @@ export function parseExtensionCommandId(id: string): ExtensionCommandBinding | n
   }
 }
 
+export const extensionCommandBinding = (
+  command: Pick<SlashCommand, "id">,
+): ExtensionCommandBinding | null => parseExtensionCommandId(command.id ?? "");
+
 export const mergeCommandCatalog = (
   polyth: readonly SlashCommand[],
   native: readonly RuntimeCommandDescriptor[],
@@ -68,8 +70,9 @@ const COMMAND_SCOPE_RANK: Record<CommandScope | "extension" | "native", number> 
 };
 
 /** Typed `/name` precedence when no explicit selection:
- * project > user > builtin > extension > native. Extensions never shadow
- * user/project files or Polyth built-ins merely by being installed. */
+ * project > user > builtin > extension > native. Extension transport stays a
+ * normal SlashCommand DTO; the host-reserved id carries its invocation
+ * identity and precedence class without widening legacy owner vocabularies. */
 export const commandPrecedence = (
   name: string,
   catalog: readonly CatalogCommand[],
@@ -86,7 +89,7 @@ export const commandPrecedence = (
     }
     const polyth = cmd as SlashCommand;
     if (polyth.name.toLowerCase() !== normalized) continue;
-    const rank = polyth.owner === "extension"
+    const rank = extensionCommandBinding(polyth)
       ? COMMAND_SCOPE_RANK.extension
       : COMMAND_SCOPE_RANK[polyth.scope] ?? COMMAND_SCOPE_RANK.builtin;
     if (!best || rank < best.rank) best = { item: polyth, rank };
