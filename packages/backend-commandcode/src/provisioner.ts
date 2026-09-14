@@ -21,6 +21,8 @@ import { renderCapabilityText } from "@polyth/harness-runtime/capability-text";
 import { atomicWriteSync } from "@polyth/plugins";
 
 const AGENT_TOOLS_CAPABILITY_ID = "polyth.agent-tools";
+const MAX_TOOL_CAPABILITIES = 256;
+const MAX_TOOL_CAPABILITY_ID = 512;
 
 export interface CommandCodeToolBridge {
   url: string;
@@ -370,8 +372,19 @@ export function createCommandCodeProvisioner(): HarnessProvisioner {
           "Command Code dont-ask can deny a mutating custom tool before Polyth authorization; transient native permission delegation is unavailable",
         ));
       }
-      const projectedTools = toolItems.filter((item) =>
+      const readOnlyTools = toolItems.filter((item) =>
         item.capability.kind === "tool" && item.mode === "mcp" && item.capability.mutating === false);
+      const validIdTools = readOnlyTools.filter((item) => {
+        if (item.capability.id.length <= MAX_TOOL_CAPABILITY_ID) return true;
+        records.push(record(item, "failed", `Command Code tool capability id exceeds ${MAX_TOOL_CAPABILITY_ID} characters`));
+        return false;
+      });
+      const projectedTools = validIdTools.length <= MAX_TOOL_CAPABILITIES ? validIdTools : [];
+      if (validIdTools.length > MAX_TOOL_CAPABILITIES) {
+        for (const item of validIdTools) {
+          records.push(record(item, "failed", `Command Code tool bridge supports at most ${MAX_TOOL_CAPABILITIES} projected tools`));
+        }
+      }
       if (projectedTools.length) {
         const bridgeEnv = secrets.mcpSecrets(AGENT_TOOLS_CAPABILITY_ID);
         if (!bridgeEnv.POLYTH_AGENT_TOOLS_URL || !bridgeEnv.POLYTH_AGENT_TOOLS_TOKEN) {
