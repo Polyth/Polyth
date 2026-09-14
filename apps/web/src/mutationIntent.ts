@@ -6,6 +6,8 @@ import { clientPersistenceScope } from "./reliabilityContext.ts";
 import { api } from "@polyth/session/web-api";
 import { errorCodeOf, httpStatusOf } from "@polyth/session/web-api";
 import type { AttachmentRef, JsonObject, SendResult } from "@polyth/contracts";
+import { getState, endPendingSend } from "./store.ts";
+import { launchExtensionCommand } from "./packages/sandbox/extensionCommands.tsx";
 
 export type ClientMutationKind = "turn-submit" | "queue-admission" | "permission-reply" | "question-reply" | "abort";
 export interface LocalMutationIntent {
@@ -92,6 +94,50 @@ export function retainLocalMutationIntentAfterError(error: unknown): boolean {
   return status === undefined || status < 400 || status >= 500;
 }
 
+function retireExtensionCommandEcho(sessionId: string, text: string): void {
+  const pending = getState().pendingSends;
+  for (let index = pending.length - 1; index >= 0; index -= 1) {
+    const item = pending[index]!;
+    if (item.sessionId === sessionId && item.text.trim() === text.trim() && item.attachments.length === 0) {
+      endPendingSend(item.id);
+      return;
+    }
+  }
+}
+
+/** Host-only slash commands are intercepted before the durable mutation ledger.
+ * They may open RemoteUI and attach context, but they never create a fake
+ * user/message, prompt-history row, model turn, or recoverable send intent. */
+async function submitExtensionCommand(
+  sessionId: string,
+  body: {
+    text: string;
+    command?: { id: string; args?: string };
+    attachments?: AttachmentRef[];
+  },
+): Promise<SendResult | null> {
+  const command = body.command;
+  if (!command?.id.startsWith("extension:")) return null;
+  if (body.attachments?.length) {
+    throw Object.assign(new Error("Remove attachments before running an extension command."), {
+      code: "invalid-input",
+      status: 409,
+    });
+  }
+  const session = getState().sessions.find((candidate) => candidate.id === sessionId);
+  await launchExtensionCommand({
+    commandId: command.id,
+    query: body.text,
+    ...(command.args ? { arguments: command.args } : {}),
+    sessionId,
+    ...(session?.projectId ? { projectId: session.projectId } : {}),
+  });
+  retireExtensionCommandEcho(sessionId, body.text);
+  // submitDirectPrompt callers only need an admitted/not-admitted distinction;
+  // host commands intentionally have no canonical turn id.
+  return { turnId: `extension:${crypto.randomUUID()}` } as SendResult;
+}
+
 /** One-shot direct prompt admission. It never retries a transport failure:
  * after `fetch` throws, only the server's durable operation can establish
  * whether this UUID applied. The caller may later inspect/reconcile it. */
@@ -105,6 +151,9 @@ export async function submitDirectPrompt(
   },
   scopeOverride?: PersistenceScope,
 ): Promise<SendResult> {
+  const extensionResult = await submitExtensionCommand(sessionId, body);
+  if (extensionResult) return extensionResult;
+
   const capturedScope = intentScope(sessionId, scopeOverride);
   const intent = stageLocalMutationIntent(sessionId, body.delivery === "queue" ? "queue-admission" : "turn-submit", newLogicalOperationId(), capturedScope);
   activeLocalMutationIds.add(intent.operationId);
