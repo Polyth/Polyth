@@ -1,9 +1,18 @@
 import type { InstalledPluginDto } from "@polyth/contracts";
-import type { RemoteUiAction, RemoteUiNode } from "@polyth/package-sdk";
+import type {
+  ContributionCompletion,
+  ContributionInvocation,
+  ContributionInvocationKind,
+  ContributionResult,
+  PackageJsonObject,
+  RemoteUiAction,
+  RemoteUiNode,
+} from "@polyth/package-sdk";
 import {
   MAX_IN_FLIGHT,
   PROTOCOL_CHANNEL,
   PROTOCOL_VERSION,
+  REQUEST_TIMEOUT_MS,
   createMethodRegistry,
   REMOTE_UI_MAX_UPDATES_PER_SEC,
   createRateLimiter,
@@ -28,13 +37,31 @@ import { getState, openWorkspacePane, setRailPlugin } from "../../store.ts";
 import { loadSettings } from "../../settings.ts";
 import { registerComposerActionDeliverer, takePendingComposerAction, clearPackageComposerActions } from "./composerAction.ts";
 
+const CONTRIBUTION_SURFACE = "__contributions__";
+
+export interface HostContributionInvocationRequest {
+  kind: ContributionInvocationKind;
+  contributionId: string;
+  sessionId?: string;
+  projectId?: string;
+  data?: PackageJsonObject;
+}
+
 export interface SandboxRuntime {
   readonly instanceId: string;
   readonly pluginId: string;
   readonly surfaceId: string;
   subscribe(listener: (tree: RemoteUiNode | null) => void): () => void;
   sendAction(action: RemoteUiAction): void;
+  invokeContribution(request: HostContributionInvocationRequest): Promise<ContributionResult | undefined>;
   dispose(): void;
+}
+
+interface PendingContribution {
+  invocation: ContributionInvocation;
+  resolve: (result: ContributionResult | undefined) => void;
+  reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 interface LiveRuntime extends SandboxRuntime {
@@ -49,6 +76,11 @@ interface LiveRuntime extends SandboxRuntime {
   renderLimiter: ReturnType<typeof createRateLimiter>;
   onWindowMessage: (event: MessageEvent) => void;
   unregisterDeliverer?: () => void;
+  ready: Promise<void>;
+  resolveReady: () => void;
+  rejectReady: (error: Error) => void;
+  readySettled: boolean;
+  pendingContributions: Map<string, PendingContribution>;
 }
 
 const live = new Map<string, LiveRuntime>();
@@ -91,8 +123,7 @@ async function loadBundle(plugin: InstalledPluginDto): Promise<string> {
   if (!plugin.sandbox) throw new Error("package has no sandbox bundle");
   const response = await fetch(plugin.sandbox.url);
   if (!response.ok) throw new Error("sandbox bundle is unavailable");
-  const source = await response.text();
-  return source;
+  return response.text();
 }
 
 function handshake(plugin: InstalledPluginDto, surfaceId: string, instanceId: string): HandshakeReady {
@@ -113,6 +144,34 @@ function handshake(plugin: InstalledPluginDto, surfaceId: string, instanceId: st
 /** Effective capabilities sent on the sandbox handshake. Never candidate review. */
 export function sandboxHandshakeCapabilityList(plugin: InstalledPluginDto): string[] {
   return [...capabilitySet(plugin)];
+}
+
+async function issueContributionInvocation(
+  plugin: InstalledPluginDto,
+  request: HostContributionInvocationRequest,
+): Promise<ContributionInvocation> {
+  const response = await fetch(`/api/plugins/${encodeURIComponent(plugin.id)}/invocations`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as { message?: string; error?: string };
+    throw new Error(body.message ?? body.error ?? `extension invocation failed (${response.status})`);
+  }
+  return response.json() as Promise<ContributionInvocation>;
+}
+
+export async function invokeSandboxContribution(
+  plugin: InstalledPluginDto,
+  request: HostContributionInvocationRequest,
+): Promise<ContributionResult | undefined> {
+  const runtime = await acquireSandboxRuntime(plugin, CONTRIBUTION_SURFACE);
+  try {
+    return await runtime.invokeContribution(request);
+  } finally {
+    runtime.dispose();
+  }
 }
 
 export async function acquireSandboxRuntime(
@@ -148,6 +207,13 @@ ${source}
   iframe.style.cssText = "position:absolute;width:0;height:0;border:0;opacity:0;pointer-events:none";
   iframe.srcdoc = html;
 
+  let resolveReady!: () => void;
+  let rejectReady!: (error: Error) => void;
+  const ready = new Promise<void>((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
+
   const runtime: LiveRuntime = {
     instanceId,
     pluginId: plugin.id,
@@ -162,6 +228,11 @@ ${source}
     limiter: createRateLimiter(),
     renderLimiter: createRateLimiter(REMOTE_UI_MAX_UPDATES_PER_SEC, 1000),
     onWindowMessage: () => undefined,
+    ready,
+    resolveReady,
+    rejectReady,
+    readySettled: false,
+    pendingContributions: new Map(),
     subscribe(listener) {
       runtime.listeners.add(listener);
       listener(runtime.tree);
@@ -169,6 +240,19 @@ ${source}
     },
     sendAction(action) {
       runtime.port?.postMessage(eventEnvelope("ui.action", action));
+    },
+    async invokeContribution(request) {
+      await runtime.ready;
+      if (runtime.disposed || !runtime.port) throw new Error("extension runtime is unavailable");
+      const invocation = await issueContributionInvocation(plugin, request);
+      return new Promise<ContributionResult | undefined>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          runtime.pendingContributions.delete(invocation.invocationId);
+          reject(new Error("extension contribution timed out"));
+        }, REQUEST_TIMEOUT_MS);
+        runtime.pendingContributions.set(invocation.invocationId, { invocation, resolve, reject, timer });
+        runtime.port!.postMessage(eventEnvelope("contribution.invoke", invocation));
+      });
     },
     dispose() {
       if (runtime.disposed) return;
@@ -182,6 +266,40 @@ ${source}
     {
       method: "runtime.hello",
       invoke: () => handshake(plugin, surfaceId, instanceId),
+    },
+    {
+      method: "contribution.complete",
+      invoke: async (_ctx, payload) => {
+        const completion = payload as ContributionCompletion | undefined;
+        if (!completion || typeof completion.invocationId !== "string" || typeof completion.lease !== "string") {
+          throw Object.assign(new Error("contribution completion is invalid"), { code: "INVALID_REQUEST" });
+        }
+        const pending = runtime.pendingContributions.get(completion.invocationId);
+        if (!pending || pending.invocation.lease !== completion.lease) {
+          throw Object.assign(new Error("contribution invocation is not active"), { code: "HOST_REJECTED" });
+        }
+        try {
+          const response = await api.pluginsRpc(plugin.id, "contribution.complete", completion, {
+            sessionId: pending.invocation.sessionId,
+            projectId: pending.invocation.projectId,
+          });
+          if (!response.ok) {
+            throw Object.assign(new Error(response.error?.message ?? "contribution completion was rejected"), {
+              code: response.error?.code ?? "HOST_REJECTED",
+            });
+          }
+          clearTimeout(pending.timer);
+          runtime.pendingContributions.delete(completion.invocationId);
+          if (completion.ok) pending.resolve(completion.result);
+          else pending.reject(new Error(completion.error?.message ?? "extension contribution failed"));
+          return { ok: true };
+        } catch (cause) {
+          clearTimeout(pending.timer);
+          runtime.pendingContributions.delete(completion.invocationId);
+          pending.reject(cause instanceof Error ? cause : new Error(String(cause)));
+          throw cause;
+        }
+      },
     },
     {
       method: "ui.render",
@@ -301,10 +419,6 @@ ${source}
     const channel = new MessageChannel();
     runtime.port = channel.port1;
     channel.port1.start();
-    const pendingAction = takePendingComposerAction(plugin.id, surfaceId);
-    if (pendingAction) {
-      channel.port1.postMessage(eventEnvelope("composer.action", { actionId: pendingAction }));
-    }
     channel.port1.onmessage = (portEvent) => {
       void handlePort(runtime, plugin, methods, portEvent.data);
     };
@@ -317,7 +431,7 @@ ${source}
   runtime.onWindowMessage = onWindowMessage;
   window.addEventListener("message", onWindowMessage);
   runtime.unregisterDeliverer = registerComposerActionDeliverer(plugin.id, surfaceId, (actionId) => {
-    if (!runtime.port || runtime.disposed) return false;
+    if (!runtime.port || runtime.disposed || !runtime.readySettled) return false;
     runtime.port.postMessage(eventEnvelope("composer.action", { actionId }));
     return true;
   });
@@ -378,11 +492,21 @@ async function handlePort(
     }
     if (runtime.disposed || !runtime.port) return;
     runtime.port.postMessage(responseOk(envelope.id, result));
+    if (envelope.method === "runtime.hello" && !runtime.readySettled) {
+      runtime.readySettled = true;
+      runtime.resolveReady();
+      const pendingAction = takePendingComposerAction(plugin.id, runtime.surfaceId);
+      if (pendingAction) runtime.port.postMessage(eventEnvelope("composer.action", { actionId: pendingAction }));
+    }
   } catch (cause) {
     const error = cause as Error & { code?: string };
     const code = resolvePackageErrorCode(error.code);
     if (runtime.disposed || !runtime.port) return;
     runtime.port.postMessage(responseError(envelope.id, code, error.message));
+    if (envelope.method === "runtime.hello" && !runtime.readySettled) {
+      runtime.readySettled = true;
+      runtime.rejectReady(error);
+    }
   } finally {
     runtime.inFlight -= 1;
   }
@@ -394,6 +518,15 @@ function tearDown(runtime: LiveRuntime): void {
   runtime.refs = 0;
   runtime.unregisterDeliverer?.();
   runtime.unregisterDeliverer = undefined;
+  if (!runtime.readySettled) {
+    runtime.readySettled = true;
+    runtime.rejectReady(new Error("extension runtime was disposed"));
+  }
+  for (const pending of runtime.pendingContributions.values()) {
+    clearTimeout(pending.timer);
+    pending.reject(new Error("extension runtime was disposed"));
+  }
+  runtime.pendingContributions.clear();
   window.removeEventListener("message", runtime.onWindowMessage);
   runtime.port?.close();
   runtime.port = null;
@@ -401,4 +534,3 @@ function tearDown(runtime: LiveRuntime): void {
   runtime.listeners.clear();
   live.delete(runtimeKey(runtime.pluginId, runtime.surfaceId));
 }
-
