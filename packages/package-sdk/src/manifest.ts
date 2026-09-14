@@ -162,7 +162,6 @@ const MAX_CONTRIBUTIONS_PER_KIND = 32;
 const MAX_LABEL = 120;
 const MAX_DESCRIPTION = 500;
 const MAX_MATCHERS = 32;
-const MAX_PATH_SCOPES = 64;
 
 function requireRecord(value: unknown, message: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) fail("invalid-input", message);
@@ -218,32 +217,24 @@ function parseStringList(value: unknown, message: string, max: number): string[]
 function parseCapabilityConstraints(name: PackageCapabilityName, raw: Record<string, unknown>): CapabilityConstraints | undefined {
   const origins = parseStringList(raw.origins, `${name} origins must be https origins`, 64);
   if (origins?.some((origin) => !isHttpsOrigin(origin))) fail("invalid-input", `${name} origins must be https origins`);
-  const paths = parseStringList(raw.paths, `${name} paths must be relative glob scopes`, MAX_PATH_SCOPES);
-  if (paths?.some((path) => path.startsWith("/") || path.includes("\\") || path.split("/").includes("..") || path.includes("\0"))) {
-    fail("invalid-input", `${name} paths must stay inside the project root`);
-  }
   const methods = parseStringList(raw.methods, `${name} methods are invalid`, 6) as CapabilityConstraints["methods"];
   if (methods?.some((method) => !["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"].includes(method))) {
     fail("invalid-input", `${name} methods are invalid`);
   }
-  const modelClasses = parseStringList(raw.modelClasses, `${name} modelClasses are invalid`, 2) as CapabilityConstraints["modelClasses"];
-  if (modelClasses?.some((value) => value !== "utility" && value !== "standard")) fail("invalid-input", `${name} modelClasses are invalid`);
+  const modelClasses = parseStringList(raw.modelClasses, `${name} modelClasses are invalid`, 1) as CapabilityConstraints["modelClasses"];
+  if (modelClasses?.some((value) => value !== "utility")) fail("invalid-input", `${name} modelClasses are invalid`);
   let maxOutputTokens: number | undefined;
   if (raw.maxOutputTokens !== undefined) {
-    if (!Number.isInteger(raw.maxOutputTokens) || Number(raw.maxOutputTokens) < 1 || Number(raw.maxOutputTokens) > 32_768) {
-      fail("invalid-input", `${name} maxOutputTokens must be between 1 and 32768`);
+    if (!Number.isInteger(raw.maxOutputTokens) || Number(raw.maxOutputTokens) < 1 || Number(raw.maxOutputTokens) > 4_096) {
+      fail("invalid-input", `${name} maxOutputTokens must be between 1 and 4096`);
     }
     maxOutputTokens = Number(raw.maxOutputTokens);
   }
   if (name === "network.fetch" && !origins?.length) fail("invalid-input", "network.fetch requires a non-empty origins allowlist");
-  if ((name === "project.files.read" || name === "project.files.write") && !paths?.length) {
-    fail("invalid-input", `${name} requires a non-empty paths allowlist`);
-  }
   if (name === "model.generate" && !modelClasses?.length) fail("invalid-input", "model.generate requires modelClasses");
-  if (!origins?.length && !paths?.length && !methods?.length && !modelClasses?.length && maxOutputTokens === undefined) return undefined;
+  if (!origins?.length && !methods?.length && !modelClasses?.length && maxOutputTokens === undefined) return undefined;
   return {
     ...(origins?.length ? { origins } : {}),
-    ...(paths?.length ? { paths } : {}),
     ...(methods?.length ? { methods } : {}),
     ...(modelClasses?.length ? { modelClasses } : {}),
     ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
@@ -259,7 +250,7 @@ function parseCapabilities(value: unknown): DeclaredCapability[] {
     if (typeof item === "string") {
       if (!isPackageCapabilityName(item)) fail("invalid-input", `unknown capability "${item}"`);
       if (seen.has(item)) fail("invalid-input", `duplicate capability "${item}"`);
-      if (["network.fetch", "project.files.read", "project.files.write", "model.generate"].includes(item)) {
+      if (["network.fetch", "model.generate"].includes(item)) {
         fail("invalid-input", `${item} requires explicit constraints`);
       }
       seen.add(item);
@@ -343,12 +334,16 @@ function parseRuntime(value: unknown): PackageRuntime | undefined {
 }
 
 function baseContribution(raw: Record<string, unknown>, kind: string): PackageContributionBase {
+  const label = optionalString(raw.label, `${kind} label is invalid`, MAX_LABEL);
+  const description = optionalString(raw.description, `${kind} description is invalid`);
+  const icon = parseIcon(raw.icon, `${kind} icon is invalid`);
+  const order = parseOrder(raw.order);
   return {
     id: requireMatchingString(raw.id, CONTRIB_ID, `${kind} id is invalid`),
-    ...(optionalString(raw.label, `${kind} label is invalid`, MAX_LABEL) ? { label: optionalString(raw.label, `${kind} label is invalid`, MAX_LABEL) } : {}),
-    ...(optionalString(raw.description, `${kind} description is invalid`) ? { description: optionalString(raw.description, `${kind} description is invalid`) } : {}),
-    ...(parseIcon(raw.icon, `${kind} icon is invalid`) ? { icon: parseIcon(raw.icon, `${kind} icon is invalid`) } : {}),
-    ...(parseOrder(raw.order) !== undefined ? { order: parseOrder(raw.order) } : {}),
+    ...(label ? { label } : {}),
+    ...(description ? { description } : {}),
+    ...(icon ? { icon } : {}),
+    ...(order !== undefined ? { order } : {}),
   };
 }
 
@@ -416,9 +411,11 @@ function parseContributes(value: unknown, version: PackageManifestVersion): Pack
       const p = requireRecord(item.presentation, "tool renderer presentation is invalid");
       const output = p.output;
       if (output !== undefined && !["auto", "text", "json", "markdown", "code", "table"].includes(String(output))) fail("invalid-input", "tool renderer output is invalid");
+      const title = optionalString(p.title, "tool renderer title is invalid", MAX_LABEL);
+      const subtitle = optionalString(p.subtitle, "tool renderer subtitle is invalid", MAX_LABEL);
       presentation = {
-        ...(optionalString(p.title, "tool renderer title is invalid", MAX_LABEL) ? { title: optionalString(p.title, "tool renderer title is invalid", MAX_LABEL) } : {}),
-        ...(optionalString(p.subtitle, "tool renderer subtitle is invalid", MAX_LABEL) ? { subtitle: optionalString(p.subtitle, "tool renderer subtitle is invalid", MAX_LABEL) } : {}),
+        ...(title ? { title } : {}),
+        ...(subtitle ? { subtitle } : {}),
         ...(output ? { output: output as PackageToolOutputKind } : {}),
       };
     }
@@ -473,10 +470,11 @@ export function parsePackageManifestDocument(data: unknown): PackageManifest {
   if (typeof raw.version !== "string" || !validSemver(raw.version)) fail("invalid-input", "manifest version must be semver");
   const version = raw.version;
   const displayRaw = requireRecord(raw.display, "display is required");
+  const displayIcon = parseIcon(displayRaw.icon, "display.icon is invalid");
   const display: PackageDisplay = {
     name: requireNonEmptyString(displayRaw.name, "display.name is required", MAX_LABEL),
     description: requireNonEmptyString(displayRaw.description, "display.description is required"),
-    ...(parseIcon(displayRaw.icon, "display.icon is invalid") ? { icon: parseIcon(displayRaw.icon, "display.icon is invalid") } : {}),
+    ...(displayIcon ? { icon: displayIcon } : {}),
   };
   let engines: PackageManifest["engines"];
   if (raw.engines !== undefined) {
