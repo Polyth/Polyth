@@ -7,6 +7,7 @@ import type {
   ModelDescriptor,
   MutationOutcome,
   RuntimeCapabilities,
+  RuntimeErrorCode,
   RuntimeEvent,
   RuntimeSnapshot,
 } from "@polyth/contracts";
@@ -147,6 +148,31 @@ const exitMessage = (code: number | null, stderr: unknown, result: Record<string
   }
 };
 
+export const commandCodeExitFailure = (
+  code: number | null,
+  stderr: unknown,
+  result: Record<string, unknown> | undefined,
+): { error: string; code: RuntimeErrorCode; retry?: { scope: "rate" | "quota"; provider: string; retryable?: boolean } } => {
+  const error = exitMessage(code, stderr, result);
+  switch (code) {
+    case 3:
+      return { error, code: "auth-expired" };
+    case 5:
+      return { error, code: "rate-limited", retry: { scope: "rate", provider: "commandcode" } };
+    case 10:
+      return {
+        error,
+        code: "quota-exhausted",
+        retry: { scope: "quota", provider: "commandcode", retryable: false },
+      };
+    default:
+      // A Command Code 5xx is a generic native server error, not necessarily a
+      // capacity signal. Network, permission, max-turn and no-response exits are
+      // likewise not safe to reinterpret as provider quota/capacity failures.
+      return { error, code: "unknown" };
+  }
+};
+
 export function createCommandCodeRuntime(options: {
   context: HarnessContext;
   rpc: CommandCodeRpc;
@@ -243,13 +269,13 @@ export function createCommandCodeRuntime(options: {
     clearActiveTurn();
     order++;
     if (failure) {
-      emit({ type: "turn/stopped", turnId, reason: "error", error: failure });
-    } else if (wasAborted || code === 130 || message.signal === "SIGINT") {
+      emit({ type: "turn/stopped", turnId, reason: "error", error: failure, code: "unknown" });
+    } else if (wasAborted || code === 130 || message.signal === "SIGINT" || message.signal === "SIGTERM") {
       emit({ type: "turn/stopped", turnId, reason: "aborted" });
     } else if (code === 0 && (!subtype || subtype === "success")) {
       emit({ type: "turn/stopped", turnId, reason: "completed" });
     } else {
-      emit({ type: "turn/stopped", turnId, reason: "error", error: exitMessage(code, message.stderr, result) });
+      emit({ type: "turn/stopped", turnId, reason: "error", ...commandCodeExitFailure(code, message.stderr, result) });
     }
   };
 
