@@ -79,16 +79,16 @@ test("Command Code compatibility checks the documented surfaces Polyth actually 
 
 test("Command Code compatibility reports exact missing flags without semantic-version guessing", () => {
   const help = COMMANDCODE_REQUIRED_FLAGS
-    .filter((flag) => flag !== "--mod" && flag !== "--tools-enable")
+    .filter((flag) => flag !== "--mod" && flag !== "--tools-enable" && flag !== "--skill")
     .map((flag) => `\u001b[2m${flag}\u001b[0m`)
     .join("\n");
   const compatibility = inspectCommandCodeHelp(help);
   assert.deepEqual(compatibility, {
     compatible: false,
-    missing: ["--tools-enable", "--mod"],
+    missing: ["--tools-enable", "--mod", "--skill"],
   });
   assert.match(commandCodeCompatibilityMessage(compatibility), /Upgrade Command Code/);
-  assert.match(commandCodeCompatibilityMessage(compatibility), /--tools-enable, --mod/);
+  assert.match(commandCodeCompatibilityMessage(compatibility), /--tools-enable, --mod, --skill/);
 });
 
 test("compatibility does not confuse prefix lookalikes with required flags", () => {
