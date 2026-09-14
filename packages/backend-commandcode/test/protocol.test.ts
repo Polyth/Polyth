@@ -23,7 +23,7 @@ test("Command Code maps streaming, title, tools, usage, compaction and subagents
   }, state), [{ type: "tool/started", callId: "t1", tool: "read_file", input: { file_path: "a.ts" } }]);
   assert.deepEqual(translateCommandCodeRecord({
     type: "event",
-    event: { type: "model_request_end", usage: { input_tokens: 10, output_tokens: 5, reasoning_tokens: 2 } },
+    event: { type: "model_request_end", usage: { input_tokens: 10, output_tokens: 5, reasoning_tokens: 2 }, cost: 123 },
   }, state), [{
     type: "usage/recorded",
     model: { providerID: "moonshotai", modelID: "moonshotai/Kimi-K3" },
@@ -96,6 +96,42 @@ test("Command Code private thinking never enters canonical events", () => {
   }, state);
   assert.deepEqual(events, [{ type: "assistant/message", partId: "turn-private:answer", text: "Public answer" }]);
   assert.equal("reasoning" in (events[0] ?? {}), false);
+});
+
+test("run terminal events become control evidence without entering canonical history", () => {
+  const state = createCommandCodeTranslateState("turn-control");
+  assert.deepEqual(translateCommandCodeRecord({
+    type: "event",
+    event: { type: "run_error", error: { message: "provider failed" } },
+  }, state), []);
+  assert.equal(state.runError, "provider failed");
+  assert.equal(state.interrupted, false);
+
+  assert.deepEqual(translateCommandCodeRecord({ type: "event", event: { type: "interrupted" } }, state), []);
+  assert.equal(state.interrupted, true);
+});
+
+test("undocumented native cost fields never become canonical cost telemetry", () => {
+  const state = createCommandCodeTranslateState("turn-cost", { providerID: "command-code", modelID: "model" });
+  const usage = translateCommandCodeRecord({
+    type: "event",
+    event: { type: "model_request_end", usage: { input: 2, output: 1, cost: 42 }, cost: 42 },
+  }, state);
+  assert.deepEqual(usage, [{
+    type: "usage/recorded",
+    model: { providerID: "command-code", modelID: "model" },
+    tokens: { input: 2, output: 1 },
+  }]);
+  assert.equal("cost" in (usage[0] ?? {}), false);
+
+  const fallback = translateCommandCodeRecord({
+    type: "result",
+    subtype: "success",
+    finalText: "Done",
+    usage: { input: 2, output: 1, cost: 42 },
+    cost: 42,
+  }, createCommandCodeTranslateState("turn-cost-result"));
+  assert.equal("cost" in (fallback[0] ?? {}), false);
 });
 
 test("Command Code final result is a fallback answer only when streaming produced no text", () => {
