@@ -2646,6 +2646,7 @@ export async function boot(opts: BootOptions = {}) {
       svc<{ close(): void }>("knowledge")?.close();
       await svc<{ closeAll(): Promise<void> }>("browser")?.closeAll().catch(() => {});
       await svc<{ closeAll(): Promise<void> }>("terminal")?.closeAll().catch(() => {});
+      sessions.dispose();
       const physicalErrors = await openCodeRuntimes.disposeAll({ force: true }).then(
         () => undefined,
         (error: unknown) => error,

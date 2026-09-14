@@ -139,7 +139,7 @@ export function installShell(): void {
     id: "cmd.starterPicker",
     label: tr("mobile.starterpicker.addAStarter"),
     group: tr("shell.session"),
-    keywords: ["starter", "prompt", "quick action"],
+    keywords: ["shortcut", "prompt", "quick action"],
     when: () => {
       const state = getState();
       return state.activeProjectId !== null && state.activeView === "session";

@@ -462,6 +462,21 @@ test("unwire clears transient commands, context, and title fallback state", asyn
   assert.equal(features.contextWindow, undefined);
 });
 
+test("session teardown cancels pending title fallback before the store closes", async () => {
+  const f = fixture();
+  const { id } = await f.sessions.create({ projectId: "p" });
+  const timeoutCount = () => process.getActiveResourcesInfo().filter((kind) => kind === "Timeout").length;
+  const before = timeoutCount();
+
+  await f.sessions.send(id, { text: "Implement truthful fallback title", autoTitle: true });
+  await flush();
+  assert.ok(timeoutCount() > before, "auto-title fallback should arm a timer");
+
+  f.sessions.dispose();
+  assert.equal(timeoutCount(), before, "session teardown must cancel the fallback timer");
+  await f.store.close();
+});
+
 test("send rejects a native command id removed from the refreshed catalog", async () => {
   const f = fixture();
   const created = await f.sessions.create({ projectId: "p" });

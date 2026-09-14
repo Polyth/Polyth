@@ -646,16 +646,14 @@ test("the fresh-session screen is three zones with a sticky interaction dock", a
   const composer = await read("../src/components/Composer.tsx");
   assert.ok(surface.includes('className="stage stage-new"'));
   assert.ok(surface.includes('className="hero-body customize-zone"'), "empty state and starters scroll together");
+  assert.ok(surface.includes("workspace.builtinsurfaces.whatAreWeWorkingOnIn"), "the fresh hero keeps its translated title");
+  assert.ok(surface.includes('<span className="polyth-gradient">{name}</span>.'), "the project name remains in the title");
+  assert.doesNotMatch(surface, /className="hero-sub"/, "the fresh hero has no subtitle");
   assert.ok(surface.includes('className="hero-dock"'), "context bar and composer share the sticky zone");
   assert.ok(composer.includes("<SessionContextBar {...contextBar} />"), "project and branch live inside every composer");
   assert.ok(!surface.includes("SessionContextBar"), "the fresh surface cannot fork composer controls");
   assert.ok(!surface.includes("new-session-targets"), "the full-width mid-page selectors are gone");
   assert.ok(!surface.includes("hero-mark"), "the decorative mark no longer competes with the headline");
-  assert.doesNotMatch(
-    surface,
-    /workspace\.builtinsurfaces\.(whatAreWeWorkingOnIn|startATaskOrContinueWhereYou)/,
-    "the fresh-session hero keeps the prompt area free of the removed copy",
-  );
   assert.ok(surface.includes("visibleStarters"), "chips come from the starter system");
   assert.ok(surface.includes('slot="session.empty.widgets"'), "idle content is a widget slot, not hero hardcode");
   assert.ok(surface.includes('registerSlot("session.empty.widgets", "builtin.hero-starters"'), "starters register as a widget");

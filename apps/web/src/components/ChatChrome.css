@@ -180,11 +180,9 @@
 
 @media (max-width: 600px) {
   .chat-response-footer {
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas:
-      "identity info"
-      ". actions";
-    row-gap: var(--space-1);
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas: "identity info actions";
+    column-gap: var(--space-1);
     margin-block-start: var(--space-3);
   }
 
@@ -214,7 +212,7 @@
   }
 
   .chat-response-footer {
-    row-gap: var(--space-3);
+    row-gap: 0;
   }
 
   .ui-tooltip.chat-action-tooltip {

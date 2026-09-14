@@ -1342,8 +1342,7 @@ test("initial replay: delayed events present as loading, never the fresh-session
     new MutationObserver(() => {
       const hero = document.querySelector(".hero");
       if (!hero) return;
-      const freshSession = hero.querySelector(".composer-hero") !== null
-        || /^What are we working on/.test(hero.querySelector("h2")?.textContent ?? "");
+      const freshSession = hero.closest(".stage-new") !== null;
       if (freshSession) (window as unknown as { __sawHero: boolean }).__sawHero = true;
     }).observe(document, { childList: true, subtree: true });
   });

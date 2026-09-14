@@ -227,6 +227,8 @@ export interface RuntimeEpochTransitionOptions {
 }
 
 export interface RuntimeEpochSessionService extends RestartSafetySessionService {
+  /** Cancel service-owned delayed work before the persistence owner shuts down. */
+  dispose(): void;
   /** Authorize one package-contributed MCP tool against the canonical session
    * that currently owns execution. Project-scoped native runtimes do not put a
    * session id in their MCP configuration, so the owner is resolved from live
@@ -6029,6 +6031,12 @@ export function createSessionService(deps: {
   };
 
   const service: RuntimeEpochSessionService = {
+    dispose() {
+      for (const timer of titleFallbackTimers.values()) clearTimeout(timer);
+      titleFallbackTimers.clear();
+      autoTitleRequested.clear();
+      autoTitlePrompt.clear();
+    },
     async resolveAgentToolSession(input) {
       return (await activeAgentToolSession(input))?.id;
     },

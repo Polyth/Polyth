@@ -146,7 +146,7 @@ export const BUILTIN_AREAS: readonly WidgetArea[] = [
   {
     id: "session.empty.widgets",
     label: "Idle screen",
-    description: "The fresh-session screen — starters, recents, prompts.",
+    description: "The fresh-session screen — shortcuts, recents, prompts.",
     group: "session",
     orientation: "column",
     sizeHint: "flexible",
