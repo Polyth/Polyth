@@ -13,6 +13,7 @@ import {
   TextInput,
 } from "../../components/ui/index.ts";
 import { tr } from "../../i18n/index.ts";
+import { renderMarkdown } from "../../markdown.tsx";
 
 export function RemoteUiView(props: {
   tree: RemoteUiNode | null;
@@ -137,6 +138,12 @@ function RemoteNode({ node, onAction }: { node: RemoteUiNode; onAction: (action:
       );
     case "table":
       return <RemoteTable node={node} />;
+    case "markdown":
+      return (
+        <div className="polyth-remote-ui-markdown" dir="auto">
+          {renderMarkdown(node.body ?? node.text ?? "", node.id ?? "remote-ui-markdown")}
+        </div>
+      );
     case "code":
       return (
         <pre className="polyth-remote-ui-code" aria-label={node.label ?? node.title}>
