@@ -39,6 +39,7 @@ export default function MessageQuickActions({
 }) {
   const prefs = useUiSettings();
   const sessionId = useStore((state) => state.activeSessionId);
+  const projectId = useStore((state) => state.activeProjectId);
   const copyFormat = prefs.messageCopyFormat;
   const doCopy = () => {
     void copyText(copyFormat === "markdown" ? copyMarkdown(message) : copyJson(message)).then((ok) => {
@@ -82,7 +83,15 @@ export default function MessageQuickActions({
           )}
           <SlotHost
             slot="session.message.actions"
-            context={{ sessionId, kind: message.kind, messageId: message.id, eventSeq: message.eventSeq }}
+            context={{
+              sessionId,
+              projectId,
+              kind: message.kind,
+              messageId: message.id,
+              messageRole: "user",
+              messageText: message.text,
+              eventSeq: message.eventSeq,
+            }}
           />
         </div>
       )}
