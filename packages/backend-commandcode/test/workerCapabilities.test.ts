@@ -10,24 +10,28 @@ test("Command Code worker projects only documented transient capability CLI surf
   assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /\.mcp\.json|command-code\s+mcp\s+add|--yolo|--trust/);
 });
 
-test("scoped Polyth tool credentials stay in the worker-owned MCP child, not Command Code env", () => {
-  assert.match(COMMANDCODE_WORKER_SOURCE, /const startToolBridge = async/);
-  assert.match(COMMANDCODE_WORKER_SOURCE, /env: \{ \.\.\.process\.env, \.\.\.spec\.env \}/);
+test("scoped Polyth tool bearer stays only in worker memory", () => {
+  assert.match(COMMANDCODE_WORKER_SOURCE, /const invokeScopedTool =/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /authorization: "Bearer " \+ turn\.toolBridge\.token/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /target\.pathname !== AGENT_TOOLS_PATH/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /const loopback = host === "127\.0\.0\.1"/);
   assert.match(COMMANDCODE_WORKER_SOURCE, /stdio: \["pipe", "pipe", "pipe", "pipe", "pipe"\]/);
   assert.match(COMMANDCODE_WORKER_SOURCE, /turn\.child\.stdio\?\.\[3\]/);
   assert.match(COMMANDCODE_WORKER_SOURCE, /turn\.child\.stdio\?\.\[4\]/);
   assert.match(COMMANDCODE_WORKER_SOURCE, /type: "polyth-tool-invoked"/);
+  assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /spawn\(spec\.command/);
+  assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /startToolBridge/);
 
-  const commandEnv = /const env = \{([\s\S]*?)\n  \};\n  let child;/.exec(COMMANDCODE_WORKER_SOURCE)?.[1] ?? "";
+  const commandEnv = /const env = \{([\s\S]*?)\n  \};\n  const child = spawn/.exec(COMMANDCODE_WORKER_SOURCE)?.[1] ?? "";
   assert.ok(commandEnv, "Command Code child environment block must be present");
   assert.doesNotMatch(commandEnv, /POLYTH_AGENT_TOOLS_URL|POLYTH_AGENT_TOOLS_TOKEN/);
 });
 
-test("tool relay handles asynchronous pipe and bridge process failures", () => {
+test("direct tool relay is bounded, cancellable and fail-closed", () => {
+  assert.match(COMMANDCODE_WORKER_SOURCE, /pending\.get\(requestId\)\?\.abort\(\)/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /if \(bytes\.length > MAX_LINE\)/);
   assert.match(COMMANDCODE_WORKER_SOURCE, /requests\.on\("error", failRelay\)/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /requests\.on\("close", failRelay\)/);
   assert.match(COMMANDCODE_WORKER_SOURCE, /responses\.on\("error", failRelay\)/);
-  assert.match(COMMANDCODE_WORKER_SOURCE, /bridge\.stdin\.on\("error", failRelay\)/);
-  assert.match(COMMANDCODE_WORKER_SOURCE, /bridge\.stdout\.on\("error", failRelay\)/);
-  assert.match(COMMANDCODE_WORKER_SOURCE, /bridge\.on\("error", failRelay\)/);
-  assert.match(COMMANDCODE_WORKER_SOURCE, /if \(bridge\.exitCode === null && !bridge\.signalCode\) bridge\.kill\("SIGTERM"\)/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /for \(const controller of pending\.values\(\)\) controller\.abort\(\)/);
 });
