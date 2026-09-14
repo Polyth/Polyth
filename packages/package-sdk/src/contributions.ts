@@ -3,6 +3,11 @@ import { parseRemoteUiTree, type RemoteUiNode } from "./remoteUi.ts";
 export const CONTRIBUTION_RESULT_MAX_BYTES = 128 * 1024;
 export const CONTRIBUTION_MAX_RESOURCES = 20;
 export const CONTRIBUTION_MAX_CONTEXT_ITEMS = 12;
+const PACKAGE_JSON_MAX_DEPTH = 12;
+const PACKAGE_JSON_MAX_ITEMS = 512;
+const PACKAGE_JSON_MAX_ARRAY_ITEMS = 128;
+const PACKAGE_JSON_MAX_KEY = 160;
+const DANGEROUS_JSON_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 
 export type PackageJsonPrimitive = string | number | boolean | null;
 export type PackageJsonValue = PackageJsonPrimitive | PackageJsonValue[] | { [key: string]: PackageJsonValue };
@@ -179,16 +184,45 @@ function jsonBytes(value: unknown): number {
   }
 }
 
+function sanitizeJsonValue(
+  value: unknown,
+  label: string,
+  depth: number,
+  state: { items: number },
+): PackageJsonValue {
+  if (depth > PACKAGE_JSON_MAX_DEPTH) invalid(`${label} exceeds depth limit`);
+  state.items += 1;
+  if (state.items > PACKAGE_JSON_MAX_ITEMS) invalid(`${label} has too many items`);
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) invalid(`${label} contains a non-finite number`);
+    return value;
+  }
+  if (Array.isArray(value)) {
+    if (value.length > PACKAGE_JSON_MAX_ARRAY_ITEMS) invalid(`${label} array is too large`);
+    return value.map((item) => sanitizeJsonValue(item, label, depth + 1, state));
+  }
+  if (!value || typeof value !== "object") invalid(`${label} contains an unsupported value`);
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) invalid(`${label} contains a non-plain object`);
+  const out: PackageJsonObject = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (!key || key.length > PACKAGE_JSON_MAX_KEY || DANGEROUS_JSON_KEYS.has(key)) {
+      invalid(`${label} contains an unsafe key`);
+    }
+    out[key] = sanitizeJsonValue(item, label, depth + 1, state);
+  }
+  return out;
+}
+
 function boundedJsonObject(value: unknown, label: string, maxBytes = 16 * 1024): PackageJsonObject | undefined {
   if (value === undefined) return undefined;
   if (!value || typeof value !== "object" || Array.isArray(value) || jsonBytes(value) > maxBytes) {
     invalid(`${label} is invalid or too large`);
   }
-  try {
-    return JSON.parse(JSON.stringify(value)) as PackageJsonObject;
-  } catch {
-    return invalid(`${label} is not serializable`);
-  }
+  const parsed = sanitizeJsonValue(value, label, 0, { items: 0 });
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) invalid(`${label} must be an object`);
+  return parsed as PackageJsonObject;
 }
 
 function parseExternalResource(value: unknown): ExternalResource {
@@ -310,6 +344,7 @@ export function parseContributionCompletion(value: unknown): ContributionComplet
   }
   if (!ok && !error) invalid("failed extension contribution must include an error");
   if (!ok && result) invalid("failed extension contribution must not include a result");
+  if (ok && error) invalid("successful extension contribution must not include an error");
   return {
     invocationId,
     lease,
