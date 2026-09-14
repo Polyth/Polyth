@@ -93,6 +93,7 @@ test("native Polyth tool evidence is bound to the exact admitted capability id a
     const toolBridge = {
       url: "http://127.0.0.1:9999/internal/agent-tools",
       token: "opaque-token",
+      capabilityIds: ["example.tool"],
     };
     commandCodeOverlays.set(ctx, {
       promptCapabilityIds: [],
@@ -161,6 +162,7 @@ test("native Polyth tool Mod errors fail the exact admitted tool revision", asyn
       toolBridge: {
         url: "http://127.0.0.1:9999/internal/agent-tools",
         token: "opaque-token",
+        capabilityIds: ["example.tool"],
       },
     }, "commandcode", { desiredRevision: "collision-rev", capabilityIds: ["example.tool"] });
     const fake = fakeRpc(async <T>() => ({ nativeSessionId: "native" }) as T);
@@ -208,6 +210,7 @@ test("early native Polyth tool Mod failure is not downgraded by later admission 
       toolBridge: {
         url: "http://127.0.0.1:9999/internal/agent-tools",
         token: "opaque-token",
+        capabilityIds: ["example.tool"],
       },
     }, "commandcode", { desiredRevision: "early-collision-rev", capabilityIds: ["example.tool"] });
 
