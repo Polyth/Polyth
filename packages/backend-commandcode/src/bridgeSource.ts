@@ -9,6 +9,7 @@ const controlPath = process.env.POLYTH_COMMANDCODE_CONTROL_FILE?.trim();
 const controlToken = process.env.POLYTH_COMMANDCODE_CONTROL_TOKEN?.trim();
 const MAX_CONTROL_BYTES = 64 * 1024;
 let nativeSessionId = "";
+let bindingSerial = Promise.resolve();
 
 const failClosed = (message) => {
   try { process.stderr.write("[polyth-commandcode] " + message + "\\n"); } catch {}
@@ -22,39 +23,74 @@ const atomicJson = async (path, value) => {
   await rename(temp, path);
 };
 
-const persistBinding = async () => {
-  if (!bindingPath) failClosed("binding file is missing");
-  if (!requestedOperationId) failClosed("turn operation id is missing");
-  if (!nativeSessionId) failClosed("Command Code did not expose a native session id before turn admission");
-  let previous = {};
-  try {
-    const text = await readFile(bindingPath, "utf8");
-    previous = JSON.parse(text);
-  } catch {
-    failClosed("binding file could not be read");
-  }
-  if (!previous || typeof previous !== "object" || Array.isArray(previous)) failClosed("binding state is malformed");
-  if (typeof previous.nativeSessionId === "string" && previous.nativeSessionId && previous.nativeSessionId !== nativeSessionId) {
-    failClosed("native session identity changed unexpectedly");
-  }
-  const priorAccepted = Array.isArray(previous.acceptedOperations)
+const updateBinding = (update) => {
+  const work = bindingSerial.then(async () => {
+    if (!bindingPath) throw new Error("binding file is missing");
+    let previous;
+    try { previous = JSON.parse(await readFile(bindingPath, "utf8")); }
+    catch { throw new Error("binding file could not be read"); }
+    if (!previous || typeof previous !== "object" || Array.isArray(previous)) throw new Error("binding state is malformed");
+    if (typeof previous.nativeSessionId === "string" && previous.nativeSessionId && nativeSessionId && previous.nativeSessionId !== nativeSessionId) {
+      throw new Error("native session identity changed unexpectedly");
+    }
+    const next = update(previous);
+    await atomicJson(bindingPath, next);
+    return next;
+  });
+  bindingSerial = work.then(() => undefined, () => undefined);
+  return work;
+};
+
+const normalizedMutations = (previous) => {
+  const explicit = Array.isArray(previous.acceptedMutations)
+    ? previous.acceptedMutations.filter((entry) => entry && typeof entry.operationId === "string"
+      && (entry.mutationKind === "turn-submit" || entry.mutationKind === "turn-steer"))
+    : [];
+  if (explicit.length) return explicit;
+  const legacy = Array.isArray(previous.acceptedOperations)
     ? previous.acceptedOperations.filter((value) => typeof value === "string" && value)
     : [];
-  const acceptedOperations = priorAccepted.includes(requestedOperationId)
-    ? priorAccepted
-    : [...priorAccepted, requestedOperationId].slice(-64);
-  const next = {
-    ...previous,
-    nativeSessionId,
-    nativeBoundAt: Date.now(),
-    acceptedOperations,
-    updatedAt: Date.now(),
-  };
+  return legacy.map((operationId) => ({ operationId, mutationKind: "turn-submit" }));
+};
+
+const persistTurnBinding = async () => {
+  if (!requestedOperationId) failClosed("turn operation id is missing");
+  if (!nativeSessionId) failClosed("Command Code did not expose a native session id before turn admission");
   try {
-    await atomicJson(bindingPath, next);
-  } catch {
-    failClosed("native session receipt could not be persisted");
+    await updateBinding((previous) => {
+      const priorAccepted = Array.isArray(previous.acceptedOperations)
+        ? previous.acceptedOperations.filter((value) => typeof value === "string" && value)
+        : [];
+      const acceptedOperations = priorAccepted.includes(requestedOperationId)
+        ? priorAccepted
+        : [...priorAccepted, requestedOperationId].slice(-64);
+      const mutations = normalizedMutations(previous);
+      const acceptedMutations = mutations.some((entry) => entry.operationId === requestedOperationId && entry.mutationKind === "turn-submit")
+        ? mutations
+        : [...mutations, { operationId: requestedOperationId, mutationKind: "turn-submit" }].slice(-128);
+      return {
+        ...previous,
+        nativeSessionId,
+        nativeBoundAt: Date.now(),
+        acceptedOperations,
+        acceptedMutations,
+        updatedAt: Date.now(),
+      };
+    });
+  } catch (error) {
+    failClosed(error instanceof Error ? error.message : "native session receipt could not be persisted");
   }
+};
+
+const persistSteerReceipt = async (operationId) => {
+  if (!operationId) throw new Error("steering operation id is missing");
+  await updateBinding((previous) => {
+    const mutations = normalizedMutations(previous);
+    const acceptedMutations = mutations.some((entry) => entry.operationId === operationId && entry.mutationKind === "turn-steer")
+      ? mutations
+      : [...mutations, { operationId, mutationKind: "turn-steer" }].slice(-128);
+    return { ...previous, acceptedMutations, updatedAt: Date.now() };
+  });
 };
 
 const startControlServer = async (cmd) => {
@@ -68,7 +104,7 @@ const startControlServer = async (cmd) => {
       socket.end(JSON.stringify({ id, ok, ...(error ? { error } : {}) }) + "\\n");
     };
     socket.setTimeout(5000, () => socket.destroy());
-    socket.on("data", (chunk) => {
+    socket.on("data", async (chunk) => {
       if (handled) return;
       bytes = Buffer.concat([bytes, chunk]);
       if (bytes.length > MAX_CONTROL_BYTES) {
@@ -83,20 +119,29 @@ const startControlServer = async (cmd) => {
       try { request = JSON.parse(bytes.subarray(0, end).toString("utf8")); }
       catch { reply("", false, "invalid control request"); return; }
       const id = typeof request?.id === "string" ? request.id : "";
+      const operationId = typeof request?.operationId === "string" ? request.operationId : "";
       if (!id || request?.token !== controlToken) { reply(id, false, "unauthorized control request"); return; }
-      if (request?.type !== "queue") { reply(id, false, "unsupported control request"); return; }
+      if (request?.type !== "queue" || request?.deliverAs !== "steer") { reply(id, false, "unsupported control request"); return; }
       const content = typeof request?.content === "string" ? request.content : "";
-      const deliverAs = request?.deliverAs === "follow-up" ? "follow-up" : request?.deliverAs === "steer" ? "steer" : undefined;
-      if (!content.trim() || Buffer.byteLength(content, "utf8") > 48 * 1024 || !deliverAs) {
-        reply(id, false, "invalid queued message");
+      if (!operationId || !content.trim() || Buffer.byteLength(content, "utf8") > 48 * 1024) {
+        reply(id, false, "invalid steering message");
         return;
       }
       try {
-        cmd.queueMessage({ content, deliverAs });
-        reply(id, true);
+        cmd.queueMessage({ content, deliverAs: "steer" });
       } catch {
-        reply(id, false, "Command Code rejected the queued message");
+        reply(id, false, "Command Code rejected the steering message");
+        return;
       }
+      try {
+        await persistSteerReceipt(operationId);
+      } catch {
+        // The native queue may already contain the message. Without a durable
+        // receipt Polyth must not retry it, so terminate the run fail-closed.
+        failClosed("native steering receipt could not be persisted");
+        return;
+      }
+      reply(id, true);
     });
     socket.on("error", () => undefined);
   });
@@ -130,7 +175,7 @@ export default async function polythCommandCodeBridge(cmd) {
   });
   cmd.hooks({
     onTurnStart: async ({ state }) => {
-      await persistBinding();
+      await persistTurnBinding();
       return state;
     },
   });
