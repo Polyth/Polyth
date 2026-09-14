@@ -187,6 +187,58 @@ test("native Polyth tool Mod errors fail the exact admitted tool revision", asyn
   }
 });
 
+test("early native Polyth tool Mod failure is not downgraded by later admission settlement", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "polyth-commandcode-tool-early-error-"));
+  const receipts: Array<{ outcome: string; capabilityIds: string[] }> = [];
+  const disposeReceipt = setCapabilityReceiptSink((receipt) => receipts.push({
+    outcome: receipt.outcome,
+    capabilityIds: receipt.capabilityIds,
+  }));
+  try {
+    const ctx = context(dir);
+    commandCodeOverlays.set(ctx, {
+      promptCapabilityIds: [],
+      skillCapabilityIds: [],
+      toolModFile: join(dir, "polyth-tools.ts"),
+      toolCapabilityIds: ["example.tool"],
+      toolNames: { "example.tool": "read_file" },
+      toolBridge: {
+        url: "http://127.0.0.1:9999/internal/agent-tools",
+        token: "opaque-token",
+      },
+    }, "commandcode", { desiredRevision: "early-collision-rev", capabilityIds: ["example.tool"] });
+
+    let fake!: ReturnType<typeof fakeRpc>;
+    fake = fakeRpc(async <T>() => {
+      fake.emit({
+        type: "commandcode-record",
+        operationId: "early-collision-turn",
+        record: {
+          type: "event",
+          event: { type: "mod_error", modId: "mod:polyth-tools", hook: "addTool", error: "tool already exists" },
+        },
+      });
+      return { nativeSessionId: "native" } as T;
+    });
+    const sync = createCommandCodeCapabilitySync(ctx, fake.rpc);
+    const subscription = sync.onEvent(() => undefined);
+
+    await sync.request({
+      type: "start_turn",
+      operationId: "early-collision-turn",
+      bindingPath: join(dir, "binding.json"),
+    });
+    assert.deepEqual(receipts, [{ outcome: "failed", capabilityIds: ["example.tool"] }]);
+    fake.emit({ type: "polyth-tool-invoked", operationId: "early-collision-turn", toolName: "read_file" });
+    assert.equal(receipts.length, 1);
+    subscription.dispose();
+  } finally {
+    disposeReceipt();
+    commandCodeOverlays.release(context(dir));
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("proven pre-admission rejection releases launch capture but keeps projection retryable", async () => {
   const dir = await mkdtemp(join(tmpdir(), "polyth-commandcode-cap-reject-"));
   const binding = join(dir, "binding.json");
