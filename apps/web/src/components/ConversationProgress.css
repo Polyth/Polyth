@@ -1,8 +1,7 @@
 /* Conversation progress placement -----------------------------------------
  * Task state is not assistant prose. Keep the canonical plan out of message
- * flow on every shell; mobile exposes it in the session overview, while
- * desktop keeps the full plan in the session overview popover and durable task
- * transitions remain inside Activity details.
+ * flow on every shell; mobile and desktop expose it through their session
+ * overview/title surfaces instead.
  */
 .timeline .task-list {
   display: none;
@@ -21,6 +20,36 @@
   color: var(--text-dim);
   font-size: var(--font-body);
   line-height: 1.5;
+}
+
+.desktop-session-status-copy.task-progress {
+  font-weight: 650;
+}
+
+.desktop-session-status-copy.task-progress.completed,
+.desktop-session-status-copy.task-progress.all-complete {
+  color: var(--green-on-wash);
+}
+
+.desktop-session-status-copy.task-progress.failed {
+  color: var(--red);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .desktop-session-status-copy.task-progress {
+    animation: desktop-task-title-swap var(--motion-normal) var(--motion-ease) both;
+  }
+
+  @keyframes desktop-task-title-swap {
+    from {
+      opacity: .5;
+      transform: translate3d(0, 3px, 0);
+    }
+    to {
+      opacity: 1;
+      transform: translate3d(0, 0, 0);
+    }
+  }
 }
 
 .desktop-session-task-list {
