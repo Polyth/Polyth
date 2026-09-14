@@ -1,0 +1,44 @@
+.personal-coach-settings {
+  display: grid;
+  gap: var(--space-5);
+  min-inline-size: 0;
+}
+
+.personal-coach-settings .coach-settings-head {
+  display: grid;
+  gap: var(--space-1);
+  padding-block-end: var(--space-2);
+}
+
+.personal-coach-settings .coach-settings-head h2 {
+  font-size: 1.15rem;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.personal-coach-settings .coach-settings-head p {
+  max-inline-size: 68ch;
+  color: var(--text-dim);
+  line-height: 1.55;
+}
+
+/* Dialog is host-owned and may render through a portal, outside the settings
+ * subtree. These deliberately package-prefixed classes remain narrow enough to
+ * style the confirmation without depending on the host's private DOM. */
+.coach-settings-confirm {
+  display: grid;
+  gap: var(--space-4);
+  max-inline-size: 56ch;
+}
+
+.coach-settings-confirm p {
+  color: var(--text-dim);
+  line-height: 1.55;
+}
+
+.coach-settings-confirm-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}

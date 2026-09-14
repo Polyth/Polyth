@@ -12,11 +12,14 @@ proposals, chat rendering, or Schedule.
   opens a new conversation. Goals entered manually survive reloads too.
 - Preferences: explicit confirmation; reminders off by default, unavailable
   Schedule does not block manual setup. Scheduled conversations may use tokens.
-- Complete: Today / Goals / Plan. An empty day never restarts onboarding.
+- Complete: Overview / Today / Goals / Review. An empty day never restarts
+  onboarding. Review stays quiet when there is nothing to act on.
 - Goals: add/edit/pause/resume/complete, add next steps, discuss in chat.
-- Plan: pending Apply/Ignore proposals, stored plans and revision summaries.
-- Today: one main focus without duplicating its row, Done/Later/More, optional
-  check-in update, routines, evidence-backed insight and weekly review.
+- Review: pending Apply/Discuss/Not now proposals, weekly review and
+  evidence-backed insights when they actually need attention.
+- Today: one main focus without duplicating its row, Done/Move/More, optional
+  check-in update and due routines. Future work remains under Next up rather
+  than masquerading as today's focus.
 
 ## Boundaries
 
@@ -44,10 +47,10 @@ The existing package-workspace anchor stays hidden. Source inspection found
 that the shared workspace gate uses the active project ID, not membership in
 its visible project list; no speculative shared-shell rewrite was introduced.
 Web navigation now uses `host.conversation.openSession`. New components receive
-host UI primitives; existing approved imports are not expanded. Existing five
-widgets and settings/insight/proposal registrations remain available.
+host UI primitives; package UI should stay behind the stable web-sdk boundary.
+Existing widgets and settings/insight/proposal registrations remain available.
 One shared Coach client remains the data authority. No polling, extra chat
-engine, model extraction pass, schema migration, or new dependency was added.
+engine, model extraction pass, or new dependency is required by this flow.
 
 ## Verification evidence
 
@@ -76,7 +79,7 @@ and web build, then verify at narrow and wide panel widths:
 1. Fresh Space -> exact first objective -> working canonical conversation.
 2. Double click, failed provider, reload, Continue: no duplicate first turn.
 3. Manual goal + next step -> explicit no-reminders confirmation -> Today.
-4. Proposal Apply/Ignore -> updated goals/plan; reopen and refresh remain correct.
+4. Proposal Apply/Discuss/Not now -> updated durable state; reopen and refresh remain correct.
 5. Last step completed -> quiet Today, not first-run; paused goals remain reachable.
 6. Reset, package disable/re-enable, navigation away during a slow launch.
 7. Keyboard-only setup/tabs, long labels, narrow panels and light/dark themes.

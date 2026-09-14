@@ -1,6 +1,7 @@
 import "./styles.css";
 import "./proposal.css";
 import "./workspace.css";
+import "./settings.css";
 import { createElement } from "react";
 import type { SessionEvent } from "@polyth/contracts";
 import { defineWebPackage } from "@polyth/web-sdk";
@@ -65,7 +66,7 @@ export default defineWebPackage((host) => () => {
     host.surfaces.register({
       id: "personal-coach",
       title: t("coach.workspace.title"),
-      description: "Decide, commit, act and review — durable across chats.",
+      description: t("coach.workspace.description"),
       capabilityId: "personal-coach",
       order: 34,
       component: () => createElement(CoachWorkspace, coachProps),
@@ -103,7 +104,7 @@ export default defineWebPackage((host) => () => {
     host.capabilities.register({
       id: "personal-coach",
       label: t("coach.workspace.title"),
-      plainDescription: "Keep durable goals and commitments, then focus on what matters now.",
+      plainDescription: t("coach.capability.description"),
       keywords: ["coach", "goals", "commitments", "today", "focus", "routines", "review"],
       standardTier: "primary",
       standardRank: 16,
@@ -113,33 +114,39 @@ export default defineWebPackage((host) => () => {
     host.settings.registerPage({
       id: "personal-coach",
       packageId: "personal-coach",
-      label: "Personal Coach",
+      label: t("coach.settings.title"),
       group: "Workspace",
       icon: "◎",
       order: 34,
-      component: () => createElement(CoachSettingsPage, { api, client, friendlyError: errorText }),
+      component: () => createElement(CoachSettingsPage, {
+        api,
+        client,
+        ui,
+        Dialog: host.ui.Dialog,
+        friendlyError: errorText,
+      }),
       settingsItems: [
         {
           id: "personal-coach-behavior",
           pageId: "personal-coach",
-          label: "Coach behavior",
-          description: "Style, initiative, assumption challenges, and time zone.",
+          label: t("coach.settings.item.behavior"),
+          description: t("coach.settings.item.behaviorDescription"),
           keywords: ["coach", "tone", "initiative", "timezone", "style"],
           focusTarget: "personal-coach-behavior",
         },
         {
           id: "personal-coach-reminders",
           pageId: "personal-coach",
-          label: "Scheduled check-ins",
-          description: "Daily check-in and weekly review schedule.",
+          label: t("coach.settings.item.reminders"),
+          description: t("coach.settings.item.remindersDescription"),
           keywords: ["coach", "reminder", "daily", "weekly", "review", "schedule"],
           focusTarget: "personal-coach-reminders",
         },
         {
           id: "personal-coach-data",
           pageId: "personal-coach",
-          label: "Reset Coach state",
-          description: "Clear durable goals, routines, check-ins, reflections, and insights.",
+          label: t("coach.settings.item.data"),
+          description: t("coach.settings.item.dataDescription"),
           keywords: ["coach", "reset", "data", "forget", "clear", "privacy"],
           focusTarget: "personal-coach-data",
         },
@@ -147,12 +154,12 @@ export default defineWebPackage((host) => () => {
     }),
     host.widgets.registerPlugin({
       id: "personal-coach",
-      name: "Personal Coach",
+      name: t("coach.settings.title"),
       widgets: [
         {
           id: "personal-coach.today",
           title: t("coach.tab.today"),
-          description: "Today's focus and one deterministic action.",
+          description: t("coach.widget.todayDescription"),
           defaultSlot: "workspace.main",
           supportedSlots: ["workspace.main", "workspace.right", "workspace.bottom"],
           defaultSize: { w: 6, h: 3 },
@@ -165,7 +172,7 @@ export default defineWebPackage((host) => () => {
         {
           id: "personal-coach.next-action",
           title: t("coach.upcoming.title"),
-          description: "What is queued after today.",
+          description: t("coach.widget.nextDescription"),
           defaultSlot: "workspace.right",
           supportedSlots: ["workspace.main", "workspace.right", "workspace.bottom"],
           defaultSize: { w: 3, h: 2 },
@@ -178,7 +185,7 @@ export default defineWebPackage((host) => () => {
         {
           id: "personal-coach.attention",
           title: t("coach.attention.title"),
-          description: "Overdue work and suggestions waiting for review.",
+          description: t("coach.widget.attentionDescription"),
           defaultSlot: "workspace.right",
           supportedSlots: ["workspace.main", "workspace.right", "workspace.bottom"],
           defaultSize: { w: 3, h: 2 },
@@ -190,7 +197,7 @@ export default defineWebPackage((host) => () => {
         {
           id: "personal-coach.goal",
           title: t("coach.goals.title"),
-          description: "The primary goal, without synthetic progress scores.",
+          description: t("coach.widget.goalDescription"),
           defaultSlot: "workspace.right",
           supportedSlots: ["workspace.main", "workspace.right", "workspace.bottom"],
           defaultSize: { w: 4, h: 2 },
@@ -202,7 +209,7 @@ export default defineWebPackage((host) => () => {
         {
           id: "personal-coach.check-in",
           title: t("coach.checkin.title"),
-          description: "A lightweight energy and focus check-in with no model call.",
+          description: t("coach.widget.checkinDescription"),
           defaultSlot: "workspace.right",
           supportedSlots: ["workspace.main", "workspace.right", "workspace.bottom"],
           defaultSize: { w: 4, h: 3 },
