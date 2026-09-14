@@ -1,5 +1,10 @@
-import type { ContributionResult, ExternalResource, StructuredContext } from "@polyth/package-sdk";
-import { addAttachment, attachUpload } from "../../attachments.ts";
+import {
+  parseContributionResult,
+  type ContributionResult,
+  type ExternalResource,
+  type StructuredContext,
+} from "@polyth/package-sdk";
+import { attachUpload } from "../../attachments.ts";
 
 export interface ContributionResultScope {
   sessionId?: string | null;
@@ -16,6 +21,11 @@ const safeName = (value: string, fallback: string): string => {
   return base || fallback;
 };
 
+const dateLine = (label: string, value: number | undefined): string | undefined => {
+  if (value === undefined || value < -8.64e15 || value > 8.64e15) return undefined;
+  return `${label}: ${new Date(value).toISOString()}`;
+};
+
 const provenanceText = (item: ExternalResource | StructuredContext): string => {
   const lines: string[] = [];
   lines.push(`# ${item.title}`);
@@ -23,15 +33,24 @@ const provenanceText = (item: ExternalResource | StructuredContext): string => {
   lines.push(`Provider: ${item.provider}`);
   if ("resourceId" in item) lines.push(`Resource: ${item.resourceId}`);
   if ("sourceId" in item) lines.push(`Source: ${item.sourceId}`);
+  if ("subtitle" in item && item.subtitle) lines.push(`Subtitle: ${item.subtitle}`);
   if ("url" in item && item.url) lines.push(`URL: ${item.url}`);
   if ("uri" in item && item.uri) lines.push(`URI: ${item.uri}`);
-  if ("retrievedAt" in item && item.retrievedAt) lines.push(`Retrieved: ${new Date(item.retrievedAt).toISOString()}`);
+  const retrieved = dateLine(
+    "Retrieved",
+    item.retrievedAt ?? ("provenance" in item ? item.provenance?.retrievedAt : undefined),
+  );
+  if (retrieved) lines.push(retrieved);
+  const fresh = dateLine("Fresh until", item.freshUntil);
+  if (fresh) lines.push(fresh);
+  if ("provenance" in item && item.provenance?.source) lines.push(`Provenance: ${item.provenance.source}`);
+  if ("provenance" in item && item.provenance?.uri) lines.push(`Provenance URI: ${item.provenance.uri}`);
   lines.push("");
-  if ("summary" in item && item.summary) lines.push(item.summary, "");
-  if ("text" in item && item.text) lines.push(item.text);
-  if ("content" in item && item.content) lines.push(item.content);
+  if ("summary" in item && item.summary) lines.push("## Summary", "", item.summary, "");
+  if ("text" in item && item.text) lines.push("## Content", "", item.text);
+  if ("content" in item && item.content) lines.push("## Context", "", item.content);
   if (item.metadata && Object.keys(item.metadata).length > 0) {
-    lines.push("", "Metadata:", "```json", JSON.stringify(item.metadata, null, 2), "```");
+    lines.push("", "## Metadata", "", "```json", JSON.stringify(item.metadata, null, 2), "```");
   }
   return lines.join("\n").slice(0, 64_000);
 };
@@ -52,24 +71,12 @@ export async function applyContributionResult(
   scope: ContributionResultScope,
 ): Promise<ContributionApplyResult> {
   if (!result) return { attached: 0, failed: [] };
+  const parsed = parseContributionResult(result);
   let attached = 0;
   const failed: string[] = [];
   const sessionId = scope.sessionId ?? null;
 
-  for (const resource of result.resources ?? []) {
-    if (resource.url && /^https:\/\//i.test(resource.url)) {
-      const size = new Blob([resource.summary ?? resource.text ?? resource.url]).size;
-      addAttachment(sessionId, {
-        id: `extension-${crypto.randomUUID()}`,
-        name: safeName(resource.title, "External resource"),
-        mime: "text/uri-list",
-        size,
-        kind: "url",
-        url: resource.url,
-      });
-      attached += 1;
-      continue;
-    }
+  for (const resource of parsed.resources ?? []) {
     if (!scope.projectId) {
       failed.push(resource.title);
       continue;
@@ -79,7 +86,7 @@ export async function applyContributionResult(
     else failed.push(`${resource.title}: ${outcome.reason}`);
   }
 
-  for (const context of result.context ?? []) {
+  for (const context of parsed.context ?? []) {
     if (!scope.projectId) {
       failed.push(context.title);
       continue;
