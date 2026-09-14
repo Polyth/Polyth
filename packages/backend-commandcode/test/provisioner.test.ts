@@ -222,7 +222,10 @@ test("Command Code stages native addTool schemas while keeping bridge secrets me
   assert.match(toolMod, /type: "cancel"/);
   assert.match(toolMod, /fd: 3/);
   assert.match(toolMod, /fd: 4/);
+  assert.match(toolMod, /let bridgeClosed = false/);
   assert.match(toolMod, /requests\.on\("error"/);
+  assert.match(toolMod, /requests\.on\("close"/);
+  assert.match(toolMod, /if \(bridgeClosed\) \{ resolve\(\{ ok: false, error: "Polyth tool bridge disconnected" \}\); return; \}/);
   assert.match(toolMod, /review_project/);
   assert.doesNotMatch(toolMod, /127\.0\.0\.1:7777/);
   assert.doesNotMatch(toolMod, /opaque-secret-token/);
