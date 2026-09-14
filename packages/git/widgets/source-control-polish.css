@@ -1,0 +1,321 @@
+/* Source control interaction grammar. Package-owned and scoped to Git surfaces. */
+.git-page .git-file-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: center;
+  column-gap: var(--space-2);
+  min-height: max(var(--control-h), var(--hit-min));
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-control);
+  background: transparent;
+  font-size: var(--font-meta);
+  transition:
+    background var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease);
+  content-visibility: auto;
+  contain-intrinsic-size: var(--control-h);
+}
+
+.git-page .git-file-row:hover,
+.git-page .git-file-row:focus-within {
+  background: var(--surface-overlay-hover);
+}
+
+.git-page .git-file-row.selected,
+.git-page .git-file-row.selected:hover,
+.git-page .git-file-row.selected:focus-within {
+  background: var(--accent-wash);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.git-page .git-file-main {
+  display: grid;
+  grid-template-columns: var(--icon-md) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  margin: 0;
+  padding: 0;
+}
+
+.git-page .git-file-main:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.git-page .git-file-letter {
+  display: inline-grid;
+  place-items: center;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  font: 700 var(--font-meta) / 1 var(--mono);
+}
+
+.git-page .git-file-identity {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1px;
+  min-width: 0;
+}
+
+.git-page .git-file-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 600;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-page .git-file-directory {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  font: 400 var(--font-meta) / 1.2 var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-page .git-file-linestat {
+  grid-column: 2;
+  justify-content: flex-end;
+  min-width: 8ch;
+  gap: var(--space-2);
+  color: var(--muted);
+  font-weight: 550;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+
+.git-page .git-file-actions {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  right: var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(var(--space-1), -50%);
+  transition:
+    opacity var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
+}
+
+.git-page .git-file-row:hover .git-file-actions,
+.git-page .git-file-row:focus-within .git-file-actions {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(0, -50%);
+}
+
+.git-page .git-file-row:hover .git-file-linestat,
+.git-page .git-file-row:focus-within .git-file-linestat {
+  opacity: 0;
+}
+
+.git-page .git-file-discard:hover:not(:disabled),
+.git-page .git-file-discard:focus-visible:not(:disabled) {
+  border-color: color-mix(in srgb, var(--red) 35%, transparent);
+  background: var(--red-wash);
+  color: var(--red);
+}
+
+.git-page .git-change-groups {
+  gap: 0;
+  padding: var(--space-1) var(--space-1) var(--space-2);
+}
+
+.git-page .git-change-group {
+  border-bottom: 1px solid var(--hair);
+}
+
+.git-page .git-change-group:last-child {
+  border-bottom: 0;
+}
+
+.git-page .git-change-group-head {
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  padding: 0 var(--space-2);
+  gap: var(--space-2);
+  border-radius: var(--radius-control);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.git-page .git-change-group-head:hover,
+.git-page .git-change-group-head:focus-visible {
+  background: var(--surface-overlay-hover);
+  color: var(--text);
+}
+
+.git-page .git-count {
+  display: inline;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--faint);
+  font: 500 var(--font-meta) / 1 var(--mono);
+}
+
+.git-page .git-pane-toolbar {
+  gap: var(--space-3);
+  min-height: var(--control-h-lg);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--hair);
+  background: var(--panel);
+}
+
+.git-page .git-pane-toolbar > div:first-child {
+  flex: 1 1 auto;
+  min-width: 9rem;
+}
+
+.git-page .git-pane-toolbar > .diff-stat {
+  flex: none;
+  margin-inline-start: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.git-page .git-pane-actions {
+  flex: 0 1 auto;
+  flex-basis: auto;
+  margin-inline-start: 0;
+  gap: var(--space-1);
+}
+
+.git-page .source-control-head {
+  gap: var(--space-2);
+}
+
+.git-page .source-control-title {
+  gap: var(--space-2);
+}
+
+.git-page .source-remote-actions {
+  gap: var(--space-1);
+}
+
+.git-page .diff-stat {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The compact Canvas summary follows the same basename-first scanning rule. */
+.git-recent-path {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: normal;
+}
+
+.git-recent-name,
+.git-recent-directory {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-recent-name {
+  color: var(--text);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.git-recent-directory {
+  color: var(--faint);
+  font: 400 var(--font-meta) / 1.15 var(--mono);
+}
+
+@container git-page (max-width: 620px) {
+  .git-page .git-file-linestat {
+    min-width: 7ch;
+  }
+
+  .git-page .git-pane-toolbar {
+    align-items: flex-start;
+  }
+
+  .git-page .git-pane-actions {
+    flex-basis: 100%;
+    margin-inline-start: 0;
+  }
+}
+
+@container git-page (max-width: 460px) {
+  .git-page .git-file-directory,
+  .git-page .git-file-linestat {
+    display: none;
+  }
+
+  .git-page .git-file-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .git-page .git-pane-toolbar > .diff-stat {
+    margin-inline-start: 0;
+  }
+}
+
+@media (pointer: coarse) {
+  .git-page .git-file-row {
+    grid-template-columns: minmax(0, 1fr) max-content max-content;
+    min-height: var(--tap);
+  }
+
+  .git-page .git-file-linestat {
+    grid-column: 2;
+    opacity: 1;
+  }
+
+  .git-page .git-file-actions {
+    position: static;
+    grid-column: 3;
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+  }
+
+  .git-page .git-file-row:hover .git-file-actions,
+  .git-page .git-file-row:focus-within .git-file-actions {
+    transform: none;
+  }
+
+  .git-page .git-file-row:hover .git-file-linestat,
+  .git-page .git-file-row:focus-within .git-file-linestat {
+    opacity: 1;
+  }
+
+  @container git-page (max-width: 460px) {
+    .git-page .git-file-row {
+      grid-template-columns: minmax(0, 1fr) max-content;
+    }
+
+    .git-page .git-file-actions {
+      grid-column: 2;
+    }
+
+    .git-page .git-file-linestat {
+      display: none;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .git-page .git-file-row,
+  .git-page .git-file-actions,
+  .git-page .git-file-linestat {
+    transition: none;
+  }
+}
