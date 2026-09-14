@@ -57,6 +57,10 @@ const WIDGETS: WidgetDef[] = [
 test("canvas exposes one simple add-widget menu and no placement-zone controls", async () => {
   const source = await readFile(new URL("../src/widgets/WidgetCanvas.tsx", import.meta.url), "utf8");
   assert.equal((source.match(/<WidgetMenu /g) ?? []).length, 1);
+  assert.match(source, /className="widget-menu-item-copy"/);
+  assert.match(source, /className="widget-menu-item-label"/);
+  assert.match(source, /className="widget-menu-item-detail"/);
+  assert.doesNotMatch(source, /<span><strong>\{widget\.title\}<\/strong><small>/);
   assert.ok(!source.includes("WIDGET_ZONES"));
   assert.ok(!source.includes("layout preset"));
   assert.ok(!source.includes("Recommended"));
@@ -71,6 +75,15 @@ test("canvas top row is placeable and editing borders use theme colors", async (
   assert.match(styles, /\.widget-menu-trigger\s*\{[^}]*bottom:\s*18px;/s);
   assert.match(styles, /\.widget-card\.editing\s*\{[^}]*border:\s*1px solid var\(--border\);/s);
   assert.doesNotMatch(styles, /\.widget-card\.editing\s*\{[^}]*accent-line/s);
+});
+
+test("canvas add menu is a single-column list with stacked title and description", async () => {
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(styles, /\.widget-menu-list\s*\{[^}]*flex-direction:\s*column;/s);
+  assert.doesNotMatch(styles, /\.widget-menu-list\s*\{[^}]*grid-template-columns:\s*repeat\(2/);
+  assert.doesNotMatch(styles, /\.widget-menu-list section > button > span:first-child/);
+  assert.match(styles, /\.widget-menu-item-copy\s*\{[^}]*flex-direction:\s*column;/s);
+  assert.match(styles, /\.widget-menu-item-detail\s*\{[^}]*overflow-wrap:\s*anywhere;/s);
 });
 
 test("settings has no workspace customizer; canvas owns add-widget and layout", async () => {

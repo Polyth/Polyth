@@ -429,7 +429,8 @@ function WidgetMenu({ widgets, onClose }: { widgets: WidgetDef[]; onClose: () =>
               return (
                 <button
                   key={widget.id}
-                  className={onCanvas ? "active" : ""}
+                  type="button"
+                  className={`widget-menu-item${onCanvas ? " is-active" : ""}`}
                   aria-pressed={onCanvas}
                   onClick={() => updateWidgetLayout((current) => applyWidgetLayoutMutations(
                     current,
@@ -445,8 +446,11 @@ function WidgetMenu({ widgets, onClose }: { widgets: WidgetDef[]; onClose: () =>
                   ))}
                 >
                   <WidgetGlyph widget={widget} />
-                  <span><strong>{widget.title}</strong><small>{widget.description}</small></span>
-                  <span aria-hidden="true">{onCanvas ? "−" : "+"}</span>
+                  <span className="widget-menu-item-copy">
+                    <strong className="widget-menu-item-label">{widget.title}</strong>
+                    <small className="widget-menu-item-detail">{widget.description}</small>
+                  </span>
+                  <span className="widget-menu-item-action" aria-hidden="true">{onCanvas ? "−" : "+"}</span>
                 </button>
               );
             })}
