@@ -1577,6 +1577,8 @@ width: 100%; justify-content: center;
 }
 .usage-turn-stats-grid > div {
   min-width: 0;
+  gap: 2px;
+  padding: var(--space-2);
 }
 .usage-turn-stats-grid span {
   overflow: hidden;
