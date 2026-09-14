@@ -155,12 +155,86 @@ test("undocumented native cost fields never become canonical cost telemetry", ()
   assert.equal("cost" in (fallback[0] ?? {}), false);
 });
 
-test("Command Code final result is a fallback answer only when streaming produced no text", () => {
-  const state = createCommandCodeTranslateState("turn-2");
-  assert.deepEqual(translateCommandCodeRecord({ type: "result", subtype: "success", finalText: "Done" }, state), [
-    { type: "assistant/message", partId: "turn-2:final", text: "Done" },
+test("native model_request_end identifies the default model for usage accounting", () => {
+  const state = createCommandCodeTranslateState("turn-default-model");
+  assert.deepEqual(translateCommandCodeRecord({
+    type: "event",
+    event: {
+      type: "model_request_end",
+      model: "moonshotai/Kimi-K3",
+      usage: { input: 8, output: 3 },
+    },
+  }, state), [{
+    type: "usage/recorded",
+    model: { providerID: "moonshotai", modelID: "moonshotai/Kimi-K3" },
+    tokens: { input: 8, output: 3 },
+  }]);
+});
+
+test("final result closes streamed chunks when message_end is missing", () => {
+  const state = createCommandCodeTranslateState("turn-stream-finalize");
+  assert.deepEqual(translateCommandCodeRecord({ type: "event", event: { type: "text_delta", delta: "Do" } }, state), [
+    { type: "assistant/chunk", partId: "turn-stream-finalize:answer", text: "Do" },
   ]);
-  const streamed = createCommandCodeTranslateState("turn-3");
-  translateCommandCodeRecord({ type: "event", event: { type: "text_delta", delta: "Done" } }, streamed);
-  assert.deepEqual(translateCommandCodeRecord({ type: "result", subtype: "success", finalText: "Done" }, streamed), []);
+  assert.deepEqual(translateCommandCodeRecord({ type: "event", event: { type: "text_delta", delta: "ne" } }, state), [
+    { type: "assistant/chunk", partId: "turn-stream-finalize:answer", text: "ne" },
+  ]);
+  assert.deepEqual(translateCommandCodeRecord({ type: "result", subtype: "success", finalText: "Done" }, state), [
+    { type: "assistant/message", partId: "turn-stream-finalize:answer", text: "Done" },
+  ]);
+});
+
+test("message_end prevents duplicate final assistant message", () => {
+  const state = createCommandCodeTranslateState("turn-message-end");
+  translateCommandCodeRecord({ type: "event", event: { type: "text_delta", delta: "Done" } }, state);
+  assert.deepEqual(translateCommandCodeRecord({
+    type: "event",
+    event: { type: "message_end", message: { content: [{ type: "text", text: "Done" }] } },
+  }, state), [{ type: "assistant/message", partId: "turn-message-end:answer", text: "Done" }]);
+  assert.deepEqual(translateCommandCodeRecord({ type: "result", subtype: "success", finalText: "Done" }, state), []);
+});
+
+test("final result usage is additive fallback only when no model_request_end was observed", () => {
+  const fallback = createCommandCodeTranslateState("turn-usage-fallback", {
+    providerID: "command-code",
+    modelID: "gpt-5.6-sol",
+  });
+  assert.deepEqual(translateCommandCodeRecord({
+    type: "result",
+    subtype: "success",
+    finalText: "Done",
+    usage: { input: 11, output: 4 },
+  }, fallback), [
+    {
+      type: "assistant/message",
+      partId: "turn-usage-fallback:answer",
+      text: "Done",
+      tokens: { input: 11, output: 4 },
+    },
+    {
+      type: "usage/recorded",
+      model: { providerID: "command-code", modelID: "gpt-5.6-sol" },
+      tokens: { input: 11, output: 4 },
+    },
+  ]);
+
+  const normal = createCommandCodeTranslateState("turn-usage-normal", {
+    providerID: "command-code",
+    modelID: "gpt-5.6-sol",
+  });
+  translateCommandCodeRecord({
+    type: "event",
+    event: { type: "model_request_end", model: "gpt-5.6-sol", usage: { input: 6, output: 2 } },
+  }, normal);
+  assert.deepEqual(translateCommandCodeRecord({
+    type: "result",
+    subtype: "success",
+    finalText: "Done",
+    usage: { input: 6, output: 2 },
+  }, normal), [{
+    type: "assistant/message",
+    partId: "turn-usage-normal:answer",
+    text: "Done",
+    tokens: { input: 6, output: 2 },
+  }]);
 });
