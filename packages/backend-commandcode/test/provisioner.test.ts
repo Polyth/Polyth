@@ -33,7 +33,11 @@ const contextAt = (storageDir: string, spaceId = "space"): HarnessContext => ({
 });
 const noSecrets = { mcpSecrets: () => ({}) };
 
-const plan = (revision: string, skillBody = "Follow repository evidence."): HarnessProvisioningPlan => ({
+const plan = (
+  revision: string,
+  skillBody = "Follow repository evidence.",
+  skillDescription = "Review a change",
+): HarnessProvisioningPlan => ({
   harnessId: "commandcode",
   desiredRevision: revision,
   items: [
@@ -71,7 +75,7 @@ const plan = (revision: string, skillBody = "Follow repository evidence."): Harn
         revision: `skill-${revision}`,
         name: "review",
         title: "Review",
-        description: "Review a change",
+        description: skillDescription,
         instructions: skillBody,
       },
       mode: "native",
@@ -136,6 +140,23 @@ test("Command Code provisions transient prompt/context and native skills without
   provisioner.release?.(context);
   assert.equal(existsSync(promptFile), false);
   assert.equal(commandCodeOverlays.peek(context, "commandcode"), undefined);
+});
+
+test("Command Code rejects skill descriptions outside the documented native limit", async () => {
+  const storage = temporaryDirectory();
+  const context = contextAt(storage);
+  const provisioner = createCommandCodeProvisioner();
+  const result = await provisioner.apply(
+    context,
+    plan("long-description", "Follow evidence.", "x".repeat(1025)),
+    noSecrets,
+  );
+  const skill = result.records.find((row) => row.capabilityId === "example.review");
+  assert.equal(skill?.status, "failed");
+  assert.match(skill?.reason ?? "", /exceeds 1024 characters/);
+  const overlay = commandCodeOverlays.peek(context, "commandcode")?.value;
+  assert.deepEqual(overlay?.skillCapabilityIds, []);
+  provisioner.release?.(context);
 });
 
 test("Command Code capability revisions are immutable", async () => {
