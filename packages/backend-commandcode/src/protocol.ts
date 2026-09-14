@@ -268,8 +268,25 @@ export function translateCommandCodeRecord(
         ? [{ type: "session/title-generated", title }]
         : [];
     }
-    case "compaction_done":
-      return [{ type: "session/compacted" }];
+    case "compaction_start":
+      return [{
+        type: "context/updated",
+        source: "unknown",
+        updatedAt: Date.now(),
+        compaction: { active: true },
+      }];
+    case "compaction_done": {
+      const now = Date.now();
+      return [
+        { type: "session/compacted" },
+        {
+          type: "context/updated",
+          source: "unknown",
+          updatedAt: now,
+          compaction: { active: false, lastAt: now },
+        },
+      ];
+    }
     case "subagent_start": {
       const snapshot = subagentEvent(state, event, "running");
       return snapshot ? [snapshot] : [];
@@ -285,9 +302,21 @@ export function translateCommandCodeRecord(
     case "model_request_end": {
       state.model ??= modelRef(event.model);
       const tokens = usage(event.usage);
-      if (!tokens || !state.model) return [];
-      state.usageFrames += 1;
-      return [{ type: "usage/recorded", model: state.model, tokens }];
+      if (!tokens) return [];
+      const out: RuntimeEvent[] = [{
+        // Per-request input usage is Command Code's provider-reported prompt
+        // occupancy for this inference. The model's context limit is not part
+        // of the documented headless model catalog, so do not invent one.
+        type: "context/updated",
+        source: "native",
+        updatedAt: Date.now(),
+        usedTokens: tokens.input,
+      }];
+      if (state.model) {
+        state.usageFrames += 1;
+        out.push({ type: "usage/recorded", model: state.model, tokens });
+      }
+      return out;
     }
     case "run_error":
       state.runError = errorText(event.error) ?? stringValue(event.message)?.trim() ?? "Command Code run failed";
