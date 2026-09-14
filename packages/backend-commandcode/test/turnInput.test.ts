@@ -26,7 +26,7 @@ test("Command Code project attachment path never leaks or escapes the execution 
   }), undefined);
 });
 
-test("Command Code turns project files and PDFs into provider-only native read_file instructions", () => {
+test("Command Code turns project files and PDFs into provider-only read_file instructions", () => {
   const prepared = prepareCommandCodeTurnInput("/workspace/repo", request({
     attachments: [
       { id: "a", name: "a.ts", mime: "text/typescript", size: 10, kind: "file", path: "src/a.ts" },
@@ -38,9 +38,11 @@ test("Command Code turns project files and PDFs into provider-only native read_f
   if (!prepared.ok) return;
   assert.equal(prepared.request.attachments?.length, 0);
   assert.match(prepared.request.text, /Review these inputs/);
-  assert.match(prepared.request.text, /read_file tool on project file "src\/a\.ts"/);
-  assert.match(prepared.request.text, /project document "docs\/spec\.pdf"/);
-  assert.match(prepared.request.text, /lines 10-30/);
+  assert.match(prepared.request.text, /Resolve project-relative path "src\/a\.ts" against the current workspace root/);
+  assert.match(prepared.request.text, /resulting absolute in-workspace path to native read_file/);
+  assert.match(prepared.request.text, /"docs\/spec\.pdf"/);
+  assert.match(prepared.request.text, /document extraction/);
+  assert.match(prepared.request.text, /"src\/slice\.ts"[\s\S]*offset=10 and limit=21/);
   assert.doesNotMatch(prepared.request.text, /\/workspace\/repo/);
 });
 
@@ -77,7 +79,7 @@ test("Command Code custom subagents cannot be silently treated as primary agents
   });
 });
 
-test("Command Code advertises only the attachment modalities that the adapter really transports", () => {
+test("Command Code advertises project attachment transport as emulated, not native", () => {
   const base: RuntimeCapabilities = {
     streaming: true,
     permissions: false,
@@ -87,8 +89,8 @@ test("Command Code advertises only the attachment modalities that the adapter re
     attachments: { modalities: { image: "unsupported", file: "unsupported", pdf: "unsupported", url: "unsupported", audio: "unsupported" } },
   };
   const capabilities = commandCodeInputCapabilities(base);
-  assert.equal(capabilities.attachments?.modalities.file, "native");
-  assert.equal(capabilities.attachments?.modalities.pdf, "native");
+  assert.equal(capabilities.attachments?.modalities.file, "emulated");
+  assert.equal(capabilities.attachments?.modalities.pdf, "emulated");
   assert.equal(capabilities.attachments?.modalities.image, "unsupported");
   assert.equal(capabilities.attachments?.modalities.url, "unsupported");
   assert.equal(capabilities.attachments?.modalities.audio, "unsupported");
