@@ -469,10 +469,6 @@ function InlineContribution({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plugin.id, plugin.version, descriptor.kind, descriptor.id]);
 
-  if (descriptor.kind === "status-badge" && execution.result?.status) {
-    const status = execution.result.status;
-    return <Badge tone={status.tone === "danger" ? "danger" : status.tone === "warning" ? "warning" : status.tone === "success" ? "success" : "neutral"}>{status.label}</Badge>;
-  }
   if (descriptor.kind === "tool-renderer" && execution.error) return null;
   return <ContributionBody execution={execution} />;
 }
@@ -491,6 +487,11 @@ export function SandboxContributionSlot({
   const selected = typeof hostProps.selectedContributionId === "string" ? hostProps.selectedContributionId : undefined;
   if (selected && selected !== descriptor.id) return null;
   if (!messageRoleAllowed(descriptor, hostProps) || !toolMatches(descriptor, hostProps)) return null;
+  if (descriptor.kind === "status-badge") {
+    // Status badges are static manifest metadata. Rendering them must not load
+    // an iframe or grant a background runtime opportunity on every session row.
+    return <Badge tone="neutral">{descriptor.label}</Badge>;
+  }
   if (descriptor.kind === "tool-renderer") {
     if (!descriptor.dynamic) {
       const tree = declarativeToolTree(descriptor, hostProps);
@@ -504,7 +505,7 @@ export function SandboxContributionSlot({
   ) {
     return <InlineContribution plugin={plugin} descriptor={descriptor} hostProps={hostProps} applyStructuredResult />;
   }
-  if (["settings-section", "status-badge", "widget", "surface"].includes(descriptor.kind)) {
+  if (["settings-section", "widget", "surface"].includes(descriptor.kind)) {
     return <InlineContribution plugin={plugin} descriptor={descriptor} hostProps={hostProps} />;
   }
   return <LauncherContribution plugin={plugin} descriptor={descriptor} hostProps={hostProps} />;
