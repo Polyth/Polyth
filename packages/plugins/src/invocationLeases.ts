@@ -6,7 +6,7 @@ import {
   type ContributionInvocationKind,
 } from "@polyth/package-sdk";
 
-const DEFAULT_TTL_MS = 30_000;
+const DEFAULT_TTL_MS = 120_000;
 const MAX_ACTIVE_LEASES = 256;
 const MAX_INVOCATION_BYTES = 64 * 1024;
 
