@@ -15,8 +15,12 @@ test("Command Code maps streaming, title, tools, usage, compaction and subagents
   ]);
   assert.deepEqual(translateCommandCodeRecord({
     type: "event",
-    event: { type: "tool_running", toolCallId: "t1", toolName: "read", input: { path: "a.ts" } },
-  }, state), [{ type: "tool/started", callId: "t1", tool: "read", input: { path: "a.ts" } }]);
+    event: { type: "tool_queued", toolCallId: "t1", toolName: "read_file", input: { file_path: "a.ts" } },
+  }, state), []);
+  assert.deepEqual(translateCommandCodeRecord({
+    type: "event",
+    event: { type: "tool_running", toolCallId: "t1", description: "Read a.ts" },
+  }, state), [{ type: "tool/started", callId: "t1", tool: "read_file", input: { file_path: "a.ts" } }]);
   assert.deepEqual(translateCommandCodeRecord({
     type: "event",
     event: { type: "model_request_end", usage: { input_tokens: 10, output_tokens: 5, reasoning_tokens: 2 } },
@@ -33,6 +37,51 @@ test("Command Code maps streaming, title, tools, usage, compaction and subagents
     event: { type: "subagent_start", toolCallId: "a1", subagentType: "explore" },
   }, state);
   assert.equal(subagent[0]?.type, "subagent/snapshot");
+});
+
+test("Command Code todo_write produces revisioned Polyth task snapshots from original queued input", () => {
+  const state = createCommandCodeTranslateState("turn-todos");
+  const queued = {
+    type: "event",
+    event: {
+      type: "tool_queued",
+      toolCallId: "todo-1",
+      toolName: "todo_write",
+      input: {
+        todos: [
+          { id: "a", content: "Inspect parser", status: "completed", activeForm: "Inspecting parser" },
+          { id: "b", content: "Fix parser", status: "in_progress", activeForm: "Fixing parser" },
+          { content: "Run tests", status: "pending", activeForm: "Running tests" },
+        ],
+      },
+    },
+  };
+  assert.deepEqual(translateCommandCodeRecord(queued, state), [{
+    type: "task/snapshot",
+    listId: "todo",
+    revision: 1,
+    items: [
+      { id: "a", text: "Inspect parser", status: "done" },
+      { id: "b", text: "Fix parser", status: "active" },
+      { id: "commandcode-todo:2:Run tests", text: "Run tests", status: "pending" },
+    ],
+  }]);
+  assert.deepEqual(translateCommandCodeRecord(queued, state), []);
+
+  assert.deepEqual(translateCommandCodeRecord({
+    type: "event",
+    event: { type: "tool_queued", toolCallId: "todo-2", toolName: "todo_write", input: { todos: [] } },
+  }, state), [{ type: "task/snapshot", listId: "todo", revision: 2, items: [] }]);
+});
+
+test("placeholder native titles never replace a useful canonical title", () => {
+  const state = createCommandCodeTranslateState("turn-title");
+  for (const title of ["New session", "Untitled", "Command Code session", "   "]) {
+    assert.deepEqual(translateCommandCodeRecord({ type: "event", event: { type: "session_titled", title } }, state), []);
+  }
+  assert.deepEqual(translateCommandCodeRecord({ type: "event", event: { type: "session_titled", title: "Fix flaky reconnect" } }, state), [
+    { type: "session/title-generated", title: "Fix flaky reconnect" },
+  ]);
 });
 
 test("Command Code private thinking never enters canonical events", () => {
