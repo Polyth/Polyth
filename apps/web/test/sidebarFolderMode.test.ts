@@ -1,5 +1,5 @@
 // Sidebar tree mode: projects contain worktrees, and worktrees contain
-// sessions. The same SessionList is reused by the flat project list.
+// sessions. Rail mode reuses the same SessionList for the focused project.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
@@ -65,19 +65,23 @@ const { getSidebarViewMode, parseSidebarViewMode, setSidebarViewMode, VIEW_MODE_
 const { default: Sidebar } = await import("../src/components/Sidebar.tsx");
 
 const MouseEventCtor = (dom as unknown as { MouseEvent: typeof MouseEvent }).MouseEvent;
+const KeyboardEventCtor = (dom as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent;
 const click = (el: Element) => el.dispatchEvent(new MouseEventCtor("click", { bubbles: true }));
+const contextMenu = (el: Element) => el.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, cancelable: true }));
+const dismissMenu = () => document.dispatchEvent(new KeyboardEventCtor("keydown", { key: "Escape", bubbles: true }));
+const menuActionLabels = () => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+  .map((item) => item.textContent?.trim() ?? "");
 
 const project = (id: string): Project => ({ id, path: `/work/${id}`, name: id, createdAt: 1 });
 
 test("parseSidebarViewMode defaults to the session tree; setter persists and round-trips", () => {
   assert.equal(parseSidebarViewMode(null), "tree");
-  assert.equal(parseSidebarViewMode("bogus"), "list");
+  assert.equal(parseSidebarViewMode("bogus"), "tree");
+  assert.equal(parseSidebarViewMode("list"), "tree", "removed project list migrates to the tree");
   assert.equal(parseSidebarViewMode("folders"), "tree", "legacy folder mode migrates");
   setSidebarViewMode("tree");
   assert.equal(getSidebarViewMode(), "tree");
   assert.equal(localStorage.getItem(VIEW_MODE_KEY), "tree");
-  setSidebarViewMode("list");
-  assert.equal(getSidebarViewMode(), "list");
   setSidebarViewMode("rail");
   assert.equal(getSidebarViewMode(), "rail");
   assert.equal(localStorage.getItem(VIEW_MODE_KEY), "rail");
@@ -136,7 +140,7 @@ test("tree mode nests sessions under project worktrees", async () => {
   store.setSessions("alpha", sessionsByProject.alpha!);
   store.setSessions("beta", sessionsByProject.beta!);
   store.setGitBranch("trunk");
-  setSidebarViewMode("list");
+  setSidebarViewMode("tree");
 
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -150,14 +154,17 @@ test("tree mode nests sessions under project worktrees", async () => {
     const railOption = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')]
       .find((item) => item.textContent?.trim() === "Project rail");
     assert.ok(railOption, "the new project-rail presentation is user selectable");
+    assert.equal(
+      [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')]
+        .some((item) => item.textContent?.trim() === "Project list"),
+      false,
+      "the removed project-list presentation is not user selectable",
+    );
     await act(async () => { click(railOption!); });
     assert.equal(getSidebarViewMode(), "rail");
     assert.ok(container.querySelector(".sidebar-project-rail"));
-    await act(async () => { setSidebarViewMode("list"); });
-
-    assert.ok(container.querySelector(".session-list .session-org"), "list mode renders the active project sessions");
+    assert.equal(container.querySelector(".session-list .session-org"), null, "the removed project list is not rendered");
     assert.equal(container.querySelector(".branch-row"), null, "the project root never exposes its current branch");
-    assert.equal(container.querySelector(".project-tree-node"), null);
     const toggle = container.querySelector<HTMLElement>('[aria-label="Toggle project tree view"]');
     assert.equal(toggle, null, "desktop renders no sidebar footer controls");
 
@@ -205,10 +212,50 @@ test("tree mode nests sessions under project worktrees", async () => {
     assert.equal(betaRail?.getAttribute("aria-current"), "true");
     assert.match(container.querySelector(".sidebar-focused-project")?.textContent ?? "", /Beta session/);
 
-    // Back to list mode restores the classic layout.
-    await act(async () => { setSidebarViewMode("list"); });
-    assert.ok(container.querySelector(".session-list .session-org"), "list layout restored");
-    assert.equal(container.querySelector(".project-tree-node"), null);
+    // Tree mode remains the only full-width project presentation.
+    await act(async () => { setSidebarViewMode("tree"); });
+    assert.equal(container.querySelectorAll(".project-tree-node").length, 2);
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("project name and icon open the same actions menu in tree and rail views", async () => {
+  const ticket = store.beginProjectListRequest();
+  store.publishProjectList(ticket, [project("alpha"), project("beta")]);
+  store.activateProject("alpha");
+  store.setSessions("alpha", sessionsByProject.alpha!);
+  store.setSessions("beta", sessionsByProject.beta!);
+  setSidebarViewMode("tree");
+
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(Sidebar)); });
+    const alphaCard = [...container.querySelectorAll<HTMLElement>(".project-card")]
+      .find((card) => (card.textContent ?? "").includes("alpha"))!;
+    const ellipsis = container.querySelector<HTMLButtonElement>('[aria-label="Actions for alpha"]')!;
+
+    await act(async () => { click(ellipsis); });
+    const ellipsisLabels = menuActionLabels();
+    assert.ok(ellipsisLabels.includes("Select sessions"));
+    assert.ok(ellipsisLabels.includes("Close project"));
+    await act(async () => { dismissMenu(); });
+
+    await act(async () => { contextMenu(alphaCard.querySelector(".project-name")!); });
+    assert.deepEqual(menuActionLabels(), ellipsisLabels, "the project name uses the same menu entries");
+    await act(async () => { dismissMenu(); });
+
+    await act(async () => { contextMenu(alphaCard.querySelector(".project-glyph")!); });
+    assert.deepEqual(menuActionLabels(), ellipsisLabels, "the project icon uses the same menu entries");
+    await act(async () => { dismissMenu(); });
+
+    await act(async () => { setSidebarViewMode("rail"); });
+    const railAlpha = container.querySelector<HTMLElement>('.sidebar-project-rail-item[aria-label="alpha"]')!;
+    await act(async () => { contextMenu(railAlpha.querySelector(".project-glyph")!); });
+    assert.deepEqual(menuActionLabels(), ellipsisLabels, "the rail icon uses the same menu entries");
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();
@@ -221,7 +268,7 @@ test("project menu selection keeps one multi-session selection across projects",
   store.activateProject("alpha");
   store.setSessions("alpha", sessionsByProject.alpha!);
   store.setSessions("beta", sessionsByProject.beta!);
-  setSidebarViewMode("list");
+  setSidebarViewMode("tree");
 
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -259,8 +306,8 @@ test("project menu selection keeps one multi-session selection across projects",
     assert.match(container.querySelector(".session-bulk-actions")?.textContent ?? "", /2 selected/);
     assert.equal(
       container.querySelectorAll<HTMLInputElement>(".session-check:checked").length,
-      1,
-      "the visible project reflects its selected session while the first selection remains retained",
+      2,
+      "both expanded projects reflect their selected sessions while the selection remains retained",
     );
   } finally {
     await act(async () => { root.unmount(); });

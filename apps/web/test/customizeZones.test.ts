@@ -10,10 +10,22 @@ const read = (relative: string) => readFile(new URL(relative, import.meta.url), 
 
 test("bare Shift ignores text editing and disarms as soon as typing starts", async () => {
   const dom = new Window();
+  let fineHover = true;
   Object.assign(globalThis, {
     window: dom as unknown as Window & typeof globalThis,
     document: dom.document as unknown as Document,
     Element: dom.Element,
+  });
+  Object.defineProperty(dom, "matchMedia", {
+    configurable: true,
+    value: (query: string) => ({
+      get matches() {
+        return fineHover && query.includes("hover: hover") && query.includes("pointer: fine");
+      },
+      media: query,
+      addEventListener() {},
+      removeEventListener() {},
+    }),
   });
   Object.defineProperty(globalThis, "navigator", { value: dom.navigator, configurable: true });
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -44,6 +56,12 @@ test("bare Shift ignores text editing and disarms as soon as typing starts", asy
     await act(async () => input.dispatchEvent(new dom.KeyboardEvent("keydown", { key: "A", bubbles: true }) as unknown as Event));
     assert.equal(container.textContent, "idle");
     assert.equal(document.body.dataset.shiftHeld, undefined);
+
+    fineHover = false;
+    button.focus();
+    await act(async () => button.dispatchEvent(new dom.KeyboardEvent("keydown", { key: "Shift", bubbles: true }) as unknown as Event));
+    assert.equal(container.textContent, "idle", "coarse/touch pointers must not arm Shift edit mode");
+    assert.equal(document.body.dataset.shiftHeld, undefined);
   } finally {
     await act(async () => root.unmount());
     container.remove();
@@ -53,14 +71,18 @@ test("bare Shift ignores text editing and disarms as soon as typing starts", asy
 });
 
 test("Shift exposes editors without a resting gap or content overlap", async () => {
-  const [styles, composer, header, rail, customize, hero] = await Promise.all([
+  const [styles, composer, header, rail, customize, hero, shift] = await Promise.all([
     read("../src/styles.css"),
     read("../src/components/Composer.tsx"),
     read("../src/components/Header.tsx"),
     read("../src/components/ContextRail.tsx"),
     read("../src/components/CustomizeZoneButton.tsx"),
     read("../src/components/mobile/HeroWidgets.tsx"),
+    read("../src/useShiftArmed.ts"),
   ]);
+  assert.match(shift, /canArmShiftPointer/);
+  assert.match(shift, /FINE_HOVER_QUERY/);
+  assert.match(header, /useCustomizeActive/);
   assert.match(styles, /body\[data-shift-held\] \.customize-zone:hover/);
   assert.doesNotMatch(styles, /body\[data-shift-held\] \.customize-zone\s*[,\{]/);
   assert.match(styles, /body\[data-ui-editing\] \.customize-zone/);

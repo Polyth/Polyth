@@ -35,8 +35,9 @@ test("every remaining double-click shortcut has a discoverable mobile alternativ
   assert.match(terminal, /onDoubleClick=\{\(\) => startRename\(t\)\}/);
   assert.match(terminal, /className="term-tab-rename-action"/);
   assert.match(sessions, /onDoubleClick=\{\(\) => \{ setTitle/);
-  // The rename shortcut's touch alternative is the persistent row menu
-  // trigger (Rename is the first entry of the row's ui/Menu).
+  // The rename shortcut's touch alternative is the row menu (long-press,
+  // context menu, or the ellipsis on the active/open row). Rename is the
+  // first entry of the row's ui/Menu.
   assert.match(sessions, /className="session-menu-trigger"/);
   assert.match(sessions, /id: "rename", label: tr\("common\.rename"\)/);
   assert.match(sidebar, /onDoubleClick=\{\(\) => \{ setRenamingProject/);
@@ -69,6 +70,40 @@ test("coarse pointers, focus, motion, radii, and empty states share polish token
   ]) {
     assert.ok(coarse.includes(selector), `${selector} is visible to coarse pointers`);
   }
+});
+
+test("tablet rest state does not paint Shift/hover edit chrome on every item", async () => {
+  const css = await readWebStyles();
+  assert.doesNotMatch(
+    css,
+    /@media \(pointer: coarse\) \{[^}]*\.agent-reply-actions \{[^}]*opacity:\s*1/s,
+    "reply actions stay hover/focus-revealed on coarse pointers",
+  );
+  assert.doesNotMatch(
+    css,
+    /@media \(pointer: coarse\) \{[\s\S]{0,800}?\.msg-actions \{ opacity:\s*1/,
+    "message hover actions are not forced onto every tablet row",
+  );
+  assert.doesNotMatch(
+    css,
+    /@media \(pointer: coarse\) \{[\s\S]{0,1200}?\.session-worktree-actions,[\s\S]{0,80}?opacity:\s*1/,
+    "worktree and folder edit buttons are not forced onto every group",
+  );
+  assert.doesNotMatch(
+    css,
+    /@media \(pointer: coarse\), \(max-width: 960px\) \{\s*\.session-menu-trigger \{ opacity:\s*1/,
+    "session ⋯ is not persistent on every coarse/drawer row",
+  );
+  assert.match(
+    css,
+    /@media \(pointer: coarse\), \(max-width: 960px\) \{[\s\S]*?\.session-row\.active \.session-menu-trigger/,
+    "the current session still exposes its row menu trigger",
+  );
+  assert.match(
+    css,
+    /@media \(hover: none\) and \(pointer: coarse\) and \(min-width: 481px\) \{\s*\.msg-actions \{ display:\s*none;/,
+    "tablet messages use the overflow entry instead of an always-on hover strip",
+  );
 });
 
 test("shared selects render the chosen value once and use field styling", async () => {

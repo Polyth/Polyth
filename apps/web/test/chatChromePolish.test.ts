@@ -27,21 +27,18 @@ test("visible chat actions use direct canonical controls", () => {
   assert.match(pin, /PinIcon/);
 });
 
-test("chat menu exposes the optional latest-user pin without touching message events", () => {
-  const menu = read("../src/components/ChatMenu.tsx");
+test("chat chrome does not expose a header overflow pin menu", () => {
   const header = read("../src/components/Header.tsx");
   const mobileHeader = read("../src/components/mobile/MobileSessionHeader.tsx");
   const prefs = read("../src/uiPrefs.ts");
   const timeline = read("../src/components/Timeline.tsx");
   const css = read("../src/styles.css");
 
-  assert.match(menu, /kind:\s*"checkbox"/);
-  assert.match(menu, /pinLatestUserMessage/);
-  assert.match(header, /chatSurface && <ChatMenu/);
-  assert.match(mobileHeader, /<ChatMenu className="mobile-chat-menu"/);
-  assert.match(prefs, /pinLatestUserMessage:\s*false/);
-  assert.match(timeline, /latest-user-pinned/);
-  assert.match(css, /\.timeline\s*>\s*\.msg\.user\.latest-user-pinned\s*\{[\s\S]*?position:\s*sticky;[\s\S]*?inset-block-start:\s*0;/);
+  assert.doesNotMatch(header, /ChatMenu/);
+  assert.doesNotMatch(mobileHeader, /ChatMenu|mobile-chat-menu/);
+  assert.doesNotMatch(prefs, /pinLatestUserMessage/);
+  assert.doesNotMatch(timeline, /latest-user-pinned|pinLatestUserMessage/);
+  assert.doesNotMatch(css, /header-chat-menu|mobile-chat-menu|latest-user-pinned/);
   assert.match(css, /\.focus-conversation:has\(> \.conversation-composer-dock\) \.timeline\s*\{[\s\S]*?padding-bottom:\s*calc\(var\(--conversation-message-gap\) \+ var\(--conversation-group-gap\)/);
 });
 

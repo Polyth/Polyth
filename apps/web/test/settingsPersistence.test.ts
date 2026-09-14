@@ -237,8 +237,7 @@ test("prompt history settings default to the current session and 40 prompts", ()
   assert.equal(ui.parseUiSettings(JSON.stringify({ promptHistoryLimit: 9999 })).promptHistoryLimit, 200);
 });
 
-test("latest user message pin is opt-in and persisted through the UI settings parser", () => {
-  assert.equal(ui.parseUiSettings(null).pinLatestUserMessage, false);
-  assert.equal(ui.parseUiSettings(JSON.stringify({ pinLatestUserMessage: true })).pinLatestUserMessage, true);
-  assert.equal(ui.parseUiSettings(JSON.stringify({ pinLatestUserMessage: "yes" })).pinLatestUserMessage, false);
+test("legacy latest-user pin preference is ignored by the UI settings parser", () => {
+  const parsed = ui.parseUiSettings(JSON.stringify({ pinLatestUserMessage: true }));
+  assert.equal("pinLatestUserMessage" in parsed, false);
 });

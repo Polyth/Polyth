@@ -1,7 +1,7 @@
 // Session row actions (P2-W1), mounted through a real React root: every row
 // owns one ui/Menu reachable through right-click, long-press, Shift+F10, and
-// a single ellipsis trigger (hover-revealed on fine pointers, persistent on
-// touch). The menu carries delete/archive/pin/labels with correct ARIA menu
+// a single ellipsis trigger (hover-revealed on fine pointers; on touch, the
+// active/open/focused row). The menu carries delete/archive/pin/labels with correct ARIA menu
 // roles and the keyboard contract (focus lands in the menu, arrows cycle,
 // Escape closes back to the opener). Every menu/swipe deletion confirms, with
 // additional activity context for a running session. Quick archive/delete
@@ -51,8 +51,21 @@ const mediaQueryList = (key: "compact" | "phone") => ({
 });
 Object.defineProperty(dom, "matchMedia", {
   configurable: true,
-  value: (query: string) =>
-    mediaQueryList(query.includes("960") ? "compact" : "phone"),
+  value: (query: string) => {
+    if (query.includes("hover: hover") && query.includes("pointer: fine")) {
+      return {
+        get matches() { return true; },
+        media: query,
+        onchange: null,
+        addEventListener() {},
+        removeEventListener() {},
+        addListener() {},
+        removeListener() {},
+        dispatchEvent: () => true,
+      };
+    }
+    return mediaQueryList(query.includes("960") ? "compact" : "phone");
+  },
 });
 let copiedText = "";
 Object.defineProperty(dom.navigator, "clipboard", {
