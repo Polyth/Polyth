@@ -9,9 +9,9 @@ import type { DiscoverableProvider } from "./adapters.ts";
  *
  * Keep this provider deliberately unavailable rather than reading the
  * CLI-managed `~/.commandcode/auth.json`, copying credentials, scraping the
- * TUI/Studio, or calling undocumented `/alpha/*` endpoints. Per-turn token and
- * cost telemetry is integrated separately through Command Code's documented
- * headless AgentEvent/result stream.
+ * TUI/Studio, or calling undocumented `/alpha/*` endpoints. Per-turn token
+ * usage is integrated separately through Command Code's documented headless
+ * AgentEvent/result stream; native cost telemetry is not currently claimed.
  */
 export const createCommandCodeProvider = (_runtime: QuotaRuntime): DiscoverableProvider => ({
   id: "command-code",
