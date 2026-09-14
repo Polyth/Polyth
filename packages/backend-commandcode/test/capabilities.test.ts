@@ -44,6 +44,12 @@ test("Command Code admission waits for the exact current turn receipt, not a sta
   assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /const readNativeSessionId/);
 });
 
+test("Command Code worker emits terminal evidence only after admission or observed native run evidence", () => {
+  assert.match(COMMANDCODE_WORKER_SOURCE, /if \(admission \|\| turn\.runObserved\)/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /eventType === "run_start" \|\| eventType === "turn_start"/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /!turn\.runObserved && !durableAdmission/);
+});
+
 test("subagent capability is backed by native AgentEvent snapshots", () => {
   const state = createCommandCodeTranslateState("turn-subagent");
   assert.deepEqual(
