@@ -47,6 +47,10 @@ export interface CommandCodeTranslateState {
   operationId: string;
   model?: ModelRef;
   assistantText: string;
+  toolInputs: Map<string, JsonObject>;
+  toolNames: Map<string, string>;
+  taskRevision: number;
+  lastTaskKey: string;
   subagents: Map<string, { sessionId: string; label: string; status: string; currentTask?: string }>;
   subagentRevision: number;
 }
@@ -58,9 +62,41 @@ export const createCommandCodeTranslateState = (
   operationId,
   model,
   assistantText: "",
+  toolInputs: new Map(),
+  toolNames: new Map(),
+  taskRevision: 0,
+  lastTaskKey: "",
   subagents: new Map(),
   subagentRevision: 0,
 });
+
+const taskSnapshot = (
+  state: CommandCodeTranslateState,
+  input: JsonObject,
+): RuntimeEvent | undefined => {
+  if (!Array.isArray(input.todos)) return undefined;
+  const items = input.todos.flatMap((value, index) => {
+    const todo = asRecord(value);
+    const content = typeof todo?.content === "string" ? todo.content.trim() : "";
+    if (!content) return [];
+    const nativeStatus = typeof todo?.status === "string" ? todo.status : "pending";
+    const status = nativeStatus === "in_progress"
+      ? "active" as const
+      : nativeStatus === "completed"
+        ? "done" as const
+        : "pending" as const;
+    const nativeId = typeof todo?.id === "string" && todo.id.trim() ? todo.id.trim() : undefined;
+    return [{
+      id: nativeId ?? `commandcode-todo:${index}:${content}`,
+      text: content,
+      status,
+    }];
+  });
+  const key = JSON.stringify(items);
+  if (key === state.lastTaskKey) return undefined;
+  state.lastTaskKey = key;
+  return { type: "task/snapshot", listId: "todo", revision: ++state.taskRevision, items };
+};
 
 const subagentEvent = (
   state: CommandCodeTranslateState,
@@ -82,6 +118,15 @@ const subagentEvent = (
     revision: ++state.subagentRevision,
     agents: [...state.subagents.values()],
   };
+};
+
+const toolIdentity = (
+  state: CommandCodeTranslateState,
+  event: Record<string, unknown>,
+): { callId: string; tool: string } => {
+  const callId = stringValue(event.toolCallId, event.tool_call_id, event.id) ?? `${state.operationId}:tool`;
+  const tool = stringValue(event.toolName, event.tool_name, event.name) ?? state.toolNames.get(callId) ?? "tool";
+  return { callId, tool };
 };
 
 /** Translate one official headless NDJSON record. Unknown future events are ignored.
@@ -137,28 +182,39 @@ export function translateCommandCodeRecord(
         text,
       }];
     }
+    case "tool_queued": {
+      const callId = stringValue(event.toolCallId, event.tool_call_id, event.id);
+      const tool = stringValue(event.toolName, event.tool_name, event.name);
+      const input = asJsonObject(event.input);
+      if (callId) {
+        state.toolInputs.set(callId, input);
+        if (tool) state.toolNames.set(callId, tool);
+      }
+      if (tool !== "todo_write") return [];
+      const snapshot = taskSnapshot(state, input);
+      return snapshot ? [snapshot] : [];
+    }
     case "tool_running": {
-      const callId = stringValue(event.toolCallId, event.tool_call_id, event.id) ?? `${state.operationId}:tool`;
-      const tool = stringValue(event.toolName, event.tool_name, event.name) ?? "tool";
-      return [{ type: "tool/started", callId, tool, input: asJsonObject(event.input) }];
+      const { callId, tool } = toolIdentity(state, event);
+      return [{ type: "tool/started", callId, tool, input: state.toolInputs.get(callId) ?? asJsonObject(event.input) }];
     }
     case "tool_completed": {
-      const callId = stringValue(event.toolCallId, event.tool_call_id, event.id) ?? `${state.operationId}:tool`;
-      const tool = stringValue(event.toolName, event.tool_name, event.name) ?? "tool";
+      const { callId, tool } = toolIdentity(state, event);
       const output = stringValue(event.result, event.output, event.text) ?? JSON.stringify(event.result ?? "");
       return [{ type: "tool/result", callId, tool, output }];
     }
     case "tool_errored":
     case "tool_denied":
     case "tool_hook_blocked": {
-      const callId = stringValue(event.toolCallId, event.tool_call_id, event.id) ?? `${state.operationId}:tool`;
-      const tool = stringValue(event.toolName, event.tool_name, event.name) ?? "tool";
-      const error = stringValue(event.error, event.message) ?? (event.type === "tool_denied" ? "Command Code denied the tool call" : "Command Code tool failed");
+      const { callId, tool } = toolIdentity(state, event);
+      const error = stringValue(event.error, event.message, event.hookOutput) ?? (event.type === "tool_denied" ? "Command Code denied the tool call" : "Command Code tool failed");
       return [{ type: "tool/error", callId, tool, error }];
     }
     case "session_titled": {
-      const title = stringValue(event.title);
-      return title ? [{ type: "session/title-generated", title }] : [];
+      const title = stringValue(event.title)?.trim();
+      return title && !/^new session$|^untitled$|^command code session$/i.test(title)
+        ? [{ type: "session/title-generated", title }]
+        : [];
     }
     case "compaction_done":
       return [{ type: "session/compacted" }];
