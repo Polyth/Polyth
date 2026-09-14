@@ -75,7 +75,6 @@ function intersectConstraints(
   if (!declared) return granted;
   if (!granted) return undefined;
   const origins = intersectStrings(declared.origins, granted.origins);
-  const paths = intersectStrings(declared.paths, granted.paths);
   const methods = intersectStrings(declared.methods, granted.methods);
   const modelClasses = intersectStrings(declared.modelClasses, granted.modelClasses);
   const maxOutputTokens = declared.maxOutputTokens === undefined
@@ -85,7 +84,6 @@ function intersectConstraints(
       : Math.min(declared.maxOutputTokens, granted.maxOutputTokens);
   return {
     ...(origins ? { origins } : {}),
-    ...(paths ? { paths } : {}),
     ...(methods ? { methods } : {}),
     ...(modelClasses ? { modelClasses } : {}),
     ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
@@ -103,11 +101,10 @@ export function effectiveCapabilities(
   for (const capability of declared) {
     const grant = persisted.find((item) => item.name === capability.name);
     if (!grant) continue;
+    const constraints = intersectConstraints(capability.constraints, grant.constraints);
     granted.push({
       name: capability.name,
-      ...(intersectConstraints(capability.constraints, grant.constraints)
-        ? { constraints: intersectConstraints(capability.constraints, grant.constraints) }
-        : {}),
+      ...(constraints ? { constraints } : {}),
     });
   }
   return { granted, names: new Set(granted.map((item) => item.name)) };
