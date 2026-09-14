@@ -15,10 +15,15 @@ import type {
 import {
   localOnlyRemoteAccess,
   serverServiceKey,
+  type PluginRegistry,
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
 import { createCommandService, type CommandService, type WriteScope } from "./index.ts";
+import {
+  extensionCommandId,
+  type SlashCommand,
+} from "./catalog.ts";
 import { createSkillService, type SkillService } from "./skills.ts";
 
 type ContextualContribution = AgentCapabilityContribution & {
@@ -28,11 +33,40 @@ type ProvisioningService = {
   reconcileSpace?(space: Pick<SpaceContext, "spaceId">): Promise<unknown>;
 };
 
+function extensionCommandsForSpace(
+  host: ServerPackageHost,
+  space: SpaceContext,
+): SlashCommand[] {
+  const registry = host.services.get(serverServiceKey<PluginRegistry>("plugins.managed"));
+  if (!registry) return [];
+  const storage = host.spaceStorage(space);
+  const out: SlashCommand[] = [];
+  for (const plugin of registry.list(storage)) {
+    if (!plugin.enabled || plugin.status !== "ready" || plugin.runtimeKind !== "sandboxed") continue;
+    const manifest = registry.canonicalManifest(plugin.id);
+    if (manifest.manifestVersion !== 2) continue;
+    for (const command of manifest.contributes?.commands ?? []) {
+      const binding = { packageId: plugin.id, contributionId: command.id };
+      out.push({
+        id: extensionCommandId(binding),
+        name: command.name,
+        description: command.description,
+        prompt: "",
+        scope: "builtin",
+        owner: "extension",
+        extension: binding,
+      });
+    }
+  }
+  return out;
+}
+
 export function snippetRoutes(deps: {
   projects: ProjectService;
   commands: CommandService;
   skills: SkillService;
   space: SpaceContext;
+  extensionCommands?: () => readonly SlashCommand[] | Promise<readonly SlashCommand[]>;
 }): RouteHandler {
   const rootOf = async (projectId: unknown): Promise<string> => {
     if (!projectId) {
@@ -91,7 +125,12 @@ export function snippetRoutes(deps: {
     if (method === "GET") {
       const root = await rootOf(url.searchParams.get("projectId"));
       const list = await deps.commands.list(root);
-      json(200, path === "/api/commands" ? list.commands : list.snippets);
+      if (path === "/api/commands") {
+        const extensions = deps.extensionCommands ? await deps.extensionCommands() : [];
+        json(200, [...list.commands, ...extensions]);
+      } else {
+        json(200, list.snippets);
+      }
       return true;
     }
     if (method !== "POST" && method !== "DELETE") return false;
@@ -175,7 +214,13 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         return false;
       }
       const { projects } = host.forSpace(request.space);
-      return snippetRoutes({ projects, commands, skills, space: request.space })(request);
+      return snippetRoutes({
+        projects,
+        commands,
+        skills,
+        space: request.space,
+        extensionCommands: () => extensionCommandsForSpace(host, request.space),
+      })(request);
     },
   };
 }
