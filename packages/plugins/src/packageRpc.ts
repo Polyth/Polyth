@@ -56,16 +56,18 @@ export interface PackageRpcDeps {
   generateModel?: (request: PackageModelRequest) => Promise<PackageModelResult>;
 }
 
+/** Constraint arrays are allowlists. `undefined` means unbounded, therefore
+ * the intersection with an unbounded side is the other side — never
+ * `undefined`. */
 const intersectStrings = <T extends string>(
   declared: readonly T[] | undefined,
   granted: readonly T[] | undefined,
 ): T[] | undefined => {
-  if (!declared && !granted) return undefined;
-  if (!declared) return granted ? [...granted] : undefined;
-  if (!granted) return undefined;
+  if (declared === undefined && granted === undefined) return undefined;
+  if (declared === undefined) return granted ? [...new Set(granted)] : undefined;
+  if (granted === undefined) return [...new Set(declared)];
   const allowed = new Set<T>(declared);
-  const values = granted.filter((item) => allowed.has(item));
-  return values.length ? [...new Set(values)] : [];
+  return [...new Set(granted.filter((item) => allowed.has(item)))];
 };
 
 function intersectConstraints(
@@ -73,20 +75,18 @@ function intersectConstraints(
   granted: CapabilityConstraints | undefined,
 ): CapabilityConstraints | undefined {
   if (!declared && !granted) return undefined;
-  if (!declared) return granted;
-  if (!granted) return undefined;
-  const origins = intersectStrings(declared.origins, granted.origins);
-  const methods = intersectStrings(declared.methods, granted.methods);
-  const modelClasses = intersectStrings(declared.modelClasses, granted.modelClasses);
-  const maxOutputTokens = declared.maxOutputTokens === undefined
-    ? granted.maxOutputTokens
-    : granted.maxOutputTokens === undefined
-      ? undefined
+  const origins = intersectStrings(declared?.origins, granted?.origins);
+  const methods = intersectStrings(declared?.methods, granted?.methods);
+  const modelClasses = intersectStrings(declared?.modelClasses, granted?.modelClasses);
+  const maxOutputTokens = declared?.maxOutputTokens === undefined
+    ? granted?.maxOutputTokens
+    : granted?.maxOutputTokens === undefined
+      ? declared.maxOutputTokens
       : Math.min(declared.maxOutputTokens, granted.maxOutputTokens);
   return {
-    ...(origins ? { origins } : {}),
-    ...(methods ? { methods } : {}),
-    ...(modelClasses ? { modelClasses } : {}),
+    ...(origins !== undefined ? { origins } : {}),
+    ...(methods !== undefined ? { methods } : {}),
+    ...(modelClasses !== undefined ? { modelClasses } : {}),
     ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
   };
 }
