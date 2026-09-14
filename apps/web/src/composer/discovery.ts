@@ -7,7 +7,7 @@ import type { SnippetDef, StrictListResult } from "@polyth/session/web-api";
 import type { ModelDescriptor, ModelDiscoveryState } from "@polyth/contracts";
 import {
   commandPrecedence,
-  extensionCommandId,
+  extensionCommandBinding,
   type CatalogCommand,
 } from "@polyth/commands/catalog";
 import { filterSnippets, type AutocompleteItem } from "../utils.ts";
@@ -264,7 +264,7 @@ export function commandAutocomplete(
     })
     .map((command) => {
       const native = "invocation" in command;
-      const extension = !native && command.owner === "extension" ? command.extension : undefined;
+      const extension = native ? null : extensionCommandBinding(command);
       const identity = command.id
         ?? `polyth:${"scope" in command ? command.scope : "builtin"}:${command.name}`;
       const detail = native
@@ -290,7 +290,7 @@ export { commandPrecedence, mergeCommandCatalog } from "@polyth/commands/catalog
 
 /** Resolve the exact catalog command selected/typed into the compact command
  * wire shape. Native runtime commands keep their runtime id; extension
- * commands use a host-reserved id that is intercepted before session admission. */
+ * commands reuse their host-reserved id and are intercepted before session admission. */
 export function nativeCommandInput(
   text: string,
   catalog: readonly ComposerCommand[],
@@ -300,9 +300,12 @@ export function nativeCommandInput(
   const match = firstLine.match(/^\/([A-Za-z0-9_-]+)(?:[ \t]+(.*))?$/);
   if (!match) return undefined;
   const name = match[1]!;
+  const selectedExtension = selected && !("invocation" in selected)
+    ? extensionCommandBinding(selected)
+    : null;
   const selectedMatch = selected
     && selected.name.toLowerCase() === name.toLowerCase()
-    && ("invocation" in selected || selected.owner === "extension")
+    && ("invocation" in selected || selectedExtension)
     ? selected
     : undefined;
   const winner = selectedMatch ?? commandPrecedence(name, catalog);
@@ -314,9 +317,9 @@ export function nativeCommandInput(
       ...(args ? { args } : {}),
     };
   }
-  if (winner.owner === "extension" && winner.extension) {
+  if (extensionCommandBinding(winner) && winner.id) {
     return {
-      id: extensionCommandId(winner.extension),
+      id: winner.id,
       ...(args ? { args } : {}),
     };
   }
