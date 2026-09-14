@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { COMMANDCODE_CAPABILITIES } from "../src/runtime.ts";
 import { createCommandCodeTranslateState, translateCommandCodeRecord } from "../src/protocol.ts";
+import { COMMANDCODE_CAPABILITIES } from "../src/runtime.ts";
+import { COMMANDCODE_WORKER_SOURCE } from "../src/workerSource.ts";
 
 test("Command Code advertises only the native surfaces Polyth actually integrates", () => {
   assert.equal(COMMANDCODE_CAPABILITIES.streaming, true);
@@ -21,6 +22,19 @@ test("Command Code advertises only the native surfaces Polyth actually integrate
     discovery: "unsupported",
     invoke: "unsupported",
   });
+});
+
+test("Command Code headless launch stays explicit, exact-resume and fail-closed", () => {
+  assert.match(COMMANDCODE_WORKER_SOURCE, /"-p"/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /"--output-format", "json"/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /"--skip-onboarding"/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /"--no-auto-update"/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /"--tools-enable", "todo_write"/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /args\.push\("--resume", message\.nativeSessionId\)/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /"--permission-mode", permissionMode/);
+  assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /--yolo|--dangerously-skip-permissions/);
+  assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /--trust/);
+  assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /--continue/);
 });
 
 test("subagent capability is backed by native AgentEvent snapshots", () => {
