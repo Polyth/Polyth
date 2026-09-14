@@ -44,6 +44,8 @@ export const COMMANDCODE_CAPABILITIES: RuntimeCapabilities = {
   contextOccupancy: "unknown",
 };
 
+export type CommandCodePermissionMode = "auto-accept" | "dont-ask";
+
 type CommandCodeAcceptedMutation = {
   operationId: string;
   mutationKind: "turn-submit" | "turn-steer";
@@ -151,6 +153,7 @@ export function createCommandCodeRuntime(options: {
   bindingFile: string;
   bridgePath: string;
   models(): Promise<ModelDescriptor[]>;
+  permissionMode?(): Promise<CommandCodePermissionMode>;
 }): AgentRuntime {
   const { context, rpc, bindingFile, bridgePath } = options;
   const listeners = new Set<(sessionId: string, event: RuntimeEvent) => void>();
@@ -339,6 +342,12 @@ export function createCommandCodeRuntime(options: {
       if (request.attachments?.length) {
         return { kind: "rejected", code: "unsupported", message: "Command Code attachment translation is not enabled yet" };
       }
+      let permissionMode: CommandCodePermissionMode = "dont-ask";
+      try {
+        permissionMode = await options.permissionMode?.() ?? "dont-ask";
+      } catch {
+        permissionMode = "dont-ask";
+      }
       activeOperationId = operationId;
       activeSpawnConfirmed = false;
       activeFailure = "";
@@ -354,6 +363,7 @@ export function createCommandCodeRuntime(options: {
           bindingPath: bindingFile,
           bridgePath,
           title: state.title,
+          permissionMode,
           ...(state.nativeSessionId ? { nativeSessionId: state.nativeSessionId } : {}),
           ...(request.model ? { model: request.model.modelID } : {}),
           ...(request.model?.variant ? { effort: request.model.variant } : {}),
