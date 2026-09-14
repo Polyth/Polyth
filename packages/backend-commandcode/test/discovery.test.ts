@@ -75,6 +75,8 @@ test("Command Code compatibility checks the documented surfaces Polyth actually 
     .map((flag) => `  ${flag} <value>  documented option`)
     .join("\n");
   assert.deepEqual(inspectCommandCodeHelp(help), { compatible: true, missing: [] });
+  assert.ok(COMMANDCODE_REQUIRED_FLAGS.includes("--mod"));
+  assert.ok(COMMANDCODE_REQUIRED_FLAGS.includes("--skill"));
 });
 
 test("Command Code compatibility reports exact missing flags without semantic-version guessing", () => {
