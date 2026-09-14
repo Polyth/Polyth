@@ -77,6 +77,36 @@ const secrets = {
   },
 };
 
+const instruction = (revision: string): HarnessProvisioningPlan["items"][number] => ({
+  capability: {
+    id: "example.instructions",
+    kind: "instruction",
+    owner: "example",
+    scope: "session",
+    revision,
+    text: "Keep the session usable.",
+  },
+  mode: "prompt",
+  mutability: "immediate",
+});
+
+const readOnlyTool = (id: string, index: number): HarnessProvisioningPlan["items"][number] => ({
+  capability: {
+    id,
+    kind: "tool",
+    owner: "example",
+    scope: "session",
+    revision: `tool-${index}`,
+    name: `inspect_${index}`,
+    description: "Inspect without mutation",
+    inputSchema: { type: "object", properties: {} },
+    trust: "pure",
+    mutating: false,
+  },
+  mode: "mcp",
+  mutability: "immediate",
+});
+
 test("Command Code exposes only non-mutating package tools through native addTool", async () => {
   const storage = temporaryDirectory();
   const context = contextAt(storage);
@@ -109,6 +139,56 @@ test("Command Code exposes only non-mutating package tools through native addToo
   provisioner.release?.(context);
   assert.equal(commandCodeOverlays.peek(context, "commandcode"), undefined);
   assert.equal(existsSync(modPath), false);
+});
+
+test("tool bridge capacity overflow fails tools without dropping prompt projection", async () => {
+  const storage = temporaryDirectory();
+  const context = contextAt(storage);
+  const provisioner = createCommandCodeProvisioner();
+  const tools = Array.from({ length: 257 }, (_, index) => readOnlyTool(`example.tool-${index}`, index));
+  const overflowPlan: HarnessProvisioningPlan = {
+    harnessId: "commandcode",
+    desiredRevision: "overflow-r1",
+    items: [instruction("instructions-overflow"), ...tools],
+  };
+
+  const result = await provisioner.apply(context, overflowPlan, secrets);
+  const toolRecords = result.records.filter((row) => row.kind === "tool");
+  assert.equal(toolRecords.length, 257);
+  assert.ok(toolRecords.every((row) => row.status === "failed"));
+  assert.ok(toolRecords.every((row) => /at most 256 projected tools/.test(row.reason ?? "")));
+  assert.equal(result.records.find((row) => row.capabilityId === "example.instructions")?.status, "pending");
+
+  const overlay = commandCodeOverlays.peek(context, "commandcode")?.value;
+  assert.ok(overlay?.promptModFile);
+  assert.equal(overlay.toolModFile, undefined);
+  assert.deepEqual(overlay.toolCapabilityIds, []);
+  provisioner.release?.(context);
+});
+
+test("oversized tool capability id fails locally without dropping prompt projection", async () => {
+  const storage = temporaryDirectory();
+  const context = contextAt(storage);
+  const provisioner = createCommandCodeProvisioner();
+  const oversizedId = `example.${"x".repeat(505)}`;
+  assert.equal(oversizedId.length, 513);
+  const oversizedPlan: HarnessProvisioningPlan = {
+    harnessId: "commandcode",
+    desiredRevision: "oversized-id-r1",
+    items: [instruction("instructions-oversized"), readOnlyTool(oversizedId, 1)],
+  };
+
+  const result = await provisioner.apply(context, oversizedPlan, secrets);
+  const toolRecord = result.records.find((row) => row.capabilityId === oversizedId);
+  assert.equal(toolRecord?.status, "failed");
+  assert.match(toolRecord?.reason ?? "", /exceeds 512 characters/);
+  assert.equal(result.records.find((row) => row.capabilityId === "example.instructions")?.status, "pending");
+
+  const overlay = commandCodeOverlays.peek(context, "commandcode")?.value;
+  assert.ok(overlay?.promptModFile);
+  assert.equal(overlay.toolModFile, undefined);
+  assert.deepEqual(overlay.toolCapabilityIds, []);
+  provisioner.release?.(context);
 });
 
 test("Command Code advertises the scoped AgentTool grant seam but rejects mutating projection in apply", async () => {
