@@ -23,6 +23,13 @@ function fileLetter(file: GitFileEntry): { letter: string; cls: string } {
   return file.staged && file.status !== "conflicted" ? { ...hit, cls: "staged" } : hit;
 }
 
+function fileIdentity(path: string): { name: string; directory: string } {
+  const separator = path.lastIndexOf("/");
+  return separator < 0
+    ? { name: path, directory: "" }
+    : { name: path.slice(separator + 1), directory: path.slice(0, separator + 1) };
+}
+
 /** Compact Canvas summary of source control. Deliberately read-only: branch,
  *  sync state, and a bounded changed-file preview that links into the full
  *  Source control surface. No stage/revert/publish here — those stay in
@@ -75,17 +82,23 @@ export default function RecentChangesWidget({
         <div className="git-recent-list">
           {files.slice(0, PREVIEW).map((file) => {
             const { letter, cls } = fileLetter(file);
+            const identity = fileIdentity(file.path);
+            const title = file.origPath ? `${file.origPath} → ${file.path}` : file.path;
             return (
               <button
                 key={`${file.staged ? "s" : "u"}:${file.path}`}
                 type="button"
                 className="git-recent-file"
-                title={file.origPath ? `${file.origPath} → ${file.path}` : file.path}
+                title={title}
+                aria-label={`${file.status}: ${title}`}
                 onClick={() => openChanges(file.path)}
               >
                 <span className={`git-file-letter ${cls}`} aria-hidden="true">{letter}</span>
                 <span className="git-recent-path">
-                  {file.origPath ? <><span className="muted">{file.origPath} → </span>{file.path}</> : file.path}
+                  <span className="git-recent-name">{identity.name}</span>
+                  <span className="git-recent-directory">
+                    {file.origPath ? `${file.origPath} → ${file.path}` : identity.directory}
+                  </span>
                 </span>
               </button>
             );

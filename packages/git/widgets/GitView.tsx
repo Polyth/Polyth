@@ -39,6 +39,7 @@ import {
   Icon as UiIcon,
   IconButton,
   Menu,
+  MinusIcon,
   MoreIcon,
   type MenuEntry,
   PullIcon,
@@ -118,6 +119,13 @@ function fileLetter(file: GitFileEntry): { letter: string; cls: string; label: s
   return { letter: "M", cls: file.staged ? "staged" : "unstaged", label: tr("gitview.modified") };
 }
 
+function fileIdentity(path: string): { name: string; directory: string } {
+  const separator = path.lastIndexOf("/");
+  return separator < 0
+    ? { name: path, directory: "" }
+    : { name: path.slice(separator + 1), directory: path.slice(0, separator + 1) };
+}
+
 function GraphSvg({ row }: { row: GraphRow }) {
   const width = Math.max(row.width, 1) * LANE_W;
   const cx = row.lane * LANE_W + LANE_W / 2;
@@ -161,34 +169,57 @@ function GitFileRow({ file, selected, busy, stats, onOpen, onStage, onDiscard }:
   onDiscard?: () => void;
 }) {
   const { letter, cls, label } = fileLetter(file);
+  const identity = fileIdentity(file.path);
+  const title = file.origPath ? `${file.origPath} → ${file.path}` : file.path;
+  const discardLabel = tr("gitview.revertValue", { path: file.path });
+  const overflowEntries: MenuEntry[] = onDiscard && file.staged
+    ? [{
+        id: "discard",
+        label: discardLabel,
+        icon: UndoIcon,
+        danger: true,
+        disabled: busy,
+        onSelect: onDiscard,
+      }]
+    : [];
   return (
     <div className={`git-file-row ${selected ? "selected" : ""}`}>
-      {onDiscard && (
-        <IconButton
-          icon={UndoIcon}
-          size="sm"
-          title={tr("gitview.revert")}
-          label={tr("gitview.revertValue", { path: file.path })}
-          disabled={busy}
-          onClick={onDiscard}
-        />
-      )}
-      <button type="button" className="git-file-main" aria-current={selected ? "true" : undefined} onClick={onOpen}>
+      <button type="button" className="git-file-main" aria-current={selected ? "true" : undefined} onClick={onOpen} title={title}>
         <span className={`git-file-letter ${cls}`} title={label} aria-label={label}>{letter}</span>
-        <span className="git-file-path" title={file.origPath ? `${file.origPath} → ${file.path}` : file.path}>
-          {file.origPath ? <><span className="muted">{file.origPath} → </span>{file.path}</> : file.path}
+        <span className="git-file-identity">
+          <span className="git-file-name">{identity.name}</span>
+          <span className="git-file-directory">
+            {file.origPath ? `${file.origPath} → ${identity.directory}` : identity.directory}
+          </span>
         </span>
       </button>
       {stats && <FileLineStats stats={stats} />}
       <span className="git-file-actions">
         <IconButton
-          icon={file.staged ? UndoIcon : AddIcon}
+          icon={file.staged ? MinusIcon : StageIcon}
           size="sm"
           label={file.staged ? tr("gitview.unstageValue", { path: file.path }) : tr("gitview.stageValue", { path: file.path })}
           title={file.staged ? tr("gitview.unstage") : tr("gitview.stage")}
           disabled={busy}
           onClick={onStage}
         />
+        {onDiscard && !file.staged && (
+          <IconButton
+            icon={UndoIcon}
+            size="sm"
+            variant="ghost"
+            className="git-file-discard"
+            title={tr("gitview.revert")}
+            label={discardLabel}
+            disabled={busy}
+            onClick={onDiscard}
+          />
+        )}
+        {overflowEntries.length > 0 && (
+          <Menu label={tr("common.more")} align="end" entries={overflowEntries}>
+            {(trigger) => <IconButton {...trigger} icon={MoreIcon} size="sm" label={tr("common.more")} disabled={busy} />}
+          </Menu>
+        )}
       </span>
     </div>
   );
@@ -981,7 +1012,7 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
                   </Button>
                 ) : null}
                 {(status?.unstaged.length || status?.untracked.length) ? (
-                  <Button size="sm" iconStart={DeleteIcon} disabled={busy} onClick={() => setConfirmRequest({
+                  <Button size="sm" iconStart={UndoIcon} disabled={busy} onClick={() => setConfirmRequest({
                     title: tr("gitview.revertAllChangesQuestion"),
                     description: tr("pendingchangesbar.undoAllChangesDescription", {
                       count: (status?.unstaged.length ?? 0) + (status?.untracked.length ?? 0),
@@ -993,7 +1024,7 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
                   </Button>
                 ) : null}
                 {status && status.staged.length > 0 && (
-                  <IconButton icon={UndoIcon} size="sm" label={tr("gitview.unstageAll")} disabled={busy} onClick={() => void run(() => api.gitFolder(projectId, "", "unstage", sessionId ?? undefined))} />
+                  <IconButton icon={MinusIcon} size="sm" label={tr("gitview.unstageAll")} disabled={busy} onClick={() => void run(() => api.gitFolder(projectId, "", "unstage", sessionId ?? undefined))} />
                 )}
                 </div>
               </div>
@@ -1126,7 +1157,7 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
                     .finally(() => setGenerating(false));
                 }}>{tr("gitview.generate")}</Button>
                 <Button size="sm" variant="primary" busy={busy && !!commitMsg.trim()} disabled={!commitMsg.trim() || busy} onClick={() => void run(commitStaged)}>{tr("gitview.commit")}</Button>
-                <Button size="sm" iconStart={RefreshIcon} busy={busyRemote === "sync"} disabled={busy || busyRemote !== null} onClick={() => void runRemote("sync")}>{tr("gitview.syncRepository")}</Button>
+                <Button size="sm" iconStart={SyncIcon} busy={busyRemote === "sync"} disabled={busy || busyRemote !== null} onClick={() => void runRemote("sync")}>{tr("gitview.syncRepository")}</Button>
               </div>
             </section>
           )}
