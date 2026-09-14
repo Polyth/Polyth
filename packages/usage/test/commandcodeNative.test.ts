@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { QuotaRuntime } from "../src/opencodeAuth.ts";
 import { createCommandCodeProvider } from "../src/providers/commandcode.ts";
+import { listConfiguredQuotaProviders } from "../src/providers/index.ts";
 
 test("Command Code account quota integration fails closed without touching credentials or private APIs", async () => {
   let runtimeTouched = false;
@@ -20,4 +21,16 @@ test("Command Code account quota integration fails closed without touching crede
     /not exposed through a documented machine-readable surface/,
   );
   assert.equal(runtimeTouched, false);
+});
+
+test("quota registry cannot revive the legacy private Command Code billing adapter", () => {
+  const providers = listConfiguredQuotaProviders({
+    readAuth: () => ({ "command-code": { key: "do-not-use" } }),
+    env: { COMMAND_CODE_API_KEY: "do-not-use" },
+    homedir: "/nonexistent/polyth-commandcode-test",
+    platform: "linux",
+    readFile: () => "",
+    readKeychain: () => null,
+  });
+  assert.equal(providers.includes("command-code"), false);
 });
