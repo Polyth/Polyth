@@ -357,25 +357,9 @@ export function translateCommandCodeRecord(
     case "model_request_end": {
       state.model ??= modelRef(event.model);
       const tokens = usage(event.usage);
-      const nativeInput = inputUsage(event.usage);
-      if (!tokens) return [];
-      const out: RuntimeEvent[] = [];
-      if (nativeInput !== undefined) {
-        out.push({
-          // Per-request input usage is Command Code's provider-reported prompt
-          // occupancy for this inference. The model's context limit is not part
-          // of the documented headless model catalog, so do not invent one.
-          type: "context/updated",
-          source: "native",
-          updatedAt: Date.now(),
-          usedTokens: nativeInput,
-        });
-      }
-      if (state.model) {
-        state.usageFrames += 1;
-        out.push({ type: "usage/recorded", model: state.model, tokens });
-      }
-      return out;
+      if (!tokens || !state.model) return [];
+      state.usageFrames += 1;
+      return [{ type: "usage/recorded", model: state.model, tokens }];
     }
     case "run_error":
       state.runError = errorText(event.error) ?? stringValue(event.message)?.trim() ?? "Command Code run failed";

@@ -44,11 +44,10 @@ export const COMMANDCODE_CAPABILITIES: RuntimeCapabilities = {
     },
   },
   commands: { discovery: "unsupported", invoke: "unsupported" },
-  // model_request_end carries provider-reported input usage for every native
-  // inference. Command Code's documented headless model catalog does not expose
-  // a reliable per-model limit, so Polyth reports exact used tokens without
-  // inventing a denominator.
-  contextOccupancy: "native",
+  // model_request_end usage is per-inference token accounting, not a documented
+  // current-context occupancy snapshot. Keep occupancy unknown until Command Code
+  // exposes a stable machine-readable contract for it.
+  contextOccupancy: "unknown",
 };
 
 export type CommandCodePermissionMode = "auto-accept" | "dont-ask";

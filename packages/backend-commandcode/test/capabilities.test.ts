@@ -13,7 +13,7 @@ test("Command Code advertises only the native surfaces Polyth actually integrate
   assert.equal(COMMANDCODE_CAPABILITIES.subagents, true);
   assert.equal(COMMANDCODE_CAPABILITIES.mcp, true);
   assert.equal(COMMANDCODE_CAPABILITIES.questions, true);
-  assert.equal(COMMANDCODE_CAPABILITIES.contextOccupancy, "native");
+  assert.equal(COMMANDCODE_CAPABILITIES.contextOccupancy, "unknown");
 
   assert.equal(COMMANDCODE_CAPABILITIES.permissions, false);
   assert.equal(COMMANDCODE_CAPABILITIES.compaction, false);
@@ -51,11 +51,9 @@ test("Command Code worker emits terminal evidence only after admission or observ
   assert.match(COMMANDCODE_WORKER_SOURCE, /!turn\.runObserved && !durableAdmission/);
 });
 
-test("resuming Command Code never replays a stale adapter binding title into native state", () => {
-  assert.match(
-    COMMANDCODE_WORKER_SOURCE,
-    /POLYTH_COMMANDCODE_TITLE: message\.nativeSessionId \? "" : \(message\.title \|\| ""\)/,
-  );
+test("resuming Command Code receives the latest canonical Polyth title", () => {
+  assert.match(COMMANDCODE_WORKER_SOURCE, /POLYTH_COMMANDCODE_TITLE: message\.title \|\| ""/);
+  assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /POLYTH_COMMANDCODE_TITLE: message\.nativeSessionId \?/);
 });
 
 test("worker diagnostics are redacted before crossing the worker IPC boundary", () => {
@@ -180,7 +178,7 @@ test("subagent capability is backed by native AgentEvent snapshots", () => {
   );
 });
 
-test("model request usage also reports native context occupancy without inventing a limit", () => {
+test("model request usage is recorded without pretending it is context occupancy", () => {
   const state = createCommandCodeTranslateState("turn-context", {
     providerID: "anthropic",
     modelID: "anthropic/claude-sonnet-4-5",
@@ -193,12 +191,12 @@ test("model request usage also reports native context occupancy without inventin
       usage: { input_tokens: 82_000, output_tokens: 1_200 },
     },
   }, state);
-  const context = events.find((event) => event.type === "context/updated");
-  assert.equal(context?.type, "context/updated");
-  if (context?.type === "context/updated") {
-    assert.equal(context.source, "native");
-    assert.equal(context.usedTokens, 82_000);
-    assert.equal(context.limitTokens, undefined);
+  assert.equal(events.some((event) => event.type === "context/updated"), false);
+  const usage = events.find((event) => event.type === "usage/recorded");
+  assert.equal(usage?.type, "usage/recorded");
+  if (usage?.type === "usage/recorded") {
+    assert.equal(usage.tokens.input, 82_000);
+    assert.equal(usage.tokens.output, 1_200);
   }
 });
 
@@ -215,7 +213,7 @@ test("missing native input usage is not misreported as zero context occupancy", 
   assert.equal(events.some((event) => event.type === "usage/recorded"), true);
 });
 
-test("compaction events invalidate stale occupancy until the next native request", () => {
+test("compaction events report only unknown context state", () => {
   const state = createCommandCodeTranslateState("turn-compact");
   const started = translateCommandCodeRecord({ type: "event", event: { type: "compaction_start" } }, state);
   assert.equal(started[0]?.type, "context/updated");
