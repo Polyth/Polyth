@@ -315,6 +315,7 @@ const sessionLinks = (sessionId: string): Record<string, string> => {
     messages: `/api/agent/sessions/${id}/messages`,
     debug: `/api/agent/sessions/${id}/debug`,
     cancel: `/api/agent/sessions/${id}/cancel`,
+    compact: `/api/agent/sessions/${id}/compact`,
     archive: `/api/agent/sessions/${id}/archive`,
     unarchive: `/api/agent/sessions/${id}/unarchive`,
     fork: `/api/agent/sessions/${id}/fork`,
@@ -652,6 +653,13 @@ export function agentSessionRoutes(deps: AgentSessionRouteDeps): RouteHandler {
           : sessions.restore(sessionId));
         json(200, { session: await sessions.snapshot(sessionId), links: sessionLinks(sessionId) });
       }
+      return true;
+    }
+
+    if (suffix === "/compact" && method === "POST") {
+      if (!sessions.compact) return unsupported("session compaction is unavailable");
+      await sessions.compact(sessionId);
+      json(200, { ok: true, sessionId });
       return true;
     }
 

@@ -423,7 +423,7 @@ test("Codex separates lifetime token totals from current context occupancy", asy
 test("Codex maps native titles, delta usage, occupancy, attachments, compaction, steering, and rate reset", async () => {
     const f = fakeRpc();
     f.handle(async (method) => {
-        if (method === "thread/start") return { thread: { id: "native" } };
+        if (method === "thread/start") return { thread: { id: "native" }, model: "gpt-codex", modelProvider: "openai" };
         if (method === "thread/read") return { thread: { id: "native", name: "Read title" } };
         if (method === "turn/start") return { turn: { id: "turn-started" } };
         return {};
@@ -515,6 +515,17 @@ test("Codex maps native titles, delta usage, occupancy, attachments, compaction,
         expectedTurnId: "active",
         input: [{ type: "text", text: "redirect" }],
     });
+    const steerCalls = () => f.calls.filter((call) => call.method === "turn/steer").length;
+    assert.equal((await rt.steerOperation!(
+        "canonical",
+        "same model",
+        "steer-same-model",
+        { providerID: "openai", modelID: "gpt-codex" },
+    )).kind, "confirmed");
+    const admittedSteers = steerCalls();
+    assert.equal(await rt.steer!("canonical", "switch", { providerID: "openai", modelID: "other" }), false);
+    assert.equal((await rt.steerOperation!("canonical", "delegate", "steer-agent", undefined, "review")).kind, "rejected");
+    assert.equal(steerCalls(), admittedSteers, "incompatible steering selections queue without reaching Codex");
     await rt.compact!("canonical");
     assert.deepEqual(f.calls.findLast((call) => call.method === "thread/compact/start")?.params, { threadId: "native" });
     f.emit("item/completed", { threadId: "native", item: { type: "contextCompaction", id: "compact-1" } });

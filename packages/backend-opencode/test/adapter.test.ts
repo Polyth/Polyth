@@ -184,6 +184,7 @@ const startFake = async () => {
     priority: "high",
   }];
   let aborts = 0;
+  let commands = [{ name: "review", description: "Review changes" }];
 
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -198,9 +199,13 @@ const startFake = async () => {
         paths: {
           "/session/{sessionID}/prompt_async": { post: {} },
           "/session/{sessionID}/message": { post: {} },
+          "/command": { get: {} },
+          "/session/{sessionID}/command": { post: {} },
+          "/session/{sessionID}/summarize": { post: {} },
         },
       });
     }
+    if (req.method === "GET" && path === "/command") return json(200, commands);
     if (req.method === "GET" && path === "/provider") return json(200, providerBody);
     if (req.method === "GET" && path === "/agent") return json(200, agentsBody);
     if (req.method === "POST" && path === "/session") {
@@ -306,6 +311,9 @@ const startFake = async () => {
     setTodos(next: unknown[]) {
       todos = next;
     },
+    setCommands(next: typeof commands) {
+      commands = next;
+    },
   };
 };
 
@@ -357,8 +365,35 @@ test("models/agents flatten from verified /provider and /agent shapes", async ()
     const caps = await runtime.capabilities();
     assert.equal(caps.streaming, true);
     assert.equal(caps.questions, true);
+    assert.equal(caps.compaction, true);
+    assert.deepEqual(caps.commands, { discovery: "native", invoke: "raw-native-input" });
     assert.deepEqual(await runtime.sessions(), []);
     assert.deepEqual(await runtime.history("ses_fake_1"), []);
+  } finally {
+    await runtime.dispose();
+    fake.server.close();
+  }
+});
+
+test("catalog.updated refreshes native commands for mapped sessions", async () => {
+  const fake = await startFake();
+  const runtime = await createTestRuntime(fake.baseUrl);
+  try {
+    await runtime.ensureSession({
+      sessionId: "canonical",
+      projectId: "p",
+      cwd: "/tmp",
+      title: "Commands",
+    });
+    const events: RuntimeEvent[] = [];
+    runtime.onEvent((_sessionId, event) => events.push(event));
+    await waitUntil(() => fake.sseClients.length > 0);
+    fake.setCommands([{ name: "ship", description: "Ship changes" }]);
+    fake.replay({ id: "catalog-1", type: "catalog.updated", properties: {} });
+    await waitUntil(() => events.some((event) => event.type === "runtime/commands-changed"));
+    const changed = events.findLast((event) => event.type === "runtime/commands-changed");
+    assert.ok(changed?.type === "runtime/commands-changed");
+    assert.equal(changed.commands[0]?.id, "native:opencode:ship");
   } finally {
     await runtime.dispose();
     fake.server.close();

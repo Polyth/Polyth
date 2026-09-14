@@ -674,6 +674,7 @@ export const api = {
   runtimeFeatures: (id: string) =>
     jfetch<RuntimeFeaturesDto>(`/api/harnesses/sessions/${encodeURIComponent(id)}/features`),
   abort: (id: string) => jfetch<void>(`/api/sessions/${id}/abort`, { method: "POST" }),
+  compact: (id: string) => jfetch<{ ok: true }>(`/api/sessions/${id}/compact`, { method: "POST" }),
   /** Drop a pending rate-limit auto-resume; the session stays failed. */
   cancelResume: (id: string) =>
     jfetch<{ ok: true }>(`/api/sessions/${id}/resume/cancel`, { method: "POST" }),

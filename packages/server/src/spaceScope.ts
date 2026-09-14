@@ -155,6 +155,7 @@ function scopeSessions(
   assign("delete", bySession(base.delete));
   assign("debug", bySession(base.debug));
   assign("runtimeFeatures", bySession(base.runtimeFeatures));
+  assign("compact", bySession(base.compact));
   assign("replySecret", bySession(base.replySecret));
   assign("rename", bySession(base.rename));
   assign("organize", bySession(base.organize));

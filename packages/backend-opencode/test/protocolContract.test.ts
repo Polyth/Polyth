@@ -91,6 +91,15 @@ const dualProtocolDocument = {
   },
 };
 
+const legacyNativeDocument = {
+  paths: {
+    ...legacyDocument.paths,
+    "/command": { get: {} },
+    "/session/{sessionID}/command": { post: {} },
+    "/session/{sessionID}/summarize": { post: {} },
+  },
+};
+
 test("read-only negotiation selects one prompt endpoint and never falls through", async () => {
   let attempts = 0;
   const fake = transportDouble({
@@ -213,6 +222,96 @@ test("legacy mutation classification keeps 5xx unknown and validation rejected",
   assert.ok(fake.mutations.every((request) => request.replay.kind === "never"));
 });
 
+test("legacy native commands and compaction use negotiated OpenCode routes", async () => {
+  const fake = transportDouble({
+    query: (path) => path.startsWith("/doc?")
+      ? legacyNativeDocument
+      : [{ name: "review", description: "Review changes", hints: ["$ARGUMENTS"] }],
+    mutate: (request) => request.path.includes("/command?")
+      ? { kind: "response", status: 200, headers: {}, body: { info: { id: "msg-command" } } }
+      : { kind: "response", status: 200, headers: {}, body: true },
+  });
+  const adapter = createLegacyProtocolAdapter({ transport: fake.transport, endpoint: endpoint() });
+
+  const capabilities = await adapter.capabilities();
+  assert.equal(capabilities.commands, true);
+  assert.equal(capabilities.compaction, true);
+  assert.deepEqual(await adapter.commands?.(), [{
+    id: "native:opencode:review",
+    name: "review",
+    description: "Review changes",
+    argumentHint: "$ARGUMENTS",
+    owner: "native",
+    harnessId: "opencode",
+    invocation: "raw-native-input",
+    availability: "runtime",
+    acceptsArguments: true,
+  }]);
+
+  const command = await adapter.submit({
+    session: binding(),
+    text: "recovery context\n\n/review src\n\ncapability context",
+    command: {
+      id: "native:opencode:review",
+      owner: "native",
+      name: "review",
+      args: "src",
+    },
+    model: { providerID: "opencode", modelID: "big-pickle", variant: "high" },
+    agent: "build",
+  }, "operation-command");
+  assert.deepEqual(command, {
+    kind: "confirmed",
+    value: { admissionId: "msg-command" },
+  });
+  assert.deepEqual(fake.mutations[0], {
+    method: "POST",
+    path: "/session/session-a/command?directory=%2Fworkspace%2Fproject&workspace=worktree-a",
+    body: {
+      command: "review",
+      arguments: "recovery context\n\nsrc\n\ncapability context",
+      model: "opencode/big-pickle",
+      variant: "high",
+      agent: "build",
+    },
+    operationId: "operation-command",
+    deadlineMs: 10_000,
+    replay: { kind: "never" },
+  });
+
+  const compact = await adapter.compact?.(
+    binding(),
+    "operation-compact",
+    { providerID: "opencode", modelID: "big-pickle" },
+  );
+  assert.deepEqual(compact, { kind: "confirmed", value: {} });
+  assert.deepEqual(fake.mutations[1], {
+    method: "POST",
+    path: "/session/session-a/summarize?directory=%2Fworkspace%2Fproject&workspace=worktree-a",
+    body: { providerID: "opencode", modelID: "big-pickle" },
+    operationId: "operation-compact",
+    deadlineMs: 10_000,
+    replay: { kind: "never" },
+  });
+  assert.equal(fake.queries.filter((path) => path.startsWith("/doc?")).length, 1);
+});
+
+test("legacy native features require the documented HTTP methods", async () => {
+  const fake = transportDouble({
+    query: () => ({ paths: {
+      "/command": { post: {} },
+      "/session/{sessionID}/command": { get: {} },
+      "/session/{sessionID}/summarize": { get: {} },
+    } }),
+  });
+  const capabilities = await createLegacyProtocolAdapter({
+    transport: fake.transport,
+    endpoint: endpoint(),
+  }).capabilities();
+  assert.equal(capabilities.commands, false);
+  assert.equal(capabilities.compaction, false);
+});
+
 test("protocol probe cache is isolated by endpoint generation", async () => {
   const fake = transportDouble({ query: () => legacyDocument });
   await createProtocolAdapter({
@@ -311,4 +410,20 @@ test("V2 prompt admission uses the native session prompt contract", async () => 
     prompt: { text: "send through V2" },
     delivery: "queue",
   });
+});
+
+test("V2 keeps manual compaction and native command expansion capability-gated", async () => {
+  const fake = transportDouble({ query: () => ({}) });
+  const adapter = createV2ProtocolAdapter({ transport: fake.transport, endpoint: endpoint() });
+  const capabilities = await adapter.capabilities();
+  assert.notEqual(capabilities.commands, true);
+  assert.notEqual(capabilities.compaction, true);
+  assert.equal(adapter.commands, undefined);
+  assert.equal(adapter.compact, undefined);
+  assert.equal((await adapter.submit({
+    session: binding(),
+    text: "/review",
+    command: { id: "native:opencode:review", owner: "native", name: "review" },
+  }, "operation-command")).kind, "rejected");
+  assert.equal(fake.mutations.length, 0);
 });

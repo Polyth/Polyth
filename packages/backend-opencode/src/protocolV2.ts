@@ -812,6 +812,7 @@ export const createV2ProtocolAdapter = (
     async submit(input, operationId) {
       const mismatch = bindingError(input.session, options.endpoint);
       if (mismatch) return { kind: "rejected", code: "binding-mismatch", message: mismatch };
+      if (input.command) return unsupported("native command invocation");
       const bound = requiredBindingId<{ admissionId?: string }>(
         input.session,
         "prompt submission",

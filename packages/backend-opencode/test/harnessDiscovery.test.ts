@@ -100,6 +100,7 @@ test("OpenCode catalog discovery falls back to its isolated local metadata autho
     storageDir: "/host/storage",
   } as unknown as ServerPackageHost);
 
+  assert.equal(harness!.staticFeatures?.compaction, false);
   assert.deepEqual(await harness!.inspectConfiguration!(context), { pendingChanges: 3, restartRequired: true });
   queueStatus = { pendingChanges: 0, restartRequired: false };
   assert.deepEqual(await harness!.inspectConfiguration!(context), { pendingChanges: 0, restartRequired: false });

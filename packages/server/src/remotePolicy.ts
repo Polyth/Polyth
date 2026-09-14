@@ -144,6 +144,7 @@ export const CORE_REMOTE_ACCESS: RemoteAccessPolicy = {
     { methods: ["PATCH"], path: "/api/sessions/:id/queue/:itemId", capability: REMOTE_CAPABILITY.coreSessionsControl, mutation: true },
     { methods: ["DELETE"], path: "/api/sessions/:id/queue/:itemId", capability: REMOTE_CAPABILITY.coreSessionsControl, mutation: true },
     { methods: ["POST"], path: "/api/sessions/:id/abort", capability: REMOTE_CAPABILITY.coreSessionsControl, mutation: true },
+    { methods: ["POST"], path: "/api/sessions/:id/compact", capability: REMOTE_CAPABILITY.coreSessionsControl, mutation: true },
     { methods: ["POST"], path: "/api/sessions/:id/archive", capability: REMOTE_CAPABILITY.coreSessionsControl, mutation: true },
     { methods: ["POST"], path: "/api/sessions/:id/restore", capability: REMOTE_CAPABILITY.coreSessionsControl, mutation: true },
     { methods: ["POST"], path: "/api/sessions/:id/resume/cancel", capability: REMOTE_CAPABILITY.coreSessionsControl, mutation: true },

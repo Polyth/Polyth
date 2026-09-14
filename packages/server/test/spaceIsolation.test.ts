@@ -311,6 +311,7 @@ test("the HTTP gateway scopes by the active Space and refuses an unauthorized sw
 
     // A real session id from the other Space is a 404 over HTTP too.
     assert.equal((await fetch(`${base}/api/sessions/${inWork.sessionId}`)).status, 404);
+    assert.equal((await fetch(`${base}/api/sessions/${inWork.sessionId}/compact`, { method: "POST" })).status, 404);
     assert.equal(
       (await fetch(`${base}/api/sessions/${inHome.sessionId}`, {
         headers: { "x-polyth-space": h.work.spaceId },

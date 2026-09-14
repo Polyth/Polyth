@@ -721,6 +721,13 @@ async function dispatchHttp(
         await (m[2] === "abort" ? space().sessions.abort(m[1]!) : m[2] === "archive" ? space().sessions.archive(m[1]!) : space().sessions.restore(m[1]!));
         return json(res, 200, { ok: true });
       }
+      m = path.match(/^\/api\/sessions\/([^/]+)\/compact$/);
+      if (m && method === "POST") {
+        const compact = space().sessions.compact;
+        if (!compact) throw Object.assign(new Error("session compaction unavailable"), { code: "unsupported" });
+        await compact(m[1]!);
+        return json(res, 200, { ok: true });
+      }
       m = path.match(/^\/api\/sessions\/([^/]+)\/resume\/(cancel|now)$/);
       if (m && method === "POST") {
         if (m[2] === "cancel") {

@@ -8,7 +8,9 @@
 // be primary views, now docked/expanded/full-screen beside a still-mounted
 // Chat. The reduced FilesPanel/ChangesPanel duplicates are gone — surface
 // switching changes presentation, never implementation identity.
-import { useActiveModel, useStore } from "../store.ts";
+import { useState } from "react";
+import { api } from "@polyth/session/web-api";
+import { getState, setUiError, useActiveModel, useStore } from "../store.ts";
 import { fmtCost, fmtTokens } from "../format.ts";
 import type { SessionEvent } from "@polyth/contracts";
 import { resolveModelPresentation } from "@polyth/contracts/model-presentation";
@@ -59,6 +61,7 @@ export function ProjectContextList({ entries }: { entries: readonly ProjectConte
 }
 
 function ContextView() {
+  const [compacting, setCompacting] = useState<Set<string>>(() => new Set());
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const projectId = useStore((s) => s.activeProjectId);
   const packageContext = useProjectContextSnapshots(projectId);
@@ -137,6 +140,33 @@ function ContextView() {
         <span style={{ width: `${gauge.known ? gauge.percent : 0}%` }} />
       </div>
       {contextNotice && <div className="muted context-estimate-note">{contextNotice}</div>}
+      {runtimeFeatures?.capabilities.compaction && (
+        <Button
+          type="button"
+          size="sm"
+          title={tr("commands.compactDescription")}
+          aria-label={tr("commands.compactDescription")}
+          disabled={compacting.has(session.id) || session.status !== "idle"}
+          aria-busy={compacting.has(session.id)}
+          onClick={() => {
+            const sessionId = session.id;
+            setCompacting((current) => new Set(current).add(sessionId));
+            void api.compact(sessionId)
+              .catch((error: unknown) => {
+                if (getState().activeSessionId === sessionId) {
+                  setUiError(error instanceof Error ? error.message : String(error));
+                }
+              })
+              .finally(() => setCompacting((current) => {
+                const next = new Set(current);
+                next.delete(sessionId);
+                return next;
+              }));
+          }}
+        >
+          {compacting.has(session.id) ? "/compact…" : "/compact"}
+        </Button>
+      )}
       <div className="stat-row">
         <span className="k">{tr("railsurfaces.cost")}</span>
         <span className="mono">{model.totals.cost > 0 ? fmtCost(model.totals.cost) : "—"}</span>

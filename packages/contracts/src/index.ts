@@ -1627,6 +1627,8 @@ export interface SessionService {
    * It projects the existing durable operation/queue authorities. */
   clientMutationStatus?(sessionId: string, clientOperationId: string): Promise<ClientMutationStatusDto>;
   abort(sessionId: string): Promise<void>;
+  /** Request native context compaction when the active runtime supports it. */
+  compact?(sessionId: string): Promise<void>;
   /** Drop a pending rate-limit auto-resume (projection.resume). No-op when
    *  nothing is scheduled. */
   cancelResume?(sessionId: string): Promise<void>;
@@ -1912,6 +1914,7 @@ export type RuntimeMutationKind =
   | "turn-submit"
   | "turn-steer"
   | "turn-abort"
+  | "session-compact"
   | "session-delete"
   | "permission-reply"
   | "question-reply"
@@ -1948,6 +1951,7 @@ export interface PersistedRuntimeBinding {
 export interface RuntimeTurnBinding {
   session: RuntimeSessionBinding;
   text: string;
+  command?: { id: string; owner: "native"; name: string; args?: string };
   attachments?: AttachmentRef[];
   model?: ModelRef;
   agent?: string;
@@ -2060,6 +2064,9 @@ export interface ProtocolCapabilities {
   eventReplay: "none" | "contract-tested";
   pendingSnapshot: "none" | "partial" | "complete-causal";
   idempotentMutations: ReadonlySet<RuntimeMutationKind>;
+  /** Read-only negotiated native surfaces for this protocol generation. */
+  commands?: boolean;
+  compaction?: boolean;
 }
 
 /** One provider the backend can list — id + display name only. Used for the
@@ -2466,6 +2473,12 @@ export interface ProtocolAdapter {
     requestId: string,
     answers: JsonObject,
     operationId: string,
+  ): Promise<MutationOutcome<Record<string, never>>>;
+  commands?(): Promise<RuntimeCommandDescriptor[]>;
+  compact?(
+    input: RuntimeSessionBinding,
+    operationId: string,
+    model?: ModelRef,
   ): Promise<MutationOutcome<Record<string, never>>>;
   reconcile(input: RuntimeReconciliationBinding, after?: string): Promise<RuntimeSnapshot>;
 }
@@ -3492,10 +3505,11 @@ export interface AgentRuntime {
   /** Native slash-command catalog for this session, when discovery is supported. */
   commands?(sessionId: string): Promise<RuntimeCommandDescriptor[]>;
   /** Request context compaction when the runtime exposes a real API. */
-  compact?(sessionId: string): Promise<void>;
+  compact?(sessionId: string, model?: ModelRef): Promise<void>;
   compactOperation?(
     sessionId: string,
     operationId: string,
+    model?: ModelRef,
   ): Promise<MutationOutcome<Record<string, never>>>;
   dispose(): Promise<void>;
 }
@@ -4143,6 +4157,8 @@ export interface QueueItemDto {
   createdAt: number;
   /** Preserved across queueing so deferred sends keep their attachments. */
   attachments?: AttachmentRef[];
+  /** Preserved so a deferred native command cannot degrade into prompt text. */
+  command?: { id: string; args?: string };
   /** A fenced prior-epoch admission is a draft for explicit review, never dispatchable. */
   heldForReview?: boolean;
 }

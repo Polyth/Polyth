@@ -1073,11 +1073,11 @@ export async function boot(opts: BootOptions = {}) {
         ? { completeSmallModel: (request: Parameters<NonNullable<AgentRuntime["completeSmallModel"]>>[0]) =>
             useRuntime(() => inner.completeSmallModel!(request)) }
         : {}),
-      steer: (sessionId, text) =>
-        useRuntime(() => inner.steer?.(sessionId, text) ?? Promise.resolve(false)),
-      steerOperation: (sessionId, text, operationId) =>
+      steer: (sessionId, text, model, agent) =>
+        useRuntime(() => inner.steer?.(sessionId, text, model, agent) ?? Promise.resolve(false)),
+      steerOperation: (sessionId, text, operationId, model, agent) =>
         useRuntime(() => inner.steerOperation
-          ? inner.steerOperation(sessionId, text, operationId)
+          ? inner.steerOperation(sessionId, text, operationId, model, agent)
           : Promise.resolve({
               kind: "unknown",
               operationId,
@@ -1091,6 +1091,19 @@ export async function boot(opts: BootOptions = {}) {
               kind: "unknown",
               operationId,
               message: "runtime lacks operation-aware abort",
+            })),
+      commands: (sessionId) => useRuntime(() => inner.commands?.(sessionId) ?? Promise.resolve([])),
+      compact: (sessionId, model) => useRuntime(async () => {
+        if (!inner.compact) throw Object.assign(new Error("runtime does not support compaction"), { code: "unsupported" });
+        await inner.compact(sessionId, model);
+      }),
+      compactOperation: (sessionId, operationId, model) =>
+        useRuntime(() => inner.compactOperation
+          ? inner.compactOperation(sessionId, operationId, model)
+          : Promise.resolve({
+              kind: "rejected",
+              code: "capability-unsupported",
+              message: "runtime lacks operation-aware compaction",
             })),
       replyPermission: (sessionId, requestId, reply) =>
         useRuntime(() => inner.replyPermission(sessionId, requestId, reply)),
