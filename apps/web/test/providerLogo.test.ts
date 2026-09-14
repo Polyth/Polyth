@@ -69,7 +69,7 @@ async function render(props: ProviderLogoProps): Promise<string> {
   return renderToStaticMarkup(createElement(ProviderLogo, props));
 }
 
-test("known providers render decorative monochrome SVG marks", async () => {
+test("known providers render decorative SVG marks", async () => {
   const providers = [
     "claude",
     "anthropic",
@@ -107,9 +107,11 @@ test("known providers render decorative monochrome SVG marks", async () => {
     assert.doesNotMatch(html, /role="img"/, `${providerID} does not duplicate the adjacent name`);
     assert.doesNotMatch(html, /aria-label=/, `${providerID} does not duplicate the adjacent name`);
     assert.match(html, /<svg\b/, `${providerID} renders an SVG`);
-    assert.match(html, /(?:fill|stroke)="currentColor"/, `${providerID} inherits the theme color`);
-    assert.doesNotMatch(html, /#[\da-f]{3,8}\b/i, `${providerID} does not render a palette color`);
     assert.doesNotMatch(html, /data-provider="other"/, `${providerID} resolves to a known mark`);
+    if (providerID !== "command-code") {
+      assert.match(html, /(?:fill|stroke)="currentColor"/, `${providerID} inherits the theme color`);
+      assert.doesNotMatch(html, /#[\da-f]{3,8}\b/i, `${providerID} does not render a palette color`);
+    }
   }
 
   const namedAlias = await render({ providerID: "private-endpoint", providerName: "Claude Enterprise" });
@@ -119,20 +121,46 @@ test("known providers render decorative monochrome SVG marks", async () => {
   assert.match(kimiEndpoint, /data-provider="zai"/);
 });
 
+test("Command Code uses the official fixed black and white logomark instead of Cohere", async () => {
+  const html = await render({ providerID: "command-code", providerName: "Command Code" });
+  assert.match(html, /data-provider="commandcode"/);
+  assert.match(html, /viewBox="0 0 137 137"/);
+  assert.match(html, /fill="#000"/i);
+  assert.match(html, /fill="#fff"/i);
+  assert.match(html, /m0 66\.7959c0-31\.4879/);
+  assert.match(html, /m93\.6604 26\.1784/);
+  assert.doesNotMatch(html, /M8\.128 14\.099/);
+
+  const harnessModel = await render({
+    providerID: "moonshotai",
+    providerName: "Moonshot AI",
+    harnessId: "commandcode",
+  });
+  assert.match(harnessModel, /data-provider="commandcode"/);
+  assert.match(harnessModel, /fill="#000"/i);
+  assert.match(harnessModel, /fill="#fff"/i);
+});
+
 test("registered harness identities reuse the shared provider marks", async () => {
   const harnesses = [
     { providerID: "claude", providerName: "Claude Code", provider: "claude" },
     { providerID: "opencode", providerName: "OpenCode", provider: "opencode" },
     { providerID: "codex", providerName: "Codex", provider: "openai" },
+    { providerID: "commandcode", providerName: "Command Code", provider: "commandcode" },
     { providerID: "cursor", providerName: "Cursor", provider: "cursor" },
   ];
   for (const { provider, ...props } of harnesses) {
     const html = await render(props);
     assert.match(html, new RegExp(`data-provider="${provider}"`));
     assert.match(html, /<svg\b/);
-    assert.match(html, /(?:fill|stroke)="currentColor"/);
-    assert.doesNotMatch(html, /#[\da-f]{3,8}\b/i);
     assert.match(html, /aria-hidden="true"/);
+    if (provider === "commandcode") {
+      assert.match(html, /fill="#000"/i);
+      assert.match(html, /fill="#fff"/i);
+    } else {
+      assert.match(html, /(?:fill|stroke)="currentColor"/);
+      assert.doesNotMatch(html, /#[\da-f]{3,8}\b/i);
+    }
   }
   const cursorMark = await render({ providerID: "cursor", providerName: "Cursor" });
   assert.match(cursorMark, /M11\.503\.131/);
@@ -224,7 +252,7 @@ test("provider logos own compact and regular bounding boxes", async () => {
   assert.match(css, /\.provider-logo--regular\s*\{[^}]*width:\s*var\(--icon-md\);[^}]*height:\s*var\(--icon-md\)/s);
 });
 
-test("provider surfaces use ProviderLogo without brand palette rules", () => {
+test("provider surfaces use ProviderLogo without accidental brand palette rules", () => {
   const logo = source("../../../packages/models/widgets/ProviderLogo.tsx");
   const css = readWebStylesSync();
   const models = source("../../../packages/models/widgets/ModelsPage.tsx");
@@ -236,10 +264,11 @@ test("provider surfaces use ProviderLogo without brand palette rules", () => {
   const fusion = source("../../../packages/fusion/widgets/FusionView.tsx");
   const harnesses = source("../../../packages/harness-runtime/widgets/runtime.tsx");
 
-  assert.doesNotMatch(logo, /#[\da-f]{3,8}\b/i);
+  const logoHexes = [...new Set([...logo.matchAll(/#[\da-f]{3,8}\b/gi)].map((match) => match[0]!.toLowerCase()))].sort();
+  assert.deepEqual(logoHexes, ["#000", "#fff"], "only the official Command Code black/white mark uses fixed brand colors");
   assert.doesNotMatch(
     css,
-    /\.provider-(?:anthropic|claude|openai|google|gemini|github|copilot)\s*[,{}]/,
+    /\.provider-(?:anthropic|claude|openai|google|gemini|github|copilot|commandcode)\s*[,{}]/,
   );
   for (const brandHex of ["#d97757", "#101820", "#eaf1ff", "#315acb", "#24292f"]) {
     assert.ok(!css.toLowerCase().includes(brandHex), `${brandHex} brand rule is removed`);
