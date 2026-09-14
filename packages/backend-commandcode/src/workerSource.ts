@@ -207,7 +207,10 @@ const startTurn = async (message) => {
   const env = {
     ...process.env,
     POLYTH_COMMANDCODE_BINDING_FILE: message.bindingPath,
-    POLYTH_COMMANDCODE_TITLE: message.title || "",
+    // Canonical Polyth title remains product authority. Set a native name only
+    // while the Command Code session is first being created; replaying the
+    // adapter binding title on --resume could overwrite a newer user rename.
+    POLYTH_COMMANDCODE_TITLE: message.nativeSessionId ? "" : (message.title || ""),
     POLYTH_COMMANDCODE_OPERATION_ID: message.operationId,
     POLYTH_COMMANDCODE_CONTROL_FILE: controlPath,
     POLYTH_COMMANDCODE_CONTROL_TOKEN: controlToken,
