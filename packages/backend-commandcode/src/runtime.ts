@@ -191,7 +191,6 @@ export function createCommandCodeRuntime(options: {
   let nativeSessionId = "";
   let createOperationId = "";
   let activeOperationId = "";
-  let activeSpawnConfirmed = false;
   let activeFailure = "";
   let abortRequested = false;
   let translateState: ReturnType<typeof createCommandCodeTranslateState> | undefined;
@@ -235,7 +234,6 @@ export function createCommandCodeRuntime(options: {
 
   const clearActiveTurn = () => {
     activeOperationId = "";
-    activeSpawnConfirmed = false;
     activeFailure = "";
     abortRequested = false;
     translateState = undefined;
@@ -243,10 +241,6 @@ export function createCommandCodeRuntime(options: {
   };
 
   const handleWorkerEvent = (message: CommandCodeWorkerEvent) => {
-    if (message.type === "turn-spawned" && message.operationId === activeOperationId) {
-      activeSpawnConfirmed = true;
-      return;
-    }
     if ((message.type === "protocol-error" || message.type === "process-error") && message.operationId === activeOperationId) {
       activeFailure = safeError(message.error);
       return;
@@ -378,7 +372,6 @@ export function createCommandCodeRuntime(options: {
         permissionMode = "dont-ask";
       }
       activeOperationId = operationId;
-      activeSpawnConfirmed = false;
       activeFailure = "";
       abortRequested = false;
       lastResult = undefined;
@@ -403,17 +396,22 @@ export function createCommandCodeRuntime(options: {
         return { kind: "confirmed", value: { admissionId: nativeSessionId } };
       } catch (error) {
         const code = (error as { code?: string }).code;
-        if ((code === "busy" || code === "unsupported") && !activeSpawnConfirmed && activeOperationId === operationId) {
-          clearActiveTurn();
-          return { kind: "rejected", code, message: safeError(error instanceof Error ? error.message : error) };
-        }
-        // Once the worker has spawned Command Code, a lost admission response
-        // is not permission to clear the operation or submit another turn. The
-        // bridge may already have released native inference after durably
-        // recording this operation id. Keep the execution fenced until exact
-        // terminal evidence or release/reconciliation resolves it.
         const durable = await readBinding(bindingFile).catch(() => undefined);
         if (durable) rememberBindingAccepted(durable);
+        if (
+          (code === "runtime-rejected" || code === "busy" || code === "unsupported")
+          && !hasBindingReceipt(durable, operationId, "turn-submit")
+        ) {
+          if (activeOperationId === operationId) clearActiveTurn();
+          return {
+            kind: "rejected",
+            code,
+            message: safeError(error instanceof Error ? error.message : error),
+          };
+        }
+        // Any exact turn receipt means the provider crossed our Mod admission
+        // barrier. Lost RPC acknowledgement after that point is never replayed
+        // or silently downgraded to a rejection.
         return { kind: "unknown", operationId, message: safeError(error instanceof Error ? error.message : error) };
       }
     },
