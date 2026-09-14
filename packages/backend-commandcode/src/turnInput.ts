@@ -15,8 +15,9 @@ const invalidPath = (path: string): boolean =>
 
 /**
  * Resolve a client-neutral project-relative attachment path without ever
- * returning an absolute host path to the prompt. Command Code applies its own
- * workspace guard again when `read_file` follows the reference.
+ * returning an absolute host path to the prompt. The provider-bound instruction
+ * tells Command Code to resolve it against its own current workspace before it
+ * calls read_file, whose native contract expects an absolute in-workspace path.
  */
 export function commandCodeProjectPath(cwd: string, attachment: AttachmentRef): string | undefined {
   const raw = attachment.path?.trim();
@@ -29,21 +30,24 @@ export function commandCodeProjectPath(cwd: string, attachment: AttachmentRef): 
     return undefined;
   }
   if (invalidPath(projectRelative)) return undefined;
-  // Command Code prompt/file tools accept forward-slash project paths on all
-  // supported platforms; never expose a host absolute path.
   return projectRelative.replace(/\\/g, "/");
 }
 
+const absoluteReadInstruction = (path: string): string =>
+  `Resolve project-relative path ${JSON.stringify(path)} against the current workspace root, then pass the resulting absolute in-workspace path to native read_file`;
+
 const attachmentInstruction = (attachment: AttachmentRef, path: string): string => {
+  const read = absoluteReadInstruction(path);
   if (attachment.kind === "range" && attachment.range) {
     const from = Math.max(1, Math.trunc(attachment.range[0]));
     const to = Math.max(from, Math.trunc(attachment.range[1]));
-    return `- Use the native read_file tool on project file ${JSON.stringify(path)}, focusing on lines ${from}-${to}.`;
+    const limit = to - from + 1;
+    return `- ${read} with offset=${from} and limit=${limit}.`;
   }
   if (attachment.mime === "application/pdf" || path.toLowerCase().endsWith(".pdf")) {
-    return `- Use the native read_file tool on project document ${JSON.stringify(path)}; preserve its extracted document structure.`;
+    return `- ${read}; use Command Code's document extraction and preserve the extracted document structure.`;
   }
-  return `- Use the native read_file tool on project file ${JSON.stringify(path)} when needed.`;
+  return `- ${read} when needed.`;
 };
 
 export type PreparedCommandCodeTurn =
@@ -51,9 +55,10 @@ export type PreparedCommandCodeTurn =
   | { ok: false; code: "unsupported" | "invalid-attachment"; message: string };
 
 /**
- * Translate Polyth project-file references into Command Code's documented
- * native file-tool workflow. The visible canonical user message stays clean:
- * these instructions exist only in the provider-bound request.
+ * Translate Polyth project-file references into a provider-only read_file
+ * workflow. This is emulated attachment delivery: Command Code's file tool is
+ * native, but Polyth projects the reference as instructions rather than passing
+ * a native attachment object. The visible canonical user message stays clean.
  */
 export function prepareCommandCodeTurnInput(
   cwd: string,
@@ -106,8 +111,8 @@ export function prepareCommandCodeTurnInput(
     request: {
       ...request,
       text: providerText,
-      // References are now represented in Command Code's native read_file
-      // workflow. Do not let the inner runtime reject or double-deliver them.
+      // References are now represented by provider-only read_file instructions.
+      // Do not let the inner runtime reject or double-deliver them.
       attachments: [],
     },
   };
@@ -118,10 +123,10 @@ export const commandCodeInputCapabilities = (base: RuntimeCapabilities): Runtime
   attachments: {
     modalities: {
       ...base.attachments?.modalities,
-      // A project-relative ref is handed to Command Code's own read_file tool;
-      // it performs the actual text/PDF/document decoding and workspace guard.
-      file: "native",
-      pdf: "native",
+      // Command Code's read_file implementation is native, but the attachment
+      // itself is projected into prompt instructions by this adapter.
+      file: "emulated",
+      pdf: "emulated",
     },
   },
 });
