@@ -161,6 +161,30 @@ async function issueContributionInvocation(
   return response.json() as Promise<ContributionInvocation>;
 }
 
+/** Closing a host surface or reaching its interactive timeout consumes the
+ * exact same one-shot server lease as a package completion. This prevents
+ * abandoned pickers from occupying the bounded lease store until TTL while
+ * adding no new sandbox-visible cancellation authority. */
+function consumeAbandonedInvocation(
+  runtime: LiveRuntime,
+  pending: PendingContribution,
+  reason: string,
+): void {
+  const completion: ContributionCompletion = {
+    invocationId: pending.invocation.invocationId,
+    lease: pending.invocation.lease,
+    ok: false,
+    error: { message: reason.slice(0, 500) },
+  };
+  void api.pluginsRpc(runtime.pluginId, "contribution.complete", completion, {
+    sessionId: pending.invocation.sessionId,
+    projectId: pending.invocation.projectId,
+  }).catch(() => {
+    // Disable/update may have revoked the package lease first. Either way the
+    // authority is gone; teardown must never be held open by cleanup I/O.
+  });
+}
+
 export async function invokeSandboxContribution(
   plugin: InstalledPluginDto,
   request: HostContributionInvocationRequest,
@@ -247,7 +271,10 @@ ${source}
       return new Promise<ContributionResult | undefined>((resolve, reject) => {
         const interactiveMs = Math.max(1_000, invocation.expiresAt - Date.now());
         const timer = setTimeout(() => {
+          const pending = runtime.pendingContributions.get(invocation.invocationId);
+          if (!pending) return;
           runtime.pendingContributions.delete(invocation.invocationId);
+          consumeAbandonedInvocation(runtime, pending, "extension contribution timed out");
           reject(new Error("extension contribution timed out"));
         }, interactiveMs);
         runtime.pendingContributions.set(invocation.invocationId, { invocation, resolve, reject, timer });
@@ -524,6 +551,7 @@ function tearDown(runtime: LiveRuntime): void {
   }
   for (const pending of runtime.pendingContributions.values()) {
     clearTimeout(pending.timer);
+    consumeAbandonedInvocation(runtime, pending, "extension runtime was disposed");
     pending.reject(new Error("extension runtime was disposed"));
   }
   runtime.pendingContributions.clear();
