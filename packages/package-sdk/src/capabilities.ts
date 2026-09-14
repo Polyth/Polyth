@@ -40,13 +40,20 @@ export interface DeclaredCapability {
 }
 
 const missingStrings = (current: readonly string[] | undefined, next: readonly string[] | undefined): string[] => {
-  if (!next?.length) return [];
-  if (!current) return [];
+  if (!next?.length || !current) return [];
   const allowed = new Set(current);
   return next.filter((value) => !allowed.has(value));
 };
 
-/** Capabilities in `next` that are not covered by `current`, including scope expansion. */
+const droppedStringBound = (
+  current: readonly string[] | undefined,
+  next: readonly string[] | undefined,
+): boolean => Boolean(current?.length && !next?.length);
+
+/** Capabilities in `next` that are not covered by `current`, including scope
+ * expansion and removal of one field from an otherwise still-constrained
+ * declaration. Constraint fields are conjunctive: omitting a previously
+ * present field means that dimension became unconstrained. */
 export function expandedCapabilities(
   current: readonly DeclaredCapability[],
   next: readonly DeclaredCapability[],
@@ -66,6 +73,19 @@ export function expandedCapabilities(
     const requested = item.constraints;
     if (!currentConstraints) continue;
     if (!requested) {
+      extra.push(item);
+      continue;
+    }
+
+    const removedBound = droppedStringBound(currentConstraints.origins, requested.origins)
+      || droppedStringBound(currentConstraints.methods, requested.methods)
+      || droppedStringBound(currentConstraints.modelClasses, requested.modelClasses)
+      || (typeof currentConstraints.maxOutputTokens === "number"
+        && typeof requested.maxOutputTokens !== "number");
+    if (removedBound) {
+      // The full requested declaration is the only truthful review payload for
+      // a transition to an unconstrained dimension; a delta cannot represent
+      // "remove this bound".
       extra.push(item);
       continue;
     }
