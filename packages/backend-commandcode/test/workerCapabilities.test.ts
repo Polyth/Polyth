@@ -29,7 +29,11 @@ test("scoped Polyth tool bearer stays only in worker memory", () => {
   assert.doesNotMatch(commandEnv, /toolBridge\.token|toolBridge\.url/);
 });
 
-test("direct tool relay uses the scoped capability id and canonical loopback route", () => {
+test("direct tool relay uses only explicitly projected capability ids", () => {
+  assert.match(COMMANDCODE_WORKER_SOURCE, /const rawCapabilityIds = Array\.isArray\(value\.capabilityIds\)/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /new Set\(capabilityIds\)\.size !== capabilityIds\.length/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /capabilityIds: new Set\(capabilityIds\)/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /!turn\.toolBridge\.capabilityIds\.has\(capabilityId\)/);
   assert.match(COMMANDCODE_WORKER_SOURCE, /JSON\.stringify\(\{ id: call\.capabilityId, arguments: call\.input \?\? \{\} \}\)/);
   assert.match(COMMANDCODE_WORKER_SOURCE, /method: "POST"/);
   assert.match(COMMANDCODE_WORKER_SOURCE, /AGENT_TOOLS_PATH = "\/internal\/agent-tools"/);
