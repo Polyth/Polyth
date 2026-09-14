@@ -95,18 +95,15 @@ const parseOutput = (turn, chunk) => {
 const controlDescriptor = async (turn) => {
   let value;
   try { value = JSON.parse(await readFile(turn.controlPath, "utf8")); }
-  catch { throw runtimeRejected("Command Code native steering bridge is unavailable"); }
+  catch { throw runtimeRejected("Command Code native control bridge is unavailable"); }
   const port = Number(value?.port);
   if (value?.version !== 1 || value?.host !== "127.0.0.1" || !Number.isInteger(port) || port < 1 || port > 65535) {
-    throw runtimeRejected("Command Code native steering bridge is invalid");
+    throw runtimeRejected("Command Code native control bridge is invalid");
   }
   return { port };
 };
 
-const deliverQueuedMessage = async (turn, content, deliverAs, operationId) => {
-  if (!operationId || !content.trim() || Buffer.byteLength(content, "utf8") > 48 * 1024) {
-    throw runtimeRejected("Command Code steering message is invalid");
-  }
+const deliverControl = async (turn, request, labels) => {
   const { port } = await controlDescriptor(turn);
   const id = randomUUID();
   await new Promise((resolve, reject) => {
@@ -123,53 +120,96 @@ const deliverQueuedMessage = async (turn, content, deliverAs, operationId) => {
       error ? reject(error) : resolve();
     };
     timer = setTimeout(() => finish(sent
-      ? outcomeUnknown("Command Code steering acknowledgement timed out")
-      : runtimeRejected("Command Code native steering bridge timed out")), 5_000);
+      ? outcomeUnknown(labels.ackTimeout)
+      : runtimeRejected(labels.connectTimeout)), 5_000);
     timer.unref?.();
     socket.once("connect", () => {
       sent = true;
       try {
-        socket.write(JSON.stringify({
-          id,
-          token: turn.controlToken,
-          type: "queue",
-          operationId,
-          content,
-          deliverAs,
-        }) + "\\n");
+        socket.write(JSON.stringify({ id, token: turn.controlToken, ...request }) + "\\n");
       } catch {
-        finish(outcomeUnknown("Command Code steering request write outcome is unknown"));
+        finish(outcomeUnknown(labels.writeUnknown));
       }
     });
     socket.on("data", (chunk) => {
       bytes = Buffer.concat([bytes, chunk]);
       if (bytes.length > MAX_CONTROL_LINE) {
-        finish(outcomeUnknown("Command Code native steering response is too large"));
+        finish(outcomeUnknown(labels.tooLarge));
         return;
       }
       const end = bytes.indexOf(10);
       if (end < 0) return;
       let value;
       try { value = JSON.parse(bytes.subarray(0, end).toString("utf8")); }
-      catch { finish(outcomeUnknown("Command Code native steering response is malformed")); return; }
+      catch { finish(outcomeUnknown(labels.malformed)); return; }
       if (value?.id !== id) {
-        finish(outcomeUnknown("Command Code native steering response id does not match"));
+        finish(outcomeUnknown(labels.idMismatch));
         return;
       }
       if (value?.ok !== true) {
-        finish(runtimeRejected("Command Code rejected the steering message"));
+        finish(runtimeRejected(typeof value?.error === "string" && value.error ? value.error : labels.rejected));
         return;
       }
       finish();
     });
     socket.once("error", () => finish(sent
-      ? outcomeUnknown("Command Code steering connection failed after submission")
-      : runtimeRejected("Command Code native steering bridge is unavailable")));
+      ? outcomeUnknown(labels.connectionUnknown)
+      : runtimeRejected(labels.unavailable)));
     socket.once("close", () => {
       if (!settled) finish(sent
-        ? outcomeUnknown("Command Code native steering bridge closed before acknowledgement")
-        : runtimeRejected("Command Code native steering bridge is unavailable"));
+        ? outcomeUnknown(labels.closedUnknown)
+        : runtimeRejected(labels.unavailable));
     });
+  });
+};
+
+const deliverQueuedMessage = async (turn, content, deliverAs, operationId) => {
+  if (!operationId || !content.trim() || Buffer.byteLength(content, "utf8") > 48 * 1024) {
+    throw runtimeRejected("Command Code steering message is invalid");
+  }
+  await deliverControl(turn, {
+    type: "queue",
+    operationId,
+    content,
+    deliverAs,
+  }, {
+    ackTimeout: "Command Code steering acknowledgement timed out",
+    connectTimeout: "Command Code native steering bridge timed out",
+    writeUnknown: "Command Code steering request write outcome is unknown",
+    tooLarge: "Command Code native steering response is too large",
+    malformed: "Command Code native steering response is malformed",
+    idMismatch: "Command Code native steering response id does not match",
+    rejected: "Command Code rejected the steering message",
+    connectionUnknown: "Command Code steering connection failed after submission",
+    unavailable: "Command Code native steering bridge is unavailable",
+    closedUnknown: "Command Code native steering bridge closed before acknowledgement",
+  });
+};
+
+const deliverQuestionAnswer = async (turn, requestId, answer, operationId) => {
+  if (!operationId || !requestId || !answer || typeof answer !== "object" || Array.isArray(answer)) {
+    throw runtimeRejected("Command Code question response is invalid");
+  }
+  const encoded = JSON.stringify(answer);
+  if (Buffer.byteLength(encoded, "utf8") > 48 * 1024) {
+    throw runtimeRejected("Command Code question response is too large");
+  }
+  await deliverControl(turn, {
+    type: "answer_question",
+    operationId,
+    requestId,
+    answer,
+  }, {
+    ackTimeout: "Command Code question acknowledgement timed out",
+    connectTimeout: "Command Code question bridge timed out",
+    writeUnknown: "Command Code question response write outcome is unknown",
+    tooLarge: "Command Code question acknowledgement is too large",
+    malformed: "Command Code question acknowledgement is malformed",
+    idMismatch: "Command Code question acknowledgement id does not match",
+    rejected: "Command Code rejected the question response",
+    connectionUnknown: "Command Code question connection failed after submission",
+    unavailable: "Command Code question bridge is unavailable",
+    closedUnknown: "Command Code question bridge closed before acknowledgement",
   });
 };
 
@@ -193,7 +233,7 @@ const startTurn = async (message) => {
     "--output-format", "json",
     "--skip-onboarding",
     "--no-auto-update",
-    "--tools-enable", "todo_write",
+    "--tools-enable", "todo_write,ask_user_question",
     "--mod", bridgePath,
   ];
   if (message.nativeSessionId) args.push("--resume", message.nativeSessionId);
@@ -289,6 +329,17 @@ const handle = async (message) => {
       const turn = active;
       if (!turn) throw runtimeRejected("Command Code has no active turn to steer");
       await deliverQueuedMessage(turn, String(message.text || ""), "steer", String(message.operationId || ""));
+      return response(id, true, {});
+    }
+    if (message.type === "answer_question") {
+      const turn = active;
+      if (!turn) throw runtimeRejected("Command Code has no active question to answer");
+      await deliverQuestionAnswer(
+        turn,
+        String(message.requestId || ""),
+        message.answer,
+        String(message.operationId || ""),
+      );
       return response(id, true, {});
     }
     if (message.type === "abort") {
