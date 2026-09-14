@@ -1,17 +1,14 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { InstalledPluginDto } from "@polyth/contracts";
-import {
-  parseContributionResult,
-  type ContributionInvocationKind,
-  type ContributionResult,
-  type ExternalResource,
-  type PackageJsonObject,
-  type StructuredContext,
+import type {
+  ContributionInvocationKind,
+  PackageJsonObject,
+  RemoteUiNode,
 } from "@polyth/package-sdk";
-import { attachUpload } from "../../attachments.ts";
 import { announce } from "../../components/a11y/announce.ts";
 import { Button, Notice, ResponsiveOverlay, Spinner } from "../../components/ui/index.ts";
 import { getState } from "../../store.ts";
+import { applyContributionResult } from "./contributionResults.ts";
 import { RemoteUiView } from "./RemoteUi.tsx";
 import {
   acquireSandboxRuntime,
@@ -39,7 +36,7 @@ const integer = (value: unknown): number | undefined => {
   return Number.isSafeInteger(number) && number > 0 ? number : undefined;
 };
 
-function invocationRequest(props: SandboxContributionActionProps): HostContributionInvocationRequest {
+export function contributionInvocationRequest(props: SandboxContributionActionProps): HostContributionInvocationRequest {
   const state = getState();
   const sessionId = text(props.context.sessionId) ?? state.activeSessionId ?? undefined;
   const projectId = text(props.context.projectId) ?? state.activeProjectId ?? undefined;
@@ -74,82 +71,6 @@ function roleAllowed(props: SandboxContributionActionProps): boolean {
   return props.roles.includes(explicit ?? fallback);
 }
 
-function safeFilename(value: string): string {
-  return value
-    .normalize("NFKD")
-    .replace(/[^A-Za-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 64) || "external-context";
-}
-
-function metadataBlock(metadata: unknown): string {
-  if (!metadata || typeof metadata !== "object") return "";
-  try {
-    const json = JSON.stringify(metadata, null, 2);
-    return json && json !== "{}" ? `\n\nMetadata\n\`\`\`json\n${json}\n\`\`\`` : "";
-  } catch {
-    return "";
-  }
-}
-
-function resourceDocument(resource: ExternalResource): string {
-  const lines = [
-    `# ${resource.title}`,
-    "",
-    `Provider: ${resource.provider}`,
-    `Resource: ${resource.resourceId}`,
-  ];
-  if (resource.subtitle) lines.push(`Subtitle: ${resource.subtitle}`);
-  if (resource.url) lines.push(`URL: ${resource.url}`);
-  if (resource.retrievedAt !== undefined) lines.push(`Retrieved: ${new Date(resource.retrievedAt).toISOString()}`);
-  if (resource.freshUntil !== undefined) lines.push(`Fresh until: ${new Date(resource.freshUntil).toISOString()}`);
-  if (resource.provenance?.source) lines.push(`Source: ${resource.provenance.source}`);
-  if (resource.provenance?.uri) lines.push(`Source URI: ${resource.provenance.uri}`);
-  if (resource.summary) lines.push("", "## Summary", "", resource.summary);
-  if (resource.text) lines.push("", "## Content", "", resource.text);
-  return `${lines.join("\n")}${metadataBlock(resource.metadata)}\n`;
-}
-
-function contextDocument(context: StructuredContext): string {
-  const lines = [
-    `# ${context.title}`,
-    "",
-    `Provider: ${context.provider}`,
-    `Source: ${context.sourceId}`,
-  ];
-  if (context.uri) lines.push(`URI: ${context.uri}`);
-  lines.push(`Retrieved: ${new Date(context.retrievedAt).toISOString()}`);
-  if (context.freshUntil !== undefined) lines.push(`Fresh until: ${new Date(context.freshUntil).toISOString()}`);
-  if (context.summary) lines.push("", "## Summary", "", context.summary);
-  lines.push("", "## Context", "", context.content);
-  return `${lines.join("\n")}${metadataBlock(context.metadata)}\n`;
-}
-
-async function attachResult(result: ContributionResult, sessionId?: string, projectId?: string): Promise<void> {
-  const parsed = parseContributionResult(result);
-  const items = [
-    ...(parsed.resources ?? []).map((resource) => ({
-      name: `${safeFilename(resource.title || resource.resourceId)}.md`,
-      body: resourceDocument(resource),
-    })),
-    ...(parsed.context ?? []).map((context) => ({
-      name: `${safeFilename(context.title || context.sourceId)}.md`,
-      body: contextDocument(context),
-    })),
-  ];
-  if (items.length && !projectId) throw new Error("Choose a project before attaching extension context.");
-  for (const item of items) {
-    const attached = await attachUpload(
-      projectId!,
-      sessionId,
-      new File([item.body], item.name, { type: "text/markdown" }),
-    );
-    if (!attached.ok) throw new Error(attached.reason);
-  }
-  const announcement = parsed.message ?? parsed.status?.label;
-  if (announcement) announce(announcement);
-}
-
 export default function SandboxContributionAction(props: SandboxContributionActionProps): ReactNode {
   const [open, setOpen] = useState(false);
   const [request, setRequest] = useState<HostContributionInvocationRequest | null>(null);
@@ -158,7 +79,7 @@ export default function SandboxContributionAction(props: SandboxContributionActi
 
   const activate = () => {
     try {
-      setRequest(invocationRequest(props));
+      setRequest(contributionInvocationRequest(props));
       setOpen(true);
     } catch (cause) {
       announce(cause instanceof Error ? cause.message : String(cause));
@@ -195,7 +116,7 @@ function ContributionOverlay(props: {
   request: HostContributionInvocationRequest;
   onClose: () => void;
 }) {
-  const [tree, setTree] = useState<import("@polyth/package-sdk").RemoteUiNode | null>(null);
+  const [tree, setTree] = useState<RemoteUiNode | null>(null);
   const [runtime, setRuntime] = useState<SandboxRuntime | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -220,9 +141,12 @@ function ContributionOverlay(props: {
         const result = await next.invokeContribution(props.request);
         if (!active) return;
         if (result) {
-          await attachResult(result, props.request.sessionId, props.request.projectId);
+          const applied = await applyContributionResult(result, {
+            sessionId: props.request.sessionId,
+            projectId: props.request.projectId,
+          });
           if (!active) return;
-          if (result.ui) setTree(parseContributionResult(result).ui ?? null);
+          if (applied.ui) setTree(applied.ui);
         }
         setBusy(false);
         props.onClose();
