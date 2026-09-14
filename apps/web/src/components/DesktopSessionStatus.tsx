@@ -15,6 +15,9 @@ import {
 } from "../reduce.ts";
 import { useUiSettings } from "../uiPrefs.ts";
 import ContextIndicator from "./ContextIndicator.tsx";
+import "./ConversationProgress.css";
+
+const TASK_MARK = { done: "✓", active: "●", failed: "×", pending: "○" } as const;
 
 /** The centered desktop session overview with a stable, readable title. */
 export default function DesktopSessionStatus() {
@@ -36,7 +39,9 @@ export default function DesktopSessionStatus() {
     session.id,
     firstUserTextCached(events[session.id]),
   ) : "";
-  const activeTask = session ? model.tasks?.items.find((task) => task.status === "active") : undefined;
+  const tasks = session ? model.tasks?.items ?? [] : [];
+  const completedTasks = tasks.filter((task) => task.status === "done").length;
+  const failedTasks = tasks.filter((task) => task.status === "failed").length;
   const prompt = lastUserTextCached(session ? events[session.id] : undefined);
   const activeModel = model.contextUsage?.model ?? model.turn?.model ?? session?.model;
   const descriptor = activeModel ? models.find((item) => item.providerID === activeModel.providerID && item.modelID === activeModel.modelID) : undefined;
@@ -77,8 +82,17 @@ export default function DesktopSessionStatus() {
             : "Model context metadata is unavailable.")}</p>
         </section>
         <section>
-          <h3>Active task</h3>
-          {activeTask ? <p>{activeTask.text}</p> : <p>No active task.</p>}
+          <h3>Tasks{tasks.length > 0 ? ` · ${completedTasks}/${tasks.length} complete${failedTasks > 0 ? ` · ${failedTasks} failed` : ""}` : ""}</h3>
+          {tasks.length > 0 ? (
+            <ul className="desktop-session-task-list">
+              {tasks.map((task) => (
+                <li key={task.id} className={task.status}>
+                  <span className="desktop-session-task-mark" aria-hidden="true">{TASK_MARK[task.status]}</span>
+                  <span>{task.text}</span>
+                </li>
+              ))}
+            </ul>
+          ) : <p>No active task plan.</p>}
         </section>
         {prompt && <section><h3>Current intent</h3><p>{prompt}</p></section>}
         <section>
