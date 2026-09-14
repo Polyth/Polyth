@@ -193,14 +193,17 @@ color: var(--accent);
 }
 .usage-quota-summary {
   flex: 1;
+  min-width: 0;
+  padding: var(--space-2);
+  container: usage-quota-summary / inline-size;
+}
+.usage-quota-summary-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: stretch;
   gap: var(--space-2);
-  padding: var(--space-2);
-  container: usage-quota-summary / inline-size;
 }
-.usage-quota-summary > div {
+.usage-quota-summary-grid > div {
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -1601,7 +1604,7 @@ width: 100%; justify-content: center;
   color: var(--green);
 }
 @container usage-quota-summary (max-width: 360px) {
-  .usage-quota-summary {
+  .usage-quota-summary-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 }

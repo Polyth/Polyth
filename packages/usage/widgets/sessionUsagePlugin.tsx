@@ -187,9 +187,6 @@ export function SessionUsageStats({
 function SessionUsageWidget({ config, sessionId }: WidgetRenderContext) {
   const activeSessionId = useStore((state) => state.activeSessionId);
   const resolvedSessionId = sessionId ?? activeSessionId;
-  if (!resolvedSessionId) {
-    return <div className="widget-empty">{tr("widgets.usageplugin.chooseASessionForUsage")}</div>;
-  }
   const activeRenderModel = useActiveModel();
   const events = useStore((state) =>
     (resolvedSessionId ? state.events[resolvedSessionId] : undefined) ?? NO_EVENTS);
@@ -199,6 +196,9 @@ function SessionUsageWidget({ config, sessionId }: WidgetRenderContext) {
     state.sessions.find((item) => item.id === resolvedSessionId) ?? null);
   const runtimeFeatures = useStore((state) =>
     resolvedSessionId ? state.runtimeFeatures[resolvedSessionId] : undefined);
+  if (!resolvedSessionId) {
+    return <div className="widget-empty">{tr("widgets.usageplugin.chooseASessionForUsage")}</div>;
+  }
 
   const modelRef = model.contextUsage?.model ?? model.turn?.model ?? session?.model;
   const descriptor = modelRef

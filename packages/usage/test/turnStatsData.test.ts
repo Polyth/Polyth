@@ -87,6 +87,15 @@ test("working turn uses now for live duration and running tools", () => {
   assert.ok(stats.wholeTurnTokPerSec !== null);
 });
 
+test("turns without a start keep timing unknown", () => {
+  const stats = deriveTurnStats(baseTurn({ startedAt: undefined, stoppedAt: 10_000 }), [assistant(100)]);
+  assert.equal(stats.modelTimeMs, null);
+  assert.equal(stats.toolTimeMs, null);
+  assert.equal(stats.avgTtftMs, null);
+  assert.equal(stats.steps, null);
+  assert.equal(stats.responseTokPerSec, null);
+});
+
 test("missing usage and TTFT stay unknown rather than zero", () => {
   const stats = deriveTurnStats(
     baseTurn({ usage: undefined }),

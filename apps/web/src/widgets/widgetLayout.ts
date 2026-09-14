@@ -138,6 +138,7 @@ export const BUILTIN_WIDGET_IDS = [
   "usage.project",
   "usage.sessions-table",
   "usage.quota-summary",
+  "usage.turn",
 ] as const;
 
 /** Definitions registered by built-ins/plugins must survive project switches.
@@ -170,6 +171,7 @@ const DEFAULT_ZONE: Record<string, WidgetZone> = {
   "session.activity": "right",
   "usage.session": "right",
   "usage.sessions-table": "right",
+  "usage.turn": "right",
   "schedule.tasks": "right",
   "terminal.shell": "bottom",
   "browser.app": "bottom",
@@ -203,6 +205,7 @@ const DEFAULT_SIZE_BY_ID: Record<string, WidgetSize> = {
   "usage.project": { w: 8, h: 6 },
   "usage.sessions-table": { w: 6, h: 5 },
   "usage.quota-summary": { w: 4, h: 2 },
+  "usage.turn": { w: 4, h: 6 },
 };
 const DEFAULT_VISIBLE = new Set<string>([
   "core.chat", "core.quick-actions", "goals.current", "files.project-map",

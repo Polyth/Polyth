@@ -27,6 +27,7 @@ test("usage package declares the complete widget suite", () => {
     "usage.project",
     "usage.sessions-table",
     "usage.quota-summary",
+    "usage.turn",
   ]);
   assert.ok(USAGE_WIDGETS.every((widget) => widget.category === "Usage"));
   assert.ok(USAGE_WIDGETS.every((widget) => widget.supportedSlots.includes(widget.defaultSlot)));

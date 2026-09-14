@@ -248,9 +248,11 @@ function QuotaSummaryWidget() {
   if (snapshots.length === 0) return <div className="widget-empty">{tr("widgets.usageplugin.noProvidersDiscoveredFromOpencodeOrClaude")}</div>;
   return (
     <div className="usage-quota-summary">
-      <div><strong>{stats.providerCount}</strong><span>{tr("widgets.usageplugin.providers")}</span></div>
-      <div className={stats.attentionCount > 0 ? "warn" : ""}><strong>{stats.attentionCount}</strong><span>{tr("widgets.usageplugin.at80")}</span></div>
-      <div><strong>{stats.staleCount}</strong><span>{tr("widgets.usageplugin.stale")}</span></div>
+      <div className="usage-quota-summary-grid">
+        <div><strong>{stats.providerCount}</strong><span>{tr("widgets.usageplugin.providers")}</span></div>
+        <div className={stats.attentionCount > 0 ? "warn" : ""}><strong>{stats.attentionCount}</strong><span>{tr("widgets.usageplugin.at80")}</span></div>
+        <div><strong>{stats.staleCount}</strong><span>{tr("widgets.usageplugin.stale")}</span></div>
+      </div>
     </div>
   );
 }
