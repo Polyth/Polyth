@@ -26,6 +26,7 @@ import { copyText, firstUserTextCached } from "../../utils.ts";
 import { announce } from "../a11y/live.tsx";
 import { worktreeLabel } from "../../worktreeSessions.ts";
 import SlotHost from "../slots/SlotHost.ts";
+import SessionHoverCard from "./SessionHoverCard.tsx";
 import {
   Button, Checkbox, Dialog, EmptyState, Menu, ResponsiveOverlay, TextInput,
   type MenuEntry,
@@ -141,6 +142,9 @@ interface RowProps {
   onChanged: () => void;
   onOpen: (id: string) => void;
   onTogglePin: (session: SessionProjection) => void;
+  projectName?: string;
+  branch?: string | null;
+  workspacePath?: string | null;
   contextLabel?: string;
   pinnedWorktreeLabel?: string;
   /** Shift-key customization mode (desktop): hovering the row reveals the
@@ -151,7 +155,7 @@ interface RowProps {
 function SessionRow({
   s, activeSessionId, labels, eventsTitle, opening, selectMode, selected,
   onToggleSelect, onChanged, onOpen, onTogglePin,
-  contextLabel, pinnedWorktreeLabel, shiftQuick,
+  projectName, branch, workspacePath, contextLabel, pinnedWorktreeLabel, shiftQuick,
 }: RowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [labelPickerOpen, setLabelPickerOpen] = useState(false);
@@ -318,10 +322,6 @@ function SessionRow({
     }
   };
   const displayTitle = fullSessionTitle(s.title, eventsTitle);
-  const hoverTitle = [
-    fullSessionTitle(s.title, eventsTitle),
-    pinnedWorktreeLabel,
-  ].filter(Boolean).join(" · ");
   const actionsLabel = tr("sidebar.sessionlist.actionsForValue", { value: s.title || tr("sidebar.sessionlist.session") });
   const checkedLabels = s.labelIds ?? [];
   const normalizedLabelQuery = labelQuery.trim().toLocaleLowerCase(getLocale());
@@ -407,83 +407,90 @@ function SessionRow({
           {...renameKeys}
         />
       ) : (
-        <button
-          ref={sessionBtnRef}
-          className="session-btn"
-          aria-current={s.id === activeSessionId ? "true" : undefined}
-          aria-expanded={swipeRevealed}
-          aria-busy={opening || undefined}
-          aria-label={tr("sidebar.sessionlist.openValue", { displayTitle: displayTitle })}
-          title={hoverTitle}
-          onPointerEnter={() => prefetchSessionTail(s.id)}
-          onPointerDown={(event) => {
-            if (event.pointerType === "touch") prefetchSessionTail(s.id);
-          }}
-          onClick={(event) => {
-            if (longPressOpenedRef.current || swipeConsumedRef.current) {
-              event.preventDefault();
-              longPressOpenedRef.current = false;
-              swipeConsumedRef.current = false;
-              return;
-            }
-            if (swipeRevealed) {
-              event.preventDefault();
-              setSwipeRevealed(false);
-              return;
-            }
-            markSessionPerformance("session_click", s.id);
-            onOpen(s.id);
-          }}
-          onDoubleClick={() => { setTitle(s.title); setRenaming(true); }}
-          onTouchStart={startLongPress}
-          onTouchEnd={cancelLongPress}
-          onTouchCancel={cancelLongPress}
-          onTouchMove={cancelLongPress}
-          onKeyDown={(event) => {
-            if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
-              event.preventDefault();
-              openRowMenu();
-            }
-          }}
+        <SessionHoverCard
+          title={displayTitle}
+          projectName={projectName}
+          branch={branch}
+          path={workspacePath}
+          isolated={isIsolatedSession(s)}
         >
-          <span className="session-title">
-            {s.pinned && (
-              <span
-                className="session-pin-icon"
-                title={tr("sidebar.sessionlist.pinnedChats")}
-                aria-label={tr("sidebar.sessionlist.pinnedChats")}
-              ><Icon.pin /></span>
-            )}
-            <span className="session-title-text">{displayTitle}</span>
-            {pinnedWorktreeLabel && rowStatus.kind === "regular" && (
-              <span
-                className={`session-worktree-label${pinnedWorktreeLabel.length > 12 ? " session-worktree-label-compact" : ""}`}
-                title={pinnedWorktreeLabel}
-                aria-label={pinnedWorktreeLabel}
-              >
-                <Icon.branch />
-                {pinnedWorktreeLabel.length <= 12 && <span>{pinnedWorktreeLabel}</span>}
-              </span>
-            )}
-            <SlotHost
-              slot="session.list.badges"
-              context={{ sessionId: s.id, questions: s.attention?.questions ?? 0, permissions: s.attention?.permissions ?? 0 }}
-            />
-          </span>
-          {contextLabel && <span className="session-search-context">{contextLabel}</span>}
-          <span className="session-status-zone">
-            {opening ? (
-              <span className="session-opening-indicator" title={tr("common.loading")} aria-label={tr("common.loading")}>
-                <span className="ui-spinner ui-spinner--sm" aria-hidden="true" />
-              </span>
-            ) : (
-              <>
-                <AttentionBadges status={rowStatus} />
-                <StatusBadge status={rowStatus} />
-              </>
-            )}
-          </span>
-        </button>
+          <button
+            ref={sessionBtnRef}
+            className="session-btn"
+            aria-current={s.id === activeSessionId ? "true" : undefined}
+            aria-expanded={swipeRevealed}
+            aria-busy={opening || undefined}
+            aria-label={tr("sidebar.sessionlist.openValue", { displayTitle: displayTitle })}
+            onPointerEnter={() => prefetchSessionTail(s.id)}
+            onPointerDown={(event) => {
+              if (event.pointerType === "touch") prefetchSessionTail(s.id);
+            }}
+            onClick={(event) => {
+              if (longPressOpenedRef.current || swipeConsumedRef.current) {
+                event.preventDefault();
+                longPressOpenedRef.current = false;
+                swipeConsumedRef.current = false;
+                return;
+              }
+              if (swipeRevealed) {
+                event.preventDefault();
+                setSwipeRevealed(false);
+                return;
+              }
+              markSessionPerformance("session_click", s.id);
+              onOpen(s.id);
+            }}
+            onDoubleClick={() => { setTitle(s.title); setRenaming(true); }}
+            onTouchStart={startLongPress}
+            onTouchEnd={cancelLongPress}
+            onTouchCancel={cancelLongPress}
+            onTouchMove={cancelLongPress}
+            onKeyDown={(event) => {
+              if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+                event.preventDefault();
+                openRowMenu();
+              }
+            }}
+          >
+            <span className="session-title">
+              {s.pinned && (
+                <span
+                  className="session-pin-icon"
+                  title={tr("sidebar.sessionlist.pinnedChats")}
+                  aria-label={tr("sidebar.sessionlist.pinnedChats")}
+                ><Icon.pin /></span>
+              )}
+              <span className="session-title-text">{displayTitle}</span>
+              {pinnedWorktreeLabel && rowStatus.kind === "regular" && (
+                <span
+                  className={`session-worktree-label${pinnedWorktreeLabel.length > 12 ? " session-worktree-label-compact" : ""}`}
+                  title={pinnedWorktreeLabel}
+                  aria-label={pinnedWorktreeLabel}
+                >
+                  <Icon.branch />
+                  {pinnedWorktreeLabel.length <= 12 && <span>{pinnedWorktreeLabel}</span>}
+                </span>
+              )}
+              <SlotHost
+                slot="session.list.badges"
+                context={{ sessionId: s.id, questions: s.attention?.questions ?? 0, permissions: s.attention?.permissions ?? 0 }}
+              />
+            </span>
+            {contextLabel && <span className="session-search-context">{contextLabel}</span>}
+            <span className="session-status-zone">
+              {opening ? (
+                <span className="session-opening-indicator" title={tr("common.loading")} aria-label={tr("common.loading")}>
+                  <span className="ui-spinner ui-spinner--sm" aria-hidden="true" />
+                </span>
+              ) : (
+                <>
+                  <AttentionBadges status={rowStatus} />
+                  <StatusBadge status={rowStatus} />
+                </>
+              )}
+            </span>
+          </button>
+        </SessionHoverCard>
       )}
       {!renaming && (
         <Menu
@@ -608,6 +615,7 @@ export default function SessionList({
   dateFilter?: SessionDateFilter;
 }) {
   const sessions = useStore((st) => st.sessions);
+  const project = useStore((st) => st.projectRegistry.projects.find((candidate) => candidate.id === projectId));
   const activeSessionId = useStore((st) => st.activeSessionId);
   const openingSessionId = useStore((st) => st.openingSessionId);
   // Narrow subscription: rows only need each session's derived title (its
@@ -805,29 +813,37 @@ export default function SessionList({
     s: SessionProjection,
     contextLabel?: string,
     pinnedWorktreeLabel?: string,
-  ) => (
-    <SessionRow
-      key={s.id}
-      s={s}
-      activeSessionId={activeSessionId}
-      labels={labels}
-      eventsTitle={eventsTitles.get(s.id)}
-      opening={openingSessionId === s.id}
-      selectMode={selectMode}
-      selected={selectedSessionIds.has(s.id)}
-      onToggleSelect={onToggleSelected}
-      onChanged={onChanged}
-      // UX-A390: the compact drawer closes only after activation resolves;
-      // a failure leaves it open with the existing error path.
-      onOpen={(id) => void openSession(id).then(() => {
-        if (getState().sidebarOpen) setSidebarOpen(false);
-      })}
-      onTogglePin={(session) => void togglePin(session)}
-      contextLabel={contextLabel}
-      pinnedWorktreeLabel={pinnedWorktreeLabel}
-      shiftQuick={shiftQuick}
-    />
-  );
+  ) => {
+    const checkout = s.worktreePath
+      ? worktrees.find((worktree) => worktree.path === s.worktreePath)
+      : mainWorktree;
+    return (
+      <SessionRow
+        key={s.id}
+        s={s}
+        activeSessionId={activeSessionId}
+        labels={labels}
+        eventsTitle={eventsTitles.get(s.id)}
+        opening={openingSessionId === s.id}
+        selectMode={selectMode}
+        selected={selectedSessionIds.has(s.id)}
+        onToggleSelect={onToggleSelected}
+        onChanged={onChanged}
+        // UX-A390: the compact drawer closes only after activation resolves;
+        // a failure leaves it open with the existing error path.
+        onOpen={(id) => void openSession(id).then(() => {
+          if (getState().sidebarOpen) setSidebarOpen(false);
+        })}
+        onTogglePin={(session) => void togglePin(session)}
+        projectName={project?.name || searchProjectName}
+        branch={s.branch ?? checkout?.branch}
+        workspacePath={s.worktreePath ?? checkout?.path ?? project?.path}
+        contextLabel={contextLabel}
+        pinnedWorktreeLabel={pinnedWorktreeLabel}
+        shiftQuick={shiftQuick}
+      />
+    );
+  };
 
   const worktreeNameForSession = (session: SessionProjection): string => {
     const key = worktreeKey(session);
