@@ -666,7 +666,7 @@ export const GIT_REMOTE_ACCESS: RemoteAccessPolicy = {
     { methods: ["GET"], path: "/api/worktrees", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
     { methods: ["GET"], path: "/api/isolation/:sessionId", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
     { methods: ["POST"], path: "/api/git/resolve-conflict-agent", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
-    { methods: ["POST"], path: "/api/git/conflict-prompt", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
+    { methods: ["POST"], path: "/api/git/conflict-prompt", capability: REMOTE_CAPABILITY.gitRead, mutation: true },
     { methods: ["POST"], path: "/api/git/stage", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/git/unstage", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/git/discard", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },

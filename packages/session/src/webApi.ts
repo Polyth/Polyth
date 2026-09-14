@@ -261,6 +261,13 @@ export const httpStatusOf = (err: unknown): number =>
 export const errorCodeOf = (err: unknown): string =>
   typeof (err as { code?: unknown })?.code === "string" ? (err as { code: string }).code : "";
 
+// Read-only Git lists degrade to an empty catalog when the optional route or
+// project is gone; mutations still reject so a failed action cannot look safe.
+const emptyOnNotFound = <T>(request: Promise<T>, empty: T): Promise<T> =>
+  request.catch((error) => httpStatusOf(error) === 404 || errorCodeOf(error) === "not-found"
+    ? empty
+    : Promise.reject(error));
+
 /** Dirty-worktree refusal may include a porcelain change count for the confirm copy. */
 export const errorChangesOf = (err: unknown): number =>
   typeof (err as { changes?: unknown }).changes === "number"
@@ -1008,7 +1015,10 @@ export const api = {
   gitCommitMessage: (projectId: string, sessionId?: string) =>
     jfetch<{ message: string }>(`/api/git/commit-message`, json("POST", { projectId, ...(sessionId ? { sessionId } : {}) })),
   gitBranches: (projectId: string, sessionId?: string) =>
-    jfetch<GitBranches>(`/api/git/branches?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`),
+    emptyOnNotFound(
+      jfetch<GitBranches>(`/api/git/branches?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`),
+      { current: "", branches: [] },
+    ),
   gitBranch: (projectId: string, name: string, from?: string, sessionId?: string) =>
     jfetch<{ ok: true }>(`/api/git/branch`, json("POST", { projectId, name, from, ...(sessionId ? { sessionId } : {}) })),
   gitCheckout: (projectId: string, name: string, sessionId?: string) =>
@@ -1071,7 +1081,10 @@ export const api = {
 
   // ---- worktrees (§12) -----------------------------------------------------
   listWorktrees: (projectId: string, options?: { status?: boolean }) =>
-    jfetch<Worktree[]>(`/api/worktrees?projectId=${encodeURIComponent(projectId)}${options?.status ? "&status=1" : ""}`),
+    emptyOnNotFound(
+      jfetch<Worktree[]>(`/api/worktrees?projectId=${encodeURIComponent(projectId)}${options?.status ? "&status=1" : ""}`),
+      [],
+    ),
   createWorktree: (projectId: string, branch: string, wtPath?: string, base?: string) =>
     jfetch<Worktree>(`/api/worktrees`, json("POST", { projectId, branch, path: wtPath, base })),
   /** Rejects with code `worktree-dirty` when uncommitted changes would be lost; pass `force` after the user confirms.
