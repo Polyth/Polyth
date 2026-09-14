@@ -15,6 +15,8 @@ import {
   type ContributionCompletion,
   type ContributionInvocation,
   type ContributionResult,
+  type ExternalResource,
+  type StructuredContext,
 } from "./contributions.ts";
 import { type RemoteUiAction, type RemoteUiNode } from "./remoteUi.ts";
 
@@ -55,6 +57,12 @@ export interface PolythConnectionStatus {
   error?: string;
 }
 
+export interface PolythModelResult {
+  text: string;
+  modelClass: "utility";
+  inputTruncated: boolean;
+}
+
 export interface PolythHost {
   readonly ready: HandshakeReady;
   hasCapability(name: string): boolean;
@@ -77,12 +85,17 @@ export interface PolythHost {
   };
   session: {
     read(): Promise<PolythSessionSnapshot | null>;
+    /** Legacy text helper. Prefer context.append for provenance-aware context. */
     appendContext(text: string): Promise<void>;
+  };
+  context: {
+    append(input: StructuredContext): Promise<void>;
   };
   project: {
     readMetadata(): Promise<PolythProjectSnapshot | null>;
   };
   attachments: {
+    /** Legacy resource helper kept for v1 packages. Prefer addResource. */
     create(input: {
       resourceId: string;
       title: string;
@@ -91,6 +104,14 @@ export interface PolythHost {
       kind?: string;
       text?: string;
     }): Promise<void>;
+    addResource(input: ExternalResource): Promise<void>;
+  };
+  model: {
+    generate(input: {
+      prompt: string;
+      maxOutputTokens?: number;
+      timeoutMs?: number;
+    }): Promise<PolythModelResult>;
   };
   storage: {
     get(key: string): Promise<string | null>;
@@ -345,11 +366,18 @@ async function connectOnPort(port: PolythPort, timeoutMs = REQUEST_TIMEOUT_MS): 
       read: () => request("session.read") as Promise<PolythSessionSnapshot | null>,
       appendContext: (text) => request("session.appendContext", { text }).then(() => undefined),
     },
+    context: {
+      append: (input) => request("context.append", input).then(() => undefined),
+    },
     project: {
       readMetadata: () => request("project.readMetadata") as Promise<PolythProjectSnapshot | null>,
     },
     attachments: {
       create: (input) => request("attachments.create", input).then(() => undefined),
+      addResource: (input) => request("attachments.create", input).then(() => undefined),
+    },
+    model: {
+      generate: (input) => request("model.generate", input) as Promise<PolythModelResult>,
     },
     storage: {
       get: (key) => request("storage.get", { key }) as Promise<string | null>,
