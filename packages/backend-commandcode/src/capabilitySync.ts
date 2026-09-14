@@ -49,7 +49,7 @@ export function createCommandCodeCapabilitySync(context: HarnessContext, rpc: Co
     generation: rpc.generation,
   });
 
-  const settle = (staged: StagedProjection) => {
+  const settle = (staged: StagedProjection, operationId?: string) => {
     const overlay = staged.value;
     if (overlay.promptCapabilityIds.length) {
       acknowledgeCapabilityApplication({
@@ -71,7 +71,7 @@ export function createCommandCodeCapabilitySync(context: HarnessContext, rpc: Co
         evidence: { stage: "staged", source: "Command Code --skill" },
       });
     }
-    if (overlay.toolCapabilityIds.length) {
+    if (overlay.toolCapabilityIds.length && (!operationId || !failedToolMods.has(operationId))) {
       acknowledgeCapabilityApplication({
         target: target(),
         desiredRevision: staged.desiredRevision,
@@ -152,11 +152,11 @@ export function createCommandCodeCapabilitySync(context: HarnessContext, rpc: Co
         const resultRecord = result && typeof result === "object" ? result as Record<string, unknown> : undefined;
         const admitted = typeof resultRecord?.nativeSessionId === "string" && resultRecord.nativeSessionId.length > 0
           || await exactTurnReceipt(command.bindingPath, command.operationId);
-        if (admitted) settle(staged);
+        if (admitted) settle(staged, operationId);
         return result;
       } catch (error) {
         const admitted = await exactTurnReceipt(command.bindingPath, command.operationId);
-        if (admitted) settle(staged);
+        if (admitted) settle(staged, operationId);
         const code = (error as { code?: string }).code;
         if (!admitted && (code === "runtime-rejected" || code === "busy" || code === "unsupported")) {
           if (operationId) clearProjection(operationId);
