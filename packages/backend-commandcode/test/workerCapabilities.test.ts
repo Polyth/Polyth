@@ -33,7 +33,18 @@ test("direct tool relay uses the scoped capability id and canonical loopback rou
   assert.match(COMMANDCODE_WORKER_SOURCE, /JSON\.stringify\(\{ id: call\.capabilityId, arguments: call\.input \?\? \{\} \}\)/);
   assert.match(COMMANDCODE_WORKER_SOURCE, /method: "POST"/);
   assert.match(COMMANDCODE_WORKER_SOURCE, /AGENT_TOOLS_PATH = "\/internal\/agent-tools"/);
-  assert.match(COMMANDCODE_WORKER_SOURCE, /if \(outcome\.observed\) send\(\{ type: "polyth-tool-invoked"/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /if \(outcome\.invocable\) send\(\{ type: "polyth-tool-invoked"/);
+});
+
+test("tool evidence requires a response that proves the scoped capability reached authorization or execution", () => {
+  assert.match(
+    COMMANDCODE_WORKER_SOURCE,
+    /INVOCABLE_TOOL_ERROR_CODES = new Set\(\["permission-required", "forbidden", "tool-failed"\]\)/,
+  );
+  assert.match(COMMANDCODE_WORKER_SOURCE, /const responseProvesToolInvocable =/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /if \(statusCode >= 200 && statusCode < 300\) return true/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /INVOCABLE_TOOL_ERROR_CODES\.has\(code\)/);
+  assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /observed = true/);
 });
 
 test("direct tool relay is bounded, cancellable and fail-closed", () => {
