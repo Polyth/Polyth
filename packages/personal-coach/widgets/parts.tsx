@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import type { WebPackageHost } from "@polyth/web-sdk";
 import type { CoachCommitmentDto, CoachDueRoutineDto, CoachGoalDto } from "./api.ts";
+import { coachMoveTarget, type CoachMoveTarget } from "./coachTime.ts";
 import type { CoachJourneyApi } from "./journeyApi.ts";
 import type { CoachClient } from "./store.ts";
 import { useCoach } from "./store.ts";
@@ -21,10 +22,12 @@ export const isPrimaryGoal = (goal: CoachGoalDto): boolean => goal.priority === 
 
 export function formatEstimate(minutes?: number): string | null {
   if (!minutes) return null;
-  if (minutes < 60) return `~${minutes} min`;
+  if (minutes < 60) return t("coach.duration.minutes", { count: minutes });
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
-  return rest ? `~${hours}h ${rest}m` : `~${hours}h`;
+  return rest
+    ? t("coach.duration.hoursMinutes", { hours, minutes: rest })
+    : t("coach.duration.hours", { count: hours });
 }
 
 export function formatWhen(epoch?: number, timeZone?: string, withTime = true): string | null {
@@ -45,29 +48,14 @@ export function formatClock(minuteOfDay?: number): string | null {
   return `${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}`;
 }
 
-/** Times of day the "Move" menu offers, resolved against the viewer's clock. */
-const laterToday = (): number => {
-  const target = new Date();
-  target.setHours(target.getHours() + 3, 0, 0, 0);
-  return target.getTime();
+const moveTarget = (client: CoachClient, target: CoachMoveTarget): number => {
+  const timeZone = client.getSnapshot().home?.profile.timeZone ?? "UTC";
+  return coachMoveTarget(timeZone, target);
 };
-const tomorrowMorning = (): number => {
-  const target = new Date();
-  target.setDate(target.getDate() + 1);
-  target.setHours(9, 0, 0, 0);
-  return target.getTime();
-};
-const nextWeek = (): number => {
-  const target = new Date();
-  target.setDate(target.getDate() + 7);
-  target.setHours(9, 0, 0, 0);
-  return target.getTime();
-};
-export const startOfToday = (): number => {
-  const target = new Date();
-  target.setHours(target.getHours() + 1, 0, 0, 0);
-  return target.getTime();
-};
+
+/** "Today" means the current instant. An epoch instant belongs to the current
+ * Coach-local day regardless of the device/browser timezone. */
+export const startOfToday = (): number => Date.now();
 
 export function CoachError({ message, ui, onRetry }: { message: string; ui: CoachUi; onRetry?: () => void }) {
   const { Button } = ui;
@@ -92,9 +80,9 @@ export function ActionControls({ item, client, ui, compact = false }: {
   const { busy } = useCoach(client);
   const pending = busy.has(`commitment:${item.id}`);
   const moveEntries = [
-    { id: "hour", label: t("coach.action.moveHour"), disabled: pending, onSelect: () => void client.reschedule(item.id, laterToday()) },
-    { id: "tomorrow", label: t("coach.action.moveTomorrow"), disabled: pending, onSelect: () => void client.reschedule(item.id, tomorrowMorning()) },
-    { id: "week", label: t("coach.action.moveWeek"), disabled: pending, onSelect: () => void client.reschedule(item.id, nextWeek()) },
+    { id: "hour", label: t("coach.action.moveHour"), disabled: pending, onSelect: () => void client.reschedule(item.id, moveTarget(client, "later")) },
+    { id: "tomorrow", label: t("coach.action.moveTomorrow"), disabled: pending, onSelect: () => void client.reschedule(item.id, moveTarget(client, "tomorrow")) },
+    { id: "week", label: t("coach.action.moveWeek"), disabled: pending, onSelect: () => void client.reschedule(item.id, moveTarget(client, "week")) },
   ];
   const moreEntries = [
     {
@@ -214,7 +202,7 @@ export function CheckIn({ client, ui }: { client: CoachClient; ui: CoachUi }) {
             type="button"
             className={`coach-scale-option${value === option ? " selected" : ""}`}
             aria-pressed={value === option}
-            aria-label={`${label} ${option} of 5`}
+            aria-label={t("coach.checkin.scaleValue", { label, value: option })}
             onClick={() => onPick(option)}
           >{option}</button>
         ))}

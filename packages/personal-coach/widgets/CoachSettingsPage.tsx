@@ -1,12 +1,5 @@
 import { useEffect, useState } from "react";
-import { PageHead } from "../../../apps/web/src/components/settings/parts.tsx";
-import {
-  Button,
-  confirmAlert,
-  Select,
-  Switch,
-  TextInput,
-} from "../../../apps/web/src/components/ui/index.ts";
+import type { WebPackageHost } from "@polyth/web-sdk";
 import type {
   CoachApi,
   CoachProfileDto,
@@ -14,7 +7,9 @@ import type {
   CoachRemindersDto,
   CoachSettingsPatch,
 } from "./api.ts";
+import type { CoachUi } from "./parts.tsx";
 import type { CoachClient } from "./store.ts";
+import { t } from "./strings.ts";
 
 const minuteText = (value: number): string => {
   const minute = Math.max(0, Math.min(1439, Math.trunc(value)));
@@ -49,15 +44,26 @@ const profileDraft = (profile: CoachProfileDto): CoachSettingsPatch => ({
   challengeAssumptions: profile.challengeAssumptions,
 });
 
+const setupStatus = (state: CoachProfileDto["onboardingState"]): string => {
+  if (state === "complete") return t("coach.settings.setupStatus.complete");
+  if (state === "started") return t("coach.settings.setupStatus.started");
+  return t("coach.settings.setupStatus.new");
+};
+
 export default function CoachSettingsPage({
   api,
   client,
+  ui,
+  Dialog,
   friendlyError,
 }: {
   api: CoachApi;
   client: CoachClient;
+  ui: CoachUi;
+  Dialog: WebPackageHost["ui"]["Dialog"];
   friendlyError(action: string, cause: unknown): string;
 }) {
+  const { Button, Checkbox, Select, TextInput } = ui;
   const [profile, setProfile] = useState<CoachProfileDto | null>(null);
   const [draft, setDraft] = useState<CoachSettingsPatch>({});
   const [reminders, setReminders] = useState<CoachRemindersDto | null>(null);
@@ -65,6 +71,7 @@ export default function CoachSettingsPage({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
 
   const load = async () => {
     setError("");
@@ -81,7 +88,7 @@ export default function CoachSettingsPage({
         setReminderDraft(null);
       }
     } catch (cause) {
-      setError(friendlyError("Load Personal Coach settings", cause));
+      setError(friendlyError(t("coach.error.loadSettings"), cause));
     }
   };
 
@@ -104,7 +111,7 @@ export default function CoachSettingsPage({
       setSaved(true);
       await client.refresh();
     } catch (cause) {
-      setError(friendlyError("Save Personal Coach settings", cause));
+      setError(friendlyError(t("coach.error.saveSettings"), cause));
     } finally {
       setBusy(false);
     }
@@ -112,11 +119,6 @@ export default function CoachSettingsPage({
 
   const resetState = async () => {
     if (busy) return;
-    const confirmed = await confirmAlert(
-      "Delete Coach goals, commitments, routines, plans, check-ins, reflections, insights, and Coach-owned schedules? Existing Polyth chat transcripts and your Coach style/time-zone preferences stay.",
-      { title: "Reset Coach state?", confirmLabel: "Reset Coach", destructive: true },
-    );
-    if (!confirmed) return;
     setBusy(true);
     setError("");
     setSaved(false);
@@ -126,9 +128,10 @@ export default function CoachSettingsPage({
       setDraft(profileDraft(result.profile));
       setReminders(null);
       setReminderDraft(null);
+      setConfirmReset(false);
       await client.refresh();
     } catch (cause) {
-      setError(friendlyError("Reset Personal Coach state", cause));
+      setError(friendlyError(t("coach.error.resetSettings"), cause));
     } finally {
       setBusy(false);
     }
@@ -139,32 +142,32 @@ export default function CoachSettingsPage({
   };
 
   return (
-    <div className="personal-coach-settings" data-settings-item="personal-coach-behavior">
-      <PageHead
-        title="Personal Coach"
-        blurb="Tune how Coach communicates and how proactively it helps. Goals, commitments, and plans stay unchanged."
-      />
+    <div className="personal-coach-root personal-coach-settings" data-settings-item="personal-coach-behavior">
+      <header className="coach-settings-head">
+        <h2>{t("coach.settings.title")}</h2>
+        <p>{t("coach.settings.blurb")}</p>
+      </header>
 
-      {!profile && !error && <div role="status">Loading Coach settings…</div>}
+      {!profile && !error && <div role="status">{t("coach.settings.loading")}</div>}
       {error && <div className="form-error" role="alert">{error}</div>}
 
       {profile && (
         <>
           <div className="set-row">
             <div className="set-row-text">
-              <div className="set-row-label">Style</div>
-              <div className="set-row-hint">How Coach phrases guidance. This does not create separate personas or separate memory.</div>
+              <div className="set-row-label">{t("coach.settings.style")}</div>
+              <div className="set-row-hint">{t("coach.settings.styleHint")}</div>
             </div>
             <div className="set-row-control">
               <Select
-                label="Coach style"
-                ariaLabel="Coach style"
+                label={t("coach.settings.styleLabel")}
+                ariaLabel={t("coach.settings.styleLabel")}
                 value={draft.tone ?? profile.tone}
                 onChange={(tone) => setDraft((current) => ({ ...current, tone: tone as CoachProfileDto["tone"] }))}
                 options={[
-                  { value: "supportive", label: "Supportive", detail: "Encouraging and gentle" },
-                  { value: "balanced", label: "Balanced", detail: "Calm and practical" },
-                  { value: "direct", label: "Direct", detail: "Concise and candid" },
+                  { value: "supportive", label: t("coach.settings.style.supportive"), detail: t("coach.settings.style.supportiveDetail") },
+                  { value: "balanced", label: t("coach.settings.style.balanced"), detail: t("coach.settings.style.balancedDetail") },
+                  { value: "direct", label: t("coach.settings.style.direct"), detail: t("coach.settings.style.directDetail") },
                 ]}
               />
             </div>
@@ -172,19 +175,19 @@ export default function CoachSettingsPage({
 
           <div className="set-row">
             <div className="set-row-text">
-              <div className="set-row-label">Initiative</div>
-              <div className="set-row-hint">How readily Coach raises useful next steps during a conversation. Scheduled check-ins are controlled below.</div>
+              <div className="set-row-label">{t("coach.settings.initiative")}</div>
+              <div className="set-row-hint">{t("coach.settings.initiativeHint")}</div>
             </div>
             <div className="set-row-control">
               <Select
-                label="Coach initiative"
-                ariaLabel="Coach initiative"
+                label={t("coach.settings.initiativeLabel")}
+                ariaLabel={t("coach.settings.initiativeLabel")}
                 value={draft.initiative ?? profile.initiative}
                 onChange={(initiative) => setDraft((current) => ({ ...current, initiative: initiative as CoachProfileDto["initiative"] }))}
                 options={[
-                  { value: "reactive", label: "Reactive", detail: "Wait for me to ask" },
-                  { value: "balanced", label: "Balanced", detail: "Raise important things when useful" },
-                  { value: "proactive", label: "Proactive", detail: "Actively surface next steps" },
+                  { value: "reactive", label: t("coach.settings.initiative.reactive"), detail: t("coach.settings.initiative.reactiveDetail") },
+                  { value: "balanced", label: t("coach.settings.initiative.balanced"), detail: t("coach.settings.initiative.balancedDetail") },
+                  { value: "proactive", label: t("coach.settings.initiative.proactive"), detail: t("coach.settings.initiative.proactiveDetail") },
                 ]}
               />
             </div>
@@ -192,28 +195,24 @@ export default function CoachSettingsPage({
 
           <div className="set-row">
             <div className="set-row-text">
-              <div className="set-row-label" id="coach-challenge-label">Challenge my assumptions</div>
-              <div className="set-row-hint">Let Coach point out weak assumptions or contradictions when they materially affect the plan.</div>
-            </div>
-            <div className="set-row-control">
-              <Switch
-                labelledBy="coach-challenge-label"
+              <Checkbox
                 checked={draft.challengeAssumptions ?? profile.challengeAssumptions}
                 onChange={(challengeAssumptions) => setDraft((current) => ({ ...current, challengeAssumptions }))}
+                label={t("coach.settings.challenge")}
+                description={t("coach.settings.challengeHint")}
               />
             </div>
           </div>
 
           <div className="set-row">
             <div className="set-row-text">
-              <div className="set-row-label">Time zone</div>
-              <div className="set-row-hint">IANA zone used for Today, routines, and Coach-created schedules.</div>
+              <div className="set-row-label">{t("coach.settings.timeZone")}</div>
+              <div className="set-row-hint">{t("coach.settings.timeZoneHint")}</div>
             </div>
             <div className="set-row-control">
               <TextInput
-                aria-label="Coach time zone"
+                aria-label={t("coach.settings.timeZoneLabel")}
                 value={draft.timeZone ?? profile.timeZone}
-                spellCheck={false}
                 placeholder="Europe/Kyiv"
                 onChange={(event) => setDraft((current) => ({ ...current, timeZone: event.target.value }))}
               />
@@ -224,18 +223,17 @@ export default function CoachSettingsPage({
             <>
               <div className="set-row" data-settings-item="personal-coach-reminders">
                 <div className="set-row-text">
-                  <div className="set-row-label" id="coach-daily-label">Daily check-in</div>
-                  <div className="set-row-hint">One short scheduled Coach session. No background model work happens between runs.</div>
-                </div>
-                <div className="set-row-control set-add-form">
-                  <Switch
-                    labelledBy="coach-daily-label"
+                  <Checkbox
                     checked={reminderDraft.dailyCheckIn}
                     onChange={(dailyCheckIn) => updateReminder({ dailyCheckIn })}
+                    label={t("coach.settings.daily")}
+                    description={t("coach.settings.dailyHint")}
                   />
+                </div>
+                <div className="set-row-control set-add-form">
                   <TextInput
                     type="time"
-                    aria-label="Daily check-in time"
+                    aria-label={t("coach.settings.dailyTime")}
                     disabled={!reminderDraft.dailyCheckIn}
                     value={minuteText(reminderDraft.dailyMinuteOfDay)}
                     onChange={(event) => {
@@ -248,34 +246,33 @@ export default function CoachSettingsPage({
 
               <div className="set-row">
                 <div className="set-row-text">
-                  <div className="set-row-label" id="coach-weekly-label">Weekly review</div>
-                  <div className="set-row-hint">Review durable activity and propose changes only when there is evidence.</div>
-                </div>
-                <div className="set-row-control set-add-form">
-                  <Switch
-                    labelledBy="coach-weekly-label"
+                  <Checkbox
                     checked={reminderDraft.weeklyReview}
                     onChange={(weeklyReview) => updateReminder({ weeklyReview })}
+                    label={t("coach.settings.weekly")}
+                    description={t("coach.settings.weeklyHint")}
                   />
+                </div>
+                <div className="set-row-control set-add-form">
                   <Select
-                    label="Weekly review day"
-                    ariaLabel="Weekly review day"
+                    label={t("coach.settings.weeklyDay")}
+                    ariaLabel={t("coach.settings.weeklyDay")}
                     disabled={!reminderDraft.weeklyReview}
                     value={String(reminderDraft.weeklyDay)}
                     onChange={(value) => updateReminder({ weeklyDay: Number(value) })}
                     options={[
-                      { value: "1", label: "Monday" },
-                      { value: "2", label: "Tuesday" },
-                      { value: "3", label: "Wednesday" },
-                      { value: "4", label: "Thursday" },
-                      { value: "5", label: "Friday" },
-                      { value: "6", label: "Saturday" },
-                      { value: "0", label: "Sunday" },
+                      { value: "1", label: t("coach.settings.day.monday") },
+                      { value: "2", label: t("coach.settings.day.tuesday") },
+                      { value: "3", label: t("coach.settings.day.wednesday") },
+                      { value: "4", label: t("coach.settings.day.thursday") },
+                      { value: "5", label: t("coach.settings.day.friday") },
+                      { value: "6", label: t("coach.settings.day.saturday") },
+                      { value: "0", label: t("coach.settings.day.sunday") },
                     ]}
                   />
                   <TextInput
                     type="time"
-                    aria-label="Weekly review time"
+                    aria-label={t("coach.settings.weeklyTime")}
                     disabled={!reminderDraft.weeklyReview}
                     value={minuteText(reminderDraft.weeklyMinuteOfDay)}
                     onChange={(event) => {
@@ -291,38 +288,50 @@ export default function CoachSettingsPage({
           {profile.onboardingState === "complete" && reminders && !reminders.available && (
             <div className="set-row">
               <div className="set-row-text">
-                <div className="set-row-label">Scheduled check-ins</div>
-                <div className="set-row-hint">The Schedule package is unavailable. Coach itself still works normally.</div>
+                <div className="set-row-label">{t("coach.settings.scheduled")}</div>
+                <div className="set-row-hint">{t("coach.settings.scheduleUnavailable")}</div>
               </div>
-              <div className="set-row-control"><span className="tag">Unavailable</span></div>
+              <div className="set-row-control"><span className="tag">{t("coach.settings.unavailable")}</span></div>
             </div>
           )}
 
           <div className="set-row">
             <div className="set-row-text">
-              <div className="set-row-label">Setup</div>
-              <div className="set-row-hint">{profile.onboardingState === "complete" ? "Initial Coach setup is complete." : "Coach will finish its short setup in chat."}</div>
+              <div className="set-row-label">{t("coach.settings.setup")}</div>
+              <div className="set-row-hint">
+                {profile.onboardingState === "complete" ? t("coach.settings.setupComplete") : t("coach.settings.setupPending")}
+              </div>
             </div>
-            <div className="set-row-control">
-              <span className="tag">{profile.onboardingState}</span>
-            </div>
+            <div className="set-row-control"><span className="tag">{setupStatus(profile.onboardingState)}</span></div>
           </div>
 
           <div className="set-row" data-settings-item="personal-coach-data">
             <div className="set-row-text">
-              <div className="set-row-label">Coach state</div>
-              <div className="set-row-hint">Clear goals, commitments, routines, plans, check-ins, reflections, insights, and Coach-owned schedules. Existing chat transcripts and communication preferences stay.</div>
+              <div className="set-row-label">{t("coach.settings.state")}</div>
+              <div className="set-row-hint">{t("coach.settings.stateHint")}</div>
             </div>
             <div className="set-row-control">
-              <Button variant="danger" disabled={busy} onClick={() => void resetState()}>Reset Coach state</Button>
+              <Button variant="danger" disabled={busy} onClick={() => setConfirmReset(true)}>{t("coach.settings.reset")}</Button>
             </div>
           </div>
 
           <div className="set-add-form">
-            <Button variant="primary" busy={busy} onClick={() => void save()}>Save changes</Button>
-            {saved && <span className="set-row-hint" role="status">Saved</span>}
+            <Button variant="primary" busy={busy} onClick={() => void save()}>{t("coach.settings.save")}</Button>
+            {saved && <span className="set-row-hint" role="status">{t("coach.settings.saved")}</span>}
           </div>
         </>
+      )}
+
+      {confirmReset && (
+        <Dialog title={t("coach.settings.resetTitle")} onClose={() => { if (!busy) setConfirmReset(false); }}>
+          <div className="coach-settings-confirm">
+            <p>{t("coach.settings.resetBody")}</p>
+            <div className="coach-settings-confirm-actions">
+              <Button variant="danger" busy={busy} onClick={() => void resetState()}>{t("coach.settings.resetConfirm")}</Button>
+              <Button variant="ghost" disabled={busy} onClick={() => setConfirmReset(false)}>{t("coach.settings.resetCancel")}</Button>
+            </div>
+          </div>
+        </Dialog>
       )}
     </div>
   );
