@@ -210,10 +210,10 @@ test("Command Code stages native addTool schemas while keeping bridge secrets me
   const overlay = commandCodeOverlays.peek(context, "commandcode")?.value;
   assert.ok(overlay?.toolModFile);
   assert.deepEqual(overlay.toolCapabilityIds, ["example.review-tool"]);
-  assert.deepEqual(overlay.toolNames, { "example.review-tool": "review_project" });
   assert.deepEqual(overlay.toolBridge, {
     url: "http://127.0.0.1:7777/internal/agent-tools",
     token: "opaque-secret-token",
+    capabilityIds: ["example.review-tool"],
   });
   const toolMod = readFileSync(overlay.toolModFile, "utf8");
   assert.match(toolMod, /cmd\.addTool/);
