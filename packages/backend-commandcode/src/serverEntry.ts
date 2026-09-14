@@ -19,7 +19,13 @@ import {
 import { createCommandCodeRpc } from "./rpc.ts";
 import { COMMANDCODE_CAPABILITIES, createCommandCodeRuntime } from "./runtime.ts";
 import { createCommandCodeTitleSync } from "./titleSync.ts";
+import {
+  commandCodeInputCapabilities,
+  decorateCommandCodeTurnInput,
+} from "./turnInput.ts";
 import { COMMANDCODE_WORKER_SOURCE } from "./workerSource.ts";
+
+const COMMANDCODE_PRESENTED_CAPABILITIES = commandCodeInputCapabilities(COMMANDCODE_CAPABILITIES);
 
 const writeGenerated = async (file: string, content: string): Promise<void> => {
   const current = await readFile(file, "utf8").catch(() => undefined);
@@ -73,7 +79,7 @@ export default function registerPackage(host: ServerPackageHost) {
       installCommand: "npm install -g command-code@latest",
       signInCommand: "command-code login",
     },
-    staticFeatures: COMMANDCODE_CAPABILITIES,
+    staticFeatures: COMMANDCODE_PRESENTED_CAPABILITIES,
     async probe(context) {
       if (context.remote) {
         return { harnessId: "commandcode", installed: false, authenticated: "unknown", healthy: false, message: "Local execution only" };
@@ -139,7 +145,7 @@ export default function registerPackage(host: ServerPackageHost) {
         return {
           state: "degraded" as const,
           authenticated: status.authenticated,
-          capabilities: COMMANDCODE_CAPABILITIES,
+          capabilities: COMMANDCODE_PRESENTED_CAPABILITIES,
           catalog: { models: [], agents },
           message: "Polyth could not verify the installed Command Code CLI surface",
         };
@@ -148,7 +154,7 @@ export default function registerPackage(host: ServerPackageHost) {
         return {
           state: "incompatible" as const,
           authenticated: status.authenticated,
-          capabilities: COMMANDCODE_CAPABILITIES,
+          capabilities: COMMANDCODE_PRESENTED_CAPABILITIES,
           catalog: { models: [], agents },
           message: commandCodeCompatibilityMessage(compatibility),
         };
@@ -157,7 +163,7 @@ export default function registerPackage(host: ServerPackageHost) {
         return {
           state: "auth-required" as const,
           authenticated: false,
-          capabilities: COMMANDCODE_CAPABILITIES,
+          capabilities: COMMANDCODE_PRESENTED_CAPABILITIES,
           catalog: { models: [], agents },
           message: "Sign in with Command Code to discover the native model catalog",
         };
@@ -166,7 +172,7 @@ export default function registerPackage(host: ServerPackageHost) {
       return {
         state: "ready" as const,
         authenticated: status.authenticated === true,
-        capabilities: COMMANDCODE_CAPABILITIES,
+        capabilities: COMMANDCODE_PRESENTED_CAPABILITIES,
         catalog: { models, agents },
         ...(status.accountLabel ? { message: status.accountLabel } : {}),
       };
@@ -197,7 +203,7 @@ export default function registerPackage(host: ServerPackageHost) {
       });
       try {
         const titleSync = createCommandCodeTitleSync(rpc);
-        const runtime = createCommandCodeRuntime({
+        const runtime = decorateCommandCodeTurnInput(createCommandCodeRuntime({
           context,
           rpc: titleSync.rpc,
           bindingFile: p.binding,
@@ -217,7 +223,7 @@ export default function registerPackage(host: ServerPackageHost) {
               return "dont-ask";
             }
           },
-        });
+        }), context.cwd);
 
         const ensureSession = runtime.ensureSession.bind(runtime);
         runtime.ensureSession = async (input) => {
@@ -239,8 +245,9 @@ export default function registerPackage(host: ServerPackageHost) {
           };
         }
 
-        // The documented native registry re-scans custom agents each turn, so
-        // do not freeze this list at runtime construction time.
+        // Native Command Code custom agents are delegated subagents. Expose
+        // their live metadata for observability/discovery, while turnInput.ts
+        // rejects any accidental attempt to select one as the primary agent.
         return Object.assign(runtime, {
           agents: () => discoverCommandCodeAgents(context.cwd),
         });
