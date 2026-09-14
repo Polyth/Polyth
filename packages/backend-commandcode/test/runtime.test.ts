@@ -9,6 +9,8 @@ import { createCommandCodeRuntime } from "../src/runtime.ts";
 
 const fakeRpc = (options: {
   unknownAdmission?: boolean;
+  rejectFirstAdmissionWithoutReceipt?: boolean;
+  rejectAdmissionAfterReceipt?: boolean;
   unknownSteerAfterReceipt?: boolean;
   rejectSteer?: boolean;
 } = {}) => {
@@ -16,6 +18,7 @@ const fakeRpc = (options: {
   const events = new Set<(event: CommandCodeWorkerEvent) => void>();
   const closes = new Set<() => void>();
   let bindingPath = "";
+  let startCalls = 0;
   const steerCalls: Array<{ operationId: string; text: string }> = [];
   const emit = (event: CommandCodeWorkerEvent) => { for (const callback of events) callback(event); };
   const rpc: CommandCodeRpc = {
@@ -25,9 +28,13 @@ const fakeRpc = (options: {
     releasedAuthorities: [],
     async request<T>(command) {
       if (command.type === "start_turn") {
+        startCalls += 1;
         bindingPath = String(command.bindingPath);
         const operationId = String(command.operationId);
         emit({ type: "turn-spawned", operationId });
+        if (options.rejectFirstAdmissionWithoutReceipt && startCalls === 1) {
+          throw Object.assign(new Error("workspace trust is required before admission"), { code: "runtime-rejected" });
+        }
         const state = JSON.parse(await readFile(bindingPath, "utf8"));
         await writeFile(bindingPath, JSON.stringify({
           ...state,
@@ -40,6 +47,9 @@ const fakeRpc = (options: {
           ],
           updatedAt: Date.now(),
         }));
+        if (options.rejectAdmissionAfterReceipt) {
+          throw Object.assign(new Error("late rejection response"), { code: "runtime-rejected" });
+        }
         if (options.unknownAdmission) {
           throw Object.assign(new Error("worker response was lost"), { code: "outcome-unknown" });
         }
@@ -128,6 +138,57 @@ test("Command Code creates a durable adapter binding before the provider session
     assert.ok(events.some((event) => event.type === "assistant/chunk" && event.text === "Hi"));
     assert.ok(events.some((event) => event.type === "assistant/message" && event.text === "Hi"));
     assert.ok(events.some((event) => event.type === "turn/stopped" && event.reason === "completed"));
+  } finally {
+    await runtime.dispose();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("spawn without the exact turn receipt can be proven rejected and does not leave the runtime fenced", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "polyth-commandcode-pre-admission-reject-"));
+  const fake = fakeRpc({ rejectFirstAdmissionWithoutReceipt: true });
+  const { runtime, bindingFile } = await createRuntime(dir, fake);
+  try {
+    const rejected = await runtime.startTurnOperation!(
+      { sessionId: "canonical", text: "first" },
+      "turn-not-admitted",
+    );
+    assert.deepEqual(rejected, {
+      kind: "rejected",
+      code: "runtime-rejected",
+      message: "workspace trust is required before admission",
+    });
+    const beforeRetry = JSON.parse(await readFile(bindingFile, "utf8"));
+    assert.equal(beforeRetry.nativeSessionId, undefined);
+    assert.deepEqual(beforeRetry.acceptedMutations, []);
+
+    const retried = await runtime.startTurnOperation!(
+      { sessionId: "canonical", text: "second" },
+      "turn-admitted-after-rejection",
+    );
+    assert.equal(retried.kind, "confirmed");
+    const afterRetry = JSON.parse(await readFile(bindingFile, "utf8"));
+    assert.ok(afterRetry.acceptedMutations.some((entry: { operationId: string; mutationKind: string }) =>
+      entry.operationId === "turn-admitted-after-rejection" && entry.mutationKind === "turn-submit"));
+  } finally {
+    await runtime.dispose();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a durable exact turn receipt outranks a late runtime-rejected RPC response", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "polyth-commandcode-receipt-precedence-"));
+  const fake = fakeRpc({ rejectAdmissionAfterReceipt: true });
+  const { runtime, bindingFile } = await createRuntime(dir, fake);
+  try {
+    const outcome = await runtime.startTurnOperation!(
+      { sessionId: "canonical", text: "may already be running" },
+      "turn-receipt-precedence",
+    );
+    assert.equal(outcome.kind, "unknown");
+    const state = JSON.parse(await readFile(bindingFile, "utf8"));
+    assert.ok(state.acceptedMutations.some((entry: { operationId: string; mutationKind: string }) =>
+      entry.operationId === "turn-receipt-precedence" && entry.mutationKind === "turn-submit"));
   } finally {
     await runtime.dispose();
     await rm(dir, { recursive: true, force: true });
