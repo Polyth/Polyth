@@ -97,7 +97,7 @@
 .session-hover-card-technical,
 .session-hover-card-path {
   font-family: var(--mono);
-  font-size: max(11px, calc(var(--font-meta) * .95));
+  font-size: var(--font-meta);
 }
 
 .session-hover-card-path-row {
