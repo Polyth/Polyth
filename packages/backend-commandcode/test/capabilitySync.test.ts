@@ -91,12 +91,8 @@ test("native Polyth tool evidence is bound to the exact admitted projection revi
   try {
     const ctx = context(dir);
     const toolBridge = {
-      command: "/usr/bin/node",
-      args: ["agentToolsMcp.mjs"],
-      env: {
-        POLYTH_AGENT_TOOLS_URL: "http://127.0.0.1:9999/internal/agent-tools",
-        POLYTH_AGENT_TOOLS_TOKEN: "opaque-token",
-      },
+      url: "http://127.0.0.1:9999/internal/agent-tools",
+      token: "opaque-token",
     };
     commandCodeOverlays.set(ctx, {
       promptCapabilityIds: [],
@@ -159,12 +155,8 @@ test("native Polyth tool Mod errors fail the exact admitted tool revision", asyn
       toolCapabilityIds: ["example.tool"],
       toolNames: { "example.tool": "read_file" },
       toolBridge: {
-        command: "/usr/bin/node",
-        args: ["agentToolsMcp.mjs"],
-        env: {
-          POLYTH_AGENT_TOOLS_URL: "http://127.0.0.1:9999/internal/agent-tools",
-          POLYTH_AGENT_TOOLS_TOKEN: "opaque-token",
-        },
+        url: "http://127.0.0.1:9999/internal/agent-tools",
+        token: "opaque-token",
       },
     }, "commandcode", { desiredRevision: "collision-rev", capabilityIds: ["example.tool"] });
     const fake = fakeRpc(async <T>() => ({ nativeSessionId: "native" }) as T);
