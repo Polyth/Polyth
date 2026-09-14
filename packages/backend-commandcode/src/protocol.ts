@@ -13,10 +13,16 @@ const stringValue = (...values: unknown[]): string | undefined => {
 const numberValue = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
+const inputUsage = (value: unknown): number | undefined => {
+  const row = asRecord(value);
+  if (!row) return undefined;
+  return numberValue(row.input) ?? numberValue(row.inputTokens) ?? numberValue(row.input_tokens);
+};
+
 const usage = (value: unknown): TokenUsage | undefined => {
   const row = asRecord(value);
   if (!row) return undefined;
-  const input = numberValue(row.input) ?? numberValue(row.inputTokens) ?? numberValue(row.input_tokens) ?? 0;
+  const input = inputUsage(row) ?? 0;
   const output = numberValue(row.output) ?? numberValue(row.outputTokens) ?? numberValue(row.output_tokens) ?? 0;
   const reasoning = numberValue(row.reasoning) ?? numberValue(row.reasoningTokens) ?? numberValue(row.reasoning_tokens);
   const cacheRead = numberValue(row.cacheRead) ?? numberValue(row.cacheReadTokens) ?? numberValue(row.cache_read_tokens);
@@ -132,6 +138,41 @@ const taskSnapshot = (
   return { type: "task/snapshot", listId: "todo", revision: ++state.taskRevision, items };
 };
 
+/** Command Code's ask_user_question schema is intentionally normalized at the
+ * adapter boundary so its `header`/`multiSelect` names never leak into web UI. */
+const structuredQuestions = (input: JsonObject): JsonObject[] => {
+  if (!Array.isArray(input.questions)) return [];
+  return input.questions.flatMap((value, index) => {
+    const raw = asRecord(value);
+    const prompt = stringValue(raw?.question)?.trim();
+    if (!raw || !prompt) return [];
+    const options = Array.isArray(raw.options)
+      ? raw.options.flatMap((option) => {
+          const row = asRecord(option);
+          const label = stringValue(row?.label)?.trim();
+          if (!label) return [];
+          return [{
+            value: label,
+            label,
+            ...(stringValue(row?.description)?.trim()
+              ? { description: stringValue(row?.description)!.trim() }
+              : {}),
+          } satisfies JsonObject];
+        })
+      : [];
+    return [{
+      id: `q${index + 1}`,
+      ...(stringValue(raw.header)?.trim() ? { title: stringValue(raw.header)!.trim() } : {}),
+      prompt,
+      type: raw.multiSelect === true ? "multi" : options.length ? "single" : "text",
+      ...(options.length ? { options } : {}),
+      required: true,
+      // Command Code always allows a free-text reply in addition to options.
+      ...(options.length ? { allowOther: true } : {}),
+    } satisfies JsonObject];
+  });
+};
+
 const subagentEvent = (
   state: CommandCodeTranslateState,
   event: Record<string, unknown>,
@@ -239,6 +280,10 @@ export function translateCommandCodeRecord(
         state.toolInputs.set(callId, input);
         if (tool) state.toolNames.set(callId, tool);
       }
+      if (tool === "ask_user_question" && callId) {
+        const questions = structuredQuestions(input);
+        return questions.length ? [{ type: "question/asked", requestId: callId, questions }] : [];
+      }
       if (tool !== "todo_write") return [];
       const snapshot = taskSnapshot(state, input);
       return snapshot ? [snapshot] : [];
@@ -252,13 +297,23 @@ export function translateCommandCodeRecord(
       const output = stringValue(event.result, event.output, event.text) ?? JSON.stringify(event.result ?? "");
       return [{ type: "tool/result", callId, tool, output }];
     }
-    case "tool_errored":
-    case "tool_denied":
     case "tool_hook_blocked": {
       const { callId, tool } = toolIdentity(state, event);
+      // Our transient Mod intentionally blocks ask_user_question after the
+      // Polyth answer is captured; the block text is the successful tool result
+      // delivered to the model, not an error the user should see.
+      if (tool === "ask_user_question") return [];
       const error = safeDiagnostic(event.error)
         ?? safeDiagnostic(event.message)
         ?? safeDiagnostic(event.hookOutput)
+        ?? "Command Code tool hook blocked the call";
+      return [{ type: "tool/error", callId, tool, error }];
+    }
+    case "tool_errored":
+    case "tool_denied": {
+      const { callId, tool } = toolIdentity(state, event);
+      const error = safeDiagnostic(event.error)
+        ?? safeDiagnostic(event.message)
         ?? (event.type === "tool_denied" ? "Command Code denied the tool call" : "Command Code tool failed");
       return [{ type: "tool/error", callId, tool, error }];
     }
@@ -302,16 +357,20 @@ export function translateCommandCodeRecord(
     case "model_request_end": {
       state.model ??= modelRef(event.model);
       const tokens = usage(event.usage);
+      const nativeInput = inputUsage(event.usage);
       if (!tokens) return [];
-      const out: RuntimeEvent[] = [{
-        // Per-request input usage is Command Code's provider-reported prompt
-        // occupancy for this inference. The model's context limit is not part
-        // of the documented headless model catalog, so do not invent one.
-        type: "context/updated",
-        source: "native",
-        updatedAt: Date.now(),
-        usedTokens: tokens.input,
-      }];
+      const out: RuntimeEvent[] = [];
+      if (nativeInput !== undefined) {
+        out.push({
+          // Per-request input usage is Command Code's provider-reported prompt
+          // occupancy for this inference. The model's context limit is not part
+          // of the documented headless model catalog, so do not invent one.
+          type: "context/updated",
+          source: "native",
+          updatedAt: Date.now(),
+          usedTokens: nativeInput,
+        });
+      }
       if (state.model) {
         state.usageFrames += 1;
         out.push({ type: "usage/recorded", model: state.model, tokens });
