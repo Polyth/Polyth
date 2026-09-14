@@ -19,6 +19,14 @@ const escapesRoot = (relativePath: string): boolean =>
   || relativePath === ".."
   || relativePath.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`);
 
+const validRange = (attachment: AttachmentRef): boolean => {
+  if (attachment.kind !== "range") return true;
+  const range = attachment.range;
+  if (!range) return false;
+  const [from, to] = range;
+  return Number.isSafeInteger(from) && Number.isSafeInteger(to) && from >= 1 && to >= from;
+};
+
 /**
  * Resolve a client-neutral project-relative attachment path without ever
  * returning an absolute host path to the prompt. The provider-bound instruction
@@ -55,8 +63,7 @@ const absoluteReadInstruction = (path: string): string =>
 const attachmentInstruction = (attachment: AttachmentRef, path: string): string => {
   const read = absoluteReadInstruction(path);
   if (attachment.kind === "range" && attachment.range) {
-    const from = Math.max(1, Math.trunc(attachment.range[0]));
-    const to = Math.max(from, Math.trunc(attachment.range[1]));
+    const [from, to] = attachment.range;
     const limit = to - from + 1;
     return `- ${read} with offset=${from} and limit=${limit}.`;
   }
@@ -103,6 +110,13 @@ export function prepareCommandCodeTurnInput(
         ok: false,
         code: "unsupported",
         message: `${attachment.name} is not a project file/document attachment Command Code can receive through this integration yet`,
+      };
+    }
+    if (!validRange(attachment)) {
+      return {
+        ok: false,
+        code: "invalid-attachment",
+        message: `${attachment.name} has an invalid project line range`,
       };
     }
     const path = commandCodeProjectPath(cwd, attachment);
