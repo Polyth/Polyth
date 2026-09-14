@@ -9,7 +9,7 @@ import type {
 import { announce } from "../../components/a11y/announce.ts";
 import { Button, Badge, Notice, Spinner } from "../../components/ui/index.ts";
 import ResponsiveOverlay from "../../components/ui/ResponsiveOverlay.tsx";
-import { getState, setUiError } from "../../store.ts";
+import { getState } from "../../store.ts";
 import { applyContributionResult } from "./extensionResults.ts";
 import { RemoteUiView } from "./RemoteUi.tsx";
 import { acquireSandboxRuntime, type SandboxRuntime } from "./runtime.ts";
@@ -144,28 +144,26 @@ function useContributionExecution(
         if (execution === executionRef.current && next) setTree(next);
       });
       const scope = scopeOf(hostProps);
+      const data = invocationData(descriptor, hostProps);
       const next = await runtime.invokeContribution({
         kind: descriptor.kind,
         contributionId: descriptor.id,
         ...scope,
-        ...(invocationData(descriptor, hostProps) ? { data: invocationData(descriptor, hostProps) } : {}),
+        ...(data ? { data } : {}),
       });
       if (execution !== executionRef.current) return undefined;
       setResult(next);
       if (next?.ui) setTree(next.ui);
       const applied = await applyContributionResult(next, scope);
       if (execution !== executionRef.current) return next;
-      if (applied.failed.length > 0) {
-        setError(`Could not attach: ${applied.failed.join(", ")}`);
-      }
+      if (applied.failed.length > 0) setError(`Could not attach: ${applied.failed.join(", ")}`);
       if (applied.attached > 0) announce(`${applied.attached} extension item${applied.attached === 1 ? "" : "s"} attached`);
       if (next?.message) announce(next.message);
       setBusy(false);
       return next;
     } catch (cause) {
       if (execution !== executionRef.current) return undefined;
-      const message = cause instanceof Error ? cause.message : String(cause);
-      setError(message);
+      setError(cause instanceof Error ? cause.message : String(cause));
       setBusy(false);
       return undefined;
     }
@@ -174,11 +172,7 @@ function useContributionExecution(
   return { tree, result, busy, error, run, dispose, runtimeRef };
 }
 
-function ContributionBody({
-  execution,
-}: {
-  execution: ReturnType<typeof useContributionExecution>;
-}) {
+function ContributionBody({ execution }: { execution: ReturnType<typeof useContributionExecution> }) {
   if (execution.error) return <Notice tone="warning" role="alert">{execution.error}</Notice>;
   if (execution.tree) {
     return <RemoteUiView tree={execution.tree} onAction={(action) => execution.runtimeRef.current?.sendAction(action)} />;
@@ -186,6 +180,9 @@ function ContributionBody({
   if (execution.busy) return <Spinner label="Loading extension" />;
   if (execution.result?.status) {
     return <Badge tone={execution.result.status.tone === "danger" ? "danger" : execution.result.status.tone === "warning" ? "warning" : execution.result.status.tone === "success" ? "success" : "neutral"}>{execution.result.status.label}</Badge>;
+  }
+  if ((execution.result?.resources?.length ?? 0) + (execution.result?.context?.length ?? 0) > 0) {
+    return <Badge tone="success">Added to composer</Badge>;
   }
   return null;
 }
@@ -205,7 +202,7 @@ function LauncherContribution({
   const launch = () => {
     setOpen(true);
     void execution.run().then((result) => {
-      if (result && !result.ui && !execution.tree && !(result.status || result.message)) setOpen(false);
+      if (result && !result.ui && !(result.status || result.message || result.resources?.length || result.context?.length)) setOpen(false);
     });
   };
   const close = () => {
@@ -253,7 +250,7 @@ function InlineContribution({
   useEffect(() => {
     void execution.run();
     return execution.dispose;
-  // Contribution identity is immutable for this mounted slot entry.
+  // Contribution identity and host scope are immutable for this mounted slot entry.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plugin.id, plugin.version, descriptor.kind, descriptor.id]);
 
@@ -276,16 +273,20 @@ export function SandboxContributionSlot({
 }): ReactNode {
   const descriptor = useMemo(() => descriptorOf(item), [item]);
   if (!descriptor) return null;
+  const selected = typeof hostProps.selectedContributionId === "string" ? hostProps.selectedContributionId : undefined;
+  if (selected && selected !== descriptor.id) return null;
   if (descriptor.kind === "tool-renderer") {
     if (!descriptor.dynamic) return null;
+    return <InlineContribution plugin={plugin} descriptor={descriptor} hostProps={hostProps} />;
+  }
+  if (
+    hostProps.presentation === "picker"
+    && (descriptor.kind === "attachment-provider" || descriptor.kind === "context-provider")
+  ) {
     return <InlineContribution plugin={plugin} descriptor={descriptor} hostProps={hostProps} />;
   }
   if (["settings-section", "status-badge", "widget", "surface"].includes(descriptor.kind)) {
     return <InlineContribution plugin={plugin} descriptor={descriptor} hostProps={hostProps} />;
   }
   return <LauncherContribution plugin={plugin} descriptor={descriptor} hostProps={hostProps} />;
-}
-
-export function reportContributionError(message: string): void {
-  setUiError(message);
 }
