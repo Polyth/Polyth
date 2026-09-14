@@ -151,7 +151,14 @@ const deliverQueuedMessage = async (turn, content, deliverAs, operationId) => {
 
 const startTurn = async (message) => {
   if (active) throw Object.assign(new Error("Command Code is already processing a turn"), { code: "busy" });
-  const args = ["-p", "--output-format", "json", "--skip-onboarding", "--no-auto-update", "--mod", bridgePath];
+  const args = [
+    "-p",
+    "--output-format", "json",
+    "--skip-onboarding",
+    "--no-auto-update",
+    "--tools-enable", "todo_write",
+    "--mod", bridgePath,
+  ];
   if (message.nativeSessionId) args.push("--resume", message.nativeSessionId);
   if (message.model) args.push("--model", message.model);
   if (message.effort) args.push("--effort", message.effort);
