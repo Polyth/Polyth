@@ -19,8 +19,17 @@ interface GrantsFile {
   connectionFingerprints?: Record<string, string>;
 }
 
+interface StoredConnectionState {
+  status: "disconnected" | "connecting" | "connected" | "error";
+  account?: string;
+  error?: string;
+  expiresAt?: number;
+}
+
 const fileOf = (storage: SpaceStorage, packageId: string): string =>
   spacePackageFile(storage, packageId, "grants.json");
+const connectionsFileOf = (storage: SpaceStorage, packageId: string): string =>
+  spacePackageFile(storage, packageId, "connections.json");
 
 function loadGrantState(storage: SpaceStorage, packageId: string): GrantsFile {
   return readJsonFile<GrantsFile>(fileOf(storage, packageId), {});
@@ -31,6 +40,14 @@ function saveGrantState(storage: SpaceStorage, packageId: string, state: GrantsF
     grants: state.grants ?? [],
     connectionFingerprints: state.connectionFingerprints ?? {},
   });
+}
+
+function disconnectStoredConnection(storage: SpaceStorage, packageId: string, connectionId: string): void {
+  const file = connectionsFileOf(storage, packageId);
+  const stored = readJsonFile<Record<string, StoredConnectionState>>(file, {});
+  if (!stored[connectionId]) return;
+  stored[connectionId] = { status: "disconnected" };
+  writeJsonFile(file, stored);
 }
 
 export function readGrants(storage: SpaceStorage, packageId: string): ScopedPackageCapabilityGrant[] {
@@ -73,7 +90,17 @@ export function approveConnectionDefinitions(
   const state = loadGrantState(storage, packageId);
   const fingerprints = { ...(state.connectionFingerprints ?? {}) };
   for (const spec of specs) {
-    if (wanted.has(spec.id)) fingerprints[spec.id] = connectionFingerprint(spec);
+    if (!wanted.has(spec.id)) continue;
+    const nextFingerprint = connectionFingerprint(spec);
+    if (fingerprints[spec.id] !== nextFingerprint) {
+      // Approval of a changed security target must never carry an already
+      // connected credential across origins/endpoints/client ids. Disconnect
+      // first, then publish the new fingerprint. If the process dies between
+      // those writes the connection is merely unavailable; old authority is
+      // never made valid for the new target.
+      disconnectStoredConnection(storage, packageId, spec.id);
+    }
+    fingerprints[spec.id] = nextFingerprint;
   }
   saveGrantState(storage, packageId, { grants: state.grants ?? [], connectionFingerprints: fingerprints });
   return fingerprints;
