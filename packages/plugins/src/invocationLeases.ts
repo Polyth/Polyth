@@ -1,8 +1,9 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import type {
-  ContributionCompletion,
-  ContributionInvocation,
-  ContributionInvocationKind,
+import {
+  parseContributionCompletion,
+  type ContributionCompletion,
+  type ContributionInvocation,
+  type ContributionInvocationKind,
 } from "@polyth/package-sdk";
 
 const DEFAULT_TTL_MS = 30_000;
@@ -105,12 +106,13 @@ export function createInvocationLeaseStore(options: {
     },
     authorize,
     complete(identity, completion) {
+      const parsed = parseContributionCompletion(completion);
       const record = authorize({
         ...identity,
-        invocationId: completion.invocationId,
-        lease: completion.lease,
+        invocationId: parsed.invocationId,
+        lease: parsed.lease,
       });
-      records.delete(tokenKey(completion.lease));
+      records.delete(tokenKey(parsed.lease));
       return record;
     },
     revokePackage(packageId) {
