@@ -69,13 +69,6 @@ export const BUILTIN_TOURS: readonly PackageOnboardingTour[] = [
         highlight: tr("packages.onboarding.tours.builtin.defaultModel"),
         media: { kind: "pattern", pattern: "orbit" },
       },
-      {
-        id: "canvas",
-        title: tr("packages.onboarding.tours.builtin.startWithTheRightWorkspace"),
-        body: tr("packages.onboarding.tours.builtin.pickACanvasLayoutAndSuggestedWidgets"),
-        highlight: tr("packages.onboarding.tours.builtin.canvasSetup"),
-        media: { kind: "pattern", pattern: "tiles" },
-      },
     ],
   },
   {
@@ -561,32 +554,6 @@ export const BUILTIN_TOURS: readonly PackageOnboardingTour[] = [
         highlight: tr("packages.onboarding.tours.builtin.ifStillRunning"),
         highlightWhere: "workspace",
         media: { kind: "pattern", pattern: "branches" },
-      },
-    ],
-  },
-  {
-    packageId: "widgets",
-    title: tr("packages.onboarding.tours.builtin.widgetsLayout"),
-    steps: [
-      {
-        id: "overview",
-        title: tr("packages.onboarding.tours.builtin.putToolsWhereYouUseThem"),
-        body: tr("packages.onboarding.tours.builtin.widgetsLayoutArrangesWorkspaceToolsComposerActions"),
-        media: { kind: "pattern", pattern: "tiles" },
-      },
-      {
-        id: "tools",
-        title: tr("packages.onboarding.tours.builtin.arrangeWorkspaceTools"),
-        body: tr("packages.onboarding.tours.builtin.moveAvailableCapabilitiesBetweenTheCentered"),
-        highlight: tr("packages.onboarding.tours.builtin.chatTopRail"),
-        media: { kind: "pattern", pattern: "branches" },
-      },
-      {
-        id: "actions",
-        title: tr("packages.onboarding.tours.builtin.chooseCompactActions"),
-        body: tr("packages.onboarding.tours.builtin.addOrHideButtonsAroundTheComposer"),
-        highlight: tr("packages.onboarding.tours.builtin.composerActions"),
-        media: { kind: "pattern", pattern: "orbit" },
       },
     ],
   },

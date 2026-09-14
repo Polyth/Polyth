@@ -10,7 +10,7 @@ import {
 const PAGES: Record<string, string> = {
   general: "General", appearance: "Appearance", chat: "Chat", notifications: "Notifications",
   behavior: "Behavior", mcp: "MCP", plugins: "Plugins", about: "About", voice: "Voice",
-  models: "Providers & Models", agents: "Agents", widgets: "Widgets & Layout",
+  models: "Providers & Models", agents: "Agents",
 };
 
 test("fold strips diacritics and case", () => {
@@ -45,32 +45,24 @@ test("no matches yields an empty list, blank query too", () => {
   assert.deepEqual(searchSettingsItems("   ", PAGES), []);
 });
 
-test("Widgets & Layout exposes place-first workspace and composer controls", async () => {
+test("Settings has no Widgets & Layout customizer; canvas widgets stay in the header Canvas", async () => {
   const widgetItems = listSettingsItems().filter((item) => item.pageId === "widgets");
-  assert.deepEqual(widgetItems.map((item) => item.id), ["widgets.capabilities", "widgets.actions"]);
-  assert.ok(searchSettingsItems("zones", PAGES).some((hit) => hit.item.id === "widgets.capabilities"));
-  assert.ok(searchSettingsItems("composer", PAGES).some((hit) => hit.item.id === "widgets.actions"));
+  assert.deepEqual(widgetItems, []);
+  assert.equal(searchSettingsItems("zones", PAGES).some((hit) => hit.item.id === "widgets.capabilities"), false);
+  assert.equal(searchSettingsItems("Widgets & Layout", PAGES).length, 0);
 
-  const [shell, settings, widgets, packages] = await Promise.all([
+  const [shell, settings, packages, canvas] = await Promise.all([
     readFile(new URL("../src/shell.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/components/SettingsView.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../src/components/settings/WidgetsPage.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/settings/PackagesPage.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/widgets/WidgetCanvas.tsx", import.meta.url), "utf8"),
   ]);
   assert.doesNotMatch(shell, /Change workspace preset|cmd\.customize/);
   assert.doesNotMatch(settings, /Choose a setup/);
-  assert.match(settings, /tr\("settingsview\.widgetsLayout"\)/);
-  assert.match(widgets, /className=\{`workspace-customizer preview-\$\{mode\}`\}/);
+  assert.doesNotMatch(settings, /WidgetsPage|settingsview\.widgetsLayout|id: "widgets"/);
   assert.match(packages, /<PageHead title=\{tr\("settings\.packagespage\.packages"\)\}/);
-  assert.match(widgets, /<WidgetLibraryPanel widgets=\{widgets\} onAdd=\{add\}/);
-  assert.match(widgets, /<WidgetCanvas editing selectedId=\{selected\}/);
-  assert.match(widgets, /<Inspector selectedId=\{selected\} widgets=\{widgets\}/);
-  assert.match(widgets, /aria-label="Top toolbar"/);
-  assert.match(widgets, /aria-label="Right rail"/);
-  assert.match(widgets, /aria-label="Response actions"/);
-  assert.match(widgets, /aria-label="Composer controls"/);
-  assert.doesNotMatch(widgets, /More tools \/ right rail|Technical menu|Session header stats/);
-  assert.doesNotMatch(widgets, /Choose a starting layout|Help me set up/);
+  assert.match(canvas, /<WidgetMenu /);
+  assert.match(canvas, /data-widget-surface="workspace-canvas"/);
 });
 
 test("items on hidden/unknown pages are skipped", () => {

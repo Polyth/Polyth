@@ -119,7 +119,7 @@ export const BUILTIN_AREAS: readonly WidgetArea[] = [
     group: "workspace",
     orientation: "canvas",
     sizeHint: "panel",
-    recommends: ["git.recent", "session.work-status", "session.activity"],
+    recommends: ["git.recent", "session.work-status", "session.activity", "usage.turn"],
     order: 33,
   },
   {

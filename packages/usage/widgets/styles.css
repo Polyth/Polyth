@@ -155,21 +155,35 @@ margin-top: 0;
 grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }
 .usage-sessions-table {
-min-height: 100%; overflow: auto; padding: 8px 10px;
+  min-height: 100%;
+  overflow: auto;
+  padding: var(--space-2);
+  container: usage-sessions-table / inline-size;
 }
 .usage-sessions-table table {
-width: 100%; border-collapse: collapse; font-size: var(--font-meta);
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-meta);
 }
 .usage-sessions-table th,
 .usage-sessions-table td {
-padding: 7px 8px; border-bottom: 1px solid var(--hair); text-align: right;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--hair);
+  text-align: right;
 }
 .usage-sessions-table th:first-child,
 .usage-sessions-table td:first-child {
 width: 100%; max-width: 0; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap;
 }
 .usage-sessions-table th {
-position: sticky; top: 0; z-index: 1; background: var(--panel); color: var(--muted); font-size: var(--font-meta); text-transform: uppercase;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-activity);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  text-transform: uppercase;
+  box-shadow: 0 1px 0 var(--hair);
 }
 .usage-sessions-table th button {
 border: 0; padding: 2px 3px; background: transparent; color: inherit; font: inherit; text-transform: inherit;
@@ -178,13 +192,32 @@ border: 0; padding: 2px 3px; background: transparent; color: inherit; font: inhe
 color: var(--accent);
 }
 .usage-quota-summary {
-flex: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; gap: var(--space-2); padding: 9px;
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-2);
+  container: usage-quota-summary / inline-size;
 }
-.usage-quota-summary > div {
-min-width: 0; display: flex; flex-direction: column; justify-content: center; padding: 7px 9px; border: 1px solid var(--hair); border-radius: var(--radius-card); background: var(--sunken);
+.usage-quota-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+  gap: var(--space-2);
+}
+.usage-quota-summary-grid > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-card);
+  background: var(--surface-activity);
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
 }
 .usage-quota-summary strong {
-font: 650 16px var(--mono);
+  font: 650 var(--font-label) var(--mono);
+  font-variant-numeric: tabular-nums;
 }
 .usage-quota-summary span {
 overflow: hidden; color: var(--muted); font-size: var(--font-meta); text-overflow: ellipsis; white-space: nowrap;
@@ -1528,4 +1561,51 @@ width: 100%; justify-content: center;
 /* Quota meta lines share the meta type role instead of inline pixel sizes. */
 .quota-meta {
   font-size: var(--font-meta);
+}
+
+/* Compact turn telemetry cells, sharing the session-usage stat grid. */
+.usage-turn-stats {
+  min-width: 0;
+  padding: 0;
+  container: usage-turn-stats / inline-size;
+}
+.usage-turn-stats > .usage-inline-empty {
+  padding: var(--space-3);
+}
+.usage-turn-stats-grid {
+  padding: var(--space-2);
+}
+.usage-turn-stats-grid > div {
+  min-width: 0;
+  gap: 2px;
+  padding: var(--space-2);
+}
+.usage-turn-stats-grid span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.usage-turn-stats-grid strong {
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.usage-turn-stats-grid strong.usage-turn-stats-good {
+  color: var(--green);
+}
+@container usage-quota-summary (max-width: 360px) {
+  .usage-quota-summary-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@container usage-sessions-table (max-width: 320px) {
+  .usage-sessions-table th,
+  .usage-sessions-table td {
+    padding: var(--space-1) var(--space-2);
+  }
+}
+@container usage-turn-stats (max-width: 260px) {
+  .usage-turn-stats-grid {
+    grid-template-columns: minmax(0, 1fr);
+    padding: var(--space-1);
+  }
 }

@@ -7,6 +7,21 @@ const WORKSPACE_SLOTS = [
   "workspace.right",
 ] as const;
 
+const TURN_STATS_SETTINGS = {
+  type: "object",
+  properties: {
+    showResponseRate: { type: "boolean", title: "Response", default: true },
+    showWholeTurnRate: { type: "boolean", title: "Whole turn", default: true },
+    showModelTime: { type: "boolean", title: "Model time", default: true },
+    showToolTime: { type: "boolean", title: "Tool time", default: true },
+    showAvgTtft: { type: "boolean", title: "Average TTFT", default: true },
+    showSteps: { type: "boolean", title: "Steps", default: true },
+    showTokens: { type: "boolean", title: "Tokens", default: true },
+    showCache: { type: "boolean", title: "Cache", default: true },
+    showCost: { type: "boolean", title: "Cost", default: true },
+  },
+} as const;
+
 const SESSION_USAGE_SETTINGS = {
   type: "object",
   properties: {
@@ -112,5 +127,31 @@ export const USAGE_WIDGETS: readonly WidgetContributionDescriptor[] = [
     recommended: true,
     defaultVisible: false,
     order: 40,
+  },
+  {
+    id: "usage.turn",
+    module: "usage.turn",
+    title: "Turn stats",
+    description: "Compact last-turn rate, timing, token, cache, and cost telemetry.",
+    kind: "widget",
+    defaultSlot: "workspace.right",
+    supportedSlots: [
+      "workspace.left",
+      "workspace.main",
+      "workspace.right",
+      "workspace.bottom",
+      "session.composer.before",
+    ],
+    category: "Usage",
+    defaultSize: { w: 4, h: 9 },
+    minSize: { w: 3, h: 5 },
+    maxSize: { w: 12, h: 50 },
+    audience: "standard",
+    scope: "workspace",
+    resizable: true,
+    recommended: true,
+    defaultVisible: false,
+    duplicatable: true,
+    settingsSchema: TURN_STATS_SETTINGS,
   },
 ];

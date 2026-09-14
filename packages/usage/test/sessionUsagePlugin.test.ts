@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { register } from "node:module";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -80,4 +81,17 @@ test("latest context event is selected as the live occupancy fallback", () => {
   const latest = latestContextWindow([first, second]);
   assert.equal(latest?.usedTokens, 40);
   assert.equal(latest?.fraction, undefined);
+});
+
+test("session usage widget avoids rendering metrics without a resolved session", async () => {
+  const source = await readFile(new URL("../widgets/sessionUsagePlugin.tsx", import.meta.url), "utf8");
+  assert.match(source, /chooseASessionForUsage/);
+  const widget = source.slice(source.indexOf("function SessionUsageWidget"));
+  const lastHook = Math.max(
+    widget.lastIndexOf("useStore"),
+    widget.lastIndexOf("useActiveModel"),
+  );
+  const emptyReturn = widget.indexOf("if (!resolvedSessionId)");
+  assert.ok(emptyReturn > 0);
+  assert.ok(lastHook > 0 && lastHook < emptyReturn);
 });

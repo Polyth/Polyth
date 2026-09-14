@@ -57,6 +57,10 @@ const WIDGETS: WidgetDef[] = [
 test("canvas exposes one simple add-widget menu and no placement-zone controls", async () => {
   const source = await readFile(new URL("../src/widgets/WidgetCanvas.tsx", import.meta.url), "utf8");
   assert.equal((source.match(/<WidgetMenu /g) ?? []).length, 1);
+  assert.match(source, /className="widget-menu-item-copy"/);
+  assert.match(source, /className="widget-menu-item-label"/);
+  assert.match(source, /className="widget-menu-item-detail"/);
+  assert.doesNotMatch(source, /<span><strong>\{widget\.title\}<\/strong><small>/);
   assert.ok(!source.includes("WIDGET_ZONES"));
   assert.ok(!source.includes("layout preset"));
   assert.ok(!source.includes("Recommended"));
@@ -73,13 +77,21 @@ test("canvas top row is placeable and editing borders use theme colors", async (
   assert.doesNotMatch(styles, /\.widget-card\.editing\s*\{[^}]*accent-line/s);
 });
 
-test("settings is a visual workspace customizer with library, live preview, and inspector", async () => {
-  const source = await readFile(new URL("../src/components/settings/WidgetsPage.tsx", import.meta.url), "utf8");
-  assert.match(source, /Customize workspace/);
-  assert.match(source, /WidgetLibraryPanel/);
-  assert.match(source, /WidgetCanvas editing/);
-  assert.match(source, /workspace-inspector/);
-  assert.match(source, /redoWidgetLayout/);
+test("canvas add menu is a single-column list with stacked title and description", async () => {
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(styles, /\.widget-menu-list\s*\{[^}]*flex-direction:\s*column;/s);
+  assert.doesNotMatch(styles, /\.widget-menu-list\s*\{[^}]*grid-template-columns:\s*repeat\(2/);
+  assert.doesNotMatch(styles, /\.widget-menu-list section > button > span:first-child/);
+  assert.match(styles, /\.widget-menu-item-copy\s*\{[^}]*flex-direction:\s*column;/s);
+  assert.match(styles, /\.widget-menu-item-detail\s*\{[^}]*overflow-wrap:\s*anywhere;/s);
+});
+
+test("settings has no workspace customizer; canvas owns add-widget and layout", async () => {
+  const settings = await readFile(new URL("../src/components/SettingsView.tsx", import.meta.url), "utf8");
+  const canvas = await readFile(new URL("../src/widgets/WidgetCanvas.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(settings, /WidgetsPage|WidgetLibraryPanel|workspace-customizer/);
+  assert.match(canvas, /<WidgetMenu /);
+  assert.match(canvas, /data-widget-surface="workspace-canvas"/);
 });
 
 test("chat top rail is configured directly without a More tools overflow", async () => {
@@ -89,23 +101,17 @@ test("chat top rail is configured directly without a More tools overflow", async
   assert.doesNotMatch(source, /CapabilityMenu/);
 });
 
-test("customizer exposes responsive live controls and widget inspector settings", async () => {
-  const source = await readFile(new URL("../src/components/settings/WidgetsPage.tsx", import.meta.url), "utf8");
-  assert.match(source, /"desktop", "tablet", "phone"/);
-  assert.match(source, /Mobile shortcuts/);
-  assert.match(source, /ui\.mobileShortcuts/);
-  assert.match(source, /setUiSettings\(\{ mobileShortcuts \}\)/);
-  assert.match(source, /Widget settings/);
-  assert.match(source, /Compact", "Default", "Large/);
+test("canvas widget settings live on the widget, not a settings customizer", async () => {
+  const canvas = await readFile(new URL("../src/widgets/WidgetCanvas.tsx", import.meta.url), "utf8");
+  const chat = await readFile(new URL("../src/components/settings/pages.tsx", import.meta.url), "utf8");
+  assert.match(canvas, /SchemaWidgetSettings|settingsRender/);
+  assert.match(chat, /itemId="chat\.responseActions"/);
+  assert.match(chat, /itemId="chat\.headerMetrics"/);
 });
 
 test("buttons stay on shell surfaces while the canvas accepts only full widgets", async () => {
-  const library = await readFile(new URL("../src/components/settings/WidgetLibraryPanel.tsx", import.meta.url), "utf8");
   const canvas = await readFile(new URL("../src/widgets/WidgetCanvas.tsx", import.meta.url), "utf8");
   const slots = await readFile(new URL("../src/components/slots/SlotHost.ts", import.meta.url), "utf8");
-  assert.match(library, /Widgets" : "Buttons/);
-  assert.match(library, /Add buttons to/);
-  assert.match(library, /setDragWidget/);
   assert.match(canvas, /getDragWidget/);
   assert.match(canvas, /widget\.kind !== "mini-widget"/);
   assert.match(canvas, /onDropSlot/);

@@ -2,9 +2,7 @@
 // Behavior, Projects, Agents, MCP, and About.
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
-  activateProject,
   applyProjectUpsert,
-  openSettingsPage,
   setUiError,
   updateSettings,
   useStore,
@@ -1054,19 +1052,6 @@ export function ProjectsPage() {
               />
             </div>
           )}
-          <div className="project-settings-options" data-settings-item="projects.canvas">
-            <div>
-              <strong>{tr("settings.pages.canvasSetup")}</strong>
-              <span>{tr("settings.pages.chooseAStartingLayoutWidgetsAndWorkspace")}</span>
-            </div>
-            <Button
-              size="sm"
-              onClick={() => {
-                activateProject(p.id);
-                openSettingsPage("widgets");
-              }}
-            >{tr("settings.pages.configureCanvas")}</Button>
-          </div>
         </section>
       ))}
       <div className="set-add-form">
