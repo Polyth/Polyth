@@ -74,6 +74,27 @@ test("Command Code todo_write produces revisioned Polyth task snapshots from ori
   }, state), [{ type: "task/snapshot", listId: "todo", revision: 2, items: [] }]);
 });
 
+test("object-shaped native tool errors preserve the message and redact secrets", () => {
+  const state = createCommandCodeTranslateState("turn-tool-error");
+  translateCommandCodeRecord({
+    type: "event",
+    event: { type: "tool_queued", toolCallId: "tool-1", toolName: "shell", input: { command: "false" } },
+  }, state);
+  assert.deepEqual(translateCommandCodeRecord({
+    type: "event",
+    event: {
+      type: "tool_errored",
+      toolCallId: "tool-1",
+      error: { message: "token=super-secret\ncommand failed" },
+    },
+  }, state), [{
+    type: "tool/error",
+    callId: "tool-1",
+    tool: "shell",
+    error: "token=[redacted] command failed",
+  }]);
+});
+
 test("placeholder native titles never replace a useful canonical title", () => {
   const state = createCommandCodeTranslateState("turn-title");
   for (const title of ["New session", "Untitled", "Command Code session", "   "]) {
