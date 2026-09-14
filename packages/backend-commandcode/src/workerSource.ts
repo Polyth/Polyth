@@ -246,6 +246,7 @@ const startToolBridge = async (spec, cwd) => {
     shell: windowsShim(spec.command),
     stdio: ["pipe", "pipe", "pipe"],
   });
+  child.on("error", () => undefined);
   child.stderr?.resume();
   try {
     await waitForSpawn(child);
@@ -303,6 +304,7 @@ const attachToolRelay = (turn) => {
   requests.on("error", failRelay);
   responses.on("error", failRelay);
   bridge.stdin.on("error", failRelay);
+  bridge.on("error", failRelay);
 
   bridge.stdout.on("data", (chunk) => {
     responseBytes = Buffer.concat([responseBytes, chunk]);
@@ -431,7 +433,10 @@ const startTurn = async (message) => {
   child.stderr.on("data", (chunk) => {
     turn.stderr = (turn.stderr + chunk.toString("utf8")).slice(-MAX_STDERR);
   });
-  child.once("error", (error) => send({ type: "process-error", operationId: turn.operationId, error: safeError(error) }));
+  child.once("error", (error) => {
+    if (toolBridge && toolBridge.exitCode === null && !toolBridge.signalCode) toolBridge.kill("SIGTERM");
+    send({ type: "process-error", operationId: turn.operationId, error: safeError(error) });
+  });
   child.once("close", (code, signal) => {
     void rm(controlPath, { force: true }).catch(() => undefined);
     if (toolBridge && toolBridge.exitCode === null && !toolBridge.signalCode) toolBridge.kill("SIGTERM");
