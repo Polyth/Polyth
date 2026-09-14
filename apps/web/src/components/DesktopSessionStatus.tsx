@@ -1,7 +1,13 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { displayWideSessionTitle, fmtTokens } from "../format.ts";
 import { openSession } from "../init.ts";
-import { recentSessionsForIsland, sessionTitleOf } from "../mobileIsland.ts";
+import { recentSessionsForIsland, sessionTitleOf, tasksForIsland, type IslandTask } from "../mobileIsland.ts";
+import {
+  deriveTaskProgressEvent,
+  taskProgressSnapshot,
+  taskProgressSnapshotKey,
+  type TaskProgressEvent,
+} from "../mobileTaskProgress.ts";
 import { resolveSessionStatus } from "../sessionStatus.ts";
 import { useActiveModel, useStore } from "../store.ts";
 import { firstUserTextCached, lastUserTextCached } from "../utils.ts";
@@ -15,8 +21,77 @@ import {
 } from "../reduce.ts";
 import { useUiSettings } from "../uiPrefs.ts";
 import ContextIndicator from "./ContextIndicator.tsx";
+import "./ConversationProgress.css";
 
-/** The centered desktop session overview with a stable, readable title. */
+const TASK_MARK = { done: "✓", active: "●", failed: "×", pending: "○" } as const;
+const TASK_ACTIVE_TITLE_MS = 1_600;
+const TASK_COMPLETED_TITLE_MS = 950;
+const TASK_ALL_COMPLETE_TITLE_MS = 1_200;
+
+type TaskTitleTone = TaskProgressEvent["kind"];
+
+interface TaskTitleCue {
+  sessionId: string | undefined;
+  key: string;
+  text: string;
+  tone: TaskTitleTone;
+}
+
+function useTaskProgressTitle(sessionId: string | undefined, tasks: readonly IslandTask[]): TaskTitleCue | null {
+  const snapshot = taskProgressSnapshot(tasks);
+  const snapshotKey = taskProgressSnapshotKey(snapshot);
+  const sessionRef = useRef(sessionId);
+  const previousRef = useRef(snapshot);
+  const [visible, setVisible] = useState<TaskTitleCue | null>(null);
+
+  useEffect(() => {
+    if (sessionRef.current !== sessionId) {
+      sessionRef.current = sessionId;
+      previousRef.current = snapshot;
+      setVisible(null);
+      return;
+    }
+
+    const previous = previousRef.current;
+    previousRef.current = snapshot;
+    const event = deriveTaskProgressEvent(previous, snapshot);
+    if (!event) {
+      setVisible(null);
+      return;
+    }
+
+    const text = event.kind === "all-complete"
+      ? `✓ ${event.completed}/${event.total} complete`
+      : event.kind === "completed"
+        ? `✓ ${event.text}`
+        : event.kind === "failed"
+          ? `× ${event.text}`
+          : `● ${event.text}`;
+    const cue: TaskTitleCue = {
+      sessionId,
+      key: `${sessionId ?? "new"}:${event.key}:${snapshotKey}`,
+      text,
+      tone: event.kind,
+    };
+    setVisible(cue);
+
+    if (event.kind === "failed") return;
+    const duration = event.kind === "active"
+      ? TASK_ACTIVE_TITLE_MS
+      : event.kind === "all-complete"
+        ? TASK_ALL_COMPLETE_TITLE_MS
+        : TASK_COMPLETED_TITLE_MS;
+    const timer = window.setTimeout(() => {
+      setVisible((current) => current?.key === cue.key ? null : current);
+    }, duration);
+    return () => window.clearTimeout(timer);
+  }, [sessionId, snapshotKey]);
+
+  return visible?.sessionId === sessionId ? visible : null;
+}
+
+/** The centered desktop session overview. Task transitions temporarily borrow
+ * the title so progress never has to jump around inside the conversation. */
 export default function DesktopSessionStatus() {
   const anchorRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -36,7 +111,11 @@ export default function DesktopSessionStatus() {
     session.id,
     firstUserTextCached(events[session.id]),
   ) : "";
-  const activeTask = session ? model.tasks?.items.find((task) => task.status === "active") : undefined;
+  const tasks = tasksForIsland(model.tasks, model.messages);
+  const taskProgressTitle = useTaskProgressTitle(session?.id, tasks);
+  const displayedTitle = taskProgressTitle?.text ?? title;
+  const completedTasks = tasks.filter((task) => task.status === "done").length;
+  const failedTasks = tasks.filter((task) => task.status === "failed").length;
   const prompt = lastUserTextCached(session ? events[session.id] : undefined);
   const activeModel = model.contextUsage?.model ?? model.turn?.model ?? session?.model;
   const descriptor = activeModel ? models.find((item) => item.providerID === activeModel.providerID && item.modelID === activeModel.modelID) : undefined;
@@ -60,10 +139,14 @@ export default function DesktopSessionStatus() {
     >
       <ContextIndicator gauge={gauge} mode={ui.contextIndicatorMode} providerID={activeModel?.providerID} providerName={descriptor?.providerName} harnessId={descriptor?.harnessId ?? session.resolvedHarnessId} active={status.kind === "working"} telemetryStatus={telemetryStatus} />
       <span className="desktop-session-status-mask">
-        <span className="desktop-session-status-copy"><span>{title}</span></span>
+        <span
+          key={taskProgressTitle?.key ?? `title:${session.id}`}
+          className={`desktop-session-status-copy${taskProgressTitle ? ` task-progress ${taskProgressTitle.tone}` : ""}`}
+        ><span>{displayedTitle}</span></span>
       </span>
       <Icon.chevronDown />
     </button>
+    {taskProgressTitle && <span className="sr-only" role="status" aria-live="polite">{displayedTitle}</span>}
     <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} align="center" ariaLabel="Session overview">
       <div className="desktop-session-status-popover">
         <header>
@@ -77,8 +160,17 @@ export default function DesktopSessionStatus() {
             : "Model context metadata is unavailable.")}</p>
         </section>
         <section>
-          <h3>Active task</h3>
-          {activeTask ? <p>{activeTask.text}</p> : <p>No active task.</p>}
+          <h3>Tasks{tasks.length > 0 ? ` · ${completedTasks}/${tasks.length} complete${failedTasks > 0 ? ` · ${failedTasks} failed` : ""}` : ""}</h3>
+          {tasks.length > 0 ? (
+            <ul className="desktop-session-task-list">
+              {tasks.map((task) => (
+                <li key={task.id} className={task.status}>
+                  <span className="desktop-session-task-mark" aria-hidden="true">{TASK_MARK[task.status]}</span>
+                  <span>{task.text}</span>
+                </li>
+              ))}
+            </ul>
+          ) : <p>No active task plan.</p>}
         </section>
         {prompt && <section><h3>Current intent</h3><p>{prompt}</p></section>}
         <section>
