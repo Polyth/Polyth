@@ -100,6 +100,8 @@ test("Command Code exposes only non-mutating package tools through native addToo
   assert.match(mod, /inspect_project/);
   assert.match(mod, /example\.inspect/);
   assert.match(mod, /readOnly: true/);
+  assert.match(mod, /bridgeClosed/);
+  assert.match(mod, /Polyth tool bridge returned malformed response/);
   assert.doesNotMatch(mod, /modify_project|example\.modify/);
   assert.doesNotMatch(mod, /127\.0\.0\.1:7777|opaque-secret-token/);
 
