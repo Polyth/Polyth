@@ -243,7 +243,10 @@ const startControlServer = async (cmd) => {
           // observe the answer, so ambiguity after this point must be recoverable.
           await persistMutationReceipt(operationId, mutationKind, requestId);
         } catch {
-          reply(id, false, "question response receipt could not be persisted");
+          // The answer has not been released to the model because its durable
+          // receipt failed. Close without an acknowledgement: the worker must
+          // preserve an outcome-unknown fence and keep the question pending.
+          socket.destroy();
           return;
         }
         pendingQuestions.delete(requestId);
