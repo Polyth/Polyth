@@ -339,7 +339,12 @@ const attachToolRelay = (turn) => {
     pending.set(id, controller);
     try {
       const outcome = await invokeScopedTool(turn, { capabilityId, input: callInput }, controller);
-      if (outcome.invocable) send({ type: "polyth-tool-invoked", operationId: turn.operationId, toolName });
+      if (outcome.invocable) send({
+        type: "polyth-tool-invoked",
+        operationId: turn.operationId,
+        capabilityId,
+        toolName,
+      });
       writeResponse({ id, result: outcome.result });
     } finally {
       if (pending.get(id) === controller) pending.delete(id);
