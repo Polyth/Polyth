@@ -203,7 +203,7 @@ export function createCommandCodeProvisioner(): HarnessProvisioner {
       if (promptItems.length) {
         try {
           const prompt = renderCapabilityText(plan);
-          if (!prompt.trim()) throw new Error("Command Code prompt projection is empty");
+          if (!prompt?.trim()) throw new Error("Command Code prompt projection is empty");
           const promptFile = join(revisionRoot, "system-prompt.txt");
           writeRevisionFile(promptFile, prompt);
           const promptModFile = join(revisionRoot, "polyth-capabilities.ts");
