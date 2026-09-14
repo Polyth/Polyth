@@ -13,12 +13,20 @@ import { createStore } from "@polyth/session";
 import { createSessionService } from "../src/sessions.ts";
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 30));
+const waitUntil = async (predicate: () => boolean): Promise<void> => {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (predicate()) return;
+    await flush();
+  }
+  throw new Error("condition was not met");
+};
 
 function fixture(capabilities?: Partial<RuntimeCapabilities>) {
   const store = createStore(":memory:");
   const listeners = new Set<(sessionId: string, event: RuntimeEvent) => void>();
   const requests: CanonicalTurnRequest[] = [];
   let expandCalls = 0;
+  const compactCalls: Array<{ sessionId: string; operationId: string; model?: { providerID: string; modelID: string }; sawIntent: boolean }> = [];
   const commands: RuntimeCommandDescriptor[] = [{
     id: "native:fake:review",
     name: "review",
@@ -54,6 +62,15 @@ function fixture(capabilities?: Partial<RuntimeCapabilities>) {
       }
     },
     abort: async () => {},
+    compactOperation: async (sessionId, operationId, model) => {
+      compactCalls.push({
+        sessionId,
+        operationId,
+        ...(model ? { model } : {}),
+        sawIntent: (await store.events(sessionId)).some((event) => event.type === "session/compaction-requested"),
+      });
+      return { kind: "confirmed", value: {} };
+    },
     replyPermission: async () => {},
     replyQuestion: async () => {},
     onEvent(listener) {
@@ -92,6 +109,7 @@ function fixture(capabilities?: Partial<RuntimeCapabilities>) {
     runtime,
     requests,
     commands,
+    compactCalls,
     emit,
     expandCalls: () => expandCalls,
   };
@@ -102,9 +120,15 @@ test("native commands bypass Polyth expansion while unselected /compact still ex
   const native = await f.sessions.create({ projectId: "p", title: "Native" });
   await f.sessions.send(native.id, {
     text: "/review src",
-    command: { id: "native:fake:review", owner: "native", name: "review", args: "src" },
+    command: { id: "native:fake:review", args: "src" },
   });
   assert.equal(f.requests[0]?.text, "/review src");
+  assert.deepEqual(f.requests[0]?.command, {
+    id: "native:fake:review",
+    owner: "native",
+    name: "review",
+    args: "src",
+  });
   assert.equal(f.expandCalls(), 0);
   f.emit(native.id, { type: "turn/stopped", reason: "completed" });
   await flush();
@@ -114,6 +138,33 @@ test("native commands bypass Polyth expansion while unselected /compact still ex
   assert.equal(f.requests.at(-1)?.text, "expanded compact prompt");
   assert.equal(f.expandCalls(), 1);
   f.emit(polyth.id, { type: "turn/stopped", reason: "completed" });
+  await flush();
+  await f.store.close();
+});
+
+test("queued native commands retain native invocation after the active turn", async () => {
+  const f = fixture({ commands: { discovery: "native", invoke: "raw-native-input" } });
+  const { id } = await f.sessions.create({ projectId: "p", title: "T" });
+  await f.sessions.send(id, { text: "first" });
+  const queued = await f.sessions.send(id, {
+    text: "/review src",
+    command: { id: "native:fake:review", args: "src" },
+  });
+  assert.equal(queued.queued, true);
+  assert.deepEqual((await f.sessions.queueList!(id))[0]?.command, {
+    id: "native:fake:review",
+    args: "src",
+  });
+
+  f.emit(id, { type: "turn/stopped", reason: "completed" });
+  await waitUntil(() => f.requests.length > 1);
+  assert.deepEqual(f.requests[1]?.command, {
+    id: "native:fake:review",
+    owner: "native",
+    name: "review",
+    args: "src",
+  });
+  f.emit(id, { type: "turn/stopped", reason: "completed" });
   await flush();
   await f.store.close();
 });
@@ -200,6 +251,41 @@ test("context occupancy and compaction never overwrite additive lifetime totals"
   const afterCompact = await f.sessions.runtimeFeatures!(id);
   assert.equal(afterCompact.contextWindow?.source, "unknown");
   assert.equal(afterCompact.telemetry?.context.status, "unavailable");
+  await f.store.close();
+});
+
+test("manual compaction is idle-only and persists intent before native execution", async () => {
+  const f = fixture({ compaction: true });
+  const model = { providerID: "fake", modelID: "m" };
+  const { id } = await f.sessions.create({ projectId: "p", title: "T", model });
+  await f.sessions.send(id, { text: "fill context" });
+  await assert.rejects(() => f.sessions.compact!(id), (error: Error & { code?: string }) => error.code === "conflict");
+  f.emit(id, { type: "turn/stopped", reason: "completed" });
+  await flush();
+  const idle = (await f.store.projection(id))!;
+  await f.store.upsertProjection({ ...idle, status: "failed" });
+  await assert.rejects(() => f.sessions.compact!(id), (error: Error & { code?: string }) => error.code === "conflict");
+  await f.store.upsertProjection(idle);
+
+  await f.sessions.compact!(id);
+  assert.deepEqual(f.compactCalls.map(({ sessionId, model: selected, sawIntent }) => ({ sessionId, model: selected, sawIntent })), [{ sessionId: id, model, sawIntent: true }]);
+  const operation = (await f.store.operations(id)).find((candidate) => candidate.mutationKind === "session-compact");
+  assert.equal(operation?.state, "confirmed");
+  await f.store.close();
+});
+
+test("unknown manual compaction fences the session for reconciliation", async () => {
+  const f = fixture({ compaction: true });
+  const { id } = await f.sessions.create({ projectId: "p", title: "T" });
+  f.runtime.compactOperation = async (_sessionId, operationId) => ({
+    kind: "unknown",
+    operationId,
+    message: "response lost",
+  });
+  await assert.rejects(() => f.sessions.compact!(id), (error: Error & { code?: string }) => error.code === "outcome-unknown");
+  assert.equal((await f.store.projection(id))?.status, "unknown");
+  assert.equal((await f.store.operations(id)).find((operation) => operation.mutationKind === "session-compact")?.state, "unknown");
+  await flush();
   await f.store.close();
 });
 
@@ -305,7 +391,7 @@ test("native commands are rejected when the runtime does not advertise invocatio
   await assert.rejects(
     f.sessions.send(id, {
       text: "/review",
-      command: { id: "native:fake:review", owner: "native", name: "review" },
+      command: { id: "native:fake:review" },
     }),
     (error: Error & { code?: string }) => {
       assert.equal(error.code, "unsupported");

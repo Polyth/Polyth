@@ -6,6 +6,7 @@ import type {
   JsonObject,
   ModelDescriptor,
   ModelMessage,
+  ModelRef,
   MutationOutcome,
   MutationTransportResult,
   OpenCodeTransport,
@@ -17,6 +18,7 @@ import type {
   RuntimeEvent,
   RuntimeLocation,
   RuntimeReconciliationBinding,
+  RuntimeCommandDescriptor,
   RuntimeSession,
   RuntimeSessionBinding,
   RuntimeSessionMessage,
@@ -76,6 +78,12 @@ interface LegacySession {
 interface LegacyMessage {
   info?: { role?: string; id?: string };
   parts?: Array<{ type?: string; text?: string }>;
+}
+
+interface LegacyCommand {
+  name?: string;
+  description?: string;
+  hints?: unknown;
 }
 
 export interface CreateLegacyProtocolAdapterOptions {
@@ -243,6 +251,22 @@ export const legacyPromptPathsFromDocument = (document: unknown): LegacyPromptPa
   return result;
 };
 
+const legacyNativeFeaturesFromDocument = (
+  document: unknown,
+): Pick<ProtocolCapabilities, "commands" | "compaction"> => {
+  const root = asRecord(document);
+  const paths = asRecord(root?.paths) ?? asRecord(asRecord(root?.data)?.paths);
+  const names = paths ? Object.keys(paths) : [];
+  const supports = (path: string, method: "get" | "post") =>
+    asRecord(paths?.[path])?.[method] !== undefined;
+  const sessionPath = (suffix: string, method: "post") => names.some((path) =>
+    new RegExp(`/session/\\{[^}]+\\}/${suffix}$`).test(path) && supports(path, method));
+  return {
+    commands: supports("/command", "get") && sessionPath("command", "post"),
+    compaction: sessionPath("summarize", "post"),
+  };
+};
+
 const attachmentParts = (
   input: RuntimeTurnBinding,
 ): JsonObject[] => {
@@ -310,6 +334,33 @@ const turnBody = (input: RuntimeTurnBinding): JsonObject => {
       providerID: input.model.providerID,
       modelID: input.model.modelID,
     };
+    if (input.model.variant) body.variant = input.model.variant;
+  }
+  if (input.agent) body.agent = input.agent;
+  return body;
+};
+
+const commandBody = (input: RuntimeTurnBinding): JsonObject => {
+  const command = input.command!;
+  const literal = `/${command.name}${command.args ? ` ${command.args}` : ""}`;
+  const offset = input.text.indexOf(literal);
+  const argumentsText = offset < 0
+    ? command.args ?? ""
+    : `${input.text.slice(0, offset)}${command.args ?? ""}${input.text.slice(offset + literal.length)}`.trim();
+  const parts = attachmentParts(input);
+  const attachmentText = parts
+    .filter((part) => part.type === "text" && typeof part.text === "string")
+    .map((part) => String(part.text));
+  const body: JsonObject = {
+    command: command.name,
+    arguments: [argumentsText, ...attachmentText]
+      .filter(Boolean)
+      .join("\n\n"),
+  };
+  const files = parts.filter((part) => part.type === "file");
+  if (files.length > 0) body.parts = files;
+  if (input.model) {
+    body.model = `${input.model.providerID}/${input.model.modelID}`;
     if (input.model.variant) body.variant = input.model.variant;
   }
   if (input.agent) body.agent = input.agent;
@@ -617,17 +668,25 @@ export const createLegacyProtocolAdapter = (
 ): ProtocolAdapter => {
   const deadlineMs = options.deadlineMs ?? 10_000;
   let promptPaths = options.promptPaths ? [...options.promptPaths] : undefined;
+  let document: Promise<unknown | undefined> | undefined;
   let reconciliationOrdinal = 0;
   const freshSessionEvidence = new Map<string, string>();
 
-  const negotiatePromptPaths = async (): Promise<LegacyPromptPath[]> => {
-    if (promptPaths) return promptPaths;
-    const document = await queryOptional(
+  const negotiateDocument = (): Promise<unknown | undefined> => {
+    document ??= queryOptional(
       options.transport,
       withLocation("/doc", options.endpoint.location),
       deadlineMs,
-    );
-    promptPaths = document.ok ? legacyPromptPathsFromDocument(document.value) : [];
+    ).then((result) => result.ok ? result.value : undefined);
+    return document;
+  };
+
+  const negotiateNativeFeatures = async () =>
+    legacyNativeFeaturesFromDocument(await negotiateDocument());
+
+  const negotiatePromptPaths = async (): Promise<LegacyPromptPath[]> => {
+    if (promptPaths) return promptPaths;
+    promptPaths = legacyPromptPathsFromDocument(await negotiateDocument());
     // Some compatible legacy servers omit /doc (or publish an incomplete
     // document) while still implementing OpenCode's long-standing async
     // prompt endpoint. Choose exactly this one known endpoint; a definitive
@@ -665,7 +724,7 @@ export const createLegacyProtocolAdapter = (
     protocol: "legacy",
     async capabilities() {
       await negotiatePromptPaths();
-      return protocolCapabilities;
+      return { ...protocolCapabilities, ...await negotiateNativeFeatures() };
     },
     async models(): Promise<ModelDescriptor[]> {
       const body = await queryRequired<LegacyProviderList>(
@@ -956,6 +1015,34 @@ export const createLegacyProtocolAdapter = (
           message: "prompt submission requires a backend session binding",
         };
       }
+      if (input.command) {
+        if (!(await negotiateNativeFeatures()).commands) {
+          return {
+            kind: "rejected",
+            code: "capability-unsupported",
+            message: "legacy endpoint exposes no native command contract",
+          };
+        }
+        freshSessionEvidence.delete(backendSessionId);
+        const result = await options.transport.mutate<unknown>({
+          method: "POST",
+          path: withLocation(
+            `/session/${encodeURIComponent(backendSessionId)}/command`,
+            input.session.location,
+          ),
+          body: commandBody(input),
+          operationId,
+          deadlineMs,
+          replay: NEVER_REPLAY,
+        });
+        return classifyLegacyMutationResponse(result, operationId, (body) => {
+          const response = asRecord(unwrap(body));
+          const admissionId = typeof asRecord(response?.info)?.id === "string"
+            ? String(asRecord(response?.info)?.id)
+            : typeof response?.id === "string" ? response.id : undefined;
+          return admissionId ? { admissionId } : {};
+        });
+      }
       const negotiated = await negotiatePromptPaths();
       const selected = negotiated[0];
       if (!selected) {
@@ -1119,6 +1206,64 @@ export const createLegacyProtocolAdapter = (
           input.location,
         ),
         ...(reject ? {} : { body: { answers: list } }),
+        operationId,
+        deadlineMs,
+        replay: NEVER_REPLAY,
+      });
+      return classifyLegacyMutationResponse(result, operationId, confirmedEmpty);
+    },
+    async commands(): Promise<RuntimeCommandDescriptor[]> {
+      if (!(await negotiateNativeFeatures()).commands) return [];
+      const rows = await queryRequired<LegacyCommand[]>(
+        options.transport,
+        withLocation("/command", options.endpoint.location),
+        deadlineMs,
+      );
+      return asArray(rows).flatMap((value) => {
+        const command = asRecord(value);
+        const name = typeof command?.name === "string" ? command.name.trim() : "";
+        if (!name) return [];
+        const hints = Array.isArray(command?.hints)
+          ? command.hints.filter((hint): hint is string => typeof hint === "string" && Boolean(hint))
+          : [];
+        return [{
+          id: `native:opencode:${name}`,
+          name,
+          ...(typeof command?.description === "string" ? { description: command.description } : {}),
+          ...(hints.length > 0 ? { argumentHint: hints.join(" ") } : {}),
+          owner: "native" as const,
+          harnessId: "opencode",
+          invocation: "raw-native-input" as const,
+          availability: "runtime" as const,
+          acceptsArguments: true,
+        }];
+      });
+    },
+    async compact(input, operationId, model?: ModelRef) {
+      const mismatch = bindingError(input, options.endpoint);
+      if (mismatch) return { kind: "rejected", code: "binding-mismatch", message: mismatch };
+      if (!input.backendSessionId) return {
+        kind: "rejected",
+        code: "binding-missing",
+        message: "compaction requires a backend session binding",
+      };
+      if (!(await negotiateNativeFeatures()).compaction) return {
+        kind: "rejected",
+        code: "capability-unsupported",
+        message: "legacy endpoint exposes no native compaction contract",
+      };
+      if (!model) return {
+        kind: "rejected",
+        code: "validation",
+        message: "OpenCode compaction requires a selected model",
+      };
+      const result = await options.transport.mutate<unknown>({
+        method: "POST",
+        path: withLocation(
+          `/session/${encodeURIComponent(input.backendSessionId)}/summarize`,
+          input.location,
+        ),
+        body: { providerID: model.providerID, modelID: model.modelID },
         operationId,
         deadlineMs,
         replay: NEVER_REPLAY,

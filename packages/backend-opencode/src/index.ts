@@ -217,7 +217,8 @@ export const CAPABILITIES: RuntimeCapabilities = {
   streaming: true,
   permissions: true,
   questions: true,
-  compaction: true,
+  // Legacy support is negotiated from /doc; static fallback must stay conservative.
+  compaction: false,
   subagents: true,
   // Process can consume MCP at startup. Provisioning mutability is separate
   // (requires-restart) and lives on HarnessCapabilitySupport.
@@ -465,6 +466,17 @@ export const createOpenCodeRuntimeFacade = (
     for (const cb of listeners) cb(canonical, ev);
   };
 
+  const refreshNativeCommands = (): void => {
+    void lifecycle.usingProtocol((protocol) =>
+      protocol.commands ? protocol.commands() : Promise.resolve([]))
+      .then((commands) => {
+        for (const canonical of maps.forward.keys()) {
+          emit(canonical, { type: "runtime/commands-changed", commands });
+        }
+      })
+      .catch((error) => log("debug", "opencode command refresh failed", { error: String(error) }));
+  };
+
   const emitLifecycle = (
     notification: Parameters<Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0]>[0],
   ): void => {
@@ -552,6 +564,10 @@ export const createOpenCodeRuntimeFacade = (
   ) => {
     const ev = asOcEvent(data);
     if (!ev) return;
+    if (ev.type === "catalog.updated") {
+      refreshNativeCommands();
+      return;
+    }
     const eid = id ?? ev.id;
     if (eid) {
       const eventIdentity = streamEndpoint
@@ -753,9 +769,20 @@ export const createOpenCodeRuntimeFacade = (
   };
 
   return {
-    capabilities: async () => CAPABILITIES,
+    capabilities: () => lifecycle.usingProtocol(async (protocol) => {
+      const negotiated = await protocol.capabilities();
+      return {
+        ...CAPABILITIES,
+        compaction: negotiated.compaction === true,
+        commands: negotiated.commands === true
+          ? { discovery: "native", invoke: "raw-native-input" }
+          : { discovery: "unsupported", invoke: "unsupported" },
+      };
+    }),
     models: () => lifecycle.usingProtocol((protocol) => protocol.models()),
     agents: () => lifecycle.usingProtocol((protocol) => protocol.agents()),
+    commands: () => lifecycle.usingProtocol((protocol) =>
+      protocol.commands ? protocol.commands() : Promise.resolve([])),
     sessions: () => lifecycle.usingProtocol((protocol) => protocol.sessions()),
     listAllProviders: () => lifecycle.usingProtocol((protocol) => {
       if (!protocol.listAllProviders) throw Object.assign(new Error("provider listing unavailable"), { code: "unsupported" });
@@ -902,6 +929,7 @@ export const createOpenCodeRuntimeFacade = (
       const outcome = await lifecycle.submit({
         session: await lifecycleBinding(req.sessionId),
         text: req.text,
+        ...(req.command ? { command: req.command } : {}),
         ...(req.attachments ? { attachments: req.attachments } : {}),
         ...(req.model ? { model: req.model } : {}),
         ...(req.agent ? { agent: req.agent } : {}),
@@ -913,6 +941,7 @@ export const createOpenCodeRuntimeFacade = (
       const outcome = await lifecycle.submit({
         session: await lifecycleBinding(req.sessionId),
         text: req.text,
+        ...(req.command ? { command: req.command } : {}),
         ...(req.attachments ? { attachments: req.attachments } : {}),
         ...(req.model ? { model: req.model } : {}),
         ...(req.agent ? { agent: req.agent } : {}),
@@ -976,6 +1005,14 @@ export const createOpenCodeRuntimeFacade = (
         clearAbortRequest(sessionId, turn);
       }
       return outcome;
+    },
+    async compact(sessionId, model) {
+      const binding = await lifecycleBinding(sessionId);
+      outcomeValue(await lifecycle.compact(binding, randomUUID(), model));
+    },
+    async compactOperation(sessionId, operationId, model) {
+      const binding = await lifecycleBinding(sessionId);
+      return lifecycle.compact(binding, operationId, model);
     },
     async releaseExecution(binding, operationId) {
       if (!binding.backendSessionId) {

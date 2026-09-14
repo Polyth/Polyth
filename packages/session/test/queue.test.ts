@@ -69,6 +69,25 @@ test("queue order survives store reopen (restart)", async () => {
   }
 });
 
+test("native command identity survives queue restart and editing clears it", async () => {
+  const dbPath = join(freshDir(), "q.db");
+  const command = { id: "native:opencode:review", args: "src" };
+  {
+    const store = createStore(dbPath);
+    await store.enqueue("s1", "/review src", "queue", undefined, undefined, command);
+    await store.close();
+  }
+  const store = createStore(dbPath);
+  try {
+    const [queued] = await store.queueList("s1");
+    assert.deepEqual(queued?.command, command);
+    const edited = await store.queueEdit("s1", queued!.id, "ordinary text");
+    assert.equal(edited?.command, undefined);
+  } finally {
+    await store.close();
+  }
+});
+
 test("queueReorder validates an exact permutation", async () => {
   const store = createStore(join(freshDir(), "q.db"));
   try {
@@ -169,8 +188,8 @@ test("pre-migration database reopens unchanged and gains queue support", async (
     const proj = await store.projection("s1");
     assert.equal(proj?.title, "Old");
     // new capability works after migration
-    await store.enqueue("s1", "queued later", "queue");
-    assert.equal((await store.queueList("s1")).length, 1);
+    await store.enqueue("s1", "/review src", "queue", undefined, undefined, { id: "native:opencode:review", args: "src" });
+    assert.deepEqual((await store.queueList("s1"))[0]?.command, { id: "native:opencode:review", args: "src" });
   } finally {
     await store.close();
   }

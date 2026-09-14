@@ -9,6 +9,7 @@ const fakePi = () => {
   const eventListeners = new Set<(event: PiRpcEvent) => void>();
   const closeListeners = new Set<() => void>();
   const calls: Array<Record<string, unknown>> = [];
+  let commands = [{ name: "review", description: "Review changes" }];
   let state: PiRpcState = {
     sessionFile: "/tmp/pi-initial.jsonl",
     sessionId: "initial",
@@ -44,7 +45,7 @@ const fakePi = () => {
         case "get_available_thinking_levels":
           return { levels: ["off", "medium", "high"] } as T;
         case "get_commands":
-          return { commands: [{ name: "review", description: "Review changes" }] } as T;
+          return { commands } as T;
         case "set_model":
         case "set_thinking_level":
         case "prompt":
@@ -67,6 +68,7 @@ const fakePi = () => {
     rpc,
     calls,
     state: () => state,
+    setCommands(next: typeof commands) { commands = next; },
     emit(event: PiRpcEvent) { for (const callback of eventListeners) callback(event); },
   };
 };
@@ -159,7 +161,9 @@ test("Pi maps catalog, model selection, streaming text, tools and settled termin
     result: { content: [{ type: "text", text: "/tmp" }] },
     isError: false,
   });
+  fake.setCommands([{ name: "ship", description: "Ship changes" }]);
   fake.emit({ type: "agent_settled" });
+  await new Promise<void>((resolve) => setImmediate(resolve));
 
   assert.ok(events.some((event) => event.type === "turn/started" && event.turnId === "turn-op"));
   assert.ok(events.some((event) => event.type === "assistant/chunk" && event.text === "Hello"));
@@ -167,6 +171,19 @@ test("Pi maps catalog, model selection, streaming text, tools and settled termin
   assert.ok(events.some((event) => event.type === "tool/started" && event.callId === "tool-1"));
   assert.ok(events.some((event) => event.type === "tool/result" && event.callId === "tool-1"));
   assert.ok(events.some((event) => event.type === "turn/stopped" && event.turnId === "turn-op" && event.reason === "completed"));
+  assert.deepEqual(events.findLast((event) => event.type === "runtime/commands-changed"), {
+    type: "runtime/commands-changed",
+    commands: [{
+      id: "native:pi:ship",
+      name: "ship",
+      description: "Ship changes",
+      owner: "native",
+      harnessId: "pi",
+      invocation: "raw-native-input",
+      availability: "session",
+      acceptsArguments: true,
+    }],
+  });
 
   await runtime.dispose();
 });

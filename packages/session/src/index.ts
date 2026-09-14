@@ -230,9 +230,16 @@ export interface Store extends SessionPersistence {
     input: RuntimeRestartRecoveryInput,
   ): Promise<RuntimeRestartRecoveryResult | undefined>;
   // -- durable delivery queue (WP3) --
-  enqueue(sessionId: string, text: string, delivery: DeliveryMode, attachments?: AttachmentRef[], clientOperationId?: string): Promise<QueueEnqueueResult>;
+  enqueue(
+    sessionId: string,
+    text: string,
+    delivery: DeliveryMode,
+    attachments?: AttachmentRef[],
+    clientOperationId?: string,
+    command?: QueueItemDto["command"],
+  ): Promise<QueueEnqueueResult>;
   queueList(sessionId: string): Promise<QueueItemDto[]>;
-  /** Updates only the queued text; delivery, attachments, position, and timestamps stay unchanged. */
+  /** Updates text, clears native command/review state; delivery, attachments, position, and timestamps stay unchanged. */
   queueEdit(sessionId: string, queueId: string, text: string): Promise<QueueItemDto | undefined>;
   /** Validates ids are an exact permutation for the session; positions update transactionally. */
   queueReorder(sessionId: string, ids: string[]): Promise<QueueItemDto[]>;
@@ -845,6 +852,10 @@ export function createStore(dbPath: string): Store {
     // strings alone; new exact profiles always write a harness id.
     () => {
       sqliteExec("ALTER TABLE agent_profiles ADD COLUMN harness_id TEXT");
+    },
+    // v13: native command identity survives deferred queue admission.
+    () => {
+      sqliteExec("ALTER TABLE session_queue ADD COLUMN command TEXT");
     },
   ];
   for (let v = getVersion(); v < MIGRATIONS.length; v++) {
@@ -2050,6 +2061,7 @@ export function createStore(dbPath: string): Store {
     delivery: string;
     created_at: number;
     attachments: string | null;
+    command: string | null;
     reservation_operation_id: string | null;
     held_for_review: number;
   }
@@ -2064,8 +2076,23 @@ export function createStore(dbPath: string): Store {
     }
   };
 
+  const parseQueueCommand = (raw: string | null): QueueItemDto["command"] => {
+    if (!raw) return undefined;
+    try {
+      const value = JSON.parse(raw) as { id?: unknown; args?: unknown };
+      if (typeof value.id !== "string" || !value.id) return undefined;
+      return {
+        id: value.id,
+        ...(typeof value.args === "string" ? { args: value.args } : {}),
+      };
+    } catch {
+      return undefined;
+    }
+  };
+
   const rowToQueueItem = (r: QueueRow): QueueItemDto => {
     const attachments = parseAttachments(r.attachments);
+    const command = parseQueueCommand(r.command);
     return {
       id: r.queue_id,
       sessionId: r.session_id,
@@ -2074,13 +2101,24 @@ export function createStore(dbPath: string): Store {
       delivery: (["normal", "steer", "queue", "interrupt"].includes(r.delivery) ? r.delivery : "queue") as DeliveryMode,
       createdAt: Number(r.created_at),
       ...(attachments ? { attachments } : {}),
+      ...(command ? { command } : {}),
       ...(r.held_for_review === 1 ? { heldForReview: true } : {}),
     };
   };
 
-  async function enqueue(sessionId: string, text: string, delivery: DeliveryMode, attachments?: AttachmentRef[], clientOperationId?: string): Promise<QueueEnqueueResult> {
+  async function enqueue(
+    sessionId: string,
+    text: string,
+    delivery: DeliveryMode,
+    attachments?: AttachmentRef[],
+    clientOperationId?: string,
+    command?: QueueItemDto["command"],
+  ): Promise<QueueEnqueueResult> {
     const queueId = clientOperationId ?? randomUUID();
     const createdAt = Date.now();
+    const serializedCommand = command
+      ? JSON.stringify({ id: command.id, ...(command.args !== undefined ? { args: command.args } : {}) })
+      : null;
     const result = transaction(() => {
       if (clientOperationId) {
         const existing = prep("SELECT * FROM session_queue WHERE queue_id = ?").get(queueId) as unknown as QueueRow | undefined;
@@ -2088,7 +2126,8 @@ export function createStore(dbPath: string): Store {
           const same = existing.session_id === sessionId
             && existing.text === text
             && existing.delivery === delivery
-            && (existing.attachments ?? null) === (attachments?.length ? JSON.stringify(attachments) : null);
+            && (existing.attachments ?? null) === (attachments?.length ? JSON.stringify(attachments) : null)
+            && (existing.command ?? null) === serializedCommand;
           if (!same) throw Object.assign(new Error("client operation id is already bound to another queue admission"), { code: "client-operation-conflict" });
           return { item: rowToQueueItem(existing), created: false };
         }
@@ -2096,12 +2135,22 @@ export function createStore(dbPath: string): Store {
       const row = prep("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM session_queue WHERE session_id = ?")
         .get(sessionId) as { next: number };
       prep(
-        "INSERT INTO session_queue (queue_id, session_id, position, text, delivery, created_at, attachments) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      ).run(queueId, sessionId, Number(row.next), text, delivery, createdAt, attachments?.length ? JSON.stringify(attachments) : null);
+        "INSERT INTO session_queue (queue_id, session_id, position, text, delivery, created_at, attachments, command) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      ).run(
+        queueId,
+        sessionId,
+        Number(row.next),
+        text,
+        delivery,
+        createdAt,
+        attachments?.length ? JSON.stringify(attachments) : null,
+        serializedCommand,
+      );
       return {
         item: {
           id: queueId, sessionId, position: Number(row.next), text, delivery, createdAt,
           ...(attachments?.length ? { attachments } : {}),
+          ...(command ? { command } : {}),
         } satisfies QueueItemDto,
         created: true,
       };
@@ -2117,7 +2166,7 @@ export function createStore(dbPath: string): Store {
 
   function queueEdit(sessionId: string, queueId: string, text: string): Promise<QueueItemDto | undefined> {
     const result = prep(
-      `UPDATE session_queue SET text = ?, held_for_review = 0
+      `UPDATE session_queue SET text = ?, command = NULL, held_for_review = 0
        WHERE session_id = ? AND queue_id = ? AND reservation_operation_id IS NULL`,
     )
       .run(text, sessionId, queueId);
@@ -2225,6 +2274,7 @@ export function createStore(dbPath: string): Store {
       raw?: unknown;
       delivery?: unknown;
       attachments?: unknown;
+      command?: unknown;
     };
     const text = typeof data.raw === "string"
       ? data.raw
@@ -2237,8 +2287,8 @@ export function createStore(dbPath: string): Store {
     prep(
       `INSERT INTO session_queue (
         queue_id, session_id, position, text, delivery, created_at,
-        attachments, reservation_operation_id, held_for_review
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 1)`,
+        attachments, command, reservation_operation_id, held_for_review
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 1)`,
     ).run(
       queueId,
       operation.sessionId,
@@ -2250,6 +2300,10 @@ export function createStore(dbPath: string): Store {
       Date.now(),
       Array.isArray(data.attachments) && data.attachments.length > 0
         ? JSON.stringify(data.attachments)
+        : null,
+      data.command && typeof data.command === "object"
+        && typeof (data.command as { id?: unknown }).id === "string"
+        ? JSON.stringify(data.command)
         : null,
     );
     const held = prep("SELECT * FROM session_queue WHERE queue_id = ?")

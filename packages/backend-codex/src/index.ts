@@ -747,6 +747,10 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
             return { admissionId: turn.id };
         });
     };
+    const canSteer = (model?: ModelRef, agent?: string) => !agent && (!model || !!nativeModel
+        && model.providerID === nativeModel.providerID
+        && model.modelID === nativeModel.modelID
+        && model.variant === nativeModel.variant);
     const runtime: AgentRuntime = {
         capabilities: async () => CODEX_CAPABILITIES,
         models: () => catalog(),
@@ -786,8 +790,8 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
         async abort() { if (activeTurn)
             await rpc.request("turn/interrupt", { threadId: nativeId, turnId: activeTurn }); },
         abortOperation: (_id, operationId) => mutate(operationId, async () => { await runtime.abort(sid); return {}; }),
-        async steer(_id, text) {
-            if (!activeTurn) return false;
+        async steer(_id, text, model, agent) {
+            if (!activeTurn || !canSteer(model, agent)) return false;
             await rpc.request("turn/steer", {
                 threadId: nativeId,
                 expectedTurnId: activeTurn,
@@ -795,8 +799,8 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
             });
             return true;
         },
-        steerOperation: (_id, text, operationId) => mutate(operationId, async () => {
-            if (!activeTurn) throw Object.assign(new Error("No active Codex turn"), { code: "runtime-rejected" });
+        steerOperation: (_id, text, operationId, model, agent) => mutate(operationId, async () => {
+            if (!activeTurn || !canSteer(model, agent)) throw Object.assign(new Error("Codex cannot apply the requested live steering selection"), { code: "runtime-rejected" });
             await rpc.request("turn/steer", {
                 threadId: nativeId,
                 expectedTurnId: activeTurn,

@@ -3,6 +3,7 @@ import type {
   BorrowedRuntimeEndpointLease,
   JsonObject,
   ModelMessage,
+  ModelRef,
   MutationOutcome,
   OpenCodeTransport,
   OwnedRuntimeEndpointLease,
@@ -145,6 +146,11 @@ export interface BaseRuntimeLifecycle {
   abort(
     binding: RuntimeSessionBindingWithProtocol,
     operationId: string,
+  ): Promise<MutationOutcome<Record<string, never>>>;
+  compact(
+    binding: RuntimeSessionBindingWithProtocol,
+    operationId: string,
+    model?: ModelRef,
   ): Promise<MutationOutcome<Record<string, never>>>;
   deleteSession(
     binding: RuntimeSessionBindingWithProtocol,
@@ -562,6 +568,23 @@ export const createRuntimeLifecycle = async (
       "turn abort",
     );
 
+  const compact = (
+    binding: RuntimeSessionBindingWithProtocol,
+    operationId: string,
+    model?: ModelRef,
+  ): Promise<MutationOutcome<Record<string, never>>> =>
+    sessionMutation(
+      binding,
+      (protocol, checked) => protocol.compact
+        ? protocol.compact(checked, operationId, model)
+        : Promise.resolve({
+            kind: "rejected",
+            code: "capability-unsupported",
+            message: `${protocol.protocol} protocol does not support manual compaction`,
+          }),
+      "session compaction",
+    );
+
   const deleteSession = async (
     binding: RuntimeSessionBindingWithProtocol,
     operationId: string,
@@ -718,6 +741,7 @@ export const createRuntimeLifecycle = async (
     submit,
     steer,
     abort,
+    compact,
     deleteSession,
     replyPermission,
     replyQuestion,

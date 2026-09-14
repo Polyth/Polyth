@@ -134,7 +134,14 @@ export interface Broadcaster {
 
 /** Durable FIFO delivery queue (implemented by @polyth/session's Store). */
 export interface QueueStore {
-  enqueue(sessionId: string, text: string, delivery: DeliveryMode, attachments?: AttachmentRef[], clientOperationId?: string): Promise<{ item: QueueItemDto; created: boolean }>;
+  enqueue(
+    sessionId: string,
+    text: string,
+    delivery: DeliveryMode,
+    attachments?: AttachmentRef[],
+    clientOperationId?: string,
+    command?: QueueItemDto["command"],
+  ): Promise<{ item: QueueItemDto; created: boolean }>;
   queueList(sessionId: string): Promise<QueueItemDto[]>;
   queueEdit(sessionId: string, queueId: string, text: string): Promise<QueueItemDto | undefined>;
   queueReorder(sessionId: string, ids: string[]): Promise<QueueItemDto[]>;
@@ -4377,11 +4384,11 @@ export function createSessionService(deps: {
 
   const enqueueMessage = async (
     sessionId: string, text: string, delivery: DeliveryMode, fallbackReason?: string,
-    attachments?: AttachmentRef[], sourceOperationId?: string, clientOperationId?: string,
+    attachments?: AttachmentRef[], command?: QueueItemDto["command"], sourceOperationId?: string, clientOperationId?: string,
     clientRequestFingerprint?: string,
   ): Promise<SendResult> => {
     if (!deps.queue) throw Object.assign(new Error("delivery queue unavailable"), { code: "unsupported" });
-    const admission = await deps.queue.enqueue(sessionId, text, delivery, attachments, clientOperationId);
+    const admission = await deps.queue.enqueue(sessionId, text, delivery, attachments, clientOperationId, command);
     const item = admission.item;
     if (!admission.created) return { queueId: item.id, queued: true };
     if (fallbackReason) {
@@ -4390,6 +4397,7 @@ export function createSessionService(deps: {
     await appendAndBroadcast(sessionId, "queue/enqueued", {
       queueId: item.id, text, delivery,
       ...(attachments?.length ? { attachments: attachments as unknown as JsonObject[] } : {}),
+      ...(command ? { command: command as unknown as JsonObject } : {}),
       ...(sourceOperationId ? { sourceOperationId } : {}),
       ...(clientOperationId && clientRequestFingerprint ? { clientRequestFingerprint } : {}),
     }, { ignorable: true });
@@ -4567,6 +4575,7 @@ export function createSessionService(deps: {
         await admitTurnCore(sessionId, current, rt, {
           text: reserved.reservation.queueItem.text,
           ...(queuedAttachments?.length ? { attachments: queuedAttachments } : {}),
+          ...(reserved.reservation.queueItem.command ? { command: reserved.reservation.queueItem.command } : {}),
         }, {
           operation: reserved.reservation.operation,
           queueId: reserved.reservation.queueItem.id,
@@ -4763,6 +4772,7 @@ export function createSessionService(deps: {
       ...(reserved ? { queueId: reserved.queueId } : {}),
       ...(input.githubConflictResolution === true ? { githubConflictResolution: true } : {}),
       ...(input.attachments ? { attachments: input.attachments as unknown as JsonObject[] } : {}),
+      ...(input.command ? { command: input.command as unknown as JsonObject } : {}),
       ...(recoveryContext ? { recoveryContext } : {}),
       ...(decoration ? {
         compactionRecovery: {
@@ -4968,6 +4978,7 @@ export function createSessionService(deps: {
             "queue",
             "harness-switch",
             input.attachments,
+            input.command,
             undefined,
             input.clientOperationId,
             clientRequestFingerprint,
@@ -5012,6 +5023,7 @@ export function createSessionService(deps: {
           delivery,
           reason,
           input.attachments,
+          input.command,
           undefined,
           input.clientOperationId,
           clientRequestFingerprint,
@@ -6634,6 +6646,7 @@ export function createSessionService(deps: {
           delivery === "steer" || delivery === "interrupt" ? delivery : "queue",
           "mutation-active",
           input.attachments,
+          input.command,
         );
       };
       if (input.harness) {
@@ -6659,6 +6672,7 @@ export function createSessionService(deps: {
             "queue",
             "harness-switch",
             input.attachments,
+            input.command,
             undefined,
             input.clientOperationId,
             clientRequestFingerprint,
@@ -6773,6 +6787,7 @@ export function createSessionService(deps: {
           delivery === "normal" ? "queue" : delivery,
           "reconciliation-blocked",
           input.attachments,
+          input.command,
         );
       }
       if (
@@ -6838,6 +6853,7 @@ export function createSessionService(deps: {
           delivery === "normal" ? "queue" : delivery,
           "reconciliation-blocked",
           input.attachments,
+          input.command,
         );
       }
       if (readyReconciliation?.state === "reconciling"
@@ -6943,6 +6959,7 @@ export function createSessionService(deps: {
             "queue",
             undefined,
             input.attachments,
+            input.command,
             undefined,
             input.clientOperationId,
             clientRequestFingerprint,
@@ -6956,20 +6973,33 @@ export function createSessionService(deps: {
             "queue",
             "turn-active",
             input.attachments,
+            input.command,
             undefined,
             input.clientOperationId,
             clientRequestFingerprint,
           );
         }
         if (delivery === "steer") {
+          // Native commands are discrete backend admissions, not text that can
+          // join an already-running provider turn.
+          if (input.command) {
+            return enqueueMessage(
+              sessionId,
+              input.text,
+              "steer",
+              "native-command-next-turn",
+              input.attachments,
+              input.command,
+            );
+          }
           const caps = await rt.capabilities().catch(() => null);
           if (!caps?.steering || !rt.steer) {
-            return enqueueMessage(sessionId, input.text, "steer", "steer-unsupported", input.attachments);
+            return enqueueMessage(sessionId, input.text, "steer", "steer-unsupported", input.attachments, input.command);
           }
           // Steering is text-only in the runtime seam; attachments would be
           // silently dropped mid-turn, so they queue for the next turn instead.
           if (input.attachments?.length) {
-            return enqueueMessage(sessionId, input.text, "steer", "steer-attachments", input.attachments);
+            return enqueueMessage(sessionId, input.text, "steer", "steer-attachments", input.attachments, input.command);
           }
           const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
             sessionId,
@@ -7007,6 +7037,7 @@ export function createSessionService(deps: {
               "steer",
               "steer-rejected",
               undefined,
+              input.command,
               prepared.operation.operationId,
             );
           }
@@ -7026,7 +7057,14 @@ export function createSessionService(deps: {
         }
         if (delivery === "interrupt") {
           // enqueue at the head, then abort; turn/stopped(aborted) dispatches it
-          const admission = await deps.queue.enqueue(sessionId, input.text, "interrupt", input.attachments);
+          const admission = await deps.queue.enqueue(
+            sessionId,
+            input.text,
+            "interrupt",
+            input.attachments,
+            undefined,
+            input.command,
+          );
           const item = admission.item;
           const rest = await deps.queue.queueList(sessionId);
           const ids = [item.id, ...rest.filter((i) => i.id !== item.id).map((i) => i.id)];
@@ -7034,6 +7072,7 @@ export function createSessionService(deps: {
           await appendAndBroadcast(sessionId, "queue/enqueued", {
             queueId: item.id, text: input.text, delivery,
             ...(input.attachments?.length ? { attachments: input.attachments as unknown as JsonObject[] } : {}),
+            ...(input.command ? { command: input.command as unknown as JsonObject } : {}),
           }, { ignorable: true });
           const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
             sessionId,
@@ -7087,6 +7126,7 @@ export function createSessionService(deps: {
             delivery === "steer" ? "steer" : "queue",
             undefined,
             input.attachments,
+            input.command,
             undefined,
             input.clientOperationId,
             clientRequestFingerprint,
@@ -7158,6 +7198,7 @@ export function createSessionService(deps: {
       return service.send(sessionId, {
         text: nextText,
         ...(item.attachments?.length ? { attachments: item.attachments } : {}),
+        ...(item.command && nextText === item.text ? { command: item.command } : {}),
         delivery: "interrupt",
         dismissPending: true,
       });
@@ -7228,6 +7269,45 @@ export function createSessionService(deps: {
     async abort(sessionId) {
       await withSessionLock(sessionId, () =>
         abortTurnUnderLock(sessionId, "user", "Command stopped by user."));
+    },
+
+    async compact(sessionId) {
+      await withSessionLock(sessionId, async () => {
+        const { proj } = await assertMutable(sessionId);
+        if (proj.status !== "idle") {
+          throw Object.assign(new Error(`cannot compact while the session is ${proj.status}`), { code: "conflict" });
+        }
+        if (!proj.backendSessionId) {
+          throw Object.assign(new Error("session has no native context to compact"), { code: "conflict" });
+        }
+        const runtime = await ensureWired(sessionId, proj);
+        const capabilities = await cachedCapabilities(runtime);
+        if (!capabilities.compaction || (!runtime.compactOperation && !runtime.compact)) {
+          throw Object.assign(new Error("runtime does not support compaction"), { code: "unsupported" });
+        }
+        const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
+          sessionId,
+          mutationKind: "session-compact",
+          intentEvent: {
+            type: "session/compaction-requested",
+            data: {},
+            ignorable: true,
+          },
+        }));
+        const outcome = await runPreparedOperation<Record<string, never>, void>(
+          prepared.operation,
+          (operationId) => runtime.compactOperation
+            ? runtime.compactOperation(sessionId, operationId, proj.model)
+            : runtime.compact!(sessionId, proj.model),
+          () => ({}),
+        );
+        if (outcome.kind === "unknown") {
+          await updateProjection(sessionId, { status: "unknown" });
+          scheduleReconciliation(sessionId, proj, runtime, "mutation-outcome-unknown");
+          throw outcomeError(outcome);
+        }
+        if (outcome.kind === "rejected") throw outcomeError(outcome);
+      });
     },
 
     async cancelResume(sessionId) {

@@ -181,6 +181,7 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc): AgentRunti
     lastStopReason = "";
     lastError = "";
     void refreshContextTelemetry();
+    void nativeCommands().then((commands) => emit({ type: "runtime/commands-changed", commands })).catch(() => {});
   };
 
   const handleEvent = (event: PiRpcEvent) => {

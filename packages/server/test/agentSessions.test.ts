@@ -408,6 +408,7 @@ test("agent detail exposes messages, paged events, state, errors, and runtime di
     assert.equal(detail.body.state.runtime.attached, true);
     assert.ok(detail.body.state.recentErrors.some((error) => error.message === "boom"));
     assert.match(detail.body.links.debug, new RegExp(`${ref.id}/debug$`));
+    assert.match(detail.body.links.compact, new RegExp(`${ref.id}/compact$`));
 
     const page = await jsonFetch<{
       events: SessionEvent[];
