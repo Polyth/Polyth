@@ -20,3 +20,17 @@ test("question receipt uniqueness is checked inside the serialized binding updat
   const accepted = body.indexOf("const acceptedMutations =");
   assert.ok(update >= 0 && uniqueness > update && accepted > uniqueness);
 });
+
+test("question response is released only after a durable receipt and receipt failure stays ambiguous", () => {
+  const start = COMMANDCODE_BRIDGE_SOURCE.indexOf('if (request?.type === "answer_question")');
+  const end = COMMANDCODE_BRIDGE_SOURCE.indexOf('reply(id, false, "unsupported control request")', start);
+  const body = COMMANDCODE_BRIDGE_SOURCE.slice(start, end);
+
+  const persist = body.indexOf("await persistMutationReceipt(operationId, mutationKind, requestId)");
+  const destroy = body.indexOf("socket.destroy()", persist);
+  const release = body.indexOf("pending.resolve(answer)", persist);
+  const success = body.indexOf("reply(id, true)", release);
+
+  assert.ok(persist >= 0 && destroy > persist && release > destroy && success > release);
+  assert.doesNotMatch(body, /question response receipt could not be persisted/);
+});
