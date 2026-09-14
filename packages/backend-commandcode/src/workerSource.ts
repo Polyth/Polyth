@@ -13,6 +13,7 @@ const MAX_LINE = 8 * 1024 * 1024;
 const MAX_CONTROL_LINE = 64 * 1024;
 const MAX_STDERR = 64 * 1024;
 const AGENT_TOOLS_PATH = "/internal/agent-tools";
+const INVOCABLE_TOOL_ERROR_CODES = new Set(["permission-required", "forbidden", "tool-failed"]);
 let input = Buffer.alloc(0);
 let active = null;
 
@@ -237,16 +238,21 @@ const toolErrorResult = (message) => ({
   isError: true,
 });
 
+const responseProvesToolInvocable = (statusCode, parsed) => {
+  if (statusCode >= 200 && statusCode < 300) return true;
+  const code = typeof parsed?.error?.code === "string" ? parsed.error.code : "";
+  return INVOCABLE_TOOL_ERROR_CODES.has(code);
+};
+
 const invokeScopedTool = (turn, call, controller) => new Promise((resolve) => {
   const target = new URL(turn.toolBridge.url);
   const payload = JSON.stringify({ id: call.capabilityId, arguments: call.input ?? {} });
   let bytes = Buffer.alloc(0);
-  let observed = false;
   let settled = false;
-  const finish = (result, didObserve = observed) => {
+  const finish = (result, invocable = false) => {
     if (settled) return;
     settled = true;
-    resolve({ observed: didObserve, result });
+    resolve({ invocable, result });
   };
   const request = (target.protocol === "https:" ? httpsRequest : httpRequest)({
     hostname: target.hostname,
@@ -260,36 +266,37 @@ const invokeScopedTool = (turn, call, controller) => new Promise((resolve) => {
       "content-length": Buffer.byteLength(payload),
     },
   }, (res) => {
-    observed = true;
+    const statusCode = res.statusCode ?? 500;
     res.on("data", (chunk) => {
       bytes = Buffer.concat([bytes, chunk]);
       if (bytes.length > MAX_LINE) {
         request.destroy();
-        finish(toolErrorResult("Polyth tool response is too large"), true);
+        finish(toolErrorResult("Polyth tool response is too large"), statusCode >= 200 && statusCode < 300);
       }
     });
     res.on("end", () => {
       if (settled) return;
       let parsed;
       try { parsed = bytes.length ? JSON.parse(bytes.toString("utf8")) : {}; }
-      catch { finish(toolErrorResult("Polyth tool bridge returned malformed JSON"), true); return; }
-      if ((res.statusCode ?? 500) >= 400) {
-        finish(toolErrorResult(parsed?.error?.message ?? ("Polyth tool HTTP " + String(res.statusCode))), true);
+      catch { finish(toolErrorResult("Polyth tool bridge returned malformed JSON")); return; }
+      const invocable = responseProvesToolInvocable(statusCode, parsed);
+      if (statusCode >= 400) {
+        finish(toolErrorResult(parsed?.error?.message ?? ("Polyth tool HTTP " + String(statusCode))), invocable);
         return;
       }
-      finish({ content: [{ type: "text", text: String(parsed?.output ?? "") }] }, true);
+      finish({ content: [{ type: "text", text: String(parsed?.output ?? "") }] }, invocable);
     });
-    res.on("error", (error) => finish(toolErrorResult(error), true));
+    res.on("error", (error) => finish(toolErrorResult(error)));
   });
   request.on("error", (error) => {
-    if (controller.signal.aborted) finish(toolErrorResult("Polyth tool call aborted"), observed);
-    else finish(toolErrorResult(error), observed);
+    if (controller.signal.aborted) finish(toolErrorResult("Polyth tool call aborted"));
+    else finish(toolErrorResult(error));
   });
   try {
     request.write(payload);
     request.end();
   } catch (error) {
-    finish(toolErrorResult(error), observed);
+    finish(toolErrorResult(error));
   }
 });
 
@@ -332,7 +339,7 @@ const attachToolRelay = (turn) => {
     pending.set(id, controller);
     try {
       const outcome = await invokeScopedTool(turn, { capabilityId, input: callInput }, controller);
-      if (outcome.observed) send({ type: "polyth-tool-invoked", operationId: turn.operationId, toolName });
+      if (outcome.invocable) send({ type: "polyth-tool-invoked", operationId: turn.operationId, toolName });
       writeResponse({ id, result: outcome.result });
     } finally {
       if (pending.get(id) === controller) pending.delete(id);
