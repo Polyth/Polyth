@@ -1,6 +1,9 @@
 import { execFile } from "node:child_process";
+import { readdir, readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, extname, join } from "node:path";
 import { promisify } from "node:util";
-import type { ModelDescriptor } from "@polyth/contracts";
+import type { AgentDescriptor, ModelDescriptor, ModelRef } from "@polyth/contracts";
 import {
   discoverHarnessExecutable,
   harnessExecutableChildEnv,
@@ -183,4 +186,116 @@ export async function discoverCommandCodeModels(
     throw Object.assign(new Error("Command Code returned no parseable models"), { code: "catalog-unavailable" });
   }
   return models;
+}
+
+const BUILTIN_AGENTS: readonly AgentDescriptor[] = [
+  {
+    name: "general",
+    description: "General research and multi-step work with the full native Command Code tool set.",
+    mode: "subagent",
+  },
+  {
+    name: "explore",
+    description: "Read-only codebase search and understanding across many files.",
+    mode: "subagent",
+  },
+  {
+    name: "plan",
+    description: "Implementation planning and trade-off analysis with read-only tools.",
+    mode: "subagent",
+  },
+] as const;
+
+const RESERVED_AGENT_NAMES = new Set(["general", "explore", "plan", "review"]);
+const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
+
+const scalar = (value: string): string | undefined => {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "|" || trimmed === ">") return undefined;
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    return trimmed.slice(1, -1).trim() || undefined;
+  }
+  return trimmed;
+};
+
+const frontmatter = (text: string): Record<string, string> => {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
+  if (!match) return {};
+  const out: Record<string, string> = {};
+  for (const line of match[1]!.split(/\r?\n/)) {
+    if (!line || /^\s/.test(line) || line.trimStart().startsWith("#")) continue;
+    const colon = line.indexOf(":");
+    if (colon <= 0) continue;
+    const key = line.slice(0, colon).trim();
+    const value = scalar(line.slice(colon + 1));
+    if (key && value !== undefined) out[key] = value;
+  }
+  return out;
+};
+
+const configuredModel = (id: string | undefined, effort: string | undefined): ModelRef | undefined => {
+  if (!id || id.toLowerCase() === "inherit") return undefined;
+  const slash = id.indexOf("/");
+  const variant = effort && EFFORTS.has(effort.toLowerCase()) ? effort.toLowerCase() : undefined;
+  return {
+    providerID: slash > 0 ? id.slice(0, slash).toLowerCase() : "command-code",
+    modelID: id,
+    ...(variant ? { variant } : {}),
+  };
+};
+
+export function parseCommandCodeAgentFile(filename: string, text: string): AgentDescriptor | undefined {
+  if (extname(filename).toLowerCase() !== ".md") return undefined;
+  const meta = frontmatter(text);
+  const fallback = basename(filename, extname(filename));
+  const name = (meta.name ?? fallback).trim();
+  if (!name || name.length > 128 || /[\r\n/\\]/.test(name)) return undefined;
+  if (RESERVED_AGENT_NAMES.has(name.toLowerCase())) return undefined;
+  const description = meta.description?.trim();
+  const model = configuredModel(meta.model?.trim(), meta.reasoningEffort?.trim());
+  return {
+    name,
+    ...(description ? { description } : {}),
+    mode: "subagent",
+    ...(model ? { model } : {}),
+  };
+}
+
+const discoverAgentDir = async (dir: string): Promise<AgentDescriptor[]> => {
+  let entries: Awaited<ReturnType<typeof readdir>>;
+  try {
+    entries = await readdir(dir, { withFileTypes: true, encoding: "utf8" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    return [];
+  }
+  const out: AgentDescriptor[] = [];
+  for (const entry of entries.filter((item) => item.isFile() && extname(item.name).toLowerCase() === ".md")
+    .sort((a, b) => a.name.localeCompare(b.name))) {
+    const text = await readFile(join(dir, entry.name), "utf8").catch(() => undefined);
+    if (text === undefined) continue;
+    const agent = parseCommandCodeAgentFile(entry.name, text);
+    if (agent) out.push(agent);
+  }
+  return out;
+};
+
+/** Discover the documented Command Code agent registry without reading prompt
+ * bodies into Polyth state. Built-ins win, then personal agents, then project
+ * agents — matching Command Code's first-definition-wins load order. */
+export async function discoverCommandCodeAgents(
+  cwd: string,
+  home = homedir(),
+): Promise<AgentDescriptor[]> {
+  const result = BUILTIN_AGENTS.map((agent) => ({ ...agent }));
+  const seen = new Set([...RESERVED_AGENT_NAMES]);
+  for (const dir of [join(home, ".commandcode", "agents"), join(cwd, ".commandcode", "agents")]) {
+    for (const agent of await discoverAgentDir(dir)) {
+      const key = agent.name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(agent);
+    }
+  }
+  return result;
 }
