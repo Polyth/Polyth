@@ -33,7 +33,8 @@ test("direct tool relay uses the scoped capability id and canonical loopback rou
   assert.match(COMMANDCODE_WORKER_SOURCE, /JSON\.stringify\(\{ id: call\.capabilityId, arguments: call\.input \?\? \{\} \}\)/);
   assert.match(COMMANDCODE_WORKER_SOURCE, /method: "POST"/);
   assert.match(COMMANDCODE_WORKER_SOURCE, /AGENT_TOOLS_PATH = "\/internal\/agent-tools"/);
-  assert.match(COMMANDCODE_WORKER_SOURCE, /if \(outcome\.invocable\) send\(\{ type: "polyth-tool-invoked"/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /if \(outcome\.invocable\) send\(\{[\s\S]*type: "polyth-tool-invoked"/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /capabilityId,[\s\S]*toolName,/);
 });
 
 test("tool evidence requires a response that proves the scoped capability reached authorization or execution", () => {
