@@ -40,7 +40,7 @@ test("desktop and phone titles present normalized task transitions without movin
   assert.match(mobile, /task-progress \$\{taskProgressTitle\.tone\}/);
 
   assert.match(progressStyles, /\.timeline \.task-list\s*\{\s*display: none;/s);
-  assert.match(progressStyles, /\.activity-live\.task-started\s*\{\s*display: none;/s);
+  assert.match(progressStyles, /\.activity-live\.task-started,\s*\.activity-live:has\(\.task-activity\)\s*\{\s*display: none;/s);
   assert.match(progressStyles, /\.msg\.assistant:not\(\.activity-group\):has\(\+ \.activity-group\) > \.bubble/);
   assert.match(progressStyles, /\.desktop-session-status-copy\.task-progress/);
   // Phone keeps its local guards too, so the behavior survives shell-specific
