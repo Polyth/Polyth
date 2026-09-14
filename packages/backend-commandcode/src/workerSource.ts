@@ -247,10 +247,10 @@ const startTurn = async (message) => {
   const env = {
     ...process.env,
     POLYTH_COMMANDCODE_BINDING_FILE: message.bindingPath,
-    // Canonical Polyth title remains product authority. Set a native name only
-    // while the Command Code session is first being created; replaying the
-    // adapter binding title on --resume could overwrite a newer user rename.
-    POLYTH_COMMANDCODE_TITLE: message.nativeSessionId ? "" : (message.title || ""),
+    // Polyth owns the canonical title. Every exact resume receives the latest
+    // title seen by the session service, so manual renames converge natively
+    // without transcript/config scraping.
+    POLYTH_COMMANDCODE_TITLE: message.title || "",
     POLYTH_COMMANDCODE_OPERATION_ID: message.operationId,
     POLYTH_COMMANDCODE_CONTROL_FILE: controlPath,
     POLYTH_COMMANDCODE_CONTROL_TOKEN: controlToken,
