@@ -86,12 +86,10 @@ export function createCommandCodeCapabilitySync(context: HarnessContext, rpc: Co
   const observeToolInvocation = (message: CommandCodeWorkerEvent) => {
     if (message.type !== "polyth-tool-invoked") return;
     const operationId = typeof message.operationId === "string" ? message.operationId : "";
-    const toolName = typeof message.toolName === "string" ? message.toolName : "";
+    const capabilityId = typeof message.capabilityId === "string" ? message.capabilityId : "";
     const staged = operationId ? projections.get(operationId) : undefined;
-    if (!staged || !toolName || failedToolMods.has(operationId)) return;
-    const capabilityId = Object.entries(staged.value.toolNames ?? {})
-      .find(([, name]) => name === toolName)?.[0];
-    if (!capabilityId || !staged.value.toolCapabilityIds.includes(capabilityId)) return;
+    if (!staged || !capabilityId || failedToolMods.has(operationId)) return;
+    if (!staged.value.toolCapabilityIds.includes(capabilityId)) return;
     acknowledgeCapabilityApplication({
       target: target(),
       desiredRevision: staged.desiredRevision,
