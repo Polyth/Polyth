@@ -15,6 +15,25 @@ export interface CommandCodeStatus {
   raw?: Record<string, unknown>;
 }
 
+export const COMMANDCODE_REQUIRED_FLAGS = [
+  "--print",
+  "--output-format",
+  "--skip-onboarding",
+  "--no-auto-update",
+  "--tools-enable",
+  "--mod",
+  "--resume",
+  "--model",
+  "--effort",
+  "--permission-mode",
+  "--list-models",
+] as const;
+
+export interface CommandCodeCompatibility {
+  compatible: boolean;
+  missing: string[];
+}
+
 export async function resolveCommandCodeBinary(): Promise<string> {
   const requested = process.env.POLYTH_COMMANDCODE_BIN?.trim() || "command-code";
   const report = await discoverHarnessExecutable(requested);
@@ -44,6 +63,31 @@ export const commandCodeVersion = async (command = await resolveCommandCodeBinar
   const value = await run(command, ["--version"], undefined, 5_000).catch(() => "");
   return value.trim() || undefined;
 };
+
+const flagPattern = (flag: string): RegExp => {
+  const escaped = flag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[\\s,])${escaped}(?=$|[\\s,=<])`, "m");
+};
+
+/** Inspect the real installed CLI surface instead of guessing from a version.
+ * This keeps compatibility tied to documented features Polyth actually uses. */
+export function inspectCommandCodeHelp(output: string): CommandCodeCompatibility {
+  const help = output.replace(ANSI, "");
+  const missing = COMMANDCODE_REQUIRED_FLAGS.filter((flag) => !flagPattern(flag).test(help));
+  return { compatible: missing.length === 0, missing };
+}
+
+export async function commandCodeCompatibility(
+  command = await resolveCommandCodeBinary(),
+): Promise<CommandCodeCompatibility> {
+  const help = await run(command, ["--help"], undefined, 5_000);
+  return inspectCommandCodeHelp(help);
+}
+
+export const commandCodeCompatibilityMessage = (compatibility: CommandCodeCompatibility): string =>
+  compatibility.compatible
+    ? "Command Code CLI is compatible"
+    : `Upgrade Command Code; required CLI flags are missing: ${compatibility.missing.join(", ")}`;
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
   value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
