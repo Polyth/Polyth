@@ -37,6 +37,13 @@ test("Command Code headless launch stays explicit, exact-resume and fail-closed"
   assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /--continue/);
 });
 
+test("Command Code admission waits for the exact current turn receipt, not a stale resumed session id", () => {
+  assert.match(COMMANDCODE_WORKER_SOURCE, /acceptedMutations/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /entry\?\.operationId === operationId && entry\?\.mutationKind === "turn-submit"/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /waitForTurnAdmission\([\s\S]*message\.operationId/);
+  assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /const readNativeSessionId/);
+});
+
 test("subagent capability is backed by native AgentEvent snapshots", () => {
   const state = createCommandCodeTranslateState("turn-subagent");
   assert.deepEqual(
