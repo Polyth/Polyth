@@ -37,6 +37,7 @@ import { loadSettings } from "../../settings.ts";
 import { registerComposerActionDeliverer, takePendingComposerAction, clearPackageComposerActions } from "./composerAction.ts";
 
 const CONTRIBUTION_SURFACE = "__contributions__";
+const USER_INTENT_WINDOW_MS = 10_000;
 
 export interface HostContributionInvocationRequest {
   kind: ContributionInvocationKind;
@@ -80,6 +81,7 @@ interface LiveRuntime extends SandboxRuntime {
   rejectReady: (error: Error) => void;
   readySettled: boolean;
   pendingContributions: Map<string, PendingContribution>;
+  lastUserIntentAt: number;
 }
 
 const live = new Map<string, LiveRuntime>();
@@ -116,6 +118,28 @@ function sandboxSurfaceIds(plugin: InstalledPluginDto): string[] {
     }
   }
   return ids;
+}
+
+function userDrivenContribution(kind: ContributionInvocationKind): boolean {
+  return kind === "composer-action"
+    || kind === "attachment-provider"
+    || kind === "message-action"
+    || kind === "session-action"
+    || kind === "command"
+    || kind === "context-provider";
+}
+
+function requireRecentUserIntent(runtime: LiveRuntime, action: string): void {
+  const at = runtime.lastUserIntentAt;
+  if (!at || Date.now() - at > USER_INTENT_WINDOW_MS) {
+    throw Object.assign(new Error(`${action} requires a recent user action in Polyth`), {
+      code: "HOST_REJECTED",
+    });
+  }
+  // One observed user action authorizes one prompt/navigation side effect. A
+  // package cannot reuse the same click to open a loop of credential prompts
+  // or external tabs during the window.
+  runtime.lastUserIntentAt = 0;
 }
 
 async function loadBundle(plugin: InstalledPluginDto): Promise<string> {
@@ -256,17 +280,20 @@ ${source}
     rejectReady,
     readySettled: false,
     pendingContributions: new Map(),
+    lastUserIntentAt: 0,
     subscribe(listener) {
       runtime.listeners.add(listener);
       listener(runtime.tree);
       return () => runtime.listeners.delete(listener);
     },
     sendAction(action) {
+      runtime.lastUserIntentAt = Date.now();
       runtime.port?.postMessage(eventEnvelope("ui.action", action));
     },
     async invokeContribution(request) {
       await runtime.ready;
       if (runtime.disposed || !runtime.port) throw new Error("extension runtime is unavailable");
+      if (userDrivenContribution(request.kind)) runtime.lastUserIntentAt = Date.now();
       const invocation = await issueContributionInvocation(plugin, request);
       return new Promise<ContributionResult | undefined>((resolve, reject) => {
         const interactiveMs = Math.max(1_000, invocation.expiresAt - Date.now());
@@ -366,9 +393,12 @@ ${source}
       method: "ui.openExternalUrl",
       capability: "ui.openExternalUrl",
       invoke: (_ctx, payload) => {
+        requireRecentUserIntent(runtime, "Opening an external URL");
         const url = payload && typeof payload === "object" ? String((payload as { url?: unknown }).url ?? "") : "";
         const parsed = new URL(url);
-        if (parsed.protocol !== "https:") throw Object.assign(new Error("only https URLs can be opened"), { code: "INVALID_REQUEST" });
+        if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+          throw Object.assign(new Error("only credential-free https URLs can be opened"), { code: "INVALID_REQUEST" });
+        }
         window.open(parsed.toString(), "_blank", "noopener,noreferrer");
         return { ok: true };
       },
@@ -415,6 +445,7 @@ ${source}
       method: "auth.connect",
       capability: "auth.connection",
       invoke: async (_ctx, payload) => {
+        requireRecentUserIntent(runtime, "Connecting an extension account");
         const id = payload && typeof payload === "object" ? String((payload as { id?: unknown }).id ?? "") : "";
         const spec = (plugin.connections ?? []).find((item) => item.id === id);
         if (!spec) throw Object.assign(new Error("connection is not declared"), { code: "RESOURCE_NOT_FOUND" });
@@ -459,6 +490,7 @@ ${source}
   window.addEventListener("message", onWindowMessage);
   runtime.unregisterDeliverer = registerComposerActionDeliverer(plugin.id, surfaceId, (actionId) => {
     if (!runtime.port || runtime.disposed || !runtime.readySettled) return false;
+    runtime.lastUserIntentAt = Date.now();
     runtime.port.postMessage(eventEnvelope("composer.action", { actionId }));
     return true;
   });
@@ -523,7 +555,10 @@ async function handlePort(
       runtime.readySettled = true;
       runtime.resolveReady();
       const pendingAction = takePendingComposerAction(plugin.id, runtime.surfaceId);
-      if (pendingAction) runtime.port.postMessage(eventEnvelope("composer.action", { actionId: pendingAction }));
+      if (pendingAction) {
+        runtime.lastUserIntentAt = Date.now();
+        runtime.port.postMessage(eventEnvelope("composer.action", { actionId: pendingAction }));
+      }
     }
   } catch (cause) {
     const error = cause as Error & { code?: string };
