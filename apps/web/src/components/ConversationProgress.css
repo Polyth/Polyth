@@ -7,9 +7,11 @@
   display: none;
 }
 
-/* A task start is already represented by the task plan/status surfaces. Do not
- * replay it as a delayed flying action after the agent has moved on to prose. */
-.activity-live.task-started {
+/* Task lifecycle events are durable inside Activity details, while the session
+ * title/overview owns their live presentation. Never replay start/completion/
+ * failure as a delayed flying action after the agent has moved on to prose. */
+.activity-live.task-started,
+.activity-live:has(.task-activity) {
   display: none;
 }
 
