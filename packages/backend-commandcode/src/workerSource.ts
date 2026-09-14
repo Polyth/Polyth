@@ -155,7 +155,8 @@ const startTurn = async (message) => {
   if (message.nativeSessionId) args.push("--resume", message.nativeSessionId);
   if (message.model) args.push("--model", message.model);
   if (message.effort) args.push("--effort", message.effort);
-  if (message.permissionMode) args.push("--permission-mode", message.permissionMode);
+  const permissionMode = message.permissionMode === "auto-accept" ? "auto-accept" : "dont-ask";
+  args.push("--permission-mode", permissionMode);
   const controlPath = String(message.bindingPath) + ".control." + randomUUID() + ".json";
   const controlToken = randomUUID() + randomUUID();
   await rm(controlPath, { force: true }).catch(() => undefined);
