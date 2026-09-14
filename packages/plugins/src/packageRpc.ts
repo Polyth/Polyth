@@ -1,8 +1,9 @@
 import type { JsonObject, ProjectService, SessionService, SpaceContext, SpaceStorage } from "@polyth/contracts";
-import type {
-  ContributionCompletion,
-  ExternalResource,
-  StructuredContext,
+import {
+  parseContributionResult,
+  type ContributionCompletion,
+  type ExternalResource,
+  type StructuredContext,
 } from "@polyth/package-sdk";
 import type {
   CapabilityConstraints,
@@ -112,63 +113,22 @@ export function effectiveCapabilities(
 
 function safeExternalResource(body: Record<string, unknown>, fallbackProvider: string): ExternalResource {
   const provider = typeof body.provider === "string" && body.provider.trim()
-    ? body.provider.trim().slice(0, 120)
+    ? body.provider.trim()
     : fallbackProvider;
-  const resourceId = typeof body.resourceId === "string" ? body.resourceId.trim().slice(0, 240) : "";
-  const title = typeof body.title === "string" ? body.title.trim().slice(0, 240) : "";
-  if (!resourceId || !title) fail("INVALID_REQUEST", "resourceId and title are required");
-  const url = typeof body.url === "string" ? body.url.trim().slice(0, 2_000) : undefined;
-  if (url && !/^https:\/\//i.test(url)) fail("INVALID_REQUEST", "resource URL must use https");
-  const metadata = body.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)
-    ? body.metadata as ExternalResource["metadata"]
-    : undefined;
-  return {
-    provider,
-    resourceId,
-    title,
-    ...(typeof body.subtitle === "string" ? { subtitle: body.subtitle.slice(0, 240) } : {}),
-    ...(url ? { url } : {}),
-    ...(typeof body.summary === "string" ? { summary: body.summary.slice(0, 4_000) } : {}),
-    ...(typeof body.text === "string" ? { text: body.text.slice(0, 16_000) } : {}),
-    ...(typeof body.retrievedAt === "number" && Number.isFinite(body.retrievedAt) ? { retrievedAt: body.retrievedAt } : {}),
-    ...(typeof body.freshUntil === "number" && Number.isFinite(body.freshUntil) ? { freshUntil: body.freshUntil } : {}),
-    ...(metadata ? { metadata } : {}),
-  };
+  const parsed = parseContributionResult({ resources: [{ ...body, provider }] });
+  const resource = parsed.resources?.[0];
+  if (!resource) fail("INVALID_REQUEST", "extension resource is invalid");
+  return resource;
 }
 
 function safeStructuredContext(body: Record<string, unknown>, fallbackProvider: string): StructuredContext {
   const provider = typeof body.provider === "string" && body.provider.trim()
-    ? body.provider.trim().slice(0, 120)
+    ? body.provider.trim()
     : fallbackProvider;
-  const sourceId = typeof body.sourceId === "string" ? body.sourceId.trim().slice(0, 240) : "";
-  const title = typeof body.title === "string" ? body.title.trim().slice(0, 240) : "";
-  const summary = typeof body.summary === "string" ? body.summary.trim().slice(0, 4_000) : "";
-  const content = typeof body.content === "string" ? body.content.slice(0, 24_000) : "";
-  if (!sourceId || !title || !content.trim()) fail("INVALID_REQUEST", "sourceId, title and content are required");
-  const uri = typeof body.uri === "string" ? body.uri.trim().slice(0, 2_000) : undefined;
-  if (uri && !/^https:\/\//i.test(uri)) fail("INVALID_REQUEST", "context URI must use https");
-  return {
-    provider,
-    sourceId,
-    title,
-    ...(uri ? { uri } : {}),
-    retrievedAt: typeof body.retrievedAt === "number" && Number.isFinite(body.retrievedAt)
-      ? body.retrievedAt
-      : Date.now(),
-    ...(typeof body.freshUntil === "number" && Number.isFinite(body.freshUntil) ? { freshUntil: body.freshUntil } : {}),
-    summary,
-    content,
-    ...(body.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)
-      ? { metadata: body.metadata as StructuredContext["metadata"] }
-      : {}),
-  };
-}
-
-function assertCompletionBounds(completion: ContributionCompletion): void {
-  const bytes = Buffer.byteLength(JSON.stringify(completion), "utf8");
-  if (bytes > 128 * 1024) fail("INVALID_REQUEST", "contribution result exceeds size limit");
-  if ((completion.result?.resources?.length ?? 0) > 20) fail("INVALID_REQUEST", "too many resources in contribution result");
-  if ((completion.result?.context?.length ?? 0) > 12) fail("INVALID_REQUEST", "too many context items in contribution result");
+  const parsed = parseContributionResult({ context: [{ ...body, provider }] });
+  const context = parsed.context?.[0];
+  if (!context) fail("INVALID_REQUEST", "extension context is invalid");
+  return context;
 }
 
 export async function invokePackageRpc(
@@ -204,16 +164,7 @@ export async function invokePackageRpc(
     switch (method) {
       case "contribution.complete": {
         if (!deps.invocationLeases || !deps.invocationIdentity) fail("HOST_UNAVAILABLE", "invocation authority is unavailable");
-        const completion = body as unknown as ContributionCompletion;
-        if (
-          typeof completion.invocationId !== "string"
-          || typeof completion.lease !== "string"
-          || typeof completion.ok !== "boolean"
-        ) {
-          fail("INVALID_REQUEST", "contribution completion is invalid");
-        }
-        assertCompletionBounds(completion);
-        deps.invocationLeases.complete(deps.invocationIdentity, completion);
+        deps.invocationLeases.complete(deps.invocationIdentity, body as unknown as ContributionCompletion);
         return { accepted: true };
       }
       case "session.read": {
@@ -241,6 +192,7 @@ export async function invokePackageRpc(
           sourceId: `legacy:${Date.now()}`,
           title: deps.manifest.display.name,
           summary: text.slice(0, 500),
+          text,
           content: text,
           retrievedAt: Date.now(),
         });
@@ -260,6 +212,7 @@ export async function invokePackageRpc(
           retrievedAt: context.retrievedAt,
           freshUntil: context.freshUntil ?? 0,
           summary: context.summary,
+          text: context.content,
           content: context.content,
           metadata: (context.metadata ?? {}) as JsonObject,
         });
