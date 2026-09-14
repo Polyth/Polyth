@@ -234,6 +234,7 @@ function useContributionExecution(
   plugin: InstalledPluginDto,
   descriptor: ContributionDescriptor,
   hostProps: Record<string, unknown>,
+  applyStructuredResult: boolean,
 ) {
   const runtimeRef = useRef<SandboxRuntime | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
@@ -242,6 +243,7 @@ function useContributionExecution(
   const [result, setResult] = useState<ContributionResult | undefined>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [appliedCount, setAppliedCount] = useState(0);
 
   const dispose = useCallback(() => {
     executionRef.current += 1;
@@ -260,6 +262,7 @@ function useContributionExecution(
     setError(null);
     setResult(undefined);
     setTree(null);
+    setAppliedCount(0);
     setBusy(true);
     const surfaceId = `contribution:${descriptor.kind}:${descriptor.id}:${crypto.randomUUID()}`;
     try {
@@ -286,10 +289,13 @@ function useContributionExecution(
       if (execution !== executionRef.current) return undefined;
       setResult(next);
       if (next?.ui) setTree(next.ui);
-      const applied = await applyContributionResult(next, scope);
-      if (execution !== executionRef.current) return next;
-      if (applied.failed.length > 0) setError(`Could not attach: ${applied.failed.join(", ")}`);
-      if (applied.attached > 0) announce(`${applied.attached} extension item${applied.attached === 1 ? "" : "s"} attached`);
+      if (applyStructuredResult) {
+        const applied = await applyContributionResult(next, scope);
+        if (execution !== executionRef.current) return next;
+        setAppliedCount(applied.attached);
+        if (applied.failed.length > 0) setError(`Could not attach: ${applied.failed.join(", ")}`);
+        if (applied.attached > 0) announce(`${applied.attached} extension item${applied.attached === 1 ? "" : "s"} attached`);
+      }
       if (next?.message) announce(next.message);
       setBusy(false);
       return next;
@@ -299,9 +305,9 @@ function useContributionExecution(
       setBusy(false);
       return undefined;
     }
-  }, [descriptor, dispose, hostProps, plugin]);
+  }, [applyStructuredResult, descriptor, dispose, hostProps, plugin]);
 
-  return { tree, result, busy, error, run, dispose, runtimeRef };
+  return { tree, result, busy, error, appliedCount, run, dispose, runtimeRef };
 }
 
 function ContributionBody({ execution }: { execution: ReturnType<typeof useContributionExecution> }) {
@@ -313,9 +319,8 @@ function ContributionBody({ execution }: { execution: ReturnType<typeof useContr
   if (execution.result?.status) {
     return <Badge tone={execution.result.status.tone === "danger" ? "danger" : execution.result.status.tone === "warning" ? "warning" : execution.result.status.tone === "success" ? "success" : "neutral"}>{execution.result.status.label}</Badge>;
   }
-  if ((execution.result?.resources?.length ?? 0) + (execution.result?.context?.length ?? 0) > 0) {
-    return <Badge tone="success">Added to composer</Badge>;
-  }
+  if (execution.appliedCount > 0) return <Badge tone="success">Added to composer</Badge>;
+  if (execution.result?.message) return <Notice tone="info">{execution.result.message}</Notice>;
   return null;
 }
 
@@ -330,7 +335,7 @@ function LauncherContribution({
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const execution = useContributionExecution(plugin, descriptor, hostProps);
+  const execution = useContributionExecution(plugin, descriptor, hostProps, true);
   const launch = () => {
     setOpen(true);
     void execution.run().then((result) => {
@@ -403,7 +408,7 @@ export function SandboxCommandInvocationOverlay({
     query,
     arguments: commandArguments ?? "",
   }), [sessionId, projectId, query, commandArguments]);
-  const execution = useContributionExecution(plugin, descriptor, hostProps);
+  const execution = useContributionExecution(plugin, descriptor, hostProps, true);
   const [completed, setCompleted] = useState(false);
 
   useEffect(() => {
@@ -449,12 +454,14 @@ function InlineContribution({
   plugin,
   descriptor,
   hostProps,
+  applyStructuredResult = false,
 }: {
   plugin: InstalledPluginDto;
   descriptor: ContributionDescriptor;
   hostProps: Record<string, unknown>;
+  applyStructuredResult?: boolean;
 }) {
-  const execution = useContributionExecution(plugin, descriptor, hostProps);
+  const execution = useContributionExecution(plugin, descriptor, hostProps, applyStructuredResult);
   useEffect(() => {
     void execution.run();
     return execution.dispose;
@@ -495,7 +502,7 @@ export function SandboxContributionSlot({
     hostProps.presentation === "picker"
     && (descriptor.kind === "attachment-provider" || descriptor.kind === "context-provider")
   ) {
-    return <InlineContribution plugin={plugin} descriptor={descriptor} hostProps={hostProps} />;
+    return <InlineContribution plugin={plugin} descriptor={descriptor} hostProps={hostProps} applyStructuredResult />;
   }
   if (["settings-section", "status-badge", "widget", "surface"].includes(descriptor.kind)) {
     return <InlineContribution plugin={plugin} descriptor={descriptor} hostProps={hostProps} />;
