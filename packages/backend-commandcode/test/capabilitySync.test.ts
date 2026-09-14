@@ -9,21 +9,29 @@ import {
 } from "@polyth/harness-runtime";
 import { createCommandCodeCapabilitySync } from "../src/capabilitySync.ts";
 import { commandCodeOverlays } from "../src/provisioner.ts";
-import type { CommandCodeRpc } from "../src/rpc.ts";
+import type { CommandCodeRpc, CommandCodeWorkerEvent } from "../src/rpc.ts";
 
 const context = (cwd: string) => ({ spaceId: "space", projectId: "project", sessionId: "session", cwd });
 
-const fakeRpc = (requestImpl: CommandCodeRpc["request"]): CommandCodeRpc => ({
-  authorityId: "authority",
-  generation: 7,
-  receipts: {},
-  releasedAuthorities: [],
-  request: requestImpl,
-  async receipt() {},
-  onEvent() { return { dispose() {} }; },
-  onClose() { return { dispose() {} }; },
-  async close() {},
-});
+const fakeRpc = (requestImpl: CommandCodeRpc["request"]) => {
+  const events = new Set<(event: CommandCodeWorkerEvent) => void>();
+  const closes = new Set<() => void>();
+  const rpc: CommandCodeRpc = {
+    authorityId: "authority",
+    generation: 7,
+    receipts: {},
+    releasedAuthorities: [],
+    request: requestImpl,
+    async receipt() {},
+    onEvent(callback) { events.add(callback); return { dispose: () => events.delete(callback) }; },
+    onClose(callback) { closes.add(callback); return { dispose: () => closes.delete(callback) }; },
+    async close() { for (const callback of closes) callback(); },
+  };
+  return {
+    rpc,
+    emit(event: CommandCodeWorkerEvent) { for (const callback of events) callback(event); },
+  };
+};
 
 test("capability wrapper projects transient Mod and skills on every native turn", async () => {
   const dir = await mkdtemp(join(tmpdir(), "polyth-commandcode-cap-sync-"));
@@ -40,11 +48,13 @@ test("capability wrapper projects transient Mod and skills on every native turn"
       promptCapabilityIds: ["instruction"],
       skillRoot: join(dir, "skills"),
       skillCapabilityIds: ["skill"],
+      toolCapabilityIds: [],
     }, "commandcode", { desiredRevision: "rev-1", capabilityIds: ["instruction", "skill"] });
-    const sync = createCommandCodeCapabilitySync(ctx, fakeRpc(async <T>(command: Record<string, unknown> & { type: string }) => {
+    const fake = fakeRpc(async <T>(command: Record<string, unknown> & { type: string }) => {
       requests.push(command);
       return { nativeSessionId: "native" } as T;
-    }));
+    });
+    const sync = createCommandCodeCapabilitySync(ctx, fake.rpc);
 
     for (const operationId of ["turn-1", "turn-2"]) {
       await sync.request({ type: "start_turn", operationId, bindingPath: binding });
@@ -70,6 +80,68 @@ test("capability wrapper projects transient Mod and skills on every native turn"
   }
 });
 
+test("native Polyth tool evidence is bound to the exact admitted projection revision", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "polyth-commandcode-tool-sync-"));
+  const receipts: Array<{ outcome: string; capabilityIds: string[]; stage?: string }> = [];
+  const disposeReceipt = setCapabilityReceiptSink((receipt) => receipts.push({
+    outcome: receipt.outcome,
+    capabilityIds: receipt.capabilityIds,
+    stage: receipt.evidence?.stage,
+  }));
+  try {
+    const ctx = context(dir);
+    const toolBridge = {
+      command: "/usr/bin/node",
+      args: ["agentToolsMcp.mjs"],
+      env: {
+        POLYTH_AGENT_TOOLS_URL: "http://127.0.0.1:9999/internal/agent-tools",
+        POLYTH_AGENT_TOOLS_TOKEN: "opaque-token",
+      },
+    };
+    commandCodeOverlays.set(ctx, {
+      promptCapabilityIds: [],
+      skillCapabilityIds: [],
+      toolModFile: join(dir, "tools.ts"),
+      toolCapabilityIds: ["example.tool"],
+      toolNames: { "example.tool": "review_project" },
+      toolBridge,
+    }, "commandcode", { desiredRevision: "tools-rev", capabilityIds: ["example.tool"] });
+    const requests: Array<Record<string, unknown>> = [];
+    const fake = fakeRpc(async <T>(command: Record<string, unknown> & { type: string }) => {
+      requests.push(command);
+      return { nativeSessionId: "native" } as T;
+    });
+    const sync = createCommandCodeCapabilitySync(ctx, fake.rpc);
+    const subscription = sync.onEvent(() => undefined);
+
+    await sync.request({ type: "start_turn", operationId: "tool-turn", bindingPath: join(dir, "binding.json") });
+    assert.equal(requests[0]?.toolModPath, join(dir, "tools.ts"));
+    assert.deepEqual(requests[0]?.toolBridge, toolBridge);
+    assert.deepEqual(receipts[0], {
+      outcome: "unverifiable",
+      capabilityIds: ["example.tool"],
+      stage: "staged",
+    });
+
+    fake.emit({ type: "polyth-tool-invoked", operationId: "tool-turn", toolName: "review_project" });
+    assert.deepEqual(receipts[1], {
+      outcome: "applied",
+      capabilityIds: ["example.tool"],
+      stage: "invocable",
+    });
+    fake.emit({ type: "polyth-tool-invoked", operationId: "different-turn", toolName: "review_project" });
+    assert.equal(receipts.length, 2);
+    fake.emit({ type: "turn-exit", operationId: "tool-turn", code: 0, signal: null, stderr: "" });
+    fake.emit({ type: "polyth-tool-invoked", operationId: "tool-turn", toolName: "review_project" });
+    assert.equal(receipts.length, 2);
+    subscription.dispose();
+  } finally {
+    disposeReceipt();
+    commandCodeOverlays.release(context(dir));
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("proven pre-admission rejection releases launch capture but keeps projection retryable", async () => {
   const dir = await mkdtemp(join(tmpdir(), "polyth-commandcode-cap-reject-"));
   const binding = join(dir, "binding.json");
@@ -81,11 +153,13 @@ test("proven pre-admission rejection releases launch capture but keeps projectio
       promptModFile: join(dir, "capability.ts"),
       promptCapabilityIds: ["instruction"],
       skillCapabilityIds: [],
+      toolCapabilityIds: [],
     }, "commandcode", { desiredRevision: "rev-2", capabilityIds: ["instruction"] });
     await writeFile(binding, JSON.stringify({ acceptedMutations: [] }));
-    const sync = createCommandCodeCapabilitySync(ctx, fakeRpc(async () => {
+    const fake = fakeRpc(async () => {
       throw Object.assign(new Error("workspace trust required"), { code: "runtime-rejected" });
-    }));
+    });
+    const sync = createCommandCodeCapabilitySync(ctx, fake.rpc);
 
     await assert.rejects(
       sync.request({ type: "start_turn", operationId: "turn-rejected", bindingPath: binding }),
