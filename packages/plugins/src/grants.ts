@@ -99,13 +99,11 @@ function mergeConstraints(
 ): CapabilityConstraints | undefined {
   if (!previous && !next) return undefined;
   const origins = mergedStrings(previous?.origins, next?.origins);
-  const paths = mergedStrings(previous?.paths, next?.paths);
   const methods = mergedStrings(previous?.methods, next?.methods) as CapabilityConstraints["methods"];
   const modelClasses = mergedStrings(previous?.modelClasses, next?.modelClasses) as CapabilityConstraints["modelClasses"];
   const maxOutputTokens = Math.max(previous?.maxOutputTokens ?? 0, next?.maxOutputTokens ?? 0) || undefined;
   return {
     ...(origins ? { origins } : {}),
-    ...(paths ? { paths } : {}),
     ...(methods ? { methods } : {}),
     ...(modelClasses ? { modelClasses } : {}),
     ...(maxOutputTokens ? { maxOutputTokens } : {}),
