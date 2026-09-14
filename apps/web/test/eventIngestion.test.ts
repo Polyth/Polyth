@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { JsonObject, SessionEvent } from "@polyth/contracts";
 import { buildModel, cloneModel, createModelCache, reduceEvent } from "../src/reduce.ts";
-import { applyEvent, applyEvents, getState, lastSeq, seedSessionCache, subscribeSessionEvents, subscribeStore, upsertSession } from "../src/store.ts";
+import { applyEvent, applyEvents, beginPendingSend, bindPendingSend, endPendingSend, getState, lastSeq, seedSessionCache, subscribeSessionEvents, subscribeStore, upsertSession } from "../src/store.ts";
 import { titleFromPrompt } from "../src/format.ts";
 
 function mk(sessionId: string, seq: number, type = "user/message", data: JsonObject = {}): SessionEvent {
@@ -299,4 +299,66 @@ test("an older-history backfill containing the first user/message derives the ti
     getState().sessions.find((x) => x.id === "backfill-s")?.title,
     titleFromPrompt("Refactor the auth layer"),
   );
+});
+
+// Optimistic prompt echo (instant send): the composer shows the submitted
+// prompt immediately and the canonical event retires it. The echo must retire
+// exactly once per canonical admission, never on backfilled older history, and
+// never before the prompt it stands in for has actually landed.
+test("a pending send retires only when its own canonical admission lands", () => {
+  seedSession("echo-s");
+  applyEvents([mk("echo-s", 1, "user/message", { text: "older prompt" })]);
+
+  const echo = beginPendingSend({ sessionId: "echo-s", text: "new prompt", attachments: [] });
+  assert.equal(getState().pendingSends.length, 1);
+
+  // Non-admission traffic for the same session leaves the echo standing.
+  applyEvents([mk("echo-s", 2, "turn/started", { turnId: "t1" })]);
+  assert.equal(getState().pendingSends.length, 1);
+
+  // Backfilled older history is not an admission of this prompt.
+  applyEvents([mk("echo-s", 0, "user/message", { text: "ancient prompt" })]);
+  assert.equal(getState().pendingSends.length, 1);
+
+  // Another session's prompt is not this one either.
+  seedSession("other-s");
+  applyEvents([mk("other-s", 1, "user/message", { text: "elsewhere" })]);
+  assert.equal(getState().pendingSends.length, 1);
+
+  applyEvents([mk("echo-s", 3, "user/message", { text: "new prompt" })]);
+  assert.equal(getState().pendingSends.length, 0);
+  assert.equal(echo.startsWith("pending-send-"), true);
+});
+
+test("two rapid pending sends retire one per canonical admission, oldest first", () => {
+  seedSession("fifo-s");
+  const first = beginPendingSend({ sessionId: "fifo-s", text: "one", attachments: [] });
+  const second = beginPendingSend({ sessionId: "fifo-s", text: "two", attachments: [] });
+
+  applyEvents([mk("fifo-s", 1, "user/message", { text: "one" })]);
+  assert.deepEqual(getState().pendingSends.filter((p) => p.sessionId === "fifo-s").map((p) => p.id), [second]);
+
+  // A server-side queue fallback admits the prompt without a user/message.
+  applyEvents([mk("fifo-s", 2, "queue/enqueued", { queueId: "q1", text: "two" })]);
+  assert.equal(getState().pendingSends.filter((p) => p.sessionId === "fifo-s").length, 0);
+  assert.equal(first.length > 0, true);
+});
+
+test("a rejected send drops its echo without waiting for an event", () => {
+  seedSession("reject-s");
+  const echo = beginPendingSend({ sessionId: "reject-s", text: "nope", attachments: [] });
+  endPendingSend(echo);
+  assert.equal(getState().pendingSends.some((p) => p.id === echo), false);
+});
+
+test("first-send creation binds its echo to the new session's real tail", () => {
+  seedSession("bound-s");
+  applyEvents([mk("bound-s", 7, "user/message", { text: "pre-existing" })]);
+  const echo = beginPendingSend({ sessionId: null, text: "first prompt", attachments: [] });
+  bindPendingSend(echo, "bound-s");
+  // Binding re-anchors to seq 7: the already-stored message must not retire it.
+  applyEvents([mk("bound-s", 7, "user/message", { text: "pre-existing" })]);
+  assert.equal(getState().pendingSends.some((p) => p.id === echo), true);
+  applyEvents([mk("bound-s", 8, "user/message", { text: "first prompt" })]);
+  assert.equal(getState().pendingSends.some((p) => p.id === echo), false);
 });

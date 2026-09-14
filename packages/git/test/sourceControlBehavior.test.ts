@@ -686,6 +686,7 @@ test("GitView destructive confirmation focuses Cancel and restores the opener on
 test("GitView remote push failure shows the real reason and resolve-with-agent actions", async () => {
   const projectId = "git-push-error-project";
   const pushError = "Push was rejected because the remote has commits you do not have locally. Pull or rebase first, then push again.";
+  const agentRoutes: string[] = [];
   globalThis.fetch = async (input, init) => {
     const url = String(input);
     const method = (init as { method?: string } | undefined)?.method ?? "GET";
@@ -698,6 +699,10 @@ test("GitView remote push failure shows the real reason and resolve-with-agent a
     if (url.startsWith("/api/worktrees") || url.startsWith("/api/git/graph") || url.startsWith("/api/git/stashes")) return response([]);
     if (url.startsWith("/api/git/push") && method === "POST") {
       return response({ error: "conflict", message: pushError }, 409);
+    }
+    if (url.startsWith("/api/git/conflict-prompt") && method === "POST") {
+      agentRoutes.push(url);
+      return response({ ok: true, data: { prompt: "Resolve the checked-out git conflict." } });
     }
     throw new Error(`Unexpected request: ${method} ${url}`);
   };
@@ -721,6 +726,61 @@ test("GitView remote push failure shows the real reason and resolve-with-agent a
     assert.ok(banner, "resolve-with-agent banner renders for push failures");
     assert.ok(banner!.textContent?.includes("Resolve with an agent") || banner!.textContent?.includes("agent"));
     assert.ok(banner!.querySelectorAll("button").length >= 2, "both resolve actions remain available");
+    const newSession = [...banner!.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => /In a new session/i.test(button.textContent ?? ""));
+    assert.ok(newSession, "new-session action is available");
+    await act(async () => { newSession.click(); await delay(30); });
+    assert.equal(agentRoutes.length, 1, "the prompt is requested without starting an agent turn");
+    assert.match(getState().newSessionIntent?.draft ?? "", /Resolve the checked-out git conflict/);
+  } finally {
+    await view.unmount();
+    activateProject(null);
+  }
+});
+
+test("GitView offers automatic rebase before the conflict draft", async () => {
+  const projectId = "git-auto-rebase-project";
+  let rebased = false;
+  let pushed = false;
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    const method = (init as { method?: string } | undefined)?.method ?? "GET";
+    if (url.startsWith("/api/git/status")) {
+      return response({
+        branch: "main", ahead: rebased ? 0 : 1, behind: rebased ? 0 : 1,
+        conflicted: [], staged: [], untracked: [], unstaged: [], isRepo: true,
+      });
+    }
+    if (url.startsWith("/api/git/branches")) return response({ current: "main", branches: [{ name: "main", current: true }] });
+    if (url.startsWith("/api/worktrees") || url.startsWith("/api/git/graph") || url.startsWith("/api/git/stashes")) return response([]);
+    if (url.startsWith("/api/git/sync") && method === "POST") {
+      return response({ error: "conflict", message: "Sync cannot continue because local and remote histories have diverged." }, 409);
+    }
+    if (url.startsWith("/api/git/rebase") && method === "POST") {
+      rebased = true;
+      return response({ ok: true });
+    }
+    if (url.startsWith("/api/git/push") && method === "POST") {
+      pushed = true;
+      return response({ ok: true });
+    }
+    throw new Error(`Unexpected request: ${method} ${url}`);
+  };
+
+  activateProject(projectId);
+  const view = await mounted(createElement(GitView));
+  try {
+    await act(async () => { await delay(40); });
+    const sync = view.container.querySelector<HTMLButtonElement>(".source-sync-btn");
+    assert.ok(sync);
+    await act(async () => { sync.click(); await delay(30); });
+    const rebase = [...view.container.querySelectorAll<HTMLButtonElement>(".conflict-agent-bar button")]
+      .find((button) => /Rebase and sync/i.test(button.textContent ?? ""));
+    assert.ok(rebase, "diverged sync offers automatic rebase");
+    await act(async () => { rebase.click(); await delay(50); });
+    assert.equal(rebased, true);
+    assert.equal(pushed, true);
+    assert.match(view.container.querySelector(".source-inline-status.success")?.textContent ?? "", /Sync/i);
   } finally {
     await view.unmount();
     activateProject(null);

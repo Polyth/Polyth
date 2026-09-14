@@ -12,7 +12,8 @@ export interface SessionDefaults {
   smallModel?: StoredModelRef;
   walkthroughModel?: StoredModelRef;
   retentionDays?: number;
-  retentionAction?: "archive";
+  retentionAction?: "archive" | "delete";
+  archiveRetentionDays?: number;
 }
 
 function modelRef(value: unknown): StoredModelRef | undefined {
@@ -44,6 +45,12 @@ export function parseSessionDefaults(raw: string | null): SessionDefaults {
     const retentionDays = typeof data?.retentionDays === "number" && Number.isFinite(data.retentionDays)
       ? Math.min(3650, Math.max(1, Math.round(data.retentionDays)))
       : undefined;
+    const archiveRetentionDays = typeof data?.archiveRetentionDays === "number" && Number.isFinite(data.archiveRetentionDays)
+      ? Math.min(3650, Math.max(1, Math.round(data.archiveRetentionDays)))
+      : undefined;
+    const retentionAction = data?.retentionAction === "archive" || data?.retentionAction === "delete"
+      ? data.retentionAction
+      : undefined;
     return {
       ...(defaultModel ? { defaultModel } : {}),
       ...(defaultThinking ? { defaultThinking } : {}),
@@ -51,7 +58,8 @@ export function parseSessionDefaults(raw: string | null): SessionDefaults {
       ...(smallModel ? { smallModel } : {}),
       ...(walkthroughModel ? { walkthroughModel } : {}),
       ...(retentionDays ? { retentionDays } : {}),
-      ...(data?.retentionAction === "archive" ? { retentionAction: "archive" as const } : {}),
+      ...(retentionAction ? { retentionAction } : {}),
+      ...(archiveRetentionDays ? { archiveRetentionDays } : {}),
     };
   } catch {
     return {};

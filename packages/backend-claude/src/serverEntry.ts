@@ -18,16 +18,22 @@ const loadSdk = () => import("@anthropic-ai/claude-agent-sdk");
 type ClaudeSessionInfoLike = {
     customTitle?: string | null;
     summary?: string | null;
+    firstPrompt?: string | null;
 };
 
 /**
  * Agent-SDK sessions can report the first user prompt through `summary` even
  * when no semantic title was ever generated. `customTitle`, in contrast, is an
- * explicit native title. Keep the session object intact for resume detection,
- * but hide an untrusted summary from the runtime title-ingestion path.
+ * explicit native title. When the SDK also gives us `firstPrompt`, a different
+ * summary is the SDK's semantic title; only prompt-derived summaries are
+ * hidden from the runtime title-ingestion path.
  */
 export function titleSafeClaudeSessionInfo<T extends ClaudeSessionInfoLike | null | undefined>(info: T): T {
     if (!info || info.customTitle) return info;
+    const summary = info.summary?.trim().replace(/\s+/g, " ").toLowerCase();
+    const prompt = info.firstPrompt?.trim().replace(/\s+/g, " ").toLowerCase();
+    const firstLine = info.firstPrompt?.split(/\r?\n/).find((line) => line.trim())?.trim().replace(/\s+/g, " ").toLowerCase();
+    if (summary && prompt && summary !== prompt && summary !== firstLine) return info;
     return { ...info, summary: "" } as T;
 }
 

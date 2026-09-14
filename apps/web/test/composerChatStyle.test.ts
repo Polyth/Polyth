@@ -23,7 +23,7 @@ test("the conversation keeps the complete glass dock in flow and fresh-turn spac
   const surface = read("../src/components/workspace/builtinSurfaces.tsx");
   const css = read("../src/styles.css");
 
-  assert.match(surface, /className="conversation-composer-dock"[\s\S]*slot="session\.composer\.before"[\s\S]*slot="session\.footer"[\s\S]*spawning && <SessionSpawnStatus \/>[\s\S]*<Composer \/>/);
+  assert.match(surface, /className="conversation-composer-dock"[\s\S]*slot="session\.composer\.before"[\s\S]*slot="session\.footer"[\s\S]*\(spawning \|\| awaitingTurn\) && \(\s*<SessionSpawnStatus[\s\S]*<Composer \/>/);
   assert.doesNotMatch(surface, /composerDock|publishHeight|ResizeObserver/);
   assert.match(css, /\.conversation-composer-dock\s*\{[^}]*position:\s*relative;[^}]*flex:\s*none;/s);
   assert.doesNotMatch(css, /--conversation-dock-height|margin-block-end:\s*var\(--conversation-dock-height\)/);
@@ -60,7 +60,11 @@ test("spawning is an above-composer activity status and never replaces the compo
   const surface = read("../src/components/workspace/builtinSurfaces.tsx");
   const composer = read("../src/components/Composer.tsx");
 
-  assert.match(surface, /function SessionSpawnStatus\(\)[\s\S]*spawningAgent[\s\S]*<AgentStatusDock/);
+  assert.match(surface, /function SessionSpawnStatus\(\{[\s\S]*spawningAgent[\s\S]*<AgentStatusDock/);
+  // A submitted prompt owns the same zone until its turn is real; the dock
+  // stays a passive status (no onClick) in both cases.
+  assert.match(surface, /startingTurn[\s\S]*<AgentStatusDock/);
+  assert.match(surface, /awaitingTurn = usePendingSends\(sessionId\)\.length > 0 && model\.turn\?\.status !== "working"/);
   assert.match(surface, /ProviderLogo providerID=\{harnessId\}[\s\S]*model=\{harnessLabel\}/);
   assert.doesNotMatch(composer, /if \(creatingSession\)\s*\{\s*return/);
   assert.match(composer, /aria-busy=\{creatingSession \|\| undefined\}/);

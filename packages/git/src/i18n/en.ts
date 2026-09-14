@@ -421,6 +421,8 @@ export const en = {
   "worktreesessiondialog.workInValue": "Work in {value}",
   "worktreesessiondialog.worktreeCreatedBeforeSession": "The worktree is created before the session is registered.",
   "worktreesessiondialog.worktreeSource": "Worktree source",
+  "gitview.autoRebaseAndSync": "Rebase and sync",
+  "gitview.conflictAgentDraftReady": "Draft opened. Choose a model or edit it before sending.",
   "gitview.conflictAgentStarted": "Conflict resolution started.",
   "gitview.filesConflictedHint": "{count} unresolved merge conflict(s).",
   "gitview.historyDivergedHint": "Local and upstream history have diverged.",

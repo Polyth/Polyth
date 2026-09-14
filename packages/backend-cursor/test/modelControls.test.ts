@@ -1,7 +1,7 @@
 // Cursor rides the generic ACP transport; the only Cursor-specific pieces are
 // its profile metadata and a version/auth gate on asking the CLI for models.
-// This VM's `agent` is unauthenticated, so every protocol exchange here is
-// faked — the tests pin the contract, not the local sign-in state.
+// Native protocol exchanges are faked — the tests pin the contract, not the
+// local sign-in state.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -182,13 +182,21 @@ test("the Cursor profile never reaches for the flag that the CLI ignores", async
     }
 });
 
-test("Cursor discovery uses the direct catalog and preserves per-model reasoning", { skip: process.platform !== "linux" }, async (t) => {
+test("Cursor skips an unrelated agent command, then discovers models through cursor-agent", { skip: process.platform !== "linux" }, async (t) => {
     invalidateAcpDiscovery();
     const dir = await mkdtemp(join(tmpdir(), "polyth-cursor-discovery-"));
     t.after(() => rm(dir, { recursive: true, force: true }));
     const log = join(dir, "calls.log");
     const agent = join(dir, "agent");
     await writeFile(agent, `#!${process.execPath}
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ startup: args }) + "\\n");
+if (args[0] === "--version") { process.stdout.write("grok 1.0.30\\n"); process.exit(0); }
+process.exit(2);
+`, { mode: 0o755 });
+    const cursorAgent = join(dir, "cursor-agent");
+    await writeFile(cursorAgent, `#!${process.execPath}
 const fs = require("node:fs");
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ startup: args }) + "\\n");
@@ -233,6 +241,9 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
         undefined, ["low", "medium", "high"],
     ]);
     const before = (await readFile(log, "utf8")).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    assert.deepEqual(before.filter((entry) => entry.startup).slice(0, 3).map((entry) => entry.startup), [
+        ["--version"], ["--version"], ["acp"],
+    ]);
     await provider.discover!(discoveryContext);
     const after = (await readFile(log, "utf8")).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
     assert.deepEqual(after.filter((entry) => entry.method).map((entry) => entry.method), ["initialize", "cursor/list_available_models"]);

@@ -419,6 +419,8 @@ export const ar: GitMessages = {
   "worktreesessiondialog.workInValue": "العمل في {value}",
   "worktreesessiondialog.worktreeCreatedBeforeSession": "يتم إنشاء شجرة العمل قبل تسجيل الجلسة.",
   "worktreesessiondialog.worktreeSource": "مصدر Worktree",
+  "gitview.autoRebaseAndSync": "إعادة التأسيس والمزامنة",
+  "gitview.conflictAgentDraftReady": "فُتحت المسودة. اختر نموذجًا أو عدّلها قبل الإرسال.",
   "gitview.conflictAgentStarted": "بدأ حلّ التعارضات.",
   "gitview.filesConflictedHint": "{count} تعارض دمج غير محلول.",
   "gitview.historyDivergedHint": "تباعد السجل المحلي وسجل المصدر البعيد.",

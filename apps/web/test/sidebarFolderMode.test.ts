@@ -78,6 +78,9 @@ test("parseSidebarViewMode defaults to the session tree; setter persists and rou
   assert.equal(localStorage.getItem(VIEW_MODE_KEY), "tree");
   setSidebarViewMode("list");
   assert.equal(getSidebarViewMode(), "list");
+  setSidebarViewMode("rail");
+  assert.equal(getSidebarViewMode(), "rail");
+  assert.equal(localStorage.getItem(VIEW_MODE_KEY), "rail");
 });
 
 test("remote projects are marked separately from local projects in the sidebar", async () => {
@@ -141,6 +144,17 @@ test("tree mode nests sessions under project worktrees", async () => {
   try {
     await act(async () => { root.render(createElement(Sidebar)); });
 
+    const options = container.querySelector<HTMLElement>('[aria-label="More sidebar actions"]');
+    assert.ok(options, "desktop exposes the persisted sidebar presentation menu");
+    await act(async () => { click(options!); });
+    const railOption = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')]
+      .find((item) => item.textContent?.trim() === "Project rail");
+    assert.ok(railOption, "the new project-rail presentation is user selectable");
+    await act(async () => { click(railOption!); });
+    assert.equal(getSidebarViewMode(), "rail");
+    assert.ok(container.querySelector(".sidebar-project-rail"));
+    await act(async () => { setSidebarViewMode("list"); });
+
     assert.ok(container.querySelector(".session-list .session-org"), "list mode renders the active project sessions");
     assert.equal(container.querySelector(".branch-row"), null, "the project root never exposes its current branch");
     assert.equal(container.querySelector(".project-tree-node"), null);
@@ -173,6 +187,23 @@ test("tree mode nests sessions under project worktrees", async () => {
     assert.equal(betaCard.getAttribute("aria-expanded"), "true");
     assert.match(betaTree.textContent ?? "", /Beta session/);
     assert.equal(container.querySelector(".side-folder-bar"), null, "folder toolbar is removed");
+
+    // Rail mode keeps every project reachable in a compact switcher while
+    // the detail pane renders only the selected project's real SessionList.
+    await act(async () => { store.activateProject("alpha"); });
+    await act(async () => { setSidebarViewMode("rail"); });
+    const rail = container.querySelector(".sidebar-project-rail");
+    assert.ok(rail, "desktop rail mode renders the project switcher");
+    assert.equal(rail.querySelectorAll(".sidebar-project-rail-item").length, 2);
+    const focused = container.querySelector(".sidebar-focused-project");
+    assert.match(focused?.textContent ?? "", /Alpha session one/);
+    assert.doesNotMatch(focused?.textContent ?? "", /Beta session/);
+    const betaRail = rail.querySelector<HTMLElement>('[aria-label="beta"]');
+    assert.ok(betaRail);
+    await act(async () => { click(betaRail!); });
+    await act(async () => { await Promise.resolve(); });
+    assert.equal(betaRail?.getAttribute("aria-current"), "true");
+    assert.match(container.querySelector(".sidebar-focused-project")?.textContent ?? "", /Beta session/);
 
     // Back to list mode restores the classic layout.
     await act(async () => { setSidebarViewMode("list"); });

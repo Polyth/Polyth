@@ -419,6 +419,8 @@ export const zhCN: GitMessages = {
   "worktreesessiondialog.workInValue": "在{value}中工作",
   "worktreesessiondialog.worktreeCreatedBeforeSession": "在注册会话之前创建工作树。",
   "worktreesessiondialog.worktreeSource": "Worktree源",
+  "gitview.autoRebaseAndSync": "变基并同步",
+  "gitview.conflictAgentDraftReady": "草稿已打开。请选择模型，或在发送前编辑它。",
   "gitview.conflictAgentStarted": "已开始解决冲突。",
   "gitview.filesConflictedHint": "{count} 个未解决的合并冲突。",
   "gitview.historyDivergedHint": "本地与上游历史已分叉。",

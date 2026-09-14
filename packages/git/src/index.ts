@@ -117,6 +117,8 @@ export interface GitService {
   stashDrop(root: string, ref?: string): Promise<void>;
   fetch(root: string, remote?: string): Promise<void>;
   pull(root: string, remote?: string): Promise<void>;
+  /** Rebase local commits onto the configured upstream without autostashing. */
+  rebase(root: string, remote?: string): Promise<void>;
   push(root: string, remote?: string): Promise<void>;
   /** Fetch, integrate upstream when safe, then publish local commits. */
   sync(root: string, remote?: string): Promise<void>;
@@ -771,6 +773,13 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
         }
         throw error;
       }
+    },
+
+    async rebase(root, remote = "origin") {
+      if (!/^[\w.-]{1,120}$/.test(remote)) throw Object.assign(new Error("invalid remote"), { code: "invalid-input" });
+      // Do not hide uncommitted work in an implicit stash. A failed rebase
+      // leaves Git's conflict state available for the user or an agent.
+      await run(root, ["pull", "--rebase", "--no-autostash", remote]);
     },
 
     async push(root, remote = "origin") {

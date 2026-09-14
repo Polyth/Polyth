@@ -227,16 +227,18 @@ test("state matrix: completed/failed/empty/active/waiting/queued/active-revert r
       await closePage(page);
     }
 
-    // -- failed: terminal error surfaced, actions available -------------------
+    // -- failed: terminal error uses the transient corner surface ------------
     {
-      const page = await openApp({ width: w, height: h, session: SESSIONS.failed, ready: ".turn-error" });
+      const page = await openApp({ width: w, height: h, session: SESSIONS.failed, ready: ".error-banner" });
       const ctx = ctxOf("failed");
       const state = await page.evaluate(() => ({
-        error: document.querySelector(".turn-error")?.textContent ?? "",
+        error: document.querySelector(".error-banner")?.textContent ?? "",
+        inlineError: document.querySelector(".turn-error") !== null,
         revertDisabled: document.querySelector<HTMLButtonElement>('button[aria-label^="Revert and edit"]')?.disabled,
         menuEntry: document.querySelector(".msg-actions-entry") !== null,
       }));
-      assert.match(state.error, /synthetic model failure/, `${ctx}: turn error missing`);
+      assert.match(state.error, /last turn failed/i, `${ctx}: turn error missing`);
+      assert.equal(state.inlineError, false, `${ctx}: transient error leaked into the timeline`);
       assert.equal(state.revertDisabled, false, `${ctx}: revert must be available after a failed turn`);
       assert.ok(state.menuEntry, `${ctx}: named action entry missing`);
       await closePage(page);

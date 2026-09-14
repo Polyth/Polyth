@@ -39,14 +39,25 @@ const methodMissing = (error: unknown) =>
     (error as { rpcCode?: number }).rpcCode === -32601
     || /method not found/i.test((error as { message?: string }).message ?? "");
 
-const resolveCursorBinary = async () => {
-    const report = await discoverHarnessExecutable(process.env.POLYTH_CURSOR_BIN?.trim() || "agent");
-    if (!report.hit) throw Object.assign(new Error("Cursor Agent CLI was not found"), { code: "not-installed" });
-    const env = await harnessExecutableChildEnv(report.hit.executablePath);
-    process.env.PATH = env.PATH;
-    return { command: report.hit.executablePath, env };
-};
 const windowsShim = (command: string) => process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
+const resolveCursorBinary = async () => {
+    const configured = process.env.POLYTH_CURSOR_BIN?.trim();
+    for (const binary of configured ? [configured] : ["agent", "cursor-agent"]) {
+        const report = await discoverHarnessExecutable(binary);
+        if (!report.hit) continue;
+        const command = report.hit.executablePath;
+        const env = await harnessExecutableChildEnv(command);
+        try {
+            const version = (await exec(command, ["--version"], { timeout: 5000, maxBuffer: 4096, env, shell: windowsShim(command) })).stdout.trim();
+            if (!configured && binary === "agent"
+                && !/cursor-agent/i.test(command)
+                && !/^\d{4}\.\d{2}\.\d{2}(?:-|$)/.test(version)) continue;
+            process.env.PATH = env.PATH;
+            return { command, version };
+        } catch { /* try the next candidate */ }
+    }
+    throw Object.assign(new Error("Cursor Agent CLI was not found"), { code: "not-installed" });
+};
 
 // Cursor blocks session/prompt until these extension requests receive valid
 // nested outcomes. Decline unsupported UI explicitly instead of stranding the turn.
@@ -105,9 +116,8 @@ export default function registerPackage(host: ServerPackageHost) {
             if (context.remote)
                 return { harnessId: "cursor", installed: false, authenticated: "unknown", healthy: false, message: "Local execution only" };
             try {
-                const { command, env } = await resolveCursorBinary();
+                const { command, version } = await resolveCursorBinary();
                 profile.command = command;
-                const version = (await exec(command, ["--version"], { timeout: 5000, maxBuffer: 4096, env, shell: windowsShim(command) })).stdout.trim();
                 // Installation alone is not proof of authentication. The profile is
                 // offered for explicit selection but excluded from automatic routing
                 // until a native auth/status contract is verified.

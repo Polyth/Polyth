@@ -81,14 +81,16 @@ export function setGroupingMode(mode: string): void {
 // ---- sidebar view mode (UX-FILES-TIMELINE-03 finding 9) -----------------------
 // "list": projects plus the active project's worktree-grouped sessions.
 // "tree": project → worktrees → sessions for every expanded project.
+// "rail": a compact project switcher beside the active project's sessions.
 
 export const VIEW_MODE_KEY = "polyth.sidebar.viewMode";
-export type SidebarViewMode = "list" | "tree";
+export type SidebarViewMode = "list" | "tree" | "rail";
 
 export function parseSidebarViewMode(raw: string | null): SidebarViewMode {
   // One-way migration from the removed project-folder presentation.
   if (raw === null) return "tree";
-  return raw === "tree" || raw === "folders" ? "tree" : "list";
+  if (raw === "tree" || raw === "folders") return "tree";
+  return raw === "rail" ? "rail" : "list";
 }
 
 const readViewMode = (): string | null => {

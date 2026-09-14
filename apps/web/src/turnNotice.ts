@@ -1,7 +1,5 @@
 import type { TurnState } from "./reduce.ts";
 
-export const TRANSIENT_TURN_NOTICE_MS = 10_000;
-
 /** Presentation identity for the ordinary terminal turn notice. */
 export function transientTurnNoticeKey(
   sessionId: string | null,

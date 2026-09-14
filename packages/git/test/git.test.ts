@@ -732,6 +732,16 @@ test("sync on diverged history fails with a resolvable conflict", async () => {
   });
 });
 
+test("rebase integrates divergent history without hiding local work", async () => {
+  const { dir } = divergedRemote();
+  await git.rebase(dir);
+  const status = await git.status(dir);
+  assert.equal(status.behind, 0);
+  assert.equal(status.ahead, 1);
+  assert.equal(existsSync(join(dir, "remote.txt")), true);
+  assert.equal(existsSync(join(dir, "local.txt")), true);
+});
+
 test("buildLocalConflictResolutionPrompt includes problem when provided", () => {
   const withProblem = buildLocalConflictResolutionPrompt(
     { branch: "main", ahead: 0, behind: 1, conflictedPaths: [], diverged: false, problem: "Push was rejected" },
@@ -797,6 +807,16 @@ test("/api/git/sync and resolve-conflict-agent accept problem without an active 
   const sync = await call("/api/git/sync", { projectId: "p1", remote: "origin" });
   assert.equal(sync.status, 200);
   assert.deepEqual(syncCalls, ["origin"]);
+  const prompt = await call("/api/git/conflict-prompt", {
+    projectId: "p1",
+    target: "new-session",
+    prompt: "help",
+    problem: "Push was rejected because the remote has commits you do not have locally.",
+  });
+  assert.equal(prompt.status, 200);
+  assert.match(String((prompt.payload as { data: { prompt: string } }).data.prompt), /help/);
+  assert.equal(created.length, 0, "opening a conflict draft does not create a session");
+  assert.equal(sent.length, 0, "opening a conflict draft does not send a message");
   const agent = await call("/api/git/resolve-conflict-agent", {
     projectId: "p1",
     target: "new-session",

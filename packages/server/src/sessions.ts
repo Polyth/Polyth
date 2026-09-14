@@ -8180,7 +8180,13 @@ export function createSessionService(deps: {
         await settleDelegatedChild(projection.id);
         return (await store.projection(projection.id)) ?? projection;
       }));
-      const hydrated = await Promise.all(settled.map(async (projection) => ({
+      // Filter out empty zombie sessions — creation failed before any user
+      // turn was ever submitted. The data stays in the store for debugging
+      // but these clutter the navigator with "New session" ghosts.
+      // Preserve delegated children (parentId) — they go through settlement.
+      const alive = settled.filter((p) =>
+        !p || p.parentId || p.lastTurnAt != null || (p.status !== "failed" && p.status !== "unknown"));
+      const hydrated = await Promise.all(alive.map(async (projection) => ({
         ...projection,
         autoAccept: await effectiveAutoAccept(projection.id),
       })));

@@ -233,6 +233,14 @@ export const withCodexTitleGeneration = (
   let nativeTitleSeen = false;
   let primaryThreadId: string | undefined;
 
+  const rememberPrimaryThread = (title: string | undefined, threadId: string): void => {
+    eligible = placeholder(title);
+    if (primaryThreadId === threadId) return;
+    primaryThreadId = threadId;
+    started = false;
+    nativeTitleSeen = false;
+  };
+
   runtime.onEvent((_sessionId, event) => {
     if (event.type === "session/title-generated") nativeTitleSeen = true;
   });
@@ -249,7 +257,9 @@ export const withCodexTitleGeneration = (
     });
   };
 
+  const ensure = runtime.ensureSession.bind(runtime);
   const create = runtime.createSessionOperation?.bind(runtime);
+  const reset = runtime.resetSessionOperation?.bind(runtime);
   const startOperation = runtime.startTurnOperation?.bind(runtime);
   const startTurn = runtime.startTurn.bind(runtime);
   const capabilities = runtime.capabilities.bind(runtime);
@@ -257,13 +267,29 @@ export const withCodexTitleGeneration = (
   return {
     ...runtime,
     capabilities: async () => ({ ...(await capabilities()), title: "native" as const }),
+    ensureSession: async (...args: Parameters<AgentRuntime["ensureSession"]>) => {
+      const [input] = args;
+      const threadId = await ensure(...args);
+      rememberPrimaryThread(input.title, threadId);
+      return threadId;
+    },
     ...(create
       ? {
           createSessionOperation: async (...args: Parameters<NonNullable<AgentRuntime["createSessionOperation"]>>) => {
             const [input] = args;
             eligible = placeholder(input.title);
             const outcome = await create(...args);
-            if (outcome.kind === "confirmed") primaryThreadId = outcome.value.backendSessionId;
+            if (outcome.kind === "confirmed") rememberPrimaryThread(input.title, outcome.value.backendSessionId);
+            return outcome;
+          },
+        }
+      : {}),
+    ...(reset
+      ? {
+          resetSessionOperation: async (...args: Parameters<NonNullable<AgentRuntime["resetSessionOperation"]>>) => {
+            const [input] = args;
+            const outcome = await reset(...args);
+            if (outcome.kind === "confirmed") rememberPrimaryThread(input.title, outcome.value.backendSessionId);
             return outcome;
           },
         }

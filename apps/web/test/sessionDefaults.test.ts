@@ -50,6 +50,10 @@ test("session defaults parser accepts only complete model references", () => {
   assert.deepEqual(parseSessionDefaults("not json"), {});
   assert.deepEqual(parseSessionDefaults('{"defaultModel":{"providerID":"openai"}}'), {});
   assert.deepEqual(parseSessionDefaults('{"defaultModel":{"providerID":"","modelID":"gpt"}}'), {});
+  assert.deepEqual(parseSessionDefaults(JSON.stringify({ retentionAction: "delete", archiveRetentionDays: 90 })), {
+    retentionAction: "delete",
+    archiveRetentionDays: 90,
+  });
 });
 
 test("thinking preferences are model-scoped, corruption-safe, and deterministic", () => {

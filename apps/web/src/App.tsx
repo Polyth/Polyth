@@ -18,19 +18,27 @@ import AlertDialog from "./components/AlertDialog.tsx";
 import { useWorkspaceMode } from "./widgets/workspaceMode.ts";
 import { useShellMode } from "./responsiveShell.ts";
 import { tr } from "./i18n/index.ts";
-import { IconButton, Notice } from "./components/ui/index.ts";
+import { Button, IconButton, Notice } from "./components/ui/index.ts";
 import { CloseIcon } from "./components/ui/icons.ts";
 import BackgroundQuickPicker from "./components/BackgroundPicker.tsx";
 
 function ErrorBanner() {
   const message = useStore((s) => s.uiError);
+  const action = useStore((s) => s.uiErrorAction);
   if (!message) return null;
   return (
     <Notice
       tone="error"
       className="error-banner"
       role="alert"
-      actions={<IconButton icon={CloseIcon} label={tr("app.dismissError")} size="sm" onClick={clearUiError} />}
+      actions={<>
+        {action && (
+          <Button size="sm" variant="ghost" onClick={() => { clearUiError(); void action.run(); }}>
+            {action.label}
+          </Button>
+        )}
+        <IconButton icon={CloseIcon} label={tr("app.dismissError")} size="sm" onClick={clearUiError} />
+      </>}
     >
       {message}
     </Notice>

@@ -598,6 +598,13 @@ export interface SessionRetentionDto {
   cutoff: number;
   eligibleCount: number;
 }
+export type SessionRetentionAction = "archive" | "delete";
+export type SessionRetentionTarget = "sessions" | "archives";
+export interface SessionRetentionResultDto {
+  eligibleCount: number;
+  succeeded: string[];
+  failed: Array<{ id: string; code: string }>;
+}
 
 // ---- goal types (§12) ------------------------------------------------------
 export type GoalVerdict = "keep" | "done" | "stuck";
@@ -1024,10 +1031,23 @@ export const api = {
     jfetch<{ ok: true }>(`/api/git/fetch`, json("POST", { projectId, remote, ...(sessionId ? { sessionId } : {}), ...scoped(scope) })),
   gitPull: (projectId: string, remote = "origin", sessionId?: string, scope?: GitScope) =>
     jfetch<{ ok: true }>(`/api/git/pull`, json("POST", { projectId, remote, ...(sessionId ? { sessionId } : {}), ...scoped(scope) })),
+  gitRebase: (projectId: string, remote = "origin", sessionId?: string, scope?: GitScope) =>
+    jfetch<{ ok: true }>(`/api/git/rebase`, json("POST", { projectId, remote, ...(sessionId ? { sessionId } : {}), ...scoped(scope) })),
   gitPush: (projectId: string, remote = "origin", sessionId?: string, scope?: GitScope) =>
     jfetch<{ ok: true }>(`/api/git/push`, json("POST", { projectId, remote, ...(sessionId ? { sessionId } : {}), ...scoped(scope) })),
   gitSync: (projectId: string, remote = "origin", sessionId?: string, scope?: GitScope) =>
     jfetch<{ ok: true }>(`/api/git/sync`, json("POST", { projectId, remote, ...(sessionId ? { sessionId } : {}), ...scoped(scope) })),
+  gitConflictPrompt: (input: {
+    projectId: string;
+    target: "new-session" | "current-session";
+    prompt: string;
+    sessionId?: string;
+    problem?: string;
+  }) =>
+    jfetch<GhListResult<{ prompt: string }>>(
+      `/api/git/conflict-prompt`,
+      json("POST", input),
+    ),
   /** Merge `ref` into whatever is checked out by `scope`. Resolves with
    *  `ok: false` when Git stopped on conflicts — the checkout stays conflicted
    *  until the caller resolves it or calls `gitMergeAbort`. */
@@ -1436,12 +1456,24 @@ export const api = {
   usageQuotasRefresh: (providerId: string) =>
     jfetch<QuotaSnapshotDto>(`/api/usage/quotas/refresh`, json("POST", { providerId })),
 
-  sessionRetention: (days: number) =>
-    jfetch<SessionRetentionDto>(`/api/session-retention?days=${encodeURIComponent(days)}`),
-  runSessionRetention: (days: number) =>
-    jfetch<{ eligibleCount: number; succeeded: string[]; failed: Array<{ id: string; code: string }> }>(
+  sessionRetention: (days: number, target: SessionRetentionTarget = "sessions") =>
+    jfetch<SessionRetentionDto>(
+      `/api/session-retention?days=${encodeURIComponent(days)}&target=${encodeURIComponent(target)}`,
+    ),
+  runSessionRetention: (days: number, action: SessionRetentionAction = "archive") =>
+    jfetch<SessionRetentionResultDto>(
       "/api/session-retention",
-      json("POST", { days }),
+      json("POST", { days, action }),
+    ),
+  deleteArchivedSessions: (days: number) =>
+    jfetch<SessionRetentionResultDto>(
+      "/api/session-retention",
+      json("POST", { target: "archives", days }),
+    ),
+  deleteAllArchivedSessions: () =>
+    jfetch<SessionRetentionResultDto>(
+      "/api/session-retention",
+      json("POST", { target: "archives", all: true }),
     ),
 
   // ---- session control ---------------------------------------------------------

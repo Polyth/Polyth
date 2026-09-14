@@ -487,6 +487,7 @@ test("the running action floats out of the folded block while settled rows stay 
     status: "running",
     output: undefined,
     finishTime: undefined,
+    time: Date.now(),
   });
   const queued = tool({
     id: "call-queued",
@@ -496,8 +497,15 @@ test("the running action floats out of the folded block while settled rows stay 
     status: "running",
     output: undefined,
     finishTime: undefined,
+    time: Date.now(),
   });
   try {
+    await act(async () => root.render(createElement(ActivityGroupView, {
+      g: activityGroup("activity-motion", [first]),
+      subagents: null,
+      state: "active",
+      entering: true,
+    })));
     await act(async () => root.render(createElement(ActivityGroupView, {
       g: activityGroup("activity-motion", [first, latest, queued]),
       subagents: null,
@@ -978,7 +986,7 @@ test("a live action flies in the viewport overlay and leaves timeline scroll geo
   viewport.append(timeline, layer);
   document.body.appendChild(viewport);
   const root = createRoot(host);
-  const running = tool({ status: "running", output: undefined, finishTime: undefined });
+  const running = tool({ status: "running", output: undefined, finishTime: undefined, time: Date.now() });
   const baseScrollHeight = 640;
   Object.defineProperty(timeline, "scrollHeight", {
     configurable: true,
@@ -1011,7 +1019,7 @@ test("a live action flies in the viewport overlay and leaves timeline scroll geo
 test("a lone running action gets a stable summary and folds into it when it settles", async () => {
   const { viewport } = activityOverlayHost();
   const root = createRoot(viewport.querySelector(".timeline")!.firstElementChild!);
-  const running = tool({ status: "running", output: undefined, finishTime: undefined });
+  const running = tool({ status: "running", output: undefined, finishTime: undefined, time: Date.now() });
   const group = (message: ToolMsg) => activityGroup("activity-1", [message]);
   try {
     await act(async () => root.render(createElement(ActivityGroupView, { g: group(running), subagents: null })));
@@ -1030,6 +1038,148 @@ test("a lone running action gets a stable summary and folds into it when it sett
       "the outgoing copy is hidden from assistive technology during its visual fold");
     await act(async () => toggle.click());
     assert.equal(toggle.getAttribute("aria-expanded"), "true", "a hand toggle still opens it");
+  } finally {
+    await act(async () => root.unmount());
+    viewport.remove();
+  }
+});
+
+test("a reopened session never floats unfinished history over the conversation", async () => {
+  // A turn that ended mid-action leaves `running` tools and unfinalized
+  // assistant parts in history forever. Opening that session must not replay
+  // them as live rows: the float sits over whatever follows the block, so the
+  // answer below it would be overlapped by an hours-old action on every open.
+  const { viewport } = activityOverlayHost();
+  const root = createRoot(viewport.querySelector(".timeline")!.firstElementChild!);
+  const stale = tool({ status: "running", output: undefined, finishTime: undefined });
+  const unfinalized = {
+    kind: "assistant" as const,
+    id: "part-35",
+    partId: "part-35",
+    eventSeq: 4,
+    text: "Now I understand the full flow.",
+    reasoning: "",
+    finalized: false,
+    time: 1_000,
+  };
+  const group = {
+    ...activityGroup("activity-stale", [stale]),
+    items: [stale, unfinalized],
+    thoughts: [unfinalized],
+    settled: false,
+  };
+  try {
+    await act(async () => root.render(createElement(ActivityGroupView, { g: group, subagents: null })));
+    assert.equal(viewport.querySelector(".activity-live"), null,
+      "stale in-flight history mounts folded inside the block");
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 60)); });
+    assert.equal(viewport.querySelector(".activity-live"), null,
+      "and nothing rises into the overlay a beat later either");
+  } finally {
+    await act(async () => root.unmount());
+    viewport.remove();
+  }
+});
+
+test("a restored group with history never flies its current action", async () => {
+  // Cached reopen of a turn the reader left mid-flight: the group already
+  // contains settled work plus a still-open action. That is restore, not the
+  // first action of a new group, even when the open action is recent.
+  const { viewport } = activityOverlayHost();
+  const root = createRoot(viewport.querySelector(".timeline")!.firstElementChild!);
+  const settled = tool({ id: "call-settled", callId: "call-settled" });
+  const running = tool({
+    id: "call-running",
+    callId: "call-running",
+    eventSeq: 2,
+    status: "running",
+    output: undefined,
+    finishTime: undefined,
+    time: Date.now(),
+  });
+  try {
+    await act(async () => root.render(createElement(ActivityGroupView, {
+      g: activityGroup("activity-restore", [settled, running]),
+      subagents: null,
+    })));
+    assert.equal(viewport.querySelector(".activity-live"), null,
+      "history-bearing groups mount folded even if one action is still open");
+  } finally {
+    await act(async () => root.unmount());
+    viewport.remove();
+  }
+});
+
+test("opening a finished turn does not replay activity over the answer", async () => {
+  // The reported reopen: the agent has already answered, the reader opens the
+  // chat, and a completed action whose timestamp is still inside the show
+  // window flies in over that answer before folding into the block. Recency
+  // alone would treat that as live; a finished item at mount is history.
+  const { viewport } = activityOverlayHost();
+  const root = createRoot(viewport.querySelector(".timeline")!.firstElementChild!);
+  const recent = tool({ time: Date.now(), finishTime: Date.now() });
+  try {
+    await act(async () => root.render(createElement(ActivityGroupView, {
+      g: activityGroup("activity-finished", [recent]),
+      subagents: null,
+    })));
+    assert.equal(viewport.querySelector(".activity-live"), null,
+      "a just-finished action mounts folded inside the block");
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 60)); });
+    assert.equal(viewport.querySelector(".activity-live"), null,
+      "and does not rise into the overlay after the first frame");
+  } finally {
+    await act(async () => root.unmount());
+    viewport.remove();
+  }
+});
+
+test("an idle session does not treat reconcile suffix history as live arrivals", async () => {
+  // Revisited chats paint the cached group immediately, then the append-only
+  // suffix lands as new ids on the already-mounted group. Those rows are
+  // history, not a live burst, even when their timestamps are "now".
+  const { viewport } = activityOverlayHost();
+  const root = createRoot(viewport.querySelector(".timeline")!.firstElementChild!);
+  const cached = tool({ id: "call-cached", callId: "call-cached" });
+  const suffix = tool({
+    id: "call-suffix",
+    callId: "call-suffix",
+    eventSeq: 2,
+    time: Date.now(),
+    finishTime: Date.now(),
+  });
+  try {
+    await act(async () => root.render(createElement(ActivityGroupView, {
+      g: activityGroup("activity-cached", [cached]),
+      subagents: null,
+      liveFlight: false,
+    })));
+    assert.equal(viewport.querySelector(".activity-live"), null, "cached history mounts folded");
+    await act(async () => root.render(createElement(ActivityGroupView, {
+      g: activityGroup("activity-cached", [cached, suffix]),
+      subagents: null,
+      liveFlight: false,
+    })));
+    assert.equal(viewport.querySelector(".activity-live"), null,
+      "the idle suffix does not rise over the conversation");
+  } finally {
+    await act(async () => root.unmount());
+    viewport.remove();
+  }
+});
+
+test("an idle reopen never floats a recent cached running tool", async () => {
+  const { viewport } = activityOverlayHost();
+  const root = createRoot(viewport.querySelector(".timeline")!.firstElementChild!);
+  const running = tool({ status: "running", output: undefined, finishTime: undefined, time: Date.now() });
+  try {
+    await act(async () => root.render(createElement(ActivityGroupView, {
+      g: activityGroup("activity-idle", [running]),
+      subagents: null,
+      liveFlight: false,
+    })));
+    assert.equal(viewport.querySelector(".activity-live"), null,
+      "a finished session does not resurrect cached in-flight rows");
   } finally {
     await act(async () => root.unmount());
     viewport.remove();

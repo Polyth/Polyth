@@ -472,7 +472,7 @@ test("geometry: centered measure, disjoint reserved chrome, tail clearance at al
         b: { top: number; bottom: number; left: number; right: number },
       ) => a.top < b.bottom && a.bottom > b.top && a.left < b.right && a.right > b.left;
 
-      const contentSel = ":scope > .msg, :scope > .timeline-earlier, :scope > .turn-error, :scope > .turn-footer, :scope > .rewound-tail";
+      const contentSel = ":scope > .msg, :scope > .timeline-earlier, :scope > .turn-footer, :scope > .rewound-tail";
       const contentRects = Array.from(el.querySelectorAll<HTMLElement>(contentSel))
         .map((n) => n.getBoundingClientRect())
         .filter(visible)

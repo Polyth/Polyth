@@ -25,3 +25,13 @@ test("Claude explicit custom title remains trusted", () => {
   };
   assert.equal(titleSafeClaudeSessionInfo(info), info);
 });
+
+test("Claude semantic summary remains trusted when the first prompt is available", () => {
+  const info = {
+    summary: "Polish package UI consistency",
+    firstPrompt: "Please inspect every package and fix all visual inconsistencies",
+    customTitle: null,
+    sessionId: "native-a",
+  };
+  assert.equal(titleSafeClaudeSessionInfo(info), info);
+});

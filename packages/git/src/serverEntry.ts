@@ -210,6 +210,27 @@ export function gitRoutes(deps: {
     if (worktreePath) return worktreeRootOf(projectRoot, worktreePath);
     return projectRoot;
   };
+  const conflictRootOf = async (
+    projectId: string,
+    target: string,
+    givenSessionId: string,
+  ): Promise<{ root: string } | { status: 400 | 404 | 409; reason: string }> => {
+    const projectRoot = await projectRootOf(projectId);
+    if (target !== "new-session" && target !== "current-session") {
+      return { status: 400, reason: "target must be new-session or current-session" };
+    }
+    if (target === "new-session") return { root: projectRoot };
+    if (!givenSessionId) return { status: 400, reason: "sessionId is required for current-session" };
+    let session: SessionProjection;
+    try {
+      session = await deps.sessions.snapshot(givenSessionId);
+    } catch {
+      return { status: 404, reason: "target session not found" };
+    }
+    if (session.projectId !== projectId) return { status: 400, reason: "target session belongs to another project" };
+    if (session.worktreeState === "missing") return { status: 409, reason: "the target session's worktree is missing" };
+    return { root: session.worktreePath ?? projectRoot };
+  };
   const paths = (body: Record<string, unknown>): string[] =>
     Array.isArray(body.paths) ? body.paths.map((path) => assertGitRelativePath(String(path))) : [];
 
@@ -343,43 +364,49 @@ export function gitRoutes(deps: {
       return true;
     }
 
-    // Hand a local conflict (diverged fast-forward pull, or an in-progress
-    // merge/rebase with markers) to an agent session with a default prompt.
-    // Sibling of /api/github/pr/conflict-agent, minus the PR context.
+    // Build the live local-conflict prompt without creating a session or
+    // sending anything. The browser opens it as an editable composer draft.
+    if (path === "/api/git/conflict-prompt" && method === "POST") {
+      const input = await body();
+      const projectId = String(input.projectId ?? "").trim();
+      const target = String(input.target ?? "");
+      const resolved = await conflictRootOf(projectId, target, input.sessionId ? String(input.sessionId) : "");
+      if ("status" in resolved) {
+        json(resolved.status, { ok: false, reason: resolved.reason });
+        return true;
+      }
+      const root = resolved.root;
+      if (!(await git.isRepo(root))) {
+        json(409, { ok: false, reason: "this project is not a git repository" });
+        return true;
+      }
+      const status = await git.status(root);
+      const problem = typeof input.problem === "string" && input.problem.trim() ? input.problem.trim() : undefined;
+      const prompt = buildLocalConflictResolutionPrompt({
+        branch: status.branch,
+        ahead: status.ahead,
+        behind: status.behind,
+        conflictedPaths: status.conflicted.map((file) => file.path),
+        diverged: status.ahead > 0 && status.behind > 0,
+        ...(problem ? { problem } : {}),
+      }, String(input.prompt ?? ""));
+      json(200, { ok: true, data: { prompt } });
+      return true;
+    }
+
+    // Backward-compatible server-side handoff for non-browser clients. The
+    // GitView uses /api/git/conflict-prompt so the user can edit before send.
     if (path === "/api/git/resolve-conflict-agent" && method === "POST") {
       const input = await body();
       const projectId = String(input.projectId ?? "").trim();
-      const projectRoot = await projectRootOf(projectId);
       const target = String(input.target ?? "");
-      if (target !== "new-session" && target !== "current-session") {
-        json(400, { ok: false, reason: "target must be new-session or current-session" });
+      const givenSessionId = input.sessionId ? String(input.sessionId) : "";
+      const resolved = await conflictRootOf(projectId, target, givenSessionId);
+      if ("status" in resolved) {
+        json(resolved.status, { ok: false, reason: resolved.reason });
         return true;
       }
-      const givenSessionId = input.sessionId ? String(input.sessionId) : "";
-
-      let root = projectRoot;
-      if (target === "current-session") {
-        if (!givenSessionId) {
-          json(400, { ok: false, reason: "sessionId is required for current-session" });
-          return true;
-        }
-        let session: SessionProjection;
-        try {
-          session = await deps.sessions.snapshot(givenSessionId);
-        } catch {
-          json(404, { ok: false, reason: "target session not found" });
-          return true;
-        }
-        if (session.projectId !== projectId) {
-          json(400, { ok: false, reason: "target session belongs to another project" });
-          return true;
-        }
-        if (session.worktreeState === "missing") {
-          json(409, { ok: false, reason: "the target session's worktree is missing" });
-          return true;
-        }
-        root = session.worktreePath ?? projectRoot;
-      }
+      const root = resolved.root;
 
       if (!(await git.isRepo(root))) {
         json(409, { ok: false, reason: "this project is not a git repository" });
@@ -468,6 +495,7 @@ export function gitRoutes(deps: {
       case "/api/git/stash/drop": await git.stashDrop(root, input.ref ? String(input.ref) : undefined); break;
       case "/api/git/fetch": await git.fetch(root, input.remote ? String(input.remote) : undefined); break;
       case "/api/git/pull": await git.pull(root, input.remote ? String(input.remote) : undefined); break;
+      case "/api/git/rebase": await git.rebase(root, input.remote ? String(input.remote) : undefined); break;
       case "/api/git/push": await git.push(root, input.remote ? String(input.remote) : undefined); break;
       case "/api/git/sync": await git.sync(root, input.remote ? String(input.remote) : undefined); break;
       case "/api/git/merge": {
@@ -638,6 +666,7 @@ export const GIT_REMOTE_ACCESS: RemoteAccessPolicy = {
     { methods: ["GET"], path: "/api/worktrees", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
     { methods: ["GET"], path: "/api/isolation/:sessionId", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
     { methods: ["POST"], path: "/api/git/resolve-conflict-agent", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/git/conflict-prompt", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
     { methods: ["POST"], path: "/api/git/stage", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/git/unstage", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/git/discard", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
@@ -651,6 +680,7 @@ export const GIT_REMOTE_ACCESS: RemoteAccessPolicy = {
     { methods: ["POST"], path: "/api/git/stash/drop", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/git/fetch", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/git/pull", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/git/rebase", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/git/push", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/git/sync", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/git/merge", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },

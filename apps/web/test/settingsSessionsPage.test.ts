@@ -106,6 +106,9 @@ test("settings Sessions page renders defaults and never lists sessions", async (
     assert.match(text, /Changes Walkthrough Model/);
     assert.match(text, /Session Retention/);
     assert.match(text, /Retention Period/);
+    assert.match(text, /Cleanup Action/);
+    assert.match(text, /Delete archives older than/);
+    assert.match(text, /Delete all archives/);
     assert.match(text, /Expired sessions are archived only when you run manual cleanup/);
     assert.match(text, /Manual Cleanup/);
     assert.match(text, /Eligible for archiving right now: 2/);

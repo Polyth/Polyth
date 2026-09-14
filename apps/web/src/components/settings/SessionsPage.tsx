@@ -3,12 +3,15 @@ import { api } from "@polyth/session/web-api";
 import { setUiError, updateSettings, useStore } from "../../store.ts";
 import { friendlyError } from "../../settings.ts";
 import { setGlobalDefaultModel, setSessionDefaults, useSessionDefaults } from "../../sessionDefaults.ts";
-import { PageHead, Row } from "./parts.tsx";
+import { PageHead, Row, Seg } from "./parts.tsx";
 import { modelSupportsTextWorkflow } from "../../composer/discovery.ts";
 import { roleKind, useRolePrefs } from "../../rolePrefs.ts";
 import ModelPicker from "../../../../../packages/models/widgets/ModelPicker.tsx";
 import { tr } from "../../i18n/index.ts";
 import { Button, Select, TextInput } from "../ui/index.ts";
+import { confirmAlert } from "../../alerts.ts";
+
+type RetentionAction = "archive" | "delete";
 
 export default function SessionsPage() {
   const models = useStore((s) => s.models);
@@ -19,6 +22,8 @@ export default function SessionsPage() {
     roleKind(agent, rolePrefs) === "main" && agent.name.toLowerCase() !== "compaction");
   const defaults = useSessionDefaults();
   const retentionDays = defaults.retentionDays ?? 30;
+  const retentionAction: RetentionAction = defaults.retentionAction ?? "archive";
+  const archiveRetentionDays = defaults.archiveRetentionDays ?? 30;
   const defaultAgent = defaults.defaultAgent
     && mainAgents.some((agent) => agent.name === defaults.defaultAgent)
     ? defaults.defaultAgent
@@ -40,7 +45,9 @@ export default function SessionsPage() {
     : undefined;
   const thinkingOptions = [...new Set(models.flatMap((model) => model.variants ?? []))];
   const [eligible, setEligible] = useState<number | null>(null);
+  const [archivesEligible, setArchivesEligible] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [archiveBusy, setArchiveBusy] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -53,13 +60,30 @@ export default function SessionsPage() {
     return () => { live = false; };
   }, [retentionDays]);
 
+  useEffect(() => {
+    let live = true;
+    setArchivesEligible(null);
+    void api.sessionRetention(archiveRetentionDays, "archives")
+      .then((summary) => {
+        if (live) setArchivesEligible(typeof summary.eligibleCount === "number" ? summary.eligibleCount : 0);
+      })
+      .catch(() => { if (live) setArchivesEligible(0); });
+    return () => { live = false; };
+  }, [archiveRetentionDays]);
+
   const cleanup = async () => {
+    if (retentionAction === "delete" && !await confirmAlert(
+      tr("settings.sessionspage.confirmDeleteEligibleSessions"),
+      { title: tr("settings.sessionspage.deleteEligibleSessions"), confirmLabel: tr("common.delete"), destructive: true },
+    )) return;
     setBusy(true);
     try {
-      const result = await api.runSessionRetention(retentionDays);
+      const result = await api.runSessionRetention(retentionDays, retentionAction);
       setEligible(Math.max(0, result.eligibleCount - result.succeeded.length));
       if (result.failed.length > 0) {
-        setUiError(tr("settings.sessionspage.eligibleSessionsCouldNotArchive", {
+        setUiError(tr(retentionAction === "delete"
+          ? "settings.sessionspage.eligibleSessionsCouldNotDelete"
+          : "settings.sessionspage.eligibleSessionsCouldNotArchive", {
           count: result.failed.length,
         }));
       }
@@ -70,12 +94,50 @@ export default function SessionsPage() {
     }
   };
 
+  const deleteOldArchives = async () => {
+    if (!await confirmAlert(
+      tr("settings.sessionspage.confirmDeleteArchivesOlderThan", { days: archiveRetentionDays }),
+      { title: tr("settings.sessionspage.deleteOldArchives"), confirmLabel: tr("common.delete"), destructive: true },
+    )) return;
+    setArchiveBusy(true);
+    try {
+      const result = await api.deleteArchivedSessions(archiveRetentionDays);
+      setArchivesEligible(Math.max(0, result.eligibleCount - result.succeeded.length));
+      if (result.failed.length > 0) {
+        setUiError(tr("settings.sessionspage.archivesCouldNotDelete", { count: result.failed.length }));
+      }
+    } catch (e) {
+      setUiError(friendlyError(tr("common.error"), e));
+    } finally {
+      setArchiveBusy(false);
+    }
+  };
+
+  const deleteAllArchives = async () => {
+    if (!await confirmAlert(
+      tr("settings.sessionspage.confirmDeleteAllArchives"),
+      { title: tr("settings.sessionspage.deleteAllArchives"), confirmLabel: tr("common.delete"), destructive: true },
+    )) return;
+    setArchiveBusy(true);
+    try {
+      const result = await api.deleteAllArchivedSessions();
+      setArchivesEligible(Math.max(0, result.eligibleCount - result.succeeded.length));
+      if (result.failed.length > 0) {
+        setUiError(tr("settings.sessionspage.archivesCouldNotDelete", { count: result.failed.length }));
+      }
+    } catch (e) {
+      setUiError(friendlyError(tr("common.error"), e));
+    } finally {
+      setArchiveBusy(false);
+    }
+  };
+
   return (
     <>
       <PageHead title={tr("settings.sessionspage.sessions")} blurb={tr("settings.sessionspage.setDefaultsAndRetentionForSessions")} />
       <div className="stat-label session-settings-heading">{tr("settings.sessionspage.sessionDefaults")}</div>
       <p className="session-default-summary">
-        {tr("settings.sessionspage.newSessionsWillStartWith")}{" "}
+        {tr("settings.sessionspage.newSessionsWillStartWith")} {" "}
         <strong>{defaultModel?.name ?? tr("settings.sessionspage.noModelAvailable")}</strong>
         {defaultAgent && <> / <strong>{defaultAgent}</strong></>}
       </p>
@@ -150,14 +212,59 @@ export default function SessionsPage() {
         </label>
       </Row>
       <p className="session-retention-note">
-        {tr("settings.sessionspage.expiredSessionsAreArchivedOnlyWhenYou")}</p>
-      <Row label={tr("settings.sessionspage.manualCleanup")} hint={tr("settings.sessionspage.archiveEverySessionThatCurrentlyMeetsThe")}>
-        <Button size="sm" busy={busy} disabled={!eligible} onClick={() => void cleanup()}>
-          {busy ? tr("settings.sessionspage.archiving") : tr("settings.sessionspage.archiveEligibleSessions")}
+        {tr(retentionAction === "delete"
+          ? "settings.sessionspage.expiredSessionsAreDeletedOnlyWhenYou"
+          : "settings.sessionspage.expiredSessionsAreArchivedOnlyWhenYou")}</p>
+      <Row label={tr("settings.sessionspage.cleanupAction")} hint={tr("settings.sessionspage.chooseWhatHappensToExpiredSessions")}>
+        <Seg
+          value={retentionAction}
+          options={[
+            ["archive", tr("common.archive")],
+            ["delete", tr("common.delete")],
+          ]}
+          onChange={(value) => setSessionDefaults({ retentionAction: value as RetentionAction })}
+        />
+      </Row>
+      <Row label={tr("settings.sessionspage.manualCleanup")} hint={tr("settings.sessionspage.chooseWhatHappensToExpiredSessions")}>
+        <Button size="sm" variant={retentionAction === "delete" ? "danger" : "quiet"} busy={busy} disabled={!eligible} onClick={() => void cleanup()}>
+          {busy
+            ? retentionAction === "delete" ? tr("settings.sessionspage.deleting") : tr("settings.sessionspage.archiving")
+            : retentionAction === "delete" ? tr("settings.sessionspage.deleteEligibleSessions") : tr("settings.sessionspage.archiveEligibleSessions")}
         </Button>
       </Row>
       <div className="retention-eligible" role="status">
-        {tr("settings.sessionspage.eligibleForArchivingRightNow")}{" "}<strong>{eligible ?? "…"}</strong>
+        {retentionAction === "archive"
+          ? tr("settings.sessionspage.eligibleForArchivingRightNow")
+          : tr("settings.sessionspage.eligibleForDeletionRightNow")} <strong>{eligible ?? "…"}</strong>
+      </div>
+
+      <div className="stat-label session-settings-heading">{tr("settings.sessionspage.archiveCleanup")}</div>
+      <Row label={tr("settings.sessionspage.deleteArchivesOlderThan")} hint={tr("settings.sessionspage.deleteArchivesOlderThanHint")}>
+        <label className="retention-days">
+          <TextInput
+            uiSize="sm"
+            type="number"
+            min={1}
+            max={3650}
+            value={archiveRetentionDays}
+            aria-label={tr("settings.sessionspage.deleteArchivesOlderThan")}
+            onChange={(event) => setSessionDefaults({ archiveRetentionDays: Number(event.target.value) || 1 })}
+          />
+          <span>{tr("settings.sessionspage.days")}</span>
+        </label>
+      </Row>
+      <Row label={tr("settings.sessionspage.manualCleanup")} hint={tr("settings.sessionspage.deleteArchivesOlderThanHint")}>
+        <div className="retention-actions">
+          <Button size="sm" variant="danger" busy={archiveBusy} disabled={busy || !archivesEligible} onClick={() => void deleteOldArchives()}>
+            {tr("settings.sessionspage.deleteOldArchives")}
+          </Button>
+          <Button size="sm" variant="danger" busy={archiveBusy} disabled={busy} onClick={() => void deleteAllArchives()}>
+            {tr("settings.sessionspage.deleteAllArchives")}
+          </Button>
+        </div>
+      </Row>
+      <div className="retention-eligible" role="status">
+        {tr("settings.sessionspage.eligibleArchivesForDeletionRightNow")} <strong>{archivesEligible ?? "…"}</strong>
       </div>
     </>
   );

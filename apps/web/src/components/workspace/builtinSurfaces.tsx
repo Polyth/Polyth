@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import Timeline from "../Timeline.tsx";
 import Composer from "../Composer.tsx";
 import QuestionCards from "../QuestionCards.tsx";
-import { focusComposer, isActiveSessionSpawning, setOverlay, setUiError, useActiveModel, useStore } from "../../store.ts";
+import { focusComposer, isActiveSessionSpawning, setOverlay, setUiError, useActiveModel, usePendingSends, useStore } from "../../store.ts";
 import { openSession, prefetchSessionTail, restoreSession } from "../../init.ts";
 import { friendlyError } from "../../settings.ts";
 import { composerBlockedByArchive, sessionSurfaceKind } from "../../sessionSurface.ts";
@@ -221,12 +221,23 @@ function SessionLoading() {
 
 /** First-send runtime startup belongs in the same above-composer activity
  * zone as an active run. The composer stays mounted and usable for the next
- * draft; the transient status never impersonates the input itself. */
-function SessionSpawnStatus() {
+ * draft; the transient status never impersonates the input itself.
+ *
+ * The same dock covers a prompt that has been submitted into an existing
+ * session but whose turn has not started yet: work has been asked for, so the
+ * activity zone says so instead of staying blank until the runtime answers.
+ * It is a status, never a control — `aria-busy` with no abort affordance,
+ * because there is nothing proven running to abort. */
+function SessionSpawnStatus({ spawning, resolvedHarnessId }: {
+  spawning: boolean;
+  resolvedHarnessId?: string;
+}) {
   const spawn = useStore((state) => state.sessionSpawn);
-  const status = tr("workspace.builtinsurfaces.spawningAgent");
-  const harnessId = spawn?.harnessId;
-  const harnessName = spawn?.harnessName?.trim() || harnessId
+  const status = spawning
+    ? tr("workspace.builtinsurfaces.spawningAgent")
+    : tr("workspace.builtinsurfaces.startingTurn");
+  const harnessId = (spawning ? spawn?.harnessId : undefined) ?? resolvedHarnessId;
+  const harnessName = (spawning ? spawn?.harnessName?.trim() : undefined) || harnessId
     ?.split(/[-_]+/)
     .filter(Boolean)
     .map((part) => part[0]!.toUpperCase() + part.slice(1))
@@ -278,6 +289,9 @@ function SessionSurface() {
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const starterPickerOpen = useStore((s) => s.overlay === "starter-picker");
   const model = useActiveModel();
+  // A submitted prompt with no turn behind it yet still owns the activity zone.
+  // Once the runtime reports work, the canonical turn rows take it over.
+  const awaitingTurn = usePendingSends(sessionId).length > 0 && model.turn?.status !== "working";
   const gitStatus = useGitStatus(projectId, false);
   const starterContext = useMemo(
     () => starterContextFrom(gitStatus, starterSessionContext(model)),
@@ -326,7 +340,12 @@ function SessionSurface() {
             <SlotHost slot="session.composer.before" context={{ projectId, sessionId, editing: false }} customizable />
             <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />
             <SlotHost slot="session.footer" context={{ projectId, sessionId, editing: false }} customizable />
-            {spawning && <SessionSpawnStatus />}
+            {(spawning || awaitingTurn) && (
+              <SessionSpawnStatus
+                spawning={spawning}
+                {...(session?.resolvedHarnessId ? { resolvedHarnessId: session.resolvedHarnessId } : {})}
+              />
+            )}
             <Composer />
           </div>}
     </div>

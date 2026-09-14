@@ -419,6 +419,8 @@ export const fr: GitMessages = {
   "worktreesessiondialog.workInValue": "Travaillez dans {value}",
   "worktreesessiondialog.worktreeCreatedBeforeSession": "L'arbre de travail est créé avant l'enregistrement de la session.",
   "worktreesessiondialog.worktreeSource": "Source Worktree",
+  "gitview.autoRebaseAndSync": "Rebaser et synchroniser",
+  "gitview.conflictAgentDraftReady": "Brouillon ouvert. Choisissez un modèle ou modifiez-le avant l’envoi.",
   "gitview.conflictAgentStarted": "Résolution des conflits démarrée.",
   "gitview.filesConflictedHint": "{count} conflit(s) de fusion non résolu(s).",
   "gitview.historyDivergedHint": "L’historique local et l’historique distant ont divergé.",

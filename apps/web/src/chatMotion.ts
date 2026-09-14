@@ -350,7 +350,27 @@ function candidatesFrom(node: Node): HTMLElement[] {
   return candidates;
 }
 
-function animateAddedNode(node: Node, suppressChat = false): void {
+/** Optimistic prompt echoes carry this marker until their canonical row lands. */
+const PENDING_SEND_SELECTOR = "[data-pending-send]";
+
+/** An echo leaving the DOM in the same batch a canonical prompt enters it is a
+ *  handover, not a new event: the two rows are the same prompt at the same
+ *  place, already animated once on submit. Replaying an entrance would blink
+ *  a settled bubble. Counted per batch so rapid sends hand over one for one. */
+function pendingSendHandovers(records: MutationRecord[]): number {
+  let count = 0;
+  for (const record of records) {
+    for (const node of record.removedNodes) {
+      if (!(node instanceof Element)) continue;
+      count += node.matches(PENDING_SEND_SELECTOR)
+        ? 1
+        : node.querySelectorAll(PENDING_SEND_SELECTOR).length;
+    }
+  }
+  return count;
+}
+
+function animateAddedNode(node: Node, suppressChat = false, handover = { remaining: 0 }): void {
   if (!(node instanceof Element)) return;
 
   // A newly mounted timeline is hydration/navigation, not a sequence of new
@@ -389,6 +409,11 @@ function animateAddedNode(node: Node, suppressChat = false): void {
     if (nested) continue;
 
     if (element.matches(".msg.user")) {
+      if (handover.remaining > 0) {
+        handover.remaining -= 1;
+        animated.add(element);
+        continue;
+      }
       const explicitSend = consumeUserSend();
       // Explicit sends get the larger composer→prompt FLIP: the prompt rises
       // to the contextual fresh-turn anchor while previous agent rows slide
@@ -430,8 +455,9 @@ function installMutationWatcher(): void {
       && records.some((record) => Array.from(record.addedNodes).some(nodeHasChatCandidates));
     if (suppressNavigationBatch) navigationPending = false;
 
+    const handover = { remaining: pendingSendHandovers(records) };
     for (const record of records) {
-      for (const node of record.addedNodes) animateAddedNode(node, suppressNavigationBatch);
+      for (const node of record.addedNodes) animateAddedNode(node, suppressNavigationBatch, handover);
     }
   });
   observer.observe(document.body, { childList: true, subtree: true });

@@ -385,6 +385,113 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   display: flex;
   flex-direction: column;
 }
+.sidebar-expanded-shell {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.sidebar-main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+.sidebar-project-rail {
+  width: 58px;
+  min-width: 58px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: max(var(--space-2), var(--safe-top)) var(--space-2) var(--space-2);
+  border-inline-end: 1px solid var(--surface-divider);
+  background: color-mix(in srgb, var(--panel) 76%, transparent);
+}
+.sidebar-project-rail,
+.sidebar-project-rail-list { flex-direction: column; }
+.sidebar-project-rail-list {
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-1);
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.sidebar-project-rail-list::-webkit-scrollbar { display: none; }
+.sidebar-rail-collapse,
+.sidebar-project-rail-item,
+.sidebar-project-rail-add {
+  position: relative;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-card);
+  background: transparent;
+  color: var(--text-dim);
+}
+.sidebar-rail-collapse { flex: none; }
+.sidebar-project-rail-item { flex: none; }
+.sidebar-project-rail-item:hover,
+.sidebar-project-rail-add:hover { color: var(--text); background: var(--surface-overlay-hover); }
+.sidebar-project-rail-item.dragging { opacity: .5; }
+.sidebar-project-rail-item.drag-over { box-shadow: inset 0 2px 0 var(--accent); }
+.sidebar-project-rail-item.active {
+  border-color: var(--accent-line);
+  background: var(--accent-wash);
+  color: var(--text);
+  box-shadow: var(--inset-hi);
+}
+.sidebar-project-rail-item.active::before {
+  position: absolute;
+  inset-inline-start: -9px;
+  width: 3px;
+  height: 22px;
+  border-radius: var(--radius-round);
+  background: var(--accent);
+  content: "";
+}
+.sidebar-project-rail-item .project-glyph { width: 32px; height: 32px; }
+.sidebar-project-rail-item .project-glyph svg { width: var(--icon-md); height: var(--icon-md); }
+.sidebar-project-rail-item .project-glyph img,
+.sidebar-project-rail-item .project-glyph-mask { width: var(--icon-lg); height: var(--icon-lg); }
+.sidebar-project-rail-status {
+  position: absolute;
+  inset-inline-end: 3px;
+  bottom: 3px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--panel);
+  border-radius: var(--radius-round);
+  background: var(--green);
+}
+.sidebar-project-rail-status.attention { background: var(--amber); }
+.sidebar-project-rail-add {
+  flex: none;
+  color: var(--muted);
+}
+.sidebar-project-rail-add svg { width: var(--icon-md); height: var(--icon-md); }
+.sidebar-project-rail-divider {
+  width: 28px;
+  height: 1px;
+  flex: none;
+  background: var(--border-soft);
+}
+.sidebar-project-rail .sidebar-popover-anchor { flex: none; }
+.sidebar-project-rail .sidebar-project-rail-tool {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+}
+.sidebar-expanded-shell--project-rail .sidebar-collapse { display: none; }
 /* Finding 2: drag handle on the right edge (wide mode only). */
 .sidebar-resize {
   position: absolute; top: 0; right: -3px; width: 7px; height: 100%;
@@ -715,6 +822,39 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 }
 .sidebar-add-project:hover { background: var(--elevated); color: var(--text); }
 .sidebar-add-project svg { width: 15px; height: 15px; flex: none; }
+
+/* Project-rail presentation: the selected project's identity and complete
+   session tree own the detail pane; other projects stay in the narrow rail. */
+.sidebar-focused-project > .project-card-shell {
+  min-height: 64px;
+  margin: 0 var(--space-1) var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-soft);
+}
+.sidebar-focused-project > .project-card-shell .project-card {
+  min-height: 54px;
+  padding-inline: var(--space-2) var(--space-1);
+}
+.sidebar-focused-project > .project-card-shell .project-glyph { display: none; }
+.sidebar-focused-project > .project-card-shell .project-name {
+  font-size: var(--subheader-font-size);
+  font-weight: 680;
+}
+.sidebar-focused-project > .project-card-shell .project-path {
+  display: block;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--nav-meta-size);
+  line-height: var(--font-meta-lh);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-focused-project > .project-card-shell .project-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+.sidebar-focused-project > .project-card-shell .project-new-session { display: none; }
+.sidebar-focused-sessions { --nav-worktree-row-indent: var(--space-1); }
 
 .session-worktree-group { position: relative; z-index: 1; margin: 0; }
 .session-worktree-head {
@@ -1357,6 +1497,19 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   line-height: 1.5;
   box-shadow: var(--material-glass-highlight), var(--shadow-sm);
 }
+/* A prompt still crossing the wire. It must share the canonical row's exact
+   geometry — box model untouched — so the canonical event replaces it without
+   moving a pixel. Only its confidence reads differently: a slow, low-amplitude
+   settle that stops the moment the real turn takes over. The global
+   reduce-animations / low-resource switch above cancels it. */
+.msg.user.msg-pending .bubble {
+  animation: prompt-in-flight 1.7s var(--motion-ease) 0.45s infinite;
+}
+@keyframes prompt-in-flight {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.74; }
+}
+
 /* Optional reader aid: keep the newest prompt in the scrollport without
    duplicating it or changing the canonical conversation history. */
 .timeline > .msg.user.latest-user-pinned {
@@ -2241,12 +2394,21 @@ border-color: var(--accent); color: var(--accent); background: var(--accent-wash
 
 /* ---------- transient error toast + app-owned alerts ---------- */
 .error-banner {
-  position: fixed; right: var(--space-5); bottom: var(--space-5); z-index: var(--z-toast);
-  width: min(440px, calc(100vw - (2 * var(--screen-gutter)))); border-radius: var(--radius-sheet);
-  box-shadow: var(--shadow-md); font-size: var(--font-label);
+  position: fixed;
+  inset-inline-end: calc(var(--rail-strip-width-right, var(--control-h-lg)) + var(--space-3));
+  bottom: max(var(--space-3), var(--safe-bottom));
+  z-index: var(--z-toast);
+  width: min(400px, calc(100vw - var(--rail-strip-width-right, var(--control-h-lg)) - (2 * var(--screen-gutter))));
+  align-items: center;
+  border-color: var(--material-glass-border);
+  border-radius: var(--radius-surface);
+  background: var(--material-glass-strong);
+  box-shadow: var(--material-glass-highlight), var(--material-glass-shadow);
+  font-size: var(--font-label);
   animation: toast-in var(--motion-normal) ease-out;
 }
-@keyframes toast-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+.error-banner .ui-notice-actions { gap: var(--space-1); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(var(--space-2)); } to { opacity: 1; transform: translateY(0); } }
 .alert-dialog { width: min(440px, 92vw); gap: 0; overflow: hidden; }
 .alert-dialog-body { display: flex; flex-direction: column; gap: var(--space-3); }
 .alert-dialog-body p { margin: 0; color: var(--text-dim); line-height: 1.5; white-space: pre-line; }
@@ -4862,13 +5024,6 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .app.view-session.mode-widgets .railbar:not(.railbar-open),
 .app.view-session.mode-edit .railbar:not(.railbar-open) { display: none; }
 
-.turn-error {
-  width: min(var(--chat-measure), 100%); margin-inline: auto;
-  align-items: center; border-inline-start-width: 3px;
-}
-.turn-error-retry {
-  flex: none; white-space: nowrap;
-}
 .turn-rate-limit {
   width: min(var(--chat-measure), 100%); margin-inline: auto;
   border-inline-start-width: 3px;
@@ -6096,6 +6251,7 @@ min-width: 0;
 .session-default-summary strong { color: var(--text); font-weight: 600; }
 .retention-days { display: flex; align-items: center; gap: 7px; }
 .retention-days input { width: 84px; }
+.retention-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .session-retention-note { margin: 4px 0 10px; color: var(--muted); font-size: var(--font-meta); }
 .retention-eligible { margin: 10px 0 20px; padding: 11px 13px; border: 1px solid var(--border-soft); border-radius: var(--radius-control); background: var(--elevated); color: var(--muted); font-size: 12px; }
 .retention-eligible strong { color: var(--text); }

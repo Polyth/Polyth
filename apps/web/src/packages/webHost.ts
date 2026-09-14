@@ -41,6 +41,7 @@ import {
   setActiveView,
   setOverlay,
   setRailPlugin,
+  setUiError,
   startNewSession,
   subscribeSessionEvents,
   subscribeStore,
@@ -280,6 +281,7 @@ export const webPackageHost: WebPackageHost = {
   },
   errors: {
     friendly: friendlyError,
+    show: setUiError,
   },
   handoffTargets: {
     register: registerHandoffTarget,

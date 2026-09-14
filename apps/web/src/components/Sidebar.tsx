@@ -22,7 +22,7 @@ import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 import { useSidebarExpanded } from "../sidebarPresentation.ts";
 import {
   applyManualProjectOrder, reorderManualProjects,
-  setProjectOrder, setProjectSortMode,
+  setProjectOrder, setProjectSortMode, setSidebarViewMode,
   useProjectOrder, useProjectSortMode, useSidebarViewMode,
   type ProjectSortMode,
 } from "../sidebarPrefs.ts";
@@ -53,6 +53,7 @@ import {
   sessionMatchesDateFilter,
   type SessionDateFilter,
 } from "../sessionDates.ts";
+import type { Project, SessionProjection } from "@polyth/contracts";
 
 const EXPANDED_PROJECTS_KEY = "polyth.sidebar.expandedProjects";
 
@@ -73,6 +74,40 @@ function loadExpandedProjects(activeProjectId: string | null): ReadonlySet<strin
  *  in wide mode, where the sidebar is a plain inline column). */
 function closeDrawer(): void {
   if (getState().sidebarOpen) setSidebarOpen(false);
+}
+
+function ProjectGlyph({ project }: { project: Project }) {
+  return (
+    <span className="project-glyph" style={project.color ? { color: project.color } : undefined}>
+      {project.icon
+        ? project.icon.startsWith("/assets/project-icons/")
+          ? <span className="project-glyph-mask" aria-hidden="true" style={{ WebkitMaskImage: `url("${project.icon}")`, maskImage: `url("${project.icon}")` }} />
+          : project.icon.startsWith("data:image/")
+            ? <img src={project.icon} alt="" />
+            : <span aria-hidden="true">{project.icon}</span>
+        : <Icon.files />}
+      {project.remote && (
+        <span
+          className="project-remote-marker"
+          role="img"
+          aria-label={tr("ssh.sshprojectsource.remoteProject")}
+          title={tr("ssh.sshprojectsource.remoteProject")}
+        >
+          <Icon.globe />
+        </span>
+      )}
+    </span>
+  );
+}
+
+function sessionsNeedAttention(candidates: readonly SessionProjection[]): boolean {
+  return candidates.some((session) => session.status !== "archived"
+    && (session.status === "working"
+      || session.status === "waiting"
+      || session.status === "reconciling"
+      || session.status === "unknown"
+      || (session.attention?.questions ?? 0) > 0
+      || (session.attention?.permissions ?? 0) > 0));
 }
 
 export default function Sidebar() {
@@ -109,8 +144,8 @@ export default function Sidebar() {
   const syncStatus = useSyncExternalStore(subscribeSyncStatus, getSyncStatus, () => "disconnected");
   const host = typeof location === "undefined" ? tr("sidebar.localServer") : location.host;
 
-  // Persisted view mode: list shows the active project; tree expands projects
-  // into worktrees and sessions. Expansion is per-project UI state.
+  // Persisted desktop presentation: list, nested tree, or a compact project
+  // rail beside the active project's sessions. Expansion is per-project UI state.
   const viewMode = useSidebarViewMode();
   const [expandedTrees, setExpandedTrees] = useState<ReadonlySet<string>>(
     () => loadExpandedProjects(activeProjectId),
@@ -138,28 +173,9 @@ export default function Sidebar() {
       return next;
     });
   };
-  const visibleProjects = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    const matchesAttention = (candidates: typeof sessions) => candidates.some((session) =>
-      session.status !== "archived"
-      && (session.status === "working"
-        || session.status === "waiting"
-        || session.status === "reconciling"
-        || session.status === "unknown"
-        || (session.attention?.questions ?? 0) > 0
-        || (session.attention?.permissions ?? 0) > 0));
-    const filtered = projects.filter((candidate) => {
-      const candidates = sessions.filter((session) =>
-        session.projectId === candidate.id && sessionMatchesDateFilter(session, dateFilter));
-      if (sessionDateFilterActive(dateFilter) && candidates.length === 0) return false;
-      if (attentionOnly && !matchesAttention(candidates)) return false;
-      if (!needle) return true;
-      if (`${candidate.name} ${candidate.path}`.toLowerCase().includes(needle)) return true;
-      return candidates.some((session) =>
-        `${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLowerCase().includes(needle));
-    });
-    if (sort === "manual") return applyManualProjectOrder(filtered, projectOrder);
-    return filtered.sort((a, b) => {
+  const orderedProjects = useMemo(() => {
+    if (sort === "manual") return applyManualProjectOrder(projects, projectOrder);
+    return [...projects].sort((a, b) => {
       if (sort === "name") return (a.name || a.path).localeCompare(b.name || b.path);
       const latest = (projectId: string) => sessions.reduce(
         (value, session) => session.projectId === projectId
@@ -170,7 +186,20 @@ export default function Sidebar() {
       );
       return latest(b.id) - latest(a.id) || (a.name || a.path).localeCompare(b.name || b.path);
     });
-  }, [attentionOnly, dateFilter, projectOrder, projects, query, sessions, sort]);
+  }, [dateFilter, projectOrder, projects, sessions, sort]);
+  const visibleProjects = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return orderedProjects.filter((candidate) => {
+      const candidates = sessions.filter((session) =>
+        session.projectId === candidate.id && sessionMatchesDateFilter(session, dateFilter));
+      if (sessionDateFilterActive(dateFilter) && candidates.length === 0) return false;
+      if (attentionOnly && !sessionsNeedAttention(candidates)) return false;
+      if (!needle) return true;
+      if (`${candidate.name} ${candidate.path}`.toLowerCase().includes(needle)) return true;
+      return candidates.some((session) =>
+        `${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLowerCase().includes(needle));
+    });
+  }, [attentionOnly, dateFilter, orderedProjects, query, sessions]);
   // UX-A390: below the compact seam (COMPACT_MAX_WIDTH) the sidebar is a modal
   // drawer — every portrait tablet and small window included. It never opens by
   // itself when the viewport shrinks — wide visibility is not a persisted
@@ -178,7 +207,7 @@ export default function Sidebar() {
   const mode = useShellMode();
   const compact = mode !== "wide";
   // Compact navigation is always the complete project → worktree → session
-  // tree. Desktop keeps the user's optional list-mode preference.
+  // tree. Desktop keeps the user's optional presentation preference.
   const effectiveViewMode = compact ? "tree" : viewMode;
   // Finding 2: wide-mode width + collapse persist across reloads; the compact
   // drawer keeps its own responsive geometry and ignores both.
@@ -343,13 +372,13 @@ export default function Sidebar() {
     setDraggedProject(null);
     setDragOverProject(null);
   };
-  const startProjectDrag = (event: ReactDragEvent<HTMLDivElement>, id: string) => {
+  const startProjectDrag = (event: ReactDragEvent<HTMLElement>, id: string) => {
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", id);
     setDraggedProject(id);
     setDragOverProject(id);
   };
-  const dropProject = (event: ReactDragEvent<HTMLDivElement>, targetId: string) => {
+  const dropProject = (event: ReactDragEvent<HTMLElement>, targetId: string) => {
     if (!draggedProject) return;
     event.preventDefault();
     commitReorder(draggedProject, targetId);
@@ -378,6 +407,30 @@ export default function Sidebar() {
       kind: "radio",
       checked: sort === "manual",
       onSelect: () => setSort("manual"),
+    },
+  ];
+  const layoutEntries: MenuEntry[] = [
+    { heading: tr("shell.sidebar") },
+    {
+      id: "layout-tree",
+      label: tr("sidebar.layoutTree"),
+      kind: "radio",
+      checked: viewMode === "tree",
+      onSelect: () => setSidebarViewMode("tree"),
+    },
+    {
+      id: "layout-list",
+      label: tr("sidebar.layoutList"),
+      kind: "radio",
+      checked: viewMode === "list",
+      onSelect: () => setSidebarViewMode("list"),
+    },
+    {
+      id: "layout-rail",
+      label: tr("sidebar.projectRail"),
+      kind: "radio",
+      checked: viewMode === "rail",
+      onSelect: () => setSidebarViewMode("rail"),
     },
   ];
   const filterEntries: MenuEntry[] = [
@@ -418,6 +471,32 @@ export default function Sidebar() {
     setSidebarLayout({ width: width + (event.key === "ArrowRight" ? 16 : -16) });
   };
 
+  const connectionControl = (buttonClass: string) => (
+    <div className="sidebar-popover-anchor">
+      <button
+        ref={connectionTriggerRef}
+        className={`${buttonClass} sidebar-connection-dot ${syncStatus}`}
+        aria-label={tr("sidebar.serverConnectionValue", { syncStatus: syncStatus })}
+        title={tr("sidebar.serverConnectionValue", { syncStatus: syncStatus })}
+        aria-haspopup="dialog"
+        aria-expanded={connectionOpen}
+        onClick={() => setConnectionOpen((open) => !open)}
+      ><span aria-hidden="true" /></button>
+      <Popover
+        open={connectionOpen}
+        onClose={() => setConnectionOpen(false)}
+        anchorRef={connectionTriggerRef}
+        align={effectiveViewMode === "rail" ? "start" : "end"}
+        ariaLabel={tr("sidebar.serverConnectionDetails")}
+        className="sidebar-connection-popover"
+      >
+        <strong>{syncStatus === "connected" ? tr("sidebar.connected") : syncStatus === "connecting" ? tr("sidebar.connecting") : tr("sidebar.connectionProblem")}</strong>
+        <span>{host}</span>
+        <Button size="sm" className="sidebar-reconnect" onClick={() => { reconnectSync(); setConnectionOpen(false); }}>{tr("sidebar.reconnect")}</Button>
+      </Popover>
+    </div>
+  );
+
   return (
     <>
       {compact && drawerOpen && (
@@ -446,7 +525,76 @@ export default function Sidebar() {
             />
           </div>
         )}
-        {!collapsed && (<>
+        {!collapsed && (
+        <div className={`sidebar-expanded-shell${effectiveViewMode === "rail" ? " sidebar-expanded-shell--project-rail" : ""}`}>
+        {effectiveViewMode === "rail" && (
+          <div className="sidebar-project-rail" aria-label={tr("commandpalette.projects")}>
+            <IconButton
+              icon={SidebarIcon}
+              className="sidebar-rail-collapse"
+              label={tr("contextrail.collapseValue", { value: tr("sidebar.projectsAndSessions") })}
+              onClick={() => setSidebarLayout({ collapsed: true })}
+            />
+            <div className="sidebar-project-rail-list">
+              {orderedProjects.map((candidate) => {
+                const candidateSessions = sessions.filter((session) => session.projectId === candidate.id);
+                const attention = candidateSessions.some((session) => session.status === "waiting"
+                  || session.status === "reconciling"
+                  || session.status === "unknown"
+                  || (session.attention?.questions ?? 0) > 0
+                  || (session.attention?.permissions ?? 0) > 0);
+                const working = candidateSessions.some((session) => session.status === "working");
+                return (
+                  <button
+                    key={candidate.id}
+                    type="button"
+                    className={`sidebar-project-rail-item${candidate.id === activeProjectId ? " active" : ""}${draggedProject === candidate.id ? " dragging" : ""}${dragOverProject === candidate.id ? " drag-over" : ""}`}
+                    aria-current={candidate.id === activeProjectId ? "true" : undefined}
+                    aria-keyshortcuts={manualReorder ? "Alt+Shift+ArrowUp Alt+Shift+ArrowDown" : undefined}
+                    aria-label={candidate.name || candidate.path}
+                    title={candidate.name || candidate.path}
+                    draggable={manualReorder}
+                    onClick={() => activateProject(candidate.id)}
+                    onDragStart={(event) => startProjectDrag(event, candidate.id)}
+                    onDragOver={(event) => {
+                      if (!draggedProject) return;
+                      event.preventDefault();
+                      setDragOverProject(candidate.id);
+                    }}
+                    onDragEnd={clearProjectDrag}
+                    onDrop={(event) => dropProject(event, candidate.id)}
+                    onKeyDown={(event) => {
+                      if (!manualReorder || !event.altKey || !event.shiftKey) return;
+                      if (event.key === "ArrowUp") {
+                        event.preventDefault();
+                        moveProjectBy(candidate.id, -1);
+                      } else if (event.key === "ArrowDown") {
+                        event.preventDefault();
+                        moveProjectBy(candidate.id, 1);
+                      }
+                    }}
+                  >
+                    <ProjectGlyph project={candidate} />
+                    {(attention || working) && (
+                      <span className={`sidebar-project-rail-status${attention ? " attention" : " working"}`} aria-hidden="true" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              className="sidebar-project-rail-add"
+              aria-label={tr("sidebar.addProject")}
+              title={tr("sidebar.addProject")}
+              onClick={() => setOverlay("project-picker")}
+            ><Icon.plus /></button>
+            <span className="sidebar-project-rail-divider" aria-hidden="true" />
+            {connectionControl("sidebar-service-btn sidebar-project-rail-tool")}
+            <CustomizeZoneButton slot="sidebar.toolbar" className="sidebar-service-btn sidebar-project-rail-tool" />
+          </div>
+        )}
+        <div className="sidebar-main">
         {compact && (
           <div className="sidebar-drawer-header">
             {searchOpen ? (
@@ -580,17 +728,17 @@ export default function Sidebar() {
                     ? tr("sidebar.manualOrder")
                     : tr("sidebar.recentActivity"),
               })}
-              title={tr("sidebar.listOptions")}
+              title={tr("sidebar.moreSidebarActions")}
               align="end"
-              entries={[...sortEntries, "separator", ...filterEntries]}
+              entries={[...layoutEntries, "separator", ...sortEntries, "separator", ...filterEntries]}
               className="session-filter-menu"
               footer={<SessionDateFilterControls value={dateFilter} onChange={setDateFilter} />}
             >
               {(trigger) => (
                 <IconButton
                   icon={FilterIcon}
-                  label={tr("sidebar.listOptions")}
-                  className={`sidebar-list-options${attentionOnly || sessionDateFilterActive(dateFilter) ? " active" : ""}`}
+                  label={tr("sidebar.moreSidebarActions")}
+                  className={`sidebar-list-options${viewMode !== "tree" || attentionOnly || sessionDateFilterActive(dateFilter) ? " active" : ""}`}
                   {...trigger}
                 />
               )}
@@ -603,30 +751,8 @@ export default function Sidebar() {
             context={{ projectId: project?.id, query, attentionOnly, compact }}
             customizable
           />
-          <div className="sidebar-popover-anchor">
-            <button
-              ref={connectionTriggerRef}
-              className={`sidebar-service-btn sidebar-connection-dot ${syncStatus}`}
-              aria-label={tr("sidebar.serverConnectionValue", { syncStatus: syncStatus })}
-              title={tr("sidebar.serverConnectionValue", { syncStatus: syncStatus })}
-              aria-haspopup="dialog"
-              aria-expanded={connectionOpen}
-              onClick={() => setConnectionOpen((open) => !open)}
-            ><span aria-hidden="true" /></button>
-            <Popover
-              open={connectionOpen}
-              onClose={() => setConnectionOpen(false)}
-              anchorRef={connectionTriggerRef}
-              align="end"
-              ariaLabel={tr("sidebar.serverConnectionDetails")}
-              className="sidebar-connection-popover"
-            >
-              <strong>{syncStatus === "connected" ? tr("sidebar.connected") : syncStatus === "connecting" ? tr("sidebar.connecting") : tr("sidebar.connectionProblem")}</strong>
-              <span>{host}</span>
-              <Button size="sm" className="sidebar-reconnect" onClick={() => { reconnectSync(); setConnectionOpen(false); }}>{tr("sidebar.reconnect")}</Button>
-            </Popover>
-          </div>
-          <CustomizeZoneButton slot="sidebar.toolbar" className="sidebar-service-btn" />
+          {effectiveViewMode !== "rail" && connectionControl("sidebar-service-btn")}
+          {effectiveViewMode !== "rail" && <CustomizeZoneButton slot="sidebar.toolbar" className="sidebar-service-btn" />}
         </div>
         <div
           ref={sideScrollRef}
@@ -697,7 +823,9 @@ export default function Sidebar() {
               })}
             </div>
           )}
-          {query.trim() === "" && visibleProjects.map((p) => {
+          {query.trim() === "" && (effectiveViewMode === "rail"
+            ? visibleProjects.filter((candidate) => candidate.id === activeProjectId)
+            : visibleProjects).map((p) => {
             const projectQuery = query.trim()
               && `${p.name} ${p.path}`.toLowerCase().includes(query.trim().toLowerCase())
               ? ""
@@ -735,25 +863,7 @@ export default function Sidebar() {
                   }}
                   onDoubleClick={() => { setRenamingProject(p.id); setProjectName(p.name); }}
                 >
-                  <span className="project-glyph" style={p.color ? { color: p.color } : undefined}>
-                    {p.icon
-                      ? p.icon.startsWith("/assets/project-icons/")
-                        ? <span className="project-glyph-mask" aria-hidden="true" style={{ WebkitMaskImage: `url("${p.icon}")`, maskImage: `url("${p.icon}")` }} />
-                        : p.icon.startsWith("data:image/")
-                          ? <img src={p.icon} alt="" />
-                        : <span aria-hidden="true">{p.icon}</span>
-                      : <Icon.files />}
-                    {p.remote && (
-                      <span
-                        className="project-remote-marker"
-                        role="img"
-                        aria-label={tr("ssh.sshprojectsource.remoteProject")}
-                        title={tr("ssh.sshprojectsource.remoteProject")}
-                      >
-                        <Icon.globe />
-                      </span>
-                    )}
-                  </span>
+                  <ProjectGlyph project={p} />
                   <span className="project-meta">
                     <span className="project-name-line">
                       <span className="project-name" title={p.path}>{p.name || p.path}</span>
@@ -852,6 +962,23 @@ export default function Sidebar() {
               onDragEnd: clearProjectDrag,
               onDrop: (event: ReactDragEvent<HTMLDivElement>) => dropProject(event, p.id),
             } : {};
+            if (effectiveViewMode === "rail") {
+              return (
+                <div key={p.id} data-project-id={p.id} className="sidebar-focused-project">
+                  {card}
+                  <div className="sidebar-focused-sessions">
+                    <SessionList
+                      projectId={p.id}
+                      attentionOnly={attentionOnly}
+                      dateFilter={dateFilter}
+                      selectMode={selectMode}
+                      selectedSessionIds={selectedSessionIds}
+                      onToggleSelected={toggleSelectedSession}
+                    />
+                  </div>
+                </div>
+              );
+            }
             if (effectiveViewMode !== "tree") {
               return (
                 <div key={p.id} data-project-id={p.id} className={`project-entry${reorderClass}`} {...dragProps}>
@@ -903,7 +1030,7 @@ export default function Sidebar() {
             slot="app.nav"
             context={{ projectId: activeProjectId, sessionId: activeSessionId, expanded }}
           />
-          {registry.status === "ready" && projects.length > 0 && query.trim() === "" && (
+          {registry.status === "ready" && projects.length > 0 && query.trim() === "" && effectiveViewMode !== "rail" && (
             <button className="sidebar-add-project" onClick={() => setOverlay("project-picker")}>
               <Icon.plus />
               <span>{tr("sidebar.addProject")}</span>
@@ -915,7 +1042,8 @@ export default function Sidebar() {
           context={{ projectId: activeProjectId, sessionId: activeSessionId, expanded }}
           customizable
         />
-        </>)}
+        </div>
+        </div>)}
         {!compact && !collapsed && (
           <div
             className="sidebar-resize"

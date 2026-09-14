@@ -3,6 +3,7 @@
 import { useMemo, useSyncExternalStore } from "react";
 import type {
   AgentDescriptor,
+  AttachmentRef,
   EditorLocation,
   ModelDescriptor,
   Project,
@@ -98,6 +99,23 @@ export interface SessionSpawn {
   sessionId: string | null;
   harnessId?: string;
   harnessName?: string;
+}
+
+/** Presentation-only echo of a prompt the composer has just submitted.
+ *  It is NEVER an event: it does not enter `state.events`, is never persisted,
+ *  never reaches a reducer and carries no seq. The canonical `user/message`
+ *  (or `queue/enqueued`) still establishes the fact; this record only lets the
+ *  timeline show the prompt during the admission round trip and retires the
+ *  instant the canonical event lands — or when the submission fails. */
+export interface PendingSend {
+  /** Local id; distinct from any canonical message id. */
+  id: string;
+  /** null until first-send session creation binds the real id. */
+  sessionId: string | null;
+  text: string;
+  attachments: AttachmentRef[];
+  /** Canonical tail captured at staging: only newer events can retire it. */
+  afterSeq: number;
 }
 
 // A new chat is intentionally not a session yet, so keep its work locally
@@ -253,11 +271,14 @@ export interface AppState {
   gitBranch: string;
   settings: PolythSettings;
   uiError: string | null;
+  uiErrorAction: UiErrorAction | null;
   overlay: Overlay;
   worktreeSessionRequest: WorktreeSessionRequest | null;
   newSessionIntent: NewSessionIntent | null;
   /** First-send session creation currently waiting for its native agent. */
   sessionSpawn: SessionSpawn | null;
+  /** Submitted prompts still waiting for their canonical event (oldest first). */
+  pendingSends: PendingSend[];
   paletteMode: PaletteMode;
   railPlugin: RailPlugin | null;
   paneMode: PaneMode;
@@ -296,10 +317,12 @@ let state: AppState = {
   gitBranch: "",
   settings: loadSettings(),
   uiError: null,
+  uiErrorAction: null,
   overlay: null,
   worktreeSessionRequest: null,
   newSessionIntent: null,
   sessionSpawn: null,
+  pendingSends: [],
   paletteMode: "all",
   railPlugin: getRailPrefs().lastOpen, // F17: last-open surface survives reload
   paneMode: "dynamic",
@@ -1029,6 +1052,78 @@ export function finishSessionSpawn(requestId: number): void {
   if (state.sessionSpawn?.requestId === requestId) set({ sessionSpawn: null });
 }
 
+let nextPendingSendId = 0;
+
+/** Stage the optimistic echo for a prompt that is being submitted now. */
+export function beginPendingSend(
+  input: Pick<PendingSend, "sessionId" | "text" | "attachments">,
+): string {
+  const id = `pending-send-${++nextPendingSendId}`;
+  set({
+    pendingSends: [...state.pendingSends, {
+      ...input,
+      id,
+      afterSeq: input.sessionId ? lastSeq(input.sessionId) : 0,
+    }],
+  });
+  return id;
+}
+
+/** First-send creation resolved its session id; re-anchor the echo's tail. */
+export function bindPendingSend(id: string, sessionId: string): void {
+  const at = state.pendingSends.findIndex((p) => p.id === id);
+  if (at < 0 || state.pendingSends[at]!.sessionId !== null) return;
+  const next = state.pendingSends.slice();
+  next[at] = { ...next[at]!, sessionId, afterSeq: lastSeq(sessionId) };
+  set({ pendingSends: next });
+}
+
+/** Drop an echo whose submission failed. A rejected prompt has no canonical
+ *  event to wait for, so the composer takes its text back instead. */
+export function endPendingSend(id: string): void {
+  if (!state.pendingSends.some((p) => p.id === id)) return;
+  set({ pendingSends: state.pendingSends.filter((p) => p.id !== id) });
+}
+
+/** FIFO retirement: each canonical admission newer than the oldest echo's
+ *  captured tail replaces exactly one echo. `queue/enqueued` counts because a
+ *  normal send the server falls back to the queue produces that instead of a
+ *  `user/message`. Older backfilled history can never retire anything. */
+export function retiredPendingSends(
+  pending: readonly PendingSend[],
+  merged: readonly SessionEvent[],
+): PendingSend[] {
+  const oldest = pending[0];
+  if (!oldest) return [];
+  let landed = 0;
+  for (let i = merged.length - 1; i >= 0 && merged[i]!.seq > oldest.afterSeq; i -= 1) {
+    const type = merged[i]!.type;
+    if (type === "user/message" || type === "queue/enqueued") landed += 1;
+  }
+  return pending.slice(0, landed);
+}
+
+const NO_PENDING_SENDS: PendingSend[] = [];
+
+/** Echoes that belong to the surface currently on screen. An echo staged
+ *  before first-send creation resolved belongs to the session that spawn is
+ *  producing — including the brief window after the new id is activated but
+ *  before the echo is bound to it, so the prompt never blinks out. */
+export function usePendingSends(sessionId: string | null): PendingSend[] {
+  const pendingSends = useStore((s) => s.pendingSends);
+  const sessionSpawn = useStore((s) => s.sessionSpawn);
+  const activeProjectId = useStore((s) => s.activeProjectId);
+  return useMemo(() => {
+    if (pendingSends.length === 0) return NO_PENDING_SENDS;
+    const adoptUnbound = sessionSpawn !== null
+      && sessionSpawn.projectId === activeProjectId
+      && (sessionSpawn.sessionId === null || sessionSpawn.sessionId === sessionId);
+    const mine = pendingSends.filter((p) =>
+      p.sessionId === sessionId || (p.sessionId === null && adoptUnbound));
+    return mine.length === 0 ? NO_PENDING_SENDS : mine;
+  }, [pendingSends, sessionSpawn, activeProjectId, sessionId]);
+}
+
 export function isActiveSessionSpawning(current: AppState): boolean {
   const spawn = current.sessionSpawn;
   if (!spawn || spawn.projectId !== current.activeProjectId) return false;
@@ -1073,18 +1168,27 @@ export function updateSettings(patch: Partial<PolythSettings>): void {
   set({ settings });
 }
 
+export interface UiErrorAction {
+  label: string;
+  run(): void | Promise<void>;
+}
+
 let uiErrorTimer: ReturnType<typeof setTimeout> | undefined;
 
-// Transient error toast. Auto-dismisses after 12s.
-export function setUiError(message: string): void {
+// One host-owned transient error surface. New failures replace stale ones.
+export function setUiError(message: string, action: UiErrorAction | null = null): void {
   if (uiErrorTimer !== undefined) clearTimeout(uiErrorTimer);
-  uiErrorTimer = setTimeout(() => set({ uiError: null }), 12_000);
-  set({ uiError: message });
+  uiErrorTimer = setTimeout(() => {
+    uiErrorTimer = undefined;
+    set({ uiError: null, uiErrorAction: null });
+  }, 7_000);
+  set({ uiError: message, uiErrorAction: action });
 }
 
 export function clearUiError(): void {
   if (uiErrorTimer !== undefined) clearTimeout(uiErrorTimer);
-  set({ uiError: null });
+  uiErrorTimer = undefined;
+  set({ uiError: null, uiErrorAction: null });
 }
 
 
@@ -1100,6 +1204,12 @@ function preserveTitle(cur: SessionProjection, inc: SessionProjection): SessionP
 }
 
 export function upsertSession(p: SessionProjection): void {
+  // Drop empty zombie sessions — creation failed before any user turn.
+  if ((p.status === "failed" || p.status === "unknown") && p.lastTurnAt == null) {
+    const i = state.sessions.findIndex((s) => s.id === p.id);
+    if (i >= 0) set({ sessions: state.sessions.filter((_, j) => j !== i) });
+    return;
+  }
   const i = state.sessions.findIndex((s) => s.id === p.id);
   const cur = i >= 0 ? state.sessions[i] : undefined;
   const incoming = cur ? preserveTitle(cur, p) : p;
@@ -1111,15 +1221,21 @@ export function upsertSession(p: SessionProjection): void {
  *  and one render pass — for the whole page instead of one per session. */
 export function upsertSessions(list: readonly SessionProjection[]): void {
   if (list.length === 0) return;
-  const byId = new Map(list.map((p) => [p.id, p]));
-  const sessions = state.sessions.map((s) => {
-    const next = byId.get(s.id);
-    if (next) {
-      byId.delete(s.id);
-      return preserveTitle(s, next);
-    }
-    return s;
-  });
+  // Drop empty zombie sessions — creation failed before any user turn.
+  const zombieIds = new Set(
+    list.filter((p) => (p.status === "failed" || p.status === "unknown") && p.lastTurnAt == null).map((p) => p.id),
+  );
+  const byId = new Map(list.filter((p) => !zombieIds.has(p.id)).map((p) => [p.id, p]));
+  const sessions = state.sessions
+    .filter((s) => !zombieIds.has(s.id))
+    .map((s) => {
+      const next = byId.get(s.id);
+      if (next) {
+        byId.delete(s.id);
+        return preserveTitle(s, next);
+      }
+      return s;
+    });
   for (const p of byId.values()) sessions.push(p);
   set({ sessions });
 }
@@ -1191,6 +1307,7 @@ export function applyEvents(
   }
   let next: Record<string, SessionEvent[]> | null = null;
   let nextSessions: SessionProjection[] | null = null;
+  let retiredEchoes: Set<string> | null = null;
   const acceptedEvents: SessionEvent[] = [];
   for (const [sessionId, incoming] of bySession) {
     const list = state.events[sessionId] ?? EMPTY_EVENTS;
@@ -1207,6 +1324,16 @@ export function applyEvents(
     }
     next ??= { ...state.events };
     next[sessionId] = merged;
+    // The canonical prompt has landed: retire the optimistic echo that stood in
+    // for it. Same store transition, so the timeline swaps them in one commit.
+    if (state.pendingSends.length > 0) {
+      for (const echo of retiredPendingSends(
+        state.pendingSends.filter((p) => p.sessionId === sessionId),
+        merged,
+      )) {
+        (retiredEchoes ??= new Set()).add(echo.id);
+      }
+    }
     // Persist the prompt-derived title into the session record as soon as the
     // first user message is visible in the merged log. This handles both the
     // common tail load and older-history backfills, and keeps the title durable
@@ -1221,7 +1348,14 @@ export function applyEvents(
       }
     }
   }
-  if (next) set(nextSessions ? { events: next, sessions: nextSessions } : { events: next });
+  if (next) {
+    const retired = retiredEchoes;
+    set({
+      events: next,
+      ...(nextSessions ? { sessions: nextSessions } : {}),
+      ...(retired ? { pendingSends: state.pendingSends.filter((p) => !retired.has(p.id)) } : {}),
+    });
+  }
   if (next && options.notifySessionEvents !== false) {
     for (const event of acceptedEvents) {
       if (options.notifyEventKeys && !options.notifyEventKeys.has(`${event.sessionId}:${event.seq}`)) continue;

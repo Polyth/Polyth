@@ -23,7 +23,7 @@ globalThis.fetch = ((input, init) => fetchHandler(input, init)) as typeof fetch;
 
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { HarnessTabs } = await import("../widgets/runtime.tsx");
+const { HarnessTabs, HarnessTransitionStatus } = await import("../widgets/runtime.tsx");
 
 const snapshot = (id: string, modelID?: string, availability?: Partial<{ state: string; installed: boolean; healthy: boolean; authenticated: boolean }>) => ({
   identity: { id, name: id === "cursor" ? "Cursor" : "Codex" },
@@ -38,7 +38,9 @@ const snapshot = (id: string, modelID?: string, availability?: Partial<{ state: 
   ...(modelID ? { catalog: { models: [{ harnessId: id, providerID: id, modelID, name: modelID }] } } : {}),
 });
 
-function host(updateCount: { value: number }) {
+type ShownError = { message: string; action?: { label: string; run(): void | Promise<void> } };
+
+function host(updateCount: { value: number }, shown: ShownError[] = []) {
   return {
     executionDraft: {
       get: () => ({ harnessSelection: { mode: "auto" as const }, harnessSelectionExplicit: false }),
@@ -48,10 +50,54 @@ function host(updateCount: { value: number }) {
       },
       subscribe: () => () => {},
     },
-    errors: { friendly: (_action: string, cause: unknown) => cause instanceof Error ? cause.message : String(cause) },
+    errors: {
+      friendly: (action: string, cause: unknown) => `${action}: ${cause instanceof Error ? cause.message : String(cause)}`,
+      show: (message: string, action?: ShownError["action"]) => shown.push({ message, ...(action ? { action } : {}) }),
+    },
     sessions: { upsert: () => {} },
   } as never;
 }
+
+test("failed harness starts use the host transient error surface", async () => {
+  const shown: ShownError[] = [];
+  fetchHandler = async () => new Response(JSON.stringify([snapshot("codex"), snapshot("cursor")]));
+  const h = host({ value: 0 }, shown);
+  const transition = {
+    id: "switch-1",
+    selection: { mode: "pinned" as const, harnessId: "cursor" },
+    targetHarnessId: "cursor",
+    timing: "after-turn" as const,
+    phase: "failed" as const,
+    released: { authorityId: "authority-1", generation: 1, backendSessionId: "native-1" },
+    attempt: 1,
+    lastAttemptAt: 1,
+    error: { stage: "starting-target" as const, message: 'Runtime response was lost for "initialize"' },
+  };
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement("div", null,
+      createElement(HarnessTransitionStatus, { host: h, sessionId: "session-1", transition }),
+      createElement(HarnessTabs, {
+        ...props(h, "project-1"),
+        sessionId: "session-1",
+        harnessSelection: { mode: "pinned", harnessId: "codex" },
+        transition,
+      }),
+    )); });
+    await act(async () => { await Promise.resolve(); });
+    assert.equal(container.querySelector('[role="alert"]'), null);
+    assert.match(container.textContent ?? "", /Retry Cursor/, "recovery remains available in the model picker");
+    assert.deepEqual(shown.map(({ message }) => message), [
+      'cursor couldn\'t start: Runtime response was lost for "initialize"',
+    ]);
+    assert.equal(shown[0]?.action?.label, "Retry");
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
 
 const props = (h: ReturnType<typeof host>, projectId: string) => ({
   host: h,

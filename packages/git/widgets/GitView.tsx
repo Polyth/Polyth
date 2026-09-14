@@ -7,6 +7,7 @@ import { refreshGitStatus, useGitStatus } from "./gitStatusStore.ts";
 import { highlight, langOf } from "../../../apps/web/src/highlight.ts";
 import { getLocale, tr } from "../../../apps/web/src/i18n/index.ts";
 import { Icon } from "../../../apps/web/src/icons.tsx";
+import { requestComposerReplace } from "../../../apps/web/src/composerInsert.ts";
 import { openSession } from "../../../apps/web/src/init.ts";
 import { splitPrDiff } from "./prDiff.ts";
 import {
@@ -14,7 +15,7 @@ import {
   type DiffHunk, type ReviewComment,
 } from "../../../apps/web/src/review/anchors.ts";
 import { friendlyError } from "../../../apps/web/src/settings.ts";
-import { openWorktreeSessionDialog, setGitBranch, setGitDiffPath, setUiError, useStore } from "../../../apps/web/src/store.ts";
+import { openWorktreeSessionDialog, setGitBranch, setGitDiffPath, setUiError, startNewSession, useStore } from "../../../apps/web/src/store.ts";
 import { diffStat } from "../../../apps/web/src/utils.ts";
 import { setPaneLastResource } from "../../../apps/web/src/workspace/panePrefs.ts";
 import CopyButton from "../../../apps/web/src/components/CopyButton.tsx";
@@ -92,6 +93,9 @@ const GRAPH_PAGE = 40;
 const LANE_W = 12;
 
 type GitSelection = { path: string; staged: boolean };
+
+const isDivergedError = (message: string): boolean =>
+  /diverged|fast-forward|non-fast-forward|remote has commits/i.test(message);
 
 /** Keep an open diff attached to the file's current staged/unstaged location. */
 export function reconcileGitSelection(selection: GitSelection | null, status: GitStatus): GitSelection | null {
@@ -234,10 +238,10 @@ type ConflictAgentTarget = "new-session" | "current-session";
 
 /** Inline "resolve this conflict with an agent" affordance. Shown wherever the
  *  git surface knows the repo is conflicted — a diverged fast-forward pull or
- *  unresolved working-tree merge conflicts — and offers the handoff in the
- *  current session or a fresh one, seeded with the user's default prompt. */
+ *  unresolved working-tree merge conflicts — and opens an editable prompt in
+ *  the current session or a fresh one. */
 function ConflictAgentBanner({
-  hint, defaultTarget, hasCurrentSession, busy, message, failed, onResolve,
+  hint, defaultTarget, hasCurrentSession, busy, message, failed, autoRebaseBusy, onAutoRebase, onResolve,
 }: {
   hint: string;
   defaultTarget: ConflictAgentTarget;
@@ -245,6 +249,8 @@ function ConflictAgentBanner({
   busy: ConflictAgentTarget | null;
   message: string;
   failed: boolean;
+  autoRebaseBusy: boolean;
+  onAutoRebase?: () => void;
   onResolve: (target: ConflictAgentTarget) => void;
 }) {
   return (
@@ -254,12 +260,24 @@ function ConflictAgentBanner({
         <span className="muted">{hint}</span>
       </div>
       <div className="conflict-agent-actions">
+        {onAutoRebase && (
+          <Button
+            size="sm"
+            variant="primary"
+            iconStart={SyncIcon}
+            busy={autoRebaseBusy}
+            disabled={busy !== null || autoRebaseBusy}
+            onClick={onAutoRebase}
+          >
+            {tr("gitview.autoRebaseAndSync")}
+          </Button>
+        )}
         <Button
           size="sm"
           variant={defaultTarget === "current-session" ? "primary" : "ghost"}
           iconStart={AssistIcon}
           busy={busy === "current-session"}
-          disabled={busy !== null || !hasCurrentSession}
+          disabled={busy !== null || autoRebaseBusy || !hasCurrentSession}
           onClick={() => onResolve("current-session")}
         >
           {tr("gitview.resolveInThisSession")}
@@ -269,7 +287,7 @@ function ConflictAgentBanner({
           variant={defaultTarget === "new-session" ? "primary" : "ghost"}
           iconStart={AssistIcon}
           busy={busy === "new-session"}
-          disabled={busy !== null}
+          disabled={busy !== null || autoRebaseBusy}
           onClick={() => onResolve("new-session")}
         >
           {tr("gitview.resolveInNewSession")}
@@ -332,6 +350,7 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
   const [conflictAgentBusy, setConflictAgentBusy] = useState<ConflictAgentTarget | null>(null);
   const [conflictAgentMsg, setConflictAgentMsg] = useState("");
   const [conflictAgentFailed, setConflictAgentFailed] = useState(false);
+  const [autoRebaseBusy, setAutoRebaseBusy] = useState(false);
   const [closedGroups, setClosedGroups] = useState<ReadonlySet<string>>(new Set());
   const [comments, setComments] = useState<ReviewComment[]>([]);
   const [draft, setDraft] = useState<{ digest: string; line: number } | null>(null);
@@ -522,7 +541,7 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
   };
 
   const runRemote = async (step: RemoteStep) => {
-    if (!projectId) return;
+    if (!projectId || autoRebaseBusy) return;
     setBusyRemote(step);
     setRemoteStatus(null);
     try {
@@ -538,6 +557,25 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
       setRemoteStatus({ step, error: cause instanceof Error ? cause.message : String(cause) });
     } finally {
       setBusyRemote(null);
+    }
+  };
+
+  const autoRebaseAndSync = async () => {
+    if (!projectId || autoRebaseBusy || busyRemote !== null) return;
+    setAutoRebaseBusy(true);
+    setRemoteStatus(null);
+    setConflictAgentMsg("");
+    setConflictAgentFailed(false);
+    try {
+      await api.gitRebase(projectId, "origin", sessionId ?? undefined);
+      await api.gitPush(projectId, "origin", sessionId ?? undefined);
+      setRemoteStatus({ step: "sync" });
+      await refresh();
+    } catch (cause) {
+      setRemoteStatus({ step: "sync", error: cause instanceof Error ? cause.message : String(cause) });
+      await refresh();
+    } finally {
+      setAutoRebaseBusy(false);
     }
   };
 
@@ -615,9 +653,10 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
     });
   };
 
-  const startConflictAgent = async (target: ConflictAgentTarget, problem?: string) => {
-    if (conflictAgentBusy || !projectId) return;
-    if (target === "current-session" && !sessionId) {
+  const openConflictAgentDraft = async (target: ConflictAgentTarget, problem?: string) => {
+    if (conflictAgentBusy || autoRebaseBusy || !projectId) return;
+    const currentSessionId = sessionId;
+    if (target === "current-session" && !currentSessionId) {
       setConflictAgentFailed(true);
       setConflictAgentMsg(tr("pullrequestview.conflictAgentNeedsCurrentSession"));
       return;
@@ -626,29 +665,25 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
     setConflictAgentMsg("");
     setConflictAgentFailed(false);
     try {
-      const result = await api.gitResolveConflictAgent({
+      const result = await api.gitConflictPrompt({
         projectId,
         target,
         prompt: settings.conflictAgentPrompt,
         ...(problem?.trim() ? { problem: problem.trim() } : {}),
-        ...(target === "current-session" && sessionId ? { sessionId } : {}),
+        ...(target === "current-session" && currentSessionId ? { sessionId: currentSessionId } : {}),
       });
       if (!result.ok) {
         setConflictAgentFailed(true);
         setConflictAgentMsg(result.reason);
         return;
       }
-      // The server already created the session and admitted the prompt. State
-      // that before navigating: a failure to open the chat must not be
-      // reported as a failure to start the conflict resolution.
-      setConflictAgentMsg(tr("gitview.conflictAgentStarted"));
-      if (target === "new-session" || result.data.sessionId !== sessionId) {
-        try {
-          await openSession(result.data.sessionId);
-        } catch (cause) {
-          setUiError(friendlyError(tr("common.error"), cause));
-        }
+      if (target === "new-session") {
+        startNewSession(projectId, { draft: result.data.prompt });
+      } else if (currentSessionId) {
+        await openSession(currentSessionId);
+        requestComposerReplace(result.data.prompt);
       }
+      setConflictAgentMsg(tr("gitview.conflictAgentDraftReady"));
     } catch (cause) {
       setConflictAgentFailed(true);
       setConflictAgentMsg(friendlyError(tr("pullrequestview.conflictAgentFailed"), cause));
@@ -790,11 +825,11 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
             size="sm"
             className="source-action-btn source-sync-btn"
             iconStart={SyncIcon}
-            busy={busyRemote !== null}
-            disabled={busyRemote !== null || busy}
+            busy={busyRemote !== null || autoRebaseBusy}
+            disabled={busyRemote !== null || autoRebaseBusy || busy}
             onClick={() => void runRemote("sync")}
           >
-            {busyRemote ? remoteLabel[busyRemote].busy : remoteLabel.sync.idle}
+            {busyRemote ? remoteLabel[busyRemote].busy : autoRebaseBusy ? remoteLabel.sync.busy : remoteLabel.sync.idle}
           </Button>
           <Menu
             label={tr("gitview.remoteRepositoryActions")}
@@ -803,13 +838,13 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
               id: step,
               label: remoteLabel[step].idle,
               icon: step === "fetch" ? FetchIcon : step === "pull" ? PullIcon : PushIcon,
-              disabled: busyRemote !== null || busy,
+              disabled: busyRemote !== null || autoRebaseBusy || busy,
               onSelect: () => { void runRemote(step); },
             }))}
           >
-            {(trigger) => <IconButton {...trigger} icon={MoreIcon} size="sm" label={tr("gitview.remoteRepositoryActions")} disabled={busy || busyRemote !== null} />}
+            {(trigger) => <IconButton {...trigger} icon={MoreIcon} size="sm" label={tr("gitview.remoteRepositoryActions")} disabled={busy || busyRemote !== null || autoRebaseBusy} />}
           </Menu>
-          <IconButton icon={RefreshIcon} size="sm" className="source-refresh-btn" label={tr("gitview.refreshSourceControl")} disabled={busy || busyRemote !== null} onClick={() => void refresh()} />
+          <IconButton icon={RefreshIcon} size="sm" className="source-refresh-btn" label={tr("gitview.refreshSourceControl")} disabled={busy || busyRemote !== null || autoRebaseBusy} onClick={() => void refresh()} />
         </div>
       </header>
 
@@ -831,7 +866,9 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
           busy={conflictAgentBusy}
           message={conflictAgentMsg}
           failed={conflictAgentFailed}
-          onResolve={(target) => void startConflictAgent(target, remoteStatus.error)}
+          autoRebaseBusy={autoRebaseBusy}
+          {...(isDivergedError(remoteStatus.error) ? { onAutoRebase: () => void autoRebaseAndSync() } : {})}
+          onResolve={(target) => void openConflictAgentDraft(target, remoteStatus.error)}
         />
       )}
 
@@ -914,7 +951,8 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
               busy={conflictAgentBusy}
               message={conflictAgentMsg}
               failed={conflictAgentFailed}
-              onResolve={(target) => void startConflictAgent(target)}
+              autoRebaseBusy={autoRebaseBusy}
+              onResolve={(target) => void openConflictAgentDraft(target)}
             />
           )}
           <div className={`git-master-detail ${mobileDetail ? "detail-open" : ""}`}>

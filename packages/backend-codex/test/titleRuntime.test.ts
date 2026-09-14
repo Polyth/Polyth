@@ -105,3 +105,15 @@ test("explicit Codex session title does not spend a metadata turn", async () => 
   assert.equal(calls.some((call) => call.method === "thread/start"), false);
   assert.equal(calls.some((call) => call.method === "thread/name/set"), false);
 });
+
+test("reattached placeholder Codex sessions still get a semantic title", async () => {
+  const { wrapped, calls } = fixture();
+  await wrapped.ensureSession!({ title: "New session" } as any);
+  await wrapped.startTurnOperation!(turn, "turn-a");
+  await flushMetadataTurn();
+
+  assert.deepEqual(
+    calls.find((call) => call.method === "thread/name/set")?.params,
+    { threadId: "primary-thread", name: "Fix mobile composer" },
+  );
+});

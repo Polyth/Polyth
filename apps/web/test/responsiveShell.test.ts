@@ -383,13 +383,14 @@ test("mobile Settings swaps a vertical page list for content with a back action"
   assert.doesNotMatch(mobile, /\.settings-nav-list\s*\{[^}]*overflow-x:\s*auto/);
 });
 
-test("shared menu, destructive, failed-turn, and header-action contracts stay wired", async () => {
+test("shared menu, destructive, transient-error, and header-action contracts stay wired", async () => {
   const sidebar = await read("../src/components/Sidebar.tsx");
   const header = await read("../src/components/Header.tsx");
   const actions = await read("../src/widgets/builtinMiniWidgets.tsx");
   const sessions = await read("../src/components/sidebar/SessionList.tsx");
   const plugins = await read("../../../packages/plugins/widgets/PluginsPage.tsx");
   const timeline = await read("../src/components/Timeline.tsx");
+  const app = await read("../src/App.tsx");
   const css = await read("../src/styles.css");
   // Project and session menus render through the ui/Menu primitive, which
   // itself owns the shared dismissible-menu semantics — one contract,
@@ -406,9 +407,13 @@ test("shared menu, destructive, failed-turn, and header-action contracts stay wi
     "every permanent session deletion is guarded by the themed alert contract",
   );
   assert.ok(plugins.includes('disabled={!sourceValid}'), "plugin install stays disabled until minimally valid");
-  assert.match(timeline, /<Notice[\s\S]*?className="turn-error"[\s\S]*?role="alert"/,
-    "failed turns use the shared accessible notice primitive");
-  assert.match(css, /\.turn-error\s*\{[^}]*width:\s*min\(var\(--chat-measure\), 100%\)[^}]*border-inline-start-width:\s*3px/s);
+  assert.match(timeline, /setUiError\([\s\S]*?timeline\.lastTurnFailed/,
+    "ordinary failed turns route through the host-owned transient error surface");
+  assert.doesNotMatch(timeline, /className="turn-error"/,
+    "ordinary turn failures do not render inside the conversation");
+  assert.match(app, /className="error-banner"[\s\S]*?role="alert"/,
+    "the transient error surface remains an accessible alert");
+  assert.match(css, /\.error-banner\s*\{[^}]*bottom:\s*max\(var\(--space-3\), var\(--safe-bottom\)\)/s);
 });
 
 test("fresh and existing chats expose the shared composer and stable focus target", async () => {

@@ -4,9 +4,12 @@ import {
 } from "react";
 import {
   activateProject,
+  beginPendingSend,
   beginSessionSpawn,
+  bindPendingSend,
   bindSessionSpawn,
   clearNewSessionDraft,
+  endPendingSend,
   finishSessionSpawn,
   getState,
   isActiveSessionSpawning,
@@ -610,6 +613,15 @@ export default function Composer({
   const [queueEditStarting, setQueueEditStarting] = useState(false);
   const [queueEditSaving, setQueueEditSaving] = useState(false);
   const [sendPending, setSendPending] = useState(false);
+  // The composer empties on submit, but the submitted text stays staged in the
+  // scoped draft until admission is authoritative. Draft persistence is held
+  // off for that window so the now-empty input cannot overwrite the recovery
+  // copy; the admission result writes the record explicitly either way.
+  const sendPendingRef = useRef(false);
+  const markSendPending = useCallback((value: boolean) => {
+    sendPendingRef.current = value;
+    setSendPending(value);
+  }, []);
   const [queuedItems, setQueuedItems] = useState<QueueItemDto[]>([]);
   const [steeringQueuedId, setSteeringQueuedId] = useState<string | null>(null);
   const steeringQueuedBySessionRef = useRef(new Map<string, string>());
@@ -744,7 +756,7 @@ export default function Composer({
   // preserved untouched.
   const flushComposerDraft = useCallback(() => {
     const id = sessionIdRef.current;
-    if (id === null) return;
+    if (id === null || sendPendingRef.current) return;
     if (scopedDraftCacheKey(id) !== sessionScopeKeyRef.current) return;
     const editing = queueEditRef.current;
     const nav = promptHistoryNavRef.current;
@@ -841,14 +853,14 @@ export default function Composer({
   // mid-typing would reset the live input to the older server value.
   useEffect(() => {
     const id = session?.id;
-    if (!id || queueEdit?.sessionId === id) return;
+    if (!id || queueEdit?.sessionId === id || sendPending) return;
     if (promptHistoryNavRef.current.isBrowsing()) return;
     const scopeKey = scopedDraftCacheKey(id);
     const t = setTimeout(() => {
       if (scopedDraftCacheKey(id) === scopeKey) saveDraft(id, text);
     }, 250);
     return () => clearTimeout(t);
-  }, [session?.id, text, queueEdit, activeProjectId]);
+  }, [session?.id, text, queueEdit, activeProjectId, sendPending]);
 
   // Apply server-side draft updates from other clients when the composer is
   // empty (user hasn't started typing). Active local edits always win — the
@@ -1402,6 +1414,36 @@ export default function Composer({
       }, capturedScope);
       return { revision: staged.revision, scopeKey, scope: capturedScope };
     };
+    // Instant echo (UX): the prompt leaves the composer and appears at the tail
+    // on the submit frame, not when admission returns. Presentation only — the
+    // canonical `user/message` still establishes the fact and replaces this row
+    // the moment it lands. A queued prompt is excluded because it belongs to
+    // the queue list, and a shell command produces no user turn at all.
+    const echoId = command === null && delivery !== "queue"
+      ? beginPendingSend({ sessionId: target, text: t, attachments: atts })
+      : null;
+    // Emptying the input is itself a draft revision; anything typed after this
+    // mark is a newer draft that a rejected send must not overwrite.
+    let revisionAfterSubmit = draftRevisionAtSend;
+    const clearComposerNow = () => {
+      setText("");
+      inputRef.current?.replaceText("");
+      revisionAfterSubmit = draftRevisionRef.current;
+    };
+    // A rejected prompt has no canonical row coming. Drop the echo and hand the
+    // exact text back to the composer it was taken from — but never over a
+    // newer draft, another session, or a changed reliability scope.
+    const rejectEcho = (targetSessionId: string, stagedDraft?: StagedDraft) => {
+      if (!echoId) return;
+      endPendingSend(echoId);
+      const sentDraft = stagedDraft ?? stagedRevisions.get(targetSessionId);
+      if (!sentDraft || scopedDraftCacheKey(targetSessionId) !== sentDraft.scopeKey) return;
+      if (getState().activeSessionId !== targetSessionId) return;
+      if (draftRevisionRef.current !== revisionAfterSubmit) return;
+      if ((inputRef.current?.getText() ?? "") !== "") return;
+      setText(t);
+      inputRef.current?.replaceText(t);
+    };
     const deliver = (targetSessionId: string, stagedDraft?: StagedDraft) => {
       const deliveryScope = stagedDraft?.scope
         ?? stagedRevisions.get(targetSessionId)?.scope
@@ -1437,6 +1479,7 @@ export default function Composer({
           },
         ).then((ok) => {
           if (!ok) {
+            rejectEcho(targetSessionId, stagedDraft);
             return;
           }
           const sentDraft = stagedDraft ?? stagedRevisions.get(targetSessionId);
@@ -1453,7 +1496,7 @@ export default function Composer({
           }
           const stillCurrent = scopedDraftCacheKey(targetSessionId) === sentDraft.scopeKey;
           if (stillCurrent && getState().activeSessionId === targetSessionId
-            && draftRevisionRef.current === draftRevisionAtSend) {
+            && draftRevisionRef.current === revisionAfterSubmit) {
             setText("");
             inputRef.current?.replaceText("");
           }
@@ -1478,8 +1521,10 @@ export default function Composer({
         ...reliabilityScopeAtSend,
         sessionId: target,
       }));
-      setSendPending(true);
-      void deliver(target).finally(() => setSendPending(false));
+      markSendPending(true);
+      // The echo now carries the prompt, so the input empties on this frame.
+      if (echoId) clearComposerNow();
+      void deliver(target).finally(() => markSendPending(false));
     } else if (activeProjectId) {
       const spawnHarnessId = creationHarness?.mode === "pinned"
         ? creationHarness.harnessId
@@ -1535,6 +1580,7 @@ export default function Composer({
         }
         assertScopeStillCurrent();
         bindSessionSpawn(spawnRequestId, created);
+        if (echoId) bindPendingSend(echoId, created);
         let createdDraft: StagedDraft | undefined;
         if (command === null) {
           createdDraft = stageTargetDraft(created, {
@@ -1569,6 +1615,7 @@ export default function Composer({
       })()
         .catch((error) => {
           setUiError(friendlyError(tr("common.error"), error));
+          if (echoId) endPendingSend(echoId);
           // The draft was cleared optimistically below; a failed worktree or
           // session creation must never lose the typed prompt or its pills.
           // Restore only while still on the fresh-session surface — never into
@@ -1589,8 +1636,7 @@ export default function Composer({
         .finally(() => finishSessionSpawn(spawnRequestId));
     }
     if (!target || command !== null) {
-      setText("");
-      inputRef.current?.replaceText("");
+      clearComposerNow();
       promptHistoryNav.reset();
     }
     setAcToken(null);

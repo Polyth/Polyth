@@ -470,6 +470,11 @@ export interface ConversationSeed {
   draft?: string;
 }
 
+export interface WebErrorAction {
+  label: string;
+  run(): void | Promise<void>;
+}
+
 export interface WebPackageHost {
   slots: {
     register(registration: SlotRegistration): Unregister;
@@ -591,6 +596,9 @@ export interface WebPackageHost {
   };
   errors: {
     friendly(action: string, cause: unknown): string;
+    /** Host-owned transient error notice. Optional for compatibility with
+     * older package hosts; packages keep contextual form errors in place. */
+    show?(message: string, action?: WebErrorAction): void;
   };
   handoffTargets: {
     register(registration: HandoffTargetRegistration): Unregister;

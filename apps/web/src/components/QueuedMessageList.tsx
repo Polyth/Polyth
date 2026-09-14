@@ -4,7 +4,7 @@ import { type DragEvent as ReactDragEvent, useCallback, useEffect, useMemo, useS
 import type { QueueItemDto } from "@polyth/contracts";
 import { queuePausedAfterUserInterrupt } from "@polyth/session/queue-pause";
 import { api } from "@polyth/session/web-api";
-import { useStore } from "../store.ts";
+import { setUiError, useStore } from "../store.ts";
 import { announce } from "./a11y/live.tsx";
 import { tr } from "../i18n/index.ts";
 import Button from "./ui/Button.tsx";
@@ -52,13 +52,11 @@ export default function QueuedMessageList({
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const scope = useMemo(() => ({ alive: true, request: 0, busy: false }), [sessionId]);
   useEffect(() => {
     scope.alive = true;
     setItems([]);
     setBusyId(null);
-    setError(null);
     return () => { scope.alive = false; scope.request++; };
   }, [scope]);
   // queue/* events bump the model version; refetch on any event activity
@@ -73,7 +71,7 @@ export default function QueuedMessageList({
       setItems(next);
       onItemsChange?.(sessionId, next);
     } catch (error) {
-      if (scope.alive && request === scope.request) setError(String(error));
+      if (scope.alive && request === scope.request) setUiError(String(error));
     }
   }, [sessionId, onItemsChange, scope]);
 
@@ -83,7 +81,7 @@ export default function QueuedMessageList({
   const resumable = visibleItems.find((item) => !item.heldForReview) ?? null;
   const queuePaused = resumable !== null
     && queuePausedAfterUserInterrupt(events ?? [], items);
-  if (visibleItems.length === 0 && !error) return null;
+  if (visibleItems.length === 0) return null;
 
   const persistOrder = async (next: QueueItemDto[], movedId: string) => {
     if (scope.busy) return;
@@ -135,13 +133,12 @@ export default function QueuedMessageList({
     scope.busy = true;
     ++scope.request;
     setBusyId(id);
-    setError(null);
     try {
       await api.queueRemove(sessionId, id);
       announce(tr("queuedmessagelist.queuedMessageRemoved"));
     } catch (error) {
       const code = (error as { code?: string }).code;
-      if (scope.alive && code !== "not-found") setError(String(error));
+      if (scope.alive && code !== "not-found") setUiError(String(error));
     } finally {
       await refresh();
       scope.busy = false;
@@ -154,11 +151,10 @@ export default function QueuedMessageList({
     scope.busy = true;
     ++scope.request;
     setBusyId(item.id);
-    setError(null);
     try {
       await onSteer(item);
     } catch (error) {
-      if (scope.alive) setError(String(error));
+      if (scope.alive) setUiError(String(error));
     } finally {
       await refresh();
       scope.busy = false;
@@ -168,7 +164,6 @@ export default function QueuedMessageList({
 
   return (
     <div className="queue-list" role="list" aria-label={tr("queuedmessagelist.valueQueuedMessages", { length: visibleItems.length })}>
-      {error && <div role="alert">{error}</div>}
       {queuePaused && resumable && (
         <div className="queue-chip" role="status" aria-live="polite">
           <span className="queue-grip" aria-hidden="true">

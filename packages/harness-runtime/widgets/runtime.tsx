@@ -159,6 +159,13 @@ export function HarnessTabs({
     ? rows.find((row) => row.identity.id === transition.targetHarnessId)
       ?? roster.find((row) => row.identity.id === transition.targetHarnessId)
     : undefined;
+  const reportFailure = (message: string) => {
+    if (host.errors.show) host.errors.show(message);
+    else setFailure(message);
+  };
+  useEffect(() => {
+    if (error) host.errors.show?.(error);
+  }, [error, host.errors]);
 
   const perform = async (next: HarnessSelection, timing: "after-turn" | "stop-now") => {
     if (!sessionId) return;
@@ -177,7 +184,7 @@ export function HarnessTabs({
         ? `Harness switch scheduled. The current response will finish, then ${destination} will continue.`
         : `Now using ${destination}.`);
     } catch (cause) {
-      setFailure(host.errors.friendly("Change harness", cause));
+      reportFailure(host.errors.friendly("Change harness", cause));
     } finally {
       setBusy(false);
     }
@@ -219,7 +226,7 @@ export function HarnessTabs({
       host.sessions.upsert(await api.post<SessionProjection>(`/api/harnesses/sessions/${encodeURIComponent(sessionId)}/cancel`, {}));
       setAnnouncement("Harness switch cancelled. The current harness will continue.");
     } catch (cause) {
-      setFailure(host.errors.friendly("Cancel harness switch", cause));
+      reportFailure(host.errors.friendly("Cancel harness switch", cause));
     } finally {
       setBusy(false);
     }
@@ -278,17 +285,22 @@ export function HarnessTabs({
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => void cancel()}>Cancel</Button>
         </div>}
         {transition?.phase === "released" && <div className="pkg-harnesses-transition" role="status"><ProviderLogo providerID={target?.identity.id ?? transition.targetHarnessId} providerName={target?.identity.name} size="compact" />Starting {target?.identity.name ?? transition.targetHarnessId}…</div>}
-        {transition?.phase === "failed" && <Notice tone="error" role="alert" heading={`${target?.identity.name ?? transition.targetHarnessId} couldn't start`} actions={<Button size="sm" busy={busy} onClick={() => void perform(transition.selection, "after-turn")}>Retry</Button>}>
+        {transition?.phase === "failed" && !host.errors.show && <Notice tone="error" role="alert" heading={`${target?.identity.name ?? transition.targetHarnessId} couldn't start`} actions={<Button size="sm" busy={busy} onClick={() => void perform(transition.selection, "after-turn")}>Retry</Button>}>
           The previous harness stopped safely. {transition.error?.message ?? "Choose another harness tab to continue."}
         </Notice>}
+        {transition?.phase === "failed" && host.errors.show && (
+          <div className="pkg-harnesses-transition">
+            <Button size="sm" busy={busy} onClick={() => void perform(transition.selection, "after-turn")}>Retry {target?.identity.name ?? transition.targetHarnessId}</Button>
+          </div>
+        )}
         {activeRow?.snapshot && !canExecute(activeRow.snapshot) && !transition && <p className="pkg-harnesses-picker-state" role="status">{availabilityLabel(activeRow.snapshot)}. Open Harnesses in Settings to finish setup.</p>}
       </>
-    {(failure || error) && <Notice tone="error" role="alert">{failure || error}</Notice>}
+    {(failure || error) && !host.errors.show && <Notice tone="error" role="alert">{failure || error}</Notice>}
     <span className="sr-only" role="status" aria-live="polite">{announcement}</span>
   </section>;
 }
 
-function HarnessTransitionStatus({
+export function HarnessTransitionStatus({
   host,
   sessionId,
   resolvedHarnessId,
@@ -301,9 +313,8 @@ function HarnessTransitionStatus({
 }) {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState("");
-  if (!transition || !sessionId) return null;
-
-  const update = async (timing: "after-turn" | "stop-now") => {
+  const update = useCallback(async (timing: "after-turn" | "stop-now") => {
+    if (!transition || !sessionId) return;
     setBusy(true);
     setFailure("");
     try {
@@ -312,22 +323,39 @@ function HarnessTransitionStatus({
         timing,
       }));
     } catch (cause) {
-      setFailure(host.errors.friendly("Change harness", cause));
+      const message = host.errors.friendly("Change harness", cause);
+      if (host.errors.show) host.errors.show(message);
+      else setFailure(message);
     } finally {
       setBusy(false);
     }
-  };
-  const cancel = async () => {
+  }, [host, sessionId, transition]);
+  const cancel = useCallback(async () => {
+    if (!sessionId) return;
     setBusy(true);
     setFailure("");
     try {
       host.sessions.upsert(await api.post<SessionProjection>(`/api/harnesses/sessions/${encodeURIComponent(sessionId)}/cancel`, {}));
     } catch (cause) {
-      setFailure(host.errors.friendly("Cancel harness switch", cause));
+      const message = host.errors.friendly("Cancel harness switch", cause);
+      if (host.errors.show) host.errors.show(message);
+      else setFailure(message);
     } finally {
       setBusy(false);
     }
-  };
+  }, [host, sessionId]);
+  const transitionFailure = transition?.phase === "failed"
+    ? host.errors.friendly(`${transition.targetHarnessId} couldn't start`, transition.error?.message ?? "Choose another harness to continue.")
+    : "";
+  useEffect(() => {
+    if (!transitionFailure || !host.errors.show) return;
+    host.errors.show(transitionFailure, {
+      label: "Retry",
+      run: () => update("after-turn"),
+    });
+  }, [host.errors, transitionFailure, update]);
+
+  if (!transition || !sessionId || (transition.phase === "failed" && host.errors.show)) return null;
 
   return <div className="pkg-harnesses pkg-harnesses-transition-status">
     {transition.phase === "requested" && <div className="pkg-harnesses-transition" role="status">

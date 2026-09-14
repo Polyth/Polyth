@@ -12,7 +12,7 @@ import { useSpaces } from "../spaces.ts";
 import { markSessionPerformance } from "../sessionPerformance.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
 import {
-  applyEvent, setUiError, useStore,
+  applyEvent, setUiError, usePendingSends, useStore, type PendingSend,
 } from "../store.ts";
 import { api } from "@polyth/session/web-api";
 import {
@@ -84,7 +84,7 @@ import { tr } from "../i18n/index.ts";
 import ExecutionRow, { DiffStat, useCollapsePresence } from "./ExecutionRow.tsx";
 import { Button, Notice, RunSummary, type RunSummaryState } from "./ui/index.ts";
 import type { TurnLimitState } from "../reduce.ts";
-import { TRANSIENT_TURN_NOTICE_MS, transientTurnNoticeKey } from "../turnNotice.ts";
+import { transientTurnNoticeKey } from "../turnNotice.ts";
 import ChatResponseFooter from "./ChatResponseFooter.tsx";
 import MessageQuickActions from "./MessageQuickActions.tsx";
 
@@ -508,14 +508,6 @@ const ACTION_GAP_MS = ACTIVITY_LIVE_EXIT_MS;
  *  folds straight into the block. */
 const ACTION_BACKLOG_MS = 2 * (ACTION_SHOW_MS + ACTION_GAP_MS);
 
-/** An action is live while it is still executing. Live actions float above the
- *  activity block instead of expanding it, so the block can stay folded. */
-function inFlight(item: ActivityItem): boolean {
-  if (item.kind === "tool") return item.status === "pending" || item.status === "running";
-  if (item.kind === "assistant") return !item.finalized;
-  return item.action === "started";
-}
-
 interface ActionSchedule {
   /** The one action currently presented to the reader. */
   showing: Set<string>;
@@ -525,27 +517,53 @@ interface ActionSchedule {
   scheduled: Set<string>;
 }
 
+/** True while the item has not reached a terminal recorded state. Consulted
+ *  only together with recency on restore: status alone would resurrect
+ *  interrupted `running` tools and unfinalized assistant parts that history
+ *  keeps forever, and recency alone would replay a just-finished turn over
+ *  the answer the moment the chat is opened. */
+function actionIncomplete(item: ActivityItem): boolean {
+  if (item.kind === "tool") return item.status === "pending" || item.status === "running";
+  if (item.kind === "assistant") return !item.finalized;
+  return item.action === "started";
+}
+
 /** Ids currently inside their turn outside the block. Arrivals are queued one
  *  at a time rather than shown the moment they land: without that, a burst of
  *  fast tools cuts each other's motion short and reads as flicker. Each action
  *  gets the full show, then a gap, then the next one rises — fast work is
- *  emphasised, not chaotic. Rows already present at mount are dated by their
- *  own timestamp so replayed history stays folded on scroll-back, clamped to
- *  now because a skewed clock must not park a row outside the block. */
-function useActionSchedule(items: ActivityItem[]): ActionSchedule {
+ *  emphasised, not chaotic.
+ *
+ *  A group that already has history at first paint is a restore (reopen,
+ *  cached tail, scroll-back), not a live arrival: flying it would overlay the
+ *  answer below. Only a brand-new group whose single action is still open and
+ *  recent takes the stage; later arrivals still queue while the turn is live.
+ *  Status alone cannot decide this — interrupted `running` tools stay in
+ *  history forever — and recency alone would replay a just-finished turn. */
+function useActionSchedule(items: ActivityItem[], allowLive = true): ActionSchedule {
   // id -> start of its turn outside the block; 0 means it never gets one.
   const turns = useRef(new Map<string, number>());
   const cursor = useRef(0);
   const mounted = useRef(false);
   const [, redraw] = useState(0);
   const at = Date.now();
+  const onlyFreshLive = items.length === 1
+    && actionIncomplete(items[0]!)
+    && at - Math.min(at, items[0]!.time) < ACTION_SHOW_MS;
+  const restore = !mounted.current && !onlyFreshLive;
   for (const item of items) {
     if (turns.current.has(item.id)) continue;
-    // A live action restored after navigation still deserves one visible turn;
-    // completed history uses its recorded time and stays folded on replay.
-    const arrivedAt = mounted.current || inFlight(item) ? at : Math.min(at, item.time);
+    // An idle/historical group never takes the stage: revisited sessions paint
+    // cached history first, then the reconcile suffix would otherwise look like
+    // a burst of live arrivals and fly in over the answer.
+    if (!allowLive || restore) {
+      turns.current.set(item.id, 0);
+      continue;
+    }
+    const arrivedAt = mounted.current ? at : Math.min(at, item.time);
     const startAt = Math.max(arrivedAt, cursor.current);
-    if (at - arrivedAt >= ACTION_SHOW_MS || startAt - at > ACTION_BACKLOG_MS) {
+    const replayedFinished = !mounted.current && !actionIncomplete(item);
+    if (replayedFinished || at - arrivedAt >= ACTION_SHOW_MS || startAt - at > ACTION_BACKLOG_MS) {
       turns.current.set(item.id, 0);
       continue;
     }
@@ -625,11 +643,15 @@ export function ActivityGroupView({
   subagents,
   state: stateOverride,
   entering = false,
+  liveFlight = true,
 }: {
   g: ActivityGroup;
   subagents: SubagentState | null;
   state?: RunSummaryState;
   entering?: boolean;
+  /** False for idle/historical groups so reopen and reconcile suffixes cannot
+   *  replay the composer→block flight over the answer below. */
+  liveFlight?: boolean;
 }) {
   const state = stateOverride ?? derivedActivityState(g);
   const active = state === "active" || state === "waiting";
@@ -637,7 +659,7 @@ export function ActivityGroupView({
   // rows below it; opening the block is a reader decision only.
   const [open, setOpen] = useState(false);
   const itemsPresent = useCollapsePresence(open);
-  const schedule = useActionSchedule(g.items);
+  const schedule = useActionSchedule(g.items, liveFlight);
   const liveIds = g.items.filter((item) => schedule.showing.has(item.id)).map((item) => item.id);
   const leavingIds = g.items.filter((item) => schedule.leaving.has(item.id)).map((item) => item.id);
   const floatingIds = new Set([...liveIds, ...leavingIds]);
@@ -796,6 +818,24 @@ export function UserPrompt({ text, id }: { text: string; id: string }) {
   );
 }
 
+/** The prompt the reader just submitted, shown at the tail while admission is
+ *  still in flight. Deliberately the same row shape as a canonical user turn —
+ *  the canonical event replaces it in one commit with no reflow — but it owns
+ *  no message actions, because there is no canonical message to act on yet,
+ *  and no `article` role, because it would have to claim a send time nothing
+ *  has confirmed. The composer's activity dock carries the live status; the
+ *  canonical row arrives seconds later with its real timestamped label. */
+function PendingPrompt({ send }: { send: PendingSend }) {
+  return (
+    <div className="msg user msg-pending" data-pending-send={send.id}>
+      <div className="bubble" dir="auto">
+        <UserPrompt text={send.text} id={send.id} />
+      </div>
+      {send.attachments.length > 0 && <AttachmentPills attachments={send.attachments} />}
+    </div>
+  );
+}
+
 function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segmentStartedAt, live, entering, onRevert, onFork, revert, fork, pinned = false }: {
   m: RenderMessage;
   announce?: Announce;
@@ -927,16 +967,19 @@ const ActivityRow = memo(function ActivityRow({
   subagents,
   state,
   entering,
+  liveFlight,
 }: {
   rev: number;
   g: ActivityGroup;
   subagents: SubagentState | null;
   state?: RunSummaryState;
   entering?: boolean;
+  liveFlight?: boolean;
 }) {
-  return <ActivityGroupView g={g} subagents={subagents} state={state} entering={entering} />;
+  return <ActivityGroupView g={g} subagents={subagents} state={state} entering={entering} liveFlight={liveFlight} />;
 }, (prev, next) => prev.rev === next.rev && sameActivity(prev.g, next.g)
-  && prev.subagents === next.subagents && prev.state === next.state && prev.entering === next.entering);
+  && prev.subagents === next.subagents && prev.state === next.state
+  && prev.entering === next.entering && prev.liveFlight === next.liveFlight);
 
 // Right-edge prompt rail (WP4, restyled after polyth PromptNavigatorRail):
 // a thin vertical tape of ticks in a 28px gutter hugging the right edge of the
@@ -1359,6 +1402,8 @@ export default function Timeline({
     : EMPTY_SESSION_EVENTS);
   const latestUserMessage = [...model.messages].reverse()
     .find((message) => message.kind === "user" && !message.undone);
+  const pendingSends = usePendingSends(sessionId);
+  const newestPendingSendId = pendingSends[pendingSends.length - 1]?.id ?? null;
   useSlotVersion();
   // L13 windowing: only the last `limit` rows render (see timelineWindow.ts).
   const initialLimit = initialTimelineWindow(
@@ -1397,6 +1442,14 @@ export default function Timeline({
   // that prompt, then yields pixel for pixel as the new response grows.
   const turnSheetPromptId = useRef<string | null>(null);
   const turnSheetPadding = useRef(0);
+  // When a fresh-turn alignment scrolls the viewport, chatMotion's FLIP
+  // transforms (fill: "both") are already painted via its earlier
+  // MutationObserver. Any subsequent refresh() that re-measures
+  // getBoundingClientRect() picks up the TRANSFORMED positions, producing
+  // wrong padding and scroll targets. Suppress refresh() scrolling until
+  // the first model.version bump confirms the agent has started — the
+  // useLayoutEffect scroll is authoritative until then.
+  const freshTurnPending = useRef(false);
   const observedPrompt = useRef({
     sessionId,
     seq: latestUserMessage?.eventSeq ?? 0,
@@ -1485,8 +1538,10 @@ export default function Timeline({
     const el = ref.current;
     const promptId = turnSheetPromptId.current;
     if (!el || !promptId) return;
+    // An optimistic echo anchors the sheet exactly like the canonical prompt
+    // it stands in for, so the handover moves nothing.
     const prompt = [...el.querySelectorAll<HTMLElement>(".msg.user")]
-      .find((row) => row.dataset.msgId === promptId);
+      .find((row) => (row.dataset.msgId ?? row.dataset.pendingSend) === promptId);
     if (!prompt) {
       turnSheetPromptId.current = null;
       setTurnSheetPadding(0);
@@ -1537,6 +1592,7 @@ export default function Timeline({
       observedPrompt.current = { sessionId, seq: latestSeq };
       turnSheetPromptId.current = null;
       setTurnSheetPadding(0);
+      freshTurnPending.current = false;
       return;
     }
     if (!latestUserMessage || latestSeq <= observedPrompt.current.seq) return;
@@ -1550,12 +1606,32 @@ export default function Timeline({
     syncTurnSheet(true);
   }, [sessionId, latestUserMessage?.id, latestUserMessage?.eventSeq, setTurnSheetPadding, syncTurnSheet]);
 
+  // A submitted prompt opens its fresh-turn sheet the moment it is submitted,
+  // not when admission returns. The canonical row inherits the same sheet with
+  // identical geometry moments later, so the reader sees one settle, not two.
+  useLayoutEffect(() => {
+    if (!newestPendingSendId) return;
+    turnSheetPromptId.current = newestPendingSendId;
+    readerIntent.current = null;
+    scrollbarPointer.current = false;
+    readerDetached.current = false;
+    atBottom.current = true;
+    setShowJump(false);
+    syncTurnSheet(true);
+    // The scroll is now correct. Suppress refresh() until the first
+    // model.version bump so chatMotion's FLIP transforms cannot override it.
+    freshTurnPending.current = turnSheetPromptId.current !== null;
+  }, [newestPendingSendId, syncTurnSheet]);
+
   // Model commits cover durable/streamed rows. Resize observation additionally
   // covers local disclosure animation and smoothed text renders, so an open
   // live action cannot grow underneath the composer/status dock.
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    // The first model.version bump after a fresh-turn marks the end of the
+    // FLIP distortion window: transforms are gone and measurements are safe.
+    freshTurnPending.current = false;
     syncTurnSheet();
     if (atBottom.current) {
       setShowJump(false);
@@ -1567,6 +1643,9 @@ export default function Timeline({
     const el = ref.current;
     if (!el) return;
     const refresh = () => {
+      // While fresh-turn FLIP transforms distort getBoundingClientRect(),
+      // skip scroll updates: the useLayoutEffect scroll is authoritative.
+      if (freshTurnPending.current) return;
       syncTurnSheet();
       if (atBottom.current) scrollToTail();
     };
@@ -1808,26 +1887,29 @@ export default function Timeline({
     return bySeq;
   }, [visibleMessages]);
   const turnBroken = turn && (turn.status === "failed" || turn.status === "aborted");
-  // Ordinary terminal notices are presentation-only. Keep the rate-limit
-  // recovery panel persistent because it owns active resume/cancel controls.
   const transientTurnKey = transientTurnNoticeKey(sessionId, turn?.limit ? null : turn);
-  const [visibleTransientTurnKey, setVisibleTransientTurnKey] = useState<string | null>(transientTurnKey);
-  useEffect(() => {
-    if (transientTurnKey === null) {
-      setVisibleTransientTurnKey(null);
-      return;
-    }
-    setVisibleTransientTurnKey(transientTurnKey);
-    const timer = setTimeout(() => {
-      setVisibleTransientTurnKey((current) => current === transientTurnKey ? null : current);
-    }, TRANSIENT_TURN_NOTICE_MS);
-    return () => clearTimeout(timer);
-  }, [transientTurnKey]);
-  const showTransientTurnNotice = transientTurnKey !== null
-    && visibleTransientTurnKey === transientTurnKey;
   const lastPromptBoundary = [...model.messages].reverse()
     .find((message) => message.kind === "user" || message.kind === "github-conflict");
   const lastUser = lastPromptBoundary?.kind === "user" ? lastPromptBoundary : undefined;
+  // Ordinary turn failures use the one host-owned transient surface. Rate
+  // limits stay inline because their resume/cancel state outlives a toast.
+  useEffect(() => {
+    if (!transientTurnKey || !turn) return;
+    setUiError(
+      turn.status === "aborted" ? tr("timeline.turnAborted") : tr("timeline.lastTurnFailed"),
+      turn.status === "failed" && lastUser && sessionId ? {
+        label: tr("common.retry"),
+        run: () => {
+          const draft = {
+            text: lastUser.raw ?? lastUser.text,
+            ...(lastUser.attachments?.length ? { attachments: lastUser.attachments } : {}),
+          };
+          applyComposerSeed(sessionId, `turn-failed:${turn.turnId}`, draft);
+          requestComposerReplace(draft.text);
+        },
+      } : null,
+    );
+  }, [transientTurnKey, turn, lastUser, sessionId]);
   useEffect(() => {
     const el = ref.current;
     const update = () => {
@@ -2172,7 +2254,7 @@ export default function Timeline({
         onTouchCancelCapture={() => { touchY.current = null; }}
       >
         <SlotHost slot="session.timeline.before" context={slotSummary} customizable />
-        {model.messages.length === 0 && !model.workflowRun && (
+        {model.messages.length === 0 && !model.workflowRun && pendingSends.length === 0 && (
           <div className="empty">
             <div>{emptyCopy}</div>
           </div>
@@ -2208,6 +2290,7 @@ export default function Timeline({
                 subagents={model.subagents}
                 state={r.id === latestActivityId ? currentActivityState : undefined}
                 entering={r.id === latestRowId}
+                liveFlight={turnWorking && r.id === latestActivityId}
               />
             : (
               <MessageRow
@@ -2232,6 +2315,7 @@ export default function Timeline({
               />
             );
         })}
+        {pendingSends.map((send) => <PendingPrompt key={send.id} send={send} />)}
         {rewoundLiveActivity && (
           <ActivityRow
             key={`rewound-live-${rewoundLiveActivity.id}`}
@@ -2239,6 +2323,7 @@ export default function Timeline({
             g={rewoundLiveActivity}
             subagents={model.subagents}
             state={currentActivityState}
+            liveFlight={turnWorking}
           />
         )}
         {model.workflowRun && <WorkflowTimelineCard run={model.workflowRun} />}
@@ -2275,7 +2360,7 @@ export default function Timeline({
             <div className="rewound-tail-body">
               {undoneRows.map((row) => (
                 row.kind === "activity"
-                  ? <ActivityRow key={row.id} rev={activityRev(row)} g={row} subagents={model.subagents} />
+                  ? <ActivityRow key={row.id} rev={activityRev(row)} g={row} subagents={model.subagents} liveFlight={false} />
                   : <MessageRow key={row.id} rev={row.rev ?? 0} m={row} announce={announce} />
               ))}
             </div>
@@ -2283,30 +2368,6 @@ export default function Timeline({
         )}
         {turnBroken && turn.status === "failed" && turn.limit && sessionId && (
           <RateLimitNotice sessionId={sessionId} limit={turn.limit} />
-        )}
-        {showTransientTurnNotice && turnBroken && !(turn.status === "failed" && turn.limit) && (
-          <Notice
-            tone="error"
-            className="turn-error"
-            role="alert"
-            actions={turn.status === "failed" && lastUser && sessionId ? (
-              <Button
-                size="sm"
-                className="turn-error-retry"
-                title={tr("timeline.retryTheLastMessage")}
-                onClick={() => {
-                  const draft = {
-                    text: lastUser.raw ?? lastUser.text,
-                    ...(lastUser.attachments?.length ? { attachments: lastUser.attachments } : {}),
-                  };
-                  applyComposerSeed(sessionId, `turn-failed:${turn.turnId}`, draft);
-                  requestComposerReplace(draft.text);
-                }}
-              >{tr("common.retry")}</Button>
-            ) : undefined}
-          >
-            {turn.status === "aborted" ? tr("timeline.turnAborted") : tr("timeline.lastTurnFailed")}
-          </Notice>
         )}
         <div className="msg-live" role="status" aria-live="polite">{liveText}</div>
         <SlotHost slot="session.timeline.after" context={slotSummary} customizable />
