@@ -1,5 +1,14 @@
 import type { JsonObject, ProjectService, SessionService, SpaceContext, SpaceStorage } from "@polyth/contracts";
-import type { DeclaredCapability, PackageManifestV1 } from "@polyth/package-sdk/manifest";
+import type {
+  ContributionCompletion,
+  ExternalResource,
+  StructuredContext,
+} from "@polyth/package-sdk";
+import type {
+  CapabilityConstraints,
+  DeclaredCapability,
+  PackageManifest,
+} from "@polyth/package-sdk/manifest";
 import { brokerFetch } from "./networkBroker.ts";
 import {
   assertApprovedConnection,
@@ -10,10 +19,23 @@ import {
 } from "./connections.ts";
 import type { PackageOpaqueVault } from "./connections.ts";
 import { grantsAsDeclared, readGrants } from "./grants.ts";
+import type { InvocationLeaseIdentity, InvocationLeaseStore } from "./invocationLeases.ts";
 import { kvDelete, kvGet, kvSet } from "./packageKv.ts";
 
 function fail(code: string, message: string): never {
   throw Object.assign(new Error(message), { code });
+}
+
+export interface PackageModelRequest {
+  prompt: string;
+  maxOutputTokens: number;
+  timeoutMs: number;
+}
+
+export interface PackageModelResult {
+  text: string;
+  modelClass: "utility";
+  inputTruncated: boolean;
 }
 
 export interface PackageRpcDeps {
@@ -22,28 +44,134 @@ export interface PackageRpcDeps {
   sessions: SessionService;
   projects: ProjectService;
   appendEvent: (sessionId: string, type: string, data: JsonObject) => Promise<unknown>;
-  manifest: PackageManifestV1;
+  manifest: PackageManifest;
   enabled: boolean;
   sessionId?: string;
   projectId?: string;
   log?: (line: string) => void;
   secrets?: PackageOpaqueVault;
+  invocationLeases?: InvocationLeaseStore;
+  invocationIdentity?: InvocationLeaseIdentity;
+  generateModel?: (request: PackageModelRequest) => Promise<PackageModelResult>;
+}
+
+const intersectStrings = <T extends string>(
+  declared: readonly T[] | undefined,
+  granted: readonly T[] | undefined,
+): T[] | undefined => {
+  if (!declared && !granted) return undefined;
+  if (!declared) return granted ? [...granted] : undefined;
+  if (!granted) return undefined;
+  const allowed = new Set<T>(declared);
+  const values = granted.filter((item) => allowed.has(item));
+  return values.length ? [...new Set(values)] : [];
+};
+
+function intersectConstraints(
+  declared: CapabilityConstraints | undefined,
+  granted: CapabilityConstraints | undefined,
+): CapabilityConstraints | undefined {
+  if (!declared && !granted) return undefined;
+  if (!declared) return granted;
+  if (!granted) return undefined;
+  const origins = intersectStrings(declared.origins, granted.origins);
+  const paths = intersectStrings(declared.paths, granted.paths);
+  const methods = intersectStrings(declared.methods, granted.methods);
+  const modelClasses = intersectStrings(declared.modelClasses, granted.modelClasses);
+  const maxOutputTokens = declared.maxOutputTokens === undefined
+    ? granted.maxOutputTokens
+    : granted.maxOutputTokens === undefined
+      ? undefined
+      : Math.min(declared.maxOutputTokens, granted.maxOutputTokens);
+  return {
+    ...(origins ? { origins } : {}),
+    ...(paths ? { paths } : {}),
+    ...(methods ? { methods } : {}),
+    ...(modelClasses ? { modelClasses } : {}),
+    ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+  };
 }
 
 export function effectiveCapabilities(
-  manifest: PackageManifestV1,
+  manifest: PackageManifest,
   storage: SpaceStorage,
-): { granted: DeclaredCapability[]; names: Set<string>; origins: string[] } {
+): { granted: DeclaredCapability[]; names: Set<string> } {
   const declared = manifest.capabilities ?? [];
   const grants = readGrants(storage, manifest.id);
-  const granted = grantsAsDeclared(grants).filter((item) =>
-    declared.some((cap) => cap.name === item.name));
-  const names = new Set(granted.map((item) => item.name));
-  const network = granted.find((item) => item.name === "network.fetch");
-  const declaredNetwork = declared.find((item) => item.name === "network.fetch");
-  const allowed = new Set(declaredNetwork?.constraints?.origins ?? []);
-  const origins = (network?.constraints?.origins ?? []).filter((origin) => allowed.has(origin));
-  return { granted, names, origins };
+  const persisted = grantsAsDeclared(grants);
+  const granted: DeclaredCapability[] = [];
+  for (const capability of declared) {
+    const grant = persisted.find((item) => item.name === capability.name);
+    if (!grant) continue;
+    granted.push({
+      name: capability.name,
+      ...(intersectConstraints(capability.constraints, grant.constraints)
+        ? { constraints: intersectConstraints(capability.constraints, grant.constraints) }
+        : {}),
+    });
+  }
+  return { granted, names: new Set(granted.map((item) => item.name)) };
+}
+
+function safeExternalResource(body: Record<string, unknown>, fallbackProvider: string): ExternalResource {
+  const provider = typeof body.provider === "string" && body.provider.trim()
+    ? body.provider.trim().slice(0, 120)
+    : fallbackProvider;
+  const resourceId = typeof body.resourceId === "string" ? body.resourceId.trim().slice(0, 240) : "";
+  const title = typeof body.title === "string" ? body.title.trim().slice(0, 240) : "";
+  if (!resourceId || !title) fail("INVALID_REQUEST", "resourceId and title are required");
+  const url = typeof body.url === "string" ? body.url.trim().slice(0, 2_000) : undefined;
+  if (url && !/^https:\/\//i.test(url)) fail("INVALID_REQUEST", "resource URL must use https");
+  const metadata = body.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)
+    ? body.metadata as ExternalResource["metadata"]
+    : undefined;
+  return {
+    provider,
+    resourceId,
+    title,
+    ...(typeof body.subtitle === "string" ? { subtitle: body.subtitle.slice(0, 240) } : {}),
+    ...(url ? { url } : {}),
+    ...(typeof body.summary === "string" ? { summary: body.summary.slice(0, 4_000) } : {}),
+    ...(typeof body.text === "string" ? { text: body.text.slice(0, 16_000) } : {}),
+    ...(typeof body.retrievedAt === "number" && Number.isFinite(body.retrievedAt) ? { retrievedAt: body.retrievedAt } : {}),
+    ...(typeof body.freshUntil === "number" && Number.isFinite(body.freshUntil) ? { freshUntil: body.freshUntil } : {}),
+    ...(metadata ? { metadata } : {}),
+  };
+}
+
+function safeStructuredContext(body: Record<string, unknown>, fallbackProvider: string): StructuredContext {
+  const provider = typeof body.provider === "string" && body.provider.trim()
+    ? body.provider.trim().slice(0, 120)
+    : fallbackProvider;
+  const sourceId = typeof body.sourceId === "string" ? body.sourceId.trim().slice(0, 240) : "";
+  const title = typeof body.title === "string" ? body.title.trim().slice(0, 240) : "";
+  const summary = typeof body.summary === "string" ? body.summary.trim().slice(0, 4_000) : "";
+  const content = typeof body.content === "string" ? body.content.slice(0, 24_000) : "";
+  if (!sourceId || !title || !content.trim()) fail("INVALID_REQUEST", "sourceId, title and content are required");
+  const uri = typeof body.uri === "string" ? body.uri.trim().slice(0, 2_000) : undefined;
+  if (uri && !/^https:\/\//i.test(uri)) fail("INVALID_REQUEST", "context URI must use https");
+  return {
+    provider,
+    sourceId,
+    title,
+    ...(uri ? { uri } : {}),
+    retrievedAt: typeof body.retrievedAt === "number" && Number.isFinite(body.retrievedAt)
+      ? body.retrievedAt
+      : Date.now(),
+    ...(typeof body.freshUntil === "number" && Number.isFinite(body.freshUntil) ? { freshUntil: body.freshUntil } : {}),
+    summary,
+    content,
+    ...(body.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)
+      ? { metadata: body.metadata as StructuredContext["metadata"] }
+      : {}),
+  };
+}
+
+function assertCompletionBounds(completion: ContributionCompletion): void {
+  const bytes = Buffer.byteLength(JSON.stringify(completion), "utf8");
+  if (bytes > 128 * 1024) fail("INVALID_REQUEST", "contribution result exceeds size limit");
+  if ((completion.result?.resources?.length ?? 0) > 20) fail("INVALID_REQUEST", "too many resources in contribution result");
+  if ((completion.result?.context?.length ?? 0) > 12) fail("INVALID_REQUEST", "too many context items in contribution result");
 }
 
 export async function invokePackageRpc(
@@ -54,11 +182,13 @@ export async function invokePackageRpc(
   if (!deps.enabled) fail("PACKAGE_DISABLED", "package is disabled");
   const declared = deps.manifest.capabilities ?? [];
   const effective = effectiveCapabilities(deps.manifest, deps.storage);
-  const requireCap = (name: string): void => {
+  const requireCap = (name: string): DeclaredCapability => {
     if (!declared.some((cap) => cap.name === name)) {
       fail("CAPABILITY_UNDECLARED", `capability "${name}" is not declared`);
     }
-    if (!effective.names.has(name)) fail("CAPABILITY_DENIED", `capability "${name}" is not granted`);
+    const capability = effective.granted.find((item) => item.name === name);
+    if (!capability) fail("CAPABILITY_DENIED", `capability "${name}" is not granted`);
+    return capability;
   };
   const body = payload && typeof payload === "object" && !Array.isArray(payload)
     ? payload as Record<string, unknown>
@@ -75,6 +205,20 @@ export async function invokePackageRpc(
 
   try {
     switch (method) {
+      case "contribution.complete": {
+        if (!deps.invocationLeases || !deps.invocationIdentity) fail("HOST_UNAVAILABLE", "invocation authority is unavailable");
+        const completion = body as unknown as ContributionCompletion;
+        if (
+          typeof completion.invocationId !== "string"
+          || typeof completion.lease !== "string"
+          || typeof completion.ok !== "boolean"
+        ) {
+          fail("INVALID_REQUEST", "contribution completion is invalid");
+        }
+        assertCompletionBounds(completion);
+        deps.invocationLeases.complete(deps.invocationIdentity, completion);
+        return { accepted: true };
+      }
       case "session.read": {
         requireCap("session.read");
         if (!deps.sessionId) return null;
@@ -96,8 +240,31 @@ export async function invokePackageRpc(
         if (!await sessionOwned(sessionId)) fail("RESOURCE_NOT_FOUND", "session not found");
         await deps.appendEvent(sessionId, "package/context", {
           packageId: deps.manifest.id,
+          provider: deps.manifest.id,
+          sourceId: `legacy:${Date.now()}`,
           title: deps.manifest.display.name,
-          text,
+          summary: text.slice(0, 500),
+          content: text,
+          retrievedAt: Date.now(),
+        });
+        return { ok: true };
+      }
+      case "context.append": {
+        requireCap("context.append");
+        const sessionId = deps.sessionId;
+        if (!sessionId || !await sessionOwned(sessionId)) fail("RESOURCE_NOT_FOUND", "session not found");
+        const context = safeStructuredContext(body, deps.manifest.id);
+        await deps.appendEvent(sessionId, "package/context", {
+          packageId: deps.manifest.id,
+          provider: context.provider,
+          sourceId: context.sourceId,
+          title: context.title,
+          uri: context.uri ?? "",
+          retrievedAt: context.retrievedAt,
+          freshUntil: context.freshUntil ?? 0,
+          summary: context.summary,
+          content: context.content,
+          metadata: (context.metadata ?? {}) as JsonObject,
         });
         return { ok: true };
       }
@@ -110,23 +277,36 @@ export async function invokePackageRpc(
       }
       case "attachments.create": {
         requireCap("attachments.create");
-        const title = typeof body.title === "string" ? body.title.slice(0, 200) : "";
-        const text = typeof body.text === "string" ? body.text.slice(0, 8_000) : "";
+        const resource = safeExternalResource(body, deps.manifest.id);
         const sessionId = deps.sessionId;
-        if (typeof sessionId !== "string" || !sessionId || !title) {
-          return fail("INVALID_REQUEST", "session and title are required");
-        }
-        if (!await sessionOwned(sessionId)) fail("RESOURCE_NOT_FOUND", "session not found");
+        if (!sessionId || !await sessionOwned(sessionId)) fail("RESOURCE_NOT_FOUND", "session not found");
         await deps.appendEvent(sessionId, "package/attached", {
           packageId: deps.manifest.id,
-          resourceId: typeof body.resourceId === "string" ? body.resourceId.slice(0, 200) : "",
-          title,
-          subtitle: typeof body.subtitle === "string" ? body.subtitle.slice(0, 200) : "",
-          url: typeof body.url === "string" ? body.url.slice(0, 2_000) : "",
-          kind: typeof body.kind === "string" ? body.kind.slice(0, 64) : "context",
-          text,
+          provider: resource.provider,
+          resourceId: resource.resourceId,
+          title: resource.title,
+          subtitle: resource.subtitle ?? "",
+          url: resource.url ?? "",
+          summary: resource.summary ?? "",
+          text: resource.text ?? "",
+          retrievedAt: resource.retrievedAt ?? Date.now(),
+          freshUntil: resource.freshUntil ?? 0,
+          metadata: (resource.metadata ?? {}) as JsonObject,
         });
         return { ok: true };
+      }
+      case "model.generate": {
+        const capability = requireCap("model.generate");
+        if (!deps.generateModel) fail("HOST_UNAVAILABLE", "model generation is unavailable");
+        const classes = capability.constraints?.modelClasses ?? [];
+        if (!classes.includes("utility")) fail("CAPABILITY_DENIED", "utility model generation is not granted");
+        const prompt = typeof body.prompt === "string" ? body.prompt.trim().slice(0, 24_000) : "";
+        if (!prompt) fail("INVALID_REQUEST", "prompt is required");
+        const grantedMax = capability.constraints?.maxOutputTokens ?? 1_024;
+        const requestedMax = Number.isInteger(body.maxOutputTokens) ? Number(body.maxOutputTokens) : Math.min(1_024, grantedMax);
+        const maxOutputTokens = Math.min(Math.max(requestedMax, 1), grantedMax, 4_096);
+        const timeoutMs = Math.min(Math.max(Number(body.timeoutMs) || 30_000, 1_000), 60_000);
+        return deps.generateModel({ prompt, maxOutputTokens, timeoutMs });
       }
       case "storage.get": {
         requireCap("storage.package");
@@ -143,8 +323,14 @@ export async function invokePackageRpc(
         return { ok: true };
       }
       case "network.fetch": {
-        requireCap("network.fetch");
+        const network = requireCap("network.fetch");
         const url = typeof body.url === "string" ? body.url : "";
+        const methodName = (typeof body.method === "string" ? body.method : "GET").toUpperCase();
+        const allowedMethods = network.constraints?.methods;
+        if (allowedMethods?.length && !allowedMethods.includes(methodName as NonNullable<CapabilityConstraints["methods"]>[number])) {
+          fail("CAPABILITY_DENIED", `network method ${methodName} is not granted`);
+        }
+        const origins = network.constraints?.origins ?? [];
         const connectionId = typeof body.connectionId === "string" ? body.connectionId : undefined;
         const spec = connectionId
           ? (deps.manifest.connections ?? []).find((item) => item.id === connectionId)
@@ -165,7 +351,7 @@ export async function invokePackageRpc(
         if (connectionId && !authorization) fail("CONNECTION_REQUIRED", "connection is not connected");
         return brokerFetch({
           url,
-          method: typeof body.method === "string" ? body.method : "GET",
+          method: methodName,
           headers: body.headers && typeof body.headers === "object"
             ? Object.fromEntries(
               Object.entries(body.headers as Record<string, unknown>)
@@ -174,7 +360,7 @@ export async function invokePackageRpc(
             : undefined,
           body: typeof body.body === "string" ? body.body : undefined,
           ...(authorization ? { authorization } : {}),
-        }, effective.origins);
+        }, origins);
       }
       case "auth.connection": {
         requireCap("auth.connection");
