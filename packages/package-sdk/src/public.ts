@@ -13,6 +13,23 @@ export {
   type DeclaredCapability,
   type PackageCapabilityName,
 } from "./capabilities.ts";
+export type {
+  CommandInvocation,
+  ContributionCompletion,
+  ContributionInvocation,
+  ContributionInvocationBase,
+  ContributionInvocationKind,
+  ContributionResult,
+  ExternalResource,
+  MessageActionInvocation,
+  PackageJsonObject,
+  PackageJsonValue,
+  ResourceInvocation,
+  SessionActionInvocation,
+  StructuredContext,
+  ToolRendererInvocation,
+  UiContributionInvocation,
+} from "./contributions.ts";
 export {
   type RemoteUiAction,
   type RemoteUiNode,
