@@ -30,8 +30,20 @@ const exactTurnReceipt = async (bindingPath: unknown, operationId: unknown): Pro
   }
 };
 
+const commandCodeAgentEvent = (message: CommandCodeWorkerEvent): Record<string, unknown> | undefined => {
+  if (message.type !== "commandcode-record") return undefined;
+  const record = message.record && typeof message.record === "object" && !Array.isArray(message.record)
+    ? message.record as Record<string, unknown>
+    : undefined;
+  if (record?.type !== "event") return undefined;
+  return record.event && typeof record.event === "object" && !Array.isArray(record.event)
+    ? record.event as Record<string, unknown>
+    : undefined;
+};
+
 export function createCommandCodeCapabilitySync(context: HarnessContext, rpc: CommandCodeRpc): CommandCodeRpc {
   const projections = new Map<string, StagedProjection>();
+  const failedToolMods = new Set<string>();
   const target = () => provisioningTarget(context, "commandcode", {
     authorityId: rpc.authorityId,
     generation: rpc.generation,
@@ -76,7 +88,7 @@ export function createCommandCodeCapabilitySync(context: HarnessContext, rpc: Co
     const operationId = typeof message.operationId === "string" ? message.operationId : "";
     const toolName = typeof message.toolName === "string" ? message.toolName : "";
     const staged = operationId ? projections.get(operationId) : undefined;
-    if (!staged || !toolName) return;
+    if (!staged || !toolName || failedToolMods.has(operationId)) return;
     const capabilityId = Object.entries(staged.value.toolNames ?? {})
       .find(([, name]) => name === toolName)?.[0];
     if (!capabilityId || !staged.value.toolCapabilityIds.includes(capabilityId)) return;
@@ -87,6 +99,28 @@ export function createCommandCodeCapabilitySync(context: HarnessContext, rpc: Co
       outcome: "applied",
       evidence: { stage: "invocable", source: "Command Code Mod tool bridge invocation" },
     });
+  };
+
+  const observeToolModFailure = (message: CommandCodeWorkerEvent) => {
+    const operationId = typeof message.operationId === "string" ? message.operationId : "";
+    if (!operationId || failedToolMods.has(operationId)) return;
+    const event = commandCodeAgentEvent(message);
+    if (event?.type !== "mod_error" || event.modId !== "mod:polyth-tools") return;
+    const staged = projections.get(operationId);
+    if (!staged || !staged.value.toolCapabilityIds.length) return;
+    failedToolMods.add(operationId);
+    acknowledgeCapabilityApplication({
+      target: target(),
+      desiredRevision: staged.desiredRevision,
+      capabilityIds: staged.value.toolCapabilityIds,
+      outcome: "failed",
+      reason: "Command Code rejected the transient Polyth tool Mod; a native tool collision or Mod registration failure occurred",
+    });
+  };
+
+  const clearProjection = (operationId: string) => {
+    projections.delete(operationId);
+    failedToolMods.delete(operationId);
   };
 
   return {
@@ -125,7 +159,7 @@ export function createCommandCodeCapabilitySync(context: HarnessContext, rpc: Co
         if (admitted) settle(staged);
         const code = (error as { code?: string }).code;
         if (!admitted && (code === "runtime-rejected" || code === "busy" || code === "unsupported")) {
-          if (operationId) projections.delete(operationId);
+          if (operationId) clearProjection(operationId);
           releaseCapabilityLaunch({ target: launchTarget, desiredRevision: staged.desiredRevision });
         }
         throw error;
@@ -134,9 +168,10 @@ export function createCommandCodeCapabilitySync(context: HarnessContext, rpc: Co
     receipt: (operationId, nativeId) => rpc.receipt(operationId, nativeId),
     onEvent(callback) {
       return rpc.onEvent((message) => {
+        observeToolModFailure(message);
         observeToolInvocation(message);
         if (message.type === "turn-exit" && typeof message.operationId === "string") {
-          projections.delete(message.operationId);
+          clearProjection(message.operationId);
         }
         callback(message);
       });
@@ -144,6 +179,7 @@ export function createCommandCodeCapabilitySync(context: HarnessContext, rpc: Co
     onClose(callback) {
       return rpc.onClose(() => {
         projections.clear();
+        failedToolMods.clear();
         callback();
       });
     },
