@@ -6,6 +6,7 @@ import type {
   HarnessContext,
   ModelDescriptor,
   MutationOutcome,
+  RateLimitRetryHint,
   RuntimeCapabilities,
   RuntimeErrorCode,
   RuntimeEvent,
@@ -152,7 +153,7 @@ export const commandCodeExitFailure = (
   code: number | null,
   stderr: unknown,
   result: Record<string, unknown> | undefined,
-): { error: string; code: RuntimeErrorCode; retry?: { scope: "rate" | "quota"; provider: string; retryable?: boolean } } => {
+): { error: string; code: RuntimeErrorCode; retry?: RateLimitRetryHint } => {
   const error = exitMessage(code, stderr, result);
   switch (code) {
     case 3:
@@ -257,6 +258,8 @@ export function createCommandCodeRuntime(options: {
         : undefined;
       if (outer?.type === "result") lastResult = outer;
       for (const event of translateCommandCodeRecord(message.record, translateState)) emit(event);
+      if (translateState.runError) activeFailure = safeError(translateState.runError);
+      if (translateState.interrupted) abortRequested = true;
       return;
     }
     if (message.type !== "turn-exit" || message.operationId !== activeOperationId) return;
