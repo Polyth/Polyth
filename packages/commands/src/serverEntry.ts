@@ -46,15 +46,15 @@ function extensionCommandsForSpace(
     const manifest = registry.canonicalManifest(plugin.id);
     if (manifest.manifestVersion !== 2) continue;
     for (const command of manifest.contributes?.commands ?? []) {
-      const binding = { packageId: plugin.id, contributionId: command.id };
       out.push({
-        id: extensionCommandId(binding),
+        id: extensionCommandId({ packageId: plugin.id, contributionId: command.id }),
         name: command.name,
         description: command.description,
         prompt: "",
         scope: "builtin",
-        owner: "extension",
-        extension: binding,
+        // Keep the REST DTO compatible with pre-v2 command consumers. The
+        // host-reserved id, not a widened owner field, carries extension identity.
+        owner: "builtin",
       });
     }
   }
