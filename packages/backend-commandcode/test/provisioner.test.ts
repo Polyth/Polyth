@@ -98,6 +98,52 @@ const plan = (
   ],
 });
 
+const nativeToolPlan = (): HarnessProvisioningPlan => ({
+  harnessId: "commandcode",
+  desiredRevision: "tools-r1",
+  items: [
+    {
+      capability: {
+        id: "example.review-tool",
+        kind: "tool",
+        owner: "example",
+        scope: "session",
+        revision: "tool-r1",
+        name: "review_project",
+        description: "Review the project",
+        inputSchema: {
+          type: "object",
+          properties: { focus: { type: "string" } },
+          required: [],
+        },
+        trust: "pure",
+        mutating: false,
+      },
+      mode: "mcp",
+      mutability: "immediate",
+    },
+    {
+      capability: {
+        id: "polyth.agent-tools",
+        kind: "mcp-server",
+        owner: "polyth",
+        scope: "session",
+        revision: "agent-tools-r1",
+        name: "polyth-agent-tools",
+        enabled: true,
+        transport: {
+          kind: "stdio",
+          command: "/usr/bin/node",
+          args: ["/private/agentToolsMcp.mjs"],
+          envKeys: ["POLYTH_AGENT_TOOLS_URL", "POLYTH_AGENT_TOOLS_TOKEN", "ELECTRON_RUN_AS_NODE"],
+        },
+      },
+      mode: "unsupported",
+      mutability: "immutable",
+    },
+  ],
+});
+
 test("Command Code provisions transient prompt/context and native skills without mutating MCP config", async () => {
   const storage = temporaryDirectory();
   const context = contextAt(storage);
@@ -106,7 +152,9 @@ test("Command Code provisions transient prompt/context and native skills without
   assert.deepEqual(support.kinds.instruction?.modes, ["prompt"]);
   assert.deepEqual(support.kinds.context?.modes, ["prompt"]);
   assert.deepEqual(support.kinds.skill?.modes, ["native"]);
+  assert.deepEqual(support.kinds.tool?.modes, ["mcp"]);
   assert.deepEqual(support.kinds["mcp-server"]?.modes, ["unsupported"]);
+  assert.equal(support.kinds["mcp-server"]?.configScope, "session");
 
   const result = await provisioner.apply(context, plan("r1"), noSecrets);
   const overlay = commandCodeOverlays.peek(context, "commandcode")?.value;
@@ -114,6 +162,7 @@ test("Command Code provisions transient prompt/context and native skills without
   assert.ok(overlay.skillRoot);
   assert.deepEqual(overlay.promptCapabilityIds.sort(), ["example.context", "polyth.behavior"]);
   assert.deepEqual(overlay.skillCapabilityIds, ["example.review"]);
+  assert.deepEqual(overlay.toolCapabilityIds, []);
 
   const promptFile = join(dirname(overlay.promptModFile), "system-prompt.txt");
   const prompt = readFileSync(promptFile, "utf8");
@@ -140,6 +189,50 @@ test("Command Code provisions transient prompt/context and native skills without
   provisioner.release?.(context);
   assert.equal(existsSync(promptFile), false);
   assert.equal(commandCodeOverlays.peek(context, "commandcode"), undefined);
+});
+
+test("Command Code stages native addTool schemas while keeping bridge secrets memory-only", async () => {
+  const storage = temporaryDirectory();
+  const context = contextAt(storage);
+  const provisioner = createCommandCodeProvisioner();
+  const secrets = {
+    mcpSecrets(serverId: string) {
+      return serverId === "polyth.agent-tools"
+        ? {
+            POLYTH_AGENT_TOOLS_URL: "http://127.0.0.1:7777/internal/agent-tools",
+            POLYTH_AGENT_TOOLS_TOKEN: "opaque-secret-token",
+            ELECTRON_RUN_AS_NODE: "1",
+          }
+        : {};
+    },
+  };
+  const result = await provisioner.apply(context, nativeToolPlan(), secrets);
+  const overlay = commandCodeOverlays.peek(context, "commandcode")?.value;
+  assert.ok(overlay?.toolModFile);
+  assert.deepEqual(overlay.toolCapabilityIds, ["example.review-tool"]);
+  assert.deepEqual(overlay.toolNames, { "example.review-tool": "review_project" });
+  assert.deepEqual(overlay.toolBridge, {
+    command: "/usr/bin/node",
+    args: ["/private/agentToolsMcp.mjs"],
+    env: {
+      POLYTH_AGENT_TOOLS_URL: "http://127.0.0.1:7777/internal/agent-tools",
+      POLYTH_AGENT_TOOLS_TOKEN: "opaque-secret-token",
+      ELECTRON_RUN_AS_NODE: "1",
+    },
+  });
+  const toolMod = readFileSync(overlay.toolModFile, "utf8");
+  assert.match(toolMod, /cmd\.addTool/);
+  assert.match(toolMod, /method: "tools\/call"/);
+  assert.match(toolMod, /fd: 3/);
+  assert.match(toolMod, /fd: 4/);
+  assert.match(toolMod, /review_project/);
+  assert.doesNotMatch(toolMod, /127\.0\.0\.1:7777/);
+  assert.doesNotMatch(toolMod, /opaque-secret-token/);
+  assert.equal(result.records.find((row) => row.capabilityId === "example.review-tool")?.status, "pending");
+  assert.equal(result.records.some((row) => row.capabilityId === "polyth.agent-tools"), false);
+
+  provisioner.release?.(context);
+  assert.equal(existsSync(toolMod), false);
 });
 
 test("Command Code rejects skill descriptions outside the documented native limit", async () => {
