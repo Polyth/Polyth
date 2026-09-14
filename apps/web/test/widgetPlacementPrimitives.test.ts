@@ -4,18 +4,17 @@ import { readFile } from "node:fs/promises";
 
 const read = (relative: string) => readFile(new URL(relative, import.meta.url), "utf8");
 
-test("workspace customizer composes the library, live canvas, and placement inspector", async () => {
-  const [page, styles] = await Promise.all([
-    read("../src/components/settings/WidgetsPage.tsx"),
+test("header Canvas owns widget placement instead of a settings customizer", async () => {
+  const [settings, canvas, styles] = await Promise.all([
+    read("../src/components/SettingsView.tsx"),
+    read("../src/widgets/WidgetCanvas.tsx"),
     read("../src/styles.css"),
   ]);
 
-  assert.match(page, /<WidgetLibraryPanel widgets=\{widgets\} onAdd=\{add\}/);
-  assert.match(page, /<WidgetCanvas editing selectedId=\{selected\}/);
-  assert.match(page, /<Inspector selectedId=\{selected\} widgets=\{widgets\}/);
-  assert.match(page, /<Select label="Placement"/);
-  assert.match(styles, /\.workspace-customizer-body\s*\{[^}]*grid-template-columns:/s);
-  assert.match(styles, /\.workspace-inspector\s*\{[^}]*display:\s*flex/s);
+  assert.doesNotMatch(settings, /WidgetsPage|workspace-customizer|WidgetLibraryPanel/);
+  assert.match(canvas, /<WidgetMenu /);
+  assert.match(canvas, /data-widget-surface="workspace-canvas"/);
+  assert.doesNotMatch(styles, /\.workspace-customizer-body\s*\{/);
 });
 
 test("widget placement and settings shell typography use canonical roles", async () => {

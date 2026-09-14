@@ -308,19 +308,17 @@ test("desktop header keeps brand, workspace modes, and a named utility cluster",
   assert.ok(!header.includes('className="header-global-search"'), "Search is not duplicated in the header");
 });
 
-test("Settings uses the current desktop workbench and workspace customizer", async () => {
+test("Settings uses the current desktop workbench without a widget customizer", async () => {
   const settings = await read("../src/components/SettingsView.tsx");
   const css = await read("../src/styles.css");
-  const widgets = await read("../src/components/settings/WidgetsPage.tsx");
-  const widgetLibrary = await read("../src/components/settings/WidgetLibraryOverlay.tsx");
   const tours = await read("../src/packages/onboarding/tours/builtin.ts");
   assert.ok(settings.includes('className="scrim settings-scrim"'), "Settings owns viewport-specific scrim geometry");
   assert.ok(css.includes("width: min(96vw, 1180px); max-width: 1180px; height: 94vh"),
     "Settings uses the desktop workbench footprint");
   assert.doesNotMatch(css, /\.settings-shell\s*\{[^}]*min-width:\s*1100px/, "Settings no longer forces an 1100px minimum width");
-  assert.ok(widgets.includes('className="workspace-inspector"'), "widget settings expose the live preview inspector");
+  assert.doesNotMatch(settings, /WidgetsPage|settingsview\.widgetsLayout|id: "widgets"/);
   assert.doesNotMatch(
-    [settings, widgets, widgetLibrary, tours].join("\n"),
+    [settings, tours].join("\n"),
     /changes (?:are )?save(?:d)? automatically|changes are saved as you edit/i,
     "Settings does not show automatic-save assurances",
   );
@@ -432,10 +430,9 @@ test("timeline empty states defer starters to the hero", async () => {
   assert.ok(timeline.includes('tr("timeline.archivedSessionNoMessages")'), "archived sessions get read-only copy");
 });
 
-test("header and customizer render configured capabilities and permanent Terminal launchers", async () => {
+test("header renders configured capabilities and permanent Terminal launchers", async () => {
   const header = await read("../src/components/Header.tsx");
   const rail = await read("../src/components/ContextRail.tsx");
-  const widgets = await read("../src/components/settings/WidgetsPage.tsx");
   const store = await read("../src/store.ts");
   assert.ok(header.includes("function CapabilityNav"), "header owns the primary capability navigation");
   assert.ok(header.includes("useResolvedCapabilities"), "header resolves configured top-rail capabilities");
@@ -451,9 +448,6 @@ test("header and customizer render configured capabilities and permanent Termina
   assert.ok(rail.includes("configuredRailButtons"), "rail renders only configured tool buttons");
   assert.ok(rail.includes('capability.descriptor.id === "terminal"'), "Terminal remains a guaranteed rail launcher");
   assert.ok(rail.includes("draggable={customizeActive && capabilityIds.has(s.id)}"), "runtime capability buttons reorder only while customization is active");
-  assert.ok(widgets.includes('aria-label="Top toolbar"'), "the customizer previews top-rail capabilities");
-  assert.ok(widgets.includes('aria-label="Right rail"'), "the customizer previews right-rail capabilities");
-  assert.ok(widgets.includes('label="Placement"'), "the inspector exposes explicit placement controls");
   assert.ok(!store.includes("moreOpen:"), "dead global More-tools state stays removed");
   assert.ok(!store.includes("setMoreOpen"), "dead global More-tools action stays removed");
 });

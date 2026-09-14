@@ -67,10 +67,10 @@ test("sidebar uses contextual tree actions and no permanent footer", async () =>
 });
 
 test("header and composer controls are configurable and purpose-specific", async () => {
-  const [header, composer, widgets, metrics] = await Promise.all([
+  const [header, composer, settings, metrics] = await Promise.all([
     source("../src/components/Header.tsx"),
     source("../src/components/Composer.tsx"),
-    source("../src/components/settings/WidgetsPage.tsx"),
+    source("../src/components/settings/pages.tsx"),
     source("../src/components/ChatMetrics.tsx"),
   ]);
   assert.match(header, /const defaultPinned = \(id: string\) => \(id === "workflow" \|\| id === "terminal"\)/);
@@ -83,12 +83,9 @@ test("header and composer controls are configurable and purpose-specific", async
   // through the platform-aware picker callback.
   assert.match(composer, /onUpload=\{openAttachmentPicker\}/);
   assert.match(composer, /pickNativeFiles\(\)\.then/);
-  assert.doesNotMatch(widgets, /Session header stats|Response hover actions|Technical menu/);
-  assert.match(widgets, /className="workspace-response-preview" aria-label="Response actions"/);
-  assert.match(widgets, /ui\.responseActions\.map/);
-  assert.match(widgets, /aria-label="Top toolbar"/);
-  assert.match(widgets, /aria-label="Right rail"/);
-  assert.match(widgets, /<WidgetCanvas editing/);
+  assert.match(settings, /itemId="chat\.responseActions"/);
+  assert.match(settings, /itemId="chat\.headerMetrics"/);
+  assert.doesNotMatch(settings, /openSettingsPage\("widgets"\)|projects\.canvas/);
   assert.match(metrics, /headerMetrics\.map/);
 });
 

@@ -86,14 +86,11 @@ test("project and configuration actions remain attached to their handlers", asyn
   const project = await read("../src/components/ProjectFolderDialog.tsx");
   const worktree = await read("../src/components/WorktreeSessionDialog.tsx");
   const profile = await read("../src/components/AgentProfileForm.tsx");
-  const widgetLibrary = await read("../src/components/settings/WidgetLibraryOverlay.tsx");
 
   assert.match(project, /variant="primary"[\s\S]*className="folder-open-btn"[\s\S]*onClick=\{\(\) => void openProject\(\)\}/);
   assert.match(project, /slot="project\.create\.options"/);
   assert.match(worktree, /onClick=\{\(\) => void submit\(\)\}/);
   assert.match(profile, /onClick=\{\(\) => void save\(true\)\}/);
-  assert.match(widgetLibrary, /onClick=\{\(\) => onAdd\(widget\)\}/);
-  assert.match(widgetLibrary, /onChange=\{setPluginId\}/);
 });
 
 test("390px dialogs use an internally scrolling bottom sheet", { skip: !CHROME }, async () => {
@@ -352,12 +349,12 @@ test("360px split pane keeps project settings controls inside the card", { skip:
             <div class="set-row-hint mono">/Users/demo/polyth</div>
           </div>
         </header>
-        <div class="project-settings-options" data-settings-item="projects.canvas">
+        <div class="project-settings-options" data-settings-item="projects.executionHarness">
           <div>
-            <strong>Canvas setup</strong>
-            <span>Customize visible widgets and layout for this project.</span>
+            <strong>Default harness</strong>
+            <span>Choose an execution engine for new conversations in this project.</span>
           </div>
-          <button class="ui-btn ui-btn--sm">Widgets &amp; Layout</button>
+          <button class="ui-btn ui-btn--sm">Auto</button>
         </div>
       </section>
     </main>
@@ -386,8 +383,8 @@ test("360px split pane keeps project settings controls inside the card", { skip:
   assert.ok(geometry.paneWidth <= 361, "split pane is actually ~360px");
   assert.equal(geometry.stacked, true, "narrow pane stacks via container query, not a 700px viewport media query");
   assert.equal(geometry.overflow, false, "settings card does not overflow the pane");
-  assert.equal(geometry.overlap, false, "label does not collide with the canvas button");
-  assert.ok(geometry.buttonHeight >= 32, "canvas button remains a usable compact control");
+  assert.equal(geometry.overlap, false, "label does not collide with the harness control");
+  assert.ok(geometry.buttonHeight >= 32, "harness control remains a usable compact control");
   assert.equal(geometry.pageOverflow, false, "1024px viewport has no horizontal overflow");
   await page.setViewportSize({ width: 390, height: 720 });
 });

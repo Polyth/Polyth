@@ -24,7 +24,6 @@ import ViewErrorBoundary from "./ViewErrorBoundary.ts";
 import SessionsPage from "./settings/SessionsPage.tsx";
 import AccessPage from "./settings/AccessPage.tsx";
 import PackagesPage from "./settings/PackagesPage.tsx";
-import WidgetsPage from "./settings/WidgetsPage.tsx";
 import { PackageGlyph } from "./settings/packageIcons.tsx";
 import PackageTourOverlay from "./PackageTourOverlay.tsx";
 import { openPackageTour } from "../packages/onboarding/controller.ts";
@@ -86,7 +85,6 @@ const BUILTIN: PageDef[] = [
   { id: "projects", label: tr("settingsview.projects"), group: "Engineering", render: () => <ProjectsPage /> },
   { id: "profiles", label: "Profiles", group: "Engineering", render: () => <ProfilesPage /> },
   { id: "behavior", label: tr("settingsview.behavior"), group: "Engineering", render: () => <BehaviorPage /> },
-  { id: "widgets", label: tr("settingsview.widgetsLayout"), group: "Customize", icon: "package", render: () => <WidgetsPage /> },
   { id: "packages", label: tr("settingsview.packages"), group: "Customize", icon: "package", render: () => <PackagesPage /> },
   { id: "access", label: tr("settingsview.access"), group: "System", nav: false, render: () => <AccessPage /> },
   { id: "about", label: tr("settingsview.about"), group: "System", nav: false, render: () => <AboutPage /> },
@@ -109,7 +107,6 @@ const SETTINGS_ICON_BY_PAGE: Readonly<Record<string, string>> = {
   projects: "files",
   profiles: "user",
   behavior: "brain",
-  widgets: "package",
   packages: "package",
   desktop: "settings",
   voice: "mic",
@@ -238,6 +235,12 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
     setSettingsTarget(redirect.target);
     if (mobile) setMobileStage("page");
   }, [active, mobile, pages]);
+
+  useEffect(() => {
+    if (pages.some((page) => page.id === active) || !pages[0]) return;
+    setActive(pages[0].id);
+    setSettingsTarget(undefined);
+  }, [active, pages]);
 
   useEffect(() => {
     const navigate = (event: Event) => {

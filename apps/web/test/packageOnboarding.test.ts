@@ -215,7 +215,7 @@ test("prefs parser survives garbage and drops malformed entries", () => {
 
 test("pageId → packageId: builtin pages, slot meta, aliases, unknown pages", () => {
   assert.equal(settingsPageToPackageId("packages", []), "packages");
-  assert.equal(settingsPageToPackageId("widgets", []), "widgets");
+  assert.equal(settingsPageToPackageId("widgets", []), null, "Widgets & Layout is not a settings page");
   assert.equal(settingsPageToPackageId("voice", []), null, "slot pages need their slot item");
   assert.equal(settingsPageToPackageId("not-a-page", []), null);
 
@@ -326,7 +326,7 @@ test("every built-in package surface has a substantial onboarding tour", async (
     "access", "about", "git", "terminal", "browser", "goals",
     "multirun", "workflow", "fusion", "walkthrough", "schedule", "usage",
     "github", "knowledge", "voice", "home-assistant", "secure-safe", "mcp",
-    "commands", "plugins", "integrations", "ssh", "packages", "widgets",
+    "commands", "plugins", "integrations", "ssh", "packages",
     // Catalog-only: production BUILTIN_PACKAGES does not advertise `agents`.
     // The tour stays registered for a future Roles surface and must not be
     // confused with a live package descriptor from /api/packages.
