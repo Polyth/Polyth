@@ -10,6 +10,7 @@ const controlToken = process.env.POLYTH_COMMANDCODE_CONTROL_TOKEN?.trim();
 const MAX_CONTROL_BYTES = 64 * 1024;
 let nativeSessionId = "";
 let bindingSerial = Promise.resolve();
+const pendingQuestions = new Map();
 
 const failClosed = (message) => {
   try { process.stderr.write("[polyth-commandcode] " + message + "\\n"); } catch {}
@@ -45,10 +46,15 @@ const updateBinding = (update) => {
   return work;
 };
 
+const validMutationKind = (value) => value === "turn-submit"
+  || value === "turn-steer"
+  || value === "question-reply"
+  || value === "question-reject";
+
 const normalizedMutations = (previous) => {
   const explicit = Array.isArray(previous.acceptedMutations)
     ? previous.acceptedMutations.filter((entry) => entry && typeof entry.operationId === "string"
-      && (entry.mutationKind === "turn-submit" || entry.mutationKind === "turn-steer"))
+      && validMutationKind(entry.mutationKind))
     : [];
   if (explicit.length) return explicit;
   const legacy = Array.isArray(previous.acceptedOperations)
@@ -86,16 +92,22 @@ const persistTurnBinding = async () => {
   }
 };
 
-const persistSteerReceipt = async (operationId) => {
-  if (!operationId) throw new Error("steering operation id is missing");
+const persistMutationReceipt = async (operationId, mutationKind, entityId) => {
+  if (!operationId || !validMutationKind(mutationKind)) throw new Error("mutation receipt is invalid");
   await updateBinding((previous) => {
     const mutations = normalizedMutations(previous);
-    const acceptedMutations = mutations.some((entry) => entry.operationId === operationId && entry.mutationKind === "turn-steer")
+    const acceptedMutations = mutations.some((entry) => entry.operationId === operationId && entry.mutationKind === mutationKind)
       ? mutations
-      : [...mutations, { operationId, mutationKind: "turn-steer" }].slice(-128);
+      : [...mutations, {
+          operationId,
+          mutationKind,
+          ...(entityId ? { entityId } : {}),
+        }].slice(-128);
     return { ...previous, acceptedMutations, updatedAt: Date.now() };
   });
 };
+
+const persistSteerReceipt = (operationId) => persistMutationReceipt(operationId, "turn-steer");
 
 const persistNativeTitle = async (title) => {
   const value = typeof title === "string" ? title.trim() : "";
@@ -107,6 +119,24 @@ const persistNativeTitle = async (title) => {
     // AgentEvent still updates canonical Polyth state, so do not kill a run.
     warn("native title could not be mirrored into the adapter binding");
   }
+};
+
+const questionResult = (input, answer) => {
+  if (answer?.action === "reject") {
+    return "The user rejected this question in Polyth. Do not assume or auto-select an option; continue only if you can proceed without that answer.";
+  }
+  const questions = Array.isArray(input?.questions) ? input.questions : [];
+  const rows = Array.isArray(answer?.answers) ? answer.answers : [];
+  const normalized = questions.map((question, index) => ({
+    question: typeof question?.question === "string" ? question.question : "Question " + (index + 1),
+    answers: Array.isArray(rows[index])
+      ? rows[index].filter((value) => typeof value === "string").slice(0, 16)
+      : [],
+  }));
+  const text = JSON.stringify({ source: "polyth-user", answers: normalized });
+  return text.length <= 48 * 1024
+    ? text
+    : JSON.stringify({ source: "polyth-user", error: "answer payload exceeded bridge limit" });
 };
 
 const startControlServer = async (cmd) => {
@@ -137,27 +167,59 @@ const startControlServer = async (cmd) => {
       const id = typeof request?.id === "string" ? request.id : "";
       const operationId = typeof request?.operationId === "string" ? request.operationId : "";
       if (!id || request?.token !== controlToken) { reply(id, false, "unauthorized control request"); return; }
-      if (request?.type !== "queue" || request?.deliverAs !== "steer") { reply(id, false, "unsupported control request"); return; }
-      const content = typeof request?.content === "string" ? request.content : "";
-      if (!operationId || !content.trim() || Buffer.byteLength(content, "utf8") > 48 * 1024) {
-        reply(id, false, "invalid steering message");
+
+      if (request?.type === "queue" && request?.deliverAs === "steer") {
+        const content = typeof request?.content === "string" ? request.content : "";
+        if (!operationId || !content.trim() || Buffer.byteLength(content, "utf8") > 48 * 1024) {
+          reply(id, false, "invalid steering message");
+          return;
+        }
+        try {
+          cmd.queueMessage({ content, deliverAs: "steer" });
+        } catch {
+          reply(id, false, "Command Code rejected the steering message");
+          return;
+        }
+        try {
+          await persistSteerReceipt(operationId);
+        } catch {
+          // The native queue may already contain the message. Without a durable
+          // receipt Polyth must not retry it, so terminate the run fail-closed.
+          failClosed("native steering receipt could not be persisted");
+          return;
+        }
+        reply(id, true);
         return;
       }
-      try {
-        cmd.queueMessage({ content, deliverAs: "steer" });
-      } catch {
-        reply(id, false, "Command Code rejected the steering message");
+
+      if (request?.type === "answer_question") {
+        const requestId = typeof request?.requestId === "string" ? request.requestId : "";
+        const answer = request?.answer;
+        if (!operationId || !requestId || !answer || typeof answer !== "object" || Array.isArray(answer)) {
+          reply(id, false, "invalid question response");
+          return;
+        }
+        const pending = pendingQuestions.get(requestId);
+        if (!pending) {
+          reply(id, false, "Command Code question is no longer pending");
+          return;
+        }
+        const mutationKind = answer.action === "reject" ? "question-reject" : "question-reply";
+        try {
+          // Persist BEFORE releasing the hook. Once resolve() runs the model may
+          // observe the answer, so ambiguity after this point must be recoverable.
+          await persistMutationReceipt(operationId, mutationKind, requestId);
+        } catch {
+          reply(id, false, "question response receipt could not be persisted");
+          return;
+        }
+        pendingQuestions.delete(requestId);
+        pending.resolve(answer);
+        reply(id, true);
         return;
       }
-      try {
-        await persistSteerReceipt(operationId);
-      } catch {
-        // The native queue may already contain the message. Without a durable
-        // receipt Polyth must not retry it, so terminate the run fail-closed.
-        failClosed("native steering receipt could not be persisted");
-        return;
-      }
-      reply(id, true);
+
+      reply(id, false, "unsupported control request");
     });
     socket.on("error", () => undefined);
   });
@@ -180,6 +242,21 @@ const startControlServer = async (cmd) => {
   return server;
 };
 
+const waitForQuestionAnswer = (toolCallId, input, signal) => new Promise((resolve) => {
+  let settled = false;
+  const finish = (answer) => {
+    if (settled) return;
+    settled = true;
+    pendingQuestions.delete(toolCallId);
+    if (signal) signal.removeEventListener("abort", onAbort);
+    resolve(answer);
+  };
+  const onAbort = () => finish({ action: "reject", aborted: true });
+  pendingQuestions.set(toolCallId, { input, resolve: finish });
+  if (signal?.aborted) onAbort();
+  else signal?.addEventListener("abort", onAbort, { once: true });
+});
+
 export default async function polythCommandCodeBridge(cmd) {
   const controlServer = await startControlServer(cmd);
   if (requestedTitle) cmd.setSessionName(requestedTitle);
@@ -188,12 +265,31 @@ export default async function polythCommandCodeBridge(cmd) {
   });
   cmd.on("session_titled", (event) => persistNativeTitle(event?.title));
   cmd.on("run_end", () => {
+    for (const pending of pendingQuestions.values()) pending.resolve({ action: "reject", aborted: true });
+    pendingQuestions.clear();
     try { controlServer.close(); } catch {}
   });
   cmd.hooks({
     onTurnStart: async ({ state }) => {
       await persistTurnBinding();
       return state;
+    },
+    beforeToolCall: async ({ toolCallId, toolName, input }, ctx) => {
+      if (toolName !== "ask_user_question") return undefined;
+      if (!toolCallId || !input || !Array.isArray(input.questions) || input.questions.length === 0) {
+        return {
+          block: true,
+          additionalContext: "The question request was invalid and was not auto-answered.",
+        };
+      }
+      if (pendingQuestions.has(toolCallId)) {
+        return {
+          block: true,
+          additionalContext: "The duplicate question request was blocked and was not auto-answered.",
+        };
+      }
+      const answer = await waitForQuestionAnswer(toolCallId, input, ctx?.signal);
+      return { block: true, additionalContext: questionResult(input, answer) };
     },
   });
 }
