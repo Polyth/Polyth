@@ -212,19 +212,17 @@ test("Command Code stages native addTool schemas while keeping bridge secrets me
   assert.deepEqual(overlay.toolCapabilityIds, ["example.review-tool"]);
   assert.deepEqual(overlay.toolNames, { "example.review-tool": "review_project" });
   assert.deepEqual(overlay.toolBridge, {
-    command: "/usr/bin/node",
-    args: ["/private/agentToolsMcp.mjs"],
-    env: {
-      POLYTH_AGENT_TOOLS_URL: "http://127.0.0.1:7777/internal/agent-tools",
-      POLYTH_AGENT_TOOLS_TOKEN: "opaque-secret-token",
-      ELECTRON_RUN_AS_NODE: "1",
-    },
+    url: "http://127.0.0.1:7777/internal/agent-tools",
+    token: "opaque-secret-token",
   });
   const toolMod = readFileSync(overlay.toolModFile, "utf8");
   assert.match(toolMod, /cmd\.addTool/);
-  assert.match(toolMod, /method: "tools\/call"/);
+  assert.match(toolMod, /type: "call"/);
+  assert.match(toolMod, /capabilityId/);
+  assert.match(toolMod, /type: "cancel"/);
   assert.match(toolMod, /fd: 3/);
   assert.match(toolMod, /fd: 4/);
+  assert.match(toolMod, /requests\.on\("error"/);
   assert.match(toolMod, /review_project/);
   assert.doesNotMatch(toolMod, /127\.0\.0\.1:7777/);
   assert.doesNotMatch(toolMod, /opaque-secret-token/);
