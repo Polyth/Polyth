@@ -43,6 +43,12 @@ const textFromMessage = (value: unknown): string => {
   }).join("");
 };
 
+const errorText = (value: unknown): string | undefined => {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  const row = asRecord(value);
+  return stringValue(row?.message, row?.error)?.trim();
+};
+
 export interface CommandCodeTranslateState {
   operationId: string;
   model?: ModelRef;
@@ -53,6 +59,8 @@ export interface CommandCodeTranslateState {
   lastTaskKey: string;
   subagents: Map<string, { sessionId: string; label: string; status: string; currentTask?: string }>;
   subagentRevision: number;
+  runError?: string;
+  interrupted: boolean;
 }
 
 export const createCommandCodeTranslateState = (
@@ -68,6 +76,7 @@ export const createCommandCodeTranslateState = (
   lastTaskKey: "",
   subagents: new Map(),
   subagentRevision: 0,
+  interrupted: false,
 });
 
 const taskSnapshot = (
@@ -140,7 +149,6 @@ export function translateCommandCodeRecord(
   if (outer.type === "result") {
     const tokens = usage(outer.usage);
     const finalText = stringValue(outer.finalText, outer.final_text);
-    const cost = numberValue(outer.cost) ?? numberValue(asRecord(outer.usage)?.cost);
     const out: RuntimeEvent[] = [];
     if (finalText && !state.assistantText) {
       out.push({
@@ -148,7 +156,6 @@ export function translateCommandCodeRecord(
         partId: `${state.operationId}:final`,
         text: finalText,
         ...(tokens ? { tokens } : {}),
-        ...(cost !== undefined ? { cost } : {}),
       });
     }
     return out;
@@ -233,9 +240,14 @@ export function translateCommandCodeRecord(
     case "model_request_end": {
       const tokens = usage(event.usage);
       if (!tokens || !state.model) return [];
-      const cost = numberValue(event.cost) ?? numberValue(asRecord(event.usage)?.cost);
-      return [{ type: "usage/recorded", model: state.model, tokens, ...(cost !== undefined ? { cost, costSource: "native" as const } : {}) }];
+      return [{ type: "usage/recorded", model: state.model, tokens }];
     }
+    case "run_error":
+      state.runError = errorText(event.error) ?? stringValue(event.message)?.trim() ?? "Command Code run failed";
+      return [];
+    case "interrupted":
+      state.interrupted = true;
+      return [];
     default:
       return [];
   }
