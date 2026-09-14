@@ -31,6 +31,7 @@ const safeError = (value) => String(value || "Command Code failed")
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const runtimeRejected = (message) => Object.assign(new Error(message), { code: "runtime-rejected" });
 const outcomeUnknown = (message) => Object.assign(new Error(message), { code: "outcome-unknown" });
+const windowsShim = (value) => process.platform === "win32" && /\\.(?:cmd|bat)$/i.test(value);
 
 const readTurnAdmission = async (path, operationId) => {
   try {
@@ -213,6 +214,123 @@ const deliverQuestionAnswer = async (turn, requestId, answer, operationId) => {
   });
 };
 
+const validToolBridge = (value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const command = typeof value.command === "string" ? value.command.trim() : "";
+  const args = Array.isArray(value.args) ? value.args : undefined;
+  const env = value.env && typeof value.env === "object" && !Array.isArray(value.env) ? value.env : undefined;
+  if (!command || command.length > 8192 || !args || args.length > 128 || !env) return undefined;
+  if (!args.every((arg) => typeof arg === "string" && arg.length <= 8192)) return undefined;
+  const entries = Object.entries(env);
+  if (entries.length > 64 || !entries.every(([key, item]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(key)
+    && typeof item === "string" && item.length <= 64 * 1024)) return undefined;
+  if (typeof env.POLYTH_AGENT_TOOLS_URL !== "string" || !env.POLYTH_AGENT_TOOLS_URL) return undefined;
+  if (typeof env.POLYTH_AGENT_TOOLS_TOKEN !== "string" || !env.POLYTH_AGENT_TOOLS_TOKEN) return undefined;
+  return { command, args, env: Object.fromEntries(entries) };
+};
+
+const waitForSpawn = (child) => new Promise((resolve, reject) => {
+  if (child.pid) { resolve(); return; }
+  const failed = (error) => { child.off("spawn", ready); reject(error); };
+  const ready = () => { child.off("error", failed); resolve(); };
+  child.once("error", failed);
+  child.once("spawn", ready);
+});
+
+const startToolBridge = async (spec, cwd) => {
+  if (!spec) return undefined;
+  const child = spawn(spec.command, spec.args, {
+    cwd,
+    env: { ...process.env, ...spec.env },
+    windowsHide: true,
+    shell: windowsShim(spec.command),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  child.stderr?.resume();
+  try {
+    await waitForSpawn(child);
+    if (child.exitCode !== null || child.signalCode) throw new Error("bridge exited during spawn");
+    return child;
+  } catch {
+    if (child.exitCode === null && !child.signalCode) child.kill("SIGTERM");
+    throw runtimeRejected("Scoped Polyth tool bridge could not start");
+  }
+};
+
+const attachToolRelay = (turn) => {
+  const bridge = turn.toolBridge;
+  if (!bridge) return;
+  const requests = turn.child.stdio?.[3];
+  const responses = turn.child.stdio?.[4];
+  if (!requests || !responses || !bridge.stdin || !bridge.stdout) {
+    if (bridge.exitCode === null && !bridge.signalCode) bridge.kill("SIGTERM");
+    return;
+  }
+  let requestBytes = Buffer.alloc(0);
+  let responseBytes = Buffer.alloc(0);
+  const invoked = new Map();
+  const failRelay = () => {
+    try { responses.end(); } catch {}
+  };
+
+  requests.on("data", (chunk) => {
+    requestBytes = Buffer.concat([requestBytes, chunk]);
+    while (true) {
+      const end = requestBytes.indexOf(10);
+      if (end < 0) break;
+      if (end > MAX_LINE) { failRelay(); return; }
+      const raw = requestBytes.subarray(0, end);
+      requestBytes = requestBytes.subarray(end + 1);
+      if (!raw.length) continue;
+      let parsed;
+      try { parsed = JSON.parse(raw.toString("utf8")); } catch { failRelay(); return; }
+      const id = typeof parsed?.id === "string" ? parsed.id : String(parsed?.id ?? "");
+      const toolName = parsed?.method === "tools/call" && typeof parsed?.params?.name === "string"
+        ? parsed.params.name
+        : "";
+      try {
+        bridge.stdin.write(raw);
+        bridge.stdin.write("\\n");
+        if (id && toolName) invoked.set(id, toolName);
+      } catch {
+        failRelay();
+        return;
+      }
+    }
+    if (requestBytes.length > MAX_LINE) failRelay();
+  });
+  requests.on("error", failRelay);
+
+  bridge.stdout.on("data", (chunk) => {
+    responseBytes = Buffer.concat([responseBytes, chunk]);
+    while (true) {
+      const end = responseBytes.indexOf(10);
+      if (end < 0) break;
+      if (end > MAX_LINE) { failRelay(); return; }
+      const raw = responseBytes.subarray(0, end);
+      responseBytes = responseBytes.subarray(end + 1);
+      if (!raw.length) continue;
+      let parsed;
+      try { parsed = JSON.parse(raw.toString("utf8")); } catch { failRelay(); return; }
+      const id = typeof parsed?.id === "string" ? parsed.id : String(parsed?.id ?? "");
+      const toolName = id ? invoked.get(id) : undefined;
+      if (toolName) {
+        invoked.delete(id);
+        send({ type: "polyth-tool-invoked", operationId: turn.operationId, toolName });
+      }
+      try {
+        responses.write(raw);
+        responses.write("\\n");
+      } catch {
+        return;
+      }
+    }
+    if (responseBytes.length > MAX_LINE) failRelay();
+  });
+  bridge.stdout.on("error", failRelay);
+  bridge.once("close", failRelay);
+};
+
 const preAdmissionMessage = (stderr) => {
   const detail = safeError(stderr);
   if (/untrusted|workspace.{0,20}trust|trust.{0,20}workspace/i.test(detail)) {
@@ -228,6 +346,9 @@ const preAdmissionMessage = (stderr) => {
 
 const startTurn = async (message) => {
   if (active) throw Object.assign(new Error("Command Code is already processing a turn"), { code: "busy" });
+  const toolBridgeSpec = validToolBridge(message.toolBridge);
+  if (message.toolBridge && !toolBridgeSpec) throw runtimeRejected("Command Code received an invalid Polyth tool bridge");
+  const toolBridge = await startToolBridge(toolBridgeSpec, message.cwd);
   const args = [
     "-p",
     "--output-format", "json",
@@ -238,6 +359,9 @@ const startTurn = async (message) => {
   ];
   if (typeof message.capabilityModPath === "string" && message.capabilityModPath.trim()) {
     args.push("--mod", message.capabilityModPath);
+  }
+  if (typeof message.toolModPath === "string" && message.toolModPath.trim() && toolBridge) {
+    args.push("--mod", message.toolModPath);
   }
   if (Array.isArray(message.skillRoots)) {
     for (const root of message.skillRoots.slice(0, 64)) {
@@ -263,15 +387,24 @@ const startTurn = async (message) => {
     POLYTH_COMMANDCODE_CONTROL_FILE: controlPath,
     POLYTH_COMMANDCODE_CONTROL_TOKEN: controlToken,
   };
-  const child = spawn(command, args, {
-    cwd: message.cwd,
-    env,
-    windowsHide: true,
-    shell: process.platform === "win32" && /\\.(?:cmd|bat)$/i.test(command),
-    stdio: ["pipe", "pipe", "pipe"],
-  });
+  let child;
+  try {
+    child = spawn(command, args, {
+      cwd: message.cwd,
+      env,
+      windowsHide: true,
+      shell: windowsShim(command),
+      // fd3/fd4 are a private model-invisible relay between the transient Mod
+      // and this owned worker. The scoped Polyth bearer stays in toolBridge.
+      stdio: ["pipe", "pipe", "pipe", "pipe", "pipe"],
+    });
+  } catch (error) {
+    if (toolBridge && toolBridge.exitCode === null && !toolBridge.signalCode) toolBridge.kill("SIGTERM");
+    throw error;
+  }
   const turn = {
     child,
+    toolBridge,
     operationId: message.operationId,
     bindingPath: message.bindingPath,
     stdout: Buffer.alloc(0),
@@ -282,6 +415,7 @@ const startTurn = async (message) => {
     closed: new Promise((resolve) => child.once("close", (code, signal) => resolve({ code, signal }))),
   };
   active = turn;
+  attachToolRelay(turn);
   send({ type: "turn-spawned", operationId: turn.operationId });
   child.stdout.on("data", (chunk) => {
     try { parseOutput(turn, chunk); }
@@ -296,6 +430,7 @@ const startTurn = async (message) => {
   child.once("error", (error) => send({ type: "process-error", operationId: turn.operationId, error: safeError(error) }));
   child.once("close", (code, signal) => {
     void rm(controlPath, { force: true }).catch(() => undefined);
+    if (toolBridge && toolBridge.exitCode === null && !toolBridge.signalCode) toolBridge.kill("SIGTERM");
     if (active === turn) active = null;
     void readTurnAdmission(turn.bindingPath, turn.operationId).then((admission) => {
       // A process that died before run_start AND before the exact admission
