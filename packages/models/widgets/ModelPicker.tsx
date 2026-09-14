@@ -36,7 +36,6 @@ import { dismissKeyboard } from "@polyth/web/mobile-viewport";
 import { tapFeedback } from "@polyth/web/haptics";
 import { useSheetTrigger } from "@polyth/web/sheet-trigger";
 import {
-  InfoIcon,
   Button,
   ChevronDownIcon,
   ChevronUpIcon,
@@ -344,17 +343,10 @@ export default function ModelPicker({
       ?.scrollIntoView({ block: "nearest" });
   }, [open, phone, activeKey]);
 
-  const closeDetails = (restorePhoneFocus = false) => {
-    const returnKey = detail ? modelKey(detail) : null;
+  const closeDetails = () => {
     setDetail(null);
     setDetailAnchor(null);
     setShowDetails(false);
-    if (phone && restorePhoneFocus && returnKey) {
-      requestAnimationFrame(() => {
-        const buttons = pickerShellRef.current?.querySelectorAll<HTMLButtonElement>(".sheet-row-info");
-        [...(buttons ?? [])].find((button) => button.dataset.modelKey === returnKey)?.focus();
-      });
-    }
   };
   useEffect(() => {
     closeDetails();
@@ -415,7 +407,9 @@ export default function ModelPicker({
       providerID: model.providerID,
       modelID: model.modelID,
       ...(model.harnessId ? { harnessId: model.harnessId } : {}),
-      ...(variant ? { variant } : {}),
+      // Keep Auto distinguishable from a plain model selection for callers
+      // that persist model-specific thinking preferences.
+      variant: variant ?? "",
     });
     noteModelUsed(modelKey(model));
   };
@@ -554,26 +548,6 @@ export default function ModelPicker({
     );
   };
 
-  const infoButton = (model: ModelDescriptor, variant: "row" | "sheet" = "row") => (
-    <IconButton
-      type="button"
-      className={variant === "sheet" ? "sheet-row-info" : "model-row-info"}
-      data-model-key={modelKey(model)}
-      icon={InfoIcon}
-      size="sm"
-      variant="ghost"
-      title={tr("modelpicker.detailsForValue", { name: model.name })}
-      label={tr("modelpicker.detailsForValue", { name: model.name })}
-      tabIndex={variant === "row" ? -1 : undefined}
-      onClick={(event) => {
-        event.stopPropagation();
-        setShowDetails(false);
-        setDetail(model);
-        setDetailAnchor(event.currentTarget.closest<HTMLElement>(".sheet-row, .model-picker-row") ?? event.currentTarget);
-      }}
-    />
-  );
-
   const capabilityIcons = (model: ModelDescriptor) => {
     const modalities = new Set((model.capabilities ?? []).map((capability) => capability.toLowerCase()));
     const icons: Array<[string, ReactNode]> = [["Text", <Icon.text />]];
@@ -634,7 +608,7 @@ export default function ModelPicker({
           </strong>
         </span>
         {capabilityIcons(model)}
-        {infoButton(model)}
+        {variantMenu(model)}
         {!flatCatalog && star(model)}
       </div>
     );
@@ -687,9 +661,8 @@ export default function ModelPicker({
         </span>
       ) : (
         <span className="sheet-row-tools">
-          {variantMenu(model)}
           {capabilityIcons(model)}
-          {infoButton(model, "sheet")}
+          {variantMenu(model)}
           {!flatCatalog && star(model, "sheet")}
         </span>
       )}
@@ -743,7 +716,7 @@ export default function ModelPicker({
             selected={isSelected(detail)}
             {...(usage !== undefined ? { usage } : {})}
             onUse={() => choose(detail)}
-            onBack={() => closeDetails(true)}
+            onBack={closeDetails}
             focusBack={phone}
           />
         )

@@ -82,7 +82,6 @@
   .picker-chip,
   .model-picker-trigger,
   .composer-send-options,
-  .composer-effort-trigger,
   .icon-btn,
   .header-action,
   .ui-icon-btn,
@@ -98,7 +97,6 @@
   .picker-chip,
   .model-picker-trigger,
   .composer-send-options,
-  .composer-effort-trigger,
   .icon-btn,
   .header-action,
   .ui-icon-btn
@@ -112,7 +110,6 @@
   .picker-chip,
   .model-picker-trigger,
   .composer-send-options,
-  .composer-effort-trigger,
   .icon-btn,
   .header-action,
   .ui-icon-btn
@@ -125,107 +122,6 @@
 .composer-simple .composer-rail .send,
 .composer-simple .composer-rail .stop {
   border: 0;
-}
-
-/* Thinking effort ----------------------------------------------------------- */
-.composer-effort-control {
-  position: relative;
-  min-width: var(--tap);
-  width: var(--tap);
-  height: var(--tap);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 var(--tap);
-}
-
-.composer-effort-trigger,
-.composer-effort-option {
-  min-width: var(--tap);
-  width: var(--tap);
-  min-height: var(--tap);
-  height: var(--tap);
-  display: inline-grid;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-control);
-  color: var(--muted);
-  background: transparent;
-  cursor: pointer;
-}
-
-.composer-effort-trigger:hover,
-.composer-effort-trigger[aria-expanded="true"],
-.composer-effort-option:hover,
-.composer-effort-option.selected {
-  color: var(--text);
-  background: var(--surface-overlay-hover);
-}
-
-.composer-effort-option.selected {
-  color: var(--accent);
-  background: var(--surface-overlay-strong);
-}
-
-.composer-effort-meter {
-  width: var(--icon-md);
-  height: var(--icon-md);
-  display: inline-flex;
-  align-items: flex-end;
-  justify-content: center;
-  gap: calc(var(--space-1) / 2);
-  flex: none;
-}
-
-.composer-effort-meter i {
-  width: calc(var(--space-1) / 2);
-  display: block;
-  border-radius: var(--radius-round);
-  background: var(--hair-strong);
-  opacity: .72;
-  transition:
-    height var(--motion-fast) var(--motion-ease),
-    background-color var(--motion-fast) var(--motion-ease),
-    opacity var(--motion-fast) var(--motion-ease);
-}
-
-.composer-effort-meter i:nth-child(1) { height: 28%; }
-.composer-effort-meter i:nth-child(2) { height: 48%; }
-.composer-effort-meter i:nth-child(3) { height: 72%; }
-.composer-effort-meter i:nth-child(4) { height: 96%; }
-.composer-effort-meter i.active { background: currentColor; opacity: 1; }
-
-/* Auto is intentionally static and neutral: it must never resemble progress. */
-.composer-effort-meter.auto i {
-  background: var(--faint);
-  opacity: .42;
-}
-.composer-effort-meter.auto i:nth-child(2),
-.composer-effort-meter.auto i:nth-child(4) {
-  opacity: .8;
-}
-
-.composer-effort-menu {
-  position: absolute;
-  z-index: var(--z-popover);
-  inset-inline-start: 50%;
-  inset-block-end: calc(100% + var(--space-1));
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-1);
-  border: 1px solid var(--material-glass-border);
-  border-radius: var(--radius-control);
-  color: var(--text);
-  background: var(--material-glass-strong);
-  box-shadow: var(--material-glass-shadow);
-  transform: translateX(-50%);
-  white-space: nowrap;
-}
-
-.composer-effort-range-fallback {
-  pointer-events: none;
 }
 
 /* Queue is a send with a small follow-up badge, not a separate unfamiliar
@@ -432,27 +328,6 @@
     margin-inline-start: 0;
   }
 
-  /* A required phone-only widget places effort into composer.execution. The
-     SlotHost wrapper becomes transparent so the meter can order before Model. */
-  .composer-mobile .composer-execution > .placed-mini-widget:has(.composer-effort-inline) {
-    display: contents;
-  }
-
-  .composer-mobile .composer-effort-inline {
-    order: -1;
-    display: inline-flex;
-    align-items: center;
-    flex: none;
-  }
-
-  .composer-mobile .composer-effort-control,
-  .composer-mobile .composer-effort-trigger {
-    width: var(--tap);
-    min-width: var(--tap);
-    height: var(--tap);
-    min-height: var(--tap);
-  }
-
   /* Model is a quiet text control. The provider mark and caret belong in the
      picker, not in the composer chrome. */
   .composer-mobile .composer-execution > .picker,
@@ -493,12 +368,6 @@
     letter-spacing: -.01em;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  /* Thinking now has its own direct control in the composer. Do not duplicate
-     it again inside the phone model sheet. */
-  .model-sheet .pkg-harnesses-mobile-config {
-    display: none;
   }
 
   .composer-mobile .composer-mobile-extensions .mic-btn,
@@ -653,11 +522,5 @@
 
   .composer-simple .composer-config + .composer-primary {
     margin-inline-start: calc(var(--space-1) / 2);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .composer-effort-meter i {
-    transition: none;
   }
 }

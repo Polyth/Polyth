@@ -320,9 +320,10 @@ test("model picker shell keeps fixed geometry while details open beside it", asy
     assert.match(styles, /\.model-pop\s*\{[^}]*height:\s*min\(560px,\s*72vh\)/s, "popover height is pinned");
     assert.match(styles, /\.model-pop\s*\{[^}]*min-height:\s*min\(560px,\s*72vh\)/s, "popover min-height matches pinned height");
 
-    const info = document.body.querySelector<HTMLButtonElement>(".model-picker-row .model-row-info");
-    assert.ok(info, "desktop rows expose the details control");
-    await act(async () => { info!.click(); });
+    const row = document.body.querySelector<HTMLElement>(".model-picker-row");
+    assert.ok(row, "catalog row renders");
+    assert.equal(document.body.querySelector(".model-picker-row .model-row-info"), null, "desktop rows do not expose an info control");
+    await act(async () => { row!.dispatchEvent(new window.MouseEvent("mouseover", { bubbles: true })); });
 
     const panel = document.body.querySelector<HTMLElement>(".model-details-panel");
     assert.ok(panel, "details panel opens");
@@ -340,30 +341,26 @@ test("model picker shell keeps fixed geometry while details open beside it", asy
   }
 });
 
-test("phone model details stay inside the shared sheet focus boundary", async () => {
+test("phone model rows place thinking effort in the former info slot", async () => {
   phoneMode = true;
   const { act, createElement } = await import("react");
   const { createRoot } = await import("react-dom/client");
   const { default: ModelPicker } = await import("../../../packages/models/widgets/ModelPicker.tsx");
   const container = document.createElement("div");
   document.body.appendChild(container);
-  const root = createRoot(container);
+    const root = createRoot(container);
   try {
     await act(async () => {
       root.render(createElement(ModelPicker, {
-        models: [{ providerID: "openai", modelID: "gpt-test", name: "GPT Test" }],
+        models: [{ providerID: "openai", modelID: "gpt-test", name: "GPT Test", variants: ["high"] }],
         onPick: () => {},
       }));
     });
     await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
     const sheet = document.body.querySelector<HTMLElement>(".model-sheet");
     assert.ok(sheet, "phone picker uses the shared modal sheet");
-    const info = sheet!.querySelector<HTMLButtonElement>(".sheet-row-info");
-    assert.ok(info, "the sheet row exposes details");
-    await act(async () => { info!.click(); });
-    assert.ok(sheet!.querySelector(".model-details"), "details replace the list inside the existing sheet");
-    assert.equal(document.body.querySelector(".model-details-panel"), null, "no sibling portal escapes the modal");
-    assert.ok(sheet!.contains(document.activeElement), "details move focus to a control inside the sheet");
+    assert.equal(sheet!.querySelector(".sheet-row-info"), null, "the sheet row does not expose an info control");
+    assert.ok(sheet!.querySelector(".model-thinking-trigger"), "the sheet row exposes thinking effort in the former info slot");
   } finally {
     phoneMode = false;
     await act(async () => { root.unmount(); });

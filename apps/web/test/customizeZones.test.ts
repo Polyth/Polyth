@@ -70,6 +70,7 @@ test("Shift exposes editors without a resting gap or content overlap", async () 
   assert.match(styles, /body\[data-shift-held\] \.customize-zone:hover > \.zone-edit-button[\s\S]*position:\s*static;/);
   assert.match(styles, /\.placed-mini-widget\s*\{[^}]*display:\s*contents;/s);
   assert.match(styles, /\.placed-mini-widget\[data-widget-editing="true"\]:not\(:empty\)\s*\{[^}]*display:\s*inline-flex;/s);
+  assert.match(styles, /\.conversation-composer-dock\s*>\s*\.placed-mini-widget\[data-widget-editing="true"\]\s*\{[^}]*display:\s*block;[^}]*width:\s*100%;/s);
   assert.match(styles, /\.rail-icon-scroll\s*\{[^}]*overflow-y:\s*auto;/s);
   assert.match(rail, /className="rail-icon-scroll"[\s\S]*<CustomizeZoneButton/);
 

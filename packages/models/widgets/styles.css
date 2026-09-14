@@ -250,7 +250,6 @@ margin-inline-start: 6px; color: var(--amber); font-size: var(--font-meta); font
 }
 /* Row tools stay invisible until the row is hovered or keyboard-active, so
    the list reads as names, not as a button grid. */
-.model-row-info,
 .model-picker-row .model-star-btn {
 flex: none;
   width: 26px;
@@ -263,8 +262,6 @@ flex: none;
   color: var(--faint);
   opacity: 0;
 }
-.model-picker-row:hover .model-row-info,
-.model-picker-row.active .model-row-info,
 .model-picker-row:hover .model-star-btn,
 .model-picker-row.active .model-star-btn,
 .model-picker-row .model-star-btn {
@@ -272,12 +269,36 @@ flex: none;
   color: var(--amber);
 }
 .model-picker-row .model-star-btn.on svg { fill: currentColor; }
-.model-row-info:hover,
 .model-picker-row .model-star-btn:hover {
 color: var(--text); background: var(--surface-overlay);
 }
-.model-row-info svg {
-width: 14px; height: 14px;
+.model-thinking-trigger {
+  flex: none;
+  min-width: max(var(--control-h-sm), var(--hit-min));
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-meta);
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.model-thinking-trigger:hover,
+.model-thinking-trigger[aria-expanded="true"] {
+  background: var(--surface-overlay);
+  color: var(--text);
+}
+.model-thinking-trigger svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
 }
 /* Adjacent details panel: portaled beside the picker shell, never inside it. */
 .model-details-panel {
@@ -366,26 +387,6 @@ width: 100%;
 .model-details-current {
 display: inline-flex; align-items: center; gap: 5px; min-height: 28px;
   color: var(--muted); font-size: var(--font-meta);
-}
-/* Sheet rows reuse core tools geometry; info matches the star's touch box. */
-.model-sheet .sheet-row-info {
-flex: none;
-  width: var(--tap);
-  height: var(--tap);
-  display: inline-grid;
-  place-items: center;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--faint);
-  cursor: pointer;
-  touch-action: manipulation;
-}
-.model-sheet .sheet-row-info svg {
-width: 17px; height: 17px;
-}
-.model-sheet .sheet-row-info:active {
-color: var(--text); background: var(--surface-overlay);
 }
 /* Tiny monogram inside a 24px logo tile — decorative, not meta text. */
 .provider-logo-fallback {

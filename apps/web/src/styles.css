@@ -1357,6 +1357,15 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   line-height: 1.5;
   box-shadow: var(--material-glass-highlight), var(--shadow-sm);
 }
+/* Optional reader aid: keep the newest prompt in the scrollport without
+   duplicating it or changing the canonical conversation history. */
+.timeline > .msg.user.latest-user-pinned {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: var(--z-shell);
+  background: var(--chat-surface, var(--panel));
+  box-shadow: 0 1px 0 var(--border-soft), var(--shadow-sm);
+}
 /* A sent prompt keeps four lines in the log; the rest is one tap away. The
    fade only appears once the text really is taller than the clamp. */
 .user-prompt { max-height: 4lh; overflow: hidden; }
@@ -1777,97 +1786,6 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .config-chip-caret { display: inline-flex; color: var(--faint); flex: none; }
 .config-chip-caret svg { width: 12px; height: 12px; }
 .config-chip:hover .config-chip-caret, .config-chip[aria-expanded="true"] .config-chip-caret { color: var(--muted); }
-.composer-effort-control {
-  --composer-effort-width: 112px;
-  min-width: 0;
-  display: inline-grid;
-  grid-template-columns: minmax(72px, var(--composer-effort-width));
-  align-items: center;
-  color: var(--text-dim);
-  cursor: pointer;
-}
-.composer-effort-track {
-  position: relative;
-  display: grid;
-  align-items: center;
-  min-width: 0;
-  height: var(--control-h-sm);
-}
-.composer-effort-track::before {
-  position: absolute;
-  inset-inline: var(--space-2);
-  height: 4px;
-  border-radius: var(--radius-round);
-  background: var(--border-soft);
-  content: "";
-}
-.composer-effort-track input {
-  position: relative;
-  z-index: 1;
-  width: 100%;
-  height: var(--control-h-sm);
-  margin: 0;
-  padding: 0;
-  appearance: none;
-  -webkit-appearance: none;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-}
-.composer-effort-track input::-webkit-slider-runnable-track { height: 4px; background: transparent; }
-.composer-effort-track input::-webkit-slider-thumb {
-  width: 14px;
-  height: 14px;
-  margin-top: -5px;
-  appearance: none;
-  -webkit-appearance: none;
-  border: 3px solid var(--elevated);
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
-}
-.composer-effort-track input::-moz-range-track { height: 4px; background: transparent; }
-.composer-effort-track input::-moz-range-thumb {
-  width: 8px;
-  height: 8px;
-  border: 3px solid var(--elevated);
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
-}
-.composer-effort-stops {
-  position: absolute;
-  inset-inline: var(--space-2);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  pointer-events: none;
-}
-.composer-effort-stops i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--border);
-}
-.composer-effort-stops i.active { background: var(--accent); }
-.composer-actions:has(.composer-effort-tooltip) { overflow: visible; }
-.composer .composer-rail:has(.composer-effort-tooltip) { overflow: visible; }
-.composer-effort-tooltip {
-  position: absolute;
-  z-index: var(--z-tooltip);
-  bottom: calc(100% + var(--space-1));
-  left: 50%;
-  transform: translateX(-50%);
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  background: var(--material-glass);
-  color: var(--text);
-  font-size: var(--font-meta);
-  font-weight: 600;
-  white-space: nowrap;
-  pointer-events: none;
-}
 @container composer-widget (max-width: 480px) {
   .composer-widget .composer-config {
     flex: 1 1 auto;
@@ -3710,13 +3628,12 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .session-date-divider {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  min-height: 22px;
-  padding: var(--space-1) var(--space-3) 2px;
-  color: var(--muted);
-  font-size: var(--font-meta);
-  font-weight: 560;
-  line-height: var(--font-meta-lh);
+  gap: var(--space-1);
+  padding: 1px var(--space-2) 0;
+  color: var(--faint);
+  font-size: max(10px, calc(var(--font-meta) * .85));
+  font-weight: 450;
+  line-height: 1;
   white-space: nowrap;
 }
 .session-date-divider::before,
@@ -3724,7 +3641,7 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
   content: "";
   height: 1px;
   flex: 1 1 auto;
-  background: var(--border-soft);
+  background: var(--hair);
 }
 .session-date-divider > span {
   display: inline-flex;
@@ -4833,6 +4750,12 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .placed-slot-widget[data-widget-editing="true"] { cursor: grab; }
 .placed-mini-widget[data-widget-editing="true"]:active,
 .placed-slot-widget[data-widget-editing="true"]:active { cursor: grabbing; }
+.conversation-composer-dock > .placed-mini-widget[data-widget-editing="true"] {
+  /* Keep full-width status docks in the normal block flow while Shift makes
+     their widget wrapper draggable; inline-flex makes the dock shrink-wrap. */
+  display: block;
+  width: 100%;
+}
 .focus-conversation > .placed-slot-widget {
   flex: none; width: min(var(--chat-measure), calc(100% - 72px)); margin: 8px auto 0;
   border: 1px solid var(--border-soft); border-radius: var(--radius-surface); background: var(--sunken);
@@ -4895,6 +4818,30 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .widget-placement-empty { margin: var(--space-1) 0; color: var(--faint); }
 .header-user-menu { position: relative; flex: none; }
 /* User menu content renders through ui/Menu (portal .ui-menu). */
+.header-chat-menu,
+.mobile-chat-menu {
+  display: inline-grid;
+  place-items: center;
+  width: max(var(--control-h-sm), var(--hit-min));
+  height: max(var(--control-h-sm), var(--hit-min));
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+}
+.header-chat-menu {
+  position: relative;
+  background: var(--surface-overlay);
+}
+.header-chat-menu:hover,
+.header-chat-menu[aria-expanded="true"],
+.mobile-chat-menu[aria-expanded="true"] {
+  color: var(--text);
+  background: var(--surface-overlay-hover);
+}
+.header-chat-menu svg,
+.mobile-chat-menu svg { width: var(--icon-md); height: var(--icon-md); }
 .header-profile { display: flex; align-items: center; gap: 6px; padding: 0 4px; border: 0; background: transparent; }
 .header-profile-avatar {
   display: grid; place-items: center; width: 31px; height: 31px; border-radius: 50%;
@@ -12062,7 +12009,7 @@ html[data-font] body :is(
   }
   /* Small, close-to-anchor overlays: lighter blur reads better at this size
      than the full sheet-grade amount. */
-  :is(.ui-tooltip, .composer-effort-tooltip) {
+  :is(.ui-tooltip) {
     background: radial-gradient(140% 140% at 50% 50%,
       color-mix(in srgb, var(--material-glass) 84%, transparent) 0%,
       color-mix(in srgb, var(--material-glass) 50%, transparent) 100%);
@@ -12146,12 +12093,12 @@ html[data-font] body :is(
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
-  body[data-desktop-low-resource="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .composer-effort-tooltip, .dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .app > .header, .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .mobile-island-sheet.sheet, .activity-group, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip),
-  html[data-reduce-animations="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .composer-effort-tooltip, .dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .app > .header, .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .mobile-island-sheet.sheet, .activity-group, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip) {
+  body[data-desktop-low-resource="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .app > .header, .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .mobile-island-sheet.sheet, .activity-group, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip),
+  html[data-reduce-animations="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .app > .header, .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .mobile-island-sheet.sheet, .activity-group, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip) {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
-  :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .composer-effort-tooltip, .app > .header, .sidebar, .railbar) { background: var(--material-glass); }
+  :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .app > .header, .sidebar, .railbar) { background: var(--material-glass); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.dialog-panel, .sheet, .composer-card, .response-footer-metadata-grid, .workspace-customize-panel) { background: var(--material-glass-strong); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.activity-group, .task-list) { background: var(--surface-activity); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.ui-glass-island, .ui-glass-dock) { background: var(--material-glass); }
@@ -12161,9 +12108,9 @@ html[data-font] body :is(
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .composer-effort-tooltip) { background: var(--material-glass); }
+  :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip) { background: var(--material-glass); }
   :is(.dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel) { background: var(--material-glass-strong); }
-  :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .composer-effort-tooltip, .dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .app > .header, .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .mobile-island-sheet.sheet, .activity-group, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip) {
+   :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .app > .header, .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .mobile-island-sheet.sheet, .activity-group, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-model .picker-chip) {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
@@ -12452,6 +12399,7 @@ html[data-font] body :is(
 }
 .activity-group {
   position: relative;
+  overflow: visible;
   background: transparent;
 }
 .activity-group.current { border-color: color-mix(in srgb, var(--accent-line) 58%, var(--border-soft)); }
@@ -12463,6 +12411,13 @@ html[data-font] body :is(
   border: 0;
   border-radius: 0;
   box-shadow: none;
+}
+.activity-group.open > .ui-run-summary {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: var(--z-shell);
+  background: var(--surface-activity);
+  box-shadow: 0 1px 0 var(--border-soft), var(--shadow-sm);
 }
 .activity-group-expand-shell,
 .task-list-expand-shell {
@@ -12710,11 +12665,11 @@ body[data-desktop-low-resource="true"] .activity-live { transition: none; }
 }
 
 /* Keep this after responsive timeline shorthands. The dock's height is already
-   reserved outside the scrollport; this padding is only the normal breathing
-   room plus the fresh-turn sheet that shrinks as live content arrives. */
+   reserved outside the scrollport; keep a full reading gap below the last
+   surface so activity text cannot crowd the above-composer status dock. */
 .focus-conversation:has(> .conversation-composer-dock) .timeline {
-  padding-bottom: calc(var(--conversation-group-gap) + var(--timeline-turn-sheet-space, 0px));
-  scroll-padding-bottom: var(--conversation-group-gap);
+  padding-bottom: calc(var(--conversation-message-gap) + var(--conversation-group-gap) + var(--timeline-turn-sheet-space, 0px));
+  scroll-padding-bottom: calc(var(--conversation-message-gap) + var(--conversation-group-gap));
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -13014,7 +12969,6 @@ body:not([data-glass="off"]) :is(
       .prompt-nav-panel,
       .selection-menu,
       .ui-tooltip,
-      .composer-effort-tooltip,
       .turn-rate-limit .turn-rate-limit-action,
       .turn-rate-limit .turn-rate-limit-model .picker-chip,
       .jump-latest,
@@ -13084,7 +13038,6 @@ body[data-glass="off"] :is(
   .prompt-nav-panel,
   .selection-menu,
   .ui-tooltip,
-  .composer-effort-tooltip,
   .turn-rate-limit .turn-rate-limit-action,
   .turn-rate-limit .turn-rate-limit-model .picker-chip,
   .jump-latest

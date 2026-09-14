@@ -97,7 +97,6 @@ import { shouldHandlePromptHistoryKey } from "../composer/history.ts";
 import { usePromptHistory } from "../composer/usePromptHistory.ts";
 import AdaptiveTextInput, { type TextInputHandle } from "./input/AdaptiveTextInput.tsx";
 import ComposerAddMenu from "./ComposerAddMenu.tsx";
-import EffortMenu from "./EffortMenu.tsx";
 import ComposerFocusDialog from "./ComposerFocusDialog.tsx";
 import QueuedMessageList, { latestSteerableQueuedItem } from "./QueuedMessageList.tsx";
 import { GoalAttachForm } from "../../../../packages/goals/widgets/GoalStrip.tsx";
@@ -121,7 +120,6 @@ import { friendlyError, matchesSendShortcut, modKeyLabel, parseModelRef } from "
 import { Icon } from "../icons.tsx";
 import ModelPicker from "@polyth/models/model-picker";
 import { useRuntimeCatalog } from "@polyth/models/runtime-catalog";
-import { modelSupportsThinking } from "@polyth/models/model-presentation";
 import { resolveProjectModelDefault, useSessionDefaults } from "../sessionDefaults.ts";
 import { contextTokensUsed } from "../reduce.ts";
 import { effectiveAttachmentSupport, attachmentModality } from "@polyth/contracts";
@@ -134,7 +132,7 @@ import {
   subscribeDraftExecutionConfig,
   updateDraftExecutionConfig,
 } from "../executionDraft.ts";
-import { dismissKeyboard, useViewportMetrics } from "../mobileViewport.ts";
+import { useViewportMetrics } from "../mobileViewport.ts";
 import { tr } from "../i18n/index.ts";
 import SessionContextBar, {
   type ContextChoice,
@@ -1074,7 +1072,6 @@ export default function Composer({
   // the cap depends on it, so a text-only trigger is not enough. Reactive —
   // reading getViewportMetrics() during render never re-fires on change.
   const bandHeight = useViewportMetrics().height;
-  const keyboardOpen = useViewportMetrics().covering;
   useEffect(() => {
     const el = inputRef.current?.element();
     if (!el) return;
@@ -1802,12 +1799,17 @@ export default function Composer({
       : chatModels[0];
   const pickComposerModel = (ref?: ModelRef & { harnessId?: string }) => {
     if (!ref) return;
-    // A pending effort belongs to the old model. The selected model's saved
-    // value is derived at send/render time, so never carry this one across.
-    updateCfg(withModelForNextTurn(cfg, ref));
     const descriptor = routeCatalog.models.find((candidate) =>
       modelIdentityMatches(candidate, ref)
       && (!effectiveDraftHarness || !candidate.harnessId || candidate.harnessId === effectiveDraftHarness));
+    // The model picker owns thinking selection. An explicit `variant` key is
+    // also how its Auto choice is distinguished from merely choosing a model.
+    const hasThinkingChoice = Object.prototype.hasOwnProperty.call(ref, "variant");
+    const nextCfg = withModelForNextTurn(cfg, ref);
+    updateCfg(hasThinkingChoice
+      ? (ref.variant ? withExplicitThinking(nextCfg, ref.variant) : withAutoThinking(nextCfg))
+      : nextCfg);
+    if (hasThinkingChoice && descriptor) setModelThinking(descriptor, ref.variant || undefined);
     noteModelUsed(`${descriptor?.harnessId ? `${descriptor.harnessId}::` : ""}${ref.providerID}/${ref.modelID}`);
     if (!session && activeProjectId && descriptor?.harnessId) {
       updateDraftExecutionConfig(activeProjectId, {
@@ -1905,16 +1907,6 @@ export default function Composer({
       updateCfg(selectedThinking ? withExplicitThinking(cfg, selectedThinking) : withAutoThinking(cfg));
     }
   }, [reconciledThinkingKey]);
-  const pickThinking = (thinking: string | undefined) => {
-    if (selectedModel) setModelThinking(selectedModel, thinking);
-    updateCfg(thinking === undefined ? withAutoThinking(cfg) : withExplicitThinking(cfg, thinking));
-    if (!session && activeProjectId) updateDraftExecutionConfig(activeProjectId, {
-      ...(thinking ? { thinking } : { thinking: undefined }),
-    });
-  };
-  const preserveKeyboard = isPhone && keyboardOpen
-    ? () => inputRef.current?.focus()
-    : undefined;
   const autoApproveOn = session ? session.autoAccept === true : newSessionAutoApprove;
   const toggleAutoApprove = () => {
     if (autoApproveBusy) return;
@@ -1972,17 +1964,6 @@ export default function Composer({
     // never clear a different session if navigation happened meanwhile.
     if (getState().activeSessionId === target) requestComposerReplace("");
   };
-  const thinkingVariants = selectedModel?.variants ?? [];
-  // On phones the model picker also owns the execution settings header, so
-  // the thinking control still has one rendered owner.
-  const effortControl = !noModels && modelSupportsThinking(selectedModel) ? (
-    <EffortMenu
-      variants={thinkingVariants}
-      value={selectedThinking}
-      onPick={(thinking) => pickThinking(thinking || undefined)}
-      onCommit={preserveKeyboard}
-    />
-  ) : null;
   const phoneLayout = isPhone;
   const executionPickerContext = {
     spaceId,
@@ -1995,8 +1976,6 @@ export default function Composer({
     pendingHarnessSelection: session ? cfg.harness : undefined,
     onSelectHarness: session ? pickComposerHarness : undefined,
     projectHarnessDefault: activeProject?.defaults?.harness,
-    executionEffortControl: effortControl,
-    phoneLayout,
   };
   const modelControl = activeProjectId ? (
     <ModelPicker
@@ -2067,7 +2046,7 @@ export default function Composer({
     requestComposerReplace(rewrite.original);
   }, [promptRewrite, text]);
   // Composer controls are ordinary mini-widgets: one placement/visibility
-  // system owns next action, Workflow, and effort.
+  // system owns next action and Workflow.
   const slotContext = {
     ...executionPickerContext,
     variant,
@@ -2081,9 +2060,6 @@ export default function Composer({
     workflowDraftText: text,
     workflowAttachmentCount: attachments.length,
     consumeWorkflowDraft,
-    // The phone model sheet owns effort. Keep the ordinary composer widget
-    // context empty so it does not render twice.
-    composerEffortControl: phoneLayout ? null : effortControl,
     canGenerateNextAction,
     canRevertSuggestion,
     suggestionBusy,
@@ -2297,7 +2273,7 @@ export default function Composer({
       </div>
       {/* P2-W3A rail: typing first, configuration second. One quiet row under
           the editor — Add (attachments/context/tools), then the execution
-          config chips (model, agent, effort), then extensions and Send.
+           config chips (model, agent), then extensions and Send.
           Send/Stop is the only filled control; everything else stays quiet. */}
       <div className="composer-rail">
         <input
@@ -2330,7 +2306,7 @@ export default function Composer({
             attachGithub={attachGithub}
           />
           {/* Extensions (icon actions) lead the rail; the config cluster
-              (model · effort · agent) is right-anchored beside Send. */}
+              (model · agent) is right-anchored beside Send. */}
           <span className="composer-extensions composer-mobile-extensions">
             <SlotHost slot="composer.leading" context={slotContext} customizable />
           </span>

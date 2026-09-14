@@ -120,11 +120,6 @@
   color: currentColor;
 }
 
-/* Thinking is model capability, not picker-global configuration. */
-.model-sheet .pkg-harnesses-mobile-config {
-  display: none;
-}
-
 .model-sheet .sheet-section {
   margin: 0;
   border: 0;
@@ -259,7 +254,6 @@
   display: none;
 }
 
-.model-sheet .sheet-row-info,
 .model-sheet .sheet-row-star,
 .model-sheet .sheet-row-tool {
   width: var(--tap);
@@ -270,15 +264,10 @@
   background: transparent;
 }
 
-.model-sheet .sheet-row-info svg,
 .model-sheet .sheet-row-star svg,
 .model-sheet .sheet-row-tool svg {
   width: var(--icon-md);
   height: var(--icon-md);
-}
-
-.model-sheet .sheet-row-info {
-  color: var(--faint);
 }
 
 .model-sheet .sheet-row-star {
@@ -292,36 +281,6 @@
 
 .model-sheet .sheet-row-tool:disabled {
   opacity: .32;
-}
-
-.model-sheet .model-thinking-trigger {
-  min-width: var(--tap);
-  min-height: var(--tap);
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-1);
-  padding: 0 var(--space-1);
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--text-dim);
-  font: inherit;
-  font-size: var(--font-meta);
-  white-space: nowrap;
-  cursor: pointer;
-  touch-action: manipulation;
-}
-
-.model-sheet .model-thinking-trigger[aria-expanded="true"],
-.model-sheet .model-thinking-trigger:active {
-  background: var(--surface-overlay);
-  color: var(--text);
-}
-
-.model-sheet .model-thinking-trigger svg {
-  width: var(--icon-sm);
-  height: var(--icon-sm);
 }
 
 .model-thinking-menu.ui-menu {
@@ -338,10 +297,6 @@
 }
 
 @media (max-width: 380px) {
-  .model-sheet .sheet-row-info {
-    display: none;
-  }
-
   .model-sheet .model-thinking-trigger {
     padding-inline: 0;
   }

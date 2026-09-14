@@ -28,7 +28,7 @@ test("composer Add menu exposes advanced controls without duplicating model/thin
   assert.ok(source.includes('tr("composeraddmenu.moreComposerTools")'));
   assert.ok(source.includes('openSettingsPage("harnesses")'),
     "More controls reaches the harness/tool configuration surface");
-  assert.ok(!source.includes("EffortMenu"), "thinking remains owned by its direct composer control");
+  assert.ok(!source.includes("EffortMenu"), "thinking remains owned by the model picker");
   assert.ok(!source.includes("ModelPicker"), "model selection is not duplicated inside Add");
 });
 

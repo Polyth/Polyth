@@ -445,9 +445,7 @@ test("phone execution controls live behind the model picker with harness tabs", 
   const harnessPicker = await read("../../../packages/harness-runtime/widgets/runtime.tsx");
   const modelPicker = await read("../../../packages/models/widgets/ModelPicker.tsx");
   const modelStyles = await read("../../../packages/models/widgets/styles.css");
-  const effortMenu = await read("../src/components/EffortMenu.tsx");
   const miniWidgets = await read("../src/widgets/builtinMiniWidgets.tsx");
-  const styles = await read("../src/styles.css");
 
   // Phones expose the model trigger; its sheet owns harness tabs plus thinking
   // controls. Desktop keeps the same model control in the rail.
@@ -465,22 +463,12 @@ test("phone execution controls live behind the model picker with harness tabs", 
   assert.ok(!modelPicker.includes("{detail ? detailsView"), "the picker shell never swaps to an in-overlay details page");
   assert.ok(!composer.includes("executionAgentControl"), "agent choices are not passed into the composer");
   assert.ok(!harnessPicker.includes("agentControl"), "the model sheet does not render agent choices");
-  assert.ok(harnessPicker.includes('aria-label="Execution settings"'), "the model sheet groups execution controls accessibly");
+  assert.ok(!harnessPicker.includes('aria-label="Execution settings"'), "effort is no longer a separate execution section");
   assert.match(modelStyles, /\.model-picker-trigger\s*\{[^}]*var\(--hit-min\)/s, "the phone model trigger keeps a coarse-pointer hit target");
-  assert.ok(composer.includes("const effortControl"), "composer derives one effort control");
-  assert.ok(composer.includes("modelSupportsThinking(selectedModel)"), "it only exists for models that report variants");
-  assert.ok(composer.includes("cfg.thinking !== undefined"), "Auto suppresses saved and session thinking fallbacks");
-  assert.ok(composer.includes("onCommit={preserveKeyboard}"), "the keyboard reopens once the drag ends");
-  assert.ok(composer.includes("pickThinking(thinking || undefined)"), "picking saves the effort and updates the composer config");
-  assert.ok(composer.includes("composerEffortControl: phoneLayout ? null : effortControl"), "desktop slots own the rendered effort control");
-  assert.ok(miniWidgets.includes('id: "composer.effort"'), "effort is registered in the shared widget layout");
-  assert.ok(effortMenu.includes('type="range"'), "effort uses a direct discrete slider on every layout");
-  assert.ok(!effortMenu.includes("<select"), "the phone select variant is gone — dragging works on touch");
-  assert.ok(effortMenu.includes('const options = ["", ...new Set(variants)]'), "Auto and each backend variant get a fixed stop");
-  assert.ok(effortMenu.includes("thinkingVariantLabel"), "backend variant strings get display labels");
-  assert.ok(effortMenu.includes("{adjusting && ("), "the selected effort appears only while adjusting the slider");
-  assert.ok(effortMenu.includes("aria-valuetext={label}"), "the selected effort remains available to assistive technology");
-  assert.ok(styles.includes("background: var(--border-soft);"), "the effort track remains neutral");
+  assert.ok(!miniWidgets.includes("composer.effort"), "effort is not a standalone widget");
+  assert.ok(modelPicker.includes("const variantMenu"), "the picker owns thinking variants");
+  assert.ok(modelPicker.includes('variant: variant ?? ""'), "Auto is passed explicitly");
+  assert.match(modelStyles, /\.model-thinking-trigger\s*\{/);
 
   // A tap on any rail control blurs the input; collapsing on that blur would
   // unmount the control before its click lands (the tap would be swallowed).
@@ -497,12 +485,6 @@ test("phone execution controls live behind the model picker with harness tabs", 
 
   const css = await readWebStyles();
   const section = css.slice(css.indexOf("UX-MOBILE-01 — mobile-first new chat"));
-  const harnessStyles = await read("../../../packages/harness-runtime/widgets/styles.css");
-  assert.match(
-    harnessStyles,
-    /\.pkg-harnesses-mobile-config > div \{[^}]*grid-template-columns:/s,
-    "the execution sheet aligns its labelled controls without a horizontal rail",
-  );
   const at = section.search(/\.composer-mobile \.composer-config \.config-chip,\s*\n\s*\.composer-mobile \.composer-config \.picker-chip/);
   assert.ok(at > 0, "every config chip shares the same touch box");
   assert.match(section.slice(at, section.indexOf("}", at)), /var\(--tap\)/);

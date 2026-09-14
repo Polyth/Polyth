@@ -88,13 +88,23 @@ export function thinkingVariantLabel(variant: string): string {
   return label ? label[0]!.toUpperCase() + label.slice(1) : variant;
 }
 
+export function hasModelPricing(cost?: { input: number; output: number }): cost is { input: number; output: number } {
+  return Boolean(
+    cost
+    && Number.isFinite(cost.input) && cost.input > 0
+    && Number.isFinite(cost.output) && cost.output > 0,
+  );
+}
+
+export function formatModelPrice(value: number): string {
+  return `$${formatNumber(value, { maximumSignificantDigits: 4 })}`;
+}
+
 function priceLine(cost?: { input: number; output: number }): string | null {
-  if (!cost || (!cost.input && !cost.output)) return null;
-  const formatPrice = (value: number) =>
-    `$${formatNumber(value, { maximumFractionDigits: value < 1 ? 2 : 1 })}`;
+  if (!hasModelPricing(cost)) return null;
   return tr("modelpicker.pricingPerMTok", {
-    input: formatPrice(cost.input),
-    output: formatPrice(cost.output),
+    input: formatModelPrice(cost.input),
+    output: formatModelPrice(cost.output),
   });
 }
 

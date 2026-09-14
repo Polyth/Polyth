@@ -9,6 +9,8 @@ import { Icon } from "@polyth/web/icons";
 import { getLocale, tr } from "@polyth/web/i18n";
 import ProviderLogo from "./ProviderLogo.tsx";
 import {
+  formatModelPrice,
+  hasModelPricing,
   modelDetailsPresentation,
   modelSupportsThinking,
 } from "./modelPresentation.ts";
@@ -104,10 +106,11 @@ export function ModelDetails({
 export function ModelHoverDetails({ model, favorite, showFavorite = true }: { model: ModelDescriptor; favorite: boolean; showFavorite?: boolean }) {
   const capabilities = new Set((model.capabilities ?? []).map((capability) => capability.toLowerCase()));
   const icon = (label: string, node: ReactNode) => <span title={label} aria-label={label}>{node}</span>;
-  const prices = model.cost && (
+  const cost = model.cost;
+  const prices = hasModelPricing(cost) && (
     <div className="model-hover-pricing">
-      <span>Input <b>${model.cost.input.toLocaleString(getLocale())} <i>/ 1M tokens</i></b></span>
-      <span>Output <b>${model.cost.output.toLocaleString(getLocale())} <i>/ 1M tokens</i></b></span>
+      <span>Input <b>{formatModelPrice(cost.input)} <i>/ 1M tokens</i></b></span>
+      <span>Output <b>{formatModelPrice(cost.output)} <i>/ 1M tokens</i></b></span>
     </div>
   );
   return (

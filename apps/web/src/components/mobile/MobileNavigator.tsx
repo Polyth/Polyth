@@ -52,6 +52,7 @@ import {
   compareSessionNavigation,
   EMPTY_SESSION_DATE_FILTER,
   groupSessionsByActivityDate,
+  sessionDateInputValue,
   sessionDateFilterActive,
   sessionDateGroupLabel,
   sessionMatchesDateFilter,
@@ -998,7 +999,9 @@ export default function MobileNavigator() {
                       const label = sessionDateGroupLabel(group.timestamp, relativeTime, getLocale(), now);
                       return (
                         <div className="mobile-nav-date-group" key={group.key}>
-                          <div className="mobile-nav-date-divider" role="separator" aria-label={label}><span>{label}</span></div>
+                          {group.key !== sessionDateInputValue(now) && (
+                            <div className="mobile-nav-date-divider" role="separator" aria-label={label}><span>{label}</span></div>
+                          )}
                           {group.sessions.map((session) => (
                             <SessionRow
                               key={session.id}
@@ -1052,7 +1055,9 @@ export default function MobileNavigator() {
                               const label = sessionDateGroupLabel(group.timestamp, relativeTime, getLocale(), now);
                               return (
                                 <div className="mobile-nav-date-group" key={group.key}>
-                                  <div className="mobile-nav-date-divider" role="separator" aria-label={label}><span>{label}</span></div>
+                                  {group.key !== sessionDateInputValue(now) && (
+                                    <div className="mobile-nav-date-divider" role="separator" aria-label={label}><span>{label}</span></div>
+                                  )}
                                   {/* The section header already says these are
                                       isolated; a per-row branch glyph only
                                       repeats it and costs title width. */}

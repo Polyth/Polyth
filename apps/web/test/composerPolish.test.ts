@@ -18,8 +18,6 @@ test("phone composer keeps one text origin and one semantic control order", asyn
     "voice follows the execution group");
   assert.match(css, /\.composer-mobile \.composer-actions,[\s\S]*?order:\s*4;/,
     "the primary action remains the final rail group");
-  assert.match(css, /\.composer-mobile \.composer-effort-inline\s*\{[^}]*order:\s*-1;/s,
-    "thinking effort renders immediately before the model");
   assert.match(css, /\.composer-mobile \.model-picker-trigger \.model-trigger-logo,[\s\S]*?display:\s*none;/,
     "the composer model trigger is text-only");
 });
@@ -36,26 +34,19 @@ test("phone composer never reserves empty widget slots or leaks desktop actions"
     "a user-moved microphone remains supported without exposing other widgets");
 });
 
-test("thinking effort is a static icon meter with an icon-only menu", async () => {
-  const effort = await read("../src/components/EffortMenu.tsx");
-  assert.ok(effort.includes("composer-effort-meter"));
-  assert.ok(effort.includes('role="menuitemradio"'));
-  assert.ok(effort.includes('aria-label={optionLabel}'), "icon choices keep accessible names");
-  assert.ok(effort.includes('title={optionLabel}'), "pointer users can discover icon semantics");
-  assert.ok(!effort.includes("composer-effort-tooltip"), "the old drag-tooltip UI is gone");
-
-  const css = await read("../src/composerAdaptive.css");
-  assert.match(css, /\.composer-effort-menu\s*\{[^}]*display:\s*inline-flex;/s);
-  assert.match(css, /\.composer-effort-meter\.auto i\s*\{[^}]*background:\s*var\(--faint\);/s,
-    "Auto is neutral and cannot read as an animated progress spinner");
+test("thinking effort lives in the model picker", async () => {
+  const picker = await read("../../../packages/models/widgets/ModelPicker.tsx");
+  const css = await read("../../../packages/models/widgets/styles.css");
+  assert.ok(picker.includes("const variantMenu"));
+  assert.ok(picker.includes('label={tr("composer.thinking")}'));
+  assert.ok(picker.includes('variant: variant ?? ""'));
+  assert.match(css, /\.model-thinking-trigger\s*\{/);
+  assert.ok(!(await read("../src/components/Composer.tsx")).includes("EffortMenu"));
 });
 
-test("phone effort is a required execution control and queue keeps the send glyph", async () => {
+test("model picker owns effort and queue keeps the send glyph", async () => {
   const widgets = await read("../src/widgets/builtinMiniWidgets.tsx");
-  assert.ok(widgets.includes('id: "composer.effort-inline"'));
-  assert.ok(widgets.includes('defaultSlot: "composer.execution"'));
-  assert.ok(widgets.includes("requiredVisible: true"));
-  assert.ok(widgets.includes("context.executionEffortControl"));
+  assert.ok(!widgets.includes("composer.effort"));
 
   const icons = await read("../src/components/ui/icons.ts");
   assert.ok(icons.includes("Send as QueueIcon"), "queued follow-ups retain the familiar send glyph");

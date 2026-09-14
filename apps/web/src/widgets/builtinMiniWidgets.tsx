@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import { setOverlay } from "../store.ts";
 import { defineWidgetPlugin, registerWidgetPlugin } from "./catalog.ts";
 import { tr } from "../i18n/index.ts";
@@ -141,41 +140,6 @@ const COMPOSER_CONTROLS_PLUGIN = defineWidgetPlugin({
           </span>
         );
       },
-    },
-    {
-      // Phone execution configuration belongs directly beside the model, not
-      // inside the model sheet. A dedicated required placement lets existing
-      // persisted layouts acquire the new control without relocating the
-      // customizable desktop effort widget.
-      id: "composer.effort-inline",
-      title: tr("composer.thinking"),
-      description: tr("composer.thinking"),
-      kind: "mini-widget",
-      defaultSlot: "composer.execution",
-      supportedSlots: ["composer.execution"],
-      defaultVisible: true,
-      requiredVisible: true,
-      defaultSize: { w: 1, h: 1 },
-      resizable: false,
-      audience: "simple",
-      order: 55,
-      render: (context) => context.phoneLayout === true && context.executionEffortControl
-        ? <span className="composer-effort-inline">{context.executionEffortControl as ReactNode}</span>
-        : null,
-    },
-    {
-      id: "composer.effort",
-      title: tr("composer.thinking"),
-      description: tr("composer.thinking"),
-      kind: "mini-widget",
-      defaultSlot: "composer.trailing",
-      supportedSlots: ["composer.leading", "composer.trailing"],
-      defaultVisible: true,
-      defaultSize: { w: 1, h: 1 },
-      resizable: false,
-      audience: "simple",
-      order: 60,
-      render: (context) => context.composerEffortControl as ReactNode ?? null,
     },
   ],
 });

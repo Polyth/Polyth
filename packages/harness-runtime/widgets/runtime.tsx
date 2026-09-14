@@ -1,5 +1,5 @@
 import "./styles.css";
-import { useCallback, useEffect, useRef, useState, useId, type DragEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, useId, type DragEvent } from "react";
 import type {
   HarnessControlDescriptor,
   HarnessRosterItem,
@@ -120,8 +120,6 @@ export function HarnessTabs({
   pendingHarnessSelection,
   onSelectHarness,
   projectHarnessDefault,
-  effortControl,
-  phoneLayout,
   spaceId,
 }: {
   host: WebPackageHost;
@@ -133,8 +131,6 @@ export function HarnessTabs({
   pendingHarnessSelection?: HarnessSelection;
   onSelectHarness?: (selection: HarnessSelection) => void;
   projectHarnessDefault?: HarnessSelection | null;
-  effortControl?: ReactNode;
-  phoneLayout?: boolean;
   spaceId?: string;
 }) {
   const { rows, roster, error, loading } = useHarnesses(projectId, spaceId);
@@ -286,9 +282,6 @@ export function HarnessTabs({
           The previous harness stopped safely. {transition.error?.message ?? "Choose another harness tab to continue."}
         </Notice>}
         {activeRow?.snapshot && !canExecute(activeRow.snapshot) && !transition && <p className="pkg-harnesses-picker-state" role="status">{availabilityLabel(activeRow.snapshot)}. Open Harnesses in Settings to finish setup.</p>}
-        {phoneLayout && effortControl && <section className="pkg-harnesses-mobile-config" aria-label="Execution settings">
-          <div><span>Thinking</span>{effortControl}</div>
-        </section>}
       </>
     {(failure || error) && <Notice tone="error" role="alert">{failure || error}</Notice>}
     <span className="sr-only" role="status" aria-live="polite">{announcement}</span>
@@ -529,7 +522,7 @@ function SwitchMarker({ event }: { event: SessionEvent }) {
 export default defineWebPackage((host) => () => {
   const off = [
     host.settings.registerPage({ id: "harnesses", packageId: "harness-runtime", label: "Harnesses", group: "Engineering", order: 15, component: ({ settingsTarget }) => <HarnessSettings host={host} settingsTarget={settingsTarget}/> }),
-    host.slots.register({ id: "harnesses.model-tabs", slot: "modelPicker.header", order: 10, render: (props) => <HarnessTabs host={host} spaceId={props.spaceId as string | undefined} projectId={props.projectId as string | undefined} sessionId={props.sessionId as string | undefined} harnessSelection={props.harnessSelection as HarnessSelection | undefined} resolvedHarnessId={props.resolvedHarnessId as string | undefined} transition={props.harnessTransition as HarnessTransition | undefined} pendingHarnessSelection={props.pendingHarnessSelection as HarnessSelection | undefined} onSelectHarness={props.onSelectHarness as ((selection: HarnessSelection) => void) | undefined} projectHarnessDefault={props.projectHarnessDefault as HarnessSelection | null | undefined} effortControl={props.executionEffortControl as ReactNode} phoneLayout={props.phoneLayout === true} /> }),
+    host.slots.register({ id: "harnesses.model-tabs", slot: "modelPicker.header", order: 10, render: (props) => <HarnessTabs host={host} spaceId={props.spaceId as string | undefined} projectId={props.projectId as string | undefined} sessionId={props.sessionId as string | undefined} harnessSelection={props.harnessSelection as HarnessSelection | undefined} resolvedHarnessId={props.resolvedHarnessId as string | undefined} transition={props.harnessTransition as HarnessTransition | undefined} pendingHarnessSelection={props.pendingHarnessSelection as HarnessSelection | undefined} onSelectHarness={props.onSelectHarness as ((selection: HarnessSelection) => void) | undefined} projectHarnessDefault={props.projectHarnessDefault as HarnessSelection | null | undefined} /> }),
     host.slots.register({ id: "harnesses.transition", slot: "composer.execution", order: 10, render: (props) => <HarnessTransitionStatus host={host} sessionId={props.sessionId as string | undefined} resolvedHarnessId={props.resolvedHarnessId as string | undefined} transition={props.harnessTransition as HarnessTransition | undefined} /> }),
     host.slots.register({ id: "harnesses.switch-marker", slot: "session.timeline.event", meta: { eventTypes: ["harness/switched"] }, render: (props) => <SwitchMarker event={props.event as SessionEvent} /> }),
   ];

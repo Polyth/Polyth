@@ -3,7 +3,6 @@ import type { WidgetDef } from "./widgets/catalog.ts";
 import type { LucideIcon } from "./components/ui/icons.ts";
 import {
   BellIcon,
-  BrainIcon,
   BranchIcon,
   ChartIcon,
   ChatIcon,
@@ -39,7 +38,6 @@ const glyph = (Glyph: LucideIcon): RailIcon => () => createElement(Glyph, {
   "aria-hidden": true,
 });
 
-const EffortGlyph = glyph(BrainIcon);
 const WidgetFallbackGlyph = glyph(PackageIcon);
 
 /** Canonical monochrome icon vocabulary for built-in capabilities and package
@@ -90,7 +88,6 @@ export function railIconFor(id: string): RailIcon {
 
 /** Widget pickers use the same domain mark as panels and launchers. */
 export function widgetIconFor(widget: Pick<WidgetDef, "id" | "pluginId" | "capabilities">): RailIcon {
-  if (widget.id === "composer.effort") return EffortGlyph;
   const candidates = [...(widget.capabilities ?? []), widget.id, widget.pluginId, widget.id.split(".")[0] ?? ""];
   return candidates.map((id) => RAIL_ICONS[id]).find(Boolean) ?? WidgetFallbackGlyph;
 }

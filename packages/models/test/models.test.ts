@@ -24,6 +24,8 @@ import {
 } from "@polyth/models/model-picker-state";
 import {
   modelDetailsPresentation,
+  formatModelPrice,
+  hasModelPricing,
   modelMetaLine,
   modelModalityLabels,
   thinkingVariantLabel,
@@ -185,6 +187,24 @@ test("model presentation applies one fallback policy to missing catalog fields",
     pricing: null,
     availability: null,
   });
+});
+
+test("model pricing hides missing zeros and preserves real small values", () => {
+  assert.equal(hasModelPricing({ input: 0, output: 0 }), false);
+  assert.equal(modelDetailsPresentation({
+    providerID: "local",
+    modelID: "free",
+    name: "Free",
+    cost: { input: 0, output: 0 },
+  }).pricing, null);
+  assert.equal(hasModelPricing({ input: 0.5, output: 60 }), true);
+  assert.equal(formatModelPrice(0.000001), "$0.000001");
+  assert.match(modelDetailsPresentation({
+    providerID: "google",
+    modelID: "gemini",
+    name: "Gemini",
+    cost: { input: 0.5, output: 60 },
+  }).pricing ?? "", /\$0\.5/);
 });
 
 test("parseModelPrefs sanitizes, deduplicates, and caps persisted keys", () => {

@@ -45,6 +45,7 @@ import {
 } from "../../reduce.ts";
 import { useUiSettings } from "../../uiPrefs.ts";
 import ContextIndicator from "../ContextIndicator.tsx";
+import ChatMenu from "../ChatMenu.tsx";
 import "./MobileSessionHeader.css";
 
 const SESSION_TITLE_POLL_MS = 2_000;
@@ -408,6 +409,7 @@ export default function MobileSessionHeader() {
           if (projectId) startNewSession(projectId);
         }} />
         <IconButton icon={LayersIcon} label="Open tools" size="lg" variant="ghost" aria-expanded={workspaceNav.homeOpen} onClick={openWorkspaceNavigation} />
+        <ChatMenu className="mobile-chat-menu" />
       </GlassIsland>
     </div>
     {surface === "island" && (

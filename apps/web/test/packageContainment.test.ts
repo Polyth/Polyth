@@ -211,7 +211,6 @@ const GENERIC_PACKAGE_IMPORTERS = new Set([
   // shell's autocomplete; reimplementing that rule here would let the two
   // disagree. Imports the browser-safe `@polyth/commands/catalog` only.
   "composer/discovery.ts",
-  "components/EffortMenu.tsx",
   "components/ContextRail.tsx",
   "components/Header.tsx",
   "components/Timeline.tsx",

@@ -35,6 +35,7 @@ import {
   compareSessionNavigation,
   groupSessionsByActivityDate,
   sessionDateGroupLabel,
+  sessionDateInputValue,
   sessionMatchesDateFilter,
   sortPinnedSessions,
   EMPTY_SESSION_DATE_FILTER,
@@ -801,6 +802,7 @@ export default function SessionList({
 
   const dividerNow = Date.now();
   const dateDivider = (timestamp: number) => {
+    if (sessionDateInputValue(timestamp) === sessionDateInputValue(dividerNow)) return null;
     const label = sessionDateGroupLabel(timestamp, relativeTime, getLocale(), dividerNow);
     return (
       <div className="session-date-divider" role="separator" aria-label={label}>

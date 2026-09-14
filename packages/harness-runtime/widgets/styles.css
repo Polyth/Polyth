@@ -12,10 +12,6 @@
 .pkg-harnesses-transition > span { display: inline-flex; align-items: center; gap: var(--space-2); }
 .pkg-harnesses-transition-status:empty { display: none; }
 .pkg-harnesses-picker-state { margin: 0; color: var(--muted); font-size: var(--font-meta); }
-.pkg-harnesses-mobile-config { display: grid; gap: var(--space-1); padding-block: var(--space-2); border-block: 1px solid var(--border-soft); }
-.pkg-harnesses-mobile-config > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); align-items: center; gap: var(--space-3); min-height: var(--tap); }
-.pkg-harnesses-mobile-config > div > span { color: var(--muted); }
-.pkg-harnesses-mobile-config > div > :last-child { justify-self: end; min-width: 0; max-width: 100%; }
 
 .pkg-harnesses.pkg-harnesses-settings { container: harnesses / inline-size; display: grid; gap: var(--space-4); min-width: 0; }
 .pkg-harnesses-settings :is(header h2, header p, h3, p) { margin: 0; }

@@ -19,12 +19,30 @@ test("visible chat actions use direct canonical controls", () => {
   assert.match(messageActions, /className="chat-message-actions"/);
   assert.match(messageActions, /data-actions-seq=\{message\.eventSeq\}/);
   assert.match(messageActions, /<ChatActionButton/);
-  assert.doesNotMatch(messageActions, /Icon\.more|Menu|actions-popup/);
+  assert.doesNotMatch(messageActions, /Icon\.more|<Menu\b|actions-popup/);
   assert.match(responseFooter, /className="chat-response-actions"/);
   assert.match(responseFooter, /prefs\.responseActions\.map/);
   assert.doesNotMatch(responseFooter, /overflowActions|response-footer-more|<Menu/);
   assert.match(pin, /ChatActionButton/);
   assert.match(pin, /PinIcon/);
+});
+
+test("chat menu exposes the optional latest-user pin without touching message events", () => {
+  const menu = read("../src/components/ChatMenu.tsx");
+  const header = read("../src/components/Header.tsx");
+  const mobileHeader = read("../src/components/mobile/MobileSessionHeader.tsx");
+  const prefs = read("../src/uiPrefs.ts");
+  const timeline = read("../src/components/Timeline.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(menu, /kind:\s*"checkbox"/);
+  assert.match(menu, /pinLatestUserMessage/);
+  assert.match(header, /chatSurface && <ChatMenu/);
+  assert.match(mobileHeader, /<ChatMenu className="mobile-chat-menu"/);
+  assert.match(prefs, /pinLatestUserMessage:\s*false/);
+  assert.match(timeline, /latest-user-pinned/);
+  assert.match(css, /\.timeline\s*>\s*\.msg\.user\.latest-user-pinned\s*\{[\s\S]*?position:\s*sticky;[\s\S]*?inset-block-start:\s*0;/);
+  assert.match(css, /\.focus-conversation:has\(> \.conversation-composer-dock\) \.timeline\s*\{[\s\S]*?padding-bottom:\s*calc\(var\(--conversation-message-gap\) \+ var\(--conversation-group-gap\)/);
 });
 
 test("generic Menu contains no response-footer special case", () => {

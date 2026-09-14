@@ -740,6 +740,14 @@ test("execution summary columns stay aligned whether or not a row has line count
   }
 });
 
+test("expanded activity keeps its collapse control visible while scrolling", async () => {
+  const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.activity-group\s*\{[\s\S]*?overflow:\s*visible;/,
+    "the activity container must not trap its sticky header");
+  assert.match(css, /\.activity-group\.open\s*>\s*\.ui-run-summary\s*\{[\s\S]*?position:\s*sticky;[\s\S]*?inset-block-start:\s*0;[\s\S]*?background:\s*var\(--surface-activity\);/,
+    "the expanded activity header stays opaque and sticky");
+});
+
 test("multi-file patches list each file with its own line counts", async () => {
   const container = document.createElement("div");
   document.body.appendChild(container);
