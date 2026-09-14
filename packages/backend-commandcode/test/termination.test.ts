@@ -123,3 +123,69 @@ test("explicit Polyth abort remains aborted when the owned child exits by SIGTER
     await rm(fixture.dir, { recursive: true, force: true });
   }
 });
+
+test("native run_error wins over an ambiguous process termination", async () => {
+  const fixture = await harness();
+  try {
+    const started = await fixture.runtime.startTurnOperation!(
+      { sessionId: "canonical", text: "hello" },
+      "turn-native-error",
+    );
+    assert.equal(started.kind, "confirmed");
+    fixture.emit({
+      type: "commandcode-record",
+      operationId: "turn-native-error",
+      record: { type: "event", event: { type: "run_error", error: { message: "token=secret provider failed" } } },
+    });
+    fixture.emit({
+      type: "turn-exit",
+      operationId: "turn-native-error",
+      code: null,
+      signal: "SIGTERM",
+      stderr: "secondary diagnostic",
+    });
+    const stopped = fixture.events.find((event) => event.type === "turn/stopped");
+    assert.deepEqual(stopped, {
+      type: "turn/stopped",
+      turnId: "turn-native-error",
+      reason: "error",
+      error: "token=[redacted] provider failed",
+      code: "unknown",
+    });
+  } finally {
+    await fixture.runtime.dispose();
+    await rm(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test("native interrupted AgentEvent is authoritative abort evidence", async () => {
+  const fixture = await harness();
+  try {
+    const started = await fixture.runtime.startTurnOperation!(
+      { sessionId: "canonical", text: "hello" },
+      "turn-native-interrupt",
+    );
+    assert.equal(started.kind, "confirmed");
+    fixture.emit({
+      type: "commandcode-record",
+      operationId: "turn-native-interrupt",
+      record: { type: "event", event: { type: "interrupted" } },
+    });
+    fixture.emit({
+      type: "turn-exit",
+      operationId: "turn-native-interrupt",
+      code: null,
+      signal: "SIGTERM",
+      stderr: "",
+    });
+    const stopped = fixture.events.find((event) => event.type === "turn/stopped");
+    assert.deepEqual(stopped, {
+      type: "turn/stopped",
+      turnId: "turn-native-interrupt",
+      reason: "aborted",
+    });
+  } finally {
+    await fixture.runtime.dispose();
+    await rm(fixture.dir, { recursive: true, force: true });
+  }
+});
