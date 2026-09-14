@@ -114,13 +114,7 @@ export default function registerPackage(host: ServerPackageHost) {
     async createRuntime(context) {
       if (!context.space || context.remote) throw Object.assign(new Error("Local Space context required"), { code: "unsupported" });
       const command = await resolveCommandCodeBinary();
-      const env = {
-        ...(await harnessExecutableChildEnv(command)),
-        // Command Code documents todo_write as opt-in for headless runs. It is
-        // local session state only and gives Polyth a native task snapshot via
-        // the ordinary AgentEvent stream; no TUI/private-state scraping needed.
-        CMD_TOOLS_TODO_WRITE_ENABLE: "true",
-      };
+      const env = await harnessExecutableChildEnv(command);
       const p = await materialize(context);
       const rpc = await createCommandCodeRpc({
         workerPath: p.worker,
