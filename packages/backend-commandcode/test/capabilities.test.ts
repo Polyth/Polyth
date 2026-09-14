@@ -11,13 +11,13 @@ test("Command Code advertises only the native surfaces Polyth actually integrate
   assert.equal(COMMANDCODE_CAPABILITIES.usage, true);
   assert.equal(COMMANDCODE_CAPABILITIES.subagents, true);
   assert.equal(COMMANDCODE_CAPABILITIES.mcp, true);
+  assert.equal(COMMANDCODE_CAPABILITIES.contextOccupancy, "native");
 
   assert.equal(COMMANDCODE_CAPABILITIES.permissions, false);
   assert.equal(COMMANDCODE_CAPABILITIES.questions, false);
   assert.equal(COMMANDCODE_CAPABILITIES.compaction, false);
   assert.equal(COMMANDCODE_CAPABILITIES.fork, false);
   assert.equal(COMMANDCODE_CAPABILITIES.cost, false);
-  assert.equal(COMMANDCODE_CAPABILITIES.contextOccupancy, "unknown");
   assert.deepEqual(COMMANDCODE_CAPABILITIES.commands, {
     discovery: "unsupported",
     invoke: "unsupported",
@@ -97,4 +97,42 @@ test("subagent capability is backed by native AgentEvent snapshots", () => {
       agents: [{ sessionId: "child-1", label: "explore", status: "completed" }],
     }],
   );
+});
+
+test("model request usage also reports native context occupancy without inventing a limit", () => {
+  const state = createCommandCodeTranslateState("turn-context", {
+    providerID: "anthropic",
+    modelID: "anthropic/claude-sonnet-4-5",
+  });
+  const events = translateCommandCodeRecord({
+    type: "event",
+    event: {
+      type: "model_request_end",
+      model: "anthropic/claude-sonnet-4-5",
+      usage: { input_tokens: 82_000, output_tokens: 1_200 },
+    },
+  }, state);
+  const context = events.find((event) => event.type === "context/updated");
+  assert.equal(context?.type, "context/updated");
+  if (context?.type === "context/updated") {
+    assert.equal(context.source, "native");
+    assert.equal(context.usedTokens, 82_000);
+    assert.equal(context.limitTokens, undefined);
+  }
+});
+
+test("compaction events invalidate stale occupancy until the next native request", () => {
+  const state = createCommandCodeTranslateState("turn-compact");
+  const started = translateCommandCodeRecord({ type: "event", event: { type: "compaction_start" } }, state);
+  assert.equal(started[0]?.type, "context/updated");
+  if (started[0]?.type === "context/updated") assert.equal(started[0].compaction?.active, true);
+
+  const done = translateCommandCodeRecord({ type: "event", event: { type: "compaction_done", tokensSaved: 41_300 } }, state);
+  assert.equal(done[0]?.type, "session/compacted");
+  assert.equal(done[1]?.type, "context/updated");
+  if (done[1]?.type === "context/updated") {
+    assert.equal(done[1].source, "unknown");
+    assert.equal(done[1].compaction?.active, false);
+    assert.equal(typeof done[1].compaction?.lastAt, "number");
+  }
 });
