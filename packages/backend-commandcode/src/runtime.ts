@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import type {
   AgentRuntime,
   HarnessContext,
+  JsonObject,
   ModelDescriptor,
   MutationOutcome,
   RateLimitRetryHint,
@@ -18,7 +19,7 @@ import { createCommandCodeTranslateState, translateCommandCodeRecord } from "./p
 export const COMMANDCODE_CAPABILITIES: RuntimeCapabilities = {
   streaming: true,
   permissions: false,
-  questions: false,
+  questions: true,
   compaction: false,
   // Official AgentEvents expose nested-agent lifecycle/progress. This claim is
   // observability only; Polyth does not pretend it can independently spawn or
@@ -54,7 +55,8 @@ export type CommandCodePermissionMode = "auto-accept" | "dont-ask";
 
 type CommandCodeAcceptedMutation = {
   operationId: string;
-  mutationKind: "turn-submit" | "turn-steer";
+  mutationKind: "turn-submit" | "turn-steer" | "question-reply" | "question-reject";
+  entityId?: string;
 };
 
 interface BindingState {
@@ -81,7 +83,13 @@ const validAcceptedMutation = (value: unknown): value is CommandCodeAcceptedMuta
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const entry = value as Partial<CommandCodeAcceptedMutation>;
   return typeof entry.operationId === "string" && entry.operationId.length > 0
-    && (entry.mutationKind === "turn-submit" || entry.mutationKind === "turn-steer");
+    && (
+      entry.mutationKind === "turn-submit"
+      || entry.mutationKind === "turn-steer"
+      || entry.mutationKind === "question-reply"
+      || entry.mutationKind === "question-reject"
+    )
+    && (entry.entityId === undefined || typeof entry.entityId === "string");
 };
 
 const bindingMutations = (state: BindingState): CommandCodeAcceptedMutation[] => {
@@ -190,6 +198,7 @@ export function createCommandCodeRuntime(options: {
   const listeners = new Set<(sessionId: string, event: RuntimeEvent) => void>();
   const lifecycle = new Set<Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0]>();
   const accepted: NonNullable<RuntimeSnapshot["acceptedOperations"]> = [];
+  const pendingQuestions = new Map<string, JsonObject[]>();
   let connected = true;
   let bindingId = "";
   let nativeSessionId = "";
@@ -233,8 +242,11 @@ export function createCommandCodeRuntime(options: {
     state: BindingState | undefined,
     operationId: string,
     mutationKind: CommandCodeAcceptedMutation["mutationKind"],
+    entityId?: string,
   ): boolean => Boolean(state && bindingMutations(state).some((entry) =>
-    entry.operationId === operationId && entry.mutationKind === mutationKind));
+    entry.operationId === operationId
+    && entry.mutationKind === mutationKind
+    && (entityId === undefined || entry.entityId === entityId)));
 
   const clearActiveTurn = () => {
     activeOperationId = "";
@@ -242,6 +254,7 @@ export function createCommandCodeRuntime(options: {
     abortRequested = false;
     translateState = undefined;
     lastResult = undefined;
+    pendingQuestions.clear();
   };
 
   const handleWorkerEvent = (message: CommandCodeWorkerEvent) => {
@@ -255,7 +268,10 @@ export function createCommandCodeRuntime(options: {
         ? message.record as Record<string, unknown>
         : undefined;
       if (outer?.type === "result") lastResult = outer;
-      for (const event of translateCommandCodeRecord(message.record, translateState)) emit(event);
+      for (const event of translateCommandCodeRecord(message.record, translateState)) {
+        if (event.type === "question/asked") pendingQuestions.set(event.requestId, event.questions);
+        emit(event);
+      }
       if (translateState.runError) activeFailure = safeError(translateState.runError);
       if (translateState.interrupted) abortRequested = true;
       return;
@@ -385,6 +401,7 @@ export function createCommandCodeRuntime(options: {
       activeFailure = "";
       abortRequested = false;
       lastResult = undefined;
+      pendingQuestions.clear();
       translateState = createCommandCodeTranslateState(operationId, request.model);
       try {
         const result = await rpc.request<{ nativeSessionId: string }>({
@@ -464,7 +481,57 @@ export function createCommandCodeRuntime(options: {
       return mutation(operationId, async () => { await runtime.abort(context.sessionId ?? ""); return {}; });
     },
     replyPermission: async () => { throw Object.assign(new Error("Command Code interactive permission bridge is not enabled yet"), { code: "unsupported" }); },
-    replyQuestion: async () => { throw Object.assign(new Error("Command Code interactive question bridge is not enabled yet"), { code: "unsupported" }); },
+    async replyQuestion(sessionId, requestId, answers) {
+      const operationId = `compat-question:${randomUUID()}`;
+      const outcome = await runtime.replyQuestionOperation!(sessionId, requestId, answers, operationId);
+      if (outcome.kind === "confirmed") return;
+      if (outcome.kind === "rejected") {
+        throw Object.assign(new Error(outcome.message), { code: outcome.code });
+      }
+      throw Object.assign(new Error(outcome.message), { code: "outcome-unknown", operationId });
+    },
+    async replyQuestionOperation(_sessionId, requestId, answers, operationId) {
+      if (!connected) return { kind: "unknown", operationId, message: "Command Code worker is disconnected" };
+      const reject = answers.action === "reject";
+      const mutationKind = reject ? "question-reject" as const : "question-reply" as const;
+
+      // Recovery is checked before live state. The Mod persists this receipt
+      // before releasing its beforeToolCall hook, so a lost ACK never causes a
+      // second answer to be delivered to the model.
+      const before = await readBinding(bindingFile).catch(() => undefined);
+      if (hasBindingReceipt(before, operationId, mutationKind, requestId)) {
+        rememberAccepted(operationId, mutationKind);
+        pendingQuestions.delete(requestId);
+        return { kind: "confirmed", value: {} };
+      }
+      if (!activeOperationId || !pendingQuestions.has(requestId)) {
+        return { kind: "rejected", code: "not-found", message: "Command Code question is no longer pending" };
+      }
+      try {
+        await rpc.request({
+          type: "answer_question",
+          operationId,
+          requestId,
+          answer: answers,
+        }, 7_500);
+        rememberAccepted(operationId, mutationKind);
+        pendingQuestions.delete(requestId);
+        return { kind: "confirmed", value: {} };
+      } catch (error) {
+        const durable = await readBinding(bindingFile).catch(() => undefined);
+        if (hasBindingReceipt(durable, operationId, mutationKind, requestId)) {
+          rememberAccepted(operationId, mutationKind);
+          pendingQuestions.delete(requestId);
+          return { kind: "confirmed", value: {} };
+        }
+        const code = (error as { code?: string }).code;
+        if (code === "runtime-rejected" || code === "busy" || code === "unsupported") {
+          pendingQuestions.delete(requestId);
+          return { kind: "rejected", code: "not-found", message: safeError(error instanceof Error ? error.message : error) };
+        }
+        return { kind: "unknown", operationId, message: safeError(error instanceof Error ? error.message : error) };
+      }
+    },
     endpoint: async () => endpoint,
     protocol: async () => "legacy",
     async reconcile(binding) {
@@ -484,10 +551,10 @@ export function createCommandCodeRuntime(options: {
           comparison: { domain: rpc.authorityId, order: ++order },
           ...(createOperationId && accepted.length === 0 ? { causalOperationId: createOperationId } : {}),
         },
-        completeness: { events: "partial", permissions: "complete", questions: "complete" },
+        completeness: { events: "partial", permissions: "complete", questions: connected ? "complete" : "unverifiable" },
         events: [],
         permissions: [],
-        questions: [],
+        questions: [...pendingQuestions.entries()].map(([requestId, questions]) => ({ requestId, questions })),
         acceptedOperations: accepted,
       } satisfies RuntimeSnapshot;
     },
