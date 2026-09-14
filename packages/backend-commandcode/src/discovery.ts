@@ -26,6 +26,7 @@ export const COMMANDCODE_REQUIRED_FLAGS = [
   "--no-auto-update",
   "--tools-enable",
   "--mod",
+  "--skill",
   "--resume",
   "--model",
   "--effort",
