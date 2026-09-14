@@ -836,7 +836,7 @@ function PendingPrompt({ send }: { send: PendingSend }) {
   );
 }
 
-function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segmentStartedAt, live, entering, onRevert, onFork, revert, fork, pinned = false }: {
+function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segmentStartedAt, live, entering, onRevert, onFork, revert, fork }: {
   m: RenderMessage;
   announce?: Announce;
   plan?: NonNullable<RenderModel["tasks"]>;
@@ -850,11 +850,10 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segm
   onFork?: (message: UserMsg) => void;
   revert?: ActionAvailability;
   fork?: ActionAvailability;
-  pinned?: boolean;
 }) {
   if (m.kind === "user") {
     return (
-      <div className={`msg user${pinned ? " latest-user-pinned" : ""}${entering ? " timeline-row-enter" : ""}`} data-msg-id={m.id} data-pinned={pinned || undefined} role="article" aria-label={userArticleName(m.time)}>
+      <div className={`msg user${entering ? " timeline-row-enter" : ""}`} data-msg-id={m.id} role="article" aria-label={userArticleName(m.time)}>
         <div className="bubble" dir="auto">
           <UserPrompt text={m.text} id={m.id} />
           {m.raw && m.raw !== m.text && (
@@ -943,7 +942,6 @@ const MessageRow = memo(function MessageRow(props: Parameters<typeof MessageView
   && prev.announce === next.announce
   && prev.onRevert === next.onRevert
   && prev.onFork === next.onFork
-  && prev.pinned === next.pinned
   && availabilityEqual(prev.revert, next.revert)
   && availabilityEqual(prev.fork, next.fork));
 
@@ -2311,7 +2309,6 @@ export default function Timeline({
                 onFork={fork}
                 revert={revertOk}
                 fork={forkOk}
-                pinned={prefs.pinLatestUserMessage && r.kind === "user" && r.id === latestUserMessage?.id}
               />
             );
         })}

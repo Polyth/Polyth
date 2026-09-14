@@ -655,7 +655,9 @@ export default function SessionList({
   const [removePhase, setRemovePhase] = useState<"confirm" | "dirty">("confirm");
   const [dirtyChanges, setDirtyChanges] = useState(0);
   // Shift-key customization mode is a desktop affordance: shift+hover reveals
-  // Archive/Delete on a row. Compact/touch shells keep swipe + menu only.
+  // Archive/Delete on a row. Compact/touch shells keep swipe + menu only;
+  // useShiftArmed already ignores coarse pointers so a tablet Shift key
+  // cannot paint every row as if the modifier were held.
   const shiftArmed = useShiftArmed();
   const shellMode = useShellMode();
   const shiftQuick = shiftArmed && shellMode === "wide" && !selectMode;

@@ -136,6 +136,8 @@ export default function Sidebar() {
   const setSort = (mode: ProjectSortMode) => setProjectSortMode(mode);
   const projectOrder = useProjectOrder();
   const [connectionOpen, setConnectionOpen] = useState(false);
+  const [projectMenuOpenId, setProjectMenuOpenId] = useState<string | null>(null);
+  const [projectMenuSource, setProjectMenuSource] = useState<"card" | "rail" | null>(null);
   const [appearanceProjectId, setAppearanceProjectId] = useState<string | null>(null);
   const [attentionOnly, setAttentionOnly] = useState(false);
   const [dateFilter, setDateFilter] = useState<SessionDateFilter>(EMPTY_SESSION_DATE_FILTER);
@@ -144,8 +146,8 @@ export default function Sidebar() {
   const syncStatus = useSyncExternalStore(subscribeSyncStatus, getSyncStatus, () => "disconnected");
   const host = typeof location === "undefined" ? tr("sidebar.localServer") : location.host;
 
-  // Persisted desktop presentation: list, nested tree, or a compact project
-  // rail beside the active project's sessions. Expansion is per-project UI state.
+  // Persisted desktop presentation: nested tree or a compact project rail
+  // beside the active project's sessions. Expansion is per-project UI state.
   const viewMode = useSidebarViewMode();
   const [expandedTrees, setExpandedTrees] = useState<ReadonlySet<string>>(
     () => loadExpandedProjects(activeProjectId),
@@ -217,6 +219,7 @@ export default function Sidebar() {
   const width = dragWidth ?? layout.width;
   const navRef = useRef<HTMLElement>(null);
   const connectionTriggerRef = useRef<HTMLButtonElement>(null);
+  const projectMenuReturnRef = useRef<HTMLElement | null>(null);
   const sideScrollRef = useRef<HTMLDivElement>(null);
   const pullStartRef = useRef<GesturePoint | null>(null);
   const pullDistanceRef = useRef(0);
@@ -419,13 +422,6 @@ export default function Sidebar() {
       onSelect: () => setSidebarViewMode("tree"),
     },
     {
-      id: "layout-list",
-      label: tr("sidebar.layoutList"),
-      kind: "radio",
-      checked: viewMode === "list",
-      onSelect: () => setSidebarViewMode("list"),
-    },
-    {
       id: "layout-rail",
       label: tr("sidebar.projectRail"),
       kind: "radio",
@@ -470,6 +466,70 @@ export default function Sidebar() {
     event.preventDefault();
     setSidebarLayout({ width: width + (event.key === "ArrowRight" ? 16 : -16) });
   };
+
+  const openProjectMenu = (id: string, target: HTMLElement, source: "card" | "rail") => {
+    projectMenuReturnRef.current = target;
+    setProjectMenuOpenId(id);
+    setProjectMenuSource(source);
+  };
+  const onProjectContextMenu = (event: ReactMouseEvent<HTMLElement>, id: string, source: "card" | "rail") => {
+    event.preventDefault();
+    event.stopPropagation();
+    openProjectMenu(id, event.currentTarget, source);
+  };
+  const onProjectMenuKeyDown = (event: ReactKeyboardEvent<HTMLElement>, id: string, source: "card" | "rail") => {
+    if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+    event.preventDefault();
+    openProjectMenu(id, event.currentTarget, source);
+  };
+
+  const projectMenuEntries = (p: Project): MenuEntry[] => [
+    {
+      id: "select",
+      label: selectMode ? tr("sidebar.cancelSessionSelection") : tr("sidebar.selectSessions"),
+      onSelect: toggleSelectMode,
+    },
+    {
+      id: "worktree",
+      label: tr("sidebar.newSessionInWorktree"),
+      onSelect: () => openWorktreeSessionDialog(p.id),
+    },
+    {
+      id: "import",
+      label: tr("sidebar.importSessions"),
+      onSelect: () => setImportingProject(p.id),
+    },
+    {
+      id: "rename",
+      label: tr("sidebar.renameProject"),
+      onSelect: () => { setRenamingProject(p.id); setProjectName(p.name); },
+    },
+    {
+      id: "appearance",
+      label: tr("sidebar.projectAppearance"),
+      onSelect: () => setAppearanceProjectId(p.id),
+    },
+    {
+      id: "git",
+      label: tr("sidebar.sourceControlGitAmpWorktrees"),
+      onSelect: () => {
+        if (p.id !== activeProjectId) activateProject(p.id);
+        openWorkspacePane("git");
+      },
+    },
+    "separator",
+    {
+      id: "close",
+      label: tr("sidebar.closeProject"),
+      danger: true,
+      onSelect: () => {
+        void confirmAlert(
+          tr("sidebar.closeValueThisRemovesItFrom", { name: p.name || p.path }),
+          { title: tr("sidebar.closeProject"), confirmLabel: tr("sidebar.closeProject") },
+        ).then((ok) => { if (ok) void removeProject(p.id); });
+      },
+    },
+  ];
 
   const connectionControl = (buttonClass: string) => (
     <div className="sidebar-popover-anchor">
@@ -545,40 +605,59 @@ export default function Sidebar() {
                   || (session.attention?.permissions ?? 0) > 0);
                 const working = candidateSessions.some((session) => session.status === "working");
                 return (
-                  <button
+                  <Menu
                     key={candidate.id}
-                    type="button"
-                    className={`sidebar-project-rail-item${candidate.id === activeProjectId ? " active" : ""}${draggedProject === candidate.id ? " dragging" : ""}${dragOverProject === candidate.id ? " drag-over" : ""}`}
-                    aria-current={candidate.id === activeProjectId ? "true" : undefined}
-                    aria-keyshortcuts={manualReorder ? "Alt+Shift+ArrowUp Alt+Shift+ArrowDown" : undefined}
-                    aria-label={candidate.name || candidate.path}
+                    label={tr("sidebar.actionsForValue", { value: candidate.name || candidate.path })}
                     title={candidate.name || candidate.path}
-                    draggable={manualReorder}
-                    onClick={() => activateProject(candidate.id)}
-                    onDragStart={(event) => startProjectDrag(event, candidate.id)}
-                    onDragOver={(event) => {
-                      if (!draggedProject) return;
-                      event.preventDefault();
-                      setDragOverProject(candidate.id);
+                    align="start"
+                    open={projectMenuOpenId === candidate.id && projectMenuSource === "rail"}
+                    onOpenChange={(open) => {
+                      setProjectMenuOpenId(open ? candidate.id : null);
+                      setProjectMenuSource(open ? "rail" : null);
                     }}
-                    onDragEnd={clearProjectDrag}
-                    onDrop={(event) => dropProject(event, candidate.id)}
-                    onKeyDown={(event) => {
-                      if (!manualReorder || !event.altKey || !event.shiftKey) return;
-                      if (event.key === "ArrowUp") {
-                        event.preventDefault();
-                        moveProjectBy(candidate.id, -1);
-                      } else if (event.key === "ArrowDown") {
-                        event.preventDefault();
-                        moveProjectBy(candidate.id, 1);
-                      }
-                    }}
+                    returnFocusRef={projectMenuReturnRef}
+                    entries={projectMenuEntries(candidate)}
+                    footer={<SlotHost slot="sidebar.project.actions" context={{ projectId: candidate.id }} />}
                   >
-                    <ProjectGlyph project={candidate} />
-                    {(attention || working) && (
-                      <span className={`sidebar-project-rail-status${attention ? " attention" : " working"}`} aria-hidden="true" />
+                    {(trigger) => (
+                      <button
+                        {...trigger}
+                        type="button"
+                        className={`sidebar-project-rail-item${candidate.id === activeProjectId ? " active" : ""}${draggedProject === candidate.id ? " dragging" : ""}${dragOverProject === candidate.id ? " drag-over" : ""}`}
+                        aria-current={candidate.id === activeProjectId ? "true" : undefined}
+                        aria-keyshortcuts={manualReorder ? "Alt+Shift+ArrowUp Alt+Shift+ArrowDown" : undefined}
+                        aria-label={candidate.name || candidate.path}
+                        title={candidate.name || candidate.path}
+                        draggable={manualReorder}
+                        onClick={() => activateProject(candidate.id)}
+                        onContextMenu={(event) => onProjectContextMenu(event, candidate.id, "rail")}
+                        onDragStart={(event) => startProjectDrag(event, candidate.id)}
+                        onDragOver={(event) => {
+                          if (!draggedProject) return;
+                          event.preventDefault();
+                          setDragOverProject(candidate.id);
+                        }}
+                        onDragEnd={clearProjectDrag}
+                        onDrop={(event) => dropProject(event, candidate.id)}
+                        onKeyDown={(event) => {
+                          onProjectMenuKeyDown(event, candidate.id, "rail");
+                          if (event.defaultPrevented || !manualReorder || !event.altKey || !event.shiftKey) return;
+                          if (event.key === "ArrowUp") {
+                            event.preventDefault();
+                            moveProjectBy(candidate.id, -1);
+                          } else if (event.key === "ArrowDown") {
+                            event.preventDefault();
+                            moveProjectBy(candidate.id, 1);
+                          }
+                        }}
+                      >
+                        <ProjectGlyph project={candidate} />
+                        {(attention || working) && (
+                          <span className={`sidebar-project-rail-status${attention ? " attention" : " working"}`} aria-hidden="true" />
+                        )}
+                      </button>
                     )}
-                  </button>
+                  </Menu>
                 );
               })}
             </div>
@@ -846,13 +925,15 @@ export default function Sidebar() {
                   aria-current={p.id === activeProjectId ? "true" : undefined}
                   aria-expanded={effectiveViewMode === "tree" ? expandedTrees.has(p.id) : undefined}
                   aria-keyshortcuts={manualReorder ? "Alt+Shift+ArrowUp Alt+Shift+ArrowDown" : undefined}
+                  onContextMenu={(event) => onProjectContextMenu(event, p.id, "card")}
                   onClick={() => {
                     if (p.id !== activeProjectId) activateProject(p.id);
                     if (effectiveViewMode === "tree") toggleTree(p.id);
                     else closeDrawer();
                   }}
                   onKeyDown={(event) => {
-                    if (!manualReorder || !event.altKey || !event.shiftKey) return;
+                    onProjectMenuKeyDown(event, p.id, "card");
+                    if (event.defaultPrevented || !manualReorder || !event.altKey || !event.shiftKey) return;
                     if (event.key === "ArrowUp") {
                       event.preventDefault();
                       moveProjectBy(p.id, -1);
@@ -886,53 +967,13 @@ export default function Sidebar() {
                     label={tr("sidebar.actionsForValue", { value: p.name || p.path })}
                     title={p.name || p.path}
                     align="end"
-                    entries={[
-                      {
-                        id: "select",
-                        label: selectMode ? tr("sidebar.cancelSessionSelection") : tr("sidebar.selectSessions"),
-                        onSelect: toggleSelectMode,
-                      },
-                      {
-                        id: "worktree",
-                        label: tr("sidebar.newSessionInWorktree"),
-                        onSelect: () => openWorktreeSessionDialog(p.id),
-                      },
-                      {
-                        id: "import",
-                        label: tr("sidebar.importSessions"),
-                        onSelect: () => setImportingProject(p.id),
-                      },
-                      {
-                        id: "rename",
-                        label: tr("sidebar.renameProject"),
-                        onSelect: () => { setRenamingProject(p.id); setProjectName(p.name); },
-                      },
-                      {
-                        id: "appearance",
-                        label: tr("sidebar.projectAppearance"),
-                        onSelect: () => setAppearanceProjectId(p.id),
-                      },
-                      {
-                        id: "git",
-                        label: tr("sidebar.sourceControlGitAmpWorktrees"),
-                        onSelect: () => {
-                          if (p.id !== activeProjectId) activateProject(p.id);
-                          openWorkspacePane("git");
-                        },
-                      },
-                      "separator",
-                      {
-                        id: "close",
-                        label: tr("sidebar.closeProject"),
-                        danger: true,
-                        onSelect: () => {
-                          void confirmAlert(
-                            tr("sidebar.closeValueThisRemovesItFrom", { name: p.name || p.path }),
-                            { title: tr("sidebar.closeProject"), confirmLabel: tr("sidebar.closeProject") },
-                          ).then((ok) => { if (ok) void removeProject(p.id); });
-                        },
-                      },
-                    ] satisfies MenuEntry[]}
+                    open={projectMenuOpenId === p.id && projectMenuSource === "card"}
+                    onOpenChange={(open) => {
+                      setProjectMenuOpenId(open ? p.id : null);
+                      setProjectMenuSource(open ? "card" : null);
+                    }}
+                    returnFocusRef={projectMenuReturnRef}
+                    entries={projectMenuEntries(p)}
                     footer={<SlotHost slot="sidebar.project.actions" context={{ projectId: p.id }} />}
                   >
                     {(trigger) => (
@@ -941,6 +982,10 @@ export default function Sidebar() {
                         className="project-menu-btn"
                         title={tr("sidebar.actionsForValue", { value: p.name || p.path })}
                         aria-label={tr("sidebar.actionsForValue", { value: p.name || p.path })}
+                        onClick={(event) => {
+                          projectMenuReturnRef.current = event.currentTarget;
+                          trigger.onClick();
+                        }}
                       ><Icon.more /></button>
                     )}
                   </Menu>
@@ -979,13 +1024,6 @@ export default function Sidebar() {
                 </div>
               );
             }
-            if (effectiveViewMode !== "tree") {
-              return (
-                <div key={p.id} data-project-id={p.id} className={`project-entry${reorderClass}`} {...dragProps}>
-                  {card}
-                </div>
-              );
-            }
             return (
               <div key={p.id} data-project-id={p.id} className={`project-tree-node${reorderClass}`} {...dragProps}>
                 {card}
@@ -1005,24 +1043,6 @@ export default function Sidebar() {
               </div>
             );
           })}
-          {query.trim() === "" && effectiveViewMode === "list" && project && (
-            <div className="session-list">
-              <SessionList
-                projectId={project.id}
-                query={
-                  query.trim()
-                  && `${project.name} ${project.path}`.toLowerCase().includes(query.trim().toLowerCase())
-                    ? ""
-                    : query
-                }
-                attentionOnly={attentionOnly}
-                dateFilter={dateFilter}
-                selectMode={selectMode}
-                selectedSessionIds={selectedSessionIds}
-                onToggleSelected={toggleSelectedSession}
-              />
-            </div>
-          )}
           {/* Contributed navigation belongs with the workspaces it sits beside,
               not underneath the "add project" affordance. A package workspace
               (Personal Coach) is a peer of a project here, never a project. */}

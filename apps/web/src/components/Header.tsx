@@ -34,7 +34,6 @@ import { useSidebarLayout } from "../sidebarLayout.ts";
 import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 import DesktopSessionStatus from "./DesktopSessionStatus.tsx";
 import SpaceSwitcher from "./SpaceSwitcher.tsx";
-import ChatMenu from "./ChatMenu.tsx";
 import { railIconFor } from "../railIcons.ts";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -469,7 +468,6 @@ export default function Header() {
             </div>
           )}
           {compact && <MobileNavigationRail />}
-          {chatSurface && <ChatMenu />}
           {(!compact || !chatSurface) && <UserMenu githubUser={githubUser} />}
           <SlotHost slot="app.window.controls" />
         </div>

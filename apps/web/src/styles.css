@@ -675,8 +675,8 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 }
 .project-tree-node { margin-bottom: 2px; }
 .project-tree-node .project-card-shell { margin-bottom: 0; }
-:is(.project-entry, .project-tree-node).dragging { opacity: 0.5; }
-:is(.project-entry, .project-tree-node).drag-over { box-shadow: inset 0 2px 0 var(--accent); }
+.project-tree-node.dragging { opacity: 0.5; }
+.project-tree-node.drag-over { box-shadow: inset 0 2px 0 var(--accent); }
 .project-tree-sessions {
   position: relative;
   margin: 0;
@@ -1509,15 +1509,6 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   50% { opacity: 0.74; }
 }
 
-/* Optional reader aid: keep the newest prompt in the scrollport without
-   duplicating it or changing the canonical conversation history. */
-.timeline > .msg.user.latest-user-pinned {
-  position: sticky;
-  inset-block-start: 0;
-  z-index: var(--z-shell);
-  background: var(--chat-surface, var(--panel));
-  box-shadow: 0 1px 0 var(--border-soft), var(--shadow-sm);
-}
 /* A sent prompt keeps four lines in the log; the rest is one tap away. The
    fade only appears once the text really is taller than the clamp. */
 .user-prompt { max-height: 4lh; overflow: hidden; }
@@ -3566,8 +3557,9 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .msg.user .msg-action-btn:hover::after,
 .msg.user .msg-action-btn:focus-visible::after { transform: none; }
 .msg.user .msg-bookmark-action[aria-pressed="true"] { background: transparent; }
-/* Persistent named phone entry (≥44px) + its ≥44px menu rows. Coarse tablet
-   pointers keep the inline action set visible with enlarged targets. */
+/* Persistent named phone/tablet entry (≥44px) + its ≥44px menu rows. Touch
+   shells use this overflow instead of painting the desktop hover strip on
+   every message (that reads as Shift-held edit chrome). */
 .msg-actions-entry {
   display: none; align-items: center; justify-content: center;
   min-width: 44px; min-height: 44px; font-size: 18px; line-height: 1;
@@ -3598,8 +3590,9 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .msg-actions-item:hover, .msg-actions-item:focus-visible { background: var(--panel); }
 .msg-actions-item[disabled] { opacity: 0.55; cursor: not-allowed; }
 @media (hover: none) and (pointer: coarse) and (min-width: 481px) {
-.msg-actions { opacity: 1; pointer-events: auto; transform: none; }
-  .msg-action-btn { width: 44px; height: 44px; }
+  .msg-actions { display: none; }
+  .msg-actions-entry { display: inline-flex; }
+  .msg-actions-popup { display: flex; }
 }
 
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
@@ -3777,7 +3770,8 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 }
 .session-folder-toggle:hover { color: inherit; }
 .session-folder-del { background: none; border: 0; color: var(--muted); cursor: pointer; opacity: 0; padding: 2px 8px; }
-.session-folder-head:hover .session-folder-del { opacity: 1; }
+.session-folder-head:hover .session-folder-del,
+.session-folder-head:focus-within .session-folder-del { opacity: 1; }
 .session-folder-empty { padding: 2px 22px 6px; font-size: var(--font-meta); }
 /* WP13 Group-by section heads (status / worktree / plugin modes) */
 .session-group-head {
@@ -3917,8 +3911,8 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .ui-menu-sheet-list .session-date-filter-field input,
 .ui-menu-sheet-list .session-date-filter-clear { min-height: var(--tap); }
 .ui-menu-sheet-list .session-date-filter-field input { font-size: var(--font-input); }
-:is(.project-entry, .project-tree-node).reorderable { cursor: grab; }
-:is(.project-entry, .project-tree-node).reorderable:active { cursor: grabbing; }
+.project-tree-node.reorderable { cursor: grab; }
+.project-tree-node.reorderable:active { cursor: grabbing; }
 .session-archived { border-top: 1px solid var(--border-soft); margin-top: 6px; padding-top: 2px; }
 .session-check {
   position: absolute;
@@ -4987,30 +4981,6 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .widget-placement-empty { margin: var(--space-1) 0; color: var(--faint); }
 .header-user-menu { position: relative; flex: none; }
 /* User menu content renders through ui/Menu (portal .ui-menu). */
-.header-chat-menu,
-.mobile-chat-menu {
-  display: inline-grid;
-  place-items: center;
-  width: max(var(--control-h-sm), var(--hit-min));
-  height: max(var(--control-h-sm), var(--hit-min));
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--muted);
-}
-.header-chat-menu {
-  position: relative;
-  background: var(--surface-overlay);
-}
-.header-chat-menu:hover,
-.header-chat-menu[aria-expanded="true"],
-.mobile-chat-menu[aria-expanded="true"] {
-  color: var(--text);
-  background: var(--surface-overlay-hover);
-}
-.header-chat-menu svg,
-.mobile-chat-menu svg { width: var(--icon-md); height: var(--icon-md); }
 .header-profile { display: flex; align-items: center; gap: 6px; padding: 0 4px; border: 0; background: transparent; }
 .header-profile-avatar {
   display: grid; place-items: center; width: 31px; height: 31px; border-radius: 50%;
@@ -5208,7 +5178,6 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 }
 .bubble-copy .copy-btn:hover { background: var(--chat-raised); }
 @media (hover: none) and (pointer: coarse) and (min-width: 481px) {
-  .bubble-copy { opacity: 1; pointer-events: auto; }
   .bubble-copy .copy-btn { width: 44px; height: 44px; }
 }
 .msg-meta { margin-top: 0; padding: 5px 0 0; }
@@ -8963,11 +8932,6 @@ width: var(--tap);
     flex-wrap: wrap;
     white-space: normal;
   }
-  .agent-reply-actions {
-    width: 100%;
-    opacity: 1;
-    pointer-events: auto;
-  }
   .agent-reply-actions button,
   .assistant-gallery-shortcut,
   .msg.user .msg-action-btn,
@@ -8978,12 +8942,6 @@ width: var(--tap);
     height: var(--tap);
     min-height: var(--tap);
   }
-  .msg-actions { opacity: 1; pointer-events: auto; transform: none; }
-.session-worktree-actions,
-.session-folder-del {
-opacity: 1;
-    pointer-events: auto;
-}
 
   .folder-row {
     grid-template-columns: 28px minmax(0, 1fr) auto;
@@ -8997,15 +8955,19 @@ opacity: 1;
 }
 
 
-/* Exactly one menu trigger per input mode. Fine, wide pointers reveal the
-   trigger on row hover/focus over the faded status zone (rules in the nav
-   section); touch and drawer layouts keep it persistent and reserve its
-   footprint so the timestamp never slides beneath it. */
+/* Exactly one menu trigger per input mode. Fine pointers reveal it on row
+   hover/focus. Touch and drawer layouts reserve its footprint so timestamps
+   stay aligned, but only the active, focused, or open row shows the glyph —
+   painting ⋯ on every row reads as Shift-held edit mode. Long-press, swipe,
+   and the row context menu still reach every session. */
 @media (pointer: coarse), (max-width: 960px) {
-  .session-menu-trigger { opacity: 1; pointer-events: auto; }
   .session-row .session-btn { padding-right: calc(var(--tap) + 8px); }
-  /* With reserved space the trigger no longer overlaps the status zone, so
-     the fine-pointer hover fade is unnecessary here. */
+  .session-row.active .session-menu-trigger,
+  .session-row.menu-open .session-menu-trigger,
+  .session-row:focus-within .session-menu-trigger {
+    opacity: 1;
+    pointer-events: auto;
+  }
   .session-row:hover .session-status-zone,
   .session-row:focus-within .session-status-zone,
   .session-row.menu-open .session-status-zone { opacity: 1; }

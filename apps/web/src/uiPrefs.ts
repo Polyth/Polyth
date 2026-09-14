@@ -69,8 +69,6 @@ export interface UiSettings {
   promptNavigator: "auto" | "on" | "off";
   /** Hover/focus controls below user and assistant messages. */
   showMessageActions: boolean;
-  /** Keep the newest user prompt visible while the conversation is scrolled. */
-  pinLatestUserMessage: boolean;
   /** Payload selected by the single message Copy action. */
   messageCopyFormat: MessageCopyFormat;
   /** Visible session-header metrics, in drag-configured order. */
@@ -136,7 +134,6 @@ export const UI_DEFAULTS: UiSettings = {
   thinkingDefaultExpanded: false,
   promptNavigator: "auto",
   showMessageActions: true,
-  pinLatestUserMessage: false,
   messageCopyFormat: "markdown",
   headerMetrics: [...HEADER_METRIC_IDS],
   responseActions: [...RESPONSE_ACTION_IDS],
@@ -235,7 +232,6 @@ export function parseUiSettings(raw: string | null): UiSettings {
       thinkingDefaultExpanded: data.thinkingDefaultExpanded === true,
       promptNavigator: data.promptNavigator === "on" || data.promptNavigator === "off" ? data.promptNavigator : "auto",
       showMessageActions: data.showMessageActions !== false,
-      pinLatestUserMessage: data.pinLatestUserMessage === true,
       messageCopyFormat: data.messageCopyFormat === "json" ? "json" : "markdown",
       headerMetrics: orderedIds(data.headerMetrics, HEADER_METRIC_IDS),
       responseActions: orderedIds(data.responseActions, RESPONSE_ACTION_IDS),
