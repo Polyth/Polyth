@@ -80,7 +80,7 @@ test("capability wrapper projects transient Mod and skills on every native turn"
   }
 });
 
-test("native Polyth tool evidence is bound to the exact admitted projection revision", async () => {
+test("native Polyth tool evidence is bound to the exact admitted capability id and revision", async () => {
   const dir = await mkdtemp(join(tmpdir(), "polyth-commandcode-tool-sync-"));
   const receipts: Array<{ outcome: string; capabilityIds: string[]; stage?: string }> = [];
   const disposeReceipt = setCapabilityReceiptSink((receipt) => receipts.push({
@@ -99,7 +99,6 @@ test("native Polyth tool evidence is bound to the exact admitted projection revi
       skillCapabilityIds: [],
       toolModFile: join(dir, "tools.ts"),
       toolCapabilityIds: ["example.tool"],
-      toolNames: { "example.tool": "review_project" },
       toolBridge,
     }, "commandcode", { desiredRevision: "tools-rev", capabilityIds: ["example.tool"] });
     const requests: Array<Record<string, unknown>> = [];
@@ -119,16 +118,22 @@ test("native Polyth tool evidence is bound to the exact admitted projection revi
       stage: "staged",
     });
 
-    fake.emit({ type: "polyth-tool-invoked", operationId: "tool-turn", toolName: "review_project" });
+    fake.emit({
+      type: "polyth-tool-invoked",
+      operationId: "tool-turn",
+      capabilityId: "example.tool",
+      toolName: "spoofed-name-is-irrelevant",
+    });
     assert.deepEqual(receipts[1], {
       outcome: "applied",
       capabilityIds: ["example.tool"],
       stage: "invocable",
     });
-    fake.emit({ type: "polyth-tool-invoked", operationId: "different-turn", toolName: "review_project" });
+    fake.emit({ type: "polyth-tool-invoked", operationId: "tool-turn", capabilityId: "other.tool", toolName: "review_project" });
+    fake.emit({ type: "polyth-tool-invoked", operationId: "different-turn", capabilityId: "example.tool", toolName: "review_project" });
     assert.equal(receipts.length, 2);
     fake.emit({ type: "turn-exit", operationId: "tool-turn", code: 0, signal: null, stderr: "" });
-    fake.emit({ type: "polyth-tool-invoked", operationId: "tool-turn", toolName: "review_project" });
+    fake.emit({ type: "polyth-tool-invoked", operationId: "tool-turn", capabilityId: "example.tool", toolName: "review_project" });
     assert.equal(receipts.length, 2);
     subscription.dispose();
   } finally {
@@ -153,7 +158,6 @@ test("native Polyth tool Mod errors fail the exact admitted tool revision", asyn
       skillCapabilityIds: [],
       toolModFile: join(dir, "polyth-tools.ts"),
       toolCapabilityIds: ["example.tool"],
-      toolNames: { "example.tool": "read_file" },
       toolBridge: {
         url: "http://127.0.0.1:9999/internal/agent-tools",
         token: "opaque-token",
@@ -177,7 +181,7 @@ test("native Polyth tool Mod errors fail the exact admitted tool revision", asyn
     assert.deepEqual(receipts[1]?.capabilityIds, ["example.tool"]);
     assert.match(receipts[1]?.reason ?? "", /tool Mod/);
 
-    fake.emit({ type: "polyth-tool-invoked", operationId: "collision-turn", toolName: "read_file" });
+    fake.emit({ type: "polyth-tool-invoked", operationId: "collision-turn", capabilityId: "example.tool", toolName: "read_file" });
     assert.equal(receipts.length, 2, "failed native Mod registration cannot later be promoted by stray tool evidence");
     subscription.dispose();
   } finally {
@@ -201,7 +205,6 @@ test("early native Polyth tool Mod failure is not downgraded by later admission 
       skillCapabilityIds: [],
       toolModFile: join(dir, "polyth-tools.ts"),
       toolCapabilityIds: ["example.tool"],
-      toolNames: { "example.tool": "read_file" },
       toolBridge: {
         url: "http://127.0.0.1:9999/internal/agent-tools",
         token: "opaque-token",
@@ -229,7 +232,7 @@ test("early native Polyth tool Mod failure is not downgraded by later admission 
       bindingPath: join(dir, "binding.json"),
     });
     assert.deepEqual(receipts, [{ outcome: "failed", capabilityIds: ["example.tool"] }]);
-    fake.emit({ type: "polyth-tool-invoked", operationId: "early-collision-turn", toolName: "read_file" });
+    fake.emit({ type: "polyth-tool-invoked", operationId: "early-collision-turn", capabilityId: "example.tool", toolName: "read_file" });
     assert.equal(receipts.length, 1);
     subscription.dispose();
   } finally {
