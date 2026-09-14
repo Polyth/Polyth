@@ -107,6 +107,14 @@ const persistMutationReceipt = async (operationId, mutationKind, entityId) => {
   if (!operationId || !validMutationKind(mutationKind)) throw new Error("mutation receipt is invalid");
   await updateBinding((previous) => {
     const mutations = normalizedMutations(previous);
+    if (entityId && (mutationKind === "question-reply" || mutationKind === "question-reject")) {
+      const existingQuestion = mutations.find((entry) => entry?.entityId === entityId
+        && (entry.mutationKind === "question-reply" || entry.mutationKind === "question-reject"));
+      if (existingQuestion
+        && (existingQuestion.operationId !== operationId || existingQuestion.mutationKind !== mutationKind)) {
+        throw new Error("question already has a durable response receipt");
+      }
+    }
     const acceptedMutations = mutations.some((entry) => entry.operationId === operationId && entry.mutationKind === mutationKind)
       ? mutations
       : [...mutations, {
