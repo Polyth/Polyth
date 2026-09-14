@@ -20,11 +20,23 @@ import { createLaunchOverlayStore, type LaunchOverlayStore } from "@polyth/harne
 import { renderCapabilityText } from "@polyth/harness-runtime/capability-text";
 import { atomicWriteSync } from "@polyth/plugins";
 
+const AGENT_TOOLS_CAPABILITY_ID = "polyth.agent-tools";
+
+export interface CommandCodeToolBridge {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+}
+
 export interface CommandCodeLaunchOverlay {
   promptModFile?: string;
   promptCapabilityIds: string[];
   skillRoot?: string;
   skillCapabilityIds: string[];
+  toolModFile?: string;
+  toolCapabilityIds: string[];
+  toolNames?: Record<string, string>;
+  toolBridge?: CommandCodeToolBridge;
 }
 
 export const commandCodeOverlays: LaunchOverlayStore<CommandCodeLaunchOverlay> =
@@ -40,11 +52,13 @@ const support = (_context: HarnessContext): HarnessCapabilitySupport => ({
     context: { modes: ["prompt"], mutability: "immediate", remote: false, configScope: "session" },
     // The documented CLI accepts repeatable, session-local --skill roots.
     skill: { modes: ["native"], mutability: "immediate", remote: false, configScope: "session" },
-    // Native MCP management is persistent user/project/local configuration.
-    // Until Command Code exposes a documented transient MCP projection, Polyth
-    // must not rewrite vendor configuration to emulate one.
-    "mcp-server": { modes: ["unsupported"], mutability: "immutable" },
-    tool: { modes: ["unsupported"], mutability: "immutable" },
+    // Ambient native MCP remains Command Code-owned. The unsupported entry still
+    // carries session scope so the controller can mint the reserved Polyth tool
+    // bridge without broadening its grant beyond this canonical session.
+    "mcp-server": { modes: ["unsupported"], mutability: "immutable", remote: false, configScope: "session" },
+    // Polyth package tools execute through the shared scoped MCP bridge, while a
+    // transient Mod presents each schema to Command Code through native addTool.
+    tool: { modes: ["mcp"], mutability: "immediate", remote: false, configScope: "session" },
     extension: { modes: ["unsupported"], mutability: "immutable" },
   },
 });
@@ -145,6 +159,86 @@ description: ${JSON.stringify(skill.description.replace(/[\r\n]+/g, " "))}
 ${skill.instructions}
 `;
 
+const toolModDocument = (
+  tools: Array<Extract<HarnessProvisioningPlan["items"][number]["capability"], { kind: "tool" }>>,
+): string => {
+  const definitions = tools.map((tool) => ({
+    id: tool.id,
+    name: tool.name,
+    description: tool.description,
+    inputSchema: tool.inputSchema,
+    mutating: tool.mutating,
+  }));
+  return [
+    'import { randomUUID } from "node:crypto";',
+    'import { createReadStream, createWriteStream } from "node:fs";',
+    'import { createInterface } from "node:readline";',
+    "",
+    `const tools = ${JSON.stringify(definitions)};`,
+    'const requests = createWriteStream(null, { fd: 3, autoClose: false });',
+    'const responses = createReadStream(null, { fd: 4, autoClose: false });',
+    'const lines = createInterface({ input: responses, crlfDelay: Infinity });',
+    'const pending = new Map();',
+    "",
+    'const safeError = (value) => String(value ?? "Polyth tool failed").replace(/[\\u0000-\\u001f\\u007f]+/g, " ").replace(/\\s+/g, " ").trim().slice(0, 1000);',
+    'const failAll = (message) => { for (const entry of pending.values()) entry.finish({ ok: false, error: message }); };',
+    'responses.on("error", () => failAll("Polyth tool bridge disconnected"));',
+    'responses.on("close", () => failAll("Polyth tool bridge disconnected"));',
+    'lines.on("line", (line) => {',
+    '  let message;',
+    '  try { message = JSON.parse(line); } catch { return; }',
+    '  const id = typeof message?.id === "string" ? message.id : String(message?.id ?? "");',
+    '  const entry = pending.get(id);',
+    '  if (!entry) return;',
+    '  if (message?.error) { entry.finish({ ok: false, error: safeError(message.error?.message) }); return; }',
+    '  const result = message?.result;',
+    '  const content = Array.isArray(result?.content)',
+    '    ? result.content.filter((part) => part && part.type === "text" && typeof part.text === "string")',
+    '    : [];',
+    '  if (result?.isError === true) {',
+    '    entry.finish({ ok: false, error: safeError(content.map((part) => part.text).join("\\n") || "Polyth tool failed") });',
+    '    return;',
+    '  }',
+    '  entry.finish({ ok: true, content: content.length ? content : [{ type: "text", text: "" }] });',
+    '});',
+    "",
+    'const invoke = (name, input, signal) => new Promise((resolve) => {',
+    '  const id = randomUUID();',
+    '  let settled = false;',
+    '  const onAbort = () => {',
+    '    try { requests.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: id } }) + "\\n"); } catch {}',
+    '    finish({ ok: false, error: "Polyth tool call aborted" });',
+    '  };',
+    '  const finish = (result) => {',
+    '    if (settled) return;',
+    '    settled = true;',
+    '    pending.delete(id);',
+    '    signal?.removeEventListener?.("abort", onAbort);',
+    '    resolve(result);',
+    '  };',
+    '  pending.set(id, { finish });',
+    '  if (signal?.aborted) { onAbort(); return; }',
+    '  signal?.addEventListener?.("abort", onAbort, { once: true });',
+    '  try {',
+    '    requests.write(JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: input ?? {} } }) + "\\n");',
+    '  } catch {',
+    '    finish({ ok: false, error: "Polyth tool bridge is unavailable" });',
+    '  }',
+    '});',
+    "",
+    'export default function polythTools(cmd) {',
+    '  for (const tool of tools) {',
+    '    cmd.addTool({',
+    '      schema: { name: tool.name, description: tool.description, input_schema: tool.inputSchema },',
+    '      readOnly: tool.mutating !== true,',
+    '      run: ({ input, signal }) => invoke(tool.name, input, signal),',
+    '    });',
+    '  }',
+    '}',
+    "",
+  ].join("\n");
+};
+
 const pruneRetiredRevisions = (context: HarnessContext, keep: readonly string[]): void => {
   if (!context.space || context.space.spaceId !== context.spaceId) return;
   const revisions = existingPrivateDirectory(
@@ -166,19 +260,23 @@ const pruneRetiredRevisions = (context: HarnessContext, keep: readonly string[])
 export function createCommandCodeProvisioner(): HarnessProvisioner {
   return {
     support: (context) => support(context),
-    async apply(context, plan, _secrets: CapabilitySecretResolver) {
+    async apply(context, plan, secrets: CapabilitySecretResolver) {
       if (context.remote) {
         return {
           harnessId: "commandcode",
           desiredRevision: plan.desiredRevision,
-          records: plan.items.map((item) => record(item, "unsupported", "Command Code adapter is local-only")),
+          records: plan.items
+            .filter((item) => item.capability.id !== AGENT_TOOLS_CAPABILITY_ID)
+            .map((item) => record(item, "unsupported", "Command Code adapter is local-only")),
         };
       }
       if (!context.space || context.space.spaceId !== context.spaceId) {
         return {
           harnessId: "commandcode",
           desiredRevision: plan.desiredRevision,
-          records: plan.items.map((item) => record(item, "failed", "Local Space storage is required")),
+          records: plan.items
+            .filter((item) => item.capability.id !== AGENT_TOOLS_CAPABILITY_ID)
+            .map((item) => record(item, "failed", "Local Space storage is required")),
         };
       }
 
@@ -194,6 +292,7 @@ export function createCommandCodeProvisioner(): HarnessProvisioner {
       const overlay: CommandCodeLaunchOverlay = {
         promptCapabilityIds: [],
         skillCapabilityIds: [],
+        toolCapabilityIds: [],
       };
       const records: HarnessCapabilityRecord[] = [];
 
@@ -261,15 +360,60 @@ export function createCommandCodeProvisioner(): HarnessProvisioner {
       }
       if (skillRoot && overlay.skillCapabilityIds.length) overlay.skillRoot = skillRoot;
 
+      const toolItems = plan.items.filter((item) => item.capability.kind === "tool");
+      const projectedTools = toolItems.filter((item) => item.capability.kind === "tool" && item.mode === "mcp");
+      if (projectedTools.length) {
+        const bridgeItem = plan.items.find((item) =>
+          item.capability.id === AGENT_TOOLS_CAPABILITY_ID
+          && item.capability.kind === "mcp-server"
+          && item.capability.transport.kind === "stdio");
+        const bridgeEnv = secrets.mcpSecrets(AGENT_TOOLS_CAPABILITY_ID);
+        if (
+          !bridgeItem
+          || bridgeItem.capability.kind !== "mcp-server"
+          || bridgeItem.capability.transport.kind !== "stdio"
+          || !bridgeEnv.POLYTH_AGENT_TOOLS_URL
+          || !bridgeEnv.POLYTH_AGENT_TOOLS_TOKEN
+        ) {
+          for (const item of projectedTools) {
+            records.push(record(item, "failed", "Scoped Polyth agent-tool bridge is unavailable"));
+          }
+        } else {
+          try {
+            const tools = projectedTools.map((item) => item.capability)
+              .filter((tool): tool is Extract<typeof tool, { kind: "tool" }> => tool.kind === "tool");
+            const toolModFile = join(revisionRoot, "polyth-tools.ts");
+            writeRevisionFile(toolModFile, toolModDocument(tools));
+            overlay.toolModFile = toolModFile;
+            overlay.toolCapabilityIds = tools.map((tool) => tool.id);
+            overlay.toolNames = Object.fromEntries(tools.map((tool) => [tool.id, tool.name]));
+            overlay.toolBridge = {
+              command: bridgeItem.capability.transport.command,
+              args: [...bridgeItem.capability.transport.args],
+              env: Object.fromEntries(bridgeItem.capability.transport.envKeys.map((key) => [key, bridgeEnv[key] ?? ""])),
+            };
+            for (const item of projectedTools) {
+              records.push(record(item, "pending", "Staged for native Command Code addTool backed by the scoped Polyth tool bridge"));
+            }
+          } catch {
+            for (const item of projectedTools) {
+              records.push(record(item, "failed", "Could not stage the transient Command Code tool Mod"));
+            }
+          }
+        }
+      }
+      for (const item of toolItems) {
+        if (item.mode !== "unsupported" || records.some((row) => row.capabilityId === item.capability.id)) continue;
+        records.push(record(item, "unsupported", "Command Code cannot project this Polyth tool scope"));
+      }
+
       const preRecorded = new Set(records.map((item) => item.capabilityId));
       for (const item of plan.items) {
-        if (preRecorded.has(item.capability.id)) continue;
-        if (item.mode === "unsupported" || item.capability.kind === "mcp-server" || item.capability.kind === "tool") {
+        if (item.capability.id === AGENT_TOOLS_CAPABILITY_ID || preRecorded.has(item.capability.id)) continue;
+        if (item.mode === "unsupported" || item.capability.kind === "mcp-server") {
           const reason = item.capability.kind === "mcp-server"
             ? "Command Code has no verified non-persistent MCP projection; Polyth will not mutate vendor MCP files"
-            : item.capability.kind === "tool"
-              ? "Polyth tools require a verified transient Command Code tool bridge"
-              : "Command Code has no verified transient projection for this capability";
+            : "Command Code has no verified transient projection for this capability";
           records.push(record(item, "unsupported", reason));
         } else {
           records.push(record(item, "unsupported", "Command Code has no verified transient projection for this capability"));
