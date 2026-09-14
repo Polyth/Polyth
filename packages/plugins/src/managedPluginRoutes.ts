@@ -1,7 +1,14 @@
-import type { RouteHandler } from "@polyth/contracts";
+import type { JsonObject, RouteHandler } from "@polyth/contracts";
+import type {
+  ContributionInvocation,
+  ContributionInvocationKind,
+  PackageJsonObject,
+} from "@polyth/package-sdk";
+import type { PackageManifest, PackageManifestV2 } from "@polyth/package-sdk/manifest";
 import type { PluginRegistry } from "./managedRegistry.ts";
 import type { ServerPackageHost } from "./serverPackage.ts";
 import { invokePackageRpc } from "./packageRpc.ts";
+import { createInvocationLeaseStore } from "./invocationLeases.ts";
 import { assertApprovedConnection, completeOauthFromTx, setTokenConnection, startOauth } from "./connections.ts";
 import { connectionFingerprint } from "./connectionFingerprint.ts";
 import { assertAuthConnectionGranted } from "./grants.ts";
@@ -14,10 +21,178 @@ import {
 import { assertOauthTxMatchesActive, consumeOauthTx, oauthRedirectOrigin } from "./oauthTx.ts";
 import { notFound, secretVault } from "./pluginRouteShared.ts";
 
+const fail = (code: string, message: string): never => {
+  throw Object.assign(new Error(message), { code });
+};
+
+const invocationKinds = new Set<ContributionInvocationKind>([
+  "composer-action",
+  "attachment-provider",
+  "message-action",
+  "session-action",
+  "command",
+  "tool-renderer",
+  "status-badge",
+  "settings-section",
+  "context-provider",
+  "widget",
+  "surface",
+]);
+
+function packageGeneration(registry: PluginRegistry, id: string): string {
+  const active = registry.activeIdentity(id);
+  return `${active.installGeneration}:${active.version}:${active.integrity}`;
+}
+
+function contributionOf(manifest: PackageManifest, kind: ContributionInvocationKind, id: string): Record<string, unknown> | null {
+  const contributes = manifest.contributes;
+  const find = (items: readonly { id: string }[] | undefined): Record<string, unknown> | null =>
+    (items?.find((item) => item.id === id) as unknown as Record<string, unknown> | undefined) ?? null;
+  if (kind === "surface") return find(contributes?.surfaces);
+  if (kind === "composer-action") return find(contributes?.composerActions);
+  if (manifest.manifestVersion !== 2) return null;
+  const v2 = (manifest as PackageManifestV2).contributes;
+  if (kind === "attachment-provider") return find(v2?.attachmentProviders);
+  if (kind === "message-action") return find(v2?.messageActions);
+  if (kind === "session-action") return find(v2?.sessionActions);
+  if (kind === "command") return find(v2?.commands);
+  if (kind === "tool-renderer") return find(v2?.toolRenderers);
+  if (kind === "status-badge") return find(v2?.statusBadges);
+  if (kind === "settings-section") return find(v2?.settingsSections);
+  if (kind === "context-provider") return find(v2?.contextProviders);
+  if (kind === "widget") return find(v2?.widgets);
+  return null;
+}
+
+function boundedObject(value: unknown, maxBytes = 16 * 1024): PackageJsonObject | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const text = JSON.stringify(value);
+  if (Buffer.byteLength(text, "utf8") > maxBytes) fail("invalid-input", "extension invocation data is too large");
+  return JSON.parse(text) as PackageJsonObject;
+}
+
+function boundedString(value: unknown, max: number): string {
+  return typeof value === "string" ? value.slice(0, max) : "";
+}
+
+async function buildInvocation(input: {
+  manifest: PackageManifest;
+  kind: ContributionInvocationKind;
+  contributionId: string;
+  body: Record<string, unknown>;
+  spaceId: string;
+  sessionId?: string;
+  projectId?: string;
+  host: ServerPackageHost;
+}): Promise<Omit<ContributionInvocation, "invocationId" | "lease" | "expiresAt" | "spaceId">> {
+  const contribution = contributionOf(input.manifest, input.kind, input.contributionId);
+  if (!contribution) fail("not-found", "extension contribution is not declared");
+  const base = {
+    kind: input.kind,
+    contributionId: input.contributionId,
+    ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+    ...(input.projectId ? { projectId: input.projectId } : {}),
+  } as const;
+  const data = input.body.data && typeof input.body.data === "object" && !Array.isArray(input.body.data)
+    ? input.body.data as Record<string, unknown>
+    : {};
+
+  if (input.kind === "message-action") {
+    if (!input.sessionId) fail("invalid-input", "message action requires a session");
+    const message = data.message && typeof data.message === "object" && !Array.isArray(data.message)
+      ? data.message as Record<string, unknown>
+      : {};
+    const id = boundedString(message.id, 240);
+    const role = message.role;
+    if (!id || (role !== "user" && role !== "assistant" && role !== "tool")) {
+      fail("invalid-input", "message action target is invalid");
+    }
+    const roles = Array.isArray(contribution.roles) ? contribution.roles : [];
+    if (roles.length && !roles.includes(role)) fail("invalid-input", "message role is not accepted by this action");
+    return {
+      ...base,
+      kind: "message-action",
+      message: {
+        id,
+        role,
+        ...(typeof message.text === "string" ? { text: message.text.slice(0, 24_000) } : {}),
+        ...(typeof message.toolName === "string" ? { toolName: message.toolName.slice(0, 160) } : {}),
+      },
+    };
+  }
+
+  if (input.kind === "session-action") {
+    if (!input.sessionId) fail("invalid-input", "session action requires a session");
+    const session = await input.host.sessions.snapshot(input.sessionId);
+    return {
+      ...base,
+      kind: "session-action",
+      session: {
+        id: session.id,
+        title: session.title.slice(0, 240),
+        status: session.status,
+      },
+    };
+  }
+
+  if (input.kind === "command") {
+    return {
+      ...base,
+      kind: "command",
+      query: boundedString(data.query, 1_000),
+      arguments: boundedString(data.arguments, 4_000),
+    };
+  }
+
+  if (input.kind === "tool-renderer") {
+    const tool = data.tool && typeof data.tool === "object" && !Array.isArray(data.tool)
+      ? data.tool as Record<string, unknown>
+      : {};
+    const callId = boundedString(tool.callId, 240);
+    const name = boundedString(tool.name, 240);
+    if (!callId || !name) fail("invalid-input", "tool renderer target is invalid");
+    const matcher = contribution.matcher && typeof contribution.matcher === "object"
+      ? contribution.matcher as Record<string, unknown>
+      : {};
+    const tools = Array.isArray(matcher.tools) ? matcher.tools.filter((item): item is string => typeof item === "string") : [];
+    const prefix = typeof matcher.prefix === "string" ? matcher.prefix : "";
+    if ((tools.length || prefix) && !tools.includes(name) && !(prefix && name.startsWith(prefix))) {
+      fail("invalid-input", "tool renderer does not match this tool");
+    }
+    const output = tool.output === undefined ? undefined : JSON.parse(JSON.stringify(tool.output));
+    return {
+      ...base,
+      kind: "tool-renderer",
+      tool: {
+        callId,
+        name,
+        ...(boundedObject(tool.input, 16 * 1024) ? { input: boundedObject(tool.input, 16 * 1024) } : {}),
+        ...(output !== undefined ? { output } : {}),
+        ...(typeof tool.error === "string" ? { error: tool.error.slice(0, 8_000) } : {}),
+      },
+    };
+  }
+
+  if (input.kind === "attachment-provider" || input.kind === "context-provider") {
+    return {
+      ...base,
+      kind: input.kind,
+      ...(typeof data.query === "string" ? { query: data.query.slice(0, 1_000) } : {}),
+    };
+  }
+
+  return {
+    ...base,
+    kind: input.kind as "composer-action" | "settings-section" | "status-badge" | "widget" | "surface",
+    ...(boundedObject(data.input) ? { input: boundedObject(data.input) } : {}),
+  };
+}
+
 export function managedPluginRoutes(
   registry: PluginRegistry,
   host: ServerPackageHost,
 ): RouteHandler {
+  const invocationLeases = createInvocationLeaseStore();
   return async (request) => {
     const { path, method } = request;
     if (path !== "/api/plugins" && !path.startsWith("/api/plugins/")) return false;
@@ -68,7 +243,49 @@ export function managedPluginRoutes(
       request.res.end();
       return true;
     }
-    let match = path.match(/^\/api\/plugins\/([^/]+)\/(reload|enable|disable|update|rollback|grants|rpc)$/);
+
+    let match = path.match(/^\/api\/plugins\/([^/]+)\/invocations$/);
+    if (match && method === "POST") {
+      const id = decodeURIComponent(match[1]!);
+      if (!storage || !registry.isEnabled(id, storage)) fail("PACKAGE_DISABLED", "package is disabled");
+      const manifest = registry.canonicalManifest(id);
+      if (manifest.runtime?.kind !== "sandboxed") fail("invalid-input", "host-scoped invocations are for sandboxed packages");
+      const input = await request.body();
+      const kind = typeof input.kind === "string" && invocationKinds.has(input.kind as ContributionInvocationKind)
+        ? input.kind as ContributionInvocationKind
+        : fail("invalid-input", "contribution kind is invalid");
+      const contributionId = boundedString(input.contributionId, 64);
+      if (!contributionId) fail("invalid-input", "contribution id is required");
+      const sessionId = typeof input.sessionId === "string" ? input.sessionId : undefined;
+      const projectId = typeof input.projectId === "string" ? input.projectId : undefined;
+      if (sessionId) {
+        let snap;
+        try { snap = await host.sessions.snapshot(sessionId); } catch { throw notFound("session not found"); }
+        if (snap.spaceId !== request.space.spaceId) throw notFound("session not found");
+      }
+      if (projectId) {
+        const project = await host.projects.get(projectId);
+        if (!project || project.spaceId !== request.space.spaceId) throw notFound("project not found");
+      }
+      const invocation = await buildInvocation({
+        manifest,
+        kind,
+        contributionId,
+        body: input,
+        spaceId: request.space.spaceId,
+        sessionId,
+        projectId,
+        host,
+      });
+      request.json(200, invocationLeases.issue({
+        packageId: id,
+        spaceId: request.space.spaceId,
+        generation: packageGeneration(registry, id),
+      }, invocation));
+      return true;
+    }
+
+    match = path.match(/^\/api\/plugins\/([^/]+)\/(reload|enable|disable|update|rollback|grants|rpc)$/);
     if (match && method === "POST") {
       const id = decodeURIComponent(match[1]!);
       const operation = match[2]!;
@@ -77,15 +294,19 @@ export function managedPluginRoutes(
         request.json(200, await registry.enable(id, storage));
       } else if (operation === "disable") {
         assertSpacePackageDisable(request, request.space);
+        invocationLeases.revokePackage(id);
         request.json(200, await registry.disable(id, storage));
       } else if (operation === "reload") {
         assertDeploymentPackageMutator(request);
+        invocationLeases.revokePackage(id);
         request.json(200, await registry.reload(id));
       } else if (operation === "update") {
         assertDeploymentPackageMutator(request);
+        invocationLeases.revokePackage(id);
         request.json(200, await registry.update(id, { storage }));
       } else if (operation === "rollback") {
         assertDeploymentPackageMutator(request);
+        invocationLeases.revokePackage(id);
         const input = await request.body();
         request.json(200, await registry.rollback(
           id,
@@ -126,8 +347,9 @@ export function managedPluginRoutes(
           }
           if (snap.spaceId !== request.space.spaceId) throw notFound("session not found");
         }
+        let project;
         if (projectId) {
-          const project = await host.projects.get(projectId);
+          project = await host.projects.get(projectId);
           if (!project || project.spaceId !== request.space.spaceId) throw notFound("project not found");
         }
         try {
@@ -145,6 +367,32 @@ export function managedPluginRoutes(
             projectId,
             log: (line) => registry.log(id, line),
             secrets: secretVault(host),
+            invocationLeases,
+            invocationIdentity: {
+              packageId: id,
+              spaceId: request.space.spaceId,
+              generation: packageGeneration(registry, id),
+            },
+            ...(project ? {
+              generateModel: async ({ prompt, maxOutputTokens, timeoutMs }) => {
+                const model = host.smallModel(request.space.userId);
+                if (!model) fail("HOST_UNAVAILABLE", "utility model is not configured");
+                const runtime = await host.runtimes.forProject(project.id, project.path, model.harnessId);
+                const result = await host.smallModelComplete(runtime, {
+                  cwd: project.path,
+                  prompt,
+                  model,
+                  maxOutputTokens,
+                  timeoutMs,
+                  purpose: "extension-utility",
+                });
+                return {
+                  text: result.text,
+                  modelClass: "utility" as const,
+                  inputTruncated: result.inputTruncated,
+                };
+              },
+            } : {}),
           }, methodName, input.payload);
           request.json(200, { ok: true, payload: result });
         } catch (cause) {
@@ -207,7 +455,9 @@ export function managedPluginRoutes(
     match = path.match(/^\/api\/plugins\/([^/]+)$/);
     if (match && method === "DELETE") {
       assertDeploymentPackageMutator(request);
-      request.json(200, { ok: await registry.remove(decodeURIComponent(match[1]!), storage) });
+      const id = decodeURIComponent(match[1]!);
+      invocationLeases.revokePackage(id);
+      request.json(200, { ok: await registry.remove(id, storage) });
       return true;
     }
     return false;
