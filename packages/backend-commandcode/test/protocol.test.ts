@@ -35,6 +35,20 @@ test("Command Code maps streaming, title, tools, usage, compaction and subagents
   assert.equal(subagent[0]?.type, "subagent/snapshot");
 });
 
+test("Command Code private thinking never enters canonical events", () => {
+  const state = createCommandCodeTranslateState("turn-private");
+  assert.deepEqual(translateCommandCodeRecord({ type: "event", event: { type: "thinking_start" } }, state), []);
+  assert.deepEqual(translateCommandCodeRecord({ type: "event", event: { type: "thinking_delta", delta: "private chain" } }, state), []);
+  assert.deepEqual(translateCommandCodeRecord({ type: "event", event: { type: "thinking_end" } }, state), []);
+
+  const events = translateCommandCodeRecord({
+    type: "event",
+    event: { type: "message_end", message: { content: [{ type: "text", text: "Public answer" }] } },
+  }, state);
+  assert.deepEqual(events, [{ type: "assistant/message", partId: "turn-private:answer", text: "Public answer" }]);
+  assert.equal("reasoning" in (events[0] ?? {}), false);
+});
+
 test("Command Code final result is a fallback answer only when streaming produced no text", () => {
   const state = createCommandCodeTranslateState("turn-2");
   assert.deepEqual(translateCommandCodeRecord({ type: "result", subtype: "success", finalText: "Done" }, state), [
