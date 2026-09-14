@@ -31,6 +31,16 @@ const usage = (value: unknown): TokenUsage | undefined => {
   };
 };
 
+const modelRef = (value: unknown): ModelRef | undefined => {
+  const id = typeof value === "string" ? value.trim() : "";
+  if (!id) return undefined;
+  const slash = id.indexOf("/");
+  return {
+    providerID: slash > 0 ? id.slice(0, slash).toLowerCase() : "command-code",
+    modelID: id,
+  };
+};
+
 const textFromMessage = (value: unknown): string => {
   const row = asRecord(value);
   if (!row) return "";
@@ -64,6 +74,8 @@ export interface CommandCodeTranslateState {
   operationId: string;
   model?: ModelRef;
   assistantText: string;
+  assistantFinalized: boolean;
+  usageFrames: number;
   toolInputs: Map<string, JsonObject>;
   toolNames: Map<string, string>;
   taskRevision: number;
@@ -81,6 +93,8 @@ export const createCommandCodeTranslateState = (
   operationId,
   model,
   assistantText: "",
+  assistantFinalized: false,
+  usageFrames: 0,
   toolInputs: new Map(),
   toolNames: new Map(),
   taskRevision: 0,
@@ -161,13 +175,25 @@ export function translateCommandCodeRecord(
     const tokens = usage(outer.usage);
     const finalText = stringValue(outer.finalText, outer.final_text);
     const out: RuntimeEvent[] = [];
-    if (finalText && !state.assistantText) {
+    // Chunks are provisional. A missing message_end must not leave canonical
+    // history without a finalized assistant message. Reuse the answer part id
+    // so the final event closes the same streamed surface instead of duplicating it.
+    if (finalText && !state.assistantFinalized) {
+      state.assistantText = finalText;
+      state.assistantFinalized = true;
       out.push({
         type: "assistant/message",
-        partId: `${state.operationId}:final`,
+        partId: `${state.operationId}:answer`,
         text: finalText,
         ...(tokens ? { tokens } : {}),
       });
+    }
+    // model_request_end is the preferred per-round additive accounting path.
+    // The documented final result usage is a fallback only when no such frame
+    // was observed, so a normal tool loop cannot double-count lifetime usage.
+    if (tokens && state.model && state.usageFrames === 0) {
+      out.push({ type: "usage/recorded", model: state.model, tokens });
+      state.usageFrames += 1;
     }
     return out;
   }
@@ -178,6 +204,10 @@ export function translateCommandCodeRecord(
   switch (event.type) {
     case "turn_start":
       return [{ type: "turn/started", turnId: state.operationId, ...(state.model ? { model: state.model } : {}) }];
+    case "model_request_start": {
+      state.model ??= modelRef(event.model);
+      return [];
+    }
     case "text_delta": {
       const text = stringValue(event.delta, event.text);
       if (!text) return [];
@@ -194,6 +224,7 @@ export function translateCommandCodeRecord(
       const text = textFromMessage(event.message) || stringValue(event.text) || state.assistantText;
       if (!text) return [];
       state.assistantText = text;
+      state.assistantFinalized = true;
       return [{
         type: "assistant/message",
         partId: `${state.operationId}:answer`,
@@ -252,8 +283,10 @@ export function translateCommandCodeRecord(
       return snapshot ? [snapshot] : [];
     }
     case "model_request_end": {
+      state.model ??= modelRef(event.model);
       const tokens = usage(event.usage);
       if (!tokens || !state.model) return [];
+      state.usageFrames += 1;
       return [{ type: "usage/recorded", model: state.model, tokens }];
     }
     case "run_error":
