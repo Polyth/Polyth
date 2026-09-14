@@ -49,7 +49,10 @@ const NOOP_STARTER = (_prompt: string, _id?: string): void => {};
 // keyboard. Project and branch never split the page between the headline and
 // the composer any more.
 function SessionHero({ starterContext }: { starterContext: StarterContext }) {
+  const projects = useStore((s) => s.projectRegistry.projects);
   const projectId = useStore((s) => s.activeProjectId);
+  const project = projects.find((candidate) => candidate.id === projectId) ?? null;
+  const name = project?.name || project?.path || tr("permissionbanner.thisProject");
 
   // Quick starters (§3/§35): pinned first, then suggestions that follow the
   // real workspace state — a dirty worktree offers review/commit work, a clean
@@ -75,6 +78,7 @@ function SessionHero({ starterContext }: { starterContext: StarterContext }) {
     <div className="stage stage-new">
       <div className="hero">
         <div className="hero-body customize-zone">
+          <h2>{tr("workspace.builtinsurfaces.whatAreWeWorkingOnIn")}{" "}<span className="polyth-gradient">{name}</span>.</h2>
           <div className="hero-widget-host">
             <SlotHost
               slot="session.empty.widgets"

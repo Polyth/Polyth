@@ -29,6 +29,7 @@ export function createCapabilityContributionRegistry(): AgentCapabilityContribut
   const resolvers = new Map<string, {
     owner: string;
     resolve(context: HarnessContext): readonly AgentCapabilityDescriptor[];
+    execute: AgentCapabilityContribution["execute"];
   }>();
 
   return {
@@ -36,7 +37,11 @@ export function createCapabilityContributionRegistry(): AgentCapabilityContribut
       const registered = base.register(owner, contribution);
       if (!contextual(contribution)) return registered;
       const id = contribution.descriptor.id;
-      resolvers.set(id, { owner, resolve: contribution.resolveCapabilities });
+      resolvers.set(id, {
+        owner,
+        resolve: contribution.resolveCapabilities,
+        execute: contribution.execute,
+      });
       return {
         dispose(): void | Promise<void> {
           if (resolvers.get(id)?.resolve === contribution.resolveCapabilities) resolvers.delete(id);
@@ -49,7 +54,7 @@ export function createCapabilityContributionRegistry(): AgentCapabilityContribut
       const resolved = base.resolve(context).filter((descriptor) => !resolvers.has(descriptor.id));
       const ids = new Set(resolved.map((descriptor) => descriptor.id));
 
-      for (const { owner, resolve } of resolvers.values()) {
+      for (const { owner, resolve, execute } of resolvers.values()) {
         for (const descriptor of resolve(context)) {
           // Reuse the canonical registry's existing validation, scope matching,
           // ownership enforcement and semantic revision normalization instead of
@@ -57,6 +62,7 @@ export function createCapabilityContributionRegistry(): AgentCapabilityContribut
           const verifier = createBaseRegistry();
           verifier.register(owner, {
             descriptor: { ...descriptor, owner },
+            execute,
           });
           const normalized = verifier.resolve(context)[0];
           if (!normalized) continue;

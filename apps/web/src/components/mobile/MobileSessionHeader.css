@@ -194,3 +194,61 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* The phone title is the lightweight task-status surface. Full progress stays
+   one tap away in the overview sheet instead of being reinserted after every
+   intermediate assistant message. */
+.mobile-island-text.task-progress {
+  font-weight: 650;
+}
+.mobile-island-text.task-progress.completed,
+.mobile-island-text.task-progress.all-complete {
+  color: var(--green-on-wash);
+}
+.mobile-island-text.task-progress.failed {
+  color: var(--red);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .mobile-island-text.task-progress {
+    animation: mobile-task-title-swap var(--motion-normal) var(--motion-ease) both;
+  }
+
+  @keyframes mobile-task-title-swap {
+    from {
+      opacity: .5;
+      transform: translate3d(0, 3px, 0);
+    }
+    to {
+      opacity: 1;
+      transform: translate3d(0, 0, 0);
+    }
+  }
+}
+
+/* Match the actual phone-shell seam from responsiveShell.ts, including a
+   landscape phone with a coarse pointer. */
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  /* Tasks already have a dedicated, persistent overview above the chat. The
+     old inline plan moved to whichever assistant message happened to be latest,
+     which made the checklist jump below progress prose. */
+  .timeline .task-list {
+    display: none;
+  }
+
+  /* A task-start event is represented by the title handoff above. Keep its
+     durable row inside Activity details, but do not narrate the same transition
+     again as a floating live action. */
+  .activity-live.task-started {
+    display: none;
+  }
+
+  /* A finalized assistant message followed by more technical activity is a
+     progress update, not the turn's final answer. Keep it readable but quieter
+     so Activity → progress → Activity scans as one continuing turn. */
+  .timeline > .msg.assistant:not(.activity-group):has(+ .activity-group) > .bubble {
+    color: var(--text-dim);
+    font-size: var(--font-body);
+    line-height: 1.5;
+  }
+}

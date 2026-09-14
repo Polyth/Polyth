@@ -37,7 +37,7 @@ test("chat chrome is component-owned, compact and readable", () => {
   const footer = read("../src/components/ChatResponseFooter.tsx");
   assert.match(css, /\.chat-response-footer\s*\{[^}]*display:\s*grid;/s);
   assert.match(css, /grid-template-areas:\s*"identity info actions"/);
-  assert.match(css, /@media \(max-width:\s*600px\)[\s\S]*"identity info"[\s\S]*"\. actions"/s);
+  assert.match(css, /@media \(max-width:\s*600px\)[\s\S]*grid-template-areas:\s*"identity info actions"/s);
   assert.match(css, /@media \(max-width:\s*340px\) and \(pointer:\s*coarse\)[\s\S]*grid-template-columns:\s*repeat\(4, var\(--control-h-sm\)\)/s);
   assert.match(css, /@media \(hover:\s*none\), \(pointer:\s*coarse\)[\s\S]*\.ui-tooltip\.chat-action-tooltip\s*\{\s*display:\s*none;/s);
   assert.match(css, /\.ui-popover\.chat-response-metadata\s*\{[^}]*background:\s*var\(--elevated\);/s);

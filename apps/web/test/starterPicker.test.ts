@@ -64,7 +64,7 @@ test("starter picker shell command is searchable", async () => {
   setActiveView("session");
   installShell();
   assert.equal(
-    commands.filterPalette(commands.listCommands(), "starter")[0]?.id,
+    commands.filterPalette(commands.listCommands(), "shortcut")[0]?.id,
     "cmd.starterPicker",
   );
 });

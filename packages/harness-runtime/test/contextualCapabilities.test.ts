@@ -104,3 +104,45 @@ test("contextual resolution rejects duplicate effective ids", () => {
   registry.register("commands", contextual("resolver-b", "b"));
   assert.throws(() => registry.resolve(context("project-a")), /capability already resolved/);
 });
+
+test("contextual tool resolution preserves its canonical executor", async () => {
+  const registry = createCapabilityContributionRegistry();
+  const execute = async () => ({ output: "contextual pong" });
+  registry.register("commands", {
+    descriptor: {
+      id: "commands.contextual-tool",
+      kind: "tool",
+      owner: "commands",
+      scope: "project",
+      projectId: "project-a",
+      revision: "1",
+      name: "contextual-ping",
+      description: "Contextual ping",
+      inputSchema: { type: "object", additionalProperties: false },
+      trust: "pure",
+      mutating: false,
+    },
+    resolveCapabilities() {
+      return [{
+        id: "commands.contextual-tool",
+        kind: "tool",
+        owner: "commands",
+        scope: "project",
+        projectId: "project-a",
+        revision: "1",
+        name: "contextual-ping",
+        description: "Contextual ping",
+        inputSchema: { type: "object", additionalProperties: false },
+        trust: "pure",
+        mutating: false,
+      }];
+    },
+    execute,
+  } as Contextual);
+
+  assert.deepEqual(registry.resolve(context("project-a")).map((row) => row.id), ["commands.contextual-tool"]);
+  assert.deepEqual(
+    await registry.executor("commands.contextual-tool")!({}, { ...context("project-a"), sessionId: "s1" }),
+    { output: "contextual pong" },
+  );
+});
