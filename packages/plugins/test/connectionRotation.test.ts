@@ -16,10 +16,10 @@ import { testSpaceStorage } from "./helpers.ts";
 function memoryVault(): PackageOpaqueVault {
   const values = new Map<string, string>();
   return {
-    putOpaque: (key, value) => { values.set(key, value); },
-    getOpaque: (key) => values.get(key) ?? null,
-    deleteOpaque: (key) => { values.delete(key); },
-    deleteOpaqueByPrefix: (prefix) => {
+    putOpaque: async (key, value) => { values.set(key, value); },
+    getOpaque: async (key) => values.get(key) ?? null,
+    deleteOpaque: async (key) => { values.delete(key); },
+    deleteOpaqueByPrefix: async (prefix) => {
       for (const key of [...values.keys()]) if (key.startsWith(prefix)) values.delete(key);
     },
   };
