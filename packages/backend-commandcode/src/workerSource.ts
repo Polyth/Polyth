@@ -27,27 +27,40 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const runtimeRejected = (message) => Object.assign(new Error(message), { code: "runtime-rejected" });
 const outcomeUnknown = (message) => Object.assign(new Error(message), { code: "outcome-unknown" });
 
-const readNativeSessionId = async (path) => {
+const readTurnAdmission = async (path, operationId) => {
   try {
     const value = JSON.parse(await readFile(path, "utf8"));
-    return typeof value?.nativeSessionId === "string" && value.nativeSessionId ? value.nativeSessionId : undefined;
+    const nativeSessionId = typeof value?.nativeSessionId === "string" && value.nativeSessionId
+      ? value.nativeSessionId
+      : undefined;
+    if (!nativeSessionId || !operationId) return undefined;
+    const accepted = Array.isArray(value?.acceptedMutations)
+      ? value.acceptedMutations.some((entry) => entry?.operationId === operationId && entry?.mutationKind === "turn-submit")
+      : Array.isArray(value?.acceptedOperations)
+        ? value.acceptedOperations.includes(operationId)
+        : false;
+    return accepted ? { nativeSessionId } : undefined;
   } catch {
     return undefined;
   }
 };
 
-const waitForNativeReceipt = async (path, child, expected) => {
+const waitForTurnAdmission = async (path, turn, expected, operationId) => {
   const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
-    const id = await readNativeSessionId(path);
-    if (id) {
-      if (expected && id !== expected) throw new Error("Command Code resumed a different native session");
-      return id;
+    const admission = await readTurnAdmission(path, operationId);
+    if (admission) {
+      if (expected && admission.nativeSessionId !== expected) {
+        throw new Error("Command Code resumed a different native session");
+      }
+      return admission.nativeSessionId;
     }
-    if (child.exitCode !== null || child.signalCode) throw new Error("Command Code exited before native session admission");
+    if (turn.child.exitCode !== null || turn.child.signalCode) {
+      throw new Error("Command Code exited before native turn admission");
+    }
     await sleep(20);
   }
-  throw new Error("Command Code did not expose a native session receipt before admission timeout");
+  throw new Error("Command Code did not persist the exact turn admission receipt before timeout");
 };
 
 const parseOutput = (turn, chunk) => {
@@ -63,6 +76,12 @@ const parseOutput = (turn, chunk) => {
     let parsed;
     try { parsed = JSON.parse(line.toString("utf8")); }
     catch { throw new Error("Command Code emitted malformed NDJSON"); }
+    const eventType = parsed?.type === "event" && typeof parsed?.event?.type === "string"
+      ? parsed.event.type
+      : undefined;
+    if (eventType === "run_start" || eventType === "turn_start" || parsed?.type === "result") {
+      turn.runObserved = true;
+    }
     send({ type: "commandcode-record", operationId: turn.operationId, record: parsed });
   }
   if (turn.stdout.length > MAX_LINE) throw new Error("Command Code emitted an oversized partial NDJSON record");
@@ -149,6 +168,19 @@ const deliverQueuedMessage = async (turn, content, deliverAs, operationId) => {
   });
 };
 
+const preAdmissionMessage = (stderr) => {
+  const detail = safeError(stderr);
+  if (/untrusted|workspace.{0,20}trust|trust.{0,20}workspace/i.test(detail)) {
+    return "Command Code requires this workspace to be trusted. Open Command Code in this workspace, approve trust, then retry in Polyth";
+  }
+  if (/not authenticated|sign.?in|log.?in|authentication required/i.test(detail)) {
+    return "Command Code authentication is required. Sign in with Command Code, then retry in Polyth";
+  }
+  return detail
+    ? "Command Code rejected the turn before native admission: " + detail
+    : "Command Code rejected the turn before native admission";
+};
+
 const startTurn = async (message) => {
   if (active) throw Object.assign(new Error("Command Code is already processing a turn"), { code: "busy" });
   const args = [
@@ -187,6 +219,7 @@ const startTurn = async (message) => {
     operationId: message.operationId,
     stdout: Buffer.alloc(0),
     stderr: "",
+    runObserved: false,
     controlPath,
     controlToken,
     closed: new Promise((resolve) => child.once("close", (code, signal) => resolve({ code, signal }))),
@@ -211,11 +244,21 @@ const startTurn = async (message) => {
   });
   child.stdin.end(String(message.text || ""));
   try {
-    const nativeSessionId = await waitForNativeReceipt(message.bindingPath, child, message.nativeSessionId);
+    const nativeSessionId = await waitForTurnAdmission(
+      message.bindingPath,
+      turn,
+      message.nativeSessionId,
+      message.operationId,
+    );
     return { nativeSessionId };
   } catch (error) {
     if (child.exitCode === null && !child.signalCode) child.kill("SIGTERM");
-    throw Object.assign(error instanceof Error ? error : new Error(String(error)), { code: "outcome-unknown" });
+    await turn.closed.catch(() => undefined);
+    const durableAdmission = await readTurnAdmission(message.bindingPath, message.operationId);
+    if (!turn.runObserved && !durableAdmission) {
+      throw runtimeRejected(preAdmissionMessage(turn.stderr));
+    }
+    throw outcomeUnknown(error instanceof Error ? error.message : String(error));
   }
 };
 
