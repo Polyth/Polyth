@@ -1,4 +1,4 @@
-import type { InstalledPluginDto } from "@polyth/contracts";
+import type { InstalledPluginDto, UiSlotItem } from "@polyth/contracts";
 import { createElement, useEffect, useState, type ComponentType } from "react";
 import { api } from "@polyth/session/web-api";
 import {
@@ -27,6 +27,23 @@ function SandboxHostSlot(props: { plugin: InstalledPluginDto; surfaceId: string 
   return createElement(Frame, props);
 }
 
+function SandboxContributionHostSlot(props: {
+  plugin: InstalledPluginDto;
+  item: UiSlotItem;
+  hostProps: Record<string, unknown>;
+}) {
+  const [Contribution, setContribution] = useState<ComponentType<typeof props> | null>(null);
+  useEffect(() => {
+    let active = true;
+    void import("./packages/sandbox/Contribution.tsx").then((mod) => {
+      if (active) setContribution(() => mod.SandboxContributionSlot as ComponentType<typeof props>);
+    });
+    return () => { active = false; };
+  }, []);
+  if (!Contribution) return null;
+  return createElement(Contribution, props);
+}
+
 type PluginSync = Pick<SyncClient, "onEvent">;
 type SlotRegistrar = typeof registerSlot;
 type PluginLoader = typeof loadPluginModule;
@@ -49,7 +66,8 @@ interface PluginRegistration {
 /**
  * Mirrors server-owned plugin descriptors into the web slot registry. Trusted
  * UI bundles turn module keys into React components. Sandboxed packages never
- * import into the host React realm — they render through SandboxFrame.
+ * import into the host React realm — they contribute bounded data and RemoteUI
+ * through host-owned adapters.
  */
 export async function initPluginBridge(
   sync?: PluginSync,
@@ -102,8 +120,8 @@ export async function initPluginBridge(
       const title = typeof meta.title === "string"
         ? meta.title
         : item.id.replace(/[._-]+/g, " ");
-      let render = sandboxed
-        ? sandboxRender(plugin, item.module, meta)
+      const render = sandboxed
+        ? sandboxRender(plugin, item, meta)
         : (() => {
           const component = resolve(plugin.id, item.module);
           if (!component && item.slot !== "widget.catalog") return null;
@@ -216,9 +234,17 @@ function firstSandboxSurfaceId(plugin: InstalledPluginDto): string {
 
 function sandboxRender(
   plugin: InstalledPluginDto,
-  moduleKey: string,
+  item: UiSlotItem,
   meta: Record<string, unknown>,
 ) {
+  const moduleKey = item.module;
+  if (moduleKey.startsWith("sandbox-contribution:")) {
+    return (hostProps: Record<string, unknown>) => createElement(SandboxContributionHostSlot, {
+      plugin,
+      item,
+      hostProps,
+    });
+  }
   if (moduleKey.startsWith("sandbox-action:")) {
     const actionId = moduleKey.slice("sandbox-action:".length);
     const surface = firstSandboxSurfaceId(plugin);
