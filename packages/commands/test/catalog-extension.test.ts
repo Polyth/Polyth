@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { RuntimeCommandDescriptor } from "@polyth/contracts";
 import {
   commandPrecedence,
+  extensionCommandBinding,
   extensionCommandId,
   parseExtensionCommandId,
   type SlashCommand,
@@ -14,8 +15,7 @@ const extension = (name: string): SlashCommand => ({
   description: "extension command",
   prompt: "",
   scope: "builtin",
-  owner: "extension",
-  extension: { packageId: "com-example-tools", contributionId: name },
+  owner: "builtin",
 });
 
 const command = (name: string, scope: SlashCommand["scope"]): SlashCommand => ({
@@ -42,11 +42,13 @@ test("extension command ids round-trip opaque package and contribution ids", () 
   assert.deepEqual(parseExtensionCommandId(id), binding);
   assert.equal(parseExtensionCommandId("extension:broken"), null);
   assert.equal(parseExtensionCommandId("not-extension:x:y"), null);
+  assert.deepEqual(extensionCommandBinding({ id }), binding);
 });
 
 test("extensions never shadow project, user, or builtin commands", () => {
   const ext = extension("review");
-  assert.equal(commandPrecedence("review", [ext, command("review", "builtin")])?.owner, "builtin");
+  const builtin = command("review", "builtin");
+  assert.equal(commandPrecedence("review", [ext, builtin]), builtin);
   assert.equal(commandPrecedence("review", [ext, command("review", "user")])?.scope, "user");
   assert.equal(commandPrecedence("review", [ext, command("review", "project")])?.scope, "project");
 });
@@ -54,5 +56,5 @@ test("extensions never shadow project, user, or builtin commands", () => {
 test("extension commands beat native runtime commands but lose to Polyth commands", () => {
   const ext = extension("inspect");
   assert.equal(commandPrecedence("inspect", [native("inspect"), ext]), ext);
-  assert.equal(commandPrecedence("/inspect", [ext, command("inspect", "builtin")])?.owner, "builtin");
+  assert.notEqual(commandPrecedence("/inspect", [ext, command("inspect", "builtin")]), ext);
 });
