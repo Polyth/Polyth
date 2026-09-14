@@ -205,7 +205,7 @@ const DEFAULT_SIZE_BY_ID: Record<string, WidgetSize> = {
   "usage.project": { w: 8, h: 6 },
   "usage.sessions-table": { w: 6, h: 5 },
   "usage.quota-summary": { w: 4, h: 2 },
-  "usage.turn": { w: 4, h: 6 },
+  "usage.turn": { w: 4, h: 9 },
 };
 const DEFAULT_VISIBLE = new Set<string>([
   "core.chat", "core.quick-actions", "goals.current", "files.project-map",
