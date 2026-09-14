@@ -19,6 +19,7 @@ import { copyText } from "../utils.ts";
 import { tr } from "../i18n/index.ts";
 import ProviderLogo from "../../../../packages/models/widgets/ProviderLogo.tsx";
 import ChatActionButton from "./ChatActionButton.tsx";
+import SlotHost from "./slots/SlotHost.ts";
 import {
   CombineIcon,
   CopyIcon,
@@ -253,6 +254,18 @@ export default function ChatResponseFooter({
             onClick={() => requestComposerReplace(regeneratePrompt)}
           />
         )}
+        <SlotHost
+          slot="session.message.actions"
+          context={{
+            sessionId: session?.id,
+            projectId,
+            messageId: String(m.eventSeq),
+            messageRole: "assistant",
+            messageText: m.text,
+            eventSeq: m.eventSeq,
+          }}
+          className="slot-host-inline"
+        />
       </div>
     </footer>
   );
