@@ -50,6 +50,18 @@ test("Command Code worker emits terminal evidence only after admission or observ
   assert.match(COMMANDCODE_WORKER_SOURCE, /!turn\.runObserved && !durableAdmission/);
 });
 
+test("resuming Command Code never replays a stale adapter binding title into native state", () => {
+  assert.match(
+    COMMANDCODE_WORKER_SOURCE,
+    /POLYTH_COMMANDCODE_TITLE: message\.nativeSessionId \? "" : \(message\.title \|\| ""\)/,
+  );
+});
+
+test("worker diagnostics are redacted before crossing the worker IPC boundary", () => {
+  assert.match(COMMANDCODE_WORKER_SOURCE, /\$1\[redacted\]/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /authorization\|cookie\|credential\|password\|secret\|token\|api/);
+});
+
 test("subagent capability is backed by native AgentEvent snapshots", () => {
   const state = createCommandCodeTranslateState("turn-subagent");
   assert.deepEqual(
