@@ -187,6 +187,9 @@ export function SessionUsageStats({
 function SessionUsageWidget({ config, sessionId }: WidgetRenderContext) {
   const activeSessionId = useStore((state) => state.activeSessionId);
   const resolvedSessionId = sessionId ?? activeSessionId;
+  if (!resolvedSessionId) {
+    return <div className="widget-empty">{tr("widgets.usageplugin.chooseASessionForUsage")}</div>;
+  }
   const activeRenderModel = useActiveModel();
   const events = useStore((state) =>
     (resolvedSessionId ? state.events[resolvedSessionId] : undefined) ?? NO_EVENTS);

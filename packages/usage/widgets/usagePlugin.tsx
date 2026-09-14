@@ -30,6 +30,11 @@ import {
 } from "../../../apps/web/src/widgets/catalog.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { Button, Checkbox, EmptyState } from "../../../apps/web/src/components/ui/index.ts";
+import {
+  TURN_STATS_SETTINGS_SCHEMA,
+  turnStatsWidgetRender,
+  turnStatsWidgetSettingsRender,
+} from "./usage/turnStatsUi.tsx";
 
 export type SessionUsageMetric =
   | "showContext"
@@ -280,6 +285,7 @@ const RENDERERS: Record<string, (context: WidgetRenderContext) => ReactNode> = {
   "usage.project": (context) => <ProjectUsageWidget projectId={context.projectId} />,
   "usage.sessions-table": (context) => <SessionsTableWidget projectId={context.projectId} />,
   "usage.quota-summary": () => <QuotaSummaryWidget />,
+  "usage.turn": (context) => turnStatsWidgetRender(context),
 };
 
 export const USAGE_WIDGET_PLUGIN = defineWidgetPlugin({
@@ -390,6 +396,33 @@ export const USAGE_WIDGET_PLUGIN = defineWidgetPlugin({
       order: 40,
       render: RENDERERS["usage.quota-summary"]!,
       settingsRender: () => <UsageWidgetSettings />,
+    },
+    {
+      id: "usage.turn",
+      title: tr("widgets.usageplugin.turnStats"),
+      description: tr("widgets.usageplugin.turnStatsDescription"),
+      kind: "widget",
+      defaultSlot: "workspace.right",
+      supportedSlots: [
+        "workspace.left",
+        "workspace.main",
+        "workspace.right",
+        "workspace.bottom",
+        "session.composer.before",
+      ],
+      category: "Usage",
+      defaultSize: { w: 4, h: 6 },
+      minSize: { w: 3, h: 3 },
+      maxSize: { w: 12, h: 50 },
+      audience: "standard",
+      scope: "workspace",
+      resizable: true,
+      recommended: true,
+      defaultVisible: false,
+      duplicatable: true,
+      settingsSchema: TURN_STATS_SETTINGS_SCHEMA,
+      render: RENDERERS["usage.turn"]!,
+      settingsRender: (context) => turnStatsWidgetSettingsRender(context),
     },
   ] satisfies readonly PluginWidgetDef[],
 });

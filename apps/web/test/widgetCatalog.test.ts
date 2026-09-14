@@ -101,6 +101,7 @@ test("Usage plugin owns all package-declared usage widgets", () => {
       "usage.quotas",
       "usage.session",
       "usage.sessions-table",
+      "usage.turn",
     ],
   );
   assert.ok(widgets.every((widget) => widget.category === "Usage"));
