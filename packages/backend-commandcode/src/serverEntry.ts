@@ -18,6 +18,7 @@ import {
 } from "./discovery.ts";
 import { createCommandCodeRpc } from "./rpc.ts";
 import { COMMANDCODE_CAPABILITIES, createCommandCodeRuntime } from "./runtime.ts";
+import { createCommandCodeTitleSync } from "./titleSync.ts";
 import { COMMANDCODE_WORKER_SOURCE } from "./workerSource.ts";
 
 const writeGenerated = async (file: string, content: string): Promise<void> => {
@@ -195,9 +196,10 @@ export default function registerPackage(host: ServerPackageHost) {
         stableAuthority: true,
       });
       try {
+        const titleSync = createCommandCodeTitleSync(rpc);
         const runtime = createCommandCodeRuntime({
           context,
-          rpc,
+          rpc: titleSync.rpc,
           bindingFile: p.binding,
           bridgePath: p.bridge,
           models: () => discoverCommandCodeModels(command, context.cwd),
@@ -216,6 +218,27 @@ export default function registerPackage(host: ServerPackageHost) {
             }
           },
         });
+
+        const ensureSession = runtime.ensureSession.bind(runtime);
+        runtime.ensureSession = async (input) => {
+          titleSync.capture(input.title);
+          return ensureSession(input);
+        };
+        if (runtime.createSessionOperation) {
+          const createSessionOperation = runtime.createSessionOperation.bind(runtime);
+          runtime.createSessionOperation = async (input, operationId) => {
+            titleSync.capture(input.title);
+            return createSessionOperation(input, operationId);
+          };
+        }
+        if (runtime.resetSessionOperation) {
+          const resetSessionOperation = runtime.resetSessionOperation.bind(runtime);
+          runtime.resetSessionOperation = async (input, operationId) => {
+            titleSync.capture(input.title);
+            return resetSessionOperation(input, operationId);
+          };
+        }
+
         // The documented native registry re-scans custom agents each turn, so
         // do not freeze this list at runtime construction time.
         return Object.assign(runtime, {
