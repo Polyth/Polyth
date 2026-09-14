@@ -29,9 +29,14 @@ test("Command Code maps streaming, title, tools, usage, compaction and subagents
     model: { providerID: "moonshotai", modelID: "moonshotai/Kimi-K3" },
     tokens: { input: 10, output: 5, reasoning: 2 },
   }]);
-  assert.deepEqual(translateCommandCodeRecord({ type: "event", event: { type: "compaction_done", tokensSaved: 2000 } }, state), [
-    { type: "session/compacted" },
-  ]);
+  const compacted = translateCommandCodeRecord({ type: "event", event: { type: "compaction_done", tokensSaved: 2000 } }, state);
+  assert.equal(compacted[0]?.type, "session/compacted");
+  assert.equal(compacted[1]?.type, "context/updated");
+  if (compacted[1]?.type === "context/updated") {
+    assert.equal(compacted[1].source, "unknown");
+    assert.equal(compacted[1].compaction?.active, false);
+    assert.equal(typeof compacted[1].compaction?.lastAt, "number");
+  }
   const subagent = translateCommandCodeRecord({
     type: "event",
     event: { type: "subagent_start", toolCallId: "a1", subagentType: "explore" },
