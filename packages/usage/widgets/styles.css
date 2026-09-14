@@ -1586,10 +1586,8 @@ width: 100%; justify-content: center;
   white-space: nowrap;
 }
 .usage-turn-stats-grid strong {
-  overflow: hidden;
   font-variant-numeric: tabular-nums;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .usage-turn-stats-grid strong.usage-turn-stats-good {
   color: var(--green);
