@@ -22,7 +22,12 @@ const response = (id, success, data, error, code) => send({
   ...(error ? { error } : {}),
   ...(code ? { code } : {}),
 });
-const safeError = (value) => String(value || "Command Code failed").replace(/[\\r\\n]+/g, " ").slice(0, 500);
+const safeError = (value) => String(value || "Command Code failed")
+  .replace(/((?:authorization|cookie|credential|password|secret|token|api[-_ ]?key)\s*[=:]\s*)\S+/gi, "$1[redacted]")
+  .replace(/[\u0000-\u001f\u007f]+/g, " ")
+  .replace(/\s+/g, " ")
+  .trim()
+  .slice(0, 500);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const runtimeRejected = (message) => Object.assign(new Error(message), { code: "runtime-rejected" });
 const outcomeUnknown = (message) => Object.assign(new Error(message), { code: "outcome-unknown" });
