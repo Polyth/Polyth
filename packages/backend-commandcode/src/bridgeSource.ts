@@ -21,6 +21,8 @@ const warn = (message) => {
   try { process.stderr.write("[polyth-commandcode] " + message + "\\n"); } catch {}
 };
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const atomicJson = async (path, value) => {
   await mkdir(dirname(path), { recursive: true });
   const temp = path + "." + process.pid + ".tmp";
@@ -139,6 +141,20 @@ const questionResult = (input, answer) => {
     : JSON.stringify({ source: "polyth-user", error: "answer payload exceeded bridge limit" });
 };
 
+const waitForPendingQuestion = async (requestId) => {
+  // tool_queued is emitted immediately before permission resolution and the
+  // beforeToolCall hook. A very fast remote/UI reply can therefore beat the
+  // hook registration by a few milliseconds. Bound that race instead of
+  // incorrectly declaring a live question stale.
+  const deadline = Date.now() + 1_000;
+  while (Date.now() < deadline) {
+    const pending = pendingQuestions.get(requestId);
+    if (pending) return pending;
+    await sleep(10);
+  }
+  return pendingQuestions.get(requestId);
+};
+
 const startControlServer = async (cmd) => {
   if (!controlPath) failClosed("control file is missing");
   if (!controlToken) failClosed("control token is missing");
@@ -199,7 +215,7 @@ const startControlServer = async (cmd) => {
           reply(id, false, "invalid question response");
           return;
         }
-        const pending = pendingQuestions.get(requestId);
+        const pending = await waitForPendingQuestion(requestId);
         if (!pending) {
           reply(id, false, "Command Code question is no longer pending");
           return;
@@ -265,7 +281,7 @@ export default async function polythCommandCodeBridge(cmd) {
   });
   cmd.on("session_titled", (event) => persistNativeTitle(event?.title));
   cmd.on("run_end", () => {
-    for (const pending of pendingQuestions.values()) pending.resolve({ action: "reject", aborted: true });
+    for (const pending of [...pendingQuestions.values()]) pending.resolve({ action: "reject", aborted: true });
     pendingQuestions.clear();
     try { controlServer.close(); } catch {}
   });
