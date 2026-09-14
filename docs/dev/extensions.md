@@ -56,7 +56,7 @@ v2 currently parses and integrates these contribution kinds:
 | `attachmentProviders` | composer Add menu + native picker overlay | when opened |
 | `messageActions` | native message-action seam | when invoked |
 | `sessionActions` | native session action seam | when invoked |
-| `commands` | command contribution metadata | when invoked |
+| `commands` | native `/` command discovery and host overlay | when invoked |
 | `toolRenderers` | conversation tool-result seam | none for declarative; lazy for dynamic |
 | `statusBadges` | session status seam | only while visible/live |
 | `settingsSections` | package settings integration seam | while visible |
@@ -72,6 +72,28 @@ The browser never supplies authoritative selected-message text or tool output to
 For message actions and dynamic tool renderers the browser sends only the canonical event sequence. The server re-reads that exact event from the canonical session log, verifies the session belongs to the current Space, validates the declared role/matcher, bounds the payload, and only then creates an invocation lease.
 
 This keeps a one-message action from becoming implicit permission to read an entire session.
+
+## Slash commands
+
+A v2 `commands` contribution participates in the normal Polyth `/` discovery UI rather than introducing a second command picker. Discovery is resolved per request from the current Space: only enabled, ready, sandboxed packages in that Space contribute commands.
+
+Command-name precedence is deliberately conservative:
+
+1. project commands;
+2. user commands;
+3. Polyth built-ins;
+4. extension commands;
+5. native runtime commands.
+
+Installing a package therefore cannot silently take over an existing project, user, or built-in command name.
+
+When an extension command wins, the browser carries a host-reserved opaque command id. Immediately before normal session admission, Polyth re-resolves the current installed package and exact contribution, launches the same host-owned contribution overlay used by other extension actions, and removes the temporary optimistic composer echo.
+
+Extension slash commands are **host actions, not model turns**. A successful invocation does not create a canonical `user/message`, prompt-history entry, model turn, durable send operation, queue item, or local send-recovery intent. If the package was disabled, removed, updated incompatibly, or the contribution disappeared after autocomplete discovery, launch fails before session admission and the normal rejected-send path restores the draft.
+
+The invocation payload contains only bounded command data: the typed query is capped at 1,000 characters and arguments at 4,000 characters, plus the host-owned Space/package/generation/contribution identity. It does not grant session-history access.
+
+Attachment pills cannot be mixed into an extension command submission. Returned resources/context use the normal extension result path and become ordinary Polyth attachments after the command runs.
 
 ## Invocation leases
 
@@ -95,7 +117,7 @@ The server stores only a hash of the lease token. Completion payloads are valida
 
 Capabilities are declared in the manifest and granted per Space. A grant in one Space never grants the same authority in another Space.
 
-A declaration may set `required: false`. Optional authority does not block activation; code must check `host.hasCapability(name)` before using it.
+A declaration may set `required: false`. Optional authority does not block activation; code must check `host.hasCapability(name)` before using it. Package review grants required authority by default; optional authority is a separate explicit user choice.
 
 Capabilities currently backed by host behavior include the UI/composer/session/project metadata surfaces, structured context/resources, package storage, brokered network access, connections, clipboard access, and bounded utility-model generation exposed by the current SDK catalog.
 
