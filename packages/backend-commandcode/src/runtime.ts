@@ -18,8 +18,13 @@ export const COMMANDCODE_CAPABILITIES: RuntimeCapabilities = {
   permissions: false,
   questions: false,
   compaction: false,
-  subagents: false,
-  mcp: false,
+  // Official AgentEvents expose nested-agent lifecycle/progress. This claim is
+  // observability only; Polyth does not pretend it can independently spawn or
+  // control Command Code subagents.
+  subagents: true,
+  // Command Code consumes its own native MCP configuration from the execution
+  // cwd. Polyth provisioning/mutability remains a separate capability seam.
+  mcp: true,
   steering: true,
   resume: true,
   usage: true,
