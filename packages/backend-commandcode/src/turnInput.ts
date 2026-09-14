@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import type {
   AgentRuntime,
@@ -13,11 +14,17 @@ const invalidPath = (path: string): boolean =>
   || Buffer.byteLength(path, "utf8") > MAX_ATTACHMENT_PATH_BYTES
   || /[\u0000\r\n]/.test(path);
 
+const escapesRoot = (relativePath: string): boolean =>
+  isAbsolute(relativePath)
+  || relativePath === ".."
+  || relativePath.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`);
+
 /**
  * Resolve a client-neutral project-relative attachment path without ever
  * returning an absolute host path to the prompt. The provider-bound instruction
  * tells Command Code to resolve it against its own current workspace before it
  * calls read_file, whose native contract expects an absolute in-workspace path.
+ * Both the lexical path and its real symlink target must remain inside cwd.
  */
 export function commandCodeProjectPath(cwd: string, attachment: AttachmentRef): string | undefined {
   const raw = attachment.path?.trim();
@@ -25,11 +32,20 @@ export function commandCodeProjectPath(cwd: string, attachment: AttachmentRef): 
   const root = resolve(cwd);
   const absolute = resolve(root, raw);
   const projectRelative = relative(root, absolute);
-  if (!projectRelative || projectRelative === ".") return undefined;
-  if (isAbsolute(projectRelative) || projectRelative === ".." || projectRelative.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)) {
+  if (!projectRelative || projectRelative === "." || escapesRoot(projectRelative)) return undefined;
+  if (invalidPath(projectRelative)) return undefined;
+
+  try {
+    const canonicalRoot = realpathSync.native(root);
+    const canonicalTarget = realpathSync.native(absolute);
+    const canonicalRelative = relative(canonicalRoot, canonicalTarget);
+    if (!canonicalRelative || canonicalRelative === "." || escapesRoot(canonicalRelative)) return undefined;
+  } catch {
+    // An attachment is a concrete file reference. A missing/unresolvable target
+    // cannot be safely delegated to provider-side path resolution.
     return undefined;
   }
-  if (invalidPath(projectRelative)) return undefined;
+
   return projectRelative.replace(/\\/g, "/");
 }
 
