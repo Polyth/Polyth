@@ -6,6 +6,11 @@ import type { RuntimeCommandDescriptor } from "@polyth/contracts";
 
 export type CommandScope = "user" | "project" | "builtin";
 
+export interface ExtensionCommandBinding {
+  packageId: string;
+  contributionId: string;
+}
+
 export interface SlashCommand {
   name: string;
   description: string;
@@ -14,7 +19,9 @@ export interface SlashCommand {
   model?: string;
   scope: CommandScope;
   id?: string;
-  owner?: "builtin" | "user" | "project";
+  owner?: "builtin" | "user" | "project" | "extension";
+  /** Host-owned invocation identity. Never contains executable extension code. */
+  extension?: ExtensionCommandBinding;
 }
 
 export type CatalogCommand = SlashCommand | RuntimeCommandDescriptor;
@@ -30,19 +37,39 @@ export interface CommandList {
   snippets: Snippet[];
 }
 
+export const extensionCommandId = (binding: ExtensionCommandBinding): string =>
+  `extension:${encodeURIComponent(binding.packageId)}:${encodeURIComponent(binding.contributionId)}`;
+
+export function parseExtensionCommandId(id: string): ExtensionCommandBinding | null {
+  if (!id.startsWith("extension:")) return null;
+  const parts = id.slice("extension:".length).split(":");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+  try {
+    const packageId = decodeURIComponent(parts[0]);
+    const contributionId = decodeURIComponent(parts[1]);
+    if (!packageId || !contributionId) return null;
+    return { packageId, contributionId };
+  } catch {
+    return null;
+  }
+}
+
 export const mergeCommandCatalog = (
   polyth: readonly SlashCommand[],
   native: readonly RuntimeCommandDescriptor[],
 ): CatalogCommand[] => [...polyth, ...native];
 
-const COMMAND_SCOPE_RANK: Record<CommandScope | "native", number> = {
+const COMMAND_SCOPE_RANK: Record<CommandScope | "extension" | "native", number> = {
   project: 0,
   user: 1,
   builtin: 2,
-  native: 3,
+  extension: 3,
+  native: 4,
 };
 
-/** Typed `/name` precedence when no explicit selection: project > user > builtin > native. */
+/** Typed `/name` precedence when no explicit selection:
+ * project > user > builtin > extension > native. Extensions never shadow
+ * user/project files or Polyth built-ins merely by being installed. */
 export const commandPrecedence = (
   name: string,
   catalog: readonly CatalogCommand[],
@@ -59,7 +86,9 @@ export const commandPrecedence = (
     }
     const polyth = cmd as SlashCommand;
     if (polyth.name.toLowerCase() !== normalized) continue;
-    const rank = COMMAND_SCOPE_RANK[polyth.scope] ?? COMMAND_SCOPE_RANK.builtin;
+    const rank = polyth.owner === "extension"
+      ? COMMAND_SCOPE_RANK.extension
+      : COMMAND_SCOPE_RANK[polyth.scope] ?? COMMAND_SCOPE_RANK.builtin;
     if (!best || rank < best.rank) best = { item: polyth, rank };
   }
   return best?.item;
