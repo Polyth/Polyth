@@ -7,6 +7,15 @@ const requestedTitle = process.env.POLYTH_COMMANDCODE_TITLE?.trim();
 const requestedOperationId = process.env.POLYTH_COMMANDCODE_OPERATION_ID?.trim();
 const controlPath = process.env.POLYTH_COMMANDCODE_CONTROL_FILE?.trim();
 const controlToken = process.env.POLYTH_COMMANDCODE_CONTROL_TOKEN?.trim();
+for (const key of [
+  "POLYTH_COMMANDCODE_BINDING_FILE",
+  "POLYTH_COMMANDCODE_TITLE",
+  "POLYTH_COMMANDCODE_OPERATION_ID",
+  "POLYTH_COMMANDCODE_CONTROL_FILE",
+  "POLYTH_COMMANDCODE_CONTROL_TOKEN",
+  "POLYTH_COMMANDCODE_BIN",
+  "POLYTH_COMMANDCODE_BRIDGE_PATH",
+]) delete process.env[key];
 const MAX_CONTROL_BYTES = 64 * 1024;
 let nativeSessionId = "";
 let bindingSerial = Promise.resolve();
@@ -117,8 +126,6 @@ const persistNativeTitle = async (title) => {
   try {
     await updateBinding((previous) => ({ ...previous, title: value, updatedAt: Date.now() }));
   } catch {
-    // Title durability is presentation metadata, not execution authority. The
-    // AgentEvent still updates canonical Polyth state, so do not kill a run.
     warn("native title could not be mirrored into the adapter binding");
   }
 };
@@ -142,10 +149,6 @@ const questionResult = (input, answer) => {
 };
 
 const waitForPendingQuestion = async (requestId) => {
-  // tool_queued is emitted immediately before permission resolution and the
-  // beforeToolCall hook. A very fast remote/UI reply can therefore beat the
-  // hook registration by a few milliseconds. Bound that race instead of
-  // incorrectly declaring a live question stale.
   const deadline = Date.now() + 1_000;
   while (Date.now() < deadline) {
     const pending = pendingQuestions.get(requestId);
@@ -199,8 +202,6 @@ const startControlServer = async (cmd) => {
         try {
           await persistSteerReceipt(operationId);
         } catch {
-          // The native queue may already contain the message. Without a durable
-          // receipt Polyth must not retry it, so terminate the run fail-closed.
           failClosed("native steering receipt could not be persisted");
           return;
         }
@@ -222,8 +223,6 @@ const startControlServer = async (cmd) => {
         }
         const mutationKind = answer.action === "reject" ? "question-reject" : "question-reply";
         try {
-          // Persist BEFORE releasing the hook. Once resolve() runs the model may
-          // observe the answer, so ambiguity after this point must be recoverable.
           await persistMutationReceipt(operationId, mutationKind, requestId);
         } catch {
           reply(id, false, "question response receipt could not be persisted");
