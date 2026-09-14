@@ -16,6 +16,10 @@ const failClosed = (message) => {
   process.exit(70);
 };
 
+const warn = (message) => {
+  try { process.stderr.write("[polyth-commandcode] " + message + "\\n"); } catch {}
+};
+
 const atomicJson = async (path, value) => {
   await mkdir(dirname(path), { recursive: true });
   const temp = path + "." + process.pid + ".tmp";
@@ -91,6 +95,18 @@ const persistSteerReceipt = async (operationId) => {
       : [...mutations, { operationId, mutationKind: "turn-steer" }].slice(-128);
     return { ...previous, acceptedMutations, updatedAt: Date.now() };
   });
+};
+
+const persistNativeTitle = async (title) => {
+  const value = typeof title === "string" ? title.trim() : "";
+  if (!value || /^new session$|^untitled$|^command code session$/i.test(value)) return;
+  try {
+    await updateBinding((previous) => ({ ...previous, title: value, updatedAt: Date.now() }));
+  } catch {
+    // Title durability is presentation metadata, not execution authority. The
+    // AgentEvent still updates canonical Polyth state, so do not kill a run.
+    warn("native title could not be mirrored into the adapter binding");
+  }
 };
 
 const startControlServer = async (cmd) => {
@@ -170,6 +186,7 @@ export default async function polythCommandCodeBridge(cmd) {
   cmd.on("run_start", (event) => {
     if (event && typeof event.sessionId === "string" && event.sessionId) nativeSessionId = event.sessionId;
   });
+  cmd.on("session_titled", (event) => persistNativeTitle(event?.title));
   cmd.on("run_end", () => {
     try { controlServer.close(); } catch {}
   });
