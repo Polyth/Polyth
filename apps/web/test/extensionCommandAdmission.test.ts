@@ -41,7 +41,8 @@ test("extension slash commands never enter the durable session mutation path", a
     projectId: "p-ext",
   }]);
   assert.deepEqual(calls.retire, [["s-ext", "/review issue-42"]]);
-  assert.match(result.turnId, /^extension:/);
+  assert.equal(typeof result.turnId, "string");
+  assert.match(result.turnId ?? "", /^extension:/);
   assert.equal(loadLocalMutationIntent("s-ext"), null);
 });
 
