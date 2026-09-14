@@ -117,6 +117,9 @@ export async function initPluginBridge(
         ...(item.order !== undefined ? { order: item.order } : {}),
         module: item.module,
       };
+      if (sandboxed && meta.contributionKind === "tool-renderer") {
+        meta.eventTypes = ["tool/call", "tool/result", "tool/error"];
+      }
       const title = typeof meta.title === "string"
         ? meta.title
         : item.id.replace(/[._-]+/g, " ");
