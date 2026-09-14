@@ -2,7 +2,7 @@
 // The compact composer stays writing-first; this menu owns attachments,
 // context and compose utilities. Quick actions accelerate common outcomes but
 // never replace the labelled source-of-truth rows below them.
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import {
   addMenuRows,
   type AddMenuAction,
@@ -12,13 +12,16 @@ import {
 } from "../composer/discovery.ts";
 import type { SnippetDef } from "@polyth/session/web-api";
 import { parseGithubUrl, type GithubAttachResult } from "@polyth/github/attachments";
-import { openSettingsPage } from "../store.ts";
+import { openSettingsPage, useStore } from "../store.ts";
+import { listSlots, slotRegistryVersion, subscribeSlots } from "../slots.ts";
 import { tr } from "../i18n/index.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import { dismissKeyboard } from "../mobileViewport.ts";
 import Sheet from "./mobile/Sheet.tsx";
 import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
 import { useDismissibleMenu } from "./a11y/Menu.ts";
+import SlotHost from "./slots/SlotHost.ts";
+import ResponsiveOverlay from "./ui/ResponsiveOverlay.tsx";
 import {
   Button,
   ChevronRightIcon,
@@ -61,12 +64,37 @@ type QuickAction = {
   icon: LucideIcon;
 };
 
+interface ExtensionProvider {
+  id: string;
+  label: string;
+  description?: string;
+  pluginName?: string;
+}
+
 export default function ComposerAddMenu(props: ComposerAddMenuProps) {
   const [open, setOpen] = useState(false);
   const [githubOpen, setGithubOpen] = useState(false);
+  const [providerOpen, setProviderOpen] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const asSheet = useShellMode() === "phone";
+  const sessionId = useStore((state) => state.activeSessionId);
+  const projectId = useStore((state) => state.activeProjectId);
+  useSyncExternalStore(subscribeSlots, slotRegistryVersion, slotRegistryVersion);
+
+  const providers: ExtensionProvider[] = listSlots("composer.leading").flatMap((entry) => {
+    const kind = entry.meta.contributionKind;
+    if (kind !== "attachment-provider" && kind !== "context-provider") return [];
+    const id = typeof entry.meta.contributionId === "string" ? entry.meta.contributionId : "";
+    if (!id) return [];
+    return [{
+      id,
+      label: typeof entry.meta.label === "string" ? entry.meta.label : id,
+      ...(typeof entry.meta.description === "string" && entry.meta.description ? { description: entry.meta.description } : {}),
+      ...(typeof entry.meta.pluginName === "string" ? { pluginName: entry.meta.pluginName } : {}),
+    }];
+  });
+  const activeProvider = providers.find((provider) => provider.id === providerOpen) ?? null;
 
   const closeToTrigger = () => {
     setOpen(false);
@@ -85,13 +113,10 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
       return;
     }
     setOpen(true);
-    // A phone action list is a modal Sheet. Dismiss the keyboard after it is
-    // mounted so the trigger's pointer-up cannot be lost during reflow.
     if (asSheet) void dismissKeyboard();
   };
   const triggerHandlers = useSheetTrigger(asSheet, toggleOpen);
 
-  // Opening focuses the first operable quick action / row on desktop.
   useEffect(() => {
     if (!open || asSheet) return;
     const first = menuRef.current?.querySelector<HTMLButtonElement>(
@@ -114,8 +139,6 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
   );
 
   const activate = (action: AddMenuAction) => {
-    // Selection closes the menu; focus moves to the resulting target (the
-    // editor, the file picker, or the opened dialog) — not back to Add.
     setOpen(false);
     switch (action) {
       case "upload": props.onUpload(); break;
@@ -143,8 +166,6 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
     return row ? [{ row, label, icon }] : [];
   });
 
-  // Sheets retain the existing in-list arrow handling; desktop delegates to
-  // the shared menu primitive for the complete dismissal/navigation contract.
   const onSheetMenuKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
     const items = Array.from(
@@ -214,6 +235,32 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
           </button>
         ))}
 
+        {providers.length > 0 && (
+          <>
+            <div className="add-menu-group" role="presentation">Extensions</div>
+            {providers.map((provider) => (
+              <button
+                key={`extension-provider-${provider.id}`}
+                type="button"
+                role="menuitem"
+                className="add-menu-item"
+                onClick={() => {
+                  setOpen(false);
+                  setProviderOpen(provider.id);
+                }}
+              >
+                <span className="add-menu-main">
+                  <span className="add-menu-label">{provider.label}</span>
+                  {(provider.description || provider.pluginName) && (
+                    <span className="add-menu-desc">{provider.description ?? provider.pluginName}</span>
+                  )}
+                </span>
+                {provider.pluginName && <span className="add-menu-detail">{provider.pluginName}</span>}
+              </button>
+            ))}
+          </>
+        )}
+
         <div className="add-menu-group add-menu-tools-group" role="presentation">
           {tr("composeraddmenu.tools")}
         </div>
@@ -268,6 +315,27 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
           onClose={() => { setGithubOpen(false); triggerRef.current?.focus(); }}
         />
       )}
+      <ResponsiveOverlay
+        open={activeProvider !== null}
+        onClose={() => { setProviderOpen(null); triggerRef.current?.focus(); }}
+        title={activeProvider?.label ?? "Extension provider"}
+        desktop="dialog"
+        sheetSize="tall"
+        dialogSize="md"
+        restoreFocusRef={triggerRef}
+      >
+        {activeProvider && (
+          <SlotHost
+            slot="composer.leading"
+            context={{
+              sessionId,
+              projectId,
+              presentation: "picker",
+              selectedContributionId: activeProvider.id,
+            }}
+          />
+        )}
+      </ResponsiveOverlay>
     </span>
   );
 }
@@ -292,8 +360,6 @@ function GithubLinkDialog({ attachGithub, onClose }: {
       onClose();
       return;
     }
-    // Failure creates no pill, preserves the input, and reports a bounded
-    // inline error.
     setError(r.reason.length > 300 ? `${r.reason.slice(0, 297)}…` : r.reason);
   };
 
