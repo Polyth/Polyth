@@ -79,6 +79,9 @@ const safeDiagnostic = (value: unknown): string | undefined => {
 export interface CommandCodeTranslateState {
   operationId: string;
   model?: ModelRef;
+  activeModel?: ModelRef;
+  turnStarted: boolean;
+  messageIndex: number;
   assistantText: string;
   assistantFinalized: boolean;
   usageFrames: number;
@@ -98,6 +101,9 @@ export const createCommandCodeTranslateState = (
 ): CommandCodeTranslateState => ({
   operationId,
   model,
+  activeModel: model,
+  turnStarted: false,
+  messageIndex: 0,
   assistantText: "",
   assistantFinalized: false,
   usageFrames: 0,
@@ -109,6 +115,23 @@ export const createCommandCodeTranslateState = (
   subagentRevision: 0,
   interrupted: false,
 });
+
+const startAssistantMessage = (state: CommandCodeTranslateState): void => {
+  state.messageIndex += 1;
+  state.assistantText = "";
+  state.assistantFinalized = false;
+};
+
+const ensureAssistantMessage = (state: CommandCodeTranslateState): void => {
+  if (state.messageIndex === 0) startAssistantMessage(state);
+};
+
+const assistantPartId = (state: CommandCodeTranslateState): string => {
+  ensureAssistantMessage(state);
+  return state.messageIndex === 1
+    ? `${state.operationId}:answer`
+    : `${state.operationId}:answer:${state.messageIndex}`;
+};
 
 const taskSnapshot = (
   state: CommandCodeTranslateState,
@@ -216,15 +239,14 @@ export function translateCommandCodeRecord(
     const tokens = usage(outer.usage);
     const finalText = stringValue(outer.finalText, outer.final_text);
     const out: RuntimeEvent[] = [];
-    // Chunks are provisional. A missing message_end must not leave canonical
-    // history without a finalized assistant message. Reuse the answer part id
-    // so the final event closes the same streamed surface instead of duplicating it.
+    // Chunks are provisional. A missing message_end on the final native round
+    // must not leave canonical history without a finalized assistant message.
     if (finalText && !state.assistantFinalized) {
       state.assistantText = finalText;
       state.assistantFinalized = true;
       out.push({
         type: "assistant/message",
-        partId: `${state.operationId}:answer`,
+        partId: assistantPartId(state),
         text: finalText,
         ...(tokens ? { tokens } : {}),
       });
@@ -243,17 +265,28 @@ export function translateCommandCodeRecord(
   if (!event || typeof event.type !== "string") return [];
 
   switch (event.type) {
-    case "turn_start":
+    case "turn_start": {
+      if (state.turnStarted) return [];
+      state.turnStarted = true;
       return [{ type: "turn/started", turnId: state.operationId, ...(state.model ? { model: state.model } : {}) }];
+    }
+    case "message_start":
+      startAssistantMessage(state);
+      return [];
     case "model_request_start": {
-      state.model ??= modelRef(event.model);
+      const current = modelRef(event.model);
+      if (current) {
+        state.activeModel = current;
+        state.model ??= current;
+      }
       return [];
     }
     case "text_delta": {
       const text = stringValue(event.delta, event.text);
       if (!text) return [];
+      ensureAssistantMessage(state);
       state.assistantText += text;
-      return [{ type: "assistant/chunk", partId: `${state.operationId}:answer`, text }];
+      return [{ type: "assistant/chunk", partId: assistantPartId(state), text }];
     }
     case "thinking_start":
     case "thinking_delta":
@@ -262,13 +295,15 @@ export function translateCommandCodeRecord(
       // telemetry, not canonical dialogue, and must never be persisted by Polyth.
       return [];
     case "message_end": {
+      ensureAssistantMessage(state);
+      if (state.assistantFinalized) return [];
       const text = textFromMessage(event.message) || stringValue(event.text) || state.assistantText;
       if (!text) return [];
       state.assistantText = text;
       state.assistantFinalized = true;
       return [{
         type: "assistant/message",
-        partId: `${state.operationId}:answer`,
+        partId: assistantPartId(state),
         text,
       }];
     }
@@ -294,7 +329,8 @@ export function translateCommandCodeRecord(
     }
     case "tool_completed": {
       const { callId, tool } = toolIdentity(state, event);
-      const output = stringValue(event.result, event.output, event.text) ?? JSON.stringify(event.result ?? "");
+      const output = stringValue(event.result, event.output, event.text)
+        ?? (event.result === undefined ? "" : JSON.stringify(event.result));
       return [{ type: "tool/result", callId, tool, output }];
     }
     case "tool_hook_blocked": {
@@ -355,11 +391,15 @@ export function translateCommandCodeRecord(
       return snapshot ? [snapshot] : [];
     }
     case "model_request_end": {
-      state.model ??= modelRef(event.model);
+      const current = modelRef(event.model) ?? state.activeModel ?? state.model;
+      if (current) {
+        state.activeModel = current;
+        state.model ??= current;
+      }
       const tokens = usage(event.usage);
-      if (!tokens || !state.model) return [];
+      if (!tokens || !current) return [];
       state.usageFrames += 1;
-      return [{ type: "usage/recorded", model: state.model, tokens }];
+      return [{ type: "usage/recorded", model: current, tokens }];
     }
     case "run_error":
       state.runError = errorText(event.error) ?? stringValue(event.message)?.trim() ?? "Command Code run failed";
