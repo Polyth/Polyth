@@ -47,7 +47,6 @@ export interface CommandCodeTranslateState {
   operationId: string;
   model?: ModelRef;
   assistantText: string;
-  reasoningText: string;
   subagents: Map<string, { sessionId: string; label: string; status: string; currentTask?: string }>;
   subagentRevision: number;
 }
@@ -59,7 +58,6 @@ export const createCommandCodeTranslateState = (
   operationId,
   model,
   assistantText: "",
-  reasoningText: "",
   subagents: new Map(),
   subagentRevision: 0,
 });
@@ -86,7 +84,8 @@ const subagentEvent = (
   };
 };
 
-/** Translate one official headless NDJSON record. Unknown future events are ignored. */
+/** Translate one official headless NDJSON record. Unknown future events are ignored.
+ * Native thinking frames are intentionally excluded from canonical Polyth history. */
 export function translateCommandCodeRecord(
   record: unknown,
   state: CommandCodeTranslateState,
@@ -122,12 +121,12 @@ export function translateCommandCodeRecord(
       state.assistantText += text;
       return [{ type: "assistant/chunk", partId: `${state.operationId}:answer`, text }];
     }
-    case "thinking_delta": {
-      const text = stringValue(event.delta, event.text);
-      if (!text) return [];
-      state.reasoningText += text;
-      return [{ type: "assistant/reasoning-chunk", partId: `${state.operationId}:reasoning`, text }];
-    }
+    case "thinking_start":
+    case "thinking_delta":
+    case "thinking_end":
+      // Command Code may stream private model reasoning. It is provider-internal
+      // telemetry, not canonical dialogue, and must never be persisted by Polyth.
+      return [];
     case "message_end": {
       const text = textFromMessage(event.message) || stringValue(event.text) || state.assistantText;
       if (!text) return [];
@@ -136,7 +135,6 @@ export function translateCommandCodeRecord(
         type: "assistant/message",
         partId: `${state.operationId}:answer`,
         text,
-        ...(state.reasoningText ? { reasoning: state.reasoningText } : {}),
       }];
     }
     case "tool_running": {
