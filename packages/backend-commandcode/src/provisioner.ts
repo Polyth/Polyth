@@ -182,6 +182,7 @@ const toolModDocument = (
     "",
     'const safeError = (value) => String(value ?? "Polyth tool failed").replace(/[\\u0000-\\u001f\\u007f]+/g, " ").replace(/\\s+/g, " ").trim().slice(0, 1000);',
     'const failAll = (message) => { for (const entry of pending.values()) entry.finish({ ok: false, error: message }); };',
+    'requests.on("error", () => failAll("Polyth tool bridge disconnected"));',
     'responses.on("error", () => failAll("Polyth tool bridge disconnected"));',
     'responses.on("close", () => failAll("Polyth tool bridge disconnected"));',
     'lines.on("line", (line) => {',
