@@ -125,23 +125,35 @@ export function TurnStatsView({
   now?: number;
 }) {
   if (!model.turn) {
-    return <div className="widget-empty">{tr("widgets.usageplugin.turnStatsAppearAfterRun")}</div>;
+    return (
+      <div className="usage-turn-stats">
+        <div className="usage-inline-empty">
+          <strong>{tr("widgets.usageplugin.turnStatsAppearAfterRun")}</strong>
+        </div>
+      </div>
+    );
   }
   const stats = deriveTurnStats(model.turn, model.messages, now);
   const rows = buildTurnStatsRows(stats, config);
   if (rows.length === 0) {
-    return <div className="widget-empty">{tr("widgets.usageplugin.chooseMetricsInWidgetSettings")}</div>;
+    return (
+      <div className="usage-turn-stats">
+        <div className="usage-inline-empty">
+          <strong>{tr("widgets.usageplugin.chooseMetricsInWidgetSettings")}</strong>
+        </div>
+      </div>
+    );
   }
   return (
     <div className="usage-turn-stats">
-      <dl className="usage-turn-stats-list">
+      <div className="usage-widget-stat-grid usage-turn-stats-grid">
         {rows.map((row) => (
           <div key={row.id} data-turn-stat={row.id}>
-            <dt>{row.label}</dt>
-            <dd className={row.valueClassName}>{row.value}</dd>
+            <span>{row.label}</span>
+            <strong className={row.valueClassName}>{row.value}</strong>
           </div>
         ))}
-      </dl>
+      </div>
     </div>
   );
 }
@@ -206,7 +218,13 @@ function TurnStatsWidget({ config, sessionId }: WidgetRenderContext) {
   }, [resolvedSessionId, model.turn?.turnId, model.turn?.status]);
 
   if (!resolvedSessionId) {
-    return <div className="widget-empty">{tr("widgets.usageplugin.chooseASessionForUsage")}</div>;
+    return (
+      <div className="usage-turn-stats">
+        <div className="usage-inline-empty">
+          <strong>{tr("widgets.usageplugin.chooseASessionForUsage")}</strong>
+        </div>
+      </div>
+    );
   }
   return <TurnStatsView model={model} config={config} now={now} />;
 }

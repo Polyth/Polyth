@@ -1563,44 +1563,33 @@ width: 100%; justify-content: center;
   font-size: var(--font-meta);
 }
 
-/* Compact turn telemetry rows (label/value list). */
+/* Compact turn telemetry cells, sharing the session-usage stat grid. */
 .usage-turn-stats {
   min-width: 0;
-  min-height: 100%;
-  padding: var(--space-2);
+  padding: 0;
   container: usage-turn-stats / inline-size;
 }
-.usage-turn-stats-list {
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+.usage-turn-stats > .usage-inline-empty {
+  padding: var(--space-3);
 }
-.usage-turn-stats-list > div {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: baseline;
-  gap: var(--space-2);
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-control);
+.usage-turn-stats-grid {
+  padding: var(--space-2);
 }
-.usage-turn-stats-list dt {
-  margin: 0;
+.usage-turn-stats-grid > div {
   min-width: 0;
+}
+.usage-turn-stats-grid span {
   overflow: hidden;
-  color: var(--muted);
-  font-size: var(--font-meta);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.usage-turn-stats-list dd {
-  margin: 0;
-  color: var(--text);
-  font: 600 var(--font-meta) var(--mono);
+.usage-turn-stats-grid strong {
+  overflow: hidden;
   font-variant-numeric: tabular-nums;
-  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.usage-turn-stats-list dd.usage-turn-stats-good {
+.usage-turn-stats-grid strong.usage-turn-stats-good {
   color: var(--green);
 }
 @container usage-quota-summary (max-width: 360px) {
@@ -1615,7 +1604,8 @@ width: 100%; justify-content: center;
   }
 }
 @container usage-turn-stats (max-width: 260px) {
-  .usage-turn-stats-list > div {
-    padding-inline: var(--space-1);
+  .usage-turn-stats-grid {
+    grid-template-columns: minmax(0, 1fr);
+    padding: var(--space-1);
   }
 }

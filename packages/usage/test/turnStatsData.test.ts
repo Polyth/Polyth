@@ -139,4 +139,5 @@ test("turn stats view empty states", () => {
   }));
   assert.match(html, /data-turn-stat="responseRate"/);
   assert.match(html, /tok\/s/);
+  assert.match(html, /usage-widget-stat-grid/);
 });
