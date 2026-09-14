@@ -245,6 +245,10 @@ export function createCommandCodeProvisioner(): HarnessProvisioner {
           records.push(record(item, "failed", "Native Command Code skill name is invalid"));
           continue;
         }
+        if (item.capability.description.length > 1024) {
+          records.push(record(item, "failed", "Native Command Code skill description exceeds 1024 characters"));
+          continue;
+        }
         try {
           skillRoot ??= privateDirectory(revisionRoot, "skills");
           const directory = privateDirectory(skillRoot, item.capability.name);
