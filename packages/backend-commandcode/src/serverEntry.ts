@@ -11,6 +11,7 @@ import {
   commandCodeCompatibilityMessage,
   commandCodeStatus,
   commandCodeVersion,
+  discoverCommandCodeAgents,
   discoverCommandCodeModels,
   resolveCommandCodeBinary,
   type CommandCodeCompatibility,
@@ -128,16 +129,17 @@ export default function registerPackage(host: ServerPackageHost) {
     async discover(context) {
       if (context.remote) throw Object.assign(new Error("Local execution only"), { code: "unsupported" });
       const command = await resolveCommandCodeBinary();
-      const [status, compatibility] = await Promise.all([
+      const [status, compatibility, agents] = await Promise.all([
         commandCodeStatus(command).catch(() => ({ authenticated: "unknown" as const })),
         compatibilityOrUndefined(command),
+        discoverCommandCodeAgents(context.cwd),
       ]);
       if (!compatibility) {
         return {
           state: "degraded" as const,
           authenticated: status.authenticated,
           capabilities: COMMANDCODE_CAPABILITIES,
-          catalog: { models: [], agents: [] },
+          catalog: { models: [], agents },
           message: "Polyth could not verify the installed Command Code CLI surface",
         };
       }
@@ -146,7 +148,7 @@ export default function registerPackage(host: ServerPackageHost) {
           state: "incompatible" as const,
           authenticated: status.authenticated,
           capabilities: COMMANDCODE_CAPABILITIES,
-          catalog: { models: [], agents: [] },
+          catalog: { models: [], agents },
           message: commandCodeCompatibilityMessage(compatibility),
         };
       }
@@ -155,7 +157,7 @@ export default function registerPackage(host: ServerPackageHost) {
           state: "auth-required" as const,
           authenticated: false,
           capabilities: COMMANDCODE_CAPABILITIES,
-          catalog: { models: [], agents: [] },
+          catalog: { models: [], agents },
           message: "Sign in with Command Code to discover the native model catalog",
         };
       }
@@ -164,7 +166,7 @@ export default function registerPackage(host: ServerPackageHost) {
         state: "ready" as const,
         authenticated: status.authenticated === true,
         capabilities: COMMANDCODE_CAPABILITIES,
-        catalog: { models, agents: [] },
+        catalog: { models, agents },
         ...(status.accountLabel ? { message: status.accountLabel } : {}),
       };
     },
@@ -193,7 +195,7 @@ export default function registerPackage(host: ServerPackageHost) {
         stableAuthority: true,
       });
       try {
-        return createCommandCodeRuntime({
+        const runtime = createCommandCodeRuntime({
           context,
           rpc,
           bindingFile: p.binding,
@@ -213,6 +215,11 @@ export default function registerPackage(host: ServerPackageHost) {
               return "dont-ask";
             }
           },
+        });
+        // The documented native registry re-scans custom agents each turn, so
+        // do not freeze this list at runtime construction time.
+        return Object.assign(runtime, {
+          agents: () => discoverCommandCodeAgents(context.cwd),
         });
       } catch (error) {
         await rpc.close().catch(() => undefined);
