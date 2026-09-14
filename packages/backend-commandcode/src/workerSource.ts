@@ -1,11 +1,14 @@
-export const COMMANDCODE_WORKER_SOURCE = String.raw`import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+export const COMMANDCODE_WORKER_SOURCE = String.raw`import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
+import { connect } from "node:net";
+import { readFile, rm } from "node:fs/promises";
 
 const command = process.env.POLYTH_COMMANDCODE_BIN;
 const bridgePath = process.env.POLYTH_COMMANDCODE_BRIDGE_PATH;
 if (!command || !bridgePath) process.exit(64);
 
 const MAX_LINE = 8 * 1024 * 1024;
+const MAX_CONTROL_LINE = 64 * 1024;
 const MAX_STDERR = 64 * 1024;
 let input = Buffer.alloc(0);
 let active = null;
@@ -21,6 +24,7 @@ const response = (id, success, data, error, code) => send({
 });
 const safeError = (value) => String(value || "Command Code failed").replace(/[\\r\\n]+/g, " ").slice(0, 500);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const runtimeRejected = (message) => Object.assign(new Error(message), { code: "runtime-rejected" });
 
 const readNativeSessionId = async (path) => {
   try {
@@ -63,6 +67,69 @@ const parseOutput = (turn, chunk) => {
   if (turn.stdout.length > MAX_LINE) throw new Error("Command Code emitted an oversized partial NDJSON record");
 };
 
+const controlDescriptor = async (turn) => {
+  let value;
+  try { value = JSON.parse(await readFile(turn.controlPath, "utf8")); }
+  catch { throw runtimeRejected("Command Code native steering bridge is unavailable"); }
+  const port = Number(value?.port);
+  if (value?.version !== 1 || value?.host !== "127.0.0.1" || !Number.isInteger(port) || port < 1 || port > 65535) {
+    throw runtimeRejected("Command Code native steering bridge is invalid");
+  }
+  return { port };
+};
+
+const deliverQueuedMessage = async (turn, content, deliverAs) => {
+  if (!content.trim() || Buffer.byteLength(content, "utf8") > 48 * 1024) {
+    throw runtimeRejected("Command Code steering message is invalid");
+  }
+  const { port } = await controlDescriptor(turn);
+  const id = randomUUID();
+  await new Promise((resolve, reject) => {
+    const socket = connect({ host: "127.0.0.1", port });
+    let bytes = Buffer.alloc(0);
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      error ? reject(error) : resolve();
+    };
+    const timer = setTimeout(() => finish(runtimeRejected("Command Code native steering bridge timed out")), 5_000);
+    timer.unref?.();
+    socket.once("connect", () => {
+      socket.write(JSON.stringify({
+        id,
+        token: turn.controlToken,
+        type: "queue",
+        content,
+        deliverAs,
+      }) + "\\n");
+    });
+    socket.on("data", (chunk) => {
+      bytes = Buffer.concat([bytes, chunk]);
+      if (bytes.length > MAX_CONTROL_LINE) {
+        finish(runtimeRejected("Command Code native steering response is too large"));
+        return;
+      }
+      const end = bytes.indexOf(10);
+      if (end < 0) return;
+      let value;
+      try { value = JSON.parse(bytes.subarray(0, end).toString("utf8")); }
+      catch { finish(runtimeRejected("Command Code native steering response is malformed")); return; }
+      if (value?.id !== id || value?.ok !== true) {
+        finish(runtimeRejected("Command Code rejected the steering message"));
+        return;
+      }
+      finish();
+    });
+    socket.once("error", () => finish(runtimeRejected("Command Code native steering bridge is unavailable")));
+    socket.once("close", () => {
+      if (!settled) finish(runtimeRejected("Command Code native steering bridge closed before acknowledgement"));
+    });
+  });
+};
+
 const startTurn = async (message) => {
   if (active) throw Object.assign(new Error("Command Code is already processing a turn"), { code: "busy" });
   const args = ["-p", "--output-format", "json", "--skip-onboarding", "--no-auto-update", "--mod", bridgePath];
@@ -70,11 +137,16 @@ const startTurn = async (message) => {
   if (message.model) args.push("--model", message.model);
   if (message.effort) args.push("--effort", message.effort);
   if (message.permissionMode) args.push("--permission-mode", message.permissionMode);
+  const controlPath = String(message.bindingPath) + ".control." + randomUUID() + ".json";
+  const controlToken = randomUUID() + randomUUID();
+  await rm(controlPath, { force: true }).catch(() => undefined);
   const env = {
     ...process.env,
     POLYTH_COMMANDCODE_BINDING_FILE: message.bindingPath,
     POLYTH_COMMANDCODE_TITLE: message.title || "",
     POLYTH_COMMANDCODE_OPERATION_ID: message.operationId,
+    POLYTH_COMMANDCODE_CONTROL_FILE: controlPath,
+    POLYTH_COMMANDCODE_CONTROL_TOKEN: controlToken,
   };
   const child = spawn(command, args, {
     cwd: message.cwd,
@@ -88,6 +160,8 @@ const startTurn = async (message) => {
     operationId: message.operationId,
     stdout: Buffer.alloc(0),
     stderr: "",
+    controlPath,
+    controlToken,
     closed: new Promise((resolve) => child.once("close", (code, signal) => resolve({ code, signal }))),
   };
   active = turn;
@@ -104,6 +178,7 @@ const startTurn = async (message) => {
   });
   child.once("error", (error) => send({ type: "process-error", operationId: turn.operationId, error: safeError(error) }));
   child.once("close", (code, signal) => {
+    void rm(controlPath, { force: true }).catch(() => undefined);
     send({ type: "turn-exit", operationId: turn.operationId, code, signal, stderr: safeError(turn.stderr) });
     if (active === turn) active = null;
   });
@@ -123,6 +198,12 @@ const handle = async (message) => {
   try {
     if (message.type === "ping") return response(id, true, { ok: true });
     if (message.type === "start_turn") return response(id, true, await startTurn(message));
+    if (message.type === "steer") {
+      const turn = active;
+      if (!turn) throw runtimeRejected("Command Code has no active turn to steer");
+      await deliverQueuedMessage(turn, String(message.text || ""), "steer");
+      return response(id, true, {});
+    }
     if (message.type === "abort") {
       const turn = active;
       if (!turn) return response(id, true, {});
@@ -139,7 +220,9 @@ const handle = async (message) => {
     throw Object.assign(new Error("unsupported worker request"), { code: "unsupported" });
   } catch (error) {
     const rawCode = error && typeof error === "object" ? error.code : undefined;
-    const code = rawCode === "busy" || rawCode === "unsupported" ? rawCode : "outcome-unknown";
+    const code = rawCode === "busy" || rawCode === "unsupported" || rawCode === "runtime-rejected"
+      ? rawCode
+      : "outcome-unknown";
     return response(id, false, undefined, safeError(error), code);
   }
 };
