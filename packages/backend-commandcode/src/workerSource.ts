@@ -271,6 +271,7 @@ const attachToolRelay = (turn) => {
   const invoked = new Map();
   const failRelay = () => {
     try { responses.end(); } catch {}
+    if (bridge.exitCode === null && !bridge.signalCode) bridge.kill("SIGTERM");
   };
 
   requests.on("data", (chunk) => {
@@ -300,6 +301,8 @@ const attachToolRelay = (turn) => {
     if (requestBytes.length > MAX_LINE) failRelay();
   });
   requests.on("error", failRelay);
+  responses.on("error", failRelay);
+  bridge.stdin.on("error", failRelay);
 
   bridge.stdout.on("data", (chunk) => {
     responseBytes = Buffer.concat([responseBytes, chunk]);
@@ -322,6 +325,7 @@ const attachToolRelay = (turn) => {
         responses.write(raw);
         responses.write("\\n");
       } catch {
+        failRelay();
         return;
       }
     }
