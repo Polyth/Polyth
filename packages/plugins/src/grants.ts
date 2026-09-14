@@ -88,28 +88,30 @@ export function connectionReviewRequired(
   return fingerprintsStale(readConnectionFingerprints(storage, packageId), specs);
 }
 
-const mergedStrings = (previous: readonly string[] | undefined, next: readonly string[] | undefined): string[] | undefined => {
-  const merged = [...new Set([...(previous ?? []), ...(next ?? [])])];
-  return merged.length ? merged : undefined;
-};
+const cloneStrings = <T extends string>(value: readonly T[] | undefined): T[] | undefined =>
+  value?.length ? [...new Set(value)] : undefined;
 
-function mergeConstraints(
-  previous: CapabilityConstraints | undefined,
-  next: CapabilityConstraints | undefined,
+function exactConstraints(
+  value: CapabilityConstraints | undefined,
 ): CapabilityConstraints | undefined {
-  if (!previous && !next) return undefined;
-  const origins = mergedStrings(previous?.origins, next?.origins);
-  const methods = mergedStrings(previous?.methods, next?.methods) as CapabilityConstraints["methods"];
-  const modelClasses = mergedStrings(previous?.modelClasses, next?.modelClasses) as CapabilityConstraints["modelClasses"];
-  const maxOutputTokens = Math.max(previous?.maxOutputTokens ?? 0, next?.maxOutputTokens ?? 0) || undefined;
+  if (!value) return undefined;
+  const origins = cloneStrings(value.origins);
+  const methods = cloneStrings(value.methods);
+  const modelClasses = cloneStrings(value.modelClasses);
   return {
     ...(origins ? { origins } : {}),
     ...(methods ? { methods } : {}),
     ...(modelClasses ? { modelClasses } : {}),
-    ...(maxOutputTokens ? { maxOutputTokens } : {}),
+    ...(typeof value.maxOutputTokens === "number" ? { maxOutputTokens: value.maxOutputTokens } : {}),
   };
 }
 
+/** Persist the exact authority the user just approved for each named
+ * capability. Callers resolve capability names back to the full current
+ * manifest declaration before reaching this function, so this is not a
+ * delta-merge operation. Exact replacement is required to represent an
+ * approved transition from constrained -> unconstrained (or removal of one
+ * constraint dimension). */
 export function grantCapabilities(
   storage: SpaceStorage,
   packageId: string,
@@ -122,7 +124,7 @@ export function grantCapabilities(
   const byName = new Map(existing.map((item) => [item.name, item]));
   for (const item of requested) {
     const prev = byName.get(item.name);
-    const constraints = mergeConstraints(prev?.constraints, item.constraints);
+    const constraints = exactConstraints(item.constraints);
     byName.set(item.name, {
       name: item.name,
       ...(constraints ? { constraints } : {}),
