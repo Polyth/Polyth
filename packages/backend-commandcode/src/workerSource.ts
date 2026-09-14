@@ -217,6 +217,7 @@ const startTurn = async (message) => {
   const turn = {
     child,
     operationId: message.operationId,
+    bindingPath: message.bindingPath,
     stdout: Buffer.alloc(0),
     stderr: "",
     runObserved: false,
@@ -239,8 +240,16 @@ const startTurn = async (message) => {
   child.once("error", (error) => send({ type: "process-error", operationId: turn.operationId, error: safeError(error) }));
   child.once("close", (code, signal) => {
     void rm(controlPath, { force: true }).catch(() => undefined);
-    send({ type: "turn-exit", operationId: turn.operationId, code, signal, stderr: safeError(turn.stderr) });
     if (active === turn) active = null;
+    void readTurnAdmission(turn.bindingPath, turn.operationId).then((admission) => {
+      // A process that died before run_start AND before the exact admission
+      // receipt is a proven non-application. Do not manufacture a terminal
+      // canonical turn event for it. Once either proof exists, the outcome can
+      // no longer be silently downgraded to rejection.
+      if (admission || turn.runObserved) {
+        send({ type: "turn-exit", operationId: turn.operationId, code, signal, stderr: safeError(turn.stderr) });
+      }
+    });
   });
   child.stdin.end(String(message.text || ""));
   try {
