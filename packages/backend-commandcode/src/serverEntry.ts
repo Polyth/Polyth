@@ -138,6 +138,20 @@ export default function registerPackage(host: ServerPackageHost) {
           bindingFile: p.binding,
           bridgePath: p.bridge,
           models: () => discoverCommandCodeModels(command, context.cwd),
+          // Resolve the canonical policy for every turn: a user can change
+          // auto-accept while the session is alive. Missing policy/service and
+          // all lookup failures stay fail-closed in native dont-ask mode.
+          permissionMode: async () => {
+            if (!context.sessionId) return "dont-ask";
+            try {
+              const sessions = host.forSpace(context.space!).sessions;
+              if (!sessions.autoAcceptGet) return "dont-ask";
+              const policy = await sessions.autoAcceptGet(context.sessionId);
+              return policy.effective ? "auto-accept" : "dont-ask";
+            } catch {
+              return "dont-ask";
+            }
+          },
         });
       } catch (error) {
         await rpc.close().catch(() => undefined);
