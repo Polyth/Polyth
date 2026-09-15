@@ -48,3 +48,14 @@ play-console-service-account.json
 
 # Build-time staged controlled browser binaries
 /apps/desktop/resources/chromium/
+
+# Native branding outputs are generated from apps/mobile/resources/*.svg.
+# Keep only the source-of-truth artwork in Git; npm run assets recreates these.
+/apps/mobile/icons/
+/apps/mobile/android/app/src/main/res/mipmap-*/ic_launcher*
+/apps/mobile/android/app/src/main/res/drawable*/splash.png
+/apps/mobile/android/app/src/main/res/drawable/ic_launcher_background.xml
+/apps/mobile/android/app/src/main/res/drawable-v24/ic_launcher_foreground.xml
+/apps/mobile/android/app/src/main/res/values/ic_launcher_background.xml
+/apps/mobile/ios/App/App/Assets.xcassets/AppIcon.appiconset/*.png
+/apps/mobile/ios/App/App/Assets.xcassets/Splash.imageset/*.png

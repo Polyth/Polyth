@@ -6,7 +6,7 @@ const config: CapacitorConfig = {
   appId: "com.polyth.mobile",
   appName: "Polyth",
   webDir: "../web/dist",
-  backgroundColor: "#1b1713",
+  backgroundColor: "#07091c",
   server: {
     hostname: "localhost",
     androidScheme: "https",
@@ -31,7 +31,7 @@ const config: CapacitorConfig = {
     },
     SplashScreen: {
       launchAutoHide: false,
-      backgroundColor: "#1b1713",
+      backgroundColor: "#07091c",
       showSpinner: false,
     },
     SafeArea: {
@@ -41,7 +41,7 @@ const config: CapacitorConfig = {
     },
     LocalNotifications: {
       smallIcon: "ic_stat_polyth",
-      iconColor: "#f49b5b",
+      iconColor: "#6f6bff",
     },
   },
 };
