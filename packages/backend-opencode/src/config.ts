@@ -32,13 +32,9 @@ import type {
   RuntimeConfigAuthority,
 } from "@polyth/contracts";
 import {
-  addManualModelIntoProvider,
-  applyProviderOps,
-  dropConfiguredModelFromProvider,
-  dropCustomProvider,
   inspectProviderEntry,
-  mergeCustomProvider,
-  mergeDiscoveredIntoProvider,
+  projectConfig,
+  providerConfigKey,
   type StagedProviderOp,
 } from "./customProvider.ts";
 
@@ -148,6 +144,41 @@ const defaultConfigDir = (): string =>
     ? join(process.env.XDG_CONFIG_HOME, "opencode")
     : join(homedir(), ".config", "opencode");
 
+/** V2 normalizes legacy config but drops model blacklists. Keep the native
+ * projection ephemeral so unhiding restores the original user configuration. */
+export async function projectV2ModelVisibility(env: NodeJS.ProcessEnv): Promise<NodeJS.ProcessEnv> {
+  const directory = env.OPENCODE_CONFIG_DIR
+    ?? join(env.XDG_CONFIG_HOME ?? join(env.HOME ?? homedir(), ".config"), "opencode");
+  const path = existsSync(join(directory, "opencode.jsonc"))
+    ? join(directory, "opencode.jsonc") : join(directory, "opencode.json");
+  let config: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(stripJsonc(await readFile(path, "utf8")));
+    if (!isPlainObject(parsed)) throw new Error("OpenCode config must be an object");
+    config = parsed;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return env;
+    throw error;
+  }
+  const hidden = Object.entries(isPlainObject(config.provider) ? config.provider : {}).flatMap(([id, value]) => {
+    const entry = isPlainObject(value) ? value : {};
+    if (!Array.isArray(entry.blacklist)) return [];
+    return entry.blacklist.filter((name): name is string => typeof name === "string" && name.length > 0).map((name) => [id, name] as const);
+  });
+  if (!hidden.length) return env;
+  const parsed: unknown = JSON.parse(stripJsonc(env.OPENCODE_CONFIG_CONTENT || "{}"));
+  if (!isPlainObject(parsed)) throw new Error("OpenCode inline config must be an object");
+  const providers = isPlainObject(parsed.providers) ? { ...parsed.providers } : {};
+  for (const [id, modelID] of hidden) {
+    const provider = isPlainObject(providers[id]) ? { ...providers[id] } : {};
+    const models = isPlainObject(provider.models) ? { ...provider.models } : {};
+    const model = isPlainObject(models[modelID]) ? models[modelID] : {};
+    Object.defineProperty(models, modelID, { value: { ...model, disabled: true }, enumerable: true, configurable: true, writable: true });
+    Object.defineProperty(providers, id, { value: { ...provider, models }, enumerable: true, configurable: true, writable: true });
+  }
+  return { ...env, OPENCODE_CONFIG_CONTENT: JSON.stringify({ ...parsed, providers }) };
+}
+
 // Reduce JSONC to strict JSON: drop line and block comments and trailing
 // commas, all outside string literals. OpenCode itself rewrites its config
 // in JSONC form (observed live: `{"$schema": …,}`), so a strict JSON.parse
@@ -220,6 +251,9 @@ const isJsonValue = (value: unknown): value is JsonValue => {
   return Object.values(value as Record<string, unknown>).every(isJsonValue);
 };
 
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
 const normalizePluginSpec = (value: unknown, index?: number): string => {
   if (typeof value !== "string" || !value.trim()) {
     throw invalidPluginEntry(`plugin${index === undefined ? "" : ` entry ${index + 1}`} needs a non-empty package spec`);
@@ -249,6 +283,18 @@ export function normalizePluginEntries(raw: unknown): OpenCodePluginConfigEntry[
       && isJsonValue(entry[1])
     ) {
       normalized = [normalizePluginSpec(entry[0], index), entry[1] as JsonObject];
+    } else if (
+      entry !== null
+      && typeof entry === "object"
+      && !Array.isArray(entry)
+      && isJsonValue(entry)
+    ) {
+      const native = entry as Record<string, unknown>;
+      const options = native.options;
+      if (options !== undefined && (options === null || typeof options !== "object" || Array.isArray(options) || !isJsonValue(options))) {
+        throw invalidPluginEntry(`plugin entry ${index + 1} has invalid options`);
+      }
+      normalized = [normalizePluginSpec(native.package, index), (options ?? {}) as JsonObject];
     } else {
       throw invalidPluginEntry(`plugin entry ${index + 1} must be a package spec or [spec, options] tuple`);
     }
@@ -259,8 +305,20 @@ export function normalizePluginEntries(raw: unknown): OpenCodePluginConfigEntry[
   return order.map((spec) => bySpec.get(spec)!);
 }
 
+const pluginConfigKey = (config: Record<string, unknown>): "plugin" | "plugins" =>
+  Array.isArray(config.plugins) ? "plugins" : "plugin";
+
+const encodePlugins = (entries: OpenCodePluginConfigEntry[], key: "plugin" | "plugins", existing: unknown): unknown[] => {
+  if (key === "plugin") return entries;
+  const prior = new Map((Array.isArray(existing) ? existing : []).flatMap((entry) =>
+    isPlainObject(entry) && typeof entry.package === "string" ? [[entry.package, entry] as const] : []));
+  return entries.map((entry) => typeof entry === "string"
+    ? entry
+    : { ...prior.get(entry[0]), package: entry[0], options: entry[1] });
+};
+
 /** MCP entry fields Polyth owns; everything else is opaque and preserved. */
-const MCP_OWNED_FIELDS = ["type", "command", "environment", "url", "headers", "enabled"] as const;
+const MCP_OWNED_FIELDS = ["type", "command", "environment", "url", "headers", "enabled", "disabled"] as const;
 
 /** Owned string map (environment/headers) merged over opaque leftovers: keys
  * Polyth could never have imported (non-string values) are preserved; string
@@ -315,11 +373,22 @@ export function projectManagedMcp(
     blockRaw && typeof blockRaw === "object" && !Array.isArray(blockRaw)
       ? { ...(blockRaw as Record<string, unknown>) }
       : {};
+  const v2 = blockRaw && typeof blockRaw === "object" && !Array.isArray(blockRaw)
+    && (blockRaw as Record<string, unknown>).servers !== undefined;
+  const source = v2 && isPlainObject(block.servers) ? { ...(block.servers as Record<string, unknown>) } : block;
   const desiredNames = new Set(entries.map((e) => e.name));
   for (const name of entries.managedNames ?? []) {
-    if (!desiredNames.has(name)) delete block[name];
+    if (!desiredNames.has(name)) delete source[name];
   }
-  for (const e of entries) block[e.name] = patchedMcpEntry(block[e.name], e);
+  for (const e of entries) {
+    const projected = patchedMcpEntry(source[e.name], e);
+    if (v2) {
+      delete projected.enabled;
+      projected.disabled = !e.enabled;
+    }
+    source[e.name] = projected;
+  }
+  if (v2) block.servers = source;
   const next: Record<string, unknown> = { ...existing };
   if (Object.keys(block).length > 0) next.mcp = block;
   else delete next.mcp;
@@ -389,8 +458,10 @@ export function createConfigApplier(opts: ConfigApplierOptions = {}): BackendCon
     await atomicWrite(configPath, `${JSON.stringify(next, null, 2)}\n`);
   };
 
-  const pluginsFrom = (config: Record<string, unknown>): OpenCodePluginConfigEntry[] =>
-    config.plugin === undefined ? [] : normalizePluginEntries(config.plugin);
+  const pluginsFrom = (config: Record<string, unknown>): OpenCodePluginConfigEntry[] => {
+    const key = pluginConfigKey(config);
+    return config[key] === undefined ? [] : normalizePluginEntries(config[key]);
+  };
 
   // Serialize opencode.json mutations so concurrent plugin/provider writes
   // cannot both read the same base and lose one another before the rename.
@@ -445,7 +516,8 @@ export function createConfigApplier(opts: ConfigApplierOptions = {}): BackendCon
             merged[position] = entry;
           }
         }
-        await writeConfigIfChanged(existing, { ...existing, plugin: merged });
+        const key = pluginConfigKey(existing);
+        await writeConfigIfChanged(existing, { ...existing, [key]: encodePlugins(merged, key, existing[key]) });
         return merged;
       });
     },
@@ -456,8 +528,9 @@ export function createConfigApplier(opts: ConfigApplierOptions = {}): BackendCon
       return mutatePlugins(async () => {
         const existing = await readExisting();
         const next = { ...existing };
-        if (plugins.length > 0) next.plugin = plugins;
-        else delete next.plugin;
+        const key = pluginConfigKey(existing);
+        if (plugins.length > 0) next[key] = encodePlugins(plugins, key, existing[key]);
+        else delete next[key];
         await writeConfigIfChanged(existing, next);
         return plugins;
       });
@@ -473,8 +546,9 @@ export function createConfigApplier(opts: ConfigApplierOptions = {}): BackendCon
         const removed = plugins.length !== current.length;
         if (removed) {
           const next = { ...existing };
-          if (plugins.length > 0) next.plugin = plugins;
-          else delete next.plugin;
+          const key = pluginConfigKey(existing);
+          if (plugins.length > 0) next[key] = encodePlugins(plugins, key, existing[key]);
+          else delete next[key];
           await writeConfigIfChanged(existing, next);
         }
         return { plugins, removed };
@@ -523,8 +597,7 @@ export function createConfigApplier(opts: ConfigApplierOptions = {}): BackendCon
       if (!input.id?.trim()) throw Object.assign(new Error("provider id required"), { code: "invalid-input" });
       return mutateConfig(async () => {
         const existing = await readExisting();
-        const provider = mergeCustomProvider(existing.provider, input);
-        await writeConfigIfChanged(existing, { ...existing, provider });
+        await writeConfigIfChanged(existing, projectConfig(existing, [{ kind: "upsert", input }]));
       });
     },
 
@@ -533,22 +606,15 @@ export function createConfigApplier(opts: ConfigApplierOptions = {}): BackendCon
       if (!id?.trim()) throw Object.assign(new Error("provider id required"), { code: "invalid-input" });
       return mutateConfig(async () => {
         const existing = await readExisting();
-        const provider = dropCustomProvider(existing.provider, id.trim());
-        const next: Record<string, unknown> = { ...existing };
-        if (provider && Object.keys(provider).length > 0) next.provider = provider;
-        else delete next.provider;
-        await writeConfigIfChanged(existing, next);
+        await writeConfigIfChanged(existing, projectConfig(existing, [{ kind: "remove", id: id.trim() }]));
       });
     },
 
     async inspectProvider(id: string): Promise<ProviderInspect | undefined> {
       if (!id?.trim()) return undefined;
       const existing = await readExisting();
-      const providerRaw = existing.provider;
-      const provider = providerRaw && typeof providerRaw === "object" && !Array.isArray(providerRaw)
-        ? providerRaw as Record<string, unknown>
-        : {};
-      return inspectProviderEntry(id, provider[id]);
+      const provider = existing[providerConfigKey(existing, id)];
+      return inspectProviderEntry(id, isPlainObject(provider) ? provider[id] : undefined);
     },
 
     async applyStagedProviderOps(ops: readonly StagedProviderOp[]): Promise<void> {
@@ -556,11 +622,7 @@ export function createConfigApplier(opts: ConfigApplierOptions = {}): BackendCon
       if (ops.length === 0) return;
       return mutateConfig(async () => {
         const existing = await readExisting();
-        const provider = applyProviderOps(existing.provider, ops);
-        const next: Record<string, unknown> = { ...existing };
-        if (provider && Object.keys(provider).length > 0) next.provider = provider;
-        else delete next.provider;
-        await writeConfigIfChanged(existing, next);
+        await writeConfigIfChanged(existing, projectConfig(existing, ops));
       });
     },
 
@@ -569,8 +631,7 @@ export function createConfigApplier(opts: ConfigApplierOptions = {}): BackendCon
       if (!id?.trim()) throw Object.assign(new Error("provider id required"), { code: "invalid-input" });
       return mutateConfig(async () => {
         const existing = await readExisting();
-        const provider = mergeDiscoveredIntoProvider(existing.provider, id.trim(), discovered);
-        await writeConfigIfChanged(existing, { ...existing, provider });
+        await writeConfigIfChanged(existing, projectConfig(existing, [{ kind: "mergeDiscovered", id: id.trim(), discovered }]));
       });
     },
 
@@ -581,8 +642,7 @@ export function createConfigApplier(opts: ConfigApplierOptions = {}): BackendCon
       }
       return mutateConfig(async () => {
         const existing = await readExisting();
-        const provider = addManualModelIntoProvider(existing.provider, id.trim(), model);
-        await writeConfigIfChanged(existing, { ...existing, provider });
+        await writeConfigIfChanged(existing, projectConfig(existing, [{ kind: "addManual", id: id.trim(), model }]));
       });
     },
 
@@ -593,8 +653,7 @@ export function createConfigApplier(opts: ConfigApplierOptions = {}): BackendCon
       }
       return mutateConfig(async () => {
         const existing = await readExisting();
-        const provider = dropConfiguredModelFromProvider(existing.provider, id.trim(), modelId.trim());
-        await writeConfigIfChanged(existing, { ...existing, provider });
+        await writeConfigIfChanged(existing, projectConfig(existing, [{ kind: "dropModel", id: id.trim(), modelId: modelId.trim() }]));
       });
     },
 
@@ -602,7 +661,8 @@ export function createConfigApplier(opts: ConfigApplierOptions = {}): BackendCon
       assertWritable("applyAgent");
       if (!name.trim()) throw new Error("agent name required");
       const existing = await readExisting();
-      const agentsRaw = existing.agent;
+      const agentKey = isPlainObject(existing.agents) ? "agents" : "agent";
+      const agentsRaw = existing[agentKey];
       const agents: Record<string, unknown> =
         agentsRaw && typeof agentsRaw === "object" && !Array.isArray(agentsRaw)
           ? { ...(agentsRaw as Record<string, unknown>) }
@@ -616,26 +676,27 @@ export function createConfigApplier(opts: ConfigApplierOptions = {}): BackendCon
       // valid and persist the policy in the extensible agent options object.
       current.mode = role.mode === "auto" ? "subagent" : role.mode;
       const optionsRaw = current.options;
-      if (role.mode === "auto") {
+      if (role.mode === "auto" && agentKey === "agent") {
         const options: Record<string, unknown> =
           optionsRaw && typeof optionsRaw === "object" && !Array.isArray(optionsRaw)
             ? { ...(optionsRaw as Record<string, unknown>) }
             : {};
         options[POLYTH_AGENT_MODE_OPTION] = "auto";
         current.options = options;
-      } else if (optionsRaw && typeof optionsRaw === "object" && !Array.isArray(optionsRaw)) {
+      } else if (agentKey === "agent" && optionsRaw && typeof optionsRaw === "object" && !Array.isArray(optionsRaw)) {
         const options = { ...(optionsRaw as Record<string, unknown>) };
         delete options[POLYTH_AGENT_MODE_OPTION];
         if (Object.keys(options).length > 0) current.options = options;
         else delete current.options;
       }
-      if (role.prompt?.trim()) current.prompt = role.prompt;
-      else delete current.prompt;
+      const promptKey = agentKey === "agents" ? "system" : "prompt";
+      if (role.prompt?.trim()) current[promptKey] = role.prompt;
+      else delete current[promptKey];
       if (role.mode === "auto") delete current.model;
       else if (role.model) current.model = `${role.model.providerID}/${role.model.modelID}`;
       else delete current.model;
       agents[name] = current;
-      await writeConfigIfChanged(existing, { ...existing, agent: agents });
+      await writeConfigIfChanged(existing, { ...existing, [agentKey]: agents });
     },
 
     // Patch, never regenerate: unsupported entries and unmanaged names are

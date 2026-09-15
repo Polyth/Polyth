@@ -105,7 +105,7 @@ test("engine version and DB-path probes both use the isolated probe DB", async (
 printf '%s\\t%s\\t%s\\n' "$1" "$OPENCODE_DB" "$OPENCODE_DISABLE_AUTOUPDATE" >> "$POLYTH_PROBE_CAPTURE"
 if [ "$1" = "--version" ]; then
   printf '1.18.18\\n'
-elif [ "$1" = "db" ] && [ "$2" = "path" ]; then
+elif [ "$1" = "debug" ] && [ "$2" = "paths" ] && [ "$3" = "db" ]; then
   printf '%s\\n' "$OPENCODE_DB"
 else
   exit 2
@@ -129,7 +129,7 @@ fi
     .map((line) => line.split("\t"));
   assert.deepEqual(
     [...invocations.map(([argument]) => argument)].sort(),
-    ["--version", "db"].sort(),
+    ["--version", "debug"].sort(),
   );
   assert.ok(invocations[0]![1], "the version probe must receive OPENCODE_DB");
   assert.ok(invocations[1]![1], "the db-path probe must receive OPENCODE_DB");
@@ -154,7 +154,7 @@ test("engine inspect caches identity for an unchanged binary and coalesces in-fl
 printf '%s\\n' "$1" >> "$POLYTH_PROBE_CAPTURE"
 if [ "$1" = "--version" ]; then
   printf '1.18.18\\n'
-elif [ "$1" = "db" ] && [ "$2" = "path" ]; then
+elif [ "$1" = "debug" ] && [ "$2" = "paths" ] && [ "$3" = "db" ]; then
   printf '%s\\n' "$OPENCODE_DB"
 else
   exit 2
@@ -181,7 +181,39 @@ fi
   assert.equal(
     invocations.length,
     2,
-    "an unchanged binary must not relaunch --version or db path",
+    "an unchanged binary must not relaunch --version or debug paths db",
+  );
+});
+
+test("engine DB inspection falls back to legacy db path only when v2 debug paths is unavailable", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "polyth-engine-legacy-db-probe-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const executable = join(directory, "opencode-test");
+  const capture = join(directory, "probe-args.txt");
+  await writeFile(executable, `#!/bin/sh
+printf '%s %s %s\n' "$1" "$2" "$3" >> "$POLYTH_PROBE_CAPTURE"
+if [ "$1" = "--version" ]; then
+  printf '1.18.30\n'
+elif [ "$1" = "debug" ]; then
+  exit 2
+elif [ "$1" = "db" ] && [ "$2" = "path" ]; then
+  printf '%s\n' "$OPENCODE_DB"
+else
+  exit 2
+fi
+`);
+  await chmod(executable, 0o700);
+  const previousCapture = process.env.POLYTH_PROBE_CAPTURE;
+  process.env.POLYTH_PROBE_CAPTURE = capture;
+  try {
+    assert.equal((await inspectOpenCodeEngine(executable)).version, "1.18.30");
+  } finally {
+    if (previousCapture === undefined) delete process.env.POLYTH_PROBE_CAPTURE;
+    else process.env.POLYTH_PROBE_CAPTURE = previousCapture;
+  }
+  assert.deepEqual(
+    (await readFile(capture, "utf8")).trim().split("\n").map((line) => line.split(" ").slice(0, 2)),
+    [["--version", ""], ["debug", "paths"], ["db", "path"]],
   );
 });
 

@@ -1,0 +1,71 @@
+name: OpenCode compatibility
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'packages/backend-opencode/**'
+      - 'packages/harness-runtime/**'
+      - 'packages/contracts/**'
+      - '.github/workflows/opencode-compatibility.yml'
+      - 'package-lock.json'
+  schedule:
+    - cron: '23 5 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: opencode-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime:
+    runs-on: ubuntu-24.04
+    continue-on-error: ${{ matrix.canary }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: legacy
+            package: opencode-ai@1.18.31
+            canary: false
+          - lane: v2
+            package: '@opencode/cli@2.0.3'
+            canary: false
+          - lane: v2-canary
+            package: '@opencode/cli@latest'
+            canary: true
+    name: ${{ matrix.lane }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build:supervisor
+      - name: Install isolated OpenCode release
+        env:
+          OPENCODE_PACKAGE: ${{ matrix.package }}
+        run: npm install --prefix "$RUNNER_TEMP/opencode" --no-audit --no-fund "$OPENCODE_PACKAGE"
+      - name: Verify protocol and owned runtime without external inference
+        env:
+          OPENCODE_COMPAT_BIN: ${{ runner.temp }}/opencode/node_modules/.bin/opencode
+        run: node --experimental-strip-types --test packages/backend-opencode/test/releasedCompatibility.live.ts
+      - name: Verify V2 native capability discovery
+        if: matrix.lane != 'legacy'
+        env:
+          OPENCODE_COMPAT_BIN: ${{ runner.temp }}/opencode/node_modules/.bin/opencode
+        run: node --experimental-strip-types --test packages/backend-opencode/test/nativeCapabilitiesV2.live.ts
+      - name: Verify legacy native capability discovery
+        if: matrix.lane == 'legacy'
+        env:
+          POLYTH_NATIVE_CAPABILITY_TESTS: '1'
+          POLYTH_OPENCODE_TEST_BINARY: ${{ runner.temp }}/opencode/node_modules/.bin/opencode
+        run: node --experimental-strip-types --test packages/backend-opencode/test/nativeCapabilities.test.ts
+      - name: Verify V2 inference through a local fixture provider
+        if: matrix.lane != 'legacy'
+        env:
+          OPENCODE_COMPAT_BIN: ${{ runner.temp }}/opencode/node_modules/.bin/opencode
+        run: node --experimental-strip-types --test packages/backend-opencode/test/releasedInference.live.ts

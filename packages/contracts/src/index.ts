@@ -3841,8 +3841,9 @@ export interface RemoteHost {
     command: string,
     opts?: { timeoutMs?: number; maxOutputBytes?: number },
   ): Promise<{ code: number; stdout: string; stderr: string }>;
-  /** Start a long-lived remote process whose output can be observed. */
-  start(command: string, opts?: { interactive?: boolean }): Promise<RemoteProcessHandle>;
+  /** Start a long-lived remote process whose output can be observed. `stdin`
+   * requests a raw non-TTY input pipe for programmatic secrets or protocols. */
+  start(command: string, opts?: { interactive?: boolean; stdin?: "pipe" }): Promise<RemoteProcessHandle>;
   /** Forward a fresh local port to `remotePort` on the remote loopback. */
   forward(remotePort: number): Promise<RemoteForwardHandle>;
 }

@@ -121,6 +121,9 @@ test("OpenCode projects package-owned MCP descriptors from the canonical plan", 
     command: ["package-helper", "--stdio"],
     enabled: true,
   });
+  const v2 = applyOpenCodeLaunchOverlay({}, overlay, "v2");
+  // Released V2 performs its own backwards-compatible normalization.
+  assert.deepEqual(JSON.parse(v2.OPENCODE_CONFIG_CONTENT ?? "{}"), config);
 });
 
 test("browser capability uses the generic agent-tools MCP projection", async (t) => {

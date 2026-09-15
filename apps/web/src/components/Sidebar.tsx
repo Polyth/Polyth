@@ -22,14 +22,15 @@ import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 import { useSidebarExpanded } from "../sidebarPresentation.ts";
 import {
   applyManualProjectOrder, reorderManualProjects,
-  setProjectOrder, setProjectSortMode, setSidebarViewMode,
-  useProjectOrder, useProjectSortMode, useSidebarViewMode,
+  getShowDateGroups, setProjectOrder, setProjectSortMode, setShowDateGroups,
+  setSidebarViewMode, useProjectOrder, useProjectSortMode, useShowDateGroups,
+  useSidebarViewMode,
   type ProjectSortMode,
 } from "../sidebarPrefs.ts";
 import EmptyState from "./EmptyState.tsx";
 import {
   Button, CloseIcon, ComposeIcon, FilterIcon, IconButton, Menu, Popover,
-  SearchIcon, SidebarIcon, SortIcon, Switch,
+  SearchIcon, SidebarIcon, SortIcon, Switch, Tooltip,
   type MenuEntry,
 } from "./ui/index.ts";
 import {
@@ -138,6 +139,7 @@ export default function Sidebar() {
   const sort = useProjectSortMode();
   const setSort = (mode: ProjectSortMode) => setProjectSortMode(mode);
   const projectOrder = useProjectOrder();
+  const showDateGroups = useShowDateGroups();
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [projectMenuOpenId, setProjectMenuOpenId] = useState<string | null>(null);
   const [projectMenuSource, setProjectMenuSource] = useState<"card" | "rail" | null>(null);
@@ -211,6 +213,9 @@ export default function Sidebar() {
   // drawer-open preference.
   const mode = useShellMode();
   const compact = mode !== "wide";
+  const projectRailTooltipSide = typeof document !== "undefined" && document.documentElement.dir === "rtl"
+    ? "left"
+    : "right";
   // Compact navigation is always the complete project → worktree → session
   // tree. Desktop keeps the user's optional presentation preference.
   const effectiveViewMode = compact ? "tree" : viewMode;
@@ -491,6 +496,13 @@ export default function Sidebar() {
       kind: "checkbox",
       checked: attentionOnly,
       onSelect: () => setAttentionOnly((value) => !value),
+    },
+    {
+      id: "date-groups",
+      label: tr("sidebar.dateGroups"),
+      kind: "checkbox",
+      checked: showDateGroups,
+      onSelect: () => setShowDateGroups(!getShowDateGroups()),
     },
   ];
 
@@ -779,45 +791,60 @@ export default function Sidebar() {
                     footer={<SlotHost slot="sidebar.project.actions" context={{ projectId: candidate.id }} />}
                   >
                     {(trigger) => (
-                      <button
-                        {...trigger}
-                        type="button"
-                        className={`sidebar-project-rail-item${candidate.id === activeProjectId ? " active" : ""}${draggedProject === candidate.id ? " dragging" : ""}${dragOverProject === candidate.id ? " drag-over" : ""}`}
-                        aria-current={candidate.id === activeProjectId ? "true" : undefined}
-                        aria-keyshortcuts={manualReorder ? "Alt+Shift+ArrowUp Alt+Shift+ArrowDown" : undefined}
-                        aria-label={candidate.name || candidate.path}
-                        title={candidate.name || candidate.path}
-                        draggable={manualReorder}
-                        onClick={() => { activateProject(candidate.id); openPeek(candidate.id); }}
-                        onPointerEnter={(event) => {
-                          if (event.pointerType === "mouse") openPeek(candidate.id);
-                        }}
-                        onContextMenu={(event) => onProjectContextMenu(event, candidate.id, "rail")}
-                        onDragStart={(event) => startProjectDrag(event, candidate.id)}
-                        onDragOver={(event) => {
-                          if (!draggedProject) return;
-                          event.preventDefault();
-                          setDragOverProject(candidate.id);
-                        }}
-                        onDragEnd={clearProjectDrag}
-                        onDrop={(event) => dropProject(event, candidate.id)}
-                        onKeyDown={(event) => {
-                          onProjectMenuKeyDown(event, candidate.id, "rail");
-                          if (event.defaultPrevented || !manualReorder || !event.altKey || !event.shiftKey) return;
-                          if (event.key === "ArrowUp") {
-                            event.preventDefault();
-                            moveProjectBy(candidate.id, -1);
-                          } else if (event.key === "ArrowDown") {
-                            event.preventDefault();
-                            moveProjectBy(candidate.id, 1);
-                          }
-                        }}
-                      >
-                        <ProjectGlyph project={candidate} />
-                        {(attention || working) && (
-                          <span className={`sidebar-project-rail-status${attention ? " attention" : " working"}`} aria-hidden="true" />
+                      <Tooltip
+                        side={projectRailTooltipSide}
+                        delayMs={120}
+                        className="sidebar-project-rail-tooltip"
+                        content={(
+                          <span className="sidebar-project-rail-tooltip-content">
+                            <span className="sidebar-project-rail-tooltip-icon"><ProjectGlyph project={candidate} /></span>
+                            <span className="sidebar-project-rail-tooltip-copy">
+                              <strong>{candidate.name || candidate.path}</strong>
+                              {candidate.name && candidate.path !== candidate.name && <span>{candidate.path}</span>}
+                            </span>
+                          </span>
                         )}
-                      </button>
+                      >
+                        <button
+                          {...trigger}
+                          type="button"
+                          className={`sidebar-project-rail-item${candidate.id === activeProjectId ? " active" : ""}${draggedProject === candidate.id ? " dragging" : ""}${dragOverProject === candidate.id ? " drag-over" : ""}`}
+                          aria-current={candidate.id === activeProjectId ? "true" : undefined}
+                          aria-keyshortcuts={manualReorder ? "Alt+Shift+ArrowUp Alt+Shift+ArrowDown" : undefined}
+                          aria-label={candidate.name || candidate.path}
+                          title=""
+                          draggable={manualReorder}
+                          onClick={() => { activateProject(candidate.id); openPeek(candidate.id); }}
+                          onPointerEnter={(event) => {
+                            if (event.pointerType === "mouse") openPeek(candidate.id);
+                          }}
+                          onContextMenu={(event) => onProjectContextMenu(event, candidate.id, "rail")}
+                          onDragStart={(event) => startProjectDrag(event, candidate.id)}
+                          onDragOver={(event) => {
+                            if (!draggedProject) return;
+                            event.preventDefault();
+                            setDragOverProject(candidate.id);
+                          }}
+                          onDragEnd={clearProjectDrag}
+                          onDrop={(event) => dropProject(event, candidate.id)}
+                          onKeyDown={(event) => {
+                            onProjectMenuKeyDown(event, candidate.id, "rail");
+                            if (event.defaultPrevented || !manualReorder || !event.altKey || !event.shiftKey) return;
+                            if (event.key === "ArrowUp") {
+                              event.preventDefault();
+                              moveProjectBy(candidate.id, -1);
+                            } else if (event.key === "ArrowDown") {
+                              event.preventDefault();
+                              moveProjectBy(candidate.id, 1);
+                            }
+                          }}
+                        >
+                          <ProjectGlyph project={candidate} />
+                          {(attention || working) && (
+                            <span className={`sidebar-project-rail-status${attention ? " attention" : " working"}`} aria-hidden="true" />
+                          )}
+                        </button>
+                      </Tooltip>
                     )}
                   </Menu>
                 );

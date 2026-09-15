@@ -1,26 +1,5 @@
-/*
-OpenCode 1.18.18 serve API (empirically verified 2026-08-17 against
-`opencode serve --port 4556 --hostname 127.0.0.1` + GET /doc + bundled SDK
-~/.opencode/node_modules/@opencode-ai/sdk).
-
-Auth: when OPENCODE_SERVER_PASSWORD is set, HTTP Basic uses
-OPENCODE_SERVER_USERNAME (the direct legacy-client compatibility default is `opencode`).
-Listening line: `opencode server listening on http://127.0.0.1:<port>`
-
-The verified legacy wire shapes live exclusively in `protocolLegacy.ts`.
-Protocol discovery is read-only and lives in `protocol.ts`; V2 remains
-capability-gated.
-
-SSE event names observed live (JSON `data:` objects, field `id` = evt_…; no SSE `id:` lines):
-  server.connected
-  session.created / session.updated / session.diff / session.status {type:busy|idle} / session.idle / session.error
-  message.updated  properties.info  (role user|assistant; assistant has cost, tokens, time.completed?)
-  message.part.updated  properties.{sessionID, part:{id,type,text|state,...}, delta?, time}
-  message.part.delta    properties.{sessionID,messageID,partID,field:"text"|"reasoning",delta}
-  permission.updated (SDK) / permission.asked (OpenAPI) / permission.replied
-  question.asked / question.replied / question.rejected
-  plugin.added, catalog.updated, … (ignored)
-*/
+/** OpenCode runtime composition. Released wire formats stay in the legacy and
+ * V2 protocol adapters; detection and transport are generation-local. */
 
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
@@ -147,7 +126,6 @@ export {
   createOwnedLocalEndpointLease,
   createOwnedSshEndpointLease,
   isOwnedEndpointLease,
-  LISTEN_RE,
   ownedSshRuntimeIdentityKey,
   pickFreePort,
   pidFileForDirectory,
@@ -1163,9 +1141,8 @@ export const createOpenCodeRuntime = async (
   try {
     lifecycle = await createOpenCodeRuntimeLifecycle({
       lease,
-      // Owned local is the OpenCode we just spawned. Skip /doc auto-discovery
-      // so models() can run as soon as health is 200.
-      protocol: opts.protocol ?? "legacy",
+      // Health negotiation is cheap and belongs to this runtime generation.
+      protocol: opts.protocol ?? "auto",
       startupDeadlineMs: opts.startupDeadlineMs,
       probeDeadlineMs: opts.probeDeadlineMs,
     });

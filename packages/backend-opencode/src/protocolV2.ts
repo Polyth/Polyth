@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
   AgentDescriptor,
   AvailableProviderDescriptor,
   JsonObject,
+  ModelMessage,
   ModelDescriptor,
   MutationOutcome,
   MutationTransportResult,
@@ -28,13 +30,14 @@ import {
   createTranslateState,
   type ObservationBinding,
 } from "./events.ts";
-import { createProviderHttpClient } from "./providerHttp.ts";
+import { createV2ProviderClient } from "./providerV2.ts";
 import { appendPulledEvents } from "./reconciliationEvents.ts";
 import {
   pulledV2MessageEvents,
   v2PermissionOf,
   v2QuestionOf,
 } from "./v2Reconciliation.ts";
+import { v2FormAnswerOf, v2FormInfoOf } from "./v2Forms.ts";
 
 export interface CreateV2ProtocolAdapterOptions {
   transport: OpenCodeTransport;
@@ -56,7 +59,8 @@ interface V2Model {
 interface V2Provider {
   id?: unknown;
   name?: unknown;
-  disabled?: unknown;
+  activation?: unknown;
+  integrationID?: unknown;
   env?: unknown;
   docs?: unknown;
 }
@@ -76,6 +80,11 @@ interface V2Session {
   title?: unknown;
   parentID?: unknown;
   time?: unknown;
+}
+
+interface HistoryEntry {
+  role: "user" | "assistant";
+  text: string;
 }
 
 const NEVER_REPLAY = { kind: "never" } as const;
@@ -148,7 +157,7 @@ const requiredBindingId = <T>(
 
 const invalidResponse = (path: string, expected: string): Error =>
   Object.assign(
-    new Error(`OpenCode GET ${path} returned an invalid response; expected ${expected}`),
+    new Error(`OpenCode V2 GET ${path} returned an invalid response; expected ${expected}`),
     { code: "protocol-response-invalid" },
   );
 
@@ -162,12 +171,7 @@ const queryRequired = async (
   if (typeof response?.status !== "number") return result;
   if (response.status < 200 || response.status >= 300) {
     throw Object.assign(
-      new Error(
-        mutationMessage(
-          response.body,
-          `OpenCode GET ${path} returned HTTP ${response.status}`,
-        ),
-      ),
+      new Error(`OpenCode V2 GET ${path} returned HTTP ${response.status}`),
       {
         code: `http-${response.status}`,
         status: response.status,
@@ -185,7 +189,9 @@ const queryOptional = async (
 ): Promise<{ ok: true; value: unknown } | { ok: false }> => {
   try {
     return { ok: true, value: await queryRequired(transport, path, deadlineMs) };
-  } catch {
+  } catch (error) {
+    const status = asRecord(error)?.status;
+    if (status !== 404 && status !== 405 && status !== 501) throw error;
     return { ok: false };
   }
 };
@@ -196,31 +202,7 @@ const optionalDataArray = (body: unknown): unknown[] | undefined => {
   return Array.isArray(value) ? value : undefined;
 };
 
-/** One-shot provider-auth write (no session/replay semantics apply). */
-const mutateRequired = async (
-  transport: OpenCodeTransport,
-  method: "POST" | "PUT" | "DELETE",
-  path: string,
-  body: unknown,
-  deadlineMs: number,
-): Promise<unknown> => {
-  const result = await transport.mutate<unknown>({
-    method, path, body, operationId: randomUUID(), deadlineMs, replay: NEVER_REPLAY,
-  });
-  if (result.kind === "unknown") {
-    throw Object.assign(new Error(result.message), { code: "unavailable" });
-  }
-  if (result.status < 200 || result.status >= 300) {
-    throw Object.assign(
-      new Error(mutationMessage(result.body, `OpenCode ${method} ${path} returned HTTP ${result.status}`)),
-      { code: `http-${result.status}`, status: result.status },
-    );
-  }
-  return result.body;
-};
 
-// OpenCode's auto/device OAuth callback intentionally blocks while the user
-// signs in (upstream currently allows five minutes).
 const PROVIDER_OAUTH_CALLBACK_DEADLINE_MS = 15 * 60 * 1000;
 
 const requiredData = (body: unknown, path: string): unknown => {
@@ -235,16 +217,6 @@ const requiredDataArray = (body: unknown, path: string): unknown[] => {
   const data = requiredData(body, path);
   if (!Array.isArray(data)) throw invalidResponse(path, "a JSON data array");
   return data;
-};
-
-const mutationMessage = (body: unknown, fallback: string): string => {
-  if (typeof body === "string" && body.trim()) return body.slice(0, 500);
-  const record = asRecord(body);
-  const error = asRecord(record?.error);
-  for (const candidate of [record?.message, error?.message]) {
-    if (typeof candidate === "string" && candidate.trim()) return candidate.slice(0, 500);
-  }
-  return fallback;
 };
 
 const classifyMutation = <T>(
@@ -269,7 +241,7 @@ const classifyMutation = <T>(
     return {
       kind: "rejected",
       code: "capability-unsupported",
-      message: mutationMessage(result.body, "OpenCode V2 operation is unsupported"),
+      message: "OpenCode V2 operation is unsupported",
     };
   }
   if ([400, 401, 403, 404, 409, 415, 422].includes(result.status)) {
@@ -279,23 +251,20 @@ const classifyMutation = <T>(
     return {
       kind: "rejected",
       code,
-      message: mutationMessage(
-        result.body,
-        `OpenCode V2 rejected the operation (HTTP ${result.status})`,
-      ),
+      message: `OpenCode V2 rejected the operation (HTTP ${result.status})`,
     };
   }
   return {
     kind: "unknown",
     operationId,
-    message: mutationMessage(
-      result.body,
-      `OpenCode V2 returned an ambiguous HTTP ${result.status} response`,
-    ),
+    message: `OpenCode V2 returned an ambiguous HTTP ${result.status} response; do not retry automatically`,
   };
 };
 
-const confirmedEmpty = (): Record<string, never> => ({});
+/** V2 NoContent routes are not successful merely because they returned 2xx:
+ * a body signals a different contract and cannot prove the mutation applied. */
+const confirmedEmpty = (body: unknown): Record<string, never> | undefined =>
+  body === undefined || body === null ? {} : undefined;
 
 const providerRows = (body: unknown): V2Provider[] =>
   requiredDataArray(body, "/api/provider").map((value, index) => {
@@ -315,8 +284,19 @@ const providerRows = (body: unknown): V2Provider[] =>
     return provider;
   });
 
-const hasConnectedProvider = (body: unknown): boolean =>
-  providerRows(body).some((provider) => provider.disabled !== true);
+const hasConnectedProvider = (body: unknown, integrations: unknown): boolean => {
+  const connections = new Map(requiredDataArray(integrations, "/api/integration").map((value) => {
+    const integration = asRecord(value);
+    if (typeof integration?.id !== "string" || !Array.isArray(integration.connections)) {
+      throw invalidResponse("/api/integration", "integration IDs and connection arrays");
+    }
+    return [integration.id, integration.connections.length > 0] as const;
+  }));
+  return providerRows(body).some((provider) => provider.activation !== "disabled"
+    && (provider.activation === "enabled"
+      || connections.get(String(provider.integrationID ?? provider.id)) === true
+      || (provider.integrationID === undefined && !connections.has(String(provider.id)))));
+};
 
 const variantNames = (value: unknown): string[] => {
   if (!Array.isArray(value)) return [];
@@ -402,7 +382,9 @@ export const flattenV2Models = (
         : {}),
       ...(asRecord(model.capabilities) ? { capabilities } : {}),
       ...(variants.length > 0 ? { variants } : {}),
-      connected: provider !== undefined && provider.disabled !== true,
+      // /api/model lists available models, which is stronger evidence than a
+      // provider merely existing in /api/provider's complete inventory.
+      connected: provider !== undefined && provider.activation !== "disabled",
     }];
   });
 };
@@ -520,7 +502,103 @@ const normalizeHistory = (body: unknown, path: string): RuntimeSessionMessage[] 
   return result;
 };
 
-const attachmentFiles = (input: RuntimeTurnBinding): JsonObject[] => {
+const mergeHistoryEntry = (
+  target: HistoryEntry[],
+  role: HistoryEntry["role"],
+  text: string,
+): void => {
+  if (!text) return;
+  const previous = target.at(-1);
+  if (previous?.role === role) previous.text = `${previous.text}\n${text}`;
+  else target.push({ role, text });
+};
+
+const normalizedCanonicalHistory = (messages: ModelMessage[]): HistoryEntry[] => {
+  const result: HistoryEntry[] = [];
+  for (const message of messages) {
+    if (message.role !== "user" && message.role !== "assistant") continue;
+    const text = message.parts
+      .filter((part) => part.type === "text")
+      .map((part) => "text" in part ? part.text : "")
+      .join("\n")
+      .trim();
+    mergeHistoryEntry(result, message.role, text);
+  }
+  return result;
+};
+
+const v2MessageEntries = (rows: unknown[]): Array<HistoryEntry & { id: string }> => {
+  const result: Array<HistoryEntry & { id: string }> = [];
+  for (const value of rows) {
+    const message = asRecord(value);
+    if (!message || typeof message.id !== "string") continue;
+    if (message.type === "user" && typeof message.text === "string") {
+      result.push({ id: message.id, role: "user", text: message.text.trim() });
+      continue;
+    }
+    if (message.type !== "assistant") continue;
+    const text = (Array.isArray(message.content) ? message.content : [])
+      .map(asRecord)
+      .filter((part) => part?.type === "text" && typeof part.text === "string")
+      .map((part) => String(part?.text))
+      .join("\n")
+      .trim();
+    result.push({ id: message.id, role: "assistant", text });
+  }
+  return result;
+};
+
+const normalizedBackendHistory = (
+  entries: Array<HistoryEntry & { id?: string }>,
+): HistoryEntry[] => {
+  const result: HistoryEntry[] = [];
+  for (const entry of entries) mergeHistoryEntry(result, entry.role, entry.text);
+  return result;
+};
+
+const sameHistory = (left: HistoryEntry[], right: HistoryEntry[]): boolean =>
+  left.length === right.length
+  && left.every((entry, index) =>
+    entry.role === right[index]?.role && entry.text === right[index]?.text);
+
+const v2CompletedHistoryTerminalState = (
+  rows: unknown[],
+): RuntimeSnapshot["state"] | undefined => {
+  const latest = [...rows].reverse().map(asRecord).find((message) =>
+    message?.type === "user" || message?.type === "assistant");
+  const completed = asRecord(latest?.time)?.completed;
+  if (
+    latest?.type !== "assistant"
+    || typeof completed !== "number"
+    || !Number.isSafeInteger(completed)
+    || completed < 0
+  ) return undefined;
+  return {
+    value: "idle",
+    watermark: String(completed),
+    comparison: { domain: "v2-history:assistant-completed", order: completed },
+  };
+};
+
+const dataUri = async (
+  path: string,
+  mime: string,
+): Promise<string> => {
+  let bytes: Buffer;
+  try {
+    bytes = await readFile(path);
+  } catch {
+    throw Object.assign(new Error(`OpenCode V2 could not read attachment: ${path}`), {
+      code: "invalid-attachment",
+    });
+  }
+  const contentType = /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$/.test(mime)
+    ? mime
+    : "application/octet-stream";
+  return `data:${contentType};base64,${bytes.toString("base64")}`;
+};
+
+const attachmentFiles = async (input: RuntimeTurnBinding): Promise<JsonObject[]> => {
   const files: JsonObject[] = [];
   // The server guarantees any `_inbox/*` attachment is materialized into the
   // runtime cwd before the turn, so resolving against the session directory is
@@ -533,47 +611,71 @@ const attachmentFiles = (input: RuntimeTurnBinding): JsonObject[] => {
       const shot = attachment.browserContext?.crop ?? attachment.browserContext?.screenshot;
       if (shot?.localPath && shot.mime.startsWith("image/")) {
         files.push({
-          uri: pathToFileURL(shot.localPath).href,
+          uri: await dataUri(shot.localPath, shot.mime),
           name: attachment.name || `${attachment.browserContext?.type ?? "browser"}-capture`,
         });
       }
       continue;
     }
     if (attachment.kind === "url") {
-      if (attachment.url && /^https?:\/\//i.test(attachment.url)) {
-        files.push({ uri: attachment.url, name: attachment.name });
-      }
+      // PromptInput accepts only file: and data: sources. Do not turn an
+      // attachment URL into a server-side fetch primitive; promptBody carries
+      // it as ordinary text instead.
       continue;
     }
     if (!attachment.path) continue;
     const absolute = resolve(root, attachment.path);
     const pathFromRoot = relative(root, absolute);
     if (pathFromRoot.startsWith("..") || isAbsolute(pathFromRoot)) continue;
-    let uri = pathToFileURL(absolute).href;
-    if (attachment.kind === "range" && attachment.range) {
-      uri += `?start=${attachment.range[0]}&end=${attachment.range[1]}`;
-    }
-    files.push({ uri, name: attachment.name });
+    files.push({
+      // These files were materialized on the runtime host, including SSH
+      // runtimes. Let that host read them; the same local path is unrelated.
+      uri: pathToFileURL(absolute).href,
+      name: attachment.name,
+    });
   }
   return files;
 };
 
-const promptBody = (input: RuntimeTurnBinding, delivery: "queue" | "steer"): JsonObject => {
-  const files = attachmentFiles(input);
+const promptText = (input: RuntimeTurnBinding): string => {
   const browserText = (input.attachments ?? [])
     .filter((a) => a.kind === "browser-context" && a.browserContext)
     .map((a) => formatBrowserContextForModel(a.browserContext!))
     .join("\n\n");
-  const text = browserText
-    ? (input.text.trim() ? `${input.text}\n\n${browserText}` : browserText)
+  const links = (input.attachments ?? [])
+    .filter((attachment) => attachment.kind === "url" && !!attachment.url && /^https?:\/\//i.test(attachment.url))
+    .map((attachment) => `[Attached link${attachment.name ? `: ${attachment.name}` : ""}] ${attachment.url}`)
+    .join("\n\n");
+  const supplemental = [browserText, links].filter(Boolean).join("\n\n");
+  return supplemental
+    ? (input.text.trim() ? `${input.text}\n\n${supplemental}` : supplemental)
     : input.text;
+};
+
+const promptBody = async (
+  input: RuntimeTurnBinding,
+  delivery: "queue" | "steer",
+): Promise<JsonObject> => {
+  const files = await attachmentFiles(input);
   return {
-    prompt: {
-      text,
-      ...(files.length > 0 ? { files } : {}),
-    },
+    text: promptText(input),
+    ...(files.length > 0 ? { files } : {}),
     delivery,
   };
+};
+
+const commandText = (input: RuntimeTurnBinding): string => {
+  const command = input.command!;
+  const literal = `/${command.name}${command.args ? ` ${command.args}` : ""}`;
+  const offset = input.text.indexOf(literal);
+  return offset < 0
+    ? command.args ?? input.text
+    : `${input.text.slice(0, offset)}${command.args ?? ""}${input.text.slice(offset + literal.length)}`.trim();
+};
+
+const commandBody = async (input: RuntimeTurnBinding): Promise<JsonObject> => {
+  const prompt = await promptBody(input, "queue");
+  return { ...prompt, command: input.command!.name, text: commandText(input) };
 };
 
 const sessionCreateBody = (location: RuntimeLocation): JsonObject => ({
@@ -589,6 +691,18 @@ export const createV2ProtocolAdapter = (
   const deadlineMs = options.deadlineMs ?? 10_000;
   let reconciliationOrdinal = 0;
   const freshSessionEvidence = new Map<string, string>();
+  let activation: Promise<void> | undefined;
+  const catalogReady = (): Promise<void> => {
+    activation ??= options.transport.mutate({
+      method: "POST", path: withLocation("/api/plugin/await-activation", options.endpoint.location, "deep"),
+      operationId: randomUUID(), deadlineMs, replay: NEVER_REPLAY,
+    }).then((result) => {
+      if (result.kind !== "response" || result.status !== 204) {
+        throw Object.assign(new Error("OpenCode V2 catalog plugin activation did not complete; retry catalog discovery"), { code: "backend-not-ready" });
+      }
+    }).catch((error) => { activation = undefined; throw error; });
+    return activation;
+  };
 
   const createSession = async (
     input: RuntimeSessionBinding,
@@ -603,7 +717,7 @@ export const createV2ProtocolAdapter = (
       replay: NEVER_REPLAY,
     });
     const outcome = classifyMutation(result, operationId, (body) => {
-      const id = asRecord(requiredData(body, "/api/session"))?.id;
+      const id = asRecord(asRecord(body)?.data)?.id;
       return typeof id === "string" && id ? { backendSessionId: id } : undefined;
     });
     if (outcome.kind === "confirmed") {
@@ -672,7 +786,7 @@ export const createV2ProtocolAdapter = (
         `/api/session/${encodeURIComponent(backendSessionId)}/prompt`,
         input.session.location,
       ),
-      body: promptBody(input, delivery),
+      body: await promptBody(input, delivery),
       operationId,
       deadlineMs,
       replay: NEVER_REPLAY,
@@ -683,26 +797,16 @@ export const createV2ProtocolAdapter = (
     });
   };
 
-  const providerHttp = createProviderHttpClient({
-    locate: (path) => withLocation(path, options.endpoint.location),
+  const providerHttp = createV2ProviderClient({
+    ready: catalogReady,
+    locate: (path) => withLocation(path, options.endpoint.location, "deep"),
     transport: {
       queryRequired: (path) => queryRequired(options.transport, path, deadlineMs),
-      mutate: (method, path, body, extra) => mutateRequired(
-        options.transport,
-        method,
-        path,
-        body,
-        extra?.deadlineMs ?? deadlineMs,
-      ),
+      mutate: (method, path, body) => options.transport.mutate({
+        method, path, body, operationId: randomUUID(), deadlineMs, replay: NEVER_REPLAY,
+      }),
     },
-    deadlineMs,
-    oauthCallbackDeadlineMs: PROVIDER_OAUTH_CALLBACK_DEADLINE_MS,
-    listAllRequireName: true,
-    authorizeUnavailable: () => invalidResponse(
-      withLocation("/provider/:id/oauth/authorize", options.endpoint.location),
-      "url, method, and instructions",
-    ),
-    operationIdFor: () => randomUUID(),
+    callbackDeadlineMs: PROVIDER_OAUTH_CALLBACK_DEADLINE_MS,
   });
 
   return {
@@ -711,6 +815,7 @@ export const createV2ProtocolAdapter = (
       return protocolCapabilities;
     },
     async models(): Promise<ModelDescriptor[]> {
+      await catalogReady();
       const modelPath = withLocation("/api/model", options.endpoint.location, "deep");
       const providerPath = withLocation("/api/provider", options.endpoint.location, "deep");
       for (let attempt = 0; ; attempt += 1) {
@@ -719,7 +824,10 @@ export const createV2ProtocolAdapter = (
           queryRequired(options.transport, providerPath, deadlineMs),
         ]);
         const models = flattenV2Models(modelBody, providerBody);
-        if (models.length > 0 || !hasConnectedProvider(providerBody)) return models;
+        if (models.length > 0) return models;
+        const integrationBody = await queryRequired(options.transport,
+          withLocation("/api/integration", options.endpoint.location, "deep"), deadlineMs);
+        if (!hasConnectedProvider(providerBody, integrationBody)) return models;
         const retryDelayMs = MODEL_READINESS_RETRY_DELAYS_MS[attempt];
         if (retryDelayMs === undefined) {
           throw Object.assign(
@@ -733,6 +841,7 @@ export const createV2ProtocolAdapter = (
       }
     },
     async agents(): Promise<AgentDescriptor[]> {
+      await catalogReady();
       const path = withLocation("/api/agent", options.endpoint.location, "deep");
       return normalizeAgents(await queryRequired(options.transport, path, deadlineMs), path);
     },
@@ -752,11 +861,8 @@ export const createV2ProtocolAdapter = (
       return providerHttp.setProviderApiKey(providerID, key, metadata);
     },
     async setProviderAuth(providerID, info: ProviderAuthWrite): Promise<boolean> {
-      const path = withLocation(`/auth/${encodeURIComponent(providerID)}`, options.endpoint.location);
-      const body = info.type === "api"
-        ? { type: "api", key: info.key, ...(info.metadata ? { metadata: info.metadata } : {}) }
-        : { type: "wellknown", key: info.key, token: info.token };
-      return Boolean(await mutateRequired(options.transport, "PUT", path, body, deadlineMs));
+      if (info.type === "api") return providerHttp.setProviderApiKey(providerID, info.key, info.metadata);
+      throw Object.assign(new Error("OpenCode V2 does not support legacy well-known credential writes; use a supported integration method"), { code: "unsupported" });
     },
     async removeProviderAuth(providerID): Promise<boolean> {
       return providerHttp.removeProviderAuth(providerID);
@@ -803,22 +909,117 @@ export const createV2ProtocolAdapter = (
       if (mismatch) return { kind: "rejected", code: "binding-mismatch", message: mismatch };
       return createSession(input, operationId);
     },
-    async branchSession(input, _operationId) {
+    async branchSession(input, operationId) {
       const mismatch = bindingError(input.source, options.endpoint)
         ?? bindingError(input.target, options.endpoint);
       if (mismatch) return { kind: "rejected", code: "binding-mismatch", message: mismatch };
-      return unsupported("session fork/branch");
+      const sourceBackendId = input.source.backendSessionId;
+      if (!sourceBackendId) {
+        return {
+          kind: "rejected",
+          code: "binding-missing",
+          message: "branch requires a source backend session binding",
+        };
+      }
+      const wanted = normalizedCanonicalHistory(input.history);
+      const sourcePath = withLocation(
+        `/api/session/${encodeURIComponent(sourceBackendId)}/message?limit=${V2_PAGE_LIMIT}&order=asc`,
+        input.source.location,
+      );
+      const entries = v2MessageEntries(await queryAllPages(options.transport, sourcePath, deadlineMs));
+      let boundary = wanted.length === 0 ? 0 : -1;
+      const accumulated: HistoryEntry[] = [];
+      for (let index = 0; index < entries.length; index += 1) {
+        mergeHistoryEntry(accumulated, entries[index]!.role, entries[index]!.text);
+        if (sameHistory(accumulated, wanted)) {
+          boundary = index + 1;
+          break;
+        }
+      }
+      if (boundary < 0) {
+        return {
+          kind: "rejected",
+          code: "history-mismatch",
+          message: "requested history prefix is not present in the backend session",
+        };
+      }
+      if (entries.length === 0) {
+        // The released fork endpoint has no empty-session boundary. A fresh
+        // session is the only exact representation of an empty canonical
+        // prefix; its Polyth lineage remains canonical rather than guessed.
+        return createSession(input.target, operationId);
+      }
+      const forkBody: JsonObject = boundary === entries.length
+        ? { boundary: { type: "through" } }
+        : { boundary: { type: "before", messageID: entries[boundary]!.id } };
+      const result = await options.transport.mutate<unknown>({
+        method: "POST",
+        path: withLocation(`/api/session/${encodeURIComponent(sourceBackendId)}/fork`, input.source.location),
+        body: forkBody,
+        operationId,
+        deadlineMs,
+        replay: NEVER_REPLAY,
+      });
+      const forked = classifyMutation(result, operationId, (body) => {
+        const session = asRecord(asRecord(body)?.data);
+        const id = session?.id;
+        return typeof id === "string" && id ? { backendSessionId: id } : undefined;
+      });
+      if (forked.kind !== "confirmed") return forked;
+      let childRows: unknown[];
+      try {
+        childRows = await queryAllPages(
+          options.transport,
+          withLocation(
+            `/api/session/${encodeURIComponent(forked.value.backendSessionId)}/message?limit=${V2_PAGE_LIMIT}&order=asc`,
+            input.target.location,
+          ),
+          deadlineMs,
+        );
+      } catch {
+        return {
+          kind: "unknown",
+          operationId,
+          message: "backend branch exists but exact history could not be verified",
+        };
+      }
+      if (!sameHistory(normalizedBackendHistory(v2MessageEntries(childRows)), wanted)) {
+        return {
+          kind: "unknown",
+          operationId,
+          message: "backend branch exists with an unexpected history",
+        };
+      }
+      freshSessionEvidence.set(forked.value.backendSessionId, operationId);
+      return { ...forked, receipt: forked.value.backendSessionId };
     },
     async submit(input, operationId) {
       const mismatch = bindingError(input.session, options.endpoint);
       if (mismatch) return { kind: "rejected", code: "binding-mismatch", message: mismatch };
-      if (input.command) return unsupported("native command invocation");
       const bound = requiredBindingId<{ admissionId?: string }>(
         input.session,
         "prompt submission",
       );
       if ("kind" in bound) return bound;
-      return prompt(input, operationId, "queue");
+      if (input.command) {
+        freshSessionEvidence.delete(bound.id);
+        const result = await options.transport.mutate<unknown>({
+          method: "POST",
+          path: withLocation(
+            `/api/session/${encodeURIComponent(bound.id)}/command`,
+            input.session.location,
+          ),
+          body: await commandBody(input),
+          operationId,
+          deadlineMs,
+          replay: NEVER_REPLAY,
+        });
+        return classifyMutation(result, operationId, confirmedEmpty);
+      }
+      // A released V2 session only starts its first idle drain for steer
+      // delivery. Polyth serializes ordinary canonical turns before this
+      // boundary; native queue remains available for explicit inbox control.
+      return prompt(input, operationId, "steer");
     },
     async steer(input, operationId) {
       const mismatch = bindingError(input.session, options.endpoint);
@@ -844,12 +1045,30 @@ export const createV2ProtocolAdapter = (
         deadlineMs,
         replay: NEVER_REPLAY,
       });
-      return classifyMutation(result, operationId, confirmedEmpty);
+      const interrupted = asRecord(result.kind === "response" ? result.body : undefined)?.interrupted;
+      if (result.kind === "response" && result.status >= 200 && result.status < 300 && interrupted === false) {
+        return {
+          kind: "rejected",
+          code: "not-running",
+          message: "OpenCode V2 reported that no active execution was interrupted",
+        };
+      }
+      return classifyMutation(result, operationId, (body) =>
+        asRecord(body)?.interrupted === true ? {} : undefined);
     },
-    async deleteSession(input, _operationId) {
+    async deleteSession(input, operationId) {
       const mismatch = bindingError(input, options.endpoint);
       if (mismatch) return { kind: "rejected", code: "binding-mismatch", message: mismatch };
-      return unsupported("session delete");
+      const bound = requiredBindingId<Record<string, never>>(input, "session delete");
+      if ("kind" in bound) return bound;
+      const result = await options.transport.mutate<unknown>({
+        method: "DELETE",
+        path: withLocation(`/api/session/${encodeURIComponent(bound.id)}`, input.location),
+        operationId,
+        deadlineMs,
+        replay: NEVER_REPLAY,
+      });
+      return classifyMutation(result, operationId, confirmedEmpty);
     },
     async replyPermission(input, requestId, reply, operationId) {
       const mismatch = bindingError(input, options.endpoint);
@@ -875,15 +1094,28 @@ export const createV2ProtocolAdapter = (
       const bound = requiredBindingId<Record<string, never>>(input, "question reply");
       if ("kind" in bound) return bound;
       const reject = answers.action === "reject";
+      const formPath = withLocation(
+        `/api/session/${encodeURIComponent(bound.id)}/form/${encodeURIComponent(requestId)}`,
+        input.location,
+      );
+      const form = v2FormInfoOf(
+        requiredData(await queryRequired(options.transport, formPath, deadlineMs), formPath),
+        bound.id,
+      );
+      if (!form || form.id !== requestId) {
+        throw invalidResponse(formPath, "a Form.Info owned by this session");
+      }
+      const nativeAnswer = reject ? undefined : v2FormAnswerOf(form, answers);
+      if (nativeAnswer && "error" in nativeAnswer) {
+        return { kind: "rejected", code: "validation", message: nativeAnswer.error };
+      }
       const result = await options.transport.mutate<unknown>({
         method: "POST",
         path: withLocation(
-          `/api/session/${encodeURIComponent(bound.id)}/question/${encodeURIComponent(requestId)}/${reject ? "reject" : "reply"}`,
+          `/api/session/${encodeURIComponent(bound.id)}/form/${encodeURIComponent(requestId)}/${reject ? "cancel" : "reply"}`,
           input.location,
         ),
-        ...(reject
-          ? {}
-          : { body: { answers: Array.isArray(answers.answers) ? answers.answers : [] } }),
+        ...(reject ? {} : { body: nativeAnswer }),
         operationId,
         deadlineMs,
         replay: NEVER_REPLAY,
@@ -921,11 +1153,13 @@ export const createV2ProtocolAdapter = (
         input.location,
       );
       const permissionsPath = withLocation(
-        "/api/permission/request",
+        `/api/session/${encodeURIComponent(backendSessionId)}/permission`,
         input.location,
-        "deep",
       );
-      const questionsPath = withLocation("/api/question/request", input.location, "deep");
+      const questionsPath = withLocation(
+        `/api/session/${encodeURIComponent(backendSessionId)}/form`,
+        input.location,
+      );
       const [sessionBody, activeBody, messageRows, todosResult, permissionsBody, questionsBody] =
         await Promise.all([
           queryRequired(options.transport, sessionPath, deadlineMs),
@@ -973,17 +1207,25 @@ export const createV2ProtocolAdapter = (
           state,
         );
       }
-      const permissions = permissionRows
-        .map((value) => v2PermissionOf(value, backendSessionId))
-        .filter((value): value is RuntimeSnapshot["permissions"][number] => value !== undefined);
-      const questions = questionRows
-        .map((value) => v2QuestionOf(value, backendSessionId))
-        .filter((value): value is RuntimeSnapshot["questions"][number] => value !== undefined);
+      const permissions = permissionRows.map((value, index) => {
+        const permission = v2PermissionOf(value, backendSessionId);
+        if (!permission) throw invalidResponse(permissionsPath, `a permission owned by this session at data[${index}]`);
+        return permission;
+      });
+      const questions = questionRows.map((value, index) => {
+        const question = v2QuestionOf(value, backendSessionId);
+        if (!question) throw invalidResponse(questionsPath, `a Form.Info owned by this session at data[${index}]`);
+        return question;
+      });
 
       const activeSession = asRecord(active[backendSessionId]);
       let snapshotState: RuntimeSnapshot["state"] = activeSession?.type === "running"
         ? { value: "running" }
         : { value: "unknown" };
+      if (snapshotState.value !== "running") {
+        const historyTerminal = v2CompletedHistoryTerminalState(messageRows);
+        if (historyTerminal) snapshotState = historyTerminal;
+      }
       const createOperationId = freshSessionEvidence.get(backendSessionId);
       if (snapshotState.value === "unknown" && createOperationId) {
         snapshotState = { value: "idle", causalOperationId: createOperationId };

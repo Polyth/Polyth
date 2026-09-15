@@ -345,7 +345,7 @@ try {
 
   assert.equal(report.health.ok, true);
   assert.equal(report.info.packaged, true);
-  assert.equal(report.info.opencodeVersion, "1.18.22");
+  assert.equal(report.info.opencodeVersion, "2.0.3");
   assert.equal(report.desktopPage, true);
   assert.equal(report.windowButtonCount, 3);
   assert.equal(report.trayAvailable, true);

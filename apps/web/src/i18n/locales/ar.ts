@@ -1660,6 +1660,7 @@ export const ar: AppMessages = {
   "sidebar.message": "×",
   "sidebar.moreSidebarActions": "المزيد من إجراءات الشريط الجانبي",
   "sidebar.needsAttention": "يحتاج إلى اهتمام",
+  "sidebar.dateGroups": "مجموعات التاريخ",
   "sidebar.newChatInValue": "محادثة جديدة في {value}",
   "sidebar.newSessionInWorktree": "العمل بمعزل…",
   "sidebar.noMatchingSessions": "لا توجد جلسات مطابقة.",

@@ -7,15 +7,12 @@ import {
   parseProviderCatalogue,
 } from "../src/providerHttp.ts";
 
-test("legacy catalogue keeps nameless ids; v2 drops them", () => {
+test("legacy catalogue keeps nameless ids", () => {
   const body = { all: [{ id: "cursor", name: "Cursor" }, { id: "bad", name: "" }, { id: "ok" }] };
   assert.deepEqual(parseProviderCatalogue(body), [
     { id: "cursor", name: "Cursor" },
     { id: "bad", name: "bad" },
     { id: "ok", name: "ok" },
-  ]);
-  assert.deepEqual(parseProviderCatalogue(body, { requireName: true }), [
-    { id: "cursor", name: "Cursor" },
   ]);
 });
 

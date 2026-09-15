@@ -8,16 +8,16 @@
 import { useLayoutEffect, useState, type RefObject } from "react";
 
 export type AnchoredAlign = "start" | "center" | "end";
-export type AnchoredSide = "down" | "up";
+export type AnchoredSide = "down" | "up" | "left" | "right";
 
 export interface AnchoredPositionOptions {
-  /** Horizontal alignment against the anchor (default start = left edges). */
+  /** Alignment on the axis perpendicular to the side (default start). */
   align?: AnchoredAlign;
   /** Gap between anchor and surface in px (default 6). */
   gap?: number;
   /** Safety margin against the viewport edges in px (default 8). */
   margin?: number;
-  /** Preferred vertical side (default down). */
+  /** Preferred side (default down). */
   side?: AnchoredSide;
   /** Keep the opening anchor rectangle during content-driven layout changes. */
   stableAnchor?: boolean;
@@ -74,28 +74,60 @@ export function useAnchoredPosition(
         : anchor.getBoundingClientRect();
       const surfaceRect = surface.getBoundingClientRect();
 
-      const below = band.bottom - anchorRect.bottom - gap - margin;
-      const above = anchorRect.top - band.top - gap - margin;
-      const fits = (space: number) => surfaceRect.height <= space;
-      const resolvedSide: AnchoredSide =
-        side === "down"
+      const horizontal = side === "left" || side === "right";
+      let resolvedSide: AnchoredSide;
+      let maxHeight: number;
+      let maxWidth: number;
+      let height: number;
+      let width: number;
+      let top: number;
+      let left: number;
+
+      if (horizontal) {
+        const after = band.right - anchorRect.right - gap - margin;
+        const before = anchorRect.left - band.left - gap - margin;
+        const fits = (space: number) => surfaceRect.width <= space;
+        resolvedSide = side === "right"
+          ? (fits(after) || after >= before ? "right" : "left")
+          : (fits(before) || before >= after ? "left" : "right");
+        const space = resolvedSide === "right" ? after : before;
+        maxWidth = Math.max(0, Math.min(space, band.right - band.left - 2 * margin));
+        width = Math.min(surfaceRect.width, maxWidth);
+        const preferredLeft = resolvedSide === "right"
+          ? anchorRect.right + gap
+          : anchorRect.left - gap - width;
+        left = Math.max(band.left + margin, Math.min(preferredLeft, band.right - margin - width));
+
+        maxHeight = Math.max(0, band.bottom - band.top - 2 * margin);
+        height = Math.min(surfaceRect.height, maxHeight);
+        const preferredTop =
+          align === "start" ? anchorRect.top
+          : align === "end" ? anchorRect.bottom - height
+          : anchorRect.top + (anchorRect.height - height) / 2;
+        top = Math.max(band.top + margin, Math.min(preferredTop, band.bottom - margin - height));
+      } else {
+        const below = band.bottom - anchorRect.bottom - gap - margin;
+        const above = anchorRect.top - band.top - gap - margin;
+        const fits = (space: number) => surfaceRect.height <= space;
+        resolvedSide = side === "down"
           ? (fits(below) || below >= above ? "down" : "up")
           : (fits(above) || above >= below ? "up" : "down");
-      const space = resolvedSide === "down" ? below : above;
-      const maxHeight = Math.max(0, Math.min(space, band.bottom - band.top - 2 * margin));
-      const height = Math.min(surfaceRect.height, maxHeight);
-      const preferredTop = resolvedSide === "down"
-        ? anchorRect.bottom + gap
-        : anchorRect.top - gap - height;
-      const top = Math.max(band.top + margin, Math.min(preferredTop, band.bottom - margin - height));
+        const space = resolvedSide === "down" ? below : above;
+        maxHeight = Math.max(0, Math.min(space, band.bottom - band.top - 2 * margin));
+        height = Math.min(surfaceRect.height, maxHeight);
+        const preferredTop = resolvedSide === "down"
+          ? anchorRect.bottom + gap
+          : anchorRect.top - gap - height;
+        top = Math.max(band.top + margin, Math.min(preferredTop, band.bottom - margin - height));
 
-      const maxWidth = Math.max(0, band.right - band.left - 2 * margin);
-      const width = Math.min(surfaceRect.width, maxWidth);
-      let left =
-        align === "start" ? anchorRect.left
-        : align === "end" ? anchorRect.right - width
-        : anchorRect.left + (anchorRect.width - width) / 2;
-      left = Math.min(Math.max(left, band.left + margin), band.right - margin - width);
+        maxWidth = Math.max(0, band.right - band.left - 2 * margin);
+        width = Math.min(surfaceRect.width, maxWidth);
+        const preferredLeft =
+          align === "start" ? anchorRect.left
+          : align === "end" ? anchorRect.right - width
+          : anchorRect.left + (anchorRect.width - width) / 2;
+        left = Math.min(Math.max(preferredLeft, band.left + margin), band.right - margin - width);
+      }
 
       setPosition((previous) => {
         const next: AnchoredPosition = { top, left, side: resolvedSide, maxHeight, maxWidth, ready: true };

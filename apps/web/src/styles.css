@@ -414,6 +414,12 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   scrollbar-width: none;
 }
 .sidebar-project-rail-list::-webkit-scrollbar { display: none; }
+.sidebar-project-rail-list > .ui-tooltip-host {
+  display: block;
+  width: 40px;
+  height: 40px;
+  flex: none;
+}
 .sidebar-project-rail-item,
 .sidebar-project-rail-add {
   position: relative;
@@ -453,6 +459,66 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .sidebar-project-rail-item .project-glyph svg { width: var(--icon-md); height: var(--icon-md); }
 .sidebar-project-rail-item .project-glyph img,
 .sidebar-project-rail-item .project-glyph-mask { width: var(--icon-lg); height: var(--icon-lg); }
+.sidebar-project-rail-item > .project-glyph { pointer-events: none; }
+.sidebar-project-rail-tooltip.ui-tooltip {
+  width: min(300px, calc(100vw - 2 * var(--screen-gutter)));
+  max-width: min(300px, calc(100vw - 2 * var(--screen-gutter)));
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border-radius: var(--radius-card);
+  box-shadow: var(--material-glass-shadow), var(--material-glass-highlight);
+  color: var(--text);
+  text-align: start;
+}
+.sidebar-project-rail-tooltip-content {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+.sidebar-project-rail-tooltip-icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+}
+.sidebar-project-rail-tooltip-icon .project-glyph { width: 28px; height: 28px; }
+.sidebar-project-rail-tooltip-icon .project-glyph svg { width: var(--icon-md); height: var(--icon-md); }
+.sidebar-project-rail-tooltip-icon .project-glyph img,
+.sidebar-project-rail-tooltip-icon .project-glyph-mask { width: var(--icon-lg); height: var(--icon-lg); }
+.sidebar-project-rail-tooltip-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+.sidebar-project-rail-tooltip-copy strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 650;
+  line-height: 1.25;
+  text-align: start;
+}
+.sidebar-project-rail-tooltip-copy > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  direction: ltr;
+  font-family: var(--mono);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  text-align: start;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .sidebar-project-rail-status {
   position: absolute;
   inset-inline-end: 3px;
@@ -1467,6 +1533,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .activity-live-layer {
   position: absolute;
   inset: 0;
+  z-index: calc(var(--z-shell) + 2);
   overflow: hidden;
   pointer-events: none;
 }
@@ -10242,6 +10309,18 @@ grid-template-columns: minmax(0, 1fr);
   transition: width var(--motion-surface) var(--motion-ease), height var(--motion-surface) var(--motion-ease);
 }
 .rail-workspace > .module-view { background: transparent; }
+/* A workspace package turns the railbar into a geometry host. Bottom and
+   narrow docks stretch that host across Chat, so glass here would blur the
+   conversation (and add an unnecessary filtered ancestor in side mode).
+   The package pane and launcher strip paint their own bounded surfaces. */
+.railbar:has(> .rail-workspace) {
+  background: transparent !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+.railbar:has(> .rail-workspace) > .rail-icon-col.plugin-strip {
+  background: var(--material-glass);
+}
 .railbar:has(.rail-dynamic) {
   pointer-events: none;
   background: transparent; border: 0; border-radius: 0; box-shadow: none;
@@ -12116,6 +12195,10 @@ html[data-font] body :is(
 @keyframes ui-pop-in { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
 .ui-popover[data-side="up"] { animation-name: ui-pop-in-up; }
 @keyframes ui-pop-in-up { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+.ui-popover[data-side="right"] { animation-name: ui-pop-in-right; }
+@keyframes ui-pop-in-right { from { opacity: 0; transform: translateX(-2px); } to { opacity: 1; transform: none; } }
+.ui-popover[data-side="left"] { animation-name: ui-pop-in-left; }
+@keyframes ui-pop-in-left { from { opacity: 0; transform: translateX(2px); } to { opacity: 1; transform: none; } }
 
 .ui-menu { min-width: 200px; }
 .widget-choice-menu { width: min(430px, calc(100vw - 2 * var(--screen-gutter))); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-1); padding: var(--space-2); }
@@ -12270,8 +12353,11 @@ html[data-font] body :is(
   /* Chat-turn cards: one per assistant turn, not a repeated list row, so a
      lighter blur is worth the cost here (unlike the excluded list surfaces
      below). Lower opacity than chrome — these sit inside the scrolling
-     conversation, so more of the app background should read through. */
-  :is(.activity-group, .task-list) {
+     conversation, so more of the app background should read through.
+     Activity paints this on ::before so overflow:visible can keep the sticky
+     header while the filter still has a bounded box. */
+  .task-list,
+  .activity-group::before {
     background: radial-gradient(140% 140% at 50% 50%,
       color-mix(in srgb, var(--surface-activity) 88%, transparent) 0%,
       color-mix(in srgb, var(--surface-activity) 52%, transparent) 100%);
@@ -12337,14 +12423,14 @@ html[data-font] body :is(
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
-  body[data-desktop-low-resource="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .app > .header, .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .mobile-island-sheet.sheet, .activity-group, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip),
-  html[data-reduce-animations="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .app > .header, .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .mobile-island-sheet.sheet, .activity-group, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip) {
+  body[data-desktop-low-resource="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .app > .header, .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .mobile-island-sheet.sheet, .activity-group, .activity-group::before, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip),
+  html[data-reduce-animations="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .app > .header, .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .mobile-island-sheet.sheet, .activity-group, .activity-group::before, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip) {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .app > .header, .sidebar, .sidebar-project-rail, .railbar) { background: var(--material-glass); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.dialog-panel, .sheet, .composer-card, .response-footer-metadata-grid, .workspace-customize-panel, .error-banner) { background: var(--material-glass-strong); }
-  :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.activity-group, .task-list) { background: var(--surface-activity); }
+  :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.activity-group, .activity-group::before, .task-list) { background: var(--surface-activity); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.ui-glass-island, .ui-glass-dock) { background: var(--material-glass); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) .msg.user .bubble { background: var(--bubble-user-bg); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) .mobile-island-sheet.sheet { background: var(--panel); }
@@ -12354,14 +12440,14 @@ html[data-font] body :is(
 @media (prefers-reduced-motion: reduce) {
   :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip) { background: var(--material-glass); }
   :is(.dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .error-banner) { background: var(--material-glass-strong); }
-   :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .app > .header, .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .mobile-island-sheet.sheet, .activity-group, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-model .picker-chip) {
+   :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .app > .header, .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .mobile-island-sheet.sheet, .activity-group, .activity-group::before, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-model .picker-chip) {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
   :is(.app > .header, .sidebar, .sidebar-project-rail, .railbar) { background: var(--material-glass); }
   .composer-card,
   .composer-mobile .composer-card { background: var(--material-glass-strong); }
-  :is(.activity-group, .task-list) { background: var(--surface-activity); }
+  :is(.activity-group, .activity-group::before, .task-list) { background: var(--surface-activity); }
   :is(.ui-glass-island, .ui-glass-dock) { background: var(--material-glass); }
   .msg.user .bubble { background: var(--bubble-user-bg); }
   .mobile-island-sheet.sheet { background: var(--panel); }
@@ -12644,6 +12730,19 @@ html[data-font] body :is(
 .activity-group {
   position: relative;
   overflow: visible;
+  isolation: isolate;
+  /* The plate below owns the fill so overflow:visible can keep sticky while
+     backdrop-filter still has a bounded, rounded box. */
+  background: transparent;
+}
+.activity-group::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  background: var(--surface-activity);
+  pointer-events: none;
 }
 .activity-group.current { border-color: color-mix(in srgb, var(--accent-line) 58%, var(--border-soft)); }
 /* Nested summaries inherit the container's chrome. The surface is handed over
@@ -12656,15 +12755,22 @@ html[data-font] body :is(
   box-shadow: none;
 }
 .activity-group:not(.open) > .ui-run-summary { border-radius: var(--radius-activity); }
+/* Expanded details float above neighboring timeline rows and the composer
+   dock so the list is not trapped under chrome. Live flight stays above this
+   via `.activity-live-layer`. */
+.activity-group.open {
+  z-index: calc(var(--z-shell) + 1);
+  box-shadow: var(--material-glass-highlight), var(--material-glass-shadow);
+}
 .activity-group.open > .ui-run-summary {
   position: sticky;
   inset-block-start: 0;
-  z-index: var(--z-shell);
+  z-index: 1;
   /* The group owns the material. Keeping this transparent prevents the sticky
      header from becoming an opaque rectangle over the rounded glass surface. */
   background: transparent;
   border-radius: var(--radius-activity) var(--radius-activity) 0 0;
-  box-shadow: 0 1px 0 var(--border-soft), var(--shadow-sm);
+  box-shadow: 0 1px 0 var(--border-soft);
 }
 .activity-group.open > .ui-run-summary:hover { background: var(--surface-overlay-hover); }
 .activity-group-expand-shell,
@@ -12682,6 +12788,7 @@ html[data-font] body :is(
 .activity-group-collapse-content,
 .task-list-collapse-content { min-width: 0; min-height: 0; overflow: hidden; }
 .activity-group-items { min-width: 0; display: grid; padding-inline: var(--space-3); border-top: 1px solid var(--border-soft); }
+.activity-group.open .activity-group-items { padding-block-end: var(--space-2); }
 .activity-group-items > :last-child { border-bottom: 0; }
 
 /* Live actions -------------------------------------------------------------
@@ -12977,8 +13084,10 @@ body[data-desktop-low-resource="true"] .activity-live { transition: none; }
 }
 @media (min-width: 961px) {
   /* The header is a sibling of .app-shell, so mirror the same frame using the
-     live sidebar/pane dimensions published by Header and ContextRail. */
-  .app > .header.header-chat {
+     live sidebar/pane dimensions published by Header and ContextRail. The
+     session status stays mounted when Chat is replaced by Canvas, so this
+     geometry must apply to every desktop header, not only `.header-chat`. */
+  .app > .header {
     --conversation-frame-inline-start: calc(
       var(--sidebar-inline-size, 0px) + var(--space-2)
       + max(
@@ -13007,7 +13116,7 @@ body[data-desktop-low-resource="true"] .activity-live { transition: none; }
   }
 }
 @media (min-width: 961px) and (max-width: 1400px) {
-  .app > .header.header-chat {
+  .app > .header {
     --conversation-frame-inline-end: calc(
       var(--workspace-pane-inline-size, 0px)
       + max(
@@ -13202,10 +13311,11 @@ body:not([data-glass="off"]) .header-profile { border: 0; background: transparen
       .app > .header,
       .sidebar,
       .sidebar-project-rail,
-      /* Excluded when it holds the compact contextual sheet: backdrop-filter
-         makes .railbar a containing block for its position:fixed children, and
-         the inset:0 sheet would collapse to the 0-width launcher strip. */
-      .railbar:not(:has(.rail-fullscreen)):not(:has(> .panel-sheet)),
+      /* Excluded when it is a workspace-pane geometry host or holds the
+         compact contextual sheet: filtering the former blurs Chat beneath
+         wide docks; filtering the latter makes it a containing block for its
+         position:fixed child and collapses the sheet to the launcher strip. */
+      .railbar:not(:has(.rail-fullscreen)):not(:has(> .rail-workspace)):not(:has(> .panel-sheet)),
       .statusbar,
       .background-quick-trigger,
       .ui-glass-island,
@@ -13262,11 +13372,26 @@ body:not([data-glass="off"]) .header-profile { border: 0; background: transparen
       background-clip: padding-box;
     }
     body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) :is(.activity-group, .task-list) {
+      border-color: var(--material-glass-border);
+      box-shadow: var(--material-glass-highlight), var(--shadow-sm);
+    }
+    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) :is(.activity-group::before, .task-list) {
       background: radial-gradient(140% 140% at 50% 50%,
         color-mix(in srgb, var(--surface-activity) var(--material-glass-fill), transparent) 0%,
         color-mix(in srgb, var(--surface-activity) var(--material-glass-edge), transparent) 100%);
-      border-color: var(--material-glass-border);
-      box-shadow: var(--material-glass-highlight), var(--shadow-sm);
+      -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
+      backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
+      background-clip: padding-box;
+    }
+    /* Expanded activity sits over conversation chrome, so it uses the same
+       popover glass recipe and the user's fill/blur tokens. */
+    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .activity-group.open {
+      box-shadow: var(--material-glass-highlight), var(--material-glass-shadow);
+    }
+    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .activity-group.open::before {
+      background: radial-gradient(140% 140% at 50% 50%,
+        color-mix(in srgb, var(--material-glass) var(--material-glass-fill), transparent) 0%,
+        color-mix(in srgb, var(--material-glass) var(--material-glass-edge), transparent) 100%);
       -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
       backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
       background-clip: padding-box;
@@ -13321,10 +13446,13 @@ body[data-glass="off"] :is(
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
-body[data-glass="off"] :is(.activity-group, .task-list) {
+body[data-glass="off"] :is(.activity-group, .activity-group::before, .task-list) {
   background: var(--surface-activity);
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
+}
+body[data-glass="off"] .activity-group {
+  background: transparent;
 }
 body[data-glass="off"] .msg.user .bubble {
   background: var(--bubble-user-bg);

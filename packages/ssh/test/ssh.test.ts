@@ -362,6 +362,33 @@ test("interactive host processes allocate an SSH TTY and forward terminal input"
   assert.deepEqual(writes, ["echo ready\n"]);
 });
 
+test("host() can pipe programmatic input without allocating an SSH TTY", async () => {
+  const spawned: string[][] = [];
+  const writes: string[] = [];
+  const { runner } = fakeRunner({
+    check: () => 0,
+    dial: () => ({ code: 0, stdout: "", stderr: "" }),
+  });
+  const spawner: SshSpawner = (args, opts) => {
+    spawned.push(args);
+    assert.equal(opts?.interactive, undefined);
+    assert.equal(opts?.stdin, "pipe");
+    return {
+      onOutput: () => ({ dispose: () => {} }),
+      onExit: () => ({ dispose: () => {} }),
+      write: async (data) => { writes.push(data); },
+      kill: () => {},
+    };
+  };
+  const service = createSshService({ file: tempFile(), runner, spawner });
+  const conn = service.create({ host: "build.example" });
+  const process = await service.host(conn.id).start("read secret", { stdin: "pipe" });
+
+  await process.write?.("private-input\n");
+  assert.equal(spawned[0]!.includes("-tt"), false);
+  assert.deepEqual(writes, ["private-input\n"]);
+});
+
 test("disconnect and remove tear down the mux; concurrent connects dedupe", async () => {
   let dials = 0;
   let exits = 0;

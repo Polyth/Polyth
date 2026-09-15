@@ -1,6 +1,5 @@
-// Shared OpenCode generation-1 provider catalogue/auth HTTP. Legacy and V2
-// adapters both talk to GET /provider, GET /provider/auth, OAuth authorize/
-// callback, and PUT/DELETE /auth/:id.
+// Legacy OpenCode provider catalogue/auth HTTP. Released V2 uses the
+// integration and credential API through providerV2.ts.
 //
 // mutate() may return { kind: "unknown" } — the request may or may not have
 // reached OpenCode. That is never success. Confirmed non-2xx is a rejection.
@@ -44,19 +43,15 @@ export interface ProviderHttpClient {
   removeProviderAuth(providerID: string): Promise<boolean>;
 }
 
-export function parseProviderCatalogue(
-  body: unknown,
-  opts: { requireName?: boolean } = {},
-): AvailableProviderDescriptor[] {
+export function parseProviderCatalogue(body: unknown): AvailableProviderDescriptor[] {
   const rec = asRecord(body);
   const out: AvailableProviderDescriptor[] = [];
-  // Both generations publish `{ all: [...] }`. Do not fall back to a raw array
+  // Legacy publishes `{ all: [...] }`. Do not fall back to a raw array
   // — that would treat an unexpected payload as a catalogue.
   for (const entry of Array.isArray(rec?.all) ? rec.all : []) {
     const provider = asRecord(entry);
     if (typeof provider?.id !== "string" || !provider.id) continue;
     const name = typeof provider.name === "string" ? provider.name : "";
-    if (opts.requireName && !name) continue;
     const env = Array.isArray(provider.env)
       ? provider.env.filter((item): item is string => typeof item === "string" && Boolean(item))
       : undefined;
@@ -180,7 +175,6 @@ export function createProviderHttpClient(opts: {
   transport: ProviderHttpTransport;
   deadlineMs: number;
   oauthCallbackDeadlineMs?: number;
-  listAllRequireName?: boolean;
   authMethodsOptional?: boolean;
   authorizeUnavailable?: () => Error;
   operationIdFor?: (kind: "authorize" | "callback" | "auth" | "auth-remove", providerID: string) => string;
@@ -194,7 +188,7 @@ export function createProviderHttpClient(opts: {
   return {
     async listAllProviders() {
       const body = await opts.transport.queryRequired(opts.locate("/provider"));
-      return parseProviderCatalogue(body, { requireName: opts.listAllRequireName === true });
+      return parseProviderCatalogue(body);
     },
 
     async providerAuthMethods() {

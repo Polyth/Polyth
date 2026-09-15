@@ -25,13 +25,14 @@ Object.defineProperty(globalThis, "requestAnimationFrame", {
 Object.defineProperty(globalThis, "cancelAnimationFrame", { value: () => {}, configurable: true });
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+const now = Date.now();
 const sessionsByProject: Record<string, SessionProjection[]> = {
   alpha: [
-    { id: "a1", projectId: "alpha", title: "Alpha session one", status: "idle", createdAt: 1, updatedAt: 2 },
-    { id: "a2", projectId: "alpha", title: "Alpha session two", status: "idle", createdAt: 1, updatedAt: 1, worktreePath: "/work/alpha-feature", branch: "feature/ui" },
+    { id: "a1", projectId: "alpha", title: "Alpha session one", status: "idle", createdAt: now, updatedAt: now, lastTurnAt: now },
+    { id: "a2", projectId: "alpha", title: "Alpha session two", status: "idle", createdAt: now, updatedAt: now, lastTurnAt: now, worktreePath: "/work/alpha-feature", branch: "feature/ui" },
   ],
   beta: [
-    { id: "b1", projectId: "beta", title: "Beta session", status: "idle", createdAt: 1, updatedAt: 1 },
+    { id: "b1", projectId: "beta", title: "Beta session", status: "idle", createdAt: now, updatedAt: now, lastTurnAt: now },
   ],
 };
 
@@ -61,7 +62,7 @@ register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const store = await import("../src/store.ts");
-const { getSidebarViewMode, parseSidebarViewMode, setSidebarViewMode, VIEW_MODE_KEY } = await import("../src/sidebarPrefs.ts");
+const { getSidebarViewMode, parseSidebarViewMode, setSidebarViewMode, VIEW_MODE_KEY, DATE_GROUPS_KEY, getShowDateGroups, parseShowDateGroups, setShowDateGroups } = await import("../src/sidebarPrefs.ts");
 const { default: Sidebar, PEEK_LEAVE_MS } = await import("../src/components/Sidebar.tsx");
 const { setSidebarLayout } = await import("../src/sidebarLayout.ts");
 
@@ -91,6 +92,19 @@ test("parseSidebarViewMode defaults to the session tree; setter persists and rou
   setSidebarViewMode("rail");
   assert.equal(getSidebarViewMode(), "rail");
   assert.equal(localStorage.getItem(VIEW_MODE_KEY), "rail");
+});
+
+test("parseShowDateGroups defaults on; setter persists and round-trips", () => {
+  assert.equal(parseShowDateGroups(null), true);
+  assert.equal(parseShowDateGroups("bogus"), true);
+  assert.equal(parseShowDateGroups("false"), false);
+  setShowDateGroups(true);
+  assert.equal(getShowDateGroups(), true);
+  assert.equal(localStorage.getItem(DATE_GROUPS_KEY), "true");
+  setShowDateGroups(false);
+  assert.equal(getShowDateGroups(), false);
+  assert.equal(localStorage.getItem(DATE_GROUPS_KEY), "false");
+  setShowDateGroups(true);
 });
 
 test("remote projects are marked separately from local projects in the sidebar", async () => {
@@ -284,6 +298,38 @@ test("project name and icon open the same actions menu in tree and rail views", 
   }
 });
 
+test("rail project icons show a compact named hover card without a native title", async () => {
+  const ticket = store.beginProjectListRequest();
+  store.publishProjectList(ticket, [project("alpha"), project("beta")]);
+  store.activateProject("alpha");
+  setSidebarViewMode("rail");
+  setSidebarLayout({ collapsed: false, width: 332 });
+
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(Sidebar)); });
+
+    const railAlpha = container.querySelector<HTMLButtonElement>('.sidebar-project-rail-item[aria-label="alpha"]');
+    assert.ok(railAlpha);
+    assert.equal(railAlpha?.getAttribute("title"), "", "the native delayed title is suppressed");
+
+    // Focus is the keyboard-accessible equivalent of hover and must reveal the
+    // same project identity immediately.
+    await act(async () => { railAlpha!.focus(); });
+    const tooltip = document.body.querySelector<HTMLElement>(".sidebar-project-rail-tooltip");
+    assert.ok(tooltip, "rail project focus shows the named tooltip card");
+    assert.equal(tooltip?.querySelector("strong")?.textContent, "alpha");
+    assert.equal(tooltip?.querySelector(".sidebar-project-rail-tooltip-copy > span")?.textContent, "/work/alpha");
+    assert.equal(tooltip?.getAttribute("data-side"), "right", "the card is anchored beside the project icon");
+  } finally {
+    setSidebarLayout({ collapsed: false });
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
 test("project menu selection keeps one multi-session selection across projects", async () => {
   const ticket = store.beginProjectListRequest();
   store.publishProjectList(ticket, [project("alpha"), project("beta")]);
@@ -415,5 +461,67 @@ test("the rail switch collapses only the sessions, which peek back on hover", as
     await act(async () => { root.unmount(); });
     container.remove();
     t.mock.timers.reset();
+  }
+});
+
+test("session filter menu can hide recency date-group headings", async () => {
+  const now = Date.now();
+  const twoDaysAgo = now - 2 * 24 * 60 * 60 * 1000;
+  const ticket = store.beginProjectListRequest();
+  store.publishProjectList(ticket, [project("alpha")]);
+  store.activateProject("alpha");
+  store.setSessions("alpha", [
+    {
+      id: "a-pin", projectId: "alpha", title: "Pinned chat", status: "idle",
+      createdAt: now, updatedAt: now, pinned: { position: 0 },
+    },
+    {
+      id: "a-today", projectId: "alpha", title: "Today chat", status: "idle",
+      createdAt: now, updatedAt: now, lastTurnAt: now,
+    },
+    {
+      id: "a-older", projectId: "alpha", title: "Older chat", status: "idle",
+      createdAt: twoDaysAgo, updatedAt: twoDaysAgo, lastTurnAt: twoDaysAgo,
+    },
+  ]);
+  setSidebarViewMode("tree");
+  setShowDateGroups(true);
+
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(Sidebar)); });
+    assert.match(container.textContent ?? "", /Today chat/);
+    assert.match(container.textContent ?? "", /Older chat/);
+    assert.equal(
+      container.querySelectorAll(".session-date-divider:not(.session-pinned-divider)").length,
+      1,
+      "older recency groups keep a date heading",
+    );
+    assert.ok(container.querySelector(".session-pinned-divider"), "pinned chats keep their own heading");
+
+    const options = container.querySelector<HTMLElement>('[aria-label="More sidebar actions"]');
+    assert.ok(options);
+    await act(async () => { click(options!); });
+    const dateGroups = [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')]
+      .find((item) => item.textContent?.trim() === "Date groups");
+    assert.ok(dateGroups, "the session filter menu exposes date-group visibility");
+    assert.equal(dateGroups!.getAttribute("aria-checked"), "true");
+    await act(async () => { click(dateGroups!); });
+    assert.equal(getShowDateGroups(), false);
+    assert.equal(
+      container.querySelector(".session-date-divider:not(.session-pinned-divider)"),
+      null,
+      "recency headings hide without dropping chats",
+    );
+    assert.ok(container.querySelector(".session-pinned-divider"));
+    assert.match(container.textContent ?? "", /Today chat/);
+    assert.match(container.textContent ?? "", /Older chat/);
+    assert.match(container.textContent ?? "", /Pinned chat/);
+  } finally {
+    setShowDateGroups(true);
+    await act(async () => { root.unmount(); });
+    container.remove();
   }
 });

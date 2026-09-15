@@ -18,15 +18,21 @@ interface OpenCodeCapabilityDelivery {
 
 const configured = new WeakSet<AgentRuntime>();
 
-const enabledMcpNames = (overlay: OpenCodeLaunchOverlay): Array<[string, string]> => {
-  const names = Object.entries(overlay.mcpNames ?? {});
-  if (!names.length || !overlay.configContent.trim()) return names;
-  try {
-    const config = JSON.parse(overlay.configContent) as { mcp?: Record<string, { enabled?: boolean }> };
-    return names.filter(([, name]) => config.mcp?.[name]?.enabled !== false);
-  } catch {
-    return names;
-  }
+const dataArray = (value: unknown): unknown[] | undefined => {
+  if (Array.isArray(value)) return value;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const data = (value as Record<string, unknown>).data;
+  return Array.isArray(data) ? data : undefined;
+};
+
+const readInventory = async <T>(
+  read: (path: string) => Promise<unknown>,
+  path: string,
+  parse: (value: unknown) => T | undefined,
+): Promise<{ value: T; source: string }> => {
+  const value = parse(await read(path));
+  if (value === undefined) throw new Error(`invalid OpenCode capability inventory at ${path}`);
+  return { value, source: `opencode:${path}` };
 };
 
 /** Read only from the captured physical generation. No probe invokes user tools. */
@@ -35,6 +41,7 @@ export async function verifyOpenCodeCapabilities(
   target: HarnessProvisioningTarget,
   read: (path: string) => Promise<unknown>,
   acknowledge: (receipt: HarnessCapabilityApplicationReceipt) => void = acknowledgeCapabilityApplication,
+  profile: "legacy" | "v2" = "legacy",
 ): Promise<void> {
   const receipt = (ids: string[], outcome: HarnessCapabilityApplicationReceipt["outcome"],
     reason: string, evidence: HarnessCapabilityApplicationReceipt["evidence"]) => {
@@ -43,34 +50,51 @@ export async function verifyOpenCodeCapabilities(
   const skills = overlay.skills ?? [];
   if (skills.length) {
     try {
-      const result = await read("/skill");
-      if (!Array.isArray(result)) throw new Error("unsupported skill listing");
+      const listed = await readInventory(read, profile === "v2" ? "/api/skill" : "/skill", dataArray);
+      const result = listed.value;
       for (const skill of skills) {
-        const found = result.some((row) => row && typeof row === "object"
-          && row.name === skill.name && row.location === skill.path);
+        const found = result.some((row) => {
+          const candidate = row && typeof row === "object" ? row as Record<string, unknown> : undefined;
+          return candidate?.name === skill.name && candidate.location === skill.path;
+        });
         receipt([skill.capabilityId], found ? "applied" : "failed",
           found ? "Native OpenCode skill discovered at the expected private path" : "Native OpenCode skill missing or shadowed",
-          { stage: found ? "discovered" : "staged", source: "opencode:/skill" });
+          { stage: found ? "discovered" : "staged", source: listed.source });
       }
     } catch {
       receipt(skills.map((skill) => skill.capabilityId), "unverifiable", "OpenCode native skill listing unavailable",
         { stage: "staged", source: "opencode:launch" });
     }
   }
-  // Native Polyth tools keep the scoped callback bridge in the launch config as
-  // an explicitly disabled transport/debug entry. It is not supposed to appear
-  // connected in OpenCode and must therefore not be treated as a failed MCP.
-  const servers = enabledMcpNames(overlay);
+  const servers = Object.entries(overlay.mcpNames ?? {});
   if (servers.length) {
     try {
-      const result = await read("/mcp");
-      if (!result || typeof result !== "object" || Array.isArray(result)) throw new Error("unsupported MCP status");
+      const parse = (value: unknown) => {
+        const v2 = dataArray(value);
+        if (v2) return new Map(v2.flatMap((row) => row && typeof row === "object"
+          && typeof (row as Record<string, unknown>).name === "string"
+          ? [[(row as Record<string, unknown>).name as string, ((row as Record<string, unknown>).status as Record<string, unknown>)?.status] as const]
+          : []));
+        if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+        return new Map(Object.entries(value as Record<string, unknown>).map(([name, row]) => [
+          name,
+          row && typeof row === "object" ? (row as Record<string, unknown>).status : undefined,
+        ]));
+      };
+      let listed = await readInventory(read, profile === "v2" ? "/api/mcp" : "/mcp", parse);
+      // V2 returns before MCP catalog discovery completes. Only retry its
+      // explicit pending state; failed/disabled/auth-required are terminal.
+      const deadline = Date.now() + 10_000;
+      while (profile === "v2" && servers.some(([, name]) => listed.value.get(name) === "pending") && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        listed = await readInventory(read, "/api/mcp", parse);
+      }
       for (const [id, name] of servers) {
-        const state = (result as Record<string, { status?: string }>)[name]?.status;
+        const state = listed.value.get(name);
         const connected = state === "connected";
-        receipt([id], connected ? "applied" : "failed",
+        receipt([id], connected ? "applied" : state === "pending" ? "unverifiable" : "failed",
           connected ? "OpenCode reports MCP connected; tool invocation has not been verified" : "OpenCode did not report MCP connected",
-          { stage: connected ? "connected" : "staged", source: "opencode:/mcp" });
+          { stage: connected ? "connected" : "staged", source: listed.source });
       }
     } catch {
       receipt(servers.map(([id]) => id), "unverifiable", "OpenCode MCP status unavailable",

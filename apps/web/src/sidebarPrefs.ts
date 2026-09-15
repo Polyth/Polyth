@@ -121,6 +121,44 @@ export function useSidebarViewMode(): SidebarViewMode {
   );
 }
 
+// Date-group headings in the session list ("today", "2 days ago", …). Pure
+// presentation: hiding them does not change which chats match a filter.
+export const DATE_GROUPS_KEY = "polyth.sidebar.showDateGroups";
+
+export function parseShowDateGroups(raw: string | null): boolean {
+  return raw !== "false";
+}
+
+const readDateGroups = (): string | null => {
+  try { return localStorage.getItem(DATE_GROUPS_KEY); } catch { return null; }
+};
+const writeDateGroups = (value: string): void => {
+  try { localStorage.setItem(DATE_GROUPS_KEY, value); } catch { /* private mode */ }
+};
+
+let storedShowDateGroups = parseShowDateGroups(readDateGroups());
+const dateGroupListeners = new Set<() => void>();
+
+export function getShowDateGroups(): boolean {
+  return storedShowDateGroups;
+}
+
+export function setShowDateGroups(show: boolean): void {
+  storedShowDateGroups = show;
+  writeDateGroups(storedShowDateGroups ? "true" : "false");
+  for (const listener of [...dateGroupListeners]) listener();
+}
+
+export function useShowDateGroups(): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      dateGroupListeners.add(cb);
+      return () => { dateGroupListeners.delete(cb); };
+    },
+    getShowDateGroups,
+  );
+}
+
 // ---- sidebar project ordering (mobile/desktop toolbar) -----------------------
 // The compact drawer replaced its decorative title with a search/sort/filter
 // toolbar. "manual" order lets the user drag projects into an arbitrary order

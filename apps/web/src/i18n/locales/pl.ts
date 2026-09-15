@@ -1660,6 +1660,7 @@ export const pl: AppMessages = {
   "sidebar.message": "×",
   "sidebar.moreSidebarActions": "Więcej akcji na pasku bocznym",
   "sidebar.needsAttention": "Wymaga uwagi",
+  "sidebar.dateGroups": "Grupy dat",
   "sidebar.newChatInValue": "Nowy czat w {value}",
   "sidebar.newSessionInWorktree": "Pracuj w izolacji…",
   "sidebar.noMatchingSessions": "Brak pasujących sesji.",

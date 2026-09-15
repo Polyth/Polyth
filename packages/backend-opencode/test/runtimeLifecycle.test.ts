@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { writeFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
@@ -61,10 +62,28 @@ const isolatedLocalOptions = (directory: string, projectId = "project-a") => ({
 const createFakeChild = (
   pid: number,
   output: string,
+  options: { serveHealth?: boolean; basicPassword?: string } = {},
 ): FakeChild => {
   const emitter = new EventEmitter() as FakeChild;
   const stdout = new PassThrough();
   const stderr = new PassThrough();
+  const port = Number(/opencode server listening on https?:\/\/[^\s:]+:(\d+)/i.exec(output)?.[1]);
+  let healthServer: Server | undefined;
+  if (options.serveHealth !== false && Number.isSafeInteger(port) && port > 0 && !/EADDRINUSE/i.test(output)) {
+    healthServer = createServer((request, response) => {
+      if (request.method === "GET" && request.url === "/global/health") {
+        if (options.basicPassword !== undefined
+          && request.headers.authorization !== `Basic ${Buffer.from(`opencode:${options.basicPassword}`).toString("base64")}`) {
+          response.writeHead(401).end();
+          return;
+        }
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ healthy: true, version: "1.18.30" }));
+        return;
+      }
+      response.writeHead(404).end();
+    });
+  }
   let killed = false;
   let exitCode: number | null = null;
   let signalCode: NodeJS.Signals | null = null;
@@ -82,6 +101,7 @@ const createFakeChild = (
       emitter.observedSignals.push(signal);
       killed = true;
       signalCode = signal;
+      healthServer?.close();
       queueMicrotask(() => emitter.emit("exit", null, signal));
       return true;
     },
@@ -96,6 +116,7 @@ const createFakeChild = (
     signalCode: { get: () => signalCode },
   });
   setImmediate(() => {
+    healthServer?.listen(port, "127.0.0.1");
     stderr.write(output);
     if (/EADDRINUSE/i.test(output)) {
       exitCode = 1;
@@ -129,6 +150,7 @@ test("owned local runtimes require and export exact isolated writable DB paths",
     return createFakeChild(
       nextPid++,
       `opencode server listening on http://127.0.0.1:${Number(args.at(-1))}\n`,
+      { basicPassword: env.OPENCODE_SERVER_PASSWORD },
     );
   }) as unknown as typeof nodeSpawn;
   const leases: Array<Awaited<ReturnType<typeof createOwnedLocalEndpointLease>>> = [];
@@ -205,6 +227,158 @@ test("owned local runtimes require and export exact isolated writable DB paths",
   }
 });
 
+test("owned v2 startup ignores shared credentials and requires a fresh private health credential", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "polyth-v2-owned-health-"));
+  const sharedPassword = "v2-primary-password";
+  const oldPrimary = process.env.OPENCODE_PASSWORD;
+  const oldLegacy = process.env.OPENCODE_SERVER_PASSWORD;
+  process.env.OPENCODE_PASSWORD = sharedPassword;
+  process.env.OPENCODE_SERVER_PASSWORD = "legacy-fallback-must-not-win";
+  let expectedPassword = "";
+  const health = createServer((request, response) => {
+    if (request.method !== "GET" || request.url !== "/api/health") {
+      response.writeHead(404).end();
+      return;
+    }
+    const expected = `Basic ${Buffer.from(`opencode:${expectedPassword}`).toString("base64")}`;
+    if (!expectedPassword || request.headers.authorization !== expected) {
+      response.writeHead(401).end();
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ healthy: true, version: "2.0.3", pid: 42 }));
+  });
+  await new Promise<void>((resolveListen) => health.listen(0, "127.0.0.1", resolveListen));
+  const address = health.address();
+  if (!address || typeof address === "string") throw new Error("health server did not bind");
+  t.after(async () => {
+    if (oldPrimary === undefined) delete process.env.OPENCODE_PASSWORD;
+    else process.env.OPENCODE_PASSWORD = oldPrimary;
+    if (oldLegacy === undefined) delete process.env.OPENCODE_SERVER_PASSWORD;
+    else process.env.OPENCODE_SERVER_PASSWORD = oldLegacy;
+    await new Promise<void>((resolveClose) => health.close(() => resolveClose()));
+    await rm(directory, { recursive: true, force: true });
+  });
+  const port = address.port;
+  let childEnv: NodeJS.ProcessEnv | undefined;
+  const lease = await createOwnedLocalEndpointLease({
+    ...isolatedLocalOptions(directory),
+    cwd: directory,
+    inspectEngine: async () => ({ ...TEST_ENGINE, version: "opencode v2.0.3" }),
+    pickPort: async () => port,
+    spawn: ((
+      _bin: string,
+      _args: readonly string[],
+      options: { env?: NodeJS.ProcessEnv },
+    ) => {
+      childEnv = options.env;
+      expectedPassword = options.env?.OPENCODE_PASSWORD ?? "";
+      writeFileSync(options.env!.OPENCODE_DB!, "v2 database", { mode: 0o600 });
+      // V2 does not publish this old phrase. The fake emits it to prove the
+      // lease waits for the authenticated health endpoint instead.
+      return createFakeChild(
+        process.pid,
+        `opencode server listening on http://127.0.0.1:${port}\n`,
+        { serveHealth: false },
+      );
+    }) as unknown as typeof nodeSpawn,
+    readProcessIdentity: async () => ({
+      startIdentity: "v2-start", executable: "/usr/bin/opencode", command: "opencode serve",
+    }),
+    gracefulStopMs: 20,
+  });
+  t.after(() => lease.dispose());
+
+  const first = await lease.endpoint();
+  assert.equal(first.authentication.kind, "endpoint-headers");
+  if (first.authentication.kind !== "endpoint-headers") throw new Error("expected endpoint header authentication");
+  assert.ok(childEnv?.OPENCODE_PASSWORD);
+  assert.notEqual(childEnv?.OPENCODE_PASSWORD, sharedPassword);
+  const firstHeaders = await first.authentication.resolve();
+  assert.equal(
+    firstHeaders.authorization,
+    `Basic ${Buffer.from(`opencode:${childEnv?.OPENCODE_PASSWORD}`).toString("base64")}`,
+  );
+  assert.equal((await fetch(`${first.url}/api/health`)).status, 401);
+  assert.equal((await fetch(`${first.url}/api/health`, {
+    headers: { authorization: `Basic ${Buffer.from("opencode:incorrect").toString("base64")}` },
+  })).status, 401);
+  const second = await lease.restart("manual");
+  if (second.authentication.kind !== "endpoint-headers") throw new Error("expected endpoint header authentication");
+  const secondHeaders = await second.authentication.resolve();
+  assert.notEqual(secondHeaders.authorization, firstHeaders.authorization);
+  assert.equal((await fetch(`${second.url}/api/health`, {
+    headers: firstHeaders,
+  })).status, 401);
+  assert.equal((await fetch(`${second.url}/api/health`, {
+    headers: secondHeaders,
+  })).status, 200);
+});
+
+test("owned legacy startup ignores shared credentials and requires a fresh private health credential", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "polyth-legacy-owned-health-"));
+  const sharedPassword = "legacy-primary-password";
+  const oldPassword = process.env.OPENCODE_SERVER_PASSWORD;
+  process.env.OPENCODE_SERVER_PASSWORD = sharedPassword;
+  let expectedPassword = "";
+  const health = createServer((request, response) => {
+    if (request.method !== "GET" || request.url !== "/global/health") {
+      response.writeHead(404).end();
+      return;
+    }
+    const expected = `Basic ${Buffer.from(`opencode:${expectedPassword}`).toString("base64")}`;
+    if (!expectedPassword || request.headers.authorization !== expected) {
+      response.writeHead(401).end();
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ healthy: true, version: "1.18.31" }));
+  });
+  await new Promise<void>((resolveListen) => health.listen(0, "127.0.0.1", resolveListen));
+  const address = health.address();
+  if (!address || typeof address === "string") throw new Error("health server did not bind");
+  t.after(async () => {
+    if (oldPassword === undefined) delete process.env.OPENCODE_SERVER_PASSWORD;
+    else process.env.OPENCODE_SERVER_PASSWORD = oldPassword;
+    await new Promise<void>((resolveClose) => health.close(() => resolveClose()));
+    await rm(directory, { recursive: true, force: true });
+  });
+  const lease = await createOwnedLocalEndpointLease({
+    ...isolatedLocalOptions(directory),
+    cwd: directory,
+    pickPort: async () => address.port,
+    spawn: ((
+      _bin: string,
+      _args: readonly string[],
+      options: { env?: NodeJS.ProcessEnv },
+    ) => {
+      expectedPassword = options.env?.OPENCODE_SERVER_PASSWORD ?? "";
+      writeFileSync(options.env!.OPENCODE_DB!, "legacy database", { mode: 0o600 });
+      return createFakeChild(process.pid, "", { serveHealth: false });
+    }) as unknown as typeof nodeSpawn,
+    readProcessIdentity: async () => ({
+      startIdentity: "legacy-start", executable: "/usr/bin/opencode", command: "opencode serve",
+    }),
+    gracefulStopMs: 20,
+  });
+  t.after(() => lease.dispose());
+
+  const first = await lease.endpoint();
+  if (first.authentication.kind !== "endpoint-headers") throw new Error("expected endpoint header authentication");
+  const firstHeaders = await first.authentication.resolve();
+  assert.notEqual(expectedPassword, sharedPassword);
+  assert.equal((await fetch(`${first.url}/global/health`)).status, 401);
+  assert.equal((await fetch(`${first.url}/global/health`, {
+    headers: { authorization: `Basic ${Buffer.from(`opencode:${sharedPassword}`).toString("base64")}` },
+  })).status, 401);
+  const second = await lease.restart("manual");
+  if (second.authentication.kind !== "endpoint-headers") throw new Error("expected endpoint header authentication");
+  const secondHeaders = await second.authentication.resolve();
+  assert.notEqual(secondHeaders.authorization, firstHeaders.authorization);
+  assert.equal((await fetch(`${second.url}/global/health`, { headers: firstHeaders })).status, 401);
+  assert.equal((await fetch(`${second.url}/global/health`, { headers: secondHeaders })).status, 200);
+});
+
 test("default local process records separate servers sharing one project and worktree", async () => {
   const directory = await mkdtemp(join(tmpdir(), "polyth-local-process-isolation-"));
   const leases: Array<Awaited<ReturnType<typeof createOwnedLocalEndpointLease>>> = [];
@@ -220,6 +394,7 @@ test("default local process records separate servers sharing one project and wor
     return createFakeChild(
       nextPid++,
       `opencode server listening on http://127.0.0.1:${Number(args.at(-1))}\n`,
+      { basicPassword: spawnOptions.env?.OPENCODE_SERVER_PASSWORD },
     );
   }) as unknown as typeof nodeSpawn;
   const boot = async (runtimeId: string, port: number) => {
@@ -574,11 +749,15 @@ test("PID reuse is rejected without signalling the unrelated process", async () 
     child: { pid: 999, ...expected },
   }));
   const signalled: Array<{ pid: number; signal: NodeJS.Signals | 0 }> = [];
-  const child = createFakeChild(
+  const spawn = ((
+    _bin: string,
+    _args: readonly string[],
+    spawnOptions: { env?: NodeJS.ProcessEnv },
+  ) => createFakeChild(
     1001,
     "opencode server listening on http://127.0.0.1:41001\n",
-  );
-  const spawn = (() => child) as unknown as typeof nodeSpawn;
+    { basicPassword: spawnOptions.env?.OPENCODE_SERVER_PASSWORD },
+  )) as unknown as typeof nodeSpawn;
   try {
     const lease = await createOwnedLocalEndpointLease({
       ...isolatedLocalOptions(directory),
@@ -620,10 +799,11 @@ test("separate runtime directories do not reap each other's local child", async 
   const runtimeB = join(directory, "instance-b");
   const children: FakeChild[] = [];
   const signalled: number[] = [];
-  const spawn = ((_bin: string, args: readonly string[]) => {
+  const spawn = ((_bin: string, args: readonly string[], spawnOptions: { env?: NodeJS.ProcessEnv }) => {
     const child = createFakeChild(
       1100 + children.length,
       `opencode server listening on http://127.0.0.1:${args.at(-1)}\n`,
+      { basicPassword: spawnOptions.env?.OPENCODE_SERVER_PASSWORD },
     );
     children.push(child);
     return child;
@@ -675,6 +855,7 @@ test("endpoint() never hands out a dead owned child; it respawns", async () => {
     const child = createFakeChild(
       3000 + children.length,
       `opencode server listening on http://127.0.0.1:${port}\n`,
+      { basicPassword: spawnOptions.env?.OPENCODE_SERVER_PASSWORD },
     );
     children.push(child);
     return child;
@@ -712,11 +893,67 @@ test("endpoint() never hands out a dead owned child; it respawns", async () => {
   }
 });
 
+test("owned local readiness rejects an ambient listener that ignores credentials before retrying its exact child", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "polyth-endpoint-ambient-health-"));
+  const ambient = createServer((request, response) => {
+    if (request.url !== "/global/health") { response.writeHead(404).end(); return; }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ healthy: true, version: "1.18.31" }));
+  });
+  await new Promise<void>((resolveListen) => ambient.listen(0, "127.0.0.1", resolveListen));
+  const ambientAddress = ambient.address();
+  if (!ambientAddress || typeof ambientAddress === "string") throw new Error("ambient listener did not bind");
+  const fallback = createServer();
+  await new Promise<void>((resolveListen) => fallback.listen(0, "127.0.0.1", resolveListen));
+  const fallbackAddress = fallback.address();
+  if (!fallbackAddress || typeof fallbackAddress === "string") throw new Error("fallback port did not bind");
+  await new Promise<void>((resolveClose) => fallback.close(() => resolveClose()));
+  const ports = [ambientAddress.port, fallbackAddress.port];
+  const children: FakeChild[] = [];
+  const spawn = ((_bin: string, args: readonly string[], spawnOptions: { env?: NodeJS.ProcessEnv }) => {
+    const port = Number(args.at(-1));
+    const child = createFakeChild(
+      4000 + children.length,
+      children.length === 0
+        ? `Error: listen EADDRINUSE 127.0.0.1:${port}\n`
+        : `opencode server listening on http://127.0.0.1:${port}\n`,
+      { basicPassword: spawnOptions.env?.OPENCODE_SERVER_PASSWORD },
+    );
+    children.push(child);
+    return child;
+  }) as unknown as typeof nodeSpawn;
+  let lease: Awaited<ReturnType<typeof createOwnedLocalEndpointLease>> | undefined;
+  try {
+    lease = await createOwnedLocalEndpointLease({
+      ...isolatedLocalOptions(directory),
+      cwd: directory,
+      pickPort: async () => ports.shift() ?? 0,
+      spawn,
+      readProcessIdentity: async (pid) => ({
+        startIdentity: `start-${pid}`,
+        executable: "/usr/bin/opencode",
+        command: `opencode serve --port ${pid}`,
+      }),
+      gracefulStopMs: 20,
+      listenTimeoutMs: 1_000,
+      maxBindAttempts: 2,
+    });
+    const endpoint = await lease.endpoint();
+    assert.equal(endpoint.url, `http://127.0.0.1:${fallbackAddress.port}`);
+    assert.equal(children.length, 2, "ambient health must not publish the failed child port");
+    assert.equal(children[0]!.exitCode, 1, "the exact child reported its delayed bind collision");
+  } finally {
+    await lease?.dispose();
+    await new Promise<void>((resolveClose) => ambient.close(() => resolveClose()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("three local bind collisions select fresh ports and leak no children", async () => {
   const directory = await mkdtemp(join(tmpdir(), "polyth-endpoint-bind-"));
   const ports = [42001, 42002, 42003, 42004];
   const children: FakeChild[] = [];
-  const spawn = ((_bin: string, args: readonly string[]) => {
+  const spawn = ((_bin: string, args: readonly string[], spawnOptions: { env?: NodeJS.ProcessEnv }) => {
     const port = Number(args.at(-1));
     const collision = port !== 42004;
     const child = createFakeChild(
@@ -724,6 +961,7 @@ test("three local bind collisions select fresh ports and leak no children", asyn
       collision
         ? `Error: listen EADDRINUSE 127.0.0.1:${port}\n`
         : `opencode server listening on http://127.0.0.1:${port}\n`,
+      { basicPassword: spawnOptions.env?.OPENCODE_SERVER_PASSWORD },
     );
     children.push(child);
     return child;
@@ -861,6 +1099,7 @@ test("deleting owned runtime storage mints a new authority for the same engine",
       return createFakeChild(
         nextPid++,
         `opencode server listening on http://127.0.0.1:${Number(args.at(-1))}\n`,
+        { basicPassword: spawnOptions.env?.OPENCODE_SERVER_PASSWORD },
       );
     }) as unknown as typeof nodeSpawn,
     readProcessIdentity: async (pid) => ({
@@ -972,11 +1211,12 @@ test("developer override is spawned and recorded instead of the PATH binary", as
         return TEST_ENGINE;
       },
       pickPort: async () => 43211,
-      spawn: ((binary: string, args: readonly string[]) => {
+      spawn: ((binary: string, args: readonly string[], spawnOptions: { env?: NodeJS.ProcessEnv }) => {
         spawnedBinary = binary;
         return createFakeChild(
           8111,
           `opencode server listening on http://127.0.0.1:${Number(args.at(-1))}\n`,
+          { basicPassword: spawnOptions.env?.OPENCODE_SERVER_PASSWORD },
         );
       }) as unknown as typeof nodeSpawn,
       readProcessIdentity: async (pid) => ({
@@ -1322,7 +1562,7 @@ test("waitReady returns as soon as any health path succeeds without waiting on a
         await new Promise((resolveHang) => setTimeout(resolveHang, request.deadlineMs + 50));
         throw new Error("hung health");
       }
-      return { status: 200, body: { healthy: true } } as T;
+      return { status: 200, body: { healthy: true, version: "2.0.3", pid: 7 } } as T;
     },
     async mutate<T>(request: {
       method: "POST" | "PUT" | "PATCH" | "DELETE";

@@ -532,7 +532,7 @@ try {
     "-eo", "pid,ppid,pcpu,pmem,rss,vsz,stat,etime,args", "--sort=pid",
   ])).stdout;
   const info = await cdp.evaluate(`window.polythDesktop.getInfo()`);
-  assert.equal(info.opencodeVersion, "1.18.22");
+  assert.equal(info.opencodeVersion, "2.0.3");
   assert.equal(info.packaged, true);
   assert.equal(Boolean(info.lowResourceMode), profileMode === "low-resource");
   report.checks.desktopInfo = info;

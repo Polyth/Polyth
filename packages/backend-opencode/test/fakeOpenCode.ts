@@ -883,7 +883,7 @@ export const createFakeOpenCode = async (
       return true;
     }
     if (method === "GET" && path === "/api/health") {
-      jsonResponse(response, 200, { healthy: true, version: "fake-v2" });
+      jsonResponse(response, 200, { healthy: true, version: "fake-v2", pid: process.pid });
       return true;
     }
     if (method === "GET" && path === "/doc") {

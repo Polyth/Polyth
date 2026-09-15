@@ -9,7 +9,6 @@ import {
 } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, resolve, relative, sep } from "node:path";
-import { pathToFileURL } from "node:url";
 import type {
   CapabilitySecretResolver,
   HarnessCapabilityRecord,
@@ -26,7 +25,6 @@ import { stripJsonc } from "./config.ts";
 
 const SKILL_NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const MAX_SKILL_NAME = 64;
-const AGENT_TOOLS_ID = "polyth.agent-tools";
 
 export type OpenCodeLaunchOverlay = {
   configContent: string;
@@ -44,7 +42,6 @@ export type OpenCodeLaunchOverlay = {
 
 type OverlayRecord = {
   mcp: Record<string, Record<string, unknown>>;
-  plugins?: string[];
   configPath?: string;
   skills?: OpenCodeLaunchOverlay["skills"];
   mcpNames?: Record<string, string>;
@@ -62,7 +59,6 @@ const overlayKeyOf = (context: HarnessContext): string =>
 const serializeOverlay = (record: OverlayRecord): OpenCodeLaunchOverlay => {
   const config: Record<string, unknown> = {};
   if (Object.keys(record.mcp).length > 0) config.mcp = record.mcp;
-  if (record.plugins?.length) config.plugin = record.plugins;
   return {
     configContent: Object.keys(config).length > 0 ? JSON.stringify(config) : "",
     env: { ...record.env },
@@ -94,19 +90,22 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 export function applyOpenCodeLaunchOverlay(
   env: NodeJS.ProcessEnv,
   overlay: OpenCodeLaunchOverlay | undefined,
+  profile: "legacy" | "v2" = "legacy",
 ): NodeJS.ProcessEnv {
   if (!overlay) return { ...env };
   const next: NodeJS.ProcessEnv = { ...env, ...overlay.env };
-  if (overlay.configPath) {
-    if (env.OPENCODE_CONFIG && resolve(env.OPENCODE_CONFIG) !== overlay.configPath) {
+  // V2 normalizes the V1 config form itself. Keep one immutable overlay.
+  const { configPath, configContent } = overlay;
+  if (configPath) {
+    if (env.OPENCODE_CONFIG && resolve(env.OPENCODE_CONFIG) !== configPath) {
       throw new Error("Native Polyth skills require a private OPENCODE_CONFIG; an existing custom config cannot be relocated safely");
     }
-    next.OPENCODE_CONFIG = overlay.configPath;
+    next.OPENCODE_CONFIG = configPath;
   }
-  if (!overlay.configContent.trim()) return next;
+  if (!configContent.trim()) return next;
   const existing = env.OPENCODE_CONFIG_CONTENT?.trim();
   if (!existing) {
-    next.OPENCODE_CONFIG_CONTENT = overlay.configContent;
+    next.OPENCODE_CONFIG_CONTENT = configContent;
     return next;
   }
   let base: Record<string, unknown>;
@@ -117,15 +116,13 @@ export function applyOpenCodeLaunchOverlay(
   } catch {
     throw new Error("invalid existing OPENCODE_CONFIG_CONTENT; refusing to overwrite user configuration");
   }
-  const parsedExtra = JSON.parse(stripJsonc(overlay.configContent)) as unknown;
+  const parsedExtra = JSON.parse(stripJsonc(configContent)) as unknown;
   if (!isPlainObject(parsedExtra)) throw new Error("invalid generated OpenCode overlay configuration");
   const extra = parsedExtra;
   const baseMcp = isPlainObject(base.mcp) ? base.mcp : {};
   const extraMcp = isPlainObject(extra.mcp) ? extra.mcp : {};
   const baseSkills = isPlainObject(base.skills) ? base.skills : {};
   const extraSkills = isPlainObject(extra.skills) ? extra.skills : {};
-  const basePlugins = Array.isArray(base.plugin) ? base.plugin : [];
-  const extraPlugins = Array.isArray(extra.plugin) ? extra.plugin : [];
   next.OPENCODE_CONFIG_CONTENT = JSON.stringify({
     ...base,
     ...extra,
@@ -133,8 +130,13 @@ export function applyOpenCodeLaunchOverlay(
       ...baseSkills, ...extraSkills,
       paths: [...new Set([...(Array.isArray(baseSkills.paths) ? baseSkills.paths : []), ...(Array.isArray(extraSkills.paths) ? extraSkills.paths : [])])],
     } } : {}),
-    ...(Object.keys(baseMcp).length || Object.keys(extraMcp).length ? { mcp: { ...baseMcp, ...extraMcp } } : {}),
-    ...(basePlugins.length || extraPlugins.length ? { plugin: [...new Set([...basePlugins, ...extraPlugins])] } : {}),
+    ...(profile === "v2" && isPlainObject(baseMcp.servers)
+      ? { mcp: { ...baseMcp, servers: { ...baseMcp.servers, ...Object.fromEntries(Object.entries(extraMcp).map(([name, value]) => {
+        const entry = value as Record<string, unknown>;
+        const { enabled, ...fields } = entry;
+        return [name, { ...fields, ...(typeof enabled === "boolean" ? { disabled: !enabled } : {}) }];
+      })) } } }
+      : Object.keys(baseMcp).length || Object.keys(extraMcp).length ? { mcp: { ...baseMcp, ...extraMcp } } : {}),
   });
   return next;
 }
@@ -145,9 +147,9 @@ const supportFor = (_context: HarnessContext): HarnessCapabilitySupport => ({
   kinds: {
     instruction: { modes: ["prompt"], mutability: "immediate", configScope: "project", remote: false },
     "mcp-server": { modes: ["config"], mutability: "requires-restart", configScope: "project", remote: false },
-    // Planning remains on the portable secure bridge. The OpenCode adapter
-    // presents those scoped tools natively through a generated plugin instead
-    // of exposing the synthetic bridge as a model-facing MCP namespace.
+    // Tool delivery stays on the portable scoped MCP bridge. Its stdio
+    // protocol preserves the tool error and cancellation path that OpenCode
+    // v2's generated-plugin ABI does not expose stably enough for Polyth.
     tool: { modes: ["mcp"], mutability: "requires-restart", remote: false, configScope: "project" },
     skill: { modes: ["filesystem"], mutability: "requires-restart", configScope: "project", remote: false },
     context: { modes: ["prompt"], mutability: "immediate", configScope: "project", remote: false },
@@ -253,41 +255,6 @@ const overlayMcpEntry = (
   };
 };
 
-const nativeActionTitle = String.raw`const actionTitle = (tool, input) => {
-  const raw = typeof input?.action === "string" ? input.action : tool
-  const parts = raw.split(".").filter(Boolean)
-  const verb = parts.at(-1) ?? raw
-  const subject = parts.length > 1 ? parts.at(-2) : "Polyth"
-  return (verb.charAt(0).toUpperCase() + verb.slice(1)) + " " + subject
-}`;
-
-const nativeToolSource = (toolItems: HarnessProvisioningPlan["items"]): string => {
-  const entries = toolItems.map((item) => {
-    if (item.capability.kind !== "tool") throw new Error("Native OpenCode plugin received a non-tool capability");
-    const capability = item.capability;
-    const schema = capability.inputSchema as Record<string, unknown>;
-    const args = isPlainObject(schema.properties) ? schema.properties : {};
-    return `    ${JSON.stringify(capability.name)}: {\n`
-      + `      description: ${JSON.stringify(capability.description)},\n`
-      + `      args: ${JSON.stringify(args)},\n`
-      + `      async execute(input, context) {\n`
-      + `        const endpoint = process.env.POLYTH_AGENT_TOOLS_URL\n`
-      + `        const token = process.env.POLYTH_AGENT_TOOLS_TOKEN\n`
-      + `        const title = actionTitle(${JSON.stringify(capability.name)}, input)\n`
-      + `        context.metadata?.({ title, metadata: { polyth: { capabilityId: ${JSON.stringify(capability.id)}, action: input?.action ?? null } } })\n`
-      + `        if (!endpoint || !token) return { title, output: JSON.stringify({ error: "Polyth native tool connection is unavailable" }) }\n`
-      + `        const response = await fetch(endpoint, { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify({ id: ${JSON.stringify(capability.id)}, arguments: input ?? {} }), signal: context.abort })\n`
-      + `        const text = await response.text()\n`
-      + `        let result = null\n`
-      + `        try { result = JSON.parse(text) } catch {}\n`
-      + `        if (!response.ok) return { title, output: JSON.stringify(result ?? { error: text || ("Polyth " + response.status) }) }\n`
-      + `        return { title, output: typeof result?.output === "string" ? result.output : JSON.stringify(result), ...(result?.metadata ? { metadata: result.metadata } : {}) }\n`
-      + `      },\n`
-      + `    },\n`;
-  }).join("");
-  return `${nativeActionTitle}\nexport const PolythPlugin = async () => ({\n  tool: {\n${entries}  },\n})\n`;
-};
-
 export function polythSkillId(owner: string, name: string): string {
   const raw = `polyth-${owner}-${name}`
     .toLowerCase()
@@ -352,7 +319,6 @@ export function createOpenCodeProvisioner(_applier: BackendConfigApplier): Harne
       const overlayMcp: Record<string, Record<string, unknown>> = {};
       const spawnCapabilityIds: string[] = [];
       const nativeSkills: NonNullable<OpenCodeLaunchOverlay["skills"]> = [];
-      const nativePlugins: string[] = [];
       const mcpNames: Record<string, string> = {};
       let configPath: string | undefined;
       const skillItems = plan.items.filter((item) => item.capability.kind === "skill");
@@ -394,29 +360,6 @@ export function createOpenCodeProvisioner(_applier: BackendConfigApplier): Harne
 
       const mcpItems = plan.items.filter((item) => item.capability.kind === "mcp-server");
       const toolItems = plan.items.filter((item) => item.capability.kind === "tool");
-      const liveToolItems = toolItems.filter((item) => item.mode !== "unsupported");
-      const agentTools = mcpItems.find((item) => item.capability.id === AGENT_TOOLS_ID);
-      let nativeToolsReady = false;
-      if (liveToolItems.length && agentTools?.capability.kind === "mcp-server") {
-        try {
-          const connection = secrets.mcpSecrets(AGENT_TOOLS_ID);
-          const endpoint = connection.POLYTH_AGENT_TOOLS_URL;
-          const token = connection.POLYTH_AGENT_TOOLS_TOKEN;
-          if (!endpoint || !token) throw new Error("Scoped agent-tools connection is incomplete");
-          const dir = runtimeRoot(context, "revisions", revisionToken(plan.desiredRevision), "plugins");
-          if (!dir) throw new Error("Native OpenCode tools require Space storage");
-          mkdirSync(dir, { recursive: true, mode: 0o700 });
-          const pluginPath = join(dir, "polyth-agent-tools.js");
-          writeRevisionFile(pluginPath, nativeToolSource(liveToolItems));
-          nativePlugins.push(pathToFileURL(pluginPath).href);
-          overlayEnv.POLYTH_AGENT_TOOLS_URL = endpoint;
-          overlayEnv.POLYTH_AGENT_TOOLS_TOKEN = token;
-          nativeToolsReady = true;
-        } catch (error) {
-          for (const item of liveToolItems) records.push(recordFor(item, "failed", `Could not stage native OpenCode tool: ${(error as Error).message}`.slice(0, 280)));
-        }
-      }
-
       try {
         for (const item of mcpItems) {
           if (item.capability.kind !== "mcp-server") continue;
@@ -434,17 +377,6 @@ export function createOpenCodeProvisioner(_applier: BackendConfigApplier): Harne
             continue;
           }
           const entry = overlayMcpEntry(context, plan.desiredRevision, overlayEnv, item.capability, secrets);
-          if (item.capability.id === AGENT_TOOLS_ID && nativeToolsReady) {
-            // Keep a disabled config entry as transport/debug evidence and for
-            // compatibility with older OpenCode launch diagnostics. The model
-            // sees only the generated native tools.
-            entry.enabled = false;
-            overlayMcp[item.capability.name] = entry;
-            mcpNames[item.capability.id] = item.capability.name;
-            spawnCapabilityIds.push(item.capability.id);
-            records.push(recordFor(item, "pending", "Private disabled MCP transport backing native OpenCode Polyth tools"));
-            continue;
-          }
           overlayMcp[item.capability.name] = entry;
           mcpNames[item.capability.id] = item.capability.name;
           spawnCapabilityIds.push(item.capability.id);
@@ -462,9 +394,7 @@ export function createOpenCodeProvisioner(_applier: BackendConfigApplier): Harne
             item.mode === "unsupported" ? "unsupported" : "pending",
             item.mode === "unsupported"
               ? "OpenCode does not support this capability"
-              : nativeToolsReady
-                ? "Presented as a native OpenCode plugin tool over the scoped Polyth capability bridge"
-                : "Staged through the private OpenCode MCP launch overlay",
+              : "Presented through the scoped Polyth MCP capability bridge",
           ));
           if (item.mode !== "unsupported") spawnCapabilityIds.push(item.capability.id);
         }
@@ -483,7 +413,6 @@ export function createOpenCodeProvisioner(_applier: BackendConfigApplier): Harne
       const promptText = promptIds.length ? renderCapabilityText(plan) : undefined;
       overlayStore.set(overlayKeyOf(context), {
         mcp: overlayMcp,
-        plugins: nativePlugins,
         configPath,
         skills: nativeSkills,
         mcpNames,

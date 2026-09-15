@@ -52,25 +52,16 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
     ? value as Record<string, unknown>
     : undefined;
 
-const protocolMarker = (value: unknown): "legacy" | "v2" | undefined => {
-  const body = asRecord(value);
-  const nested = asRecord(body?.data);
-  for (const candidate of [
-    body?.protocol,
-    body?.api,
-    body?.apiVersion,
-    nested?.protocol,
-    nested?.api,
-    nested?.apiVersion,
-  ]) {
-    if (typeof candidate !== "string") continue;
-    const normalized = candidate.toLowerCase();
-    if (normalized === "v2" || normalized === "2" || normalized === "beta-v2") return "v2";
-    if (normalized === "legacy" || normalized === "v1" || normalized === "1") return "legacy";
-  }
-  const capabilities = asRecord(body?.capabilities) ?? asRecord(nested?.capabilities);
-  if (capabilities?.v2 === true) return "v2";
-  return undefined;
+/** Both released protocols report application health; a successful HTML page
+ * or an arbitrary JSON response is not evidence that OpenCode is ready. */
+export const isOpenCodeHealth = (value: unknown): boolean => {
+  const response = asRecord(value);
+  if (!response) return false;
+  if (typeof response.status === "number" && response.status !== 200) return false;
+  const body = typeof response.status === "number" ? asRecord(response.body) : response;
+  return body?.healthy === true
+    && typeof body.version === "string" && body.version.trim().length > 0
+    && (body.pid === undefined || (Number.isSafeInteger(body.pid) && (body.pid as number) >= 0));
 };
 
 const queryOptional = async (
@@ -87,10 +78,18 @@ const queryOptional = async (
     });
     const response = asRecord(result);
     if (typeof response?.status !== "number") return result;
-    if (response.status < 200 || response.status >= 300) return undefined;
+    if ([404, 405, 501].includes(response.status)) return undefined;
+    if (response.status < 200 || response.status >= 300) {
+      throw Object.assign(new Error(`OpenCode protocol probe ${path} failed (HTTP ${response.status})`), {
+        code: response.status === 401 || response.status === 403 ? "auth-rejected" : "unavailable",
+        status: response.status,
+      });
+    }
     return response.body;
-  } catch {
-    return undefined;
+  } catch (error) {
+    const status = asRecord(error)?.status;
+    if (status === 404 || status === 405 || status === 501) return undefined;
+    throw error;
   }
 };
 
@@ -99,23 +98,19 @@ const performProbe = async (
   endpoint: RuntimeEndpoint,
   deadlineMs: number,
 ): Promise<ProtocolProbe> => {
-  // `/doc` is a generated OpenAPI document (~0.5–1s, hundreds of KB). Owned
-  // OpenCode already proved liveness via `/global/health`; prompt paths are
-  // negotiated lazily on first submit. Probe health first so connect is not
-  // gated on that document.
+  // Probe the small health contracts before the generated OpenAPI document.
   const globalHealth = await queryOptional(
     transport,
     endpoint,
     "/global/health",
     deadlineMs,
   );
-  const globalMarker = protocolMarker(globalHealth);
-  if (globalMarker) return { protocol: globalMarker, legacyPromptPaths: [] };
-  if (globalHealth !== undefined) return { protocol: "legacy", legacyPromptPaths: [] };
+  if (isOpenCodeHealth(globalHealth)) return { protocol: "legacy", legacyPromptPaths: [] };
 
   const apiHealth = await queryOptional(transport, endpoint, "/api/health", deadlineMs);
-  const apiMarker = protocolMarker(apiHealth);
-  if (apiMarker) return { protocol: apiMarker, legacyPromptPaths: [] };
+  // Released V2 exposes this small process health contract. Legacy health wins
+  // above even when a 1.x server also advertises experimental V2 routes.
+  if (isOpenCodeHealth(apiHealth)) return { protocol: "v2", legacyPromptPaths: [] };
 
   const document = await queryOptional(transport, endpoint, "/doc", deadlineMs);
   const legacyPromptPaths = legacyPromptPathsFromDocument(document);
@@ -142,7 +137,12 @@ export const probeProtocol = (
   const key = cacheKey(endpoint);
   const cached = byGeneration.get(key);
   if (cached) return cached;
-  const pending = performProbe(transport, endpoint, deadlineMs);
+  const pending = performProbe(transport, endpoint, deadlineMs).catch((error) => {
+    // A failed probe is not a protocol decision. A repaired transport or
+    // credential can be tried again without changing unrelated runtime state.
+    byGeneration!.delete(key);
+    throw error;
+  });
   byGeneration.set(key, pending);
   return pending;
 };

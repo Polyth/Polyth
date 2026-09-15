@@ -75,3 +75,13 @@ test("bottom package docks expose edges and keep the launcher strip on the right
   assert.match(css, /\.app-shell:has\(\.rail-dock-bottom\) > \.railbar > \.rail-dock-bottom \{[\s\S]*inset-inline-end: var\(--rail-strip-width-right/);
   assert.match(css, /\.app-shell:has\(\.rail-dock-bottom\) > \.railbar > \.rail-icon-col\.plugin-strip \{[\s\S]*position: absolute;[\s\S]*inset-inline-end: 0;/);
 });
+
+test("workspace package hosts never blur Chat", async () => {
+  const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  const host = css.match(/\.railbar:has\(> \.rail-workspace\) \{([^}]*)\}/)?.[1] ?? "";
+  assert.match(host, /background: transparent !important;/);
+  assert.match(host, /-webkit-backdrop-filter: none !important;/);
+  assert.match(host, /\n  backdrop-filter: none !important;/);
+  assert.match(css, /\.railbar:has\(> \.rail-workspace\) > \.rail-icon-col\.plugin-strip \{[\s\S]*background: var\(--material-glass\);/);
+  assert.match(css, /\.railbar:not\(:has\(\.rail-fullscreen\)\):not\(:has\(> \.rail-workspace\)\):not\(:has\(> \.panel-sheet\)\)/);
+});

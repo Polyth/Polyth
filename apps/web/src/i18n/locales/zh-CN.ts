@@ -1660,6 +1660,7 @@ export const zhCN: AppMessages = {
   "sidebar.message": "×",
   "sidebar.moreSidebarActions": "更多侧边栏操作",
   "sidebar.needsAttention": "需要关注",
+  "sidebar.dateGroups": "日期分组",
   "sidebar.newChatInValue": "在{value}中新建聊天",
   "sidebar.newSessionInWorktree": "隔离工作…",
   "sidebar.noMatchingSessions": "没有匹配的会话。",

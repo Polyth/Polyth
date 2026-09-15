@@ -33,6 +33,35 @@ test("applyMcp merges into existing config without touching other keys", async (
   assert.deepEqual(cfg.mcp.web, { type: "remote", url: "https://x.example/mcp", enabled: false });
 });
 
+test("plugin edits preserve OpenCode v2 plugin objects and write the v2 key", async () => {
+  const dir = tmp();
+  writeFileSync(join(dir, "opencode.json"), JSON.stringify({
+    plugins: [{ package: "existing", options: { future: true }, opaque: { retain: true } }],
+    plugin: ["legacy-kept-separate"],
+  }));
+  const applier = createConfigApplier({ configDir: dir });
+  await applier.applyPlugins([["added", { strict: true }]]);
+  const cfg = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"));
+  assert.deepEqual(cfg.plugins, [
+    { package: "existing", options: { future: true }, opaque: { retain: true } },
+    { package: "added", options: { strict: true } },
+  ]);
+  assert.deepEqual(cfg.plugin, ["legacy-kept-separate"]);
+});
+
+test("agent and custom provider edits retain the released v2 field names", async () => {
+  const dir = tmp();
+  writeFileSync(join(dir, "opencode.json"), JSON.stringify({ agents: {}, providers: {} }));
+  const applier = createConfigApplier({ configDir: dir });
+  await applier.applyAgent("review", { mode: "subagent", prompt: "Review", model: { providerID: "openai", modelID: "gpt" } });
+  await applier.applyCustomProvider({ id: "local", name: "Local", protocol: "openai-compatible", baseURL: "http://127.0.0.1/v1" });
+  const cfg = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"));
+  assert.deepEqual(cfg.agents.review, { mode: "subagent", system: "Review", model: "openai/gpt" });
+  assert.equal(cfg.providers.local.package, "aisdk:@ai-sdk/openai-compatible");
+  assert.equal(cfg.providers.local.settings.baseURL, "http://127.0.0.1/v1");
+  assert.equal("provider" in cfg, false);
+});
+
 test("applyMcp refuses to overwrite a corrupt backend config", async () => {
   const dir = tmp();
   writeFileSync(join(dir, "opencode.json"), "{corrupt");
@@ -246,4 +275,55 @@ test("auto agent roles keep OpenCode config valid and omit the fixed model", asy
   assert.equal(cfg.agent.review.mode, "subagent");
   assert.deepEqual(cfg.agent.review.options, { "polyth.mode": "auto" });
   assert.equal("model" in cfg.agent.review, false);
+});
+
+
+test("native V2 provider edits, inspection and removal use the same config map", async () => {
+  const dir = tmp();
+  writeFileSync(join(dir, "opencode.json"), JSON.stringify({
+    providers: { local: { package: "@ai-sdk/openai-compatible", name: "Local", settings: { baseURL: "http://127.0.0.1/v1", opaque: true }, headers: { "X-Custom": "preserve" }, models: { keep: { disabled: true } } } },
+    future: { retain: true },
+  }));
+  const applier = createConfigApplier({ configDir: dir });
+  assert.equal((await applier.inspectProvider("local"))?.baseURL, "http://127.0.0.1/v1");
+  assert.equal((await applier.inspectProvider("local"))?.protocol, "openai-compatible");
+  await applier.mergeDiscoveredModels("local", [{ id: "discovered" }]);
+  await applier.addManualModel("local", { id: "manual", context: 1000 });
+  await applier.removeConfiguredModel("local", "discovered");
+  await applier.applyStagedProviderOps([{ kind: "upsert", input: { id: "local", name: "Changed", protocol: "openai-compatible", baseURL: "http://127.0.0.1/v2" } }]);
+  const config = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"));
+  assert.equal(config.provider, undefined);
+  assert.deepEqual(config.providers.local.settings, { baseURL: "http://127.0.0.1/v2", opaque: true });
+  assert.deepEqual(config.providers.local.headers, { "X-Custom": "preserve" });
+  assert.deepEqual(config.providers.local.models, { keep: { disabled: true }, manual: { limit: { context: 1000 } } });
+  await applier.removeCustomProvider("local");
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8")), { future: { retain: true } });
+});
+
+test("mixed config edits follow the effective provider and deletion cannot reveal shadowed entries", async () => {
+  const dir = tmp();
+  const legacy = { name: "Legacy", npm: "@ai-sdk/openai-compatible", options: { baseURL: "http://127.0.0.1/legacy" }, models: { shared: { name: "Legacy model" } }, future: { legacy: true } };
+  const native = { name: "Native", package: "@ai-sdk/openai-compatible", settings: { baseURL: "http://127.0.0.1/native" }, models: { shared: { name: "Native model", disabled: true } }, future: { native: true } };
+  writeFileSync(join(dir, "opencode.json"), JSON.stringify({ provider: { mixed: legacy, legacyOnly: legacy }, providers: { mixed: native, untouched: native } }));
+  const applier = createConfigApplier({ configDir: dir });
+  assert.equal((await applier.inspectProvider("mixed"))?.name, "Native");
+  assert.equal((await applier.inspectProvider("legacyOnly"))?.name, "Legacy");
+  await applier.addManualModel("legacyOnly", { id: "added", context: 2048 });
+  await applier.addManualModel("mixed", { id: "added", output: 512 });
+  let config = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"));
+  assert.deepEqual(config.provider.legacyOnly.models.added, { limit: { context: 2048 } });
+  assert.equal(config.providers.legacyOnly, undefined);
+  assert.deepEqual(config.providers.mixed.models.added, { limit: { output: 512 } });
+  assert.equal(config.provider.mixed.models.added, undefined);
+  await applier.removeConfiguredModel("mixed", "shared");
+  config = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"));
+  assert.equal(config.provider.mixed.models?.shared, undefined);
+  assert.equal(config.providers.mixed.models.shared, undefined);
+  assert.deepEqual(config.providers.untouched, native);
+  await applier.applyStagedProviderOps([{ kind: "remove", id: "mixed" }]);
+  config = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"));
+  assert.equal(config.provider.mixed, undefined);
+  assert.equal(config.providers.mixed, undefined);
+  assert.deepEqual(config.provider.legacyOnly.future, { legacy: true });
+  assert.deepEqual(config.providers.untouched, native);
 });

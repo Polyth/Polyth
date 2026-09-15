@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import type {
   MutationTransportResult,
+  ObservationCheckpoint,
   OpenCodeTransport,
   RuntimeEndpoint,
   RuntimeSessionBinding,
@@ -10,12 +11,15 @@ import type {
 import {
   asOcEvent,
   createTranslateState,
+  normalizeOcObservation,
   translateOcEvent,
 } from "../src/events.ts";
 import {
   createV2ProtocolAdapter,
   flattenV2Models,
 } from "../src/protocolV2.ts";
+import { pulledV2MessageEvents } from "../src/v2Reconciliation.ts";
+import { v2FormAnswerOf, v2FormInfoOf } from "../src/v2Forms.ts";
 
 const endpoint: RuntimeEndpoint = {
   authorityId: "v2-test",
@@ -81,6 +85,7 @@ const transportDouble = (options: {
     },
     async mutate<T>(request: TransportMutationCall): Promise<MutationTransportResult<T>> {
       mutations.push(request);
+      if (!options.mutate && request.path.startsWith("/api/plugin/await-activation?")) return { kind: "response", status: 204, headers: {}, body: undefined as T };
       if (!options.mutate) throw new Error("mutation not scripted");
       return await options.mutate(request) as MutationTransportResult<T>;
     },
@@ -162,6 +167,7 @@ test("V2 model discovery distinguishes empty upstream data from failures", async
     const modelBody = await fixture();
     const fake = transportDouble({
       query: (path) => {
+        if (path.startsWith("/api/integration?")) return httpResponse({ data: [] });
         if (!path.startsWith("/api/model?")) return httpResponse(providerBody);
         modelQueries += 1;
         return httpResponse(modelQueries === 1
@@ -180,7 +186,7 @@ test("V2 model discovery distinguishes empty upstream data from failures", async
 
   await t.test("a persistently empty connected catalog surfaces backend-not-ready", async () => {
     const fake = transportDouble({
-      query: (path) => httpResponse(path.startsWith("/api/model?")
+      query: (path) => httpResponse(path.startsWith("/api/model?") || path.startsWith("/api/integration?")
         ? { location: endpoint.location, data: [] }
         : providerBody),
     });
@@ -221,7 +227,7 @@ test("V2 model discovery distinguishes empty upstream data from failures", async
     await assert.rejects(
       () => adapter.models(),
       (error: Error & { code?: string; status?: number; path?: string }) =>
-        error.message === "provider catalog unavailable"
+        error.message.includes("/api/provider")
         && error.code === "http-503"
         && error.status === 503
         && error.path?.startsWith("/api/provider?") === true,
@@ -255,105 +261,6 @@ test("V2 model discovery distinguishes empty upstream data from failures", async
       (error: Error & { code?: string }) => error.code === "protocol-response-invalid",
     );
   });
-});
-
-test("V2 provider listing and auth methods use native endpoints", async () => {
-  const fake = transportDouble({
-    query: (path) => path.startsWith("/provider/auth?")
-      ? httpResponse({ cursor: [{ type: "oauth", label: "Sign in" }] })
-      : httpResponse({
-          all: [
-            { id: "cursor", name: "Cursor" },
-            { id: "bad", name: "" },
-          ],
-        }),
-    mutate: (call) => ({
-      kind: "response",
-      status: 200,
-      headers: {},
-      body: call.path.includes("/oauth/authorize?")
-        ? { url: "https://cursor.test/login", method: "code", instructions: "Sign in" }
-        : true,
-    }),
-  });
-  const adapter = createV2ProtocolAdapter({ transport: fake.transport, endpoint });
-
-  assert.deepEqual(await adapter.listAllProviders!(), [{ id: "cursor", name: "Cursor" }]);
-  assert.deepEqual(await adapter.providerAuthMethods!(), {
-    cursor: [{ type: "oauth", label: "Sign in", upstreamIndex: 0 }],
-  });
-  assert.deepEqual(
-    await adapter.providerAuthorize!("cursor", 0, { instance: "cloud" }),
-    { url: "https://cursor.test/login", method: "code", instructions: "Sign in" },
-  );
-  assert.equal(await adapter.providerAuthCallback!("cursor", 0, "auth-code"), true);
-  assert.equal(await adapter.providerAuthCallback!("cursor", 0), true);
-  assert.equal(await adapter.setProviderApiKey!("openai", "sk-test", { region: "us" }), true);
-  assert.equal(await adapter.setProviderAuth!("https://org.example", { type: "wellknown", key: "OPENCODE_ORG_TOKEN", token: "tok" }), true);
-  assert.equal(await adapter.removeProviderAuth!("openai"), true);
-
-  assert.deepEqual(fake.mutations.map(({ method, path, body, replay }) => ({ method, path, body, replay })), [
-    {
-      method: "POST",
-      path: "/provider/cursor/oauth/authorize?directory=%2Fworkspace%2Fproject&workspace=worktree-a",
-      body: { method: 0, inputs: { instance: "cloud" } },
-      replay: { kind: "never" },
-    },
-    {
-      method: "POST",
-      path: "/provider/cursor/oauth/callback?directory=%2Fworkspace%2Fproject&workspace=worktree-a",
-      body: { method: 0, code: "auth-code" },
-      replay: { kind: "never" },
-    },
-    {
-      method: "POST",
-      path: "/provider/cursor/oauth/callback?directory=%2Fworkspace%2Fproject&workspace=worktree-a",
-      body: { method: 0 },
-      replay: { kind: "never" },
-    },
-    {
-      method: "PUT",
-      path: "/auth/openai?directory=%2Fworkspace%2Fproject&workspace=worktree-a",
-      body: { type: "api", key: "sk-test", metadata: { region: "us" } },
-      replay: { kind: "never" },
-    },
-    {
-      method: "PUT",
-      path: "/auth/https%3A%2F%2Forg.example?directory=%2Fworkspace%2Fproject&workspace=worktree-a",
-      body: { type: "wellknown", key: "OPENCODE_ORG_TOKEN", token: "tok" },
-      replay: { kind: "never" },
-    },
-    {
-      method: "DELETE",
-      path: "/auth/openai?directory=%2Fworkspace%2Fproject&workspace=worktree-a",
-      body: undefined,
-      replay: { kind: "never" },
-    },
-  ]);
-  assert.equal(fake.mutations[2]?.deadlineMs, 15 * 60 * 1000);
-});
-
-test("V2 auth method parsing keeps original upstream indices and ignores unknown types", async () => {
-  const fake = transportDouble({
-    query: (path) => path.startsWith("/provider/auth?")
-      ? httpResponse({
-          acme: [
-            { type: "mystery", label: "Future" },
-            { type: "oauth", label: "Browser" },
-            { label: "missing type" },
-            { type: "api", label: "API key", prompts: [{ type: "text", key: "region", message: "Region" }] },
-          ],
-        })
-      : httpResponse({ all: [] }),
-  });
-  const adapter = createV2ProtocolAdapter({ transport: fake.transport, endpoint });
-  const methods = await adapter.providerAuthMethods!();
-  assert.deepEqual(methods.acme?.map((item) => ({ type: item.type, index: item.upstreamIndex, label: item.label })), [
-    { type: "oauth", index: 1, label: "Browser" },
-    { type: "api", index: 3, label: "API key" },
-  ]);
-  assert.equal("providerAuthEntries" in adapter, false);
-  assert.equal(fake.queries.some((path) => path.startsWith("/auth?") || path === "/auth"), false);
 });
 
 test("V2 core session methods use native paths and reconcile pending requests", async () => {
@@ -409,7 +316,7 @@ test("V2 core session methods use native paths and reconcile pending requests", 
       if (path.startsWith("/api/session/active?")) {
         return httpResponse({ data: {} });
       }
-      if (path.startsWith("/api/permission/request?")) {
+      if (path.startsWith("/api/session/ses_created_1/permission?")) {
         return httpResponse({
           location: endpoint.location,
           data: [{
@@ -420,14 +327,30 @@ test("V2 core session methods use native paths and reconcile pending requests", 
           }],
         });
       }
-      if (path.startsWith("/api/question/request?")) {
+      if (path.startsWith("/api/session/ses_created_1/form?")) {
         return httpResponse({
-          location: endpoint.location,
           data: [{
-            id: "que_1",
+            id: "frm_1",
             sessionID: "ses_created_1",
-            questions: [{ header: "Proceed?", options: [] }],
+            title: "Release checklist",
+            fields: [
+              { key: "count", type: "integer", title: "Count", required: true },
+              { key: "proceed", type: "boolean", title: "Proceed", required: true },
+            ],
           }],
+        });
+      }
+      if (path.startsWith("/api/session/ses_created_1/form/frm_1?")) {
+        return httpResponse({
+          data: {
+            id: "frm_1",
+            sessionID: "ses_created_1",
+            title: "Release checklist",
+            fields: [
+              { key: "count", type: "integer", title: "Count", required: true },
+              { key: "proceed", type: "boolean", title: "Proceed", required: true },
+            ],
+          },
         });
       }
       if (path.startsWith("/api/session/ses_created_1/todo?")) {
@@ -469,6 +392,9 @@ test("V2 core session methods use native paths and reconcile pending requests", 
           body: { data: { id: "msg_admitted" } },
         };
       }
+      if (call.path.includes("/interrupt?")) {
+        return { kind: "response", status: 200, headers: {}, body: { interrupted: true } };
+      }
       return { kind: "response", status: 204, headers: {}, body: undefined };
     },
   });
@@ -486,7 +412,7 @@ test("V2 core session methods use native paths and reconcile pending requests", 
   assert.equal(ensured.kind, "confirmed");
   if (ensured.kind !== "confirmed") throw new Error("session was not created");
   assert.equal(ensured.value.backendSessionId, "ses_created_1");
-  assert.deepEqual(fake.mutations[0]?.body, {
+  assert.deepEqual(fake.mutations.find((call) => call.operationId === "op-create")?.body, {
     location: { directory: "/workspace/project", workspaceID: "worktree-a" },
   });
 
@@ -500,10 +426,14 @@ test("V2 core session methods use native paths and reconcile pending requests", 
   assert.equal(steered.kind, "confirmed");
   assert.equal((fake.mutations.find((call) => call.operationId === "op-submit")?.body as {
     delivery?: string;
-  }).delivery, "queue");
+  }).delivery, "steer");
   assert.equal((fake.mutations.find((call) => call.operationId === "op-steer")?.body as {
     delivery?: string;
   }).delivery, "steer");
+  assert.deepEqual(fake.mutations.find((call) => call.operationId === "op-submit")?.body, {
+    text: "hello V2",
+    delivery: "steer",
+  });
 
   assert.equal((await adapter.abort(live, "op-abort")).kind, "confirmed");
   assert.equal(
@@ -513,8 +443,8 @@ test("V2 core session methods use native paths and reconcile pending requests", 
   assert.equal(
     (await adapter.replyQuestion(
       live,
-      "que_1",
-      { answers: [["yes"]] },
+      "frm_1",
+      { answers: [["42"], ["true"]] },
       "op-question",
     )).kind,
     "confirmed",
@@ -528,7 +458,8 @@ test("V2 core session methods use native paths and reconcile pending requests", 
   assert.equal(snapshot.reconciliationOrdinal, 7);
   assert.equal(snapshot.permissions[0]?.requestId, "per_1");
   assert.deepEqual(snapshot.permissions[0]?.patterns, ["src/a.ts"]);
-  assert.equal(snapshot.questions[0]?.requestId, "que_1");
+  assert.equal(snapshot.questions[0]?.requestId, "frm_1");
+  assert.deepEqual(snapshot.questions[0]?.questions.map((question) => question.id), ["count", "proceed"]);
   assert.deepEqual(
     snapshot.events.find((entry) => entry.event.type === "task/snapshot")?.event,
     {
@@ -541,22 +472,122 @@ test("V2 core session methods use native paths and reconcile pending requests", 
   assert.ok(snapshot.events.some((event) => event.event.type === "assistant/message"));
   assert.equal(
     snapshot.state.value,
-    "unknown",
-    "a submitted turn invalidates fresh-create idle evidence without a comparable terminal state",
+    "idle",
+    "an inactive V2 session plus a completed assistant message is comparable terminal evidence",
   );
   assert.equal(adapter.eventStreamPath(), "/api/event");
 
-  const branch = await adapter.branchSession({
-    source: live,
-    target: binding(),
-    history: [],
-  }, "op-branch");
-  assert.deepEqual(branch, {
-    kind: "rejected",
-    code: "capability-unsupported",
-    message: "OpenCode V2 does not expose a session fork/branch endpoint",
+  assert.equal((await adapter.deleteSession(live, "op-delete")).kind, "confirmed");
+  assert.deepEqual(
+    fake.mutations.find((call) => call.operationId === "op-question")?.body,
+    { answer: { count: 42, proceed: true } },
+  );
+});
+
+test("V2 fork and native command preserve exact released request and history evidence", async () => {
+  const sourceRows = [
+    { id: "msg_user", type: "user", text: "one", time: { created: 1 } },
+    {
+      id: "msg_assistant",
+      type: "assistant",
+      time: { created: 2, completed: 3 },
+      content: [{ id: "txt_1", type: "text", text: "two" }],
+    },
+  ];
+  const childRows = [sourceRows[0]];
+  const fake = transportDouble({
+    query: (path) => {
+      if (path.startsWith("/api/session/ses_source/message?")) return httpResponse({ data: sourceRows, cursor: {} });
+      if (path.startsWith("/api/session/ses_child/message?")) return httpResponse({ data: childRows, cursor: {} });
+      throw new Error(`unexpected query ${path}`);
+    },
+    mutate: (call) => {
+      if (call.path.startsWith("/api/session/ses_source/fork?")) {
+        return { kind: "response", status: 200, headers: {}, body: { data: { id: "ses_child" } } };
+      }
+      if (call.path.startsWith("/api/session/ses_source/command?")) {
+        return { kind: "response", status: 204, headers: {}, body: undefined };
+      }
+      throw new Error(`unexpected mutation ${call.path}`);
+    },
   });
-  assert.equal((await adapter.deleteSession(live, "op-delete")).kind, "rejected");
+  const adapter = createV2ProtocolAdapter({ transport: fake.transport, endpoint });
+  const source = { ...binding("ses_source"), canonicalSessionId: "canonical-source" };
+  const target = { ...binding(), canonicalSessionId: "canonical-child" };
+
+  const branch = await adapter.branchSession({
+    source,
+    target,
+    history: [{ role: "user", parts: [{ type: "text", text: "one" }] }],
+  }, "op-fork");
+  assert.equal(branch.kind, "confirmed");
+  assert.deepEqual(fake.mutations[0]?.body, {
+    boundary: { type: "before", messageID: "msg_assistant" },
+  });
+  assert.deepEqual(await adapter.submit({
+    session: source,
+    text: "/deploy production",
+    command: { id: "native:deploy", owner: "native", name: "deploy", args: "production" },
+  }, "op-command"), { kind: "confirmed", value: {} });
+  assert.deepEqual(fake.mutations[1]?.body, {
+    command: "deploy",
+    text: "production",
+    delivery: "queue",
+  });
+});
+
+test("V2 mutation responses require their released response shape", async () => {
+  const fake = transportDouble({
+    query: () => httpResponse({ data: [] }),
+    mutate: () => ({ kind: "response", status: 200, headers: {}, body: { unexpected: true } }),
+  });
+  const adapter = createV2ProtocolAdapter({ transport: fake.transport, endpoint });
+  const outcome = await adapter.deleteSession(binding("ses_1"), "op-delete-malformed");
+  assert.equal(outcome.kind, "unknown");
+});
+
+test("V2 runtime attachments stay on their host and never read matching local files", async () => {
+  const scopedEndpoint = { ...endpoint, location: { directory: "/remote/project" } };
+  const fake = transportDouble({
+    query: () => httpResponse({ data: [] }),
+    mutate: () => ({ kind: "response", status: 200, headers: {}, body: { data: { id: "msg_1" } } }),
+  });
+  const adapter = createV2ProtocolAdapter({ transport: fake.transport, endpoint: scopedEndpoint });
+  const live = { ...binding("ses_1"), location: scopedEndpoint.location };
+  assert.equal((await adapter.submit({
+    session: live,
+    text: "read this",
+    attachments: [{ id: "attachment_1", name: "note.txt", mime: "text/plain", size: 5, path: "note.txt" }],
+  }, "op-file")).kind, "confirmed");
+  assert.deepEqual(fake.mutations[0]?.body, {
+    text: "read this",
+    files: [{ uri: "file:///remote/project/note.txt", name: "note.txt" }],
+    delivery: "steer",
+  });
+});
+
+test("V2 form replies recover typed answers and discard inactive generic rows", () => {
+  const form = v2FormInfoOf({
+    id: "frm_1",
+    sessionID: "ses_1",
+    title: "Conditional form",
+    fields: [
+      {
+        key: "mode",
+        type: "string",
+        required: true,
+        options: [{ value: "simple", label: "Simple" }, { value: "advanced", label: "Advanced" }],
+      },
+      { key: "detail", type: "integer", required: true, when: [{ key: "mode", op: "eq", value: "advanced" }] },
+      { key: "visited", type: "external", url: "https://example.test/confirm" },
+    ],
+  }, "ses_1");
+  assert.ok(form);
+  assert.deepEqual(v2FormAnswerOf(form!, {
+    answers: [["simple"], ["99"], ["true"]],
+  }), {
+    answer: { mode: "simple", visited: true },
+  });
 });
 
 test("V2 session and history reads follow cursor.next pagination", async () => {
@@ -627,14 +658,17 @@ test("V2 history and reconcile never send OpenCode's rejected message limit", as
             id: "msg_completed",
             type: "assistant",
             time: { created: 1, completed: 2 },
-            content: [{ id: "part_completed", type: "text", text: "done" }],
+            // Released V2 AssistantText has no content id; recovery derives a
+            // stable part key from the owning message and content position.
+            content: [{ type: "text", text: "done" }],
           }],
           cursor: {},
         });
       }
       if (path.startsWith("/api/session/active?")) return httpResponse({ data: {} });
-      if (path.startsWith("/api/permission/request?")) return httpResponse({ data: [] });
-      if (path.startsWith("/api/question/request?")) return httpResponse({ data: [] });
+      if (path.startsWith("/api/session/ses_limit/todo?")) return httpResponse({ message: "not available" }, 404);
+      if (path.startsWith("/api/session/ses_limit/permission?")) return httpResponse({ data: [] });
+      if (path.startsWith("/api/session/ses_limit/form?")) return httpResponse({ data: [] });
       if (path.startsWith("/api/session/ses_limit?")) {
         return httpResponse({ data: { id: "ses_limit" } });
       }
@@ -654,6 +688,124 @@ test("V2 history and reconcile never send OpenCode's rejected message limit", as
   }
 });
 
+test("released V2 pull identities use the text and reasoning ordinals independently", () => {
+  const events = pulledV2MessageEvents({
+    id: "msg_parts",
+    type: "assistant",
+    time: { created: 1, completed: 2 },
+    content: [
+      { type: "reasoning", text: "plan" },
+      { type: "text", text: "one" },
+      { type: "text", text: "two" },
+      { type: "reasoning", text: "check" },
+    ],
+  }, "ses_parts");
+  assert.deepEqual(events.slice(1).map((event) => {
+    const part = event.properties?.part as { id?: unknown } | undefined;
+    return part?.id;
+  }), [
+    "msg_parts:reasoning:0",
+    "msg_parts:text:0",
+    "msg_parts:text:1",
+    "msg_parts:reasoning:1",
+  ]);
+});
+
+test("released V2 tool terminal checkpoints agree between SSE and pull", () => {
+  const observed = {
+    authorityId: endpoint.authorityId,
+    generation: endpoint.generation,
+    location: endpoint.location,
+    backendSessionId: "ses_tools",
+    reconciliationOrdinal: 1,
+  };
+  const normalize = (data: unknown, state = createTranslateState(), checkpoint?: unknown) =>
+    normalizeOcObservation({
+      data,
+      channel: "sse",
+      observed,
+      current: observed,
+      state,
+      ...(checkpoint ? { checkpoint: checkpoint as never } : {}),
+    });
+  const native = (type: string, data: Record<string, unknown>) => ({
+    id: `evt_${type.replaceAll(".", "_")}`,
+    created: 1,
+    type,
+    durable: { aggregateID: "ses_tools", seq: 1, version: 2 },
+    data: { sessionID: "ses_tools", assistantMessageID: "msg_tools", ...data },
+  });
+  const liveState = createTranslateState();
+  normalize(native("session.tool.input.started", { id: "call_1", name: "read" }), liveState);
+  normalize(native("session.tool.called", { id: "call_1", input: { path: "foo" }, executed: false }), liveState);
+  const live = normalize(native("session.tool.success", {
+    id: "call_1",
+    content: [{ type: "text", text: "hello" }],
+    executed: true,
+  }), liveState);
+  assert.equal(live.kind, "accepted");
+  if (live.kind !== "accepted") throw new Error("live tool observation was not accepted");
+
+  const pulled = pulledV2MessageEvents({
+    id: "msg_tools",
+    type: "assistant",
+    time: { created: 1, completed: 2 },
+    content: [{
+      type: "tool",
+      id: "call_1",
+      name: "read",
+      state: { status: "completed", input: { path: "foo" }, content: [{ type: "text", text: "hello" }] },
+    }],
+  }, "ses_tools").at(-1);
+  assert.ok(pulled);
+  const recovered = normalizeOcObservation({
+    data: pulled,
+    channel: "pull",
+    observed,
+    current: observed,
+    state: createTranslateState(),
+    checkpoint: live.observation.checkpoint as ObservationCheckpoint | undefined,
+  });
+  assert.equal(recovered.kind, "accepted");
+  if (recovered.kind !== "accepted") throw new Error("pull tool observation was not accepted");
+  assert.deepEqual(recovered.observation.checkpoint, live.observation.checkpoint);
+
+  const errorState = createTranslateState();
+  normalize(native("session.tool.input.started", { id: "call_2", name: "write" }), errorState);
+  normalize(native("session.tool.called", { id: "call_2", input: { path: "bar" }, executed: false }), errorState);
+  const liveError = normalize(native("session.tool.failed", {
+    id: "call_2",
+    error: { type: "tool.execution", message: "denied" },
+    content: [{ type: "text", text: "partial result" }],
+    executed: false,
+  }), errorState);
+  assert.equal(liveError.kind, "accepted");
+  if (liveError.kind !== "accepted") throw new Error("live failed tool observation was not accepted");
+  const pulledError = pulledV2MessageEvents({
+    id: "msg_tools",
+    type: "assistant",
+    time: { created: 1, completed: 2 },
+    content: [{
+      type: "tool",
+      id: "call_2",
+      name: "write",
+      state: { status: "error", input: { path: "bar" }, error: { type: "tool.execution", message: "denied" }, content: [{ type: "text", text: "partial result" }] },
+    }],
+  }, "ses_tools").at(-1);
+  assert.ok(pulledError);
+  const recoveredError = normalizeOcObservation({
+    data: pulledError,
+    channel: "pull",
+    observed,
+    current: observed,
+    state: createTranslateState(),
+    checkpoint: liveError.observation.checkpoint as ObservationCheckpoint | undefined,
+  });
+  assert.equal(recoveredError.kind, "accepted");
+  if (recoveredError.kind !== "accepted") throw new Error("pull failed tool observation was not accepted");
+  assert.deepEqual(recoveredError.observation.checkpoint, liveError.observation.checkpoint);
+});
+
 test("V2 SSE frames normalize data payloads and native text events", () => {
   const direct = asOcEvent({
     id: "evt_direct",
@@ -670,42 +822,82 @@ test("V2 SSE frames normalize data payloads and native text events", () => {
   assert.equal(direct?.properties?.sessionID, "ses_1");
   assert.deepEqual(direct?.durable, { aggregateID: "ses_1", seq: 2, version: 2 });
   assert.equal(asOcEvent({
-    type: "permission.v2.asked",
+    type: "permission.asked",
     data: { sessionID: "ses_1", id: "permission_1" },
   })?.type, "permission.asked");
-  assert.equal(asOcEvent({
-    type: "question.v2.asked",
-    data: { sessionID: "ses_1", id: "question_1" },
-  })?.type, "question.asked");
+  const createdForm = asOcEvent({
+    id: "evt_form",
+    type: "form.created",
+    data: {
+      form: {
+        id: "frm_1",
+        sessionID: "ses_1",
+        title: "Confirm",
+        fields: [{ key: "approved", type: "boolean", title: "Approved", required: true }],
+      },
+    },
+  });
+  assert.ok(createdForm);
+  assert.deepEqual(translateOcEvent(createdForm!, createTranslateState()), [{
+    type: "question/asked",
+    requestId: "frm_1",
+    questions: [{
+      id: "approved",
+      title: "Approved",
+      prompt: "Approved",
+      type: "single",
+      options: [{ value: "true", label: "Yes" }, { value: "false", label: "No" }],
+      required: true,
+    }],
+  }]);
 
   const state = createTranslateState();
   const started = asOcEvent({
     id: "evt_started",
-    type: "session.next.text.started",
+    created: 1,
+    type: "session.text.started",
     data: {
-      timestamp: 1,
       sessionID: "ses_1",
       assistantMessageID: "msg_1",
-      textID: "txt_1",
+      ordinal: 0,
     },
   });
   const delta = asOcEvent({
     id: "evt_delta",
-    type: "session.next.text.delta",
+    created: 2,
+    type: "session.text.delta",
     data: {
-      timestamp: 2,
       sessionID: "ses_1",
       assistantMessageID: "msg_1",
-      textID: "txt_1",
+      ordinal: 0,
       delta: "hello",
+    },
+  });
+  const ended = asOcEvent({
+    id: "evt_ended",
+    created: 3,
+    type: "session.text.ended",
+    data: {
+      sessionID: "ses_1",
+      assistantMessageID: "msg_1",
+      ordinal: 0,
+      text: "hello",
     },
   });
   assert.ok(started);
   assert.ok(delta);
+  assert.ok(ended);
   assert.deepEqual(translateOcEvent(started, state), []);
   assert.deepEqual(translateOcEvent(delta, state), [{
     type: "assistant/chunk",
-    partId: "txt_1",
+    partId: "msg_1:text:0",
     text: "hello",
+  }]);
+  assert.deepEqual(translateOcEvent(ended, state), [{
+    type: "assistant/message",
+    partId: "msg_1:text:0",
+    text: "hello",
+    tokens: undefined,
+    cost: undefined,
   }]);
 });

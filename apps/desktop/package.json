@@ -25,8 +25,7 @@
   },
   "devDependencies": {
     "electron": "44.0.0",
-    "electron-builder": "26.15.3",
-    "yauzl": "3.4.0"
+    "electron-builder": "26.15.3"
   },
   "build": {
     "appId": "com.polyth.desktop",

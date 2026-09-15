@@ -1663,6 +1663,7 @@ export const en = {
   "sidebar.message": "×",
   "sidebar.moreSidebarActions": "More sidebar actions",
   "sidebar.needsAttention": "Needs attention",
+  "sidebar.dateGroups": "Date groups",
   "sidebar.newChatInValue": "New chat in {value}",
   "sidebar.newSessionInWorktree": "Work in isolation…",
   "sidebar.noMatchingSessions": "No matching sessions.",

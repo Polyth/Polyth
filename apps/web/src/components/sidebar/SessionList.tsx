@@ -43,6 +43,7 @@ import {
 } from "../../sessionDates.ts";
 import { Icon } from "../../icons.tsx";
 import { getLocale, tr } from "../../i18n/index.ts";
+import { useShowDateGroups } from "../../sidebarPrefs.ts";
 import { errorFeedback, successFeedback, tapFeedback } from "../../haptics.ts";
 import { horizontalDistance, SESSION_SWIPE_REVEAL, type GesturePoint } from "../../mobileGestures.ts";
 import { useShiftArmed } from "../../useShiftArmed.ts";
@@ -643,6 +644,7 @@ export default function SessionList({
   }, [titlesFingerprint]);
   const expandArchived = useStore((st) => st.settings.showArchived);
   const relativeTime = useStore((st) => st.settings.relativeTime);
+  const showDateGroups = useShowDateGroups();
   const [labels, setLabels] = useState<WorkspaceLabel[]>([]);
   const [worktrees, setWorktrees] = useState<Worktree[]>([]);
   const [collapsed, setCollapsed] = useState<ReadonlyMap<string, boolean>>(new Map());
@@ -804,8 +806,8 @@ export default function SessionList({
   };
 
   const dividerNow = Date.now();
-  const dateDivider = (timestamp: number, first: boolean) => {
-    if (first || sessionDateInputValue(timestamp) === sessionDateInputValue(dividerNow)) return null;
+  const dateDivider = (timestamp: number) => {
+    if (!showDateGroups || sessionDateInputValue(timestamp) === sessionDateInputValue(dividerNow)) return null;
     const label = sessionDateGroupLabel(timestamp, relativeTime, getLocale(), dividerNow);
     return (
       <div className="session-date-divider" role="separator" aria-label={label}>
@@ -892,9 +894,9 @@ export default function SessionList({
         </div>
       );
     };
-    return groupSessionsByActivityDate(roots).map((group, index) => (
+    return groupSessionsByActivityDate(roots).map((group) => (
       <div className="session-date-group" key={group.key}>
-        {dateDivider(group.timestamp, index === 0)}
+        {dateDivider(group.timestamp)}
         {group.sessions.map(renderNode)}
       </div>
     ));
@@ -902,9 +904,9 @@ export default function SessionList({
   const datedRows = (
     items: readonly SessionProjection[],
     render: (session: SessionProjection) => ReturnType<typeof row> = (session) => row(session),
-  ) => groupSessionsByActivityDate(items).map((group, index) => (
+  ) => groupSessionsByActivityDate(items).map((group) => (
     <div className="session-date-group" key={group.key}>
-      {dateDivider(group.timestamp, index === 0)}
+      {dateDivider(group.timestamp)}
       {group.sessions.map(render)}
     </div>
   ));

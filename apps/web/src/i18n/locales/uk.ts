@@ -1660,6 +1660,7 @@ export const uk: AppMessages = {
   "sidebar.message": "×",
   "sidebar.moreSidebarActions": "Більше дій на бічній панелі",
   "sidebar.needsAttention": "Потребує уваги",
+  "sidebar.dateGroups": "Секції за датою",
   "sidebar.newChatInValue": "Новий чат у {value}",
   "sidebar.newSessionInWorktree": "Працювати ізольовано…",
   "sidebar.noMatchingSessions": "Немає відповідних сесій.",

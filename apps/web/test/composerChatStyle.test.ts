@@ -92,7 +92,7 @@ test("conversation chrome shares one horizontal frame", () => {
   assert.match(frame, /\.timeline,\s*\.composer-chat\s*\{[^}]*padding-inline-start:\s*var\(--conversation-frame-inline-start\);[^}]*padding-inline-end:\s*var\(--conversation-frame-inline-end\)/s);
   assert.match(frame, /\.agent-status-dock\s*\{[^}]*width:\s*min\([\s\S]*calc\(100% - var\(--conversation-frame-inline-start\) - var\(--conversation-frame-inline-end\)\)/s);
   assert.match(frame, /@container app-shell \(min-width: 961px\)[\s\S]*\.focus-conversation\s*\{[^}]*--conversation-frame-inline-end:/s);
-  assert.match(frame, /\.app > \.header\.header-chat\s*\{[^}]*--conversation-frame-inline-start:/s);
+  assert.match(frame, /\.app > \.header\s*\{[^}]*--conversation-frame-inline-start:/s);
   assert.match(frame, /\.desktop-session-status\s*\{[^}]*var\(--conversation-frame-inline-start\)[^}]*var\(--conversation-frame-inline-end\)/s);
 });
 

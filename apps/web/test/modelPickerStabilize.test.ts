@@ -190,6 +190,38 @@ test("anchored surfaces stay in the visible band when both sides are short", asy
   }
 });
 
+test("horizontal anchored surfaces stay beside the trigger and flip when needed", async () => {
+  const { act, createElement, useRef } = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { useAnchoredPosition } = await import("../src/components/ui/useAnchoredPosition.ts");
+  const anchor = { getBoundingClientRect: () => ({ left: 100, right: 140, top: 200, bottom: 240, width: 40, height: 40 }) } as HTMLElement;
+  const surface = { getBoundingClientRect: () => ({ width: 160, height: 40 }) } as HTMLElement;
+  let position: { top: number; left: number; maxWidth: number; side: string } | undefined;
+  function Harness() {
+    position = useAnchoredPosition(true, useRef(anchor), useRef(surface), { side: "right", align: "center" });
+    return null;
+  }
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const originalWidth = window.innerWidth;
+  const originalHeight = window.innerHeight;
+  try {
+    Object.defineProperty(window, "innerWidth", { value: 220, configurable: true });
+    Object.defineProperty(window, "innerHeight", { value: 600, configurable: true });
+    await act(async () => { root.render(createElement(Harness)); });
+    assert.equal(position?.side, "left", "the surface flips to the side with more room");
+    assert.equal(position?.left, 8);
+    assert.equal(position?.top, 200, "center alignment uses the trigger's vertical center");
+    assert.equal(position?.maxWidth, 86, "horizontal placement caps width to the available side");
+  } finally {
+    Object.defineProperty(window, "innerWidth", { value: originalWidth, configurable: true });
+    Object.defineProperty(window, "innerHeight", { value: originalHeight, configurable: true });
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
 test("non-searchable Picker supports keyboard selection and restores trigger focus", async () => {
   const { act, createElement } = await import("react");
   const { createRoot } = await import("react-dom/client");

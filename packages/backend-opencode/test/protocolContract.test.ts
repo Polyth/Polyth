@@ -83,6 +83,56 @@ const legacyDocument = {
   },
 };
 
+test("V2 branches an empty canonical prefix from an empty native session without inventing history", async () => {
+  const fake = transportDouble({
+    query: () => ({ data: [], cursor: {} }),
+    mutate: () => ({ kind: "response", status: 200, headers: {}, body: { data: { id: "ses_empty_child" } } }),
+  });
+  const adapter = createV2ProtocolAdapter({ transport: fake.transport, endpoint: endpoint() });
+  const source = binding();
+  const target = { ...binding(), canonicalSessionId: "empty-child", backendSessionId: undefined };
+  assert.equal((await adapter.branchSession({ source, target, history: [] }, "empty-branch")).kind, "confirmed");
+  assert.match(fake.mutations[0]!.path, /^\/api\/session\?/);
+  const missing = await adapter.branchSession({ source, target, history: [{ role: "user", parts: [{ type: "text", text: "absent" }] }] }, "missing-history");
+  assert.equal(missing.kind, "rejected");
+  assert.equal(fake.mutations.length, 1);
+});
+
+test("V2 catalog reads await one activation barrier per adapter and retry failed discovery", async () => {
+  let activations = 0;
+  const fake = transportDouble({
+    query: () => ({ data: [] }),
+    mutate: (call) => {
+      assert.match(call.path, /^\/api\/plugin\/await-activation\?location%5Bdirectory%5D=/);
+      activations += 1;
+      return activations === 1
+        ? { kind: "unknown", operationId: call.operationId, message: "deadline" }
+        : { kind: "response", status: 204, headers: {}, body: undefined };
+    },
+  });
+  const adapter = createV2ProtocolAdapter({ transport: fake.transport, endpoint: endpoint() });
+  await assert.rejects(adapter.models(), { code: "backend-not-ready" });
+  assert.equal(fake.queries.length, 0);
+  await Promise.all([adapter.models(), adapter.agents(), adapter.listAllProviders!()]);
+  assert.equal(activations, 2);
+});
+
+test("V2 protocol failures do not echo private backend response bodies", async () => {
+  const secret = "test-private-provider-key";
+  const fake = transportDouble({
+    query: () => ({ status: 401, body: { message: secret } }),
+    mutate: (call) => call.path.startsWith("/api/plugin/await-activation?")
+      ? { kind: "response", status: 204, headers: {}, body: undefined }
+      : { kind: "response", status: 422, headers: {}, body: { message: secret } },
+  });
+  const adapter = createV2ProtocolAdapter({ transport: fake.transport, endpoint: endpoint() });
+  await assert.rejects(adapter.listAllProviders!(), (error: Error) =>
+    error.message.includes("/api/provider") && !error.message.includes(secret));
+  const rejected = await adapter.deleteSession(binding(), "private-body");
+  assert.equal(rejected.kind, "rejected");
+  assert.ok(!JSON.stringify(rejected).includes(secret));
+});
+
 const dualProtocolDocument = {
   paths: {
     ...legacyDocument.paths,
@@ -164,7 +214,7 @@ test("legacy prompt submission uses the compatible async endpoint when /doc lack
 
 test("auto legacy discovery keeps the compatible prompt fallback when /doc is absent", async () => {
   const fake = transportDouble({
-    query: (path) => path.startsWith("/global/health") ? { healthy: true } : undefined,
+    query: (path) => path.startsWith("/global/health") ? { healthy: true, version: "1.18.30" } : undefined,
     mutate: () => ({ kind: "response", status: 204, headers: {}, body: undefined }),
   });
   const adapter = await createProtocolAdapter({ protocol: "auto", transport: fake.transport, endpoint: endpoint() });
@@ -313,7 +363,7 @@ test("legacy native features require the documented HTTP methods", async () => {
 });
 
 test("protocol probe cache is isolated by endpoint generation", async () => {
-  const fake = transportDouble({ query: () => legacyDocument });
+  const fake = transportDouble({ query: () => ({ healthy: true, version: "1.18.30" }) });
   await createProtocolAdapter({
     protocol: "auto",
     transport: fake.transport,
@@ -366,6 +416,46 @@ test("explicit legacy adapter skips protocol probing", async () => {
   assert.equal(fake.queries.length, 0);
 });
 
+test("released V2 health selects V2 without an OpenAPI download", async () => {
+  const fake = transportDouble({ query: (path) => {
+    if (path.startsWith("/global/health")) return { status: 404, body: "missing" };
+    if (path.startsWith("/api/health")) return { healthy: true, version: "2.0.3", pid: 123 };
+    throw new Error(`unexpected probe ${path}`);
+  } });
+  const adapter = await createProtocolAdapter({ protocol: "auto", transport: fake.transport, endpoint: endpoint() });
+  assert.equal(adapter.protocol, "v2");
+  assert.equal(fake.queries.length, 2);
+});
+
+test("arbitrary successful pages cannot identify an OpenCode protocol", async () => {
+  for (const response of ["<html>login</html>", {}, { healthy: false, version: "2.0.3" }, { healthy: true }, { healthy: true, version: "2.0.3", pid: -1 }]) {
+    const fake = transportDouble({ query: () => response });
+    await assert.rejects(createProtocolAdapter({ protocol: "auto", transport: fake.transport, endpoint: endpoint() }), { code: "protocol-unsupported" });
+  }
+});
+
+test("stable legacy health wins when experimental V2 health is available", async () => {
+  const fake = transportDouble({ query: (path) => path.startsWith("/global/health")
+    ? { healthy: true, version: "1.18.30" }
+    : { healthy: true, version: "1.18.30", pid: 123 } });
+  const adapter = await createProtocolAdapter({ protocol: "auto", transport: fake.transport, endpoint: endpoint() });
+  assert.equal(adapter.protocol, "legacy");
+  assert.equal(fake.queries.length, 1);
+});
+
+test("protocol discovery preserves auth/transport failures and does not cache failures", async () => {
+  for (const status of [401, 403, 503]) {
+    let healthy = false;
+    const fake = transportDouble({ query: () => healthy ? { healthy: true, version: "1.18.30" } : { status, body: "private response" } });
+    await assert.rejects(createProtocolAdapter({ protocol: "auto", transport: fake.transport, endpoint: endpoint() }), {
+      code: status === 503 ? "unavailable" : "auth-rejected",
+    });
+    assert.equal(fake.queries.length, 1);
+    healthy = true;
+    assert.equal((await createProtocolAdapter({ protocol: "auto", transport: fake.transport, endpoint: endpoint() })).protocol, "legacy");
+  }
+});
+
 test("auto negotiation prefers the complete legacy contract when V2 is also advertised", async () => {
   const fake = transportDouble({
     query: () => dualProtocolDocument,
@@ -383,7 +473,7 @@ test("auto negotiation prefers the complete legacy contract when V2 is also adve
   assert.match(fake.mutations[0]!.path, /^\/session\/session-a\/prompt_async\?/);
 });
 
-test("V2 prompt admission uses the native session prompt contract", async () => {
+test("V2 prompt admission starts the released native session drain", async () => {
   const fake = transportDouble({
     mutate: () => ({
       kind: "response",
@@ -407,13 +497,16 @@ test("V2 prompt admission uses the native session prompt contract", async () => 
   assert.equal(fake.mutations.length, 1);
   assert.match(fake.mutations[0]!.path, /^\/api\/session\/session-a\/prompt\?/);
   assert.deepEqual(fake.mutations[0]!.body, {
-    prompt: { text: "send through V2" },
-    delivery: "queue",
+    text: "send through V2",
+    delivery: "steer",
   });
 });
 
-test("V2 keeps manual compaction and native command expansion capability-gated", async () => {
-  const fake = transportDouble({ query: () => ({}) });
+test("V2 does not advertise command discovery or compaction, but maps released native command submit", async () => {
+  const fake = transportDouble({
+    query: () => ({}),
+    mutate: () => ({ kind: "response", status: 204, headers: {}, body: undefined }),
+  });
   const adapter = createV2ProtocolAdapter({ transport: fake.transport, endpoint: endpoint() });
   const capabilities = await adapter.capabilities();
   assert.notEqual(capabilities.commands, true);
@@ -424,6 +517,11 @@ test("V2 keeps manual compaction and native command expansion capability-gated",
     session: binding(),
     text: "/review",
     command: { id: "native:opencode:review", owner: "native", name: "review" },
-  }, "operation-command")).kind, "rejected");
-  assert.equal(fake.mutations.length, 0);
+  }, "operation-command")).kind, "confirmed");
+  assert.match(fake.mutations[0]!.path, /^\/api\/session\/session-a\/command\?/);
+  assert.deepEqual(fake.mutations[0]!.body, {
+    command: "review",
+    text: "",
+    delivery: "queue",
+  });
 });

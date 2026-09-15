@@ -4,7 +4,7 @@
 // the bubble stays aria-hidden and nothing is announced twice.
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { useAnchoredPosition } from "./useAnchoredPosition.ts";
+import { useAnchoredPosition, type AnchoredSide } from "./useAnchoredPosition.ts";
 import { usePackageWindowOwner } from "./PackageWindowContext.ts";
 
 const SHOW_DELAY_MS = 350;
@@ -13,7 +13,9 @@ export interface TooltipProps {
   content: ReactNode;
   children: ReactNode;
   /** Preferred side (default up = above the trigger). */
-  side?: "up" | "down";
+  side?: AnchoredSide;
+  /** Hover intent delay. Keyboard focus still reveals the tooltip immediately. */
+  delayMs?: number;
   className?: string;
 }
 
@@ -22,7 +24,7 @@ const canHover = (): boolean =>
   && typeof window.matchMedia === "function"
   && window.matchMedia("(hover: hover) and (pointer: fine)").matches;
 
-export default function Tooltip({ content, children, side = "up", className }: TooltipProps) {
+export default function Tooltip({ content, children, side = "up", delayMs = SHOW_DELAY_MS, className }: TooltipProps) {
   const [open, setOpen] = useState(false);
   const packageWindowOwner = usePackageWindowOwner();
   const hostRef = useRef<HTMLSpanElement>(null);
@@ -32,7 +34,12 @@ export default function Tooltip({ content, children, side = "up", className }: T
 
   const show = (delayed: boolean) => {
     if (timer.current) clearTimeout(timer.current);
-    if (delayed) timer.current = setTimeout(() => setOpen(true), SHOW_DELAY_MS);
+    if (delayed && delayMs > 0) {
+      timer.current = setTimeout(() => {
+        timer.current = null;
+        setOpen(true);
+      }, delayMs);
+    }
     else setOpen(true);
   };
   const hide = () => {
@@ -68,8 +75,10 @@ export default function Tooltip({ content, children, side = "up", className }: T
           style={{
             top: position.top,
             left: position.left,
+            maxWidth: position.ready ? position.maxWidth : undefined,
             visibility: position.ready ? undefined : "hidden",
           }}
+          data-side={position.side}
           aria-hidden="true"
           data-package-window-owner={packageWindowOwner ?? undefined}
         >

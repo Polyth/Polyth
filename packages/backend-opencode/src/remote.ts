@@ -10,7 +10,7 @@
 // This module owns everything OpenCode-specific about the remote leg (binary
 // name, serve invocation, listen-line protocol, pidfile reaping); the
 // transport knows nothing about OpenCode, keeping the adapter boundary intact.
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
 import type {
@@ -40,7 +40,7 @@ import {
   withRemoteDeadline,
   type RemoteRuntimeAdoption,
 } from "./remoteStorage.ts";
-import { OPENCODE_UPDATE_DISABLE_ENV } from "./runtimeStorage.ts";
+import { isOpenCodeV2, OPENCODE_UPDATE_DISABLE_ENV } from "./runtimeStorage.ts";
 
 export interface RemoteOpenCodeOptions {
   host: RemoteHost;
@@ -84,6 +84,15 @@ const invalid = (message: string): Error =>
 
 const unavailable = (message: string): Error =>
   Object.assign(new Error(message), { code: "unavailable" });
+
+const remoteBasicAuthentication = (password: string): RuntimeAuthentication => ({
+  kind: "endpoint-headers",
+  async resolve() {
+    return {
+      authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`,
+    };
+  },
+});
 
 const checkBin = (bin: string): string => {
   if (!/^[A-Za-z0-9_.~/-]+$/.test(bin)) throw invalid(`invalid remote binary name: ${bin}`);
@@ -158,18 +167,19 @@ export const probeRemoteOpenCode = async (
     return {
       ok: false,
       installable: true,
-      message: `opencode is not installed on ${host.label} — install it there first (curl -fsSL https://opencode.ai/install | bash)`,
+      message: `opencode is not installed on ${host.label} — install it there first (curl -fsSL https://opencode.ai/v2/install | bash)`,
     };
   }
   const version = out.split("\n").pop()?.trim();
   if (expectedDb) {
-    // `db path` must be able to OPEN the database, so the probe directory has
-    // to exist first; the probe.db trio is removed right after (the owned
-    // runtime only ever contains opencode.db*).
+    // V2 moved this to `debug paths db`; use the legacy command only when the
+    // modern probe itself is unavailable. Both must report the exact isolated
+    // path, otherwise no owned serve may touch the remote global DB.
     const dbResult = await host.exec(
       `${REMOTE_PATH}; export ${OPENCODE_UPDATE_DISABLE_ENV}=true; `
         + `mkdir -p ${shq(posix.dirname(expectedDb))} && `
-        + `OPENCODE_DB=${shq(expectedDb)} ${safeBin} db path 2>/dev/null; `
+        + `OPENCODE_DB=${shq(expectedDb)} ${safeBin} debug paths db 2>/dev/null; MODERN=$?; `
+        + `if [ $MODERN -ne 0 ]; then OPENCODE_DB=${shq(expectedDb)} ${safeBin} db path 2>/dev/null; fi; `
         + `CODE=$?; rm -f ${shq(expectedDb)} ${shq(`${expectedDb}-wal`)} ${shq(`${expectedDb}-shm`)}; exit $CODE`,
       { timeoutMs: 20_000 },
     );
@@ -190,7 +200,7 @@ export const probeRemoteOpenCode = async (
  * intentionally fixed: no user input is interpolated into it. */
 export const installRemoteOpenCode = async (host: RemoteHost): Promise<void> => {
   const result = await host.exec(
-    `${REMOTE_PATH}; export PATH; curl -fsSL https://opencode.ai/install | bash && command -v opencode >/dev/null 2>&1`,
+    `${REMOTE_PATH}; export PATH; curl -fsSL https://opencode.ai/v2/install | bash && command -v opencode >/dev/null 2>&1`,
     { timeoutMs: 120_000 },
   );
   if (result.code !== 0) {
@@ -299,6 +309,7 @@ const startServe = async (
     runtimeDir: string;
     port: number;
     serveToken: string;
+    password?: string;
   },
 ): Promise<StartedServe> => {
   // The PID record is a process-ownership boundary. Key it by the isolated
@@ -319,6 +330,10 @@ const startServe = async (
       + 'echo "POLYTH_OPENCODE_RUNTIME_DIR_FAILED=$RUNTIME_DIR" >&2; exit 78; fi',
     `export OPENCODE_DB=${shq(dbPath)}`,
     `export ${OPENCODE_UPDATE_DISABLE_ENV}=true`,
+    ...(opts.password ? [
+      'IFS= read -r OPENCODE_PASSWORD || { echo "POLYTH_OPENCODE_PASSWORD_INPUT_FAILED=1" >&2; exit 78; }',
+      "export OPENCODE_PASSWORD",
+    ] : []),
     `PF=${pidFileExpr}`,
     'mkdir -p "$(dirname "$PF")"',
     REMOTE_PROCESS_IDENTITY_FUNS,
@@ -368,7 +383,7 @@ const startServe = async (
   ].join("; ");
 
   const handle = await withRemoteDeadline(
-    opts.host.start(command),
+    opts.host.start(command, opts.password ? { stdin: "pipe" } : undefined),
     opts.lifecycleTimeoutMs,
     "remote OpenCode process start",
     async (lateHandle) => {
@@ -379,6 +394,18 @@ const startServe = async (
       ).catch(() => {});
     },
   );
+  if (opts.password) {
+    if (!handle.write) {
+      await withRemoteDeadline(handle.kill(), opts.lifecycleTimeoutMs, "remote OpenCode input cleanup").catch(() => {});
+      throw unavailable("remote OpenCode start transport has no non-interactive input channel");
+    }
+    try {
+      await handle.write(`${opts.password}\n`);
+    } catch {
+      await withRemoteDeadline(handle.kill(), opts.lifecycleTimeoutMs, "remote OpenCode input cleanup").catch(() => {});
+      throw unavailable("could not deliver private remote OpenCode startup credential");
+    }
+  }
   return new Promise<StartedServe>((resolve, reject) => {
     let buf = "";
     let settled = false;
@@ -544,11 +571,20 @@ export const createRemoteOpenCodeRuntime = async (
     );
   }
 
-  const authentication: RuntimeAuthentication = {
-    kind: "basic-env",
-    usernameEnv: options.usernameEnv ?? "OPENCODE_SERVER_USERNAME",
-    passwordEnv: options.passwordEnv ?? "OPENCODE_SERVER_PASSWORD",
-  };
+  const modern = isOpenCodeV2(probe.version);
+  const configuredModernPassword = process.env.OPENCODE_PASSWORD
+    || process.env.OPENCODE_SERVER_PASSWORD;
+  // An owned v2 serve must not leave the upstream-generated password unknown
+  // to its controller. Keep a generated value only in this runtime closure and
+  // pass it to the child environment, never the parent process environment.
+  const modernPassword = modern ? configuredModernPassword || randomUUID() : undefined;
+  const authentication: RuntimeAuthentication = modernPassword
+    ? remoteBasicAuthentication(modernPassword)
+    : {
+      kind: "basic-env",
+      usernameEnv: options.usernameEnv ?? "OPENCODE_SERVER_USERNAME",
+      passwordEnv: options.passwordEnv ?? "OPENCODE_SERVER_PASSWORD",
+    };
   const lock = await acquireRemoteRuntimeLock(host, runtimeDir, remotePath, {
     timeoutMs: lifecycleTimeoutMs,
   });
@@ -566,6 +602,12 @@ export const createRemoteOpenCodeRuntime = async (
     );
   }
   let pendingAdoption = lock.adoption;
+  if (modern && pendingAdoption && !configuredModernPassword) {
+    await lock.release();
+    throw unavailable(
+      "cannot attach to an existing owned OpenCode v2 serve without its explicit OPENCODE_PASSWORD; refusing to stop or replace it",
+    );
+  }
   let controllerState: "held" | "releasing" | "released" | "lost" = "held";
   let publishedPort: number | undefined;
   let publishedServeToken: string | undefined;
@@ -681,6 +723,7 @@ export const createRemoteOpenCodeRuntime = async (
               lifecycleTimeoutMs,
               port,
               serveToken: leaseToken,
+              ...(modernPassword ? { password: modernPassword } : {}),
             });
           } catch (error) {
             lastError = error;

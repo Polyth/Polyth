@@ -1660,6 +1660,7 @@ export const ptBR: AppMessages = {
   "sidebar.message": "×",
   "sidebar.moreSidebarActions": "Mais ações na barra lateral",
   "sidebar.needsAttention": "Precisa de atenção",
+  "sidebar.dateGroups": "Grupos de data",
   "sidebar.newChatInValue": "Novo chat em {value}",
   "sidebar.newSessionInWorktree": "Trabalhar em isolamento…",
   "sidebar.noMatchingSessions": "Nenhuma sessão correspondente.",

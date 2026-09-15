@@ -16,6 +16,7 @@ import type {
   RuntimeTurnBinding,
 } from "@polyth/contracts";
 import { isOwnedEndpointLease } from "./endpoint.ts";
+import { isOpenCodeHealth } from "./protocol.ts";
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
@@ -866,6 +867,9 @@ const probePath = async (
       : undefined;
     if (typeof status === "number" && (status < 200 || status >= 300)) {
       throw unavailable(`HTTP ${status}`);
+    }
+    if (!isOpenCodeHealth(response)) {
+      throw unavailable(`OpenCode readiness probe ${path} returned invalid health data`);
     }
   } finally {
     if (timer) clearTimeout(timer);

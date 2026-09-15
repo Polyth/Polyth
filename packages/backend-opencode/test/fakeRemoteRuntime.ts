@@ -615,6 +615,7 @@ export interface FakeRemoteHostScript {
   holdAfterLock?: boolean;
   exitAfterAcquired?: boolean;
   failForwardRemaining?: number;
+  failServeWrite?: boolean;
   lockOutputDelayMs?: number;
 }
 
@@ -634,6 +635,7 @@ export interface FakeRemoteHost {
   serveStartCommands: string[];
   guardianStartCommands: string[];
   guardianWrites: string[];
+  serveWrites: string[];
   killedHandles: number[];
   forwards: Array<{ remotePort: number; cancelled: boolean }>;
   reportedDbPath?: string;
@@ -685,6 +687,7 @@ export const createFakeRemoteHost = (script: FakeRemoteHostScript): FakeRemoteHo
   const execCalls: string[] = [];
   const startCommands: string[] = [];
   const guardianWrites: string[] = [];
+  const serveWrites: string[] = [];
   const killedHandles: number[] = [];
   const forwards: Array<{ remotePort: number; cancelled: boolean }> = [];
   let serveProbeUnreachable = false;
@@ -761,6 +764,11 @@ export const createFakeRemoteHost = (script: FakeRemoteHostScript): FakeRemoteHo
           return { dispose: () => { exits.delete(cb); } };
         },
         async write(data) {
+          if (isRemoteServeCommand(command)) {
+            serveWrites.push(data);
+            if (script.failServeWrite) throw new Error("remote stdin is closed");
+            return;
+          }
           if (!isRemoteLockGuardianCommand(command)) return;
           guardianWrites.push(data);
           if (!data.includes("POLYTH_RELEASE")) return;
@@ -895,6 +903,7 @@ export const createFakeRemoteHost = (script: FakeRemoteHostScript): FakeRemoteHo
       return startCommands.filter(isRemoteLockGuardianCommand);
     },
     guardianWrites,
+    serveWrites,
     killedHandles,
     releaseHoldAfterLock() {
       releaseHold();

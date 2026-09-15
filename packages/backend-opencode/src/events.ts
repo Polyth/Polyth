@@ -13,6 +13,7 @@ import type {
 } from "@polyth/contracts";
 import type { Store as SessionStore } from "@polyth/session";
 import { classifyProviderLimit } from "./providerLimit.ts";
+import { v2FormQuestionOf } from "./v2Forms.ts";
 
 export interface OcEvent {
   id?: string;
@@ -33,32 +34,55 @@ const serialized = (value: unknown): string => {
   }
 };
 
+/** A released V2 text/reasoning part is identified by its owning assistant
+ * message, kind, and the ordinal that is scoped to that kind. The history
+ * schema has no IDs for text or reasoning content, so pull recovery uses this
+ * same identity. */
+export const v2AssistantPartId = (
+  messageId: string,
+  kind: "text" | "reasoning",
+  ordinal: number,
+): string => `${messageId}:${kind}:${ordinal}`;
+
+/** V2 stores terminal tool output as a non-empty content array. Prefer its
+ * text representation, preserving non-text content as a stable JSON value. */
+export const v2ToolOutput = (content: unknown): string | undefined => {
+  if (!Array.isArray(content)) return undefined;
+  const text = content.flatMap((value) => {
+    const part = asRecord(value);
+    return part?.type === "text" && typeof part.text === "string" ? [part.text] : [];
+  }).join("\n");
+  if (text) return text;
+  try {
+    return JSON.stringify(content);
+  } catch {
+    return undefined;
+  }
+};
+
+export const v2ToolError = (value: unknown): string => {
+  if (typeof value === "string" && value.trim()) return value.slice(0, 500);
+  const error = asRecord(value);
+  const nested = asRecord(error?.error);
+  for (const candidate of [error?.message, nested?.message]) {
+    if (typeof candidate === "string" && candidate.trim()) return candidate.slice(0, 500);
+  }
+  return "tool failed";
+};
+
 /** V2's native stream uses `{ type, data }`. Most compatibility events need
- * only the field rename; native session.next events are projected onto the
+ * only the field rename; native session events are projected onto the
  * established event vocabulary so the protocol-neutral reducer can consume
  * either stream without a UI or session-store branch. */
 const normalizeV2Event = (
   type: string,
   data: Record<string, unknown>,
+  created: unknown,
 ): { type: string; properties: Record<string, unknown> } => {
   const sessionID = data.sessionID;
   const messageID = data.assistantMessageID;
-  const timestamp = data.timestamp;
-  if (type === "session.next.prompted" || type === "session.next.prompt.admitted") {
-    return {
-      type: "message.updated",
-      properties: {
-        sessionID,
-        info: {
-          id: data.messageID,
-          role: "user",
-          sessionID,
-          time: { created: timestamp },
-        },
-      },
-    };
-  }
-  if (type === "session.next.step.started" || type === "session.next.step.ended") {
+  const timestamp = typeof created === "number" ? created : undefined;
+  if (type === "session.step.started" || type === "session.step.ended") {
     const model = asRecord(data.model);
     return {
       type: "message.updated",
@@ -73,25 +97,30 @@ const normalizeV2Event = (
           ...(typeof model?.id === "string" ? { modelID: model.id } : {}),
           ...(typeof data.cost === "number" ? { cost: data.cost } : {}),
           ...(asRecord(data.tokens) ? { tokens: data.tokens } : {}),
-          time: type === "session.next.step.ended"
+          time: type === "session.step.ended"
             ? { created: timestamp, completed: timestamp }
             : { created: timestamp },
         },
       },
     };
   }
-  if (type === "session.next.step.failed") {
+  if (type === "session.step.failed") {
     return {
       type: "session.error",
       properties: { sessionID, error: data.error },
     };
   }
   const textKind = type.includes(".reasoning.") ? "reasoning" : "text";
-  const partID = textKind === "reasoning" ? data.reasoningID : data.textID;
+  const ordinal = data.ordinal;
+  const partID = typeof messageID === "string" && messageID
+    && Number.isSafeInteger(ordinal) && (ordinal as number) >= 0
+    ? v2AssistantPartId(messageID, textKind, ordinal as number)
+    : undefined;
   if (
-    type === "session.next.text.started"
-    || type === "session.next.reasoning.started"
+    type === "session.text.started"
+    || type === "session.reasoning.started"
   ) {
+    if (!partID) return { type, properties: data };
     return {
       type: "message.part.updated",
       properties: {
@@ -108,9 +137,10 @@ const normalizeV2Event = (
     };
   }
   if (
-    type === "session.next.text.delta"
-    || type === "session.next.reasoning.delta"
+    type === "session.text.delta"
+    || type === "session.reasoning.delta"
   ) {
+    if (!partID) return { type, properties: data };
     return {
       type: "message.part.delta",
       properties: {
@@ -123,9 +153,10 @@ const normalizeV2Event = (
     };
   }
   if (
-    type === "session.next.text.ended"
-    || type === "session.next.reasoning.ended"
+    type === "session.text.ended"
+    || type === "session.reasoning.ended"
   ) {
+    if (!partID) return { type, properties: data };
     return {
       type: "message.part.updated",
       properties: {
@@ -141,16 +172,15 @@ const normalizeV2Event = (
       },
     };
   }
-  if (type === "session.next.tool.called") {
+  if (type === "session.tool.called") {
     return {
       type: "message.part.updated",
       properties: {
         sessionID,
         part: {
-          id: data.callID,
+          id: data.id,
           type: "tool",
-          callID: data.callID,
-          tool: data.tool,
+          callID: data.id,
           messageID,
           sessionID,
           state: { status: "running", input: asRecord(data.input) ?? {} },
@@ -158,34 +188,51 @@ const normalizeV2Event = (
       },
     };
   }
-  if (type === "session.next.tool.success" || type === "session.next.tool.failed") {
-    const failed = type === "session.next.tool.failed";
+  if (type === "session.tool.input.started") {
     return {
       type: "message.part.updated",
       properties: {
         sessionID,
         part: {
-          id: data.callID,
+          id: data.id,
           type: "tool",
-          callID: data.callID,
-          tool: "tool",
+          callID: data.id,
+          tool: data.name,
           messageID,
           sessionID,
-          state: failed
-            ? { status: "error", input: {}, error: serialized(data.error) }
-            : { status: "completed", input: {}, output: serialized(data.result) },
+          state: { status: "pending" },
         },
       },
     };
   }
-  return {
-    type: type === "permission.v2.asked"
-      ? "permission.asked"
-      : type === "question.v2.asked"
-        ? "question.asked"
-        : type,
-    properties: data,
-  };
+  if (type === "session.tool.success" || type === "session.tool.failed") {
+    const failed = type === "session.tool.failed";
+    const output = v2ToolOutput(data.content);
+    return {
+      type: "message.part.updated",
+      properties: {
+        sessionID,
+        part: {
+          id: data.id,
+          type: "tool",
+          callID: data.id,
+          messageID,
+          sessionID,
+          state: failed
+            ? { status: "error", error: v2ToolError(data.error), ...(output ? { output } : {}) }
+            : { status: "completed", ...(output ? { output } : {}) },
+        },
+      },
+    };
+  }
+  if (type === "form.created") {
+    const form = asRecord(data.form);
+    return {
+      type: "question.asked",
+      properties: form ?? data,
+    };
+  }
+  return { type, properties: data };
 };
 
 export const asOcEvent = (data: unknown): OcEvent | undefined => {
@@ -197,7 +244,7 @@ export const asOcEvent = (data: unknown): OcEvent | undefined => {
   if (!type) return undefined;
   const nativeData = asRecord(src.data);
   const normalized = nativeData
-    ? normalizeV2Event(type, nativeData)
+    ? normalizeV2Event(type, nativeData, src.created)
     : { type, properties: asRecord(src.properties) ?? {} };
   const id = typeof src.id === "string" ? src.id : undefined;
   const durable = asRecord(src.durable);
@@ -255,6 +302,8 @@ const tokensOf = (info: Record<string, unknown> | undefined): TokenUsage | undef
 export interface TranslateState {
   userMessageIds: Set<string>;
   toolCalls: Map<string, "pending" | "running" | "completed" | "error">;
+  toolNames: Map<string, string>;
+  toolInputs: Map<string, JsonObject>;
   partText: Map<string, string>;
   partReasoning: Map<string, string>;
   // UX-MSG-ACTIONS: one-time part classification. A part is text OR reasoning
@@ -294,6 +343,8 @@ export interface TranslateState {
 export const createTranslateState = (): TranslateState => ({
   userMessageIds: new Set(),
   toolCalls: new Map(),
+  toolNames: new Map(),
+  toolInputs: new Map(),
   partText: new Map(),
   partReasoning: new Map(),
   partKind: new Map(),
@@ -577,10 +628,13 @@ export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEve
 
     if (partType === "tool") {
       const callId = typeof part.callID === "string" ? part.callID : partId;
-      const tool = typeof part.tool === "string" ? part.tool : "tool";
+      const namedTool = typeof part.tool === "string" && part.tool ? part.tool : undefined;
+      if (namedTool) state.toolNames.set(callId, namedTool);
+      const tool = state.toolNames.get(callId) ?? namedTool ?? "tool";
       const st = asRecord(part.state);
       const status = typeof st?.status === "string" ? st.status : "";
-      const input = asJsonObject(st?.input);
+      if (st && Object.hasOwn(st, "input")) state.toolInputs.set(callId, asJsonObject(st.input));
+      const input = state.toolInputs.get(callId) ?? {};
 
       // ---- WP8: todo tools become full task snapshots ----------------------
       const toolLower = tool.toLowerCase().replace(/[^a-z]/g, "");
@@ -706,8 +760,10 @@ export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEve
 
   if (type === "question.asked") {
     const requestId = typeof p.id === "string" ? p.id : "";
-    const questions = Array.isArray(p.questions) ? (p.questions as JsonObject[]) : [];
-    out.push({ type: "question/asked", requestId, questions });
+    const sessionID = typeof p.sessionID === "string" ? p.sessionID : "";
+    const form = sessionID ? v2FormQuestionOf(p, sessionID) : undefined;
+    const questions = form?.questions ?? (Array.isArray(p.questions) ? (p.questions as JsonObject[]) : []);
+    out.push({ type: "question/asked", requestId: form?.requestId ?? requestId, questions });
   }
 
   return out;
@@ -1083,6 +1139,12 @@ const semanticIdentityOf = (
         error: 2,
       };
       const callId = typeof part.callID === "string" && part.callID ? part.callID : part.id;
+      const tool = typeof part.tool === "string" && part.tool
+        ? part.tool
+        : state?.toolNames.get(callId) ?? "tool";
+      const input = toolState && Object.hasOwn(toolState, "input")
+        ? asJsonObject(toolState.input)
+        : state?.toolInputs.get(callId) ?? {};
       return {
         artifactKind: "tool",
         entityId: callId,
@@ -1090,8 +1152,8 @@ const semanticIdentityOf = (
         ...(ranks[status] !== undefined ? { stateRank: ranks[status] } : {}),
         checkpoint: {
           status,
-          tool: typeof part.tool === "string" ? part.tool : "tool",
-          input: asJsonObject(toolState?.input),
+          tool,
+          input,
           ...(typeof toolState?.output === "string" ? { output: toolState.output } : {}),
           ...(typeof toolState?.error === "string" ? { error: toolState.error } : {}),
         },

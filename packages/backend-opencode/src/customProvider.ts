@@ -39,6 +39,7 @@ export function adapterForProtocol(protocol: CustomProviderProtocol): string {
 }
 
 export function protocolFromNpm(npm: unknown): CustomProviderProtocol | undefined {
+  if (typeof npm === "string" && npm.startsWith("aisdk:")) npm = npm.slice(6);
   if (npm === CUSTOM_PROVIDER_ADAPTERS["openai-responses"]) return "openai-responses";
   if (npm === CUSTOM_PROVIDER_ADAPTERS["openai-compatible"]) return "openai-compatible";
   return undefined;
@@ -127,6 +128,32 @@ export function mergeCustomProvider(
   if (Object.keys(models).length) next.models = models;
   provider[input.id] = next;
   return provider;
+}
+
+/** Released OpenCode v2 stores provider transport fields directly on the
+ * provider entry. Keep this separate from the legacy `npm/options` writer so
+ * a config profile never mixes schemas. */
+export function mergeCustomProviderV2(
+  providersRaw: unknown,
+  input: CustomProviderApply,
+): Record<string, unknown> {
+  const providers = asRecord(providersRaw) ? { ...asRecord(providersRaw)! } : {};
+  const current = asRecord(providers[input.id]) ?? {};
+  const settings = { ...(asRecord(current.settings) ?? {}), baseURL: input.baseURL };
+  const headers = applyHeaderPatch(stringHeaders(current.headers), input.headerPatch);
+  const models = mergeModels(current.models, input.models);
+  const next: Record<string, unknown> = {
+    ...current,
+    package: `aisdk:${adapterForProtocol(input.protocol)}`,
+    name: input.name,
+    settings,
+  };
+  if (headers) next.headers = headers;
+  else delete next.headers;
+  if (Object.keys(models).length) next.models = models;
+  delete next.polyth;
+  providers[input.id] = next;
+  return providers;
 }
 
 export function dropCustomProvider(
@@ -233,10 +260,11 @@ export type StagedProviderOp =
 export function applyProviderOps(
   providerRaw: unknown,
   ops: readonly StagedProviderOp[],
+  profile: "legacy" | "v2" = "legacy",
 ): Record<string, unknown> | undefined {
   let provider: unknown = asRecord(providerRaw) ? { ...asRecord(providerRaw)! } : {};
   for (const op of ops) {
-    if (op.kind === "upsert") provider = mergeCustomProvider(provider, op.input);
+    if (op.kind === "upsert") provider = profile === "v2" ? mergeCustomProviderV2(provider, op.input) : mergeCustomProvider(provider, op.input);
     else if (op.kind === "remove") provider = dropCustomProvider(provider, op.id);
     else if (op.kind === "mergeDiscovered") {
       provider = mergeDiscoveredIntoProvider(provider, op.id, op.discovered);
@@ -257,12 +285,12 @@ export function inspectProviderEntry(
 ): ProviderInspect | undefined {
   const rec = asRecord(entry);
   if (!rec) return undefined;
-  const options = asRecord(rec.options) ?? {};
-  const headers = stringHeaders(options.headers);
+  const options = asRecord(rec.settings) ?? asRecord(rec.options) ?? {};
+  const headers = stringHeaders(rec.headers ?? options.headers);
   const headerNames = headers ? Object.keys(headers) : [];
   const models = asRecord(rec.models);
   const modelIDs = models ? Object.keys(models) : [];
-  const protocol = protocolFromNpm(rec.npm);
+  const protocol = protocolFromNpm(rec.package ?? rec.npm);
   return {
     id,
     name: typeof rec.name === "string" && rec.name ? rec.name : id,
@@ -276,14 +304,33 @@ export function inspectProviderEntry(
   };
 }
 
+/** Native config wins per provider ID; an unrelated native provider must not
+ * move legacy entries into a different schema during an edit. */
+export function providerConfigKey(config: Record<string, unknown>, id: string): "provider" | "providers" {
+  const native = asRecord(config.providers);
+  if (native && Object.hasOwn(native, id)) return "providers";
+  const legacy = asRecord(config.provider);
+  if (legacy && Object.hasOwn(legacy, id)) return "provider";
+  return native ? "providers" : "provider";
+}
+
 export function projectConfig(
   physical: Record<string, unknown>,
   ops: readonly StagedProviderOp[],
 ): Record<string, unknown> {
   if (ops.length === 0) return physical;
-  const provider = applyProviderOps(physical.provider, ops);
   const next: Record<string, unknown> = { ...physical };
-  if (provider) next.provider = provider;
-  else delete next.provider;
+  for (const op of ops) {
+    const id = op.kind === "upsert" ? op.input.id : op.id;
+    // Remove from both spellings so a shadowed legacy entry cannot reappear.
+    const keys = op.kind === "remove" || op.kind === "dropModel"
+      ? (["provider", "providers"] as const)
+      : [providerConfigKey(next, id)];
+    for (const key of keys) {
+      const provider = applyProviderOps(next[key], [op], key === "providers" ? "v2" : "legacy");
+      if (provider) next[key] = provider;
+      else delete next[key];
+    }
+  }
   return next;
 }

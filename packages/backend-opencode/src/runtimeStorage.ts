@@ -41,6 +41,11 @@ export interface OpenCodeEngineIdentity {
   protocolGeneration: number;
 }
 
+/** The v2 CLI changed the DB inspection command and serve readiness contract.
+ * Keep this deliberately small: version is diagnostic, while the DB probe
+ * below remains the authority for whether the binary is safe to own. */
+export const isOpenCodeV2 = (version: string): boolean => /(?:^|\s)v?2(?:\.|$)/.test(version.trim());
+
 export type OpenCodeBinarySource =
   | "bundled"
   | "override"
@@ -327,6 +332,29 @@ const isolatedProbeEnv = (dbPath: string): NodeJS.ProcessEnv => ({
 const lastNonEmptyLine = (text: string): string =>
   text.trim().split(/\r?\n/).at(-1)?.trim() ?? "";
 
+/** V2 exposes `debug paths db`; 1.x used `db path`.  Do not infer support
+ * from the version string: exercise the modern command first and only then
+ * its legacy predecessor against the exact isolated path. */
+const probeDatabasePath = async (
+  executable: string,
+  expectedDb: string,
+): Promise<string> => {
+  const env = isolatedProbeEnv(expectedDb);
+  try {
+    const result = await execute(executable, ["debug", "paths", "db"], {
+      env,
+      timeout: 10_000,
+    });
+    return lastNonEmptyLine(result.stdout);
+  } catch {
+    const result = await execute(executable, ["db", "path"], {
+      env,
+      timeout: 10_000,
+    });
+    return lastNonEmptyLine(result.stdout);
+  }
+};
+
 const inspectOpenCodeEngineUncached = async (
   executable: string,
 ): Promise<OpenCodeEngineIdentity> => {
@@ -352,11 +380,7 @@ const inspectOpenCodeEngineUncached = async (
     const versionPromise = versionProbe();
     const dbProbe = async (): Promise<void> => {
       try {
-        const result = await execute(executable, ["db", "path"], {
-          env: isolatedProbeEnv(expectedDb),
-          timeout: 10_000,
-        });
-        const actualDb = lastNonEmptyLine(result.stdout);
+        const actualDb = await probeDatabasePath(executable, expectedDb);
         if (!actualDb || resolve(actualDb) !== resolve(expectedDb)) {
           const version = await versionPromise.catch(() => "unknown");
           throw unavailable(

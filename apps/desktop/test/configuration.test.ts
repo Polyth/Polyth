@@ -98,7 +98,7 @@ test("pinned OpenCode lock covers packaged CPU and operating-system targets", as
   const mainSource = await readFile(join(desktopDir, "src", "main.ts"), "utf8");
   const lock = JSON.parse(await readFile(join(desktopDir, "opencode.json"), "utf8")) as {
     version: string;
-    targets: Record<string, { archive: string; sha256: string }>;
+    targets: Record<string, { package: string; tarball: string; integrity: string }>;
   };
   assert.match(lock.version, /^\d+\.\d+\.\d+$/);
   for (const target of [
@@ -109,7 +109,9 @@ test("pinned OpenCode lock covers packaged CPU and operating-system targets", as
     "win32-x64",
     "win32-arm64",
   ]) {
-    assert.match(lock.targets[target]?.sha256 ?? "", /^[a-f0-9]{64}$/);
+    assert.match(lock.targets[target]?.package ?? "", /^@opencode\/cli-(linux|darwin|windows)-(x64|arm64)$/);
+    assert.match(lock.targets[target]?.tarball ?? "", /^https:\/\/registry\.npmjs\.org\/@opencode\/cli-[^/]+\/-\/cli-[^/]+-2\.0\.3\.tgz$/);
+    assert.match(lock.targets[target]?.integrity ?? "", /^sha512-[A-Za-z0-9+/]+={0,2}$/);
   }
   assert.match(
     mainSource,

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { createServer } from "node:http";
 import { writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -31,10 +32,18 @@ const engineIdentity = (
   protocolGeneration: 1,
 });
 
-const createFakeChild = (pid: number, port: number): ChildProcess => {
+const createFakeChild = (pid: number, port: number, password: string): ChildProcess => {
   const emitter = new EventEmitter() as ChildProcess;
   const stdout = new PassThrough();
   const stderr = new PassThrough();
+  const health = createServer((request, response) => {
+    if (request.url !== "/global/health") { response.writeHead(404).end(); return; }
+    if (request.headers.authorization !== `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`) {
+      response.writeHead(401).end(); return;
+    }
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ healthy: true, version: "1.18.30" }));
+  });
   let signalCode: NodeJS.Signals | null = null;
   Object.assign(emitter, {
     pid,
@@ -47,6 +56,8 @@ const createFakeChild = (pid: number, port: number): ChildProcess => {
     spawnfile: "opencode",
     kill(signal: NodeJS.Signals = "SIGTERM") {
       signalCode = signal;
+      health.closeAllConnections();
+      health.close();
       queueMicrotask(() => emitter.emit("exit", null, signal));
       return true;
     },
@@ -61,7 +72,7 @@ const createFakeChild = (pid: number, port: number): ChildProcess => {
     signalCode: { get: () => signalCode },
   });
   setImmediate(() => {
-    stderr.write(`opencode server listening on http://127.0.0.1:${port}\n`);
+    health.listen(port, "127.0.0.1");
   });
   return emitter;
 };
@@ -101,7 +112,7 @@ const createLeaseBooter = (
         const isolatedDb = spawnOptions.env?.OPENCODE_DB;
         assert.ok(isolatedDb);
         writeFileSync(isolatedDb, `opaque database ${nextPid}`, { mode: 0o600 });
-        return createFakeChild(nextPid++, Number(args.at(-1)));
+        return createFakeChild(nextPid++, Number(args.at(-1)), spawnOptions.env?.OPENCODE_SERVER_PASSWORD ?? "");
       }) as unknown as typeof nodeSpawn,
       readProcessIdentity: async (pid) => ({
         startIdentity: `start-${pid}`,

@@ -280,3 +280,13 @@ test("physical OpenCode release deletes private revision resources", async () =>
   assert.equal(peekOpenCodeLaunchOverlay({ cwd, spaceId: space.spaceId, projectId: "p" }), undefined);
   assert.equal(existsSync(secretPath), false);
 });
+
+
+test("V2 launch overlay preserves native server options and user skill sources", () => {
+  const existing = { mcp: { servers: { user: { type: "remote", url: "https://example.test", timeout: { startup: 9000 } } }, codemode: { instructions: "preserve" } }, skills: ["/user/skills"], plugins: [{ package: "user-plugin", options: { future: true } }], future: { untouched: true } };
+  const env = { OPENCODE_CONFIG_CONTENT: JSON.stringify(existing) };
+  const result = applyOpenCodeLaunchOverlay(env, { configContent: JSON.stringify({ mcp: { generated: { type: "local", command: ["node", "probe"], enabled: true } } }), env: {}, desiredRevision: "one", capabilityIds: [] }, "v2");
+  assert.equal(env.OPENCODE_CONFIG_CONTENT, JSON.stringify(existing));
+  const merged = JSON.parse(result.OPENCODE_CONFIG_CONTENT!);
+  assert.deepEqual(merged, { ...existing, mcp: { ...existing.mcp, servers: { ...existing.mcp.servers, generated: { type: "local", command: ["node", "probe"], disabled: false } } } });
+});

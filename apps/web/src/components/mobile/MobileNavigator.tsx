@@ -60,11 +60,14 @@ import {
 } from "../../sessionDates.ts";
 import {
   applyManualProjectOrder,
+  getShowDateGroups,
   reorderManualProjects,
   setProjectOrder,
   setProjectSortMode,
+  setShowDateGroups,
   useProjectOrder,
   useProjectSortMode,
+  useShowDateGroups,
   type ProjectSortMode,
 } from "../../sidebarPrefs.ts";
 import "./MobileNavigator.css";
@@ -429,6 +432,7 @@ export default function MobileNavigator() {
   const sort = useProjectSortMode();
   const setSort = (mode: ProjectSortMode) => setProjectSortMode(mode);
   const projectOrder = useProjectOrder();
+  const showDateGroups = useShowDateGroups();
   const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(() => loadExpanded(activeProjectId));
   const [showAllProjects, setShowAllProjects] = useState<ReadonlySet<string>>(new Set());
   const [expandedIsolation, setExpandedIsolation] = useState<ReadonlySet<string>>(new Set());
@@ -668,6 +672,13 @@ export default function MobileNavigator() {
       kind: "checkbox",
       checked: attentionOnly,
       onSelect: () => setAttentionOnly((value) => !value),
+    },
+    {
+      id: "date-groups",
+      label: tr("sidebar.dateGroups"),
+      kind: "checkbox",
+      checked: showDateGroups,
+      onSelect: () => setShowDateGroups(!getShowDateGroups()),
     },
   ];
 
@@ -999,7 +1010,7 @@ export default function MobileNavigator() {
                       const label = sessionDateGroupLabel(group.timestamp, relativeTime, getLocale(), now);
                       return (
                         <div className="mobile-nav-date-group" key={group.key}>
-                          {group.key !== sessionDateInputValue(now) && (
+                          {showDateGroups && group.key !== sessionDateInputValue(now) && (
                             <div className="mobile-nav-date-divider" role="separator" aria-label={label}><span>{label}</span></div>
                           )}
                           {group.sessions.map((session) => (
@@ -1055,7 +1066,7 @@ export default function MobileNavigator() {
                               const label = sessionDateGroupLabel(group.timestamp, relativeTime, getLocale(), now);
                               return (
                                 <div className="mobile-nav-date-group" key={group.key}>
-                                  {group.key !== sessionDateInputValue(now) && (
+                                  {showDateGroups && group.key !== sessionDateInputValue(now) && (
                                     <div className="mobile-nav-date-divider" role="separator" aria-label={label}><span>{label}</span></div>
                                   )}
                                   {/* The section header already says these are

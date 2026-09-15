@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import type { AgentCapabilityDescriptor, HarnessContext } from "@polyth/contracts";
 import { planHarnessCapabilities } from "@polyth/harness-runtime";
@@ -42,7 +41,7 @@ const applier = (): BackendConfigApplier => ({
   configAuthority: () => ({ kind: "writable", targetId: "fixture" }),
 } as unknown as BackendConfigApplier);
 
-test("OpenCode presents Polyth capabilities as native plugin tools over the scoped bridge", async (t) => {
+test("OpenCode presents Polyth capabilities through the scoped MCP bridge", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "polyth-opencode-native-tools-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const context = contextAt(root);
@@ -109,32 +108,20 @@ test("OpenCode presents Polyth capabilities as native plugin tools over the scop
   });
 
   assert.equal(result.records.find((row) => row.capabilityId === control.id)?.status, "pending");
-  assert.match(result.records.find((row) => row.capabilityId === control.id)?.reason ?? "", /native OpenCode plugin tool/);
+  assert.match(result.records.find((row) => row.capabilityId === control.id)?.reason ?? "", /scoped Polyth MCP capability bridge/);
 
   const overlay = peekOpenCodeLaunchOverlay(context);
   assert.ok(overlay);
-  assert.equal(overlay.env.POLYTH_AGENT_TOOLS_TOKEN, "native-secret-token");
   const config = JSON.parse(overlay.configContent) as {
-    plugin?: string[];
     mcp?: Record<string, { enabled?: boolean; environment?: Record<string, string> }>;
   };
-  assert.equal(config.plugin?.length, 1);
-  assert.equal(config.mcp?.["polyth-agent-tools"]?.enabled, false);
+  assert.equal(config.mcp?.["polyth-agent-tools"]?.enabled, true);
   assert.doesNotMatch(JSON.stringify(config), /native-secret-token/);
-
-  const pluginPath = fileURLToPath(config.plugin![0]!);
-  const source = readFileSync(pluginPath, "utf8");
-  assert.match(source, /"polyth"/);
-  assert.match(source, /"polyth_browser"/);
-  assert.match(source, /POLYTH_AGENT_TOOLS_URL/);
-  assert.match(source, /POLYTH_AGENT_TOOLS_TOKEN/);
-  assert.doesNotMatch(source, /native-secret-token/);
 
   const launched = applyOpenCodeLaunchOverlay({
     OPENCODE_CONFIG_CONTENT: JSON.stringify({ plugin: ["user-plugin"] }),
   }, overlay);
   const merged = JSON.parse(launched.OPENCODE_CONFIG_CONTENT ?? "{}") as { plugin?: string[] };
-  assert.equal(merged.plugin?.[0], "user-plugin");
-  assert.equal(merged.plugin?.[1], config.plugin?.[0]);
-  assert.equal(launched.POLYTH_AGENT_TOOLS_TOKEN, "native-secret-token");
+  assert.deepEqual(merged.plugin, ["user-plugin"]);
+  assert.equal(launched.POLYTH_AGENT_TOOLS_TOKEN, undefined);
 });

@@ -1,8 +1,12 @@
+import { writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 const input = createInterface({ input: process.stdin });
 input.on("line", (line) => {
   const request = JSON.parse(line);
   if (request.id === undefined) return;
+  if (request.method === "tools/list" && process.env.POLYTH_PROBE_AUDIT) {
+    writeFileSync(process.env.POLYTH_PROBE_AUDIT, JSON.stringify({ catalog: true, secretMatched: process.env.POLYTH_PROBE_SECRET === 'probe-secret-"quoted"' }));
+  }
   const result = request.method === "initialize"
     ? { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "polyth-probe", version: "1" } }
     : request.method === "tools/list"

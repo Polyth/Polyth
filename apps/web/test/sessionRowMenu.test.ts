@@ -111,6 +111,7 @@ const { default: SessionList } = await import("../src/components/sidebar/Session
 const { default: Sidebar } = await import("../src/components/Sidebar.tsx");
 const { default: AlertDialog } = await import("../src/components/AlertDialog.tsx");
 const { sessionDateInputValue } = await import("../src/sessionDates.ts");
+const { setShowDateGroups } = await import("../src/sidebarPrefs.ts");
 
 const session = (over: Partial<SessionProjection>): SessionProjection => ({
   id: "s", projectId: "p1", title: "session", status: "idle",
@@ -436,6 +437,38 @@ test("session date filters and day dividers replace per-row age labels", async (
     assert.equal(container.querySelectorAll(".session-date-divider").length, 1);
     assert.equal(container.querySelector(".session-time"), null, "chat age is not repeated on every row");
   } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("date-group headings can be hidden without dropping chats or the pinned section", async () => {
+  const now = Date.now();
+  const twoDaysAgo = now - 2 * 24 * 60 * 60 * 1000;
+  activateProject("p1");
+  setSessions("p1", [
+    session({ id: "pin", title: "Pinned chat", pinned: { position: 0 }, createdAt: now, updatedAt: now }),
+    session({ id: "today", title: "Today chat", createdAt: now, updatedAt: now, lastTurnAt: now }),
+    session({ id: "older", title: "Older chat", createdAt: twoDaysAgo, updatedAt: twoDaysAgo, lastTurnAt: twoDaysAgo }),
+  ]);
+  setShowDateGroups(true);
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => {
+      root.render(createElement(SessionList, { projectId: "p1" }));
+    });
+    assert.equal(container.querySelectorAll(".session-date-divider:not(.session-pinned-divider)").length, 1);
+    assert.ok(container.querySelector(".session-pinned-divider"));
+    await act(async () => { setShowDateGroups(false); });
+    assert.equal(container.querySelector(".session-date-divider:not(.session-pinned-divider)"), null);
+    assert.ok(container.querySelector(".session-pinned-divider"));
+    assert.match(container.textContent ?? "", /Today chat/);
+    assert.match(container.textContent ?? "", /Older chat/);
+    assert.match(container.textContent ?? "", /Pinned chat/);
+  } finally {
+    setShowDateGroups(true);
     await act(async () => { root.unmount(); });
     container.remove();
   }

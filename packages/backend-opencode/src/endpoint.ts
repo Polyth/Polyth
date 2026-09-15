@@ -24,6 +24,8 @@ import type {
 import { openCodeChildSearchPath } from "./binaryDiscovery.ts";
 import { applyOpenCodeLaunchOverlay, peekOpenCodeLaunchOverlay } from "./provisioner.ts";
 import { verifyOpenCodeCapabilities } from "./capabilityDelivery.ts";
+import { projectV2ModelVisibility } from "./config.ts";
+import { isOpenCodeHealth } from "./protocol.ts";
 import {
   createDurableOwnedRuntimeState,
   ownedRuntimeIdentityKey,
@@ -31,6 +33,7 @@ import {
 } from "./ownedRuntimeState.ts";
 import {
   inspectOpenCodeEngine,
+  isOpenCodeV2,
   OPENCODE_UPDATE_DISABLE_ENV,
   prepareOpenCodeRuntime,
   resolveOpenCodeBinary,
@@ -40,7 +43,6 @@ import {
   type ResolvedOpenCodeBinary,
 } from "./runtimeStorage.ts";
 
-export const LISTEN_RE = /opencode server listening on https?:\/\/[^\s:]+:(\d+)/i;
 const BIND_COLLISION_RE = /EADDRINUSE|address already in use/i;
 
 const sleep = (ms: number): Promise<void> =>
@@ -51,6 +53,47 @@ const unavailable = (message: string): Error =>
 
 const fingerprint = (value: unknown): string =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
+
+const basicAuthentication = (username: string, password: string): RuntimeAuthentication => ({
+  kind: "endpoint-headers",
+  async resolve() {
+    return {
+      authorization: `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`,
+    };
+  },
+});
+
+interface OwnedLaunchCredential {
+  authentication: RuntimeAuthentication;
+  environment: Record<string, string>;
+}
+
+/** Every owned process gets a new credential. It prevents a healthy listener
+ * that predated this launch from satisfying readiness. This never mutates the
+ * parent environment or reuses a configured shared password. */
+const ownedLaunchCredential = (
+  engine: OpenCodeEngineIdentity,
+  options: Pick<OwnedLocalEndpointOptions, "usernameEnv" | "passwordEnv">,
+): OwnedLaunchCredential => {
+  const password = randomUUID();
+  if (isOpenCodeV2(engine.version)) {
+    return {
+      environment: { OPENCODE_PASSWORD: password },
+      authentication: basicAuthentication("opencode", password),
+    };
+  }
+  const usernameEnv = options.usernameEnv ?? "OPENCODE_SERVER_USERNAME";
+  const passwordEnv = options.passwordEnv ?? "OPENCODE_SERVER_PASSWORD";
+  return {
+    environment: {
+      OPENCODE_SERVER_USERNAME: "opencode",
+      OPENCODE_SERVER_PASSWORD: password,
+      [usernameEnv]: "opencode",
+      [passwordEnv]: password,
+    },
+    authentication: basicAuthentication("opencode", password),
+  };
+};
 
 const normalizedHeaders = (headers: Readonly<Record<string, string>>): Array<[string, string]> =>
   Object.entries(headers)
@@ -324,7 +367,6 @@ interface OwnedLeaseOptions {
   continuity?: "verified" | "generation-only";
   location: RuntimeLocation;
   config: RuntimeConfigAuthority;
-  authentication: RuntimeAuthentication;
   start(
     instanceToken: string,
     incarnation: OwnedRuntimeIncarnation,
@@ -520,7 +562,88 @@ interface StartedLocalChild {
   authority?: Awaited<ReturnType<typeof createProcessAuthority>>;
   port: number;
   hostname: string;
+  authentication: RuntimeAuthentication;
 }
+
+const headersForAuthentication = async (
+  authentication: RuntimeAuthentication,
+): Promise<Record<string, string>> => {
+  if (authentication.kind === "none") return {};
+  if (authentication.kind === "endpoint-headers") return { ...await authentication.resolve() };
+  const password = process.env[authentication.passwordEnv];
+  if (!password) return {};
+  const username = process.env[authentication.usernameEnv]
+    ?? (authentication.usernameEnv === "OPENCODE_SERVER_USERNAME" ? "opencode" : "");
+  return username
+    ? { authorization: `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}` }
+    : {};
+};
+
+const waitForLocalHealth = async (options: {
+  hostname: string;
+  port: number;
+  path: "/global/health" | "/api/health";
+  child: ChildProcess;
+  headers: Readonly<Record<string, string>>;
+  timeoutMs: number;
+  output(): string;
+}): Promise<void> => {
+  const deadlineAt = Date.now() + options.timeoutMs;
+  const host = options.hostname === "0.0.0.0" ? "127.0.0.1" : options.hostname;
+  let lastError = "";
+  while (Date.now() < deadlineAt) {
+    if (childExited(options.child)) {
+      // stdio may flush on the turn after the exit notification. Give its
+      // final chunk one event-loop turn so EADDRINUSE remains retryable.
+      await new Promise<void>((resolveTurn) => setImmediate(resolveTurn));
+      if (BIND_COLLISION_RE.test(options.output())) {
+        throw Object.assign(new Error(`local port ${options.port} is in use`), { code: "port-in-use" });
+      }
+      throw unavailable(`opencode serve exited before health readiness: ${options.output().slice(-400)}`);
+    }
+    if (BIND_COLLISION_RE.test(options.output())) {
+      throw Object.assign(new Error(`local port ${options.port} is in use`), { code: "port-in-use" });
+    }
+    try {
+      const response = await fetch(`http://${host}:${options.port}${options.path}`, {
+        headers: options.headers,
+        signal: AbortSignal.timeout(Math.max(1, Math.min(250, deadlineAt - Date.now()))),
+      });
+      const value: unknown = await response.json();
+      // An ordinary listener can ignore Basic auth and still look healthy. Do
+      // not publish until the same endpoint rejects both omitted and wrong
+      // credentials. This is a readiness gate, not process ownership proof:
+      // OpenCode v2 may supervise the health PID beneath the CLI child.
+      if (response.ok && isOpenCodeHealth(value)) {
+        const rejectionStatus = async (headers?: Readonly<Record<string, string>>): Promise<number> => {
+          try {
+            const challenge = await fetch(`http://${host}:${options.port}${options.path}`, {
+              ...(headers ? { headers } : {}),
+              signal: AbortSignal.timeout(Math.max(1, Math.min(250, deadlineAt - Date.now()))),
+            });
+            return challenge.status;
+          } catch {
+            return 0;
+          }
+        };
+        const [withoutCredentials, withWrongCredentials] = await Promise.all([
+          rejectionStatus(),
+          rejectionStatus({ authorization: `Basic ${Buffer.from("opencode:incorrect").toString("base64")}` }),
+        ]);
+        if (withoutCredentials === 401 && withWrongCredentials === 401) return;
+        lastError = `health authentication was not enforced (missing=${withoutCredentials}, wrong=${withWrongCredentials})`;
+      } else {
+        lastError = `HTTP ${response.status}`;
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+    await sleep(Math.min(20, Math.max(1, deadlineAt - Date.now())));
+  }
+  throw unavailable(
+    `opencode serve health timeout after ${options.timeoutMs}ms${lastError ? ` (${lastError})` : ""}`,
+  );
+};
 
 const startLocalChildOnce = async (
   options: OwnedLocalEndpointOptions,
@@ -531,6 +654,7 @@ const startLocalChildOnce = async (
   readIdentity: ProcessIdentityReader,
   runtime: PreparedOpenCodeRuntime,
   incarnation: { authorityId: string; generation: number },
+  credential: OwnedLaunchCredential,
 ): Promise<StartedLocalChild> => {
   let env = { ...process.env };
   // OpenCode shells out constantly (git, ripgrep, LSP servers, bun/node for
@@ -542,6 +666,7 @@ const startLocalChildOnce = async (
   if (configDir) env.OPENCODE_CONFIG_DIR = configDir;
   env.OPENCODE_DB = runtime.dbPath;
   env[OPENCODE_UPDATE_DISABLE_ENV] = "true";
+  Object.assign(env, credential.environment);
   const overlay = peekOpenCodeLaunchOverlay({
     cwd: resolve(options.cwd),
     ...(options.spaceId ? { spaceId: options.spaceId } : {}),
@@ -564,7 +689,12 @@ const startLocalChildOnce = async (
   let authority: Awaited<ReturnType<typeof createProcessAuthority>> | undefined;
   let child: ChildProcess;
   try {
-    env = applyOpenCodeLaunchOverlay(env, overlay);
+    env = applyOpenCodeLaunchOverlay(
+      env,
+      overlay,
+      isOpenCodeV2(runtime.engineIdentity.version) ? "v2" : "legacy",
+    );
+    if (isOpenCodeV2(runtime.engineIdentity.version)) env = await projectV2ModelVisibility(env);
     // The token is not an OpenCode credential. It lets child wrappers and
     // diagnostics identify the exact Polyth-owned instance.
     env.POLYTH_OPENCODE_INSTANCE_TOKEN = instanceToken;
@@ -587,43 +717,28 @@ const startLocalChildOnce = async (
   }
 
   let buffer = "";
-  let timer: NodeJS.Timeout | undefined;
   const listenTimeoutMs = options.listenTimeoutMs ?? 20_000;
   try {
-    const actualPort = await new Promise<number>((resolveListen, rejectListen) => {
-      let settled = false;
-      const finish = (error?: Error, listeningPort?: number) => {
-        if (settled) return;
-        settled = true;
-        if (timer) clearTimeout(timer);
-        child.stdout?.off("data", onChunk);
-        child.stderr?.off("data", onChunk);
-        if (error) rejectListen(error);
-        else resolveListen(listeningPort!);
-      };
-      const onChunk = (chunk: Buffer | string) => {
-        buffer += chunk.toString();
-        if (BIND_COLLISION_RE.test(buffer)) {
-          finish(Object.assign(new Error(`local port ${port} is in use`), { code: "port-in-use" }));
-          return;
-        }
-        const match = buffer.match(LISTEN_RE);
-        if (match) finish(undefined, Number(match[1]));
-      };
+    const actualPort = await (async () => {
+      const onChunk = (chunk: Buffer | string) => { buffer += chunk.toString(); };
       child.stdout?.on("data", onChunk);
       child.stderr?.on("data", onChunk);
-      child.once("error", (error) => finish(error));
-      child.once("exit", (code) => {
-        const error = BIND_COLLISION_RE.test(buffer)
-          ? Object.assign(new Error(`local port ${port} is in use`), { code: "port-in-use" })
-          : unavailable(`opencode serve exited ${code}: ${buffer.slice(-400)}`);
-        finish(error);
-      });
-      timer = setTimeout(
-        () => finish(unavailable(`opencode serve listen timeout after ${listenTimeoutMs}ms`)),
-        listenTimeoutMs,
-      );
-    });
+      try {
+        await waitForLocalHealth({
+          hostname,
+          port,
+          path: isOpenCodeV2(runtime.engineIdentity.version) ? "/api/health" : "/global/health",
+          child,
+          headers: await headersForAuthentication(credential.authentication),
+          timeoutMs: listenTimeoutMs,
+          output: () => buffer,
+        });
+        return port;
+      } finally {
+        child.stdout?.off("data", onChunk);
+        child.stderr?.off("data", onChunk);
+      }
+    })();
     child.stdout?.resume();
     child.stderr?.resume();
     await runtime.secureDatabaseFiles();
@@ -647,23 +762,40 @@ const startLocalChildOnce = async (
           : "OpenCode process started",
       });
       if (overlay) {
+        const v2 = isOpenCodeV2(runtime.engineIdentity.version);
+        let activation: Promise<void> | undefined;
+        const capabilityUrl = (path: string): URL => {
+          const url = new URL(path, `http://${hostname === "0.0.0.0" ? "127.0.0.1" : hostname}:${actualPort}`);
+          url.searchParams.set(v2 ? "location[directory]" : "directory", resolve(options.cwd));
+          return url;
+        };
         await verifyOpenCodeCapabilities(overlay, {
           harnessId: "opencode", spaceId: options.spaceId ?? "", projectId: options.projectId,
           cwd: resolve(options.cwd), authorityId: incarnation.authorityId, generation: incarnation.generation,
         }, async (path) => {
-          const url = new URL(path, `http://${hostname === "0.0.0.0" ? "127.0.0.1" : hostname}:${actualPort}`);
-          url.searchParams.set("directory", resolve(options.cwd));
-          const headers: Record<string, string> = {};
-          if (env.OPENCODE_SERVER_PASSWORD) {
-            headers.Authorization = `Basic ${Buffer.from(`${env.OPENCODE_SERVER_USERNAME || "opencode"}:${env.OPENCODE_SERVER_PASSWORD}`).toString("base64")}`;
+          const headers = await headersForAuthentication(credential.authentication);
+          if (v2) {
+            activation ??= (async () => {
+              const response = await fetch(capabilityUrl("/api/plugin/await-activation"), {
+                method: "POST", headers, signal: AbortSignal.timeout(listenTimeoutMs),
+              });
+              if (response.status !== 204) throw new Error(`OpenCode V2 plugin activation wait failed (HTTP ${response.status})`);
+            })();
+            await activation;
           }
-          const response = await fetch(url, { headers, signal: AbortSignal.timeout(5_000) });
+          const response = await fetch(capabilityUrl(path), { headers, signal: AbortSignal.timeout(5_000) });
           if (!response.ok) throw new Error("OpenCode capability readback unavailable");
           return response.json();
-        });
+        }, undefined, v2 ? "v2" : "legacy");
       }
     }
-    return { child, port: actualPort, hostname, ...(authority ? { authority } : {}) };
+    return {
+      child,
+      port: actualPort,
+      hostname,
+      authentication: credential.authentication,
+      ...(authority ? { authority } : {}),
+    };
   } catch (error) {
     if (launchCapture) releaseCapabilityLaunch(launchCapture);
     if (authority) await authority.close();
@@ -699,11 +831,6 @@ export const createOwnedLocalEndpointLease = async (
   const stateFile = options.stateFile ?? legacyStateFile;
   const readIdentity = options.readProcessIdentity ?? readProcessIdentity;
   const signal = options.signalProcess ?? ((pid, processSignal) => process.kill(pid, processSignal));
-  const authentication: RuntimeAuthentication = {
-    kind: "basic-env",
-    usernameEnv: options.usernameEnv ?? "OPENCODE_SERVER_USERNAME",
-    passwordEnv: options.passwordEnv ?? "OPENCODE_SERVER_PASSWORD",
-  };
   let firstStart = true;
   let preparedRuntime: PreparedOpenCodeRuntime | undefined;
 
@@ -763,15 +890,15 @@ export const createOwnedLocalEndpointLease = async (
     config: options.configTargetId
       ? { kind: "writable", targetId: options.configTargetId }
       : { kind: "read-only" },
-    authentication,
     async start(instanceToken, incarnation) {
       const runtime = preparedRuntime;
       if (!runtime) throw unavailable("isolated OpenCode runtime was not prepared");
+      const credential = ownedLaunchCredential(runtime.engineIdentity, options);
       await runtime.recordOpen(incarnation);
       const attempts = Math.max(1, options.maxBindAttempts ?? 4);
       let lastError: unknown;
       for (let attempt = 0; attempt < attempts; attempt++) {
-        const port = attempt === 0 && options.port !== undefined
+        const port = attempt === 0 && options.port !== undefined && options.port !== 0
           ? options.port
           : await (options.pickPort ?? pickFreePort)(hostname);
         try {
@@ -784,13 +911,14 @@ export const createOwnedLocalEndpointLease = async (
             readIdentity,
             runtime,
             incarnation,
+            credential,
           );
           let stopped = false;
           activeLocalInstanceTokens.add(instanceToken);
           return {
             url: `http://${started.hostname}:${started.port}`,
             instanceIdentity: `${instanceToken}:${started.child.pid ?? "unknown"}`,
-            authentication,
+            authentication: started.authentication,
             notStopped: () => !stopped && !childExited(started.child),
             async stop() {
               if (stopped) return;
@@ -930,7 +1058,6 @@ export const createOwnedSshEndpointLease = async (
     continuity: options.stateFile && options.runtimeIdentity ? "verified" : "generation-only",
     location: options.location,
     config: { kind: "read-only" },
-    authentication,
     async start(instanceToken, incarnation) {
       return { ...await options.start(instanceToken, incarnation), authentication };
     },

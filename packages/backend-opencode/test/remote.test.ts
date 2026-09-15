@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import type { RuntimeEndpoint } from "@polyth/contracts";
 import {
   createRemoteOpenCodeRuntime,
   installRemoteOpenCode,
@@ -45,7 +46,9 @@ const startStubServe = async () => {
       res.writeHead(code, { "content-type": "application/json" });
       res.end(JSON.stringify(body));
     };
-    if (req.method === "GET" && path === "/global/health") return json(200, { healthy: true });
+    if (req.method === "GET" && path === "/global/health") {
+      return json(200, { healthy: true, version: "1.18.30" });
+    }
     if (req.method === "GET" && path === "/provider") return json(200, providerBody);
     if (req.method === "GET" && path === "/agent") return json(200, [{ name: "build", mode: "primary" }]);
     if (req.method === "POST" && path === "/session") return json(200, { id: "ses_remote_1" });
@@ -87,10 +90,7 @@ const bootRemote = async (
     listenTimeoutMs: 5_000,
   });
 
-const endpointOf = async (runtime: { endpoint?: () => Promise<{
-  authorityId: string;
-  generation: number;
-}> }) => {
+const endpointOf = async (runtime: { endpoint?: () => Promise<RuntimeEndpoint> }) => {
   const read = runtime.endpoint;
   assert.ok(read, "owned remote runtime must expose endpoint()");
   return read();
@@ -135,9 +135,7 @@ test("remote runtime boots serve on the host, attaches through the forward, and 
     assert.match(cmd, /POLYTH_REMOTE_PID=/, "must record the remote serve pid");
     const dbProbe = fake.execCalls.find((call) => call.includes(" db path"));
     assert.ok(
-      dbProbe?.includes(
-        "OPENCODE_DB='/var/lib/polyth/runtimes/app/probe.db' opencode db path",
-      ),
+      dbProbe?.includes("OPENCODE_DB='/var/lib/polyth/runtimes/app/probe.db' opencode debug paths db"),
       `missing isolated DB capability probe: ${dbProbe}`,
     );
     const versionProbe = fake.execCalls.find((call) => call.includes("--version"));
@@ -417,10 +415,69 @@ test("probeRemoteOpenCode reports the installed version honestly", async () => {
   assert.match(bad.message ?? "", /not installed/);
 });
 
+test("remote v2 serve delivers OPENCODE_PASSWORD through non-TTY stdin and exposes fixed-user endpoint auth", async (t) => {
+  const stub = await startStubServe();
+  const directory = await mkdtemp(join(tmpdir(), "polyth-remote-v2-auth-"));
+  const oldPrimary = process.env.OPENCODE_PASSWORD;
+  process.env.OPENCODE_PASSWORD = "remote-v2-primary";
+  t.after(async () => {
+    if (oldPrimary === undefined) delete process.env.OPENCODE_PASSWORD;
+    else process.env.OPENCODE_PASSWORD = oldPrimary;
+    stub.server.close();
+    await rm(directory, { recursive: true, force: true });
+  });
+  const fake = createFakeHost({ stubPort: stub.port, version: "opencode v2.0.3" });
+  const runtime = await bootRemote(fake, {
+    leaseStateFile: join(directory, "ssh.lease.json"),
+    port: 37180,
+  });
+  const endpoint = await endpointOf(runtime);
+  assert.equal(endpoint.authentication.kind, "endpoint-headers");
+  if (endpoint.authentication.kind !== "endpoint-headers") throw new Error("expected private v2 auth");
+  assert.deepEqual(await endpoint.authentication.resolve(), {
+    authorization: `Basic ${Buffer.from("opencode:remote-v2-primary").toString("base64")}`,
+  });
+  assert.equal(fake.serveStartCommands[0]?.includes("remote-v2-primary"), false);
+  assert.ok(fake.serveStartCommands[0]?.includes("IFS= read -r OPENCODE_PASSWORD"));
+  assert.deepEqual(fake.serveWrites, ["remote-v2-primary\n"]);
+  assert.ok(fake.execCalls.some((command) => command.includes("opencode debug paths db")));
+  await runtime.dispose();
+});
+
 test("installRemoteOpenCode runs the fixed vendor installer on the remote host", async () => {
   const fake = createFakeHost({ stubPort: 1 });
   await installRemoteOpenCode(fake.host);
-  assert.ok(fake.execCalls.some((command) => command.includes("curl -fsSL https://opencode.ai/install | bash")));
+  assert.ok(fake.execCalls.some((command) => command.includes("curl -fsSL https://opencode.ai/v2/install | bash")));
+});
+
+test("remote v2 credential input failure cleans up and does not expose the credential in argv", async () => {
+  const fake = createFakeHost({
+    stubPort: 1,
+    version: "opencode v2.0.3",
+    failServeWrite: true,
+  });
+  const oldPassword = process.env.OPENCODE_PASSWORD;
+  process.env.OPENCODE_PASSWORD = "remote-write-failure-secret";
+  try {
+    await assert.rejects(
+      () => createRemoteOpenCodeRuntime({
+        host: fake.host,
+        remotePath: "/srv/app",
+        runtimeDir: "/var/lib/polyth/runtimes/input-failure",
+        pickPort: () => 37181,
+      }),
+      (error: Error & { code?: string }) =>
+        error.code === "unavailable"
+        && error.message.includes("could not deliver private remote OpenCode startup credential")
+        && !error.message.includes("remote-write-failure-secret"),
+    );
+    assert.deepEqual(fake.serveWrites, ["remote-write-failure-secret\n"]);
+    assert.equal(fake.serveStartCommands.some((command) => command.includes("remote-write-failure-secret")), false);
+    assert.ok(fake.killedHandles.length > 0, "unwritable startup input must close the remote shell");
+  } finally {
+    if (oldPassword === undefined) delete process.env.OPENCODE_PASSWORD;
+    else process.env.OPENCODE_PASSWORD = oldPassword;
+  }
 });
 
 const STORAGE_ID_RE =

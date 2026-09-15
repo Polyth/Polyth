@@ -15,6 +15,8 @@ test("desktop status shares the live chat column geometry", async () => {
   assert.match(rail, /--workspace-pane-inline-size/);
   assert.match(styles, /\.desktop-session-status[^}]+--sidebar-inline-size[^}]+--workspace-pane-inline-size/);
   assert.match(styles, /\.desktop-session-status[^}]+--header-leading-inline-end[^}]+--header-trailing-inline-size/s);
+  assert.match(styles, /\.app > \.header\s*\{[^}]*--conversation-frame-inline-start:[^}]*--conversation-frame-inline-end:/s);
+  assert.doesNotMatch(styles, /\.app > \.header\.header-chat\s*\{[^}]*--conversation-frame-inline-start:/s);
   assert.match(styles, /body\[data-chatwidth="wide"\]\s*\{\s*--chat-measure:\s*1180px;/);
   assert.doesNotMatch(styles, /body\[data-chatwidth="wide"\] \.timeline\s*\{/);
   assert.doesNotMatch(styles, /\.timeline\s*\{[^}]*padding-inline-end:[^}]*--rail-strip-width-right/s);

@@ -1,5 +1,6 @@
 import type { JsonObject, RuntimeSnapshot } from "@polyth/contracts";
-import type { OcEvent } from "./events.ts";
+import { v2AssistantPartId, v2ToolError, v2ToolOutput, type OcEvent } from "./events.ts";
+import { v2FormQuestionOf } from "./v2Forms.ts";
 
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === "object" && !Array.isArray(value)
@@ -8,28 +9,6 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
 
 const asJsonObject = (value: unknown): JsonObject =>
   asRecord(value) as JsonObject | undefined ?? {};
-
-const errorMessage = (value: unknown): string => {
-  if (typeof value === "string" && value.trim()) return value.slice(0, 500);
-  const error = asRecord(value);
-  const nested = asRecord(error?.error);
-  for (const candidate of [error?.message, nested?.message]) {
-    if (typeof candidate === "string" && candidate.trim()) {
-      return candidate.slice(0, 500);
-    }
-  }
-  return "tool failed";
-};
-
-const toolOutput = (state: Record<string, unknown>): string | undefined => {
-  if (typeof state.result === "string") return state.result;
-  if (state.result === undefined) return undefined;
-  try {
-    return JSON.stringify(state.result);
-  } catch {
-    return undefined;
-  }
-};
 
 export const pulledV2MessageEvents = (
   value: unknown,
@@ -70,16 +49,23 @@ export const pulledV2MessageEvents = (
       },
     },
   }];
+  const partOrdinals = { text: 0, reasoning: 0 };
   for (const contentValue of Array.isArray(message.content) ? message.content : []) {
     const content = asRecord(contentValue);
-    if (!content || typeof content.id !== "string") continue;
+    if (!content) continue;
     if (content.type === "text" || content.type === "reasoning") {
+      // V2's released AssistantText and AssistantReasoning schema has no
+      // content id. Derive a stable part identity from the durable message and
+      // its ordered content position so a pulled completed response finalizes
+      // exactly once. Tool parts retain their native ids below.
+      const ordinal = partOrdinals[content.type]++;
+      const partId = v2AssistantPartId(message.id, content.type, ordinal);
       events.push({
         type: "message.part.updated",
         properties: {
           sessionID: backendSessionId,
           part: {
-            id: content.id,
+            id: partId,
             type: content.type,
             text: typeof content.text === "string" ? content.text : "",
             messageID: message.id,
@@ -93,10 +79,10 @@ export const pulledV2MessageEvents = (
       });
       continue;
     }
-    if (content.type !== "tool") continue;
+    if (content.type !== "tool" || typeof content.id !== "string" || !content.id) continue;
     const state = asRecord(content.state) ?? {};
     const status = typeof state.status === "string" ? state.status : "pending";
-    const output = toolOutput(state);
+    const output = v2ToolOutput(state.content);
     events.push({
       type: "message.part.updated",
       properties: {
@@ -112,7 +98,7 @@ export const pulledV2MessageEvents = (
             status,
             input: asJsonObject(state.input),
             ...(output ? { output } : {}),
-            ...(status === "error" ? { error: errorMessage(state.error) } : {}),
+            ...(status === "error" ? { error: v2ToolError(state.error) } : {}),
           },
         },
       },
@@ -142,19 +128,4 @@ export const v2PermissionOf = (
 export const v2QuestionOf = (
   value: unknown,
   backendSessionId: string,
-): RuntimeSnapshot["questions"][number] | undefined => {
-  const request = asRecord(value);
-  if (!request || request.sessionID !== backendSessionId || typeof request.id !== "string") {
-    return undefined;
-  }
-  return {
-    requestId: request.id,
-    questions: Array.isArray(request.questions)
-      ? request.questions
-          .map(asRecord)
-          .filter((item): item is Record<string, unknown> => item !== undefined)
-          .map((item) => item as JsonObject)
-      : [],
-    revision: "pending",
-  };
-};
+): RuntimeSnapshot["questions"][number] | undefined => v2FormQuestionOf(value, backendSessionId);

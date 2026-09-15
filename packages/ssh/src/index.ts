@@ -51,7 +51,7 @@ export interface SshChild {
   write?(data: string): Promise<void>;
   kill(): void;
 }
-export type SshSpawner = (args: string[], opts?: { interactive?: boolean }) => SshChild;
+export type SshSpawner = (args: string[], opts?: { interactive?: boolean; stdin?: "pipe" }) => SshChild;
 
 export interface SshService {
   list(): SshConnectionDto[];
@@ -353,7 +353,7 @@ export const createOwnedSshChild = (
 
 const defaultSpawner: SshSpawner = (args, opts) =>
   createOwnedSshChild(spawn("ssh", args, {
-    stdio: [opts?.interactive ? "pipe" : "ignore", "pipe", "pipe"],
+    stdio: [opts?.interactive || opts?.stdin === "pipe" ? "pipe" : "ignore", "pipe", "pipe"],
   }));
 
 const defaultFreePort = (): Promise<number> =>

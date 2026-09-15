@@ -752,12 +752,22 @@ test("expanded activity keeps its collapse control visible while scrolling", asy
   const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(css, /\.activity-group\s*\{[\s\S]*?overflow:\s*visible;/,
     "the activity container must not trap its sticky header");
+  assert.match(css, /\.activity-group::before\s*\{[\s\S]*?overflow:\s*hidden;[\s\S]*?background:\s*var\(--surface-activity\);/,
+    "glass paints on a bounded plate so overflow:visible still allows sticky");
+  assert.match(css, /\.activity-group\.open\s*\{[\s\S]*?z-index:\s*calc\(var\(--z-shell\) \+ 1\);/,
+    "expanded activity sits above conversation chrome rather than under the composer");
   assert.match(css, /\.activity-group\.open\s*>\s*\.ui-run-summary\s*\{[\s\S]*?position:\s*sticky;[\s\S]*?inset-block-start:\s*0;[\s\S]*?background:\s*transparent;[\s\S]*?border-radius:\s*var\(--radius-activity\)\s+var\(--radius-activity\)\s+0\s+0;/,
     "the expanded activity header stays sticky, transparent, and rounded at the outer corners");
   assert.match(css, /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\)\s+:is\(\.activity-group,\s*\.task-list\)/,
     "activity keeps the shared translucent glass treatment when enabled");
-  assert.match(css, /body\[data-glass="off"\]\s+:is\(\.activity-group,\s*\.task-list\)/,
+  assert.match(css, /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\)\s+:is\(\.activity-group::before,\s*\.task-list\)[\s\S]*?var\(--material-glass-fill\)/,
+    "activity translucency follows the user's glass fill token");
+  assert.match(css, /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\)\s+\.activity-group\.open::before[\s\S]*?var\(--material-glass\) var\(--material-glass-fill\)[\s\S]*?blur\(var\(--material-glass-blur\)\) saturate\(var\(--material-glass-saturation\)\)/,
+    "expanded activity uses the same glass material as other floating chrome");
+  assert.match(css, /body\[data-glass="off"\]\s+:is\(\.activity-group,\s*\.activity-group::before,\s*\.task-list\)[\s\S]*?backdrop-filter:\s*none !important/,
     "activity keeps an opaque fallback when transparency is disabled");
+  assert.match(css, /\.activity-live-layer \{[^}]*z-index:\s*calc\(var\(--z-shell\) \+ 2\)/s,
+    "live flight stays above the raised expanded activity card");
 });
 
 test("multi-file patches list each file with its own line counts", async () => {

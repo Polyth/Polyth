@@ -57,7 +57,7 @@ export function createOpenCodeHarness(
     inspectConfiguration?: HarnessProvider["inspectConfiguration"],
 ): HarnessProvider {
     return {
-        descriptor: { id: "opencode", name: "OpenCode", integration: "HTTP / SSE", priority: 0, setupUrl: "https://opencode.ai/docs/", installCommand: "npm install -g opencode-ai" },
+        descriptor: { id: "opencode", name: "OpenCode", integration: "HTTP / SSE", priority: 0, setupUrl: "https://opencode.ai/v2/docs", installCommand: "npm install -g @opencode/cli" },
         runtimeLifetime: "workspace",
         staticFeatures: CAPABILITIES,
         ...(inspectConfiguration ? { inspectConfiguration } : {}),

@@ -29,12 +29,15 @@ test("sidebar uses contextual tree actions and no permanent footer", async () =>
   assert.match(sidebar, /tr\("sidebar\.listOptions"\)/);
   assert.match(sidebar, /kind: "radio",\s*checked: sort === "recent"/);
   assert.match(sidebar, /kind: "checkbox",\s*checked: attentionOnly/);
+  assert.match(sidebar, /kind: "checkbox",\s*checked: showDateGroups/);
+  assert.match(sidebar, /tr\("sidebar\.dateGroups"\)/);
   assert.match(sidebar, /tr\("sidebar\.clearSessionSearch"\)/);
   assert.match(sidebar, /tr\("sidebar\.serverConnectionValue"/);
   assert.match(sidebar, /tr\("sidebar\.reconnect"\)/);
   assert.doesNotMatch(sessions, /session-sync-icon/);
   assert.match(sessions, /groupSessionsByActivityDate/);
   assert.match(sessions, /sessionDateGroupLabel/);
+  assert.match(sessions, /!showDateGroups \|\| sessionDateInputValue/);
   assert.doesNotMatch(sessions, /className="session-time"/);
   assert.match(sessions, /session-worktree-actions/);
   assert.match(sessions, /session-worktree-toggle-sign/);

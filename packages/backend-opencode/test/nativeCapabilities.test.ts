@@ -42,6 +42,21 @@ test("OpenCode native readback separates discovery, connection and invocation", 
   assert.ok(receipts.every((receipt) => receipt.outcome === "unverifiable"));
 });
 
+test("OpenCode v2 readback accepts the /api skill and MCP inventories", async () => {
+  const receipts: HarnessCapabilityApplicationReceipt[] = [];
+  const overlay = { configContent: "", env: {}, desiredRevision: "r", capabilityIds: ["skill", "mcp"],
+    skills: [{ capabilityId: "skill", name: "probe", path: "/private/probe/SKILL.md" }], mcpNames: { mcp: "probe" } };
+  await verifyOpenCodeCapabilities(overlay, { spaceId: "a", projectId: "p", cwd: "/work", harnessId: "opencode" }, async (path) => {
+    if (path === "/api/skill") return { data: [{ id: "probe", name: "probe", location: "/private/probe/SKILL.md" }] };
+    if (path === "/api/mcp") return { data: [{ name: "probe", status: { status: "connected" } }] };
+    throw new Error(`unexpected ${path}`);
+  }, (receipt) => receipts.push(receipt), "v2");
+  assert.equal(receipts[0]?.outcome, "applied");
+  assert.equal(receipts[0]?.evidence?.source, "opencode:/api/skill");
+  assert.equal(receipts[1]?.outcome, "applied");
+  assert.equal(receipts[1]?.evidence?.source, "opencode:/api/mcp");
+});
+
 test("OpenCode private revisions reject symlinks and remain leased until release", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "polyth-oc-private-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -89,7 +104,7 @@ test("OpenCode process discovers/removes private skills and connects fixture MCP
     transport: { kind: "stdio", command: process.execPath, args: [fixture], envKeys: [] },
   }, mode: "config", mutability: "requires-restart" });
   await provider.apply(context, desired, secrets);
-  const baseEnv: NodeJS.ProcessEnv = { ...process.env, XDG_CONFIG_HOME: join(root, "config"), XDG_DATA_HOME: join(root, "data"),
+  const baseEnv: NodeJS.ProcessEnv = { ...process.env, HOME: join(root, "home"), XDG_CONFIG_HOME: join(root, "config"), XDG_DATA_HOME: join(root, "data"),
     XDG_CACHE_HOME: join(root, "cache"), OPENCODE_DB: join(root, "opencode.db"),
     OPENCODE_DISABLE_AUTOUPDATE: "true", OPENCODE_DISABLE_MODELS_FETCH: "true", OPENCODE_DISABLE_EXTERNAL_SKILLS: "true" };
   delete baseEnv.OPENCODE_CONFIG;
@@ -140,4 +155,25 @@ test("OpenCode process discovers/removes private skills and connects fixture MCP
   }
   await provider.apply(context, { ...plan("removed"), items: [], keepRevisions: ["one", "removed"] }, secrets);
   assert.ok(!list(context).some((row) => row.name === skill.name));
+});
+
+
+test("V2 MCP readback waits through pending discovery and preserves terminal failures", async () => {
+  const receipts: HarnessCapabilityApplicationReceipt[] = [];
+  let reads = 0;
+  await verifyOpenCodeCapabilities({ configContent: "", env: {}, desiredRevision: "r", capabilityIds: ["mcp"], mcpNames: { mcp: "probe" } },
+    { spaceId: "a", projectId: "p", cwd: "/work", harnessId: "opencode", authorityId: "owned", generation: 3 },
+    async () => ({ data: [{ name: "probe", status: { status: ++reads === 1 ? "pending" : "connected" } }] }),
+    (receipt) => receipts.push(receipt), "v2");
+  assert.equal(reads, 2);
+  assert.equal(receipts[0]?.outcome, "applied");
+  assert.equal(receipts[0]?.target.generation, 3);
+  reads = 0;
+  receipts.length = 0;
+  await verifyOpenCodeCapabilities({ configContent: "", env: {}, desiredRevision: "r", capabilityIds: ["mcp"], mcpNames: { mcp: "probe" } },
+    { spaceId: "a", projectId: "p", cwd: "/work", harnessId: "opencode" },
+    async () => { reads++; return { data: [{ name: "probe", status: { status: "failed", error: "fixture failed" } }] }; },
+    (receipt) => receipts.push(receipt), "v2");
+  assert.equal(reads, 1);
+  assert.equal(receipts[0]?.outcome, "failed");
 });

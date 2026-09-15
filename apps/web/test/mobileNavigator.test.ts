@@ -126,6 +126,8 @@ test("phone chats are pinned-first, date-filtered, and grouped without row ages"
   assert.match(source, /list\.sort\(compareSessionNavigation\)/);
   assert.match(source, /sessionMatchesDateFilter\(session, dateFilter\)/);
   assert.match(source, /<SessionDateFilterControls value=\{dateFilter\} onChange=\{setDateFilter\}/);
+  assert.match(source, /id: "date-groups"/);
+  assert.match(source, /showDateGroups && group.key !== sessionDateInputValue\(now\)/);
   assert.match(source, /className="mobile-nav-date-divider is-pinned"/);
   assert.match(source, /className="mobile-nav-pin-icon"/);
   assert.doesNotMatch(source, /function activityLabel/);

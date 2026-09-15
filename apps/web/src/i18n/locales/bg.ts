@@ -1660,6 +1660,7 @@ export const bg: AppMessages = {
   "sidebar.message": "×",
   "sidebar.moreSidebarActions": "Още действия в страничната лента",
   "sidebar.needsAttention": "Изисква внимание",
+  "sidebar.dateGroups": "Групи по дата",
   "sidebar.newChatInValue": "Нов чат в {value}",
   "sidebar.newSessionInWorktree": "Работа в изолация…",
   "sidebar.noMatchingSessions": "Няма съответстващи сесии.",

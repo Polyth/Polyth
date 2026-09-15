@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import type { ChildProcess, spawn as nodeSpawn } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { createServer } from "node:http";
 import { writeFileSync } from "node:fs";
 import {
   mkdir,
@@ -54,10 +55,18 @@ interface FakeChild extends ChildProcess {
   observedSignals: NodeJS.Signals[];
 }
 
-const createFakeChild = (pid: number, output: string): FakeChild => {
+const createFakeChild = (pid: number, port: number, password: string): FakeChild => {
   const emitter = new EventEmitter() as FakeChild;
   const stdout = new PassThrough();
   const stderr = new PassThrough();
+  const health = createServer((request, response) => {
+    if (request.url !== "/global/health") { response.writeHead(404).end(); return; }
+    if (request.headers.authorization !== `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`) {
+      response.writeHead(401).end(); return;
+    }
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ healthy: true, version: "1.18.30" }));
+  });
   let killed = false;
   let exitCode: number | null = null;
   let signalCode: NodeJS.Signals | null = null;
@@ -75,6 +84,8 @@ const createFakeChild = (pid: number, output: string): FakeChild => {
       emitter.observedSignals.push(signal);
       killed = true;
       signalCode = signal;
+      health.closeAllConnections();
+      health.close();
       queueMicrotask(() => emitter.emit("exit", null, signal));
       return true;
     },
@@ -89,7 +100,7 @@ const createFakeChild = (pid: number, output: string): FakeChild => {
     signalCode: { get: () => signalCode },
   });
   setImmediate(() => {
-    stderr.write(output);
+    health.listen(port, "127.0.0.1");
   });
   return emitter;
 };
@@ -215,7 +226,6 @@ export const createLocalOwnedFixture = async (options: {
   const spawnedDbs: string[] = [];
   let engine = options.engine ?? { ...TEST_LOCAL_ENGINE };
   let nextPid = 18_000;
-  let nextPort = 47_000;
   let lastChild: FakeChild | undefined;
   let activeLease: Awaited<ReturnType<typeof createOwnedLocalEndpointLease>> | undefined;
   const resolveTestBinary: NonNullable<OwnedLocalEndpointOptions["resolveBinary"]> = async (
@@ -243,7 +253,6 @@ export const createLocalOwnedFixture = async (options: {
     },
     async boot() {
       await disposeLease();
-      const port = nextPort++;
       const lease = await createOwnedLocalEndpointLease({
         projectId: options.projectId ?? "project-a",
         cwd: directory,
@@ -253,7 +262,6 @@ export const createLocalOwnedFixture = async (options: {
         resolveBinary: resolveTestBinary,
         inspectEngine: async () => engine,
         onRuntimeDiagnostic: (message) => diagnostics.push(message),
-        pickPort: async () => port,
         spawn: ((_bin: string, args: readonly string[], spawnOptions: { env?: NodeJS.ProcessEnv }) => {
           const isolatedDb = spawnOptions.env?.OPENCODE_DB;
           assert.ok(isolatedDb, "owned spawn must always receive OPENCODE_DB");
@@ -261,7 +269,8 @@ export const createLocalOwnedFixture = async (options: {
           writeFileSync(isolatedDb, `opaque database ${nextPid}`, { mode: 0o600 });
           lastChild = createFakeChild(
             nextPid++,
-            `opencode server listening on http://127.0.0.1:${Number(args.at(-1))}\n`,
+            Number(args.at(-1)),
+            spawnOptions.env?.OPENCODE_SERVER_PASSWORD ?? "",
           );
           return lastChild;
         }) as unknown as typeof nodeSpawn,

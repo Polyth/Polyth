@@ -11,9 +11,27 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RuntimeConfigAuthority } from "@polyth/contracts";
-import { createConfigApplier, type McpApplyBatch, type McpApplyEntry } from "../src/config.ts";
+import { createConfigApplier, projectV2ModelVisibility, type McpApplyBatch, type McpApplyEntry } from "../src/config.ts";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "polyth-cfg-preserve-"));
+
+test("V2 launch projects model blacklists without persisting a second visibility state", async () => {
+  const configDir = tmp();
+  const path = join(configDir, "opencode.jsonc");
+  const raw = '{ // owned curation plus unrelated native settings\n"provider":{"custom":{"blacklist":["hidden"]}},"providers":{"custom":{"models":{"visible":{"disabled":true}}}},"future":{"keep":true}}';
+  writeFileSync(path, raw);
+  const content = { futureInline: true, providers: { custom: { headers: { "X-Fixture": "yes" }, models: { hidden: { name: "Hidden" } } } } };
+  const env = { OPENCODE_CONFIG_DIR: configDir, OPENCODE_CONFIG_CONTENT: JSON.stringify(content) };
+  const projected = await projectV2ModelVisibility(env);
+  assert.deepEqual(JSON.parse(projected.OPENCODE_CONFIG_CONTENT!), {
+    ...content, providers: { custom: { ...content.providers.custom, models: { hidden: { name: "Hidden", disabled: true } } } },
+  });
+  assert.equal(readFileSync(path, "utf8"), raw);
+  assert.equal(env.OPENCODE_CONFIG_CONTENT, JSON.stringify(content));
+  await createConfigApplier({ configDir }).applyProviderVisibility({ disabledProviders: [], blacklists: {} });
+  assert.equal(await projectV2ModelVisibility(env), env, "removing curation restores the original launch input");
+  assert.equal(JSON.parse(readFileSync(path, "utf8")).providers.custom.models.visible.disabled, true);
+});
 
 // Required regression fixture: unknown provider/model fields that no Polyth
 // DTO knows about. Every owned mutation must leave this subtree intact
