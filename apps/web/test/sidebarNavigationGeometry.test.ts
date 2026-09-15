@@ -38,7 +38,7 @@ test("sidebar geometry uses independent type roles and density controls rows", a
     "--nav-meta-size",
     "--nav-indent-project: 0px",
     "--nav-indent-worktree: 8px",
-    "--nav-indent-session: 26px",
+    "--nav-indent-session: 12px",
     "--nav-status-width: 56px",
   ]) assert.ok(css.includes(variable), `${variable} is part of the sidebar geometry contract`);
 

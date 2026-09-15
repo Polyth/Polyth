@@ -752,8 +752,12 @@ test("expanded activity keeps its collapse control visible while scrolling", asy
   const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(css, /\.activity-group\s*\{[\s\S]*?overflow:\s*visible;/,
     "the activity container must not trap its sticky header");
-  assert.match(css, /\.activity-group\.open\s*>\s*\.ui-run-summary\s*\{[\s\S]*?position:\s*sticky;[\s\S]*?inset-block-start:\s*0;[\s\S]*?background:\s*var\(--surface-activity\);/,
-    "the expanded activity header stays opaque and sticky");
+  assert.match(css, /\.activity-group\.open\s*>\s*\.ui-run-summary\s*\{[\s\S]*?position:\s*sticky;[\s\S]*?inset-block-start:\s*0;[\s\S]*?background:\s*transparent;[\s\S]*?border-radius:\s*var\(--radius-activity\)\s+var\(--radius-activity\)\s+0\s+0;/,
+    "the expanded activity header stays sticky, transparent, and rounded at the outer corners");
+  assert.match(css, /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\)\s+:is\(\.activity-group,\s*\.task-list\)/,
+    "activity keeps the shared translucent glass treatment when enabled");
+  assert.match(css, /body\[data-glass="off"\]\s+:is\(\.activity-group,\s*\.task-list\)/,
+    "activity keeps an opaque fallback when transparency is disabled");
 });
 
 test("multi-file patches list each file with its own line counts", async () => {

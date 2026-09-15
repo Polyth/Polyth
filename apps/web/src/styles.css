@@ -366,7 +366,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
      spending a full icon column on empty space. */
   --nav-indent-project: 0px;
   --nav-indent-worktree: 8px;
-  --nav-indent-session: 26px;
+  --nav-indent-session: 12px;
   /* Cap unusually long status content, but do not reserve this entire width
      for a short timestamp such as “11m”. */
   --nav-status-width: 56px;
@@ -12644,7 +12644,6 @@ html[data-font] body :is(
 .activity-group {
   position: relative;
   overflow: visible;
-  background: transparent;
 }
 .activity-group.current { border-color: color-mix(in srgb, var(--accent-line) 58%, var(--border-soft)); }
 /* Nested summaries inherit the container's chrome. The surface is handed over
@@ -12656,13 +12655,18 @@ html[data-font] body :is(
   border-radius: 0;
   box-shadow: none;
 }
+.activity-group:not(.open) > .ui-run-summary { border-radius: var(--radius-activity); }
 .activity-group.open > .ui-run-summary {
   position: sticky;
   inset-block-start: 0;
   z-index: var(--z-shell);
-  background: var(--surface-activity);
+  /* The group owns the material. Keeping this transparent prevents the sticky
+     header from becoming an opaque rectangle over the rounded glass surface. */
+  background: transparent;
+  border-radius: var(--radius-activity) var(--radius-activity) 0 0;
   box-shadow: 0 1px 0 var(--border-soft), var(--shadow-sm);
 }
+.activity-group.open > .ui-run-summary:hover { background: var(--surface-overlay-hover); }
 .activity-group-expand-shell,
 .task-list-expand-shell {
   width: 100%;
@@ -13257,7 +13261,7 @@ body:not([data-glass="off"]) .header-profile { border: 0; background: transparen
       backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
       background-clip: padding-box;
     }
-    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .task-list {
+    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) :is(.activity-group, .task-list) {
       background: radial-gradient(140% 140% at 50% 50%,
         color-mix(in srgb, var(--surface-activity) var(--material-glass-fill), transparent) 0%,
         color-mix(in srgb, var(--surface-activity) var(--material-glass-edge), transparent) 100%);
@@ -13314,7 +13318,7 @@ body[data-glass="off"] :is(
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
-body[data-glass="off"] .task-list {
+body[data-glass="off"] :is(.activity-group, .task-list) {
   background: var(--surface-activity);
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;

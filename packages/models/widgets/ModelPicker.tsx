@@ -13,7 +13,6 @@ import {
   useRef,
   useState,
   Suspense,
-  type CSSProperties,
   type DragEvent,
   type KeyboardEvent,
   type MouseEvent,
@@ -188,6 +187,9 @@ interface ModelPickerProps {
   harnessId?: string;
   value?: ModelRef & { harnessId?: string };
   recommended?: ModelRef & { harnessId?: string };
+  /** Controlled thinking choice for the selected model. `null` is explicit
+   *  Auto; omitted preserves the variant carried by `value`/`recommended`. */
+  thinking?: string | null;
   onPick: (model?: ModelRef & { harnessId?: string }) => void;
   /** Package-contributed catalog routing shown above the model list. */
   header?: ReactNode;
@@ -205,6 +207,7 @@ export default function ModelPicker({
   harnessId,
   value,
   recommended,
+  thinking,
   onPick,
   header,
   direction = "down",
@@ -241,6 +244,10 @@ export default function ModelPicker({
     : undefined;
   // A pending or partial catalog is not authority to replace the selection.
   const selectedRef = value ?? recommended;
+  // Composer thinking is persisted separately from model identity. Prefer that
+  // controlled value when supplied, while keeping ModelRef.variant compatibility
+  // for settings and recovery consumers that still carry it on the ref.
+  const selectedThinking = thinking === undefined ? selectedRef?.variant : thinking ?? undefined;
   const selectedModel = selectedRef ? (value ? current : fallback) : models[0];
   const label = selectedModel?.name ?? selectedRef?.modelID ?? tr("modelpicker.noModel");
   const q = pickerState.query.trim().toLowerCase();
@@ -384,8 +391,8 @@ export default function ModelPicker({
   const choose = (model: ModelDescriptor) => {
     if (phone) tapFeedback();
     const sameModel = selectedModel ? modelKey(selectedModel) === modelKey(model) : false;
-    const variant = sameModel && selectedRef?.variant && model.variants?.includes(selectedRef.variant)
-      ? selectedRef.variant
+    const variant = sameModel && selectedThinking && model.variants?.includes(selectedThinking)
+      ? selectedThinking
       : undefined;
     onPick({
       providerID: model.providerID,
@@ -419,13 +426,15 @@ export default function ModelPicker({
     const variants = [...new Set(model.variants ?? [])];
     if (variants.length === 0) return null;
     const selected = isSelected(model);
-    const explicitVariant = selected && selectedRef?.variant && variants.includes(selectedRef.variant)
-      ? selectedRef.variant
+    const explicitVariant = selected && selectedThinking && variants.includes(selectedThinking)
+      ? selectedThinking
       : undefined;
     const defaultVariant = model.defaultVariant && variants.includes(model.defaultVariant)
       ? model.defaultVariant
       : undefined;
-    const displayVariant = explicitVariant ?? defaultVariant;
+    const displayVariant = selected && thinking === null
+      ? undefined
+      : explicitVariant ?? defaultVariant;
     const displayLabel = displayVariant ? thinkingVariantLabel(displayVariant) : tr("composer.auto");
     const entries: MenuEntry[] = [
       {
@@ -444,32 +453,37 @@ export default function ModelPicker({
       })),
     ];
     return (
-      <Menu
-        label={tr("composer.thinking")}
-        title={tr("composer.thinking")}
-        entries={entries}
-        align="end"
-        phonePresentation="popover"
-        className="model-thinking-menu"
-      >
-        {({ ref, onClick, ...triggerProps }) => (
-          <button
-            ref={ref}
-            type="button"
-            className="model-thinking-trigger"
-            title={tr("composer.thinkingEffortValue", { value: displayLabel })}
-            aria-label={tr("composer.thinkingEffortValue", { value: displayLabel })}
-            {...triggerProps}
-            onClick={(event) => {
-              event.stopPropagation();
-              onClick();
-            }}
-          >
-            <span>{displayLabel}</span>
-            <Icon.chevronDown />
-          </button>
-        )}
-      </Menu>
+      // Menu content is portalled to <body>, but React still bubbles its click
+      // through this tree. Stop it here so choosing effort cannot also activate
+      // the containing model row with its captured, previous effort.
+      <span className="model-thinking-control" onClick={(event) => event.stopPropagation()}>
+        <Menu
+          label={tr("composer.thinking")}
+          title={tr("composer.thinking")}
+          entries={entries}
+          align="end"
+          phonePresentation="popover"
+          className="model-thinking-menu"
+        >
+          {({ ref, onClick, ...triggerProps }) => (
+            <button
+              ref={ref}
+              type="button"
+              className="model-thinking-trigger"
+              title={tr("composer.thinkingEffortValue", { value: displayLabel })}
+              aria-label={tr("composer.thinkingEffortValue", { value: displayLabel })}
+              {...triggerProps}
+              onClick={(event) => {
+                event.stopPropagation();
+                onClick();
+              }}
+            >
+              <span>{displayLabel}</span>
+              <Icon.chevronDown />
+            </button>
+          )}
+        </Menu>
+      </span>
     );
   };
 
@@ -695,18 +709,6 @@ export default function ModelPicker({
   );
 
   const detailsPanelModel = detail ?? hoverDetailsModel;
-  const compactCatalog = flatCatalog && models.length <= 8;
-  // A compact flat catalog sizes its list to the unfiltered row count, not the
-  // filtered rows: the list keeps one height while the user types, so an
-  // upward-anchored search field never drifts. An empty catalog keeps a
-  // two-row floor so its "no models" message is not clipped.
-  const compactRows = compactCatalog ? (models.length === 0 ? 2 : models.length) : 0;
-  // A genuinely empty catalog has no rows to filter, so let its message size
-  // naturally instead of forcing a row grid.
-  const emptyCompactCatalog = compactCatalog && models.length === 0;
-  const compactShellStyle = !phone && compactCatalog
-    ? ({ "--model-pop-rows": String(compactRows) } as CSSProperties)
-    : undefined;
   const detailsPanelContent = detailsPanelModel && (
     <Suspense fallback={null}>
       {detail
@@ -744,10 +746,10 @@ export default function ModelPicker({
         side={direction === "up" ? "up" : "down"}
         align="start"
         stableAnchor
-        className={phone ? "model-sheet" : `model-pop${compactCatalog ? " model-pop--compact" : ""}${emptyCompactCatalog ? " model-pop--empty" : ""}`}
+        className={phone ? "model-sheet" : "model-pop"}
         popoverOverflow="visible"
         initialFocus={!phone ? ".model-pop-search input" : undefined}
-        sheetSize={compactCatalog ? "auto" : "tall"}
+        sheetSize="tall"
         sheetSearch={{
           value: pickerState.query,
           onChange: (query: string) => {
@@ -766,7 +768,7 @@ export default function ModelPicker({
           },
         } : {})}
       >
-        <div ref={pickerShellRef} className="model-picker-shell" style={compactShellStyle}>
+        <div ref={pickerShellRef} className="model-picker-shell">
           {header && <div className="model-picker-header">{header}</div>}
           {phone ? (detail ? detailsPanelContent : (
             <div role="listbox" aria-label={tr("modelpicker.models")}>

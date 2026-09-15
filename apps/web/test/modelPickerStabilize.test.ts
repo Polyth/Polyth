@@ -74,7 +74,7 @@ test("native catalog updates preserve Luna, flat rows, and the existing picker s
     assert.equal(container.querySelector(".model-trigger-name")?.textContent, "Luna");
     await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
     const shell = document.body.querySelector(".model-pop");
-    assert.ok(shell?.classList.contains("model-pop--compact"), "small native catalogs do not reserve a full-height menu");
+    assert.equal(shell?.className.includes("model-pop--compact"), false, "short native catalogs use the shared picker height");
     assert.equal(document.body.querySelectorAll(".model-picker-row").length, 2);
     assert.equal(document.body.querySelector(".model-provider-head"), null);
     assert.equal(document.body.querySelector(".model-star-btn"), null);
@@ -318,7 +318,7 @@ test("model picker shell keeps fixed geometry while details open beside it", asy
     assert.ok(document.body.querySelector("#model-pop-listbox"), "listbox stays in the shell");
     assert.equal(document.body.querySelector(".model-details-panel"), null, "details stay closed initially");
     assert.match(styles, /\.model-pop\s*\{[^}]*height:\s*min\(560px,\s*72vh\)/s, "popover height is pinned");
-    assert.match(styles, /\.model-pop\s*\{[^}]*min-height:\s*min\(560px,\s*72vh\)/s, "popover min-height matches pinned height");
+    assert.doesNotMatch(styles, /\.model-pop\s*\{[^}]*min-height:/s, "collision bounds may shrink the preferred height on short viewports");
 
     const row = document.body.querySelector<HTMLElement>(".model-picker-row");
     assert.ok(row, "catalog row renders");
@@ -348,19 +348,34 @@ test("phone model rows place thinking effort in the former info slot", async () 
   const { default: ModelPicker } = await import("../../../packages/models/widgets/ModelPicker.tsx");
   const container = document.createElement("div");
   document.body.appendChild(container);
-    const root = createRoot(container);
+  const root = createRoot(container);
+  const render = (models: ModelDescriptor[], harnessId: string, catalogLoading = false) => act(async () => {
+    root.render(createElement(ModelPicker, { models, harnessId, catalogLoading, onPick: () => {} }));
+  });
   try {
-    await act(async () => {
-      root.render(createElement(ModelPicker, {
-        models: [{ providerID: "openai", modelID: "gpt-test", name: "GPT Test", variants: ["high"] }],
-        onPick: () => {},
-      }));
-    });
+    await render([
+      { harnessId: "codex", providerID: "openai", modelID: "gpt-test", name: "GPT Test", variants: ["high"] },
+    ], "codex");
     await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
     const sheet = document.body.querySelector<HTMLElement>(".model-sheet");
     assert.ok(sheet, "phone picker uses the shared modal sheet");
+    assert.ok(sheet!.classList.contains("sheet-tall"), "small harness catalogs use the stable tall sheet");
     assert.equal(sheet!.querySelector(".sheet-row-info"), null, "the sheet row does not expose an info control");
     assert.ok(sheet!.querySelector(".model-thinking-trigger"), "the sheet row exposes thinking effort in the former info slot");
+
+    await render(Array.from({ length: 10 }, (_, index) => ({
+      harnessId: "claude",
+      providerID: "anthropic",
+      modelID: `claude-${index}`,
+      name: `Claude ${index}`,
+    })), "claude");
+    assert.equal(document.body.querySelector(".model-sheet"), sheet, "switching harnesses keeps the same open phone surface");
+    assert.ok(sheet!.classList.contains("sheet-tall"), "large harness catalogs keep the same tall sheet mode");
+
+    await render([], "claude", true);
+    assert.equal(document.body.querySelector(".model-sheet"), sheet, "loading updates reuse the open phone surface");
+    assert.ok(sheet!.classList.contains("sheet-tall"), "loading and empty states keep the same tall sheet mode");
+    assert.match(sheet!.textContent ?? "", /loading/i);
   } finally {
     phoneMode = false;
     await act(async () => { root.unmount(); });
@@ -368,68 +383,141 @@ test("phone model rows place thinking effort in the former info slot", async () 
   }
 });
 
-test("compact catalog shell height follows unfiltered rows and holds while searching", async () => {
-  const { act, createElement } = await import("react");
+test("thinking effort commits once, keeps the model picker open, and survives reopening", async () => {
+  const { act, createElement, useState } = await import("react");
   const { createRoot } = await import("react-dom/client");
   const { default: ModelPicker } = await import("../../../packages/models/widgets/ModelPicker.tsx");
-  const styles = await read("../../../packages/models/widgets/styles.css");
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
-  const setInput = (input: HTMLInputElement, value: string) => {
-    const setter = Object.getOwnPropertyDescriptor(dom.HTMLInputElement.prototype, "value")?.set;
-    setter!.call(input, value);
-    input.dispatchEvent(new window.Event("input", { bubbles: true }));
+  const model = {
+    harnessId: "codex",
+    providerID: "openai",
+    modelID: "reasoning",
+    name: "Reasoning model",
+    variants: ["low", "high"],
+    defaultVariant: "low",
   };
-  const model = (id: string, name: string) => ({ harnessId: "codex", providerID: "openai", modelID: id, name });
+  const picks: Array<{ variant?: string }> = [];
+
+  function Harness() {
+    const [thinking, setThinking] = useState<string | null>("low");
+    return createElement(ModelPicker, {
+      harnessId: "codex",
+      models: [model],
+      value: { harnessId: "codex", providerID: "openai", modelID: "reasoning" },
+      thinking,
+      onPick: (picked) => {
+        if (!picked) return;
+        picks.push(picked);
+        setThinking(picked.variant || null);
+      },
+    });
+  }
+
   try {
-    await act(async () => {
-      root.render(createElement(ModelPicker, {
-        harnessId: "codex",
-        models: [model("m0", "Model 0"), model("m1", "Model 1")],
-        onPick: () => {},
-      }));
-    });
+    await act(async () => { root.render(createElement(Harness)); });
     await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
-    const shell = document.body.querySelector<HTMLElement>(".model-picker-shell");
-    assert.ok(shell, "compact shell renders");
-    assert.ok(document.body.querySelector(".model-pop--compact"), "short flat catalogs use compact sizing");
-    assert.equal(shell!.style.getPropertyValue("--model-pop-rows"), "2", "height derives from the unfiltered catalog");
-    assert.equal(document.body.querySelectorAll(".model-picker-row").length, 2);
+    await act(async () => { document.body.querySelector<HTMLButtonElement>(".model-thinking-trigger")!.click(); });
+    const high = [...document.body.querySelectorAll<HTMLButtonElement>(".model-thinking-menu .ui-menu-item")]
+      .find((button) => button.textContent?.trim() === "High");
+    assert.ok(high, "thinking menu offers High");
+    await act(async () => { high!.click(); });
 
-    const search = document.body.querySelector<HTMLInputElement>(".model-pop-search input")!;
-    await act(async () => { setInput(search, "Model 1"); });
-    assert.equal(document.body.querySelectorAll(".model-picker-row").length, 1, "search filters the visible rows");
-    assert.equal(shell!.style.getPropertyValue("--model-pop-rows"), "2", "filtering must not shrink the open shell");
+    assert.equal(picks.length, 1, "the portalled effort action must not bubble into model selection");
+    assert.equal(picks[0]?.variant, "high");
+    assert.ok(document.body.querySelector(".model-pop"), "choosing thinking effort keeps the picker open");
+    assert.equal(document.body.querySelector(".model-thinking-trigger span")?.textContent, "High");
 
-    await act(async () => {
-      root.render(createElement(ModelPicker, {
-        harnessId: "codex",
-        models: Array.from({ length: 8 }, (_, index) => model(`d${index}`, `Dense ${index}`)),
-        onPick: () => {},
-      }));
-    });
-    assert.equal(
-      document.body.querySelector<HTMLElement>(".model-picker-shell")?.style.getPropertyValue("--model-pop-rows"),
-      "8",
-      "dense flat catalogs size to their own row count",
-    );
+    await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
+    assert.equal(document.body.querySelector(".model-pop"), null);
+    await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
+    assert.equal(document.body.querySelector(".model-thinking-trigger span")?.textContent, "High", "the committed effort is restored on reopen");
 
-    assert.match(styles, /\.model-pop--compact\s*\{[^}]*height:\s*auto/s, "compact surfaces size to content, not a fixed 360px");
-    assert.match(styles, /\.model-pop--compact\s*\{[^}]*max-height:\s*min\(360px,\s*72vh\)/s, "short viewports still cap the compact surface");
-    assert.match(styles, /\.model-pop--compact \.model-picker-list\s*\{[^}]*height:\s*calc\(var\(--model-pop-rows/s, "the list is sized from the unfiltered row count");
-
-    // An empty flat catalog keeps a bounded floor for its message.
-    await act(async () => {
-      root.render(createElement(ModelPicker, { harnessId: "codex", models: [], onPick: () => {} }));
-    });
-    assert.equal(
-      document.body.querySelector<HTMLElement>(".model-picker-shell")?.style.getPropertyValue("--model-pop-rows"),
-      "2",
-      "empty compact catalogs keep a two-row floor",
-    );
+    await act(async () => { document.body.querySelector<HTMLButtonElement>(".model-thinking-trigger")!.click(); });
+    const auto = [...document.body.querySelectorAll<HTMLButtonElement>(".model-thinking-menu .ui-menu-item")]
+      .find((button) => button.textContent?.trim() === "Auto");
+    assert.ok(auto, "thinking menu offers explicit Auto");
+    await act(async () => { auto!.click(); });
+    assert.equal(picks.length, 2, "Auto also commits exactly once");
+    assert.equal(picks[1]?.variant, "", "Auto keeps its explicit empty-variant sentinel");
+    assert.ok(document.body.querySelector(".model-pop"), "choosing Auto also keeps the picker open");
+    assert.equal(document.body.querySelector(".model-thinking-trigger span")?.textContent, "Auto");
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();
   }
+});
+
+test("explicit Auto affects only the selected row and omitted thinking preserves its model ref", async () => {
+  const { act, createElement } = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { default: ModelPicker } = await import("../../../packages/models/widgets/ModelPicker.tsx");
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const models = [
+    {
+      harnessId: "codex",
+      providerID: "openai",
+      modelID: "selected",
+      name: "Selected",
+      variants: ["low", "high"],
+      defaultVariant: "low",
+    },
+    {
+      harnessId: "codex",
+      providerID: "openai",
+      modelID: "other",
+      name: "Other",
+      variants: ["low", "high"],
+      defaultVariant: "high",
+    },
+  ];
+  const picks: Array<{ variant?: string }> = [];
+  const base = {
+    harnessId: "codex",
+    models,
+    onPick: (picked?: { variant?: string }) => { if (picked) picks.push(picked); },
+  };
+  try {
+    await act(async () => {
+      root.render(createElement(ModelPicker, {
+        ...base,
+        value: { harnessId: "codex", providerID: "openai", modelID: "selected" },
+        thinking: null,
+      }));
+    });
+    await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
+    const labels = [...document.body.querySelectorAll(".model-picker-row .model-thinking-trigger span")]
+      .map((label) => label.textContent);
+    assert.deepEqual(labels, ["Auto", "High"], "selected Auto must not replace another model's default label");
+
+    await act(async () => {
+      root.render(createElement(ModelPicker, {
+        ...base,
+        value: { harnessId: "codex", providerID: "openai", modelID: "selected", variant: "high" },
+      }));
+    });
+    assert.equal(
+      document.body.querySelector(".model-picker-row.current .model-thinking-trigger span")?.textContent,
+      "High",
+      "an omitted controlled choice falls back to the canonical model ref",
+    );
+    await act(async () => { document.body.querySelector<HTMLElement>(".model-picker-row.current")!.click(); });
+    assert.equal(picks[0]?.variant, "high", "reselecting the current row preserves its canonical effort");
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("every harness catalog uses the same desktop and phone picker height modes", async () => {
+  const source = await read("../../../packages/models/widgets/ModelPicker.tsx");
+  const styles = await read("../../../packages/models/widgets/styles.css");
+  assert.doesNotMatch(source, /compactCatalog|--model-pop-rows|model-pop--compact/);
+  assert.match(source, /className=\{phone \? "model-sheet" : "model-pop"\}/);
+  assert.match(source, /sheetSize="tall"/);
+  assert.doesNotMatch(styles, /\.model-pop--compact/);
+  assert.match(styles, /\.model-pop\s*\{[^}]*height:\s*min\(560px,\s*72vh\)/s);
 });

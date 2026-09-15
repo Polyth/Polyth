@@ -1940,13 +1940,19 @@ export default function Composer({
         runtimeFeatures.materializeAvailable === true,
       )
     : undefined;
+  const savedThinking = getModelThinking(selectedModel);
   const thinkingResolution = resolveComposerThinking({
     ...(selectedModel ? { descriptor: selectedModel } : {}),
     configThinking: cfg.thinking,
-    ...(getModelThinking(selectedModel) ? { savedThinking: getModelThinking(selectedModel)! } : {}),
+    ...(savedThinking ? { savedThinking } : {}),
     ...(sessionDefaults.defaultThinking ? { sessionDefault: sessionDefaults.defaultThinking } : {}),
   });
   const selectedThinking = thinkingResolution.variant;
+  // Only project a controlled choice into the picker. The fully resolved value
+  // may be an inherited session/model default; passing that as controlled would
+  // overwrite a canonical ModelRef.variant and turn a row click into a newly
+  // persisted preference.
+  const pickerThinking = cfg.thinking !== undefined ? cfg.thinking : savedThinking;
   // Honest attachment note from the next-turn model's normalized capabilities:
   // `input:image`/`attachment` = supported (no note); an input report without
   // image support names the block when an image pill is pending; no report
@@ -2066,6 +2072,7 @@ export default function Composer({
       harnessId={catalogHarnessId}
       value={cfg.model}
       recommended={recommendedModel}
+      thinking={pickerThinking}
       header={<SlotHost slot="modelPicker.header" context={executionPickerContext} />}
       direction="up"
       usage={model.contextUsage ? contextTokensUsed(model) : undefined}

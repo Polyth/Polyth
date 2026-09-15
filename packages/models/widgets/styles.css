@@ -93,27 +93,11 @@ flex: none; color: var(--text-dim);
   width: min(360px, calc(100vw - var(--space-6)));
   min-width: min(360px, calc(100vw - var(--space-6)));
   height: min(560px, 72vh);
-  min-height: min(560px, 72vh);
   max-height: min(560px, 72vh);
   padding: var(--space-1);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-/* Compact flat catalogs (one harness) size the LIST to the unfiltered row count
-   so a short list does not reserve a full-height menu. Header, search and
-   shortcuts stay in natural flow; the surface caps on short viewports and the
-   list shrinks (and scrolls) instead of pushing chrome out. The height depends
-   on the unfiltered catalog, never the search results, so typing never moves
-   the search field. Empty catalogs keep a two-row minimum for their message. */
-.model-pop--compact { height: auto; min-height: 0; max-height: min(360px, 72vh); }
-.model-pop--compact .model-picker-list {
-  height: calc(var(--model-pop-rows, 1) * var(--control-h-sm));
-}
-/* No rows to filter: let the "no models" message size the list naturally. */
-.model-pop--compact.model-pop--empty .model-picker-list {
-  height: auto;
-  min-height: calc(2 * var(--control-h-sm));
 }
 .model-picker-shell {
   display: flex;
@@ -271,6 +255,10 @@ flex: none;
 .model-picker-row .model-star-btn.on svg { fill: currentColor; }
 .model-picker-row .model-star-btn:hover {
 color: var(--text); background: var(--surface-overlay);
+}
+.model-thinking-control {
+  flex: none;
+  display: inline-flex;
 }
 .model-thinking-trigger {
   flex: none;

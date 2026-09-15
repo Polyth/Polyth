@@ -770,17 +770,21 @@ test("standalone isolation switch shares the context row without entering the wo
   await page.setViewportSize({ width: 390, height: 720 });
 });
 
-test("compact model catalog sizes the list to unfiltered rows with the full chrome", { skip: !CHROME }, async () => {
+test("model picker keeps one height across sparse, dense, filtered, and empty harness catalogs", { skip: !CHROME }, async () => {
   assert.ok(page);
   const css = `${await read("../src/styles.css")}\n${await read("../../../packages/models/widgets/styles.css")}`;
-  const pop = (id: string, rows: number, renderedRows: number, empty = false) => `
-    <div class="model-pop model-pop--compact${empty ? " model-pop--empty" : ""}" id="${id}" style="width:360px">
-      <div class="model-picker-shell" style="--model-pop-rows:${rows}">
-        <div class="model-picker-header"><span>Harness header</span></div>
+  const pop = (
+    id: string,
+    renderedRows: number,
+    options: { empty?: boolean; header?: string; maxHeight?: number } = {},
+  ) => `
+    <div class="ui-popover model-pop" id="${id}" style="width:360px${options.maxHeight ? `;max-height:${options.maxHeight}px` : ""}">
+      <div class="model-picker-shell">
+        <div class="model-picker-header">${options.header ?? "<span>Harness header</span>"}</div>
         <div class="model-pop-content">
           <div class="model-pop-search"><input class="ui-input" id="${id}-search" /></div>
           <div class="model-picker-list ui-scroll" id="${id}-list">
-            ${empty
+            ${options.empty
               ? `<div class="palette-empty">No models found</div>`
               : Array.from({ length: renderedRows }, (_, index) => `<div class="model-picker-row"><span class="model-picker-copy"><strong>Model ${index}</strong></span></div>`).join("")}
           </div>
@@ -795,11 +799,13 @@ test("compact model catalog sizes the list to unfiltered rows with the full chro
   }, selector);
 
   await page.setViewportSize({ width: 1440, height: 720 });
-  await page.setContent(`<style>${css}</style><div style="display:flex;gap:20px;align-items:flex-start">${pop("sparse", 2, 2)}${pop("dense", 8, 8)}</div>`);
+  await page.setContent(`<style>${css}</style><div style="display:flex;gap:20px;align-items:flex-start">${pop("sparse", 2)}${pop("dense", 8)}</div>`);
+  const sparsePop = await rect("#sparse");
+  const densePop = await rect("#dense");
   const sparse = await rect("#sparse-list");
   const dense = await rect("#dense-list");
-  assert.ok(sparse.height < dense.height, `sparse list shorter than dense (${sparse.height} < ${dense.height})`);
-  assert.ok(sparse.height < 200, `a 1-2 model list must not reserve a full-height menu (${sparse.height}px)`);
+  assert.equal(sparsePop.height, densePop.height, "switching between sparse and dense harnesses keeps the surface height");
+  assert.equal(sparse.height, dense.height, "catalog content changes only the list's overflow, not its geometry");
   const lastRow = await rect("#sparse-list .model-picker-row:last-child");
   assert.ok(lastRow.bottom <= sparse.bottom + 0.5, "both rows are fully visible when the viewport has room");
   const header = await rect("#sparse .model-picker-header");
@@ -809,8 +815,22 @@ test("compact model catalog sizes the list to unfiltered rows with the full chro
   assert.ok(search.bottom <= sparse.top + 0.5, "the search field does not overlap the list");
   assert.ok(sparse.bottom <= shortcuts.top + 0.5, "shortcuts stay below the list");
 
+  // Harness controls and transition/error notices may make the header taller,
+  // but the outer surface remains fixed and gives the list the remaining room.
+  const statusHeader = `<div><div>Codex · Claude · OpenCode</div><p style="margin:8px 0">Switching runtime…</p><div role="alert">Runtime unavailable. Retry.</div></div>`;
+  await page.setContent(`<style>${css}</style><div style="display:flex;gap:20px;align-items:flex-start">${pop("plain-header", 8)}${pop("status-header", 8, { header: statusHeader })}</div>`);
+  const plainHeaderPop = await rect("#plain-header");
+  const statusHeaderPop = await rect("#status-header");
+  const plainHeaderList = await rect("#plain-header-list");
+  const statusHeaderList = await rect("#status-header-list");
+  const statusHeaderRect = await rect("#status-header .model-picker-header");
+  const statusSearch = await rect("#status-header-search");
+  assert.equal(statusHeaderPop.height, plainHeaderPop.height, "transition and error headers do not resize the picker");
+  assert.ok(statusHeaderList.height < plainHeaderList.height, "a taller harness header takes space from the scrolling list");
+  assert.ok(statusHeaderRect.bottom <= statusSearch.top + 0.5, "multi-line harness status does not overlap search");
+
   // Filtering rows out must not move the search input or resize the list.
-  await page.setContent(`<style>${css}</style><div style="display:flex;gap:20px;align-items:flex-start">${pop("full", 8, 8)}${pop("filtered", 8, 2)}</div>`);
+  await page.setContent(`<style>${css}</style><div style="display:flex;gap:20px;align-items:flex-start">${pop("full", 8)}${pop("filtered", 2)}</div>`);
   const fullSearch = await rect("#full-search");
   const filteredSearch = await rect("#filtered-search");
   const fullList = await rect("#full-list");
@@ -819,21 +839,21 @@ test("compact model catalog sizes the list to unfiltered rows with the full chro
   assert.equal(filteredList.height, fullList.height, "the list keeps one height when a search filters rows");
 
   // An empty catalog keeps its message visible.
-  await page.setContent(`<style>${css}</style>${pop("empty", 2, 2, true)}`);
+  await page.setContent(`<style>${css}</style>${pop("empty", 0, { empty: true })}`);
   const emptyList = await rect("#empty-list");
   const emptyMsg = await rect("#empty-list .palette-empty");
   assert.ok(emptyList.height >= emptyMsg.height, "the empty message is not clipped");
-  assert.ok(emptyList.height >= 44, "empty compact catalogs keep a usable floor");
+  assert.equal((await rect("#empty")).height, densePop.height, "an empty or loading harness keeps the same surface height");
 
   // Short viewport: the surface caps and the list scrolls rather than pushing chrome out.
   await page.setViewportSize({ width: 1440, height: 300 });
-  await page.setContent(`<style>${css}</style>${pop("short", 8, 8)}`);
+  await page.setContent(`<style>${css}</style>${pop("short", 8, { maxHeight: 180 })}`);
   const shortPop = await rect("#short");
   const shortList = await rect("#short-list");
   const shortHeader = await rect("#short .model-picker-header");
   const shortSearch = await rect("#short-search");
   const shortShortcuts = await rect("#short .model-picker-shortcuts");
-  assert.ok(shortPop.height <= 300 * 0.72 + 1, `compact surface caps at 72vh (${shortPop.height}px)`);
+  assert.ok(shortPop.height <= 181, `Popover's inline collision cap overrides the preferred picker height (${shortPop.height}px)`);
   assert.ok(shortList.scroll > shortList.client + 1, "the list owns overflow on a short viewport");
   assert.ok(shortHeader.bottom <= shortSearch.top + 0.5, "chrome still does not overlap on a short viewport");
   assert.ok(shortSearch.bottom <= shortList.top + 0.5, "search stays above the scrolling list");

@@ -36,12 +36,18 @@ test("phone composer never reserves empty widget slots or leaks desktop actions"
 
 test("thinking effort lives in the model picker", async () => {
   const picker = await read("../../../packages/models/widgets/ModelPicker.tsx");
+  const composer = await read("../src/components/Composer.tsx");
   const css = await read("../../../packages/models/widgets/styles.css");
   assert.ok(picker.includes("const variantMenu"));
   assert.ok(picker.includes('label={tr("composer.thinking")}'));
   assert.ok(picker.includes('variant: variant ?? ""'));
   assert.match(css, /\.model-thinking-trigger\s*\{/);
-  assert.ok(!(await read("../src/components/Composer.tsx")).includes("EffortMenu"));
+  assert.ok(!composer.includes("EffortMenu"));
+  assert.ok(composer.includes("thinking={pickerThinking}"), "a controlled thinking choice is projected back into the picker");
+  assert.ok(
+    composer.includes("cfg.thinking !== undefined ? cfg.thinking : savedThinking"),
+    "inherited defaults remain distinct from explicit and saved choices",
+  );
 });
 
 test("model picker owns effort and queue keeps the send glyph", async () => {
