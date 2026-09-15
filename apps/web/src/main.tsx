@@ -12,6 +12,7 @@ import "./workspacePanelPremium.css";
 import "./workspacePanelWidgetFixes.css";
 import "./workspacePanelEditor.css";
 import "./motion.css";
+import "./mobileViewport.css";
 import "./chatMotion.ts";
 
 // Auth and locale start in parallel. The app graph itself waits for auth
