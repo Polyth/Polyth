@@ -437,10 +437,13 @@ export function ManagedPluginsSection() {
     plugin.contributions.filter((item) => item.slot.startsWith(prefix)).length;
   const sandboxed = (plugin: InstalledPluginDto) => plugin.runtimeKind === "sandboxed";
   const hasReview = (plugin: InstalledPluginDto) => Boolean(plugin.permissions.review);
-  const needsReviewToEnable = (plugin: InstalledPluginDto) =>
-    sandboxed(plugin) && !plugin.enabled && plugin.permissions.requested.some(
-      (item) => capabilityReviewView(item).required && !plugin.permissions.effective.includes(item.name),
-    );
+  const needsReviewToEnable = (plugin: InstalledPluginDto) => {
+    const review = plugin.permissions.review;
+    return sandboxed(plugin) && !plugin.enabled && Boolean(review && (
+      review.connections.length > 0
+      || review.capabilities.some((item) => capabilityReviewView(item).required)
+    ));
+  };
   const detailTabs = (plugin: InstalledPluginDto) => {
     const tabs: Array<{ id: string; label: string }> = [
       { id: "overview", label: "Overview" },
