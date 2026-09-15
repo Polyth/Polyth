@@ -16,6 +16,11 @@ import {
   resolveCommandCodeBinary,
   type CommandCodeCompatibility,
 } from "./discovery.ts";
+import {
+  commandCodeExecutionModeControl,
+  readCommandCodeExecutionMode,
+  writeCommandCodeExecutionMode,
+} from "./executionMode.ts";
 import { createCommandCodeCapabilitySync } from "./capabilitySync.ts";
 import { createCommandCodeProvisioner } from "./provisioner.ts";
 import { createCommandCodeRpc } from "./rpc.ts";
@@ -46,16 +51,20 @@ export default function registerPackage(host: ServerPackageHost) {
 
   const paths = (context: HarnessContext) => {
     if (!context.space) throw Object.assign(new Error("Local Space context required"), { code: "unsupported" });
-    const key = createHash("sha256")
+    const runtimeKey = createHash("sha256")
       .update(JSON.stringify([context.projectId, context.cwd, context.sessionId ?? "catalog"]))
+      .digest("hex");
+    const projectKey = createHash("sha256")
+      .update(JSON.stringify([context.projectId, context.cwd]))
       .digest("hex");
     const root = host.spaceStorage(context.space).packageDir(host.pluginId);
     return {
       root,
       worker: join(root, "generated", "commandcode-worker.mjs"),
       bridge: join(root, "generated", "polyth-commandcode-bridge.ts"),
-      authority: join(root, "runtime", `${key}.authority.json`),
-      binding: join(root, "runtime", `${key}.binding.json`),
+      authority: join(root, "runtime", `${runtimeKey}.authority.json`),
+      binding: join(root, "runtime", `${runtimeKey}.binding.json`),
+      executionMode: join(root, "config", `${projectKey}.json`),
     };
   };
 
@@ -69,6 +78,9 @@ export default function registerPackage(host: ServerPackageHost) {
     ]);
     return p;
   };
+
+  const executionMode = async (context: HarnessContext) =>
+    context.space ? readCommandCodeExecutionMode(paths(context).executionMode) : "follow-polyth" as const;
 
   const provider: HarnessProvider = {
     descriptor: {
@@ -138,17 +150,20 @@ export default function registerPackage(host: ServerPackageHost) {
     async discover(context) {
       if (context.remote) throw Object.assign(new Error("Local execution only"), { code: "unsupported" });
       const command = await resolveCommandCodeBinary();
-      const [status, compatibility, agents] = await Promise.all([
+      const [status, compatibility, agents, mode] = await Promise.all([
         commandCodeStatus(command).catch(() => ({ authenticated: "unknown" as const })),
         compatibilityOrUndefined(command),
         discoverCommandCodeAgents(context.cwd),
+        executionMode(context),
       ]);
+      const controls = [commandCodeExecutionModeControl(mode)];
       if (!compatibility) {
         return {
           state: "degraded" as const,
           authenticated: status.authenticated,
           capabilities: COMMANDCODE_PRESENTED_CAPABILITIES,
           catalog: { models: [], agents },
+          controls,
           message: "Polyth could not verify the installed Command Code CLI surface",
         };
       }
@@ -158,6 +173,7 @@ export default function registerPackage(host: ServerPackageHost) {
           authenticated: status.authenticated,
           capabilities: COMMANDCODE_PRESENTED_CAPABILITIES,
           catalog: { models: [], agents },
+          controls,
           message: commandCodeCompatibilityMessage(compatibility),
         };
       }
@@ -167,6 +183,7 @@ export default function registerPackage(host: ServerPackageHost) {
           authenticated: false,
           capabilities: COMMANDCODE_PRESENTED_CAPABILITIES,
           catalog: { models: [], agents },
+          controls,
           message: "Sign in with Command Code to discover the native model catalog",
         };
       }
@@ -175,9 +192,19 @@ export default function registerPackage(host: ServerPackageHost) {
         state: "ready" as const,
         authenticated: status.authenticated === true,
         capabilities: COMMANDCODE_PRESENTED_CAPABILITIES,
-        catalog: { models, agents },
+        catalog: { models, agents, modes: ["follow-polyth", "plan"] },
+        controls,
         ...(status.accountLabel ? { message: status.accountLabel } : {}),
       };
+    },
+    async applyControl(context, controlId, value) {
+      if (context.remote || !context.space) {
+        throw Object.assign(new Error("Local Space context required"), { code: "unsupported" });
+      }
+      if (controlId !== "execution-mode") {
+        throw Object.assign(new Error(`Unsupported Command Code control: ${controlId}`), { code: "unsupported" });
+      }
+      await writeCommandCodeExecutionMode(paths(context).executionMode, value);
     },
     async createRuntime(context) {
       if (!context.space || context.remote) throw Object.assign(new Error("Local Space context required"), { code: "unsupported" });
@@ -212,10 +239,12 @@ export default function registerPackage(host: ServerPackageHost) {
           bindingFile: p.binding,
           bridgePath: p.bridge,
           models: () => discoverCommandCodeModels(command, context.cwd),
-          // Resolve the canonical policy for every turn: a user can change
-          // auto-accept while the session is alive. Missing policy/service and
-          // all lookup failures stay fail-closed in native dont-ask mode.
+          // Read this project-scoped control for every turn, so switching into
+          // or out of native Plan mode applies on the next admission without a
+          // runtime restart. Follow-Polyth remains fail-closed when no policy is
+          // available; we never fall back to Command Code's interactive default.
           permissionMode: async () => {
+            if (await readCommandCodeExecutionMode(p.executionMode) === "plan") return "plan";
             if (!context.sessionId) return "dont-ask";
             try {
               const sessions = host.forSpace(context.space!).sessions;
