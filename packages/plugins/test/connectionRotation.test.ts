@@ -16,10 +16,10 @@ import { testSpaceStorage } from "./helpers.ts";
 function memoryVault(): PackageOpaqueVault {
   const values = new Map<string, string>();
   return {
-    putOpaque: async (key, value) => { values.set(key, value); },
-    getOpaque: async (key) => values.get(key) ?? null,
-    deleteOpaque: async (key) => { values.delete(key); },
-    deleteOpaqueByPrefix: async (prefix) => {
+    putOpaque: (key, value) => { values.set(key, value); },
+    getOpaque: (key) => values.get(key) ?? null,
+    deleteOpaque: (key) => { values.delete(key); },
+    deleteOpaqueByPrefix: (prefix) => {
       for (const key of [...values.keys()]) if (key.startsWith(prefix)) values.delete(key);
     },
   };
@@ -58,7 +58,7 @@ test("approving a changed connection fingerprint disconnects the old credential"
   });
 });
 
-test("re-approving an unchanged fingerprint preserves a connected credential", async () => {
+test("every explicitly reviewed connection requires reconnect even at the same fingerprint", async () => {
   const root = mkdtempSync(join(tmpdir(), "polyth-connection-stable-"));
   const storage = testSpaceStorage(root);
   const vault = memoryVault();
@@ -67,11 +67,10 @@ test("re-approving an unchanged fingerprint preserves a connected credential", a
 
   approveConnectionDefinitions(storage, "com-example", [spec], [spec.id]);
   await setTokenConnection(scope, "com-example", spec, "same-secret");
+  assert.equal(listPublicConnections(storage, "com-example", [spec])[0]?.status, "connected");
+
   approveConnectionDefinitions(storage, "com-example", [spec], [spec.id]);
 
-  assert.equal(listPublicConnections(storage, "com-example", [spec])[0]?.status, "connected");
-  assert.deepEqual(await connectionAuthorization(scope, "com-example", spec), {
-    header: "authorization",
-    value: "Bearer same-secret",
-  });
+  assert.equal(listPublicConnections(storage, "com-example", [spec])[0]?.status, "disconnected");
+  assert.equal(await connectionAuthorization(scope, "com-example", spec), null);
 });
