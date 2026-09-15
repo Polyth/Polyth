@@ -142,7 +142,8 @@
 
 .schedule-page .sched-every-value { width: min(100%, 6rem); }
 .schedule-page .sched-cron-expression { width: min(100%, 15rem); }
-.schedule-page .sched-time-zone { max-width: min(100%, 18rem); }
+.schedule-page .sched-time-zone,
+.schedule-page .sched-project { max-width: min(100%, 18rem); }
 .schedule-page .sched-stat-label { margin: 0; }
 
 @container schedule-page (max-width: 700px) {

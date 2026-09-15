@@ -1,11 +1,11 @@
 // Scheduled prompts: once, every N minutes, or cron with an IANA time zone.
 // Tasks target an existing session, a fresh session per run, or a dedicated
 // session. Loop files under .agents/loops appear here with a "loop" badge.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type ScheduleCadenceDto, type ScheduleRunDto, type ScheduleTaskDto } from "@polyth/session/web-api";
 import { useStore } from "../../../apps/web/src/store.ts";
 import { ago } from "../../../apps/web/src/format.ts";
-import { normalizeScheduleList } from "./scheduleData.ts";
+import { normalizeScheduleList, projectLabel, resolveScheduleProjectId } from "./scheduleData.ts";
 import EmptyState from "../../../apps/web/src/components/EmptyState.tsx";
 import { getLocale, tr } from "../../../apps/web/src/i18n/index.ts";
 import {
@@ -126,7 +126,22 @@ function RunHistory({ taskId }: { taskId: string }) {
 }
 
 export default function ScheduleView() {
-  const projectId = useStore((s) => s.activeProjectId);
+  const activeProjectId = useStore((s) => s.activeProjectId);
+  const projects = useStore((s) => s.projectRegistry.projects);
+  const [userOverrideId, setUserOverrideId] = useState<string | null>(null);
+  const projectId = useMemo(
+    () => resolveScheduleProjectId(projects, activeProjectId, userOverrideId),
+    [projects, activeProjectId, userOverrideId],
+  );
+  const projectIdRef = useRef(projectId);
+  projectIdRef.current = projectId;
+
+  useEffect(() => {
+    if (userOverrideId !== null && !projects.some((project) => project.id === userOverrideId)) {
+      setUserOverrideId(null);
+    }
+  }, [projects, userOverrideId]);
+
   const allSessions = useStore((s) => s.sessions);
   const sessions = useMemo(
     () => allSessions.filter((session) => session.projectId === projectId && session.status !== "archived"),
@@ -170,25 +185,49 @@ export default function ScheduleView() {
   }, [cadence]);
 
   const reload = useCallback(() => {
-    if (!projectId) { setTasks([]); return; }
-    void api.scheduleList(projectId)
+    const requestProjectId = projectId;
+    if (!requestProjectId) {
+      setTasks([]);
+      setLoopErrors([]);
+      return;
+    }
+    void api.scheduleList(requestProjectId)
       .then((response) => {
+        if (projectIdRef.current !== requestProjectId) return;
         const normalized = normalizeScheduleList(response);
         setTasks(normalized.tasks);
         setLoopErrors(normalized.loopErrors);
       })
       .catch((cause) => {
+        if (projectIdRef.current !== requestProjectId) return;
         setTasks([]);
         setError(tr("scheduleview.couldNotLoadScheduledPromptsValue", { value: cause instanceof Error ? cause.message : String(cause) }));
       });
   }, [projectId]);
+
   useEffect(() => {
+    setTasks([]);
+    setLoopErrors([]);
+    setError("");
     reload();
     const timer = setInterval(reload, 15_000);
     return () => clearInterval(timer);
   }, [reload]);
 
-  if (!projectId) return <EmptyState title={tr("scheduleview.noProjectSelected")} description={tr("scheduleview.openAProjectToSchedulePrompts")} />;
+  useEffect(() => {
+    if (sessionId && !sessions.some((session) => session.id === sessionId)) {
+      setSessionId("");
+    }
+  }, [projectId, sessions, sessionId]);
+
+  const projectOptions = useMemo(
+    () => projects.map((project) => ({ value: project.id, label: projectLabel(project) })),
+    [projects],
+  );
+
+  if (projects.length === 0) {
+    return <EmptyState title={tr("scheduleview.noProjectSelected")} description={tr("scheduleview.openAProjectToSchedulePrompts")} />;
+  }
 
   const run = async (fn: () => Promise<unknown>) => {
     try {
@@ -201,6 +240,7 @@ export default function ScheduleView() {
   };
 
   const create = () => void run(async () => {
+    if (!projectId) throw new Error(tr("scheduleview.pickAProject"));
     if (!cadence) throw new Error(tr("scheduleview.pickAValidTimeIntervalOrCron"));
     await api.scheduleCreate({
       projectId,
@@ -217,11 +257,12 @@ export default function ScheduleView() {
   });
 
   const rescan = () => void run(async () => {
+    if (!projectId) throw new Error(tr("scheduleview.pickAProject"));
     const r = await api.scheduleLoopsRescan(projectId);
     setLoopErrors(r.errors);
   });
 
-  const canCreate = prompt.trim().length > 0 && cadence !== null && !previewError &&
+  const canCreate = projectId !== "" && prompt.trim().length > 0 && cadence !== null && !previewError &&
     (targetMode !== "existing-session" || sessionId !== "");
 
   return (
@@ -255,6 +296,18 @@ export default function ScheduleView() {
           )}
         </div>
         <div className="view-toolbar-row">
+          <Select
+            className="sched-project"
+            value={projectId}
+            label={tr("scheduleview.project")}
+            placeholder={tr("scheduleview.pickAProject")}
+            ariaLabel={tr("scheduleview.project")}
+            options={projectOptions}
+            onChange={(value) => {
+              if (value === "") return;
+              setUserOverrideId(value);
+            }}
+          />
           <Select
             value={targetMode}
             label={targetMode === "new-session-per-run" ? tr("scheduleview.newSessionPerRun") : targetMode === "existing-session" ? tr("scheduleview.existingSession") : tr("scheduleview.dedicatedSessionReusedAcrossRuns")}
@@ -305,7 +358,7 @@ export default function ScheduleView() {
       <div className="view-toolbar-row">
         <span className="stat-label sched-stat-label">{tr("scheduleview.tasks")}</span>
         <span className="header-spacer" />
-        <Button size="sm" title={tr("scheduleview.rescanAgentsLoopsForMarkdownManagedTasks")} onClick={rescan}>{tr("scheduleview.rescanLoops")}</Button>
+        <Button size="sm" disabled={!projectId} title={tr("scheduleview.rescanAgentsLoopsForMarkdownManagedTasks")} onClick={rescan}>{tr("scheduleview.rescanLoops")}</Button>
       </div>
       {loopErrors.length > 0 && (
         <div className="form-error" role="alert">
