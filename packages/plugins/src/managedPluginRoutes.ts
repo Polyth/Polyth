@@ -25,7 +25,7 @@ import {
   assertSpacePackageGrant,
 } from "./lifecycleAuth.ts";
 import { assertOauthTxMatchesActive, consumeOauthTx, oauthRedirectOrigin } from "./oauthTx.ts";
-import { notFound, secretVault } from "./pluginRouteShared.ts";
+import { notFound, optionalSecretVault, secretVault } from "./pluginRouteShared.ts";
 
 const fail = (code: string, message: string): never => {
   throw Object.assign(new Error(message), { code });
@@ -258,7 +258,7 @@ export function managedPluginRoutes(
       const removed = [...before].filter((connectionId) => !after.has(connectionId));
       if (removed.length === 0) return result;
       const spaces = host.packageSpaces?.() ?? [{ spaceId: request.space.spaceId, storage }];
-      const vault = secretVault(host);
+      const vault = optionalSecretVault(host);
       for (const space of spaces) {
         retireConnectionApprovals(space.storage, id, removed);
         await retireConnectionIds(vault, space.storage, id, space.spaceId, removed);
