@@ -371,7 +371,7 @@ export default function Header() {
           />
         )}
         <div ref={occupancy.leadingRef} className="header-left-cluster">
-          {(!compact || !chatSurface) && <button className="header-brand header-control" aria-label={tr("header.polythHome")} onClick={() => switchWorkspaceMode("chat")}>
+          {(!compact || !chatSurface) && <button className="header-brand" aria-label={tr("header.polythHome")} onClick={() => switchWorkspaceMode("chat")}>
             <img className="polyth-mark" src="/icon-192.png" alt="" aria-hidden="true" />
             <strong>{tr("header.polyth")}</strong>
           </button>}

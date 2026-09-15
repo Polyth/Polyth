@@ -67,6 +67,8 @@ test("production Browser contribution follows the live exact login-origin seam o
     assert.equal(contribution.descriptor.kind, "tool");
     if (contribution.descriptor.kind !== "tool") throw new Error("Browser contribution must be a tool");
     assert.match(contribution.descriptor.description, /Take control/);
+    assert.match(contribution.descriptor.description, /return control to the agent/);
+    assert.match(contribution.descriptor.description, /reply when it is ready/);
     assert.match(contribution.descriptor.description, /Never request credentials/);
 
     const opened = JSON.parse((await contribution.execute({

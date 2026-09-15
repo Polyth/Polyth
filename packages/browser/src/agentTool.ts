@@ -33,7 +33,7 @@ const VIEWPORTS = {
 } as const;
 
 const DESCRIPTION =
-  "Open, read, and interact with a page in Polyth's controlled in-app browser. Use browser.open first, then browser.snapshot before clicking or typing. The browser is an isolated session-scoped Chromium context, not the user's personal browser. If sign-in, consent, or another human-only step is required, ask the user to open the Browser activity for this session, choose Take control, complete the step themselves, and then Resume agent. Never request credentials in chat or enter them with browser.type.";
+  "Open, read, and interact with a page in Polyth's controlled in-app browser. Use browser.open first, then browser.snapshot before clicking or typing. The browser is an isolated session-scoped Chromium context, not the user's personal browser. If sign-in, consent, or another human-only step is required, ask the user to open the Browser activity for this session, choose Take control, complete the step directly while agent control is paused, return control to the agent, and reply when it is ready. Never request credentials in chat or enter them with browser.type.";
 
 const inputSchema: JsonObject = {
   type: "object",

@@ -214,8 +214,8 @@ body.desktop-app[data-desktop-controls-position="right"] .header {
   background: linear-gradient(135deg, var(--accent-wash), var(--surface-overlay));
 }
 .desktop-settings-hero .polyth-mark {
-  width: 38px;
-  height: 38px;
+  width: 46px;
+  height: 46px;
   flex: 0 0 auto;
 }
 .desktop-settings-hero > div {
@@ -414,7 +414,6 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   scrollbar-width: none;
 }
 .sidebar-project-rail-list::-webkit-scrollbar { display: none; }
-.sidebar-rail-collapse,
 .sidebar-project-rail-item,
 .sidebar-project-rail-add {
   position: relative;
@@ -430,7 +429,6 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   background: transparent;
   color: var(--text-dim);
 }
-.sidebar-rail-collapse { flex: none; }
 .sidebar-project-rail-item { flex: none; }
 .sidebar-project-rail-item:hover,
 .sidebar-project-rail-add:hover { color: var(--text); background: var(--surface-overlay-hover); }
@@ -485,6 +483,43 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   min-height: 40px;
 }
 .sidebar-expanded-shell--project-rail .sidebar-collapse { display: none; }
+/* Rail view collapses only the sessions column: the project icons keep their
+   width and the sessions return as a floating panel anchored to the rail. */
+.sidebar-rail-switch { display: grid; flex: none; place-items: center; margin-block-end: var(--space-1); }
+.sidebar--animate-width {
+  transition: width var(--motion-normal) var(--motion-ease),
+    min-width var(--motion-normal) var(--motion-ease);
+}
+.sidebar--rail-collapsed { overflow: visible; }
+.sidebar--rail-collapsed .sidebar-expanded-shell { position: relative; }
+.sidebar-sessions-peek {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 100%;
+  z-index: 40;
+  border-inline-end: 1px solid var(--material-glass-border);
+  background: var(--material-glass);
+  box-shadow: var(--material-glass-highlight), var(--material-glass-shadow);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(calc(var(--peek-slide, -1) * 10px));
+  transition: opacity var(--motion-normal) var(--motion-ease),
+    transform var(--motion-normal) var(--motion-ease),
+    visibility 0s linear var(--motion-normal);
+}
+html[dir="rtl"] .sidebar-sessions-peek { --peek-slide: 1; }
+.sidebar-sessions-peek.open {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition-delay: 0s;
+}
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .sidebar-sessions-peek {
+    -webkit-backdrop-filter: blur(var(--material-glass-blur));
+    backdrop-filter: blur(var(--material-glass-blur));
+  }
+}
 /* Finding 2: drag handle on the right edge (wide mode only). */
 .sidebar-resize {
   position: absolute; top: 0; right: -3px; width: 7px; height: 100%;
@@ -4877,9 +4912,10 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .header-brand {
   flex: none; display: flex; align-items: center; gap: 9px; padding: 4px 8px 4px 2px;
   border: 0; color: var(--text); background: transparent; font-size: 17px; letter-spacing: -.04em;
+  background: transparent; border-radius: 0;
 }
 .polyth-mark {
-  width: 29px; height: 29px; flex: none; border-radius: var(--radius-control);
+  width: 36px; height: 36px; flex: none;
   object-fit: contain;
 }
 .header-global-search {
@@ -7120,7 +7156,6 @@ color: var(--green);
 .header-divider { width: 1px; height: var(--control-h-sm); flex: none; background: var(--surface-divider); }
 .header-control,
 .header .ui-icon-btn,
-.header-profile,
 .workspace-mode-switch,
 .view-switcher-pill {
   min-height: var(--control-h-sm); border: 0; border-radius: var(--radius-control);
@@ -7128,19 +7163,18 @@ color: var(--green);
 }
 .header-control:hover,
 .header .ui-icon-btn:hover,
-.header-profile:hover,
 .view-icon:hover { background: var(--surface-overlay-hover); color: var(--text); }
 .header-control:active,
 .header .ui-icon-btn:active,
-.header-profile:active,
 .view-icon:active { background: var(--surface-overlay-strong); }
 .header-control:focus-visible,
 .header .ui-icon-btn:focus-visible,
 .header-profile:focus-visible,
 .view-icon:focus-visible,
 .workspace-mode-switch button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-.header-brand { width: var(--control-h-sm); height: var(--control-h-sm); padding: 0; justify-content: center; gap: 0; }
+.header-brand { width: var(--control-h-sm); height: var(--control-h-sm); padding: 0; justify-content: center; gap: 0; background: transparent; border-radius: 0; }
 .header-brand strong { display: none; }
+.header-profile { background: transparent; border-radius: 0; }
 .workspace-mode-switch { height: var(--control-h-sm); padding: 2px; gap: 2px; background: var(--sunken); }
 .workspace-mode-switch button { height: 26px; padding-inline: var(--space-3); border-radius: calc(var(--radius-control) - 2px); font-size: var(--font-meta); }
 .workspace-mode-switch button.active { background: var(--surface-overlay-strong); box-shadow: var(--inset-hi); font-weight: 700; }
@@ -13067,7 +13101,6 @@ body[data-glass="clear"] {
 body:not([data-glass="off"]) :is(
   .header-control,
   .header .ui-icon-btn,
-  .header-profile,
   .workspace-mode-switch,
   .view-switcher-pill,
   .sidebar-search,
@@ -13081,6 +13114,8 @@ body:not([data-glass="off"]) :is(
     color-mix(in srgb, var(--material-glass) var(--material-glass-control-edge), transparent));
   box-shadow: var(--material-glass-highlight), var(--shadow-sm);
 }
+body:not([data-glass="off"]) .header-brand { border: 0; background: transparent; box-shadow: none; }
+body:not([data-glass="off"]) .header-profile { border: 0; background: transparent; box-shadow: none; }
 
 /* Glass is a static material choice, not motion. The explicit Appearance
    setting stays authoritative even when motion is reduced; low-resource mode

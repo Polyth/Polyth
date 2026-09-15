@@ -1,12 +1,13 @@
 import type { ServerApplicationSurface } from "@polyth/plugins";
+import type { Server } from "node:http";
 
 export interface ServerApplicationSurfaceOptions {
   /** Hosted tenants must not receive a server-loopback login primitive. */
   localTrustedDeployment: boolean;
   /** Address passed to Server.listen; wildcard binds are not browser targets. */
   hostname?: string;
-  /** Null until the public listener has bound. */
-  listeningPort(): number | null;
+  /** Null before composition/after shutdown; `listening` is checked live. */
+  listener(): Server | null;
   /** Live auth state, including passwords stored before this boot. */
   authenticationRequired(): boolean;
   /** True when loopback requests may bypass UI authentication. */
@@ -46,8 +47,12 @@ export function createServerApplicationSurface(
       if (!opts.localTrustedDeployment
         || !opts.authenticationRequired()
         || opts.localhostAuthOptional) return null;
-      const port = opts.listeningPort();
-      return port === null ? null : browserReachableHttpOrigin(opts.hostname, port);
+      const listener = opts.listener();
+      if (!listener?.listening) return null;
+      const address = listener.address();
+      return address && typeof address !== "string"
+        ? browserReachableHttpOrigin(opts.hostname, address.port)
+        : null;
     },
   };
 }

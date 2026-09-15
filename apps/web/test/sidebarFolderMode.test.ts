@@ -62,11 +62,17 @@ const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const store = await import("../src/store.ts");
 const { getSidebarViewMode, parseSidebarViewMode, setSidebarViewMode, VIEW_MODE_KEY } = await import("../src/sidebarPrefs.ts");
-const { default: Sidebar } = await import("../src/components/Sidebar.tsx");
+const { default: Sidebar, PEEK_HOVER_MS, PEEK_LEAVE_MS } = await import("../src/components/Sidebar.tsx");
+const { setSidebarLayout } = await import("../src/sidebarLayout.ts");
 
 const MouseEventCtor = (dom as unknown as { MouseEvent: typeof MouseEvent }).MouseEvent;
 const KeyboardEventCtor = (dom as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent;
+const PointerEventCtor = (dom as unknown as { PointerEvent: typeof PointerEvent }).PointerEvent;
 const click = (el: Element) => el.dispatchEvent(new MouseEventCtor("click", { bubbles: true }));
+// React maps onPointerEnter/onPointerLeave onto native pointerover/pointerout,
+// so hover intent is driven through those (relatedTarget null = from/to window).
+const pointer = (el: EventTarget, type: string) =>
+  el.dispatchEvent(new PointerEventCtor(type, { bubbles: true, pointerType: "mouse" }));
 const contextMenu = (el: Element) => el.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, cancelable: true }));
 const dismissMenu = () => document.dispatchEvent(new KeyboardEventCtor("keydown", { key: "Escape", bubbles: true }));
 const menuActionLabels = () => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
@@ -312,5 +318,71 @@ test("project menu selection keeps one multi-session selection across projects",
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();
+  }
+});
+
+test("the rail switch collapses only the sessions, which peek back on hover intent", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const ticket = store.beginProjectListRequest();
+  store.publishProjectList(ticket, [project("alpha"), project("beta")]);
+  store.activateProject("alpha");
+  store.setSessions("alpha", sessionsByProject.alpha!);
+  store.setSessions("beta", sessionsByProject.beta!);
+  setSidebarViewMode("rail");
+  setSidebarLayout({ collapsed: true });
+
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(Sidebar)); });
+
+    // Collapsed rail view keeps the project icons; only the sessions go away.
+    const rail = container.querySelector(".sidebar-project-rail");
+    assert.ok(rail, "the project icon rail survives the sessions-only collapse");
+    assert.equal(container.querySelector(".sidebar-collapsed-rail"), null, "rail view never falls back to the thin rail");
+    const switchEl = container.querySelector<HTMLButtonElement>('.sidebar-rail-switch [role="switch"]');
+    assert.equal(switchEl?.getAttribute("aria-checked"), "false", "the collapse control is an off switch");
+    const peek = container.querySelector<HTMLElement>(".sidebar-sessions-peek")!;
+    assert.ok(peek, "the sessions live in a peek panel while collapsed");
+    assert.equal(peek.classList.contains("open"), false);
+
+    // Hover intent: three seconds over a project, not a moment less.
+    const betaRail = rail!.querySelector<HTMLElement>('[aria-label="beta"]')!;
+    await act(async () => { pointer(betaRail, "pointerover"); });
+    await act(async () => { t.mock.timers.tick(PEEK_HOVER_MS - 1); });
+    assert.equal(peek.classList.contains("open"), false, "the peek waits out the full hover delay");
+    await act(async () => { t.mock.timers.tick(1); });
+    assert.equal(peek.classList.contains("open"), true);
+    assert.match(peek.textContent ?? "", /Beta session/, "the peek previews the hovered project");
+    assert.equal(store.getState().activeProjectId, "alpha", "previewing never steals the active project");
+
+    // Untouched, it closes five seconds after the pointer leaves the sidebar.
+    await act(async () => { pointer(betaRail, "pointerout"); });
+    await act(async () => { t.mock.timers.tick(PEEK_LEAVE_MS - 1); });
+    assert.equal(peek.classList.contains("open"), true, "the grace period is honoured in full");
+    await act(async () => { t.mock.timers.tick(1); });
+    assert.equal(peek.classList.contains("open"), false);
+
+    // Interacted with, it stays until a click outside — leaving does not close it.
+    await act(async () => { pointer(betaRail, "pointerover"); });
+    await act(async () => { t.mock.timers.tick(PEEK_HOVER_MS); });
+    await act(async () => { pointer(peek, "pointerdown"); });
+    await act(async () => { pointer(betaRail, "pointerout"); });
+    await act(async () => { t.mock.timers.tick(PEEK_LEAVE_MS * 2); });
+    assert.equal(peek.classList.contains("open"), true, "a touched peek ignores the leave timer");
+    await act(async () => { pointer(document.body, "pointerdown"); });
+    assert.equal(peek.classList.contains("open"), false, "a click outside dismisses the pinned peek");
+
+    // Switching back on restores the inline sessions column.
+    await act(async () => { click(switchEl!); });
+    assert.equal(switchEl?.getAttribute("aria-checked"), "true");
+    assert.equal(container.querySelector(".sidebar-sessions-peek"), null);
+    assert.match(container.querySelector(".sidebar-focused-project")?.textContent ?? "", /Alpha session one/);
+  } finally {
+    setSidebarLayout({ collapsed: false });
+    await act(async () => { root.unmount(); });
+    container.remove();
+    t.mock.timers.reset();
   }
 });

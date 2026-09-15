@@ -11,6 +11,9 @@ export const SIDEBAR_MAX_WIDTH = 440;
 export const SIDEBAR_DEFAULT_WIDTH = 332;
 /** Width of the collapsed rail that keeps the restore button reachable. */
 export const SIDEBAR_COLLAPSED_WIDTH = 46;
+/** Width of the project icon rail, which survives the sessions-only collapse
+ *  in rail view. Mirrors `.sidebar-project-rail` in styles.css. */
+export const SIDEBAR_RAIL_WIDTH = 58;
 
 export interface SidebarLayout {
   width: number;

@@ -491,7 +491,7 @@ export async function boot(opts: BootOptions = {}) {
   const port = opts.port ?? Number(process.env.PORT ?? 4400);
   opts.hostname ??= process.env.HOST;
   const localhostAuthOptional = process.env.POLYTH_UI_PASSWORD_LOCALHOST === "optional";
-  let publicListeningPort: number | null = null;
+  let publicServerForSurface: import("node:http").Server | null = null;
   let uiAuthentication: Pick<ReturnType<typeof createAuthService>, "enabled"> | null = null;
   const requestedDataDir = resolve(opts.dataDir ?? process.env.POLYTH_DATA_DIR ?? "./data");
   const writerLease = await acquireDataDirectoryLease(requestedDataDir);
@@ -605,7 +605,7 @@ export async function boot(opts: BootOptions = {}) {
   services.provide(SERVER_APPLICATION_SURFACE, createServerApplicationSurface({
     localTrustedDeployment: spaceGateway.deployment === "local-trusted",
     hostname: opts.hostname,
-    listeningPort: () => publicListeningPort,
+    listener: () => publicServerForSurface,
     authenticationRequired: () => uiAuthentication?.enabled() ?? false,
     localhostAuthOptional,
   }));
@@ -2581,6 +2581,7 @@ export async function boot(opts: BootOptions = {}) {
   });
   httpHandlerRef = httpHandler;
   const server = createPublicHttpServer(httpHandler, "public");
+  publicServerForSurface = server;
   const controlSocketPath = process.env.POLYTH_CONTROL_SOCKET
     ?? (process.platform === "win32"
       ? `\\\\.\\pipe\\polyth-control-${createHash("sha256").update(dataDir).digest("hex").slice(0, 12)}`
@@ -2628,7 +2629,7 @@ export async function boot(opts: BootOptions = {}) {
     ? server.listen(port, opts.hostname, res)
     : server.listen(port, res));
   const publicAddress = server.address();
-  publicListeningPort = publicAddress && typeof publicAddress !== "string"
+  const publicListeningPort = publicAddress && typeof publicAddress !== "string"
     ? publicAddress.port
     : port;
   await new Promise<void>((res, reject) => {
@@ -2646,6 +2647,11 @@ export async function boot(opts: BootOptions = {}) {
   const shutdown = (): Promise<void> => {
     if (shutdownPromise) return shutdownPromise;
     beginShutdown();
+    // Revoke Browser's self-origin exception before the listener can release
+    // its port to another local process. The service also checks
+    // `server.listening`, covering callers that close the returned server
+    // outside the normal shutdown path.
+    publicServerForSurface = null;
     // Fence new turn admission first, then let every accepted runtime turn
     // finish before disposing its OpenCode process. This keeps watcher-driven
     // source reloads from truncating unrelated agent sessions.

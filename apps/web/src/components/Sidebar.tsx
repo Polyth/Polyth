@@ -29,13 +29,14 @@ import {
 import EmptyState from "./EmptyState.tsx";
 import {
   Button, CloseIcon, ComposeIcon, FilterIcon, IconButton, Menu, Popover,
-  SearchIcon, SidebarIcon, SortIcon,
+  SearchIcon, SidebarIcon, SortIcon, Switch,
   type MenuEntry,
 } from "./ui/index.ts";
 import {
-  SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH,
+  SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_RAIL_WIDTH,
   clampSidebarWidth, setSidebarLayout, useSidebarLayout,
 } from "../sidebarLayout.ts";
+import { useEscape } from "../useEscape.ts";
 import { api } from "@polyth/session/web-api";
 import { announce } from "./a11y/live.tsx";
 import ProjectAppearanceDialog from "./ProjectAppearanceDialog.tsx";
@@ -56,6 +57,10 @@ import {
 import type { Project, SessionProjection } from "@polyth/contracts";
 
 const EXPANDED_PROJECTS_KEY = "polyth.sidebar.expandedProjects";
+/** Hover intent before a collapsed rail peeks the sessions back open, and the
+ *  grace period an untouched peek keeps after the pointer leaves the sidebar. */
+export const PEEK_HOVER_MS = 3000;
+export const PEEK_LEAVE_MS = 5000;
 
 function loadExpandedProjects(activeProjectId: string | null): ReadonlySet<string> {
   try {
@@ -215,6 +220,11 @@ export default function Sidebar() {
   // drawer keeps its own responsive geometry and ignores both.
   const layout = useSidebarLayout();
   const collapsed = !compact && layout.collapsed;
+  // Rail view collapses only the sessions column — the project icon rail keeps
+  // its width. Every other presentation still collapses to the thin rail.
+  const railView = effectiveViewMode === "rail";
+  const railCollapsed = collapsed && railView;
+  const fullyCollapsed = collapsed && !railView;
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const width = dragWidth ?? layout.width;
   const navRef = useRef<HTMLElement>(null);
@@ -229,6 +239,60 @@ export default function Sidebar() {
     if (!prevCompact.current && compact) closeDrawer();
     prevCompact.current = compact;
   }, [compact]);
+
+  // Sessions peek while the rail switch is off: hovering a project for
+  // PEEK_HOVER_MS slides the sessions out over the workspace. A click inside
+  // pins it until a click outside; an untouched peek closes PEEK_LEAVE_MS
+  // after the pointer leaves both the rail and the peek.
+  const [peek, setPeek] = useState<{ projectId: string; pinned: boolean } | null>(null);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopHover = () => {
+    if (hoverTimer.current !== null) clearTimeout(hoverTimer.current);
+    hoverTimer.current = null;
+  };
+  const stopLeave = () => {
+    if (leaveTimer.current !== null) clearTimeout(leaveTimer.current);
+    leaveTimer.current = null;
+  };
+  const closePeek = () => { stopHover(); stopLeave(); setPeek(null); };
+  useEffect(() => () => { stopHover(); stopLeave(); }, []);
+  useEffect(() => { if (!railCollapsed) closePeek(); }, [railCollapsed]);
+  const armPeek = (projectId: string) => {
+    if (!railCollapsed) return;
+    stopLeave();
+    stopHover();
+    if (peek?.projectId === projectId) return;
+    hoverTimer.current = setTimeout(() => setPeek({ projectId, pinned: false }), PEEK_HOVER_MS);
+  };
+  const openPeek = (projectId: string) => {
+    if (!railCollapsed) return;
+    stopHover();
+    stopLeave();
+    setPeek({ projectId, pinned: false });
+  };
+  const schedulePeekClose = () => {
+    stopHover();
+    if (!peek || peek.pinned) return;
+    stopLeave();
+    leaveTimer.current = setTimeout(() => setPeek(null), PEEK_LEAVE_MS);
+  };
+  useEffect(() => {
+    if (!peek || !railCollapsed) return;
+    const onOutside = (event: Event) => {
+      const target = event.target as Element | null;
+      if (target && navRef.current?.contains(target)) return;
+      // Menus, popovers and dialogs portal to document.body but belong to the
+      // peek that opened them.
+      if (target?.closest?.(".ui-popover, .ui-popover-backdrop, [role='dialog']")) return;
+      closePeek();
+    };
+    document.addEventListener("pointerdown", onOutside, true);
+    return () => document.removeEventListener("pointerdown", onOutside, true);
+  }, [peek, railCollapsed]);
+  useEscape(peek !== null && railCollapsed, closePeek);
+  // The peek previews the hovered project without stealing the active one.
+  const focusProjectId = (railCollapsed ? peek?.projectId : null) ?? activeProjectId;
   useModalSurface({
     enabled: compact,
     open: compact && drawerOpen,
@@ -569,12 +633,18 @@ export default function Sidebar() {
       <nav
         ref={navRef}
         id="polyth-session-drawer"
-        className={`sidebar ${drawerOpen ? "open" : ""}${collapsed ? " collapsed" : ""}`}
-        style={!compact ? { width: collapsed ? SIDEBAR_COLLAPSED_WIDTH : width, minWidth: collapsed ? SIDEBAR_COLLAPSED_WIDTH : width } : undefined}
+        className={`sidebar ${drawerOpen ? "open" : ""}${fullyCollapsed ? " collapsed" : ""}${railCollapsed ? " sidebar--rail-collapsed" : ""}${railView && !compact && dragWidth === null ? " sidebar--animate-width" : ""}`}
+        style={!compact
+          ? (() => {
+              const navWidth = fullyCollapsed ? SIDEBAR_COLLAPSED_WIDTH : railCollapsed ? SIDEBAR_RAIL_WIDTH : width;
+              return { width: navWidth, minWidth: navWidth };
+            })()
+          : undefined}
         {...(compact ? { role: "dialog", "aria-modal": true, "aria-label": tr("sidebar.projectsAndSessions") } : {})}
+        {...(railCollapsed ? { onPointerEnter: stopLeave, onPointerLeave: schedulePeekClose } : {})}
       >
         <h2 className="sr-only">{tr("sidebar.projectsAndSessions")}</h2>
-        {collapsed && (
+        {fullyCollapsed && (
           <div className="sidebar-collapsed-rail">
             <IconButton
               icon={SidebarIcon}
@@ -585,16 +655,24 @@ export default function Sidebar() {
             />
           </div>
         )}
-        {!collapsed && (
+        {!fullyCollapsed && (
         <div className={`sidebar-expanded-shell${effectiveViewMode === "rail" ? " sidebar-expanded-shell--project-rail" : ""}`}>
         {effectiveViewMode === "rail" && (
           <div className="sidebar-project-rail" aria-label={tr("commandpalette.projects")}>
-            <IconButton
-              icon={SidebarIcon}
-              className="sidebar-rail-collapse"
-              label={tr("contextrail.collapseValue", { value: tr("sidebar.projectsAndSessions") })}
-              onClick={() => setSidebarLayout({ collapsed: true })}
-            />
+            <span
+              className="sidebar-rail-switch"
+              title={collapsed
+                ? tr("sidebar.expandProjectsAndSessions")
+                : tr("contextrail.collapseValue", { value: tr("sidebar.projectsAndSessions") })}
+            >
+              <Switch
+                checked={!collapsed}
+                label={collapsed
+                  ? tr("sidebar.expandProjectsAndSessions")
+                  : tr("contextrail.collapseValue", { value: tr("sidebar.projectsAndSessions") })}
+                onChange={(next) => { closePeek(); setSidebarLayout({ collapsed: !next }); }}
+              />
+            </span>
             <div className="sidebar-project-rail-list">
               {orderedProjects.map((candidate) => {
                 const candidateSessions = sessions.filter((session) => session.projectId === candidate.id);
@@ -629,7 +707,11 @@ export default function Sidebar() {
                         aria-label={candidate.name || candidate.path}
                         title={candidate.name || candidate.path}
                         draggable={manualReorder}
-                        onClick={() => activateProject(candidate.id)}
+                        onClick={() => { activateProject(candidate.id); openPeek(candidate.id); }}
+                        onPointerEnter={(event) => {
+                          if (event.pointerType === "mouse") armPeek(candidate.id);
+                        }}
+                        onPointerLeave={stopHover}
                         onContextMenu={(event) => onProjectContextMenu(event, candidate.id, "rail")}
                         onDragStart={(event) => startProjectDrag(event, candidate.id)}
                         onDragOver={(event) => {
@@ -673,7 +755,15 @@ export default function Sidebar() {
             <CustomizeZoneButton slot="sidebar.toolbar" className="sidebar-service-btn sidebar-project-rail-tool" />
           </div>
         )}
-        <div className="sidebar-main">
+        <div
+          className={`sidebar-main${railCollapsed ? ` sidebar-sessions-peek${peek ? " open" : ""}` : ""}`}
+          // The peek keeps the sessions column exactly as wide as it is when
+          // the switch is on, so toggling never resizes the list.
+          style={railCollapsed ? { width: width - SIDEBAR_RAIL_WIDTH, minWidth: width - SIDEBAR_RAIL_WIDTH } : undefined}
+          onPointerDownCapture={railCollapsed
+            ? () => { stopLeave(); setPeek((current) => current && !current.pinned ? { ...current, pinned: true } : current); }
+            : undefined}
+        >
         {compact && (
           <div className="sidebar-drawer-header">
             {searchOpen ? (
@@ -903,7 +993,7 @@ export default function Sidebar() {
             </div>
           )}
           {query.trim() === "" && (effectiveViewMode === "rail"
-            ? visibleProjects.filter((candidate) => candidate.id === activeProjectId)
+            ? visibleProjects.filter((candidate) => candidate.id === focusProjectId)
             : visibleProjects).map((p) => {
             const projectQuery = query.trim()
               && `${p.name} ${p.path}`.toLowerCase().includes(query.trim().toLowerCase())
