@@ -91,16 +91,12 @@ export function approveConnectionDefinitions(
   const fingerprints = { ...(state.connectionFingerprints ?? {}) };
   for (const spec of specs) {
     if (!wanted.has(spec.id)) continue;
-    const nextFingerprint = connectionFingerprint(spec);
-    if (fingerprints[spec.id] !== nextFingerprint) {
-      // Approval of a changed security target must never carry an already
-      // connected credential across origins/endpoints/client ids. Disconnect
-      // first, then publish the new fingerprint. If the process dies between
-      // those writes the connection is merely unavailable; old authority is
-      // never made valid for the new target.
-      disconnectStoredConnection(storage, packageId, spec.id);
-    }
-    fingerprints[spec.id] = nextFingerprint;
+    // requestedIds are the host-owned review set, never the whole declaration
+    // inventory. Every reviewed connection is disconnected before its security
+    // fingerprint is approved so stale public state/credentials cannot survive
+    // a remove/re-add or an anomalous same-fingerprint review.
+    disconnectStoredConnection(storage, packageId, spec.id);
+    fingerprints[spec.id] = connectionFingerprint(spec);
   }
   saveGrantState(storage, packageId, { grants: state.grants ?? [], connectionFingerprints: fingerprints });
   return fingerprints;
