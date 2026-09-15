@@ -1,0 +1,468 @@
+.project-appearance-dialog {
+  width: min(780px, calc(100vw - 32px));
+  max-height: min(90dvh, 860px);
+}
+
+.project-appearance-dialog .ui-dialog-body {
+  padding: var(--space-5);
+}
+
+.project-appearance-dialog .ui-dialog-foot {
+  gap: var(--space-2);
+}
+
+.project-appearance-body {
+  --project-color: var(--accent);
+  display: grid;
+  gap: var(--space-5);
+}
+
+.project-appearance-preview {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--project-color) 7%, transparent), transparent 60%),
+    var(--elevated);
+}
+
+.project-appearance-preview-icon {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  flex: 0 0 64px;
+  overflow: hidden;
+  border-radius: calc(var(--radius-card) - 2px);
+  background: var(--project-color);
+  box-shadow: var(--shadow-sm);
+  color: var(--accent-ink);
+}
+
+.project-appearance-preview-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.project-appearance-preview-mask {
+  width: 32px;
+  height: 32px;
+  background: currentColor;
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+}
+
+.project-appearance-preview-initial {
+  font-size: 25px;
+  font-weight: 750;
+  line-height: 1;
+}
+
+.project-appearance-preview-copy {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-1);
+}
+
+.project-appearance-preview-copy strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-heading);
+  font-weight: 700;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-appearance-preview-copy > span {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.project-appearance-field {
+  display: grid;
+  gap: var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  font-weight: 650;
+}
+
+.project-icon-picker {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.project-appearance-label {
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  font-weight: 650;
+}
+
+.project-icon-search-wrap {
+  position: relative;
+}
+
+.project-icon-search-wrap .project-icon-search {
+  width: 100%;
+  padding-inline-start: 42px;
+}
+
+.project-icon-search-glyph {
+  position: absolute;
+  z-index: 1;
+  inset-inline-start: 14px;
+  inset-block-start: 50%;
+  display: grid;
+  place-items: center;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  color: var(--muted);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.project-icon-search-glyph svg {
+  width: 100%;
+  height: 100%;
+}
+
+.project-icon-tabs {
+  display: flex;
+  gap: var(--space-2);
+  min-width: 0;
+  overflow-x: auto;
+  padding: 1px 1px var(--space-1);
+  scrollbar-width: none;
+}
+
+.project-icon-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.project-icon-tabs button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 0 12px;
+  border-color: transparent;
+  border-radius: var(--radius-control);
+  background: var(--elevated);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  font-weight: 600;
+}
+
+.project-icon-tabs button svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+.project-icon-tabs button.active {
+  border-color: color-mix(in srgb, var(--project-color) 34%, var(--border-soft));
+  background: color-mix(in srgb, var(--project-color) 12%, var(--elevated));
+  color: var(--text);
+}
+
+.project-appearance-dialog .project-icon-options {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: var(--space-2);
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+}
+
+.project-appearance-dialog .project-icon-options > button {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-width: 0;
+  height: 54px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: var(--elevated);
+  color: var(--text-dim);
+}
+
+@media (hover: hover) {
+  .project-appearance-dialog .project-icon-options > button:hover {
+    border-color: var(--border-soft);
+    background: var(--raised);
+    transform: translateY(-1px);
+  }
+}
+
+.project-appearance-dialog .project-icon-options > button.selected {
+  border-color: color-mix(in srgb, var(--project-color) 58%, var(--border-soft));
+  background: color-mix(in srgb, var(--project-color) 15%, var(--elevated));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--project-color) 20%, transparent);
+}
+
+.project-appearance-dialog .project-icon-art {
+  width: 25px;
+  height: 25px;
+  display: block;
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+}
+
+.project-appearance-dialog .project-icon-options > small {
+  grid-column: 1 / -1;
+  padding: var(--space-3) 0;
+  color: var(--muted);
+  text-align: center;
+}
+
+.project-appearance-dialog .project-icon-options > .project-icon-more {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--muted);
+}
+
+.project-icon-more svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+.project-icon-more span {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.project-icon-upload-row {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+
+.project-icon-upload-button {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 58px;
+  flex: 1;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-color: var(--border-soft);
+  background: var(--elevated);
+  text-align: start;
+}
+
+.project-icon-upload-glyph {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: var(--radius-control);
+  background: var(--raised);
+  color: var(--text-dim);
+}
+
+.project-icon-upload-glyph svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+.project-icon-upload-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+
+.project-icon-upload-copy strong {
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 650;
+}
+
+.project-icon-upload-copy small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 450;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-icon-preview {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: var(--radius-control);
+  object-fit: cover;
+}
+
+.project-icon-clear {
+  align-self: center;
+}
+
+.project-color-field {
+  min-width: 0;
+}
+
+.project-color-presets {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  overflow-x: auto;
+  padding: 2px 3px 5px;
+  scrollbar-width: none;
+}
+
+.project-color-presets::-webkit-scrollbar {
+  display: none;
+}
+
+.project-color-presets > button,
+.project-color-custom {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.project-color-presets > button {
+  background: var(--swatch-color);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.project-color-presets > button.selected,
+.project-color-custom.selected {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 3px;
+}
+
+.project-color-custom {
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  background: var(--elevated);
+  color: var(--text-dim);
+  font-size: 20px;
+  font-weight: 400;
+}
+
+.project-color-custom input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.project-color-custom span {
+  pointer-events: none;
+}
+
+@media (max-width: 720px) {
+  .project-appearance-dialog {
+    width: calc(100vw - 16px);
+    max-width: none;
+    max-height: calc(100dvh - 16px);
+  }
+
+  .project-appearance-dialog .ui-dialog-body {
+    padding: var(--space-4);
+  }
+
+  .project-appearance-body {
+    gap: var(--space-4);
+  }
+
+  .project-appearance-preview {
+    gap: var(--space-3);
+    padding: var(--space-3);
+  }
+
+  .project-appearance-preview-icon {
+    width: 54px;
+    height: 54px;
+    flex-basis: 54px;
+  }
+
+  .project-appearance-preview-mask {
+    width: 28px;
+    height: 28px;
+  }
+
+  .project-appearance-preview-copy strong {
+    font-size: var(--font-body);
+  }
+
+  .project-icon-tabs {
+    margin-inline-end: calc(var(--space-4) * -1);
+    padding-inline-end: var(--space-4);
+  }
+
+  .project-appearance-dialog .project-icon-options {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--space-2);
+  }
+
+  .project-appearance-dialog .project-icon-options > button {
+    min-height: 62px;
+    height: 62px;
+  }
+
+  .project-appearance-dialog .project-icon-art {
+    width: 27px;
+    height: 27px;
+  }
+
+  .project-icon-upload-row {
+    align-items: stretch;
+  }
+
+  .project-icon-upload-button {
+    min-height: var(--tap);
+  }
+
+  .project-icon-upload-copy small {
+    white-space: normal;
+  }
+
+  .project-color-presets {
+    margin-inline-end: calc(var(--space-4) * -1);
+    padding-inline-end: var(--space-4);
+  }
+
+  .project-color-presets > button,
+  .project-color-custom {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+  }
+
+  .project-appearance-dialog .ui-dialog-foot > .ui-btn {
+    flex: 1 1 0;
+  }
+}
