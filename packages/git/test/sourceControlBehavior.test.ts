@@ -170,7 +170,7 @@ test("GitView exposes diff Retry and refreshes an open selection after staging",
   }
 });
 
-test("GitView keeps staged-file and disclosure taps available without a detail composer overlay", async () => {
+test("GitView keeps the commit composer available while a file diff is open", async () => {
   const projectId = "git-composer-project";
   globalThis.fetch = async (input) => {
     const url = String(input);
@@ -191,6 +191,8 @@ test("GitView keeps staged-file and disclosure taps available without a detail c
   const view = await mounted(createElement(GitView));
   try {
     assert.ok(view.container.querySelector(".git-commit-composer"), "composer is available on the change list");
+    assert.ok(view.container.querySelector(".git-commit-composer .git-commit-msg, .git-commit-composer textarea"), "composer keeps a message field");
+    assert.ok(view.container.querySelector(".git-commit-rail"), "composer uses the action rail");
     const disclosure = view.container.querySelector<HTMLButtonElement>(".git-change-group-head");
     assert.ok(disclosure);
     await act(async () => { disclosure.click(); });
@@ -204,12 +206,13 @@ test("GitView keeps staged-file and disclosure taps available without a detail c
       await delay(20);
     });
     assert.ok(view.container.querySelector(".git-master-detail.detail-open"), "file tap opens detail mode");
-    assert.equal(view.container.querySelector(".git-commit-composer"), null, "composer is removed while detail is open");
+    assert.ok(view.container.querySelector(".git-commit-composer"), "composer stays visible while the diff is open");
+    assert.match(view.container.textContent ?? "", /Commit 1 staged file/);
 
     const back = view.container.querySelector<HTMLButtonElement>(".git-mobile-detail-head button");
     assert.ok(back);
     await act(async () => { back.click(); });
-    assert.ok(view.container.querySelector(".git-commit-composer"), "composer returns after navigating back");
+    assert.ok(view.container.querySelector(".git-commit-composer"), "composer remains after navigating back");
   } finally {
     await view.unmount();
     activateProject(null);

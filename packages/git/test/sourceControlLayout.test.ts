@@ -215,9 +215,18 @@ test("narrow source-control shell keeps every change group above the commit comp
                     <section class="git-detail-pane" aria-label="Change details"></section>
                   </div>
                   <section id="composer" class="git-commit-composer" aria-label="Commit staged changes">
-                    <div class="git-commit-heading"><strong>Commit 4 staged files</strong></div>
-                    <textarea class="ui-textarea commit-msg">message</textarea>
-                    <div class="commit-row"><button class="ui-btn ui-btn--quiet ui-btn--sm">Generate</button><button class="ui-btn ui-btn--primary ui-btn--sm">Commit</button></div>
+                    <textarea class="ui-textarea git-commit-msg">message</textarea>
+                    <div class="git-commit-rail">
+                      <div class="git-commit-heading">
+                        <strong>Commit 4 staged files</strong>
+                        <span class="git-commit-branch"><span class="mono">feature/mobile-layout</span></span>
+                      </div>
+                      <div class="git-commit-actions">
+                        <button class="ui-btn ui-btn--ghost ui-btn--sm">Generate</button>
+                        <button class="ui-btn ui-btn--primary ui-btn--sm git-commit-submit">Commit</button>
+                        <button class="ui-btn ui-btn--quiet ui-btn--sm">Sync</button>
+                      </div>
+                    </div>
                   </section>
                 </div>
               </main>
@@ -285,6 +294,101 @@ test("narrow source-control shell keeps every change group above the commit comp
     await page.click("#untracked-disclosure");
     assert.equal(await page.evaluate(() => document.body.dataset.lastTap), "untracked-disclosure");
   }
+});
+
+test("commit composer stays visible below an open file diff", { skip: !CHROME }, async () => {
+  assert.ok(page);
+  const composerMarkup = `
+    <section id="composer" class="git-commit-composer" aria-label="Commit staged changes">
+      <textarea class="ui-textarea git-commit-msg" placeholder="Commit message…">Polish the source-control commit composer</textarea>
+      <div class="git-commit-rail">
+        <div class="git-commit-heading">
+          <strong>Commit 4 staged files</strong>
+          <span class="git-commit-branch"><span class="mono">feature/commit-composer</span></span>
+        </div>
+        <div class="git-commit-actions">
+          <button class="ui-btn ui-btn--ghost ui-btn--sm">Generate</button>
+          <button class="ui-btn ui-btn--primary ui-btn--sm git-commit-submit">Commit</button>
+          <button class="ui-btn ui-btn--quiet ui-btn--sm">Sync</button>
+        </div>
+      </div>
+    </section>`;
+
+  for (const width of [320, 900]) {
+    await page.setViewportSize({ width, height: 720 });
+    await page.setContent(`
+      <style>${css}</style>
+      <div class="app">
+        <header class="header">Polyth</header>
+        <div class="app-shell">
+          <aside class="rail rail-workspace rail-fullscreen" style="width:100%;height:700px">
+            <div class="rail-head"><span class="rail-title">Source control</span></div>
+            <div class="module-view-content module-view-content--workspace" style="height:640px">
+            <div class="rail-body" style="height:640px">
+              <main class="view-page git-page">
+                <header class="source-control-head">
+                  <div class="source-control-title"><span class="source-branch">feature/commit-composer</span></div>
+                </header>
+                <nav class="source-tabs"><button class="active">Changes 4</button><button>Log</button></nav>
+                <div class="git-changes-layout">
+                  <div class="git-master-detail detail-open">
+                    <section class="git-master-pane" aria-label="Changed files">
+                      ${Array.from({ length: 8 }, (_, index) => `<div class="git-file-row"><button class="git-file-main">src/file-${index}.ts</button></div>`).join("")}
+                    </section>
+                    <section id="detail" class="git-detail-pane" aria-label="Change details">
+                      <div class="git-detail-title"><strong>apps/web/src/components/Sidebar.tsx</strong></div>
+                      <pre class="git-diff git-diff-page">${Array.from({ length: 40 }, (_, index) => `+ line ${index}`).join("\n")}</pre>
+                    </section>
+                  </div>
+                  ${composerMarkup}
+                </div>
+              </main>
+            </div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    `);
+
+    const geometry = await page.evaluate(() => {
+      const bounds = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
+      const pageBox = bounds(".git-page");
+      const layout = bounds(".git-changes-layout");
+      const detail = bounds("#detail");
+      const composer = bounds("#composer");
+      const field = bounds(".git-commit-msg");
+      const rail = bounds(".git-commit-rail");
+      const submit = bounds(".git-commit-submit");
+      const style = getComputedStyle(document.querySelector("#composer")!);
+      return {
+        pageBottom: pageBox.bottom,
+        layoutBottom: layout.bottom,
+        detailTop: detail.top,
+        detailBottom: detail.bottom,
+        composerTop: composer.top,
+        composerBottom: composer.bottom,
+        composerHeight: composer.height,
+        composerWidth: composer.width,
+        fieldHeight: field.height,
+        railHeight: rail.height,
+        submitWidth: submit.width,
+        display: style.display,
+        visibility: style.visibility,
+      };
+    });
+
+    assert.notEqual(geometry.display, "none", `${width}px composer must render`);
+    assert.notEqual(geometry.visibility, "hidden", `${width}px composer must stay visible`);
+    assert.ok(geometry.composerHeight > 72, `${width}px composer height is ${geometry.composerHeight}px`);
+    assert.ok(geometry.composerWidth > 200, `${width}px composer width is ${geometry.composerWidth}px`);
+    assert.ok(geometry.fieldHeight > 24, `${width}px message field must remain usable`);
+    assert.ok(geometry.railHeight > 24, `${width}px action rail must remain usable`);
+    assert.ok(geometry.submitWidth > 0, `${width}px commit action must keep a hit area`);
+    assert.ok(geometry.detailBottom <= geometry.composerTop + 1, `${width}px diff overlaps the composer`);
+    assert.ok(geometry.composerBottom <= geometry.pageBottom + 0.5, `${width}px composer must stay inside the page`);
+    assert.ok(geometry.composerBottom <= geometry.layoutBottom + 0.5, `${width}px composer must stay inside the changes layout`);
+  }
+  await page.setViewportSize({ width: 320, height: 720 });
 });
 
 test("compact git.recent summary keeps its action reachable in a small card", { skip: !CHROME }, async () => {

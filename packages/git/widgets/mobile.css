@@ -111,4 +111,11 @@
   .git-page .git-file-row {
     padding-inline: var(--space-1);
   }
+
+  .git-commit-composer {
+    margin-top: var(--space-2);
+    padding: var(--space-2) var(--space-3) var(--space-3);
+    border-color: var(--material-glass-border);
+    background: var(--material-glass-strong);
+  }
 }

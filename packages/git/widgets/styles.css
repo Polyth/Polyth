@@ -524,21 +524,94 @@ margin-block: -4px; color: var(--accent); opacity: 0;
 opacity: 1;
 }
 .git-commit-composer {
-position: sticky; bottom: 0; z-index: 5; display: grid; grid-template-columns: minmax(180px, .7fr) minmax(240px, 1fr) auto;
-  align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--border-soft); border-radius: var(--radius-card);
-  background: var(--elevated); box-shadow: none;
+  position: relative;
+  z-index: 5;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-card);
+  background: var(--material-glass-strong);
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
+  transition: border-color var(--motion-normal) var(--motion-ease), box-shadow var(--motion-normal) var(--motion-ease);
+}
+.git-commit-composer:focus-within {
+  border-color: var(--accent-line);
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm), 0 0 0 3px var(--focus-wash);
+}
+.git-commit-composer .git-commit-msg {
+  display: block;
+  width: 100%;
+  min-height: calc(var(--font-input) * 1.45 * 2 + var(--space-3) * 2);
+  resize: none;
+  padding: var(--space-3) var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: var(--font-body);
+  line-height: 1.45;
+  letter-spacing: -0.005em;
+}
+.git-commit-composer .git-commit-msg:focus,
+.git-commit-composer .git-commit-msg:focus-visible {
+  outline: none;
+  border-color: transparent;
+  box-shadow: none;
+}
+.git-commit-rail {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: var(--control-h);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--hair);
 }
 .git-commit-heading {
-display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: var(--font-meta);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  flex: 1 1 auto;
 }
-.git-commit-heading .muted {
-overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-meta);
+.git-commit-heading strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 650;
+  letter-spacing: -0.01em;
 }
-.git-commit-composer .commit-msg {
-min-height: 54px; max-height: 100px;
+.git-commit-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  max-width: 42%;
+  color: var(--muted);
+  font-size: var(--font-meta);
 }
-.git-commit-composer .commit-row {
-align-self: stretch; align-items: center;
+.git-commit-branch .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-commit-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex: none;
+}
+.git-page .git-commit-actions > * {
+  flex: none;
+  min-width: max-content;
 }
 .git-log-layout .git-master-pane {
 padding: 10px;
@@ -837,6 +910,10 @@ flex: 1 1 0; min-height: 0; overflow: hidden;
 flex: 1 1 0; min-height: 0; overflow: hidden;
 }
 
+.git-changes-layout > .git-commit-composer {
+  flex: none;
+}
+
 .git-changes-layout .git-master-pane,
 .git-changes-layout .git-master-detail.detail-open .git-detail-pane {
 height: 100%; min-height: 0; overflow: auto;
@@ -869,17 +946,31 @@ flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
 .git-commit-composer {
-position: static; bottom: auto; flex: none;
-    grid-template-columns: minmax(0, 1fr); gap: 8px; margin-inline: -2px; padding: 10px;
-    border-color: var(--accent-line);
+  position: static;
+  margin-inline: 0;
+  padding: var(--space-2) var(--space-3) var(--space-3);
 }
 
-.git-commit-composer .commit-row {
-justify-content: stretch;
+.git-commit-rail {
+  flex-wrap: wrap;
+  align-items: stretch;
 }
 
-.git-commit-composer .commit-row > * {
-flex: 1;
+.git-commit-heading {
+  flex: 1 1 100%;
+}
+
+.git-commit-branch {
+  max-width: 50%;
+}
+
+.git-page .git-commit-actions {
+  flex: 1 1 100%;
+  justify-content: stretch;
+}
+
+.git-page .git-commit-actions > * {
+  flex: 1 1 0;
 }
 
 .git-resource-grid {
@@ -930,8 +1021,8 @@ flex: 1;
 opacity: 1;
 }
 
-.git-commit-heading .muted {
-display: none;
+.git-commit-heading strong {
+  flex: 1 1 auto;
 }
 
 .git-page .git-wt-card {
@@ -1000,8 +1091,8 @@ display: none;
 }
 
 .git-commit-composer {
-grid-template-columns: minmax(180px, .7fr) minmax(240px, 1fr) auto;
-    margin-inline: 0; padding: 10px 12px;
+  margin-inline: 0;
+  padding: var(--space-2) var(--space-3) var(--space-3);
 }
 
 .git-resource-grid {
@@ -1020,6 +1111,7 @@ display: block;
 .pending-changes-bubble,
 .git-file-row,
 .git-file-actions,
+.git-commit-composer,
 .git-folder-chevron svg {
 transition: none;
 }
@@ -1063,12 +1155,13 @@ max-height: none; min-height: 160px; margin: 10px 0 0; border-color: var(--hair-
 opacity: 1;
 }
 @container feature-panel (max-width: 700px) {
-.git-commit-composer .commit-row {
-justify-content: stretch;
+.git-page .git-commit-actions {
+  flex: 1 1 100%;
+  justify-content: stretch;
 }
 
-.git-commit-composer .commit-row > * {
-flex: 1;
+.git-page .git-commit-actions > * {
+  flex: 1 1 0;
 }
 }
 .git-page .git-diff {
@@ -1097,7 +1190,7 @@ color: var(--purple);
   }
   .split-diff-row code:last-child { border-bottom: 0; }
 }
-.commit-msg { width: 100%; }
+.git-commit-msg { width: 100%; }
 .review-draft {
   display: flex; flex-direction: column; gap: 6px; margin-top: 8px;
   padding: 10px; border: 1px solid var(--accent-line); border-radius: var(--radius-card); background: var(--accent-wash);
