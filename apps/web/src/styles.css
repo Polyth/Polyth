@@ -399,7 +399,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   gap: var(--space-2);
   padding: max(var(--space-2), var(--safe-top)) var(--space-2) var(--space-2);
   border-inline-end: 1px solid var(--surface-divider);
-  background: color-mix(in srgb, var(--panel) 76%, transparent);
+  background: color-mix(in srgb, var(--material-glass) var(--material-glass-fill), transparent);
 }
 .sidebar-project-rail,
 .sidebar-project-rail-list { flex-direction: column; }
@@ -3917,7 +3917,7 @@ body[data-glass="clear"] .prompt-nav-panel { --prompt-nav-panel-blur: 22px; }
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 1px var(--space-2) 0;
+  padding: 1px var(--space-2) calc(var(--space-2) * var(--density-scale));
   color: var(--faint);
   font-size: max(10px, calc(var(--font-meta) * .85));
   font-weight: 450;
@@ -12342,7 +12342,7 @@ html[data-font] body :is(
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
-  :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .app > .header, .sidebar, .railbar) { background: var(--material-glass); }
+  :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .app > .header, .sidebar, .sidebar-project-rail, .railbar) { background: var(--material-glass); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.dialog-panel, .sheet, .composer-card, .response-footer-metadata-grid, .workspace-customize-panel, .error-banner) { background: var(--material-glass-strong); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.activity-group, .task-list) { background: var(--surface-activity); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.ui-glass-island, .ui-glass-dock) { background: var(--material-glass); }
@@ -12358,7 +12358,7 @@ html[data-font] body :is(
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
-  :is(.app > .header, .sidebar, .railbar) { background: var(--material-glass); }
+  :is(.app > .header, .sidebar, .sidebar-project-rail, .railbar) { background: var(--material-glass); }
   .composer-card,
   .composer-mobile .composer-card { background: var(--material-glass-strong); }
   :is(.activity-group, .task-list) { background: var(--surface-activity); }
@@ -12535,7 +12535,7 @@ html[data-font] body :is(
 }
 
 /* ---- conversation hierarchy ------------------------------------------------ */
-/* Standalone run summaries own their surface; nested ones inherit the
+/* Run summaries may supply their own surface; nested ones inherit the
    container's chrome via the reset below. */
 .ui-run-summary {
   width: 100%;
@@ -12549,7 +12549,7 @@ html[data-font] body :is(
   padding: var(--conversation-related-gap) var(--space-3);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-activity);
-  background: var(--run-summary-surface, var(--surface-activity));
+  background: var(--run-summary-surface, transparent);
   box-shadow: var(--shadow-sm);
   color: var(--text-dim);
   text-align: start;
@@ -13197,6 +13197,7 @@ body:not([data-glass="off"]) .header-profile { border: 0; background: transparen
     body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) :is(
       .app > .header,
       .sidebar,
+      .sidebar-project-rail,
       /* Excluded when it holds the compact contextual sheet: backdrop-filter
          makes .railbar a containing block for its position:fixed children, and
          the inset:0 sheet would collapse to the 0-width launcher strip. */
@@ -13278,6 +13279,7 @@ body:not([data-glass="off"]) .header-profile { border: 0; background: transparen
 body[data-glass="off"] :is(
   .app > .header,
   .sidebar,
+  .sidebar-project-rail,
   .railbar,
   .statusbar,
   .background-quick-trigger,

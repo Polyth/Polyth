@@ -280,6 +280,9 @@ export default function Sidebar() {
   useEscape(peek !== null && railCollapsed, closePeek);
   // The peek previews the hovered project without stealing the active one.
   const focusProjectId = (railCollapsed ? peek?.projectId : null) ?? activeProjectId;
+  const focusedProject = effectiveViewMode === "rail" && query.trim() === ""
+    ? visibleProjects.find((candidate) => candidate.id === focusProjectId) ?? null
+    : null;
   useModalSurface({
     enabled: compact,
     open: compact && drawerOpen,
@@ -608,6 +611,96 @@ export default function Sidebar() {
     </div>
   );
 
+  const renderProjectCard = (p: Project) => {
+    if (renamingProject === p.id) {
+      return (
+        <div className="project-card project-rename">
+          <input
+            autoFocus
+            value={projectName}
+            onChange={(e) => setProjectName(e.target.value)}
+            {...projectRenameKeys}
+          />
+        </div>
+      );
+    }
+    return (
+      <div className="project-card-shell">
+        <button
+          className={`project-card ${p.id === activeProjectId ? "active" : ""}`}
+          aria-current={p.id === activeProjectId ? "true" : undefined}
+          aria-expanded={effectiveViewMode === "tree" ? expandedTrees.has(p.id) : undefined}
+          aria-keyshortcuts={manualReorder ? "Alt+Shift+ArrowUp Alt+Shift+ArrowDown" : undefined}
+          onContextMenu={(event) => onProjectContextMenu(event, p.id, "card")}
+          onClick={() => {
+            if (p.id !== activeProjectId) activateProject(p.id);
+            if (effectiveViewMode === "tree") toggleTree(p.id);
+            else if (!collapsed) setSidebarLayout({ collapsed: true });
+            else closeDrawer();
+          }}
+          onKeyDown={(event) => {
+            onProjectMenuKeyDown(event, p.id, "card");
+            if (event.defaultPrevented || !manualReorder || !event.altKey || !event.shiftKey) return;
+            if (event.key === "ArrowUp") {
+              event.preventDefault();
+              moveProjectBy(p.id, -1);
+            } else if (event.key === "ArrowDown") {
+              event.preventDefault();
+              moveProjectBy(p.id, 1);
+            }
+          }}
+          onDoubleClick={() => { setRenamingProject(p.id); setProjectName(p.name); }}
+        >
+          <ProjectGlyph project={p} />
+          <span className="project-meta">
+            <span className="project-name-line">
+              <span className="project-name" title={p.path}>{p.name || p.path}</span>
+            </span>
+            <span className="project-path">{p.path}</span>
+          </span>
+        </button>
+        <span className="project-actions">
+          <button
+            className="project-new-session"
+            title={tr("sidebar.newChatInValue", { value: p.name || p.path })}
+            aria-label={tr("sidebar.newChatInValue", { value: p.name || p.path })}
+            onClick={(event) => {
+              event.stopPropagation();
+              startNewSession(p.id);
+              closeDrawer();
+            }}
+          ><Icon.plus /></button>
+          <Menu
+            label={tr("sidebar.actionsForValue", { value: p.name || p.path })}
+            title={p.name || p.path}
+            align="end"
+            open={projectMenuOpenId === p.id && projectMenuSource === "card"}
+            onOpenChange={(open) => {
+              setProjectMenuOpenId(open ? p.id : null);
+              setProjectMenuSource(open ? "card" : null);
+            }}
+            returnFocusRef={projectMenuReturnRef}
+            entries={projectMenuEntries(p)}
+            footer={<SlotHost slot="sidebar.project.actions" context={{ projectId: p.id }} />}
+          >
+            {(trigger) => (
+              <button
+                {...trigger}
+                className="project-menu-btn"
+                title={tr("sidebar.actionsForValue", { value: p.name || p.path })}
+                aria-label={tr("sidebar.actionsForValue", { value: p.name || p.path })}
+                onClick={(event) => {
+                  projectMenuReturnRef.current = event.currentTarget;
+                  trigger.onClick();
+                }}
+              ><Icon.more /></button>
+            )}
+          </Menu>
+        </span>
+      </div>
+    );
+  };
+
   return (
     <>
       {compact && drawerOpen && (
@@ -837,6 +930,11 @@ export default function Sidebar() {
             />
           </div>
         )}
+        {focusedProject && (
+          <div className="sidebar-focused-project" data-project-id={focusedProject.id}>
+            {renderProjectCard(focusedProject)}
+          </div>
+        )}
         <div className="sidebar-service-bar customize-zone">
           {!compact && (
             <IconButton
@@ -982,93 +1080,25 @@ export default function Sidebar() {
           {query.trim() === "" && (effectiveViewMode === "rail"
             ? visibleProjects.filter((candidate) => candidate.id === focusProjectId)
             : visibleProjects).map((p) => {
+            if (effectiveViewMode === "rail") {
+              return (
+                <div key={p.id} data-project-id={p.id} className="sidebar-focused-sessions">
+                  <SessionList
+                    projectId={p.id}
+                    attentionOnly={attentionOnly}
+                    dateFilter={dateFilter}
+                    selectMode={selectMode}
+                    selectedSessionIds={selectedSessionIds}
+                    onToggleSelected={toggleSelectedSession}
+                  />
+                </div>
+              );
+            }
             const projectQuery = query.trim()
               && `${p.name} ${p.path}`.toLowerCase().includes(query.trim().toLowerCase())
               ? ""
               : query;
-            const card = renamingProject === p.id ? (
-              <div className="project-card project-rename">
-                <input
-                  autoFocus
-                  value={projectName}
-                  onChange={(e) => setProjectName(e.target.value)}
-                  {...projectRenameKeys}
-                />
-              </div>
-            ) : (
-              <div className="project-card-shell">
-                <button
-                  className={`project-card ${p.id === activeProjectId ? "active" : ""}`}
-                  aria-current={p.id === activeProjectId ? "true" : undefined}
-                  aria-expanded={effectiveViewMode === "tree" ? expandedTrees.has(p.id) : undefined}
-                  aria-keyshortcuts={manualReorder ? "Alt+Shift+ArrowUp Alt+Shift+ArrowDown" : undefined}
-                  onContextMenu={(event) => onProjectContextMenu(event, p.id, "card")}
-                  onClick={() => {
-                    if (p.id !== activeProjectId) activateProject(p.id);
-                    if (effectiveViewMode === "tree") toggleTree(p.id);
-                    else closeDrawer();
-                  }}
-                  onKeyDown={(event) => {
-                    onProjectMenuKeyDown(event, p.id, "card");
-                    if (event.defaultPrevented || !manualReorder || !event.altKey || !event.shiftKey) return;
-                    if (event.key === "ArrowUp") {
-                      event.preventDefault();
-                      moveProjectBy(p.id, -1);
-                    } else if (event.key === "ArrowDown") {
-                      event.preventDefault();
-                      moveProjectBy(p.id, 1);
-                    }
-                  }}
-                  onDoubleClick={() => { setRenamingProject(p.id); setProjectName(p.name); }}
-                >
-                  <ProjectGlyph project={p} />
-                  <span className="project-meta">
-                    <span className="project-name-line">
-                      <span className="project-name" title={p.path}>{p.name || p.path}</span>
-                    </span>
-                    <span className="project-path">{p.path}</span>
-                  </span>
-                </button>
-                <span className="project-actions">
-                  <button
-                    className="project-new-session"
-                    title={tr("sidebar.newChatInValue", { value: p.name || p.path })}
-                    aria-label={tr("sidebar.newChatInValue", { value: p.name || p.path })}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      startNewSession(p.id);
-                      closeDrawer();
-                    }}
-                  ><Icon.plus /></button>
-                  <Menu
-                    label={tr("sidebar.actionsForValue", { value: p.name || p.path })}
-                    title={p.name || p.path}
-                    align="end"
-                    open={projectMenuOpenId === p.id && projectMenuSource === "card"}
-                    onOpenChange={(open) => {
-                      setProjectMenuOpenId(open ? p.id : null);
-                      setProjectMenuSource(open ? "card" : null);
-                    }}
-                    returnFocusRef={projectMenuReturnRef}
-                    entries={projectMenuEntries(p)}
-                    footer={<SlotHost slot="sidebar.project.actions" context={{ projectId: p.id }} />}
-                  >
-                    {(trigger) => (
-                      <button
-                        {...trigger}
-                        className="project-menu-btn"
-                        title={tr("sidebar.actionsForValue", { value: p.name || p.path })}
-                        aria-label={tr("sidebar.actionsForValue", { value: p.name || p.path })}
-                        onClick={(event) => {
-                          projectMenuReturnRef.current = event.currentTarget;
-                          trigger.onClick();
-                        }}
-                      ><Icon.more /></button>
-                    )}
-                  </Menu>
-                </span>
-              </div>
-            );
+            const card = renderProjectCard(p);
             const reorderClass = `${manualReorder ? " reorderable" : ""}${draggedProject === p.id ? " dragging" : ""}${dragOverProject === p.id ? " drag-over" : ""}`;
             const dragProps = manualReorder ? {
               draggable: true,
@@ -1084,23 +1114,6 @@ export default function Sidebar() {
               onDragEnd: clearProjectDrag,
               onDrop: (event: ReactDragEvent<HTMLDivElement>) => dropProject(event, p.id),
             } : {};
-            if (effectiveViewMode === "rail") {
-              return (
-                <div key={p.id} data-project-id={p.id} className="sidebar-focused-project">
-                  {card}
-                  <div className="sidebar-focused-sessions">
-                    <SessionList
-                      projectId={p.id}
-                      attentionOnly={attentionOnly}
-                      dateFilter={dateFilter}
-                      selectMode={selectMode}
-                      selectedSessionIds={selectedSessionIds}
-                      onToggleSelected={toggleSelectedSession}
-                    />
-                  </div>
-                </div>
-              );
-            }
             return (
               <div key={p.id} data-project-id={p.id} className={`project-tree-node${reorderClass}`} {...dragProps}>
                 {card}

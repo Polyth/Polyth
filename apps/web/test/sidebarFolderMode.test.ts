@@ -187,6 +187,7 @@ test("tree mode nests sessions under project worktrees", async () => {
       "active project tree nests the real SessionList",
     );
     assert.match(alphaTree.textContent ?? "", /Alpha session one/);
+    assert.equal(alphaTree.querySelector(".session-date-divider"), null, "the most recent session group has no date divider");
     assert.doesNotMatch(alphaTree.textContent ?? "", /master/, "the project root does not expose its current branch");
     assert.match(alphaTree.textContent ?? "", /feature\/ui/);
     const betaTree = trees.find((tree) => (tree.textContent ?? "").includes("beta"))!;
@@ -209,14 +210,29 @@ test("tree mode nests sessions under project worktrees", async () => {
     assert.ok(rail, "desktop rail mode renders the project switcher");
     assert.equal(rail.querySelectorAll(".sidebar-project-rail-item").length, 2);
     const focused = container.querySelector(".sidebar-focused-project");
-    assert.match(focused?.textContent ?? "", /Alpha session one/);
+    assert.equal(focused?.querySelector(".project-name")?.textContent, "alpha");
+    assert.match(container.querySelector(".sidebar-focused-sessions")?.textContent ?? "", /Alpha session one/);
     assert.doesNotMatch(focused?.textContent ?? "", /Beta session/);
+    const railMain = container.querySelector<HTMLElement>(".sidebar-main")!;
+    const railMainChildren = [...railMain.children];
+    assert.equal(railMainChildren.findIndex((child) => child.classList.contains("sidebar-focused-project")), 0);
+    assert.equal(railMainChildren.findIndex((child) => child.classList.contains("sidebar-service-bar")), 1);
+    assert.equal(railMainChildren.findIndex((child) => child.classList.contains("side-scroll")), 2);
+
+    const sessionIntent = store.getState().newSessionIntent;
+    await act(async () => { click(focused!.querySelector(".project-card")!); });
+    const railSwitch = container.querySelector<HTMLElement>('.sidebar-rail-switch [role="switch"]')!;
+    assert.equal(railSwitch.getAttribute("aria-checked"), "false", "clicking the open project hides its sessions");
+    assert.equal(store.getState().newSessionIntent, sessionIntent, "clicking the open project does not start a session");
+    await act(async () => { click(railSwitch); });
+
     const betaRail = rail.querySelector<HTMLElement>('[aria-label="beta"]');
     assert.ok(betaRail);
     await act(async () => { click(betaRail!); });
     await act(async () => { await Promise.resolve(); });
     assert.equal(betaRail?.getAttribute("aria-current"), "true");
-    assert.match(container.querySelector(".sidebar-focused-project")?.textContent ?? "", /Beta session/);
+    assert.equal(container.querySelector(".sidebar-focused-project .project-name")?.textContent, "beta");
+    assert.match(container.querySelector(".sidebar-focused-sessions")?.textContent ?? "", /Beta session/);
 
     // Tree mode remains the only full-width project presentation.
     await act(async () => { setSidebarViewMode("tree"); });
@@ -392,7 +408,8 @@ test("the rail switch collapses only the sessions, which peek back on hover", as
     await act(async () => { click(switchEl!); });
     assert.equal(switchEl?.getAttribute("aria-checked"), "true");
     assert.equal(container.querySelector(".sidebar-sessions-peek"), null);
-    assert.match(container.querySelector(".sidebar-focused-project")?.textContent ?? "", /Beta session/);
+    assert.equal(container.querySelector(".sidebar-focused-project .project-name")?.textContent, "beta");
+    assert.match(container.querySelector(".sidebar-focused-sessions")?.textContent ?? "", /Beta session/);
   } finally {
     setSidebarLayout({ collapsed: false });
     await act(async () => { root.unmount(); });

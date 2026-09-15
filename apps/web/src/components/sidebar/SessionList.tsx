@@ -804,8 +804,8 @@ export default function SessionList({
   };
 
   const dividerNow = Date.now();
-  const dateDivider = (timestamp: number) => {
-    if (sessionDateInputValue(timestamp) === sessionDateInputValue(dividerNow)) return null;
+  const dateDivider = (timestamp: number, first: boolean) => {
+    if (first || sessionDateInputValue(timestamp) === sessionDateInputValue(dividerNow)) return null;
     const label = sessionDateGroupLabel(timestamp, relativeTime, getLocale(), dividerNow);
     return (
       <div className="session-date-divider" role="separator" aria-label={label}>
@@ -892,9 +892,9 @@ export default function SessionList({
         </div>
       );
     };
-    return groupSessionsByActivityDate(roots).map((group) => (
+    return groupSessionsByActivityDate(roots).map((group, index) => (
       <div className="session-date-group" key={group.key}>
-        {dateDivider(group.timestamp)}
+        {dateDivider(group.timestamp, index === 0)}
         {group.sessions.map(renderNode)}
       </div>
     ));
@@ -902,9 +902,9 @@ export default function SessionList({
   const datedRows = (
     items: readonly SessionProjection[],
     render: (session: SessionProjection) => ReturnType<typeof row> = (session) => row(session),
-  ) => groupSessionsByActivityDate(items).map((group) => (
+  ) => groupSessionsByActivityDate(items).map((group, index) => (
     <div className="session-date-group" key={group.key}>
-      {dateDivider(group.timestamp)}
+      {dateDivider(group.timestamp, index === 0)}
       {group.sessions.map(render)}
     </div>
   ));

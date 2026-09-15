@@ -291,6 +291,7 @@ export default function PendingChangesBar() {
     return (
       <section className="pending-changes-bar pending-changes-bar--collapsed">
         <RunSummary
+          className="ui-glass-dock ui-glass-dock--medium"
           title={title}
           meta={bubbleCount}
           state="completed"
