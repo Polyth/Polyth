@@ -3,14 +3,26 @@ import assert from "node:assert/strict";
 import {
   RAIL_ACTIVE_WIDTH,
   RAIL_BASE_WIDTH,
+  RAIL_CURSOR_NEAR_WIDTH,
   RAIL_CURSOR_WIDTH,
   RAIL_MAX_TICKS,
   RAIL_TICK_PITCH,
+  RAIL_VISUAL_SCALE,
   activePromptIndex,
   cursorTickIndex,
   railWindow,
   tickWidth,
 } from "../src/promptRail.ts";
+
+test("rail marks and pitch are scaled up by 15%", () => {
+  const scaled = (value: number) => Number((value * RAIL_VISUAL_SCALE).toFixed(2));
+  assert.equal(RAIL_VISUAL_SCALE, 1.15);
+  assert.equal(RAIL_TICK_PITCH, scaled(8));
+  assert.equal(RAIL_BASE_WIDTH, scaled(7));
+  assert.equal(RAIL_ACTIVE_WIDTH, scaled(14));
+  assert.equal(RAIL_CURSOR_WIDTH, scaled(20));
+  assert.equal(RAIL_CURSOR_NEAR_WIDTH, scaled(12));
+});
 
 test("railWindow shows everything when it fits", () => {
   assert.deepEqual(railWindow(0, -1), { start: 0, end: 0 });
@@ -44,7 +56,7 @@ test("tickWidth uses three compact proximity levels", () => {
   const w1 = tickWidth(11, -1, 10);
   const w2 = tickWidth(12, -1, 10);
   const w3 = tickWidth(13, -1, 10);
-  assert.deepEqual([w0, w1, w2, w3], [RAIL_CURSOR_WIDTH, 12, RAIL_BASE_WIDTH, RAIL_BASE_WIDTH]);
+  assert.deepEqual([w0, w1, w2, w3], [RAIL_CURSOR_WIDTH, RAIL_CURSOR_NEAR_WIDTH, RAIL_BASE_WIDTH, RAIL_BASE_WIDTH]);
   assert.equal(tickWidth(14, 14, 10), RAIL_BASE_WIDTH, "hover emphasis beats active emphasis");
 });
 

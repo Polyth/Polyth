@@ -347,6 +347,19 @@ test("http gate: /api requires a session, auth endpoints and static stay public"
     assert.equal((await fetch(`${base}/api/health`)).status, 401);
     assert.equal((await fetch(`${base}/api/agent`)).status, 401);
 
+    // A cookie-less controlled Browser has no Space authority: auth rejects
+    // before either a real foreign Space id or an invented id is resolved.
+    const strangerUser = tenancy.gateway.store.createUser("Browser stranger");
+    const strangerSpace = tenancy.gateway.store.createSpace({
+      name: "Browser stranger",
+      ownerId: strangerUser.id,
+    });
+    for (const spaceId of [strangerSpace.id, "spc_invented_browser"]) {
+      assert.equal((await fetch(`${base}/api/projects`, {
+        headers: { "x-polyth-space": spaceId },
+      })).status, 401);
+    }
+
     const bad = await fetch(`${base}/api/auth/login`, {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ password: "nope" }),

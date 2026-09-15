@@ -1,13 +1,27 @@
 /* Agent status identity polish belongs with the primitive, not chat overrides. */
-.agent-status-dock-primary {
+.agent-status-dock .agent-status-dock-content {
+  align-content: center;
+  align-self: center;
+  gap: 0;
+}
+
+.agent-status-dock--stacked .agent-status-dock-content {
+  /* Half of --space-1: enough to separate title from meta without stretching
+     the pair across the pill. */
+  gap: calc(var(--space-1) / 2);
+}
+
+.agent-status-dock .agent-status-dock-primary {
+  display: grid;
+  grid-template-columns: fit-content(72%) minmax(0, 1fr);
   align-items: baseline;
   gap: var(--space-2);
+  line-height: 1.2;
 }
 
 .agent-status-dock-primary strong {
-  flex: 0 1 auto;
   min-width: 0;
-  max-width: min(54%, 20rem);
+  max-width: 100%;
   overflow: hidden;
   color: var(--text);
   font-weight: 650;
@@ -17,12 +31,15 @@
 }
 
 .agent-status-dock-state {
-  flex: 1 1 auto;
   min-width: 0;
 }
 
+.agent-status-dock .agent-status-dock-secondary {
+  line-height: 1.15;
+}
+
 @media (max-width: 600px) {
-  .agent-status-dock-primary strong {
-    max-width: 48%;
+  .agent-status-dock .agent-status-dock-primary {
+    grid-template-columns: fit-content(64%) minmax(0, 1fr);
   }
 }

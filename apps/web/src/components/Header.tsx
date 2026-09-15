@@ -3,7 +3,7 @@ import { formatCombo } from "@polyth/hotkeys";
 import {
   closeWorkspacePane, getState, setActiveView, useStore,
   openSettingsPage, setOverlay, setRailPlugin, setSidebarOpen,
-  toggleWorkspacePane, type AppView,
+  toggleWorkspacePane,
 } from "../store.ts";
 import { MOD } from "../format.ts";
 import { useShellMode, type ShellMode } from "../responsiveShell.ts";
@@ -11,7 +11,7 @@ import {
   useResolvedCapabilities,
   type ResolvedCapability,
 } from "../capabilities.ts";
-import { isCapabilityActive, toggleCapability, VIEW_OF_CAPABILITY } from "../builtinCapabilities.ts";
+import { isCapabilityActive, toggleCapability } from "../builtinCapabilities.ts";
 import SlotHost from "./slots/SlotHost.ts";
 import { Icon } from "../icons.tsx";
 import { setWorkspaceMode, useWorkspaceMode } from "../widgets/workspaceMode.ts";
@@ -35,69 +35,6 @@ import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 import DesktopSessionStatus from "./DesktopSessionStatus.tsx";
 import SpaceSwitcher from "./SpaceSwitcher.tsx";
 import { railIconFor } from "../railIcons.ts";
-
-const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
-
-const ICONS: Record<AppView, React.ReactNode> = {
-  session: (
-    <svg className="ui-icon ui-icon--sm" viewBox="0 0 16 16" {...STROKE}>
-      <path d="M2.5 3.5h11v7h-6l-2.8 2.6v-2.6h-2.2z" />
-    </svg>
-  ),
-  goals: (
-    <svg className="ui-icon ui-icon--sm" viewBox="0 0 16 16" {...STROKE}>
-      <circle cx="8" cy="8" r="6" /><circle cx="8" cy="8" r="3" /><circle cx="8" cy="8" r="0.5" />
-    </svg>
-  ),
-  multirun: (
-    <svg className="ui-icon ui-icon--sm" viewBox="0 0 16 16" {...STROKE}>
-      <rect x="2" y="3" width="3.2" height="10" rx="1" /><rect x="6.4" y="3" width="3.2" height="10" rx="1" /><rect x="10.8" y="3" width="3.2" height="10" rx="1" />
-    </svg>
-  ),
-  workflow: <Icon.workflow />,
-  fusion: (
-    <svg className="ui-icon ui-icon--sm" viewBox="0 0 16 16" {...STROKE}>
-      <circle cx="6" cy="8" r="4.2" /><circle cx="10" cy="8" r="4.2" />
-    </svg>
-  ),
-  walkthrough: (
-    <svg className="ui-icon ui-icon--sm" viewBox="0 0 16 16" {...STROKE}>
-      <path d="M3 4h2M3 8h2M3 12h2M8 4h5M8 8h5M8 12h5" />
-    </svg>
-  ),
-  schedule: (
-    <svg className="ui-icon ui-icon--sm" viewBox="0 0 16 16" {...STROKE}>
-      <circle cx="8" cy="8" r="5.5" /><path d="M8 5v3.2l2.2 1.3" />
-    </svg>
-  ),
-  github: (
-    <svg className="ui-icon ui-icon--sm" viewBox="0 0 16 16" {...STROKE}>
-      <circle cx="5" cy="4.5" r="1.7" /><circle cx="5" cy="11.5" r="1.7" /><circle cx="11" cy="11.5" r="1.7" />
-      <path d="M5 6.2v3.6M11 9.8V7.5a2 2 0 0 0-2-2H8.2" />
-    </svg>
-  ),
-};
-
-// Icons for capabilities that are not full views (panels, settings pages).
-const EXTRA_ICONS: Record<string, React.ReactNode> = {
-  files: <Icon.files />,
-  browser: <Icon.globe />,
-  git: <Icon.tree />,
-  terminal: <Icon.term />,
-  usage: <Icon.usage />,
-  events: <Icon.events />,
-  context: <Icon.context />,
-  knowledge: <Icon.book />,
-  voice: <Icon.mic />,
-  "models-agents": <Icon.gear />,
-  diagnostics: <Icon.shield />,
-};
-
-function capabilityIcon(id: string): React.ReactNode {
-  const view = VIEW_OF_CAPABILITY[id];
-  if (view && ICONS[view]) return ICONS[view];
-  return EXTRA_ICONS[id] ?? <Icon.context />;
-}
 
 /** The centered top rail renders primary capabilities plus the permanent
  *  Terminal launcher. Terminal must remain alongside the primary controls
@@ -169,6 +106,7 @@ function CapabilityNav() {
         {topRail.map((c) => {
           const terminalAction = c.descriptor.id === "terminal";
           const label = terminalAction ? terminalLabel : c.descriptor.label;
+          const RailIcon = railIconFor(c.descriptor.id);
           return (
             <button
               key={c.descriptor.id}
@@ -189,7 +127,7 @@ function CapabilityNav() {
                 ? toggleWorkspacePane("terminal")
                 : toggleCapability(c.descriptor.id, c.descriptor.open)}
             >
-              {capabilityIcon(c.descriptor.id)}
+              <RailIcon />
             </button>
           );
         })}
@@ -434,7 +372,7 @@ export default function Header() {
         )}
         <div ref={occupancy.leadingRef} className="header-left-cluster">
           {(!compact || !chatSurface) && <button className="header-brand header-control" aria-label={tr("header.polythHome")} onClick={() => switchWorkspaceMode("chat")}>
-            <span className="polyth-mark">{tr("header.p")}</span>
+            <img className="polyth-mark" src="/icon-192.png" alt="" aria-hidden="true" />
             <strong>{tr("header.polyth")}</strong>
           </button>}
           {/* Quiet by design: it renders only when more than one Space
@@ -446,7 +384,7 @@ export default function Header() {
           </div>}
           {workspaceMode === "chat" && !compact && <><span className="header-divider" aria-hidden="true" /><CapabilityNav /></>}
         </div>
-        {!compact && session && <DesktopSessionStatus />}
+        {session && <DesktopSessionStatus showTrigger={!compact} />}
         <span className="header-spacer" />
         <div ref={occupancy.trailingRef} className="header-trailing-cluster">
           {(!compact || !chatSurface) && (

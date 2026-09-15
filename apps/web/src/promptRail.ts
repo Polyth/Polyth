@@ -2,14 +2,17 @@
 // Implements a bounded tape of at most MAX_TICKS thin ticks at a fixed pitch,
 // widths that grow for the active turn and swell in a proximity wave around
 // the cursor, plus a window that keeps the active tick visible when there are
-// more prompts than ticks.
+// more prompts than ticks. The original rail geometry is scaled by 15% so the
+// marks and the breathing room between them remain balanced and easier to see.
 
 export const RAIL_MAX_TICKS = 30;
-export const RAIL_TICK_PITCH = 8;
-export const RAIL_BASE_WIDTH = 7;
-export const RAIL_ACTIVE_WIDTH = 14;
-export const RAIL_CURSOR_WIDTH = 20;
-export const RAIL_CURSOR_NEAR_WIDTH = 12;
+export const RAIL_VISUAL_SCALE = 1.15;
+const scaledRailPx = (value: number): number => Number((value * RAIL_VISUAL_SCALE).toFixed(2));
+export const RAIL_TICK_PITCH = scaledRailPx(8);
+export const RAIL_BASE_WIDTH = scaledRailPx(7);
+export const RAIL_ACTIVE_WIDTH = scaledRailPx(14);
+export const RAIL_CURSOR_WIDTH = scaledRailPx(20);
+export const RAIL_CURSOR_NEAR_WIDTH = scaledRailPx(12);
 export const RAIL_PANEL_ROWS = 8;
 
 /** Slice of prompt indexes shown as ticks: the whole list when it fits,
@@ -27,7 +30,7 @@ export function railWindow(
 
 /** Visual width of one tick. While navigating, the cursor owns the emphasis:
  *  the hovered tick is largest, its immediate neighbour is smaller, and all
- *  remaining ticks use the compact 7px level. */
+ *  remaining ticks use the compact base level. */
 export function tickWidth(index: number, activeIndex: number, cursorIndex: number): number {
   if (cursorIndex >= 0) {
     const distance = Math.abs(index - cursorIndex);

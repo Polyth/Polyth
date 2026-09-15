@@ -141,7 +141,7 @@ test("every primary built-in rail item has a unique Lucide icon", async () => {
     "session", "files", "git", "terminal", "browser", "goals", "multirun",
     "workflow", "fusion", "walkthrough", "schedule", "usage", "github",
     "knowledge", "context", "voice", "models-agents", "events", "diagnostics",
-    "tracks", "notification-centre",
+    "tracks", "notification-centre", "personal-coach",
   ];
   const icons = items.map((item) => {
     const escaped = item.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

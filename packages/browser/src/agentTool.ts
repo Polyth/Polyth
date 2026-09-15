@@ -33,7 +33,7 @@ const VIEWPORTS = {
 } as const;
 
 const DESCRIPTION =
-  "Open, read, and interact with a page in Polyth's controlled in-app browser. Use browser.open first, then browser.snapshot before clicking or typing. The browser is an isolated session-scoped Chromium context, not the user's personal browser.";
+  "Open, read, and interact with a page in Polyth's controlled in-app browser. Use browser.open first, then browser.snapshot before clicking or typing. The browser is an isolated session-scoped Chromium context, not the user's personal browser. If sign-in, consent, or another human-only step is required, ask the user to open the Browser activity for this session, choose Take control, complete the step themselves, and then Resume agent. Never request credentials in chat or enter them with browser.type.";
 
 const inputSchema: JsonObject = {
   type: "object",
@@ -154,24 +154,13 @@ export function createBrowserAgentTool(
       const nextScheme = colorScheme(parameters.colorScheme, false);
       const existing = session !== null;
       if (!session) {
-        try {
-          session = await browser.create({
-            projectId: ctx.projectId,
-            ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}),
-            actor: "agent",
-            ...(nextViewport ? { viewport: nextViewport } : {}),
-            ...(nextScheme ? { colorScheme: nextScheme } : {}),
-          });
-        } catch (error) {
-          const failure = error as Error & { code?: string };
-          if (failure.code === "unavailable" || (failure.message && failure.message.includes("401"))) {
-            throw Object.assign(
-              new Error(failure.message + "\n\nNote: If the server has authentication enabled, ensure POLYTH_UI_PASSWORD_LOCALHOST=optional is set."),
-              { code: failure.code }
-            );
-          }
-          throw error;
-        }
+        session = await browser.create({
+          projectId: ctx.projectId,
+          ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}),
+          actor: "agent",
+          ...(nextViewport ? { viewport: nextViewport } : {}),
+          ...(nextScheme ? { colorScheme: nextScheme } : {}),
+        });
       }
       if (ctx.signal?.aborted) throw Object.assign(new Error("browser action aborted"), { code: "aborted" });
       if (browser.agentPaused(session.id)) throw Object.assign(new Error("agent control is paused for this browser session"), { code: "agent-paused" });

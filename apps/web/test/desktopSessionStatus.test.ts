@@ -11,6 +11,7 @@ test("desktop status shares the live chat column geometry", async () => {
   assert.match(header, /--sidebar-inline-size/);
   assert.match(header, /--header-leading-inline-end/);
   assert.match(header, /--header-trailing-inline-size/);
+  assert.match(header, /session && <DesktopSessionStatus showTrigger=\{!compact\} \/>/);
   assert.match(rail, /--workspace-pane-inline-size/);
   assert.match(styles, /\.desktop-session-status[^}]+--sidebar-inline-size[^}]+--workspace-pane-inline-size/);
   assert.match(styles, /\.desktop-session-status[^}]+--header-leading-inline-end[^}]+--header-trailing-inline-size/s);
@@ -32,6 +33,9 @@ test("desktop and phone titles present normalized task transitions without movin
   assert.match(desktop, /const displayedTitle = taskProgressTitle\?\.text \?\? title/);
   assert.match(desktop, /desktop-session-status-copy\$\{taskProgressTitle \? ` task-progress \$\{taskProgressTitle\.tone\}` : ""\}/);
   assert.match(desktop, /className="desktop-session-task-list"/);
+  assert.match(desktop, /toggleSessionStatusPopover\(headerRef\.current\)/);
+  assert.match(desktop, /className="desktop-session-status-popover"/);
+  assert.match(desktop, /side=\{fromDock \? "up" : "down"\}/);
 
   assert.match(mobile, /promptVisible \? undefined : prompt/);
   assert.match(mobile, /const overviewTasks = tasksForIsland\(model\.tasks, model\.messages\)/);
@@ -70,4 +74,20 @@ test("desktop and phone session titles use the centered title role", async () =>
   assert.match(styles, /\.desktop-session-status-copy\s*\{[^}]*justify-content: center;/s);
   assert.match(styles, /\.mobile-session-selector\s*\{[^}]*display: grid;[^}]*grid-template-columns: var\(--icon-md\) minmax\(0, 1fr\) var\(--icon-md\);[^}]*font-size: var\(--font-session-title\)/s);
   assert.match(styles, /\.mobile-island-text\s*\{[^}]*text-align: center;/s);
+});
+
+test("session status popover toggles on the same anchor and moves to a new one", async () => {
+  const popover = await import("../src/sessionStatusPopover.ts");
+  popover.closeSessionStatusPopover();
+  const dock = { id: "dock" } as HTMLElement;
+  const header = { id: "header" } as HTMLElement;
+  popover.openSessionStatusPopover(dock);
+  assert.equal(popover.getSessionStatusPopover().open, true);
+  assert.equal(popover.getSessionStatusPopover().anchor, dock);
+  popover.toggleSessionStatusPopover(header);
+  assert.equal(popover.getSessionStatusPopover().open, true);
+  assert.equal(popover.getSessionStatusPopover().anchor, header);
+  popover.toggleSessionStatusPopover(header);
+  assert.equal(popover.getSessionStatusPopover().open, false);
+  popover.closeSessionStatusPopover();
 });

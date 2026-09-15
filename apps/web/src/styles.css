@@ -214,16 +214,9 @@ body.desktop-app[data-desktop-controls-position="right"] .header {
   background: linear-gradient(135deg, var(--accent-wash), var(--surface-overlay));
 }
 .desktop-settings-hero .polyth-mark {
-  display: grid;
-  place-items: center;
   width: 38px;
   height: 38px;
   flex: 0 0 auto;
-  border-radius: var(--radius-surface);
-  color: var(--accent-ink);
-  background: var(--accent);
-  font-size: 22px;
-  font-weight: 800;
 }
 .desktop-settings-hero > div {
   display: flex;
@@ -1650,7 +1643,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .surface-error-actions { display: flex; gap: 8px; margin-top: 8px; }
 .center-empty { flex: 1; display: flex; align-items: center; justify-content: center; }
 .welcome { max-width: 430px; text-align: center; padding-bottom: 12vh; }
-.welcome-mark { display: inline-grid; place-items: center; width: 36px; height: 36px; margin-bottom: 12px; border-radius: var(--radius-card); background: var(--accent); color: var(--accent-ink); font: 700 24px/1 Georgia, serif; }
+.welcome-mark { display: block; width: 36px; height: 36px; margin-bottom: 12px; object-fit: contain; }
 .welcome h1 { margin: 0; font-size: 21px; letter-spacing: -.03em; }
 .welcome p { margin: 7px 0 0; color: var(--muted); }
 .welcome-action { margin-top: 18px; padding: 8px 12px; }
@@ -2387,20 +2380,41 @@ border-color: var(--accent); color: var(--accent); background: var(--accent-wash
 /* ---------- transient error toast + app-owned alerts ---------- */
 .error-banner {
   position: fixed;
-  inset-inline-end: calc(var(--rail-strip-width-right, var(--control-h-lg)) + var(--space-3));
+  inset-inline-end: var(--safe-right);
   bottom: max(var(--space-3), var(--safe-bottom));
   z-index: var(--z-toast);
-  width: min(400px, calc(100vw - var(--rail-strip-width-right, var(--control-h-lg)) - (2 * var(--screen-gutter))));
+  width: fit-content;
+  max-width: min(220px, calc(100vw - var(--safe-right) - var(--screen-gutter)));
+  min-height: calc(var(--control-h-lg) + var(--space-2));
   align-items: center;
+  padding: var(--space-3) var(--space-3);
   border-color: var(--material-glass-border);
   border-radius: var(--radius-surface);
+  border-start-end-radius: 0;
+  border-end-end-radius: 0;
   background: var(--material-glass-strong);
   box-shadow: var(--material-glass-highlight), var(--material-glass-shadow);
-  font-size: var(--font-label);
-  animation: toast-in var(--motion-normal) ease-out;
+  font-size: var(--font-meta);
+  animation: error-banner-slide 7s var(--motion-ease) both;
 }
-.error-banner .ui-notice-actions { gap: var(--space-1); }
-@keyframes toast-in { from { opacity: 0; transform: translateY(var(--space-2)); } to { opacity: 1; transform: translateY(0); } }
+.error-banner .ui-notice-actions {
+  order: -1;
+  margin-inline: 0 var(--space-1);
+  gap: var(--space-1);
+}
+@keyframes error-banner-slide {
+  from { opacity: 0; transform: translateX(100%); }
+  3% { opacity: 1; transform: translateX(0); }
+  97% { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(100%); }
+}
+html[dir="rtl"] .error-banner { animation-name: error-banner-slide-rtl; }
+@keyframes error-banner-slide-rtl {
+  from { opacity: 0; transform: translateX(-100%); }
+  3% { opacity: 1; transform: translateX(0); }
+  97% { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(-100%); }
+}
 .alert-dialog { width: min(440px, 92vw); gap: 0; overflow: hidden; }
 .alert-dialog-body { display: flex; flex-direction: column; gap: var(--space-3); }
 .alert-dialog-body p { margin: 0; color: var(--text-dim); line-height: 1.5; white-space: pre-line; }
@@ -2468,9 +2482,7 @@ border-color: var(--accent); color: var(--accent); background: var(--accent-wash
   border-radius: var(--radius-surface); box-shadow: var(--shadow-lg);
 }
 .lock-card > .welcome-mark {
-  display: inline-grid; place-items: center; width: 46px; height: 46px; margin-bottom: 16px;
-  border-radius: var(--radius-surface); background: linear-gradient(160deg, var(--accent-hi), var(--accent));
-  color: var(--accent-ink); font: 700 24px/1 Inter, sans-serif; box-shadow: var(--shadow-lg);
+  display: block; width: 46px; height: 46px; margin-bottom: 16px;
 }
 .lock-card h1 { margin: 0; font-size: 20px; letter-spacing: -.02em; }
 .lock-hint { margin: 8px 0 18px; color: var(--muted); font-size: 13px; }
@@ -3666,7 +3678,7 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
   border: 0; background: transparent; color: inherit; cursor: pointer;
 }
 .timeline-dialog-prompt span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Prompt navigator (L13, polyth PromptNavigatorRail mechanics): a 28px
+/* Prompt navigator (L13, polyth PromptNavigatorRail mechanics): a 32.2px
    gutter pinned to the right edge of the chat viewport, vertically centered.
    The rail lives OUTSIDE the .timeline scroller (absolute sibling inside
    .timeline-viewport), so it stays put while messages scroll, never competes
@@ -3674,7 +3686,7 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
    overflow. right: 44px keeps the tick bars clear of the right rail. */
 .prompt-nav {
   position: absolute; top: 50%; right: 44px; transform: translateY(-50%);
-  width: 28px; z-index: 5;
+  width: 32.2px; z-index: 5;
   display: flex; flex-direction: column; align-items: flex-end;
 }
 .prompt-nav-tape {
@@ -3683,45 +3695,52 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 }
 /* Gradient masks hint that the 30-tick window clipped earlier/later prompts. */
 .prompt-nav-tape[data-clip-above] {
-  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 28px);
-  mask-image: linear-gradient(to bottom, transparent, #000 28px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 32.2px);
+  mask-image: linear-gradient(to bottom, transparent, #000 32.2px);
 }
 .prompt-nav-tape[data-clip-below] {
-  -webkit-mask-image: linear-gradient(to top, transparent, #000 28px);
-  mask-image: linear-gradient(to top, transparent, #000 28px);
+  -webkit-mask-image: linear-gradient(to top, transparent, #000 32.2px);
+  mask-image: linear-gradient(to top, transparent, #000 32.2px);
 }
 .prompt-nav-tape[data-clip-above][data-clip-below] {
-  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 28px, #000 calc(100% - 28px), transparent);
-  mask-image: linear-gradient(to bottom, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 32.2px, #000 calc(100% - 32.2px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 32.2px, #000 calc(100% - 32.2px), transparent);
 }
-/* Each tick is a real button: a 28px-wide hit zone at the 8px pitch; the
-   visual bar is a 2px line whose width the component drives (active tick and
-   cursor proximity wave). */
+/* Each tick is a real button: the former 28px × 8px geometry, bar thickness,
+   and inter-bar space are all 15% larger. The component drives bar width for
+   the active tick and cursor proximity wave. */
 .prompt-nav-tick {
   display: flex; align-items: center; justify-content: flex-end;
-  width: 28px; height: 6px; padding: 0 6px 0 0; border: 0; background: none;
+  width: 32.2px; height: 9.2px; padding: 0 6.9px 0 0; border: 0; background: none;
   cursor: pointer; border-radius: calc(4px * var(--corner-radius-scale));
 }
 .prompt-nav-tick-bar {
-  height: 2px; border-radius: calc(1px * var(--corner-radius-scale)); background: var(--border);
-  transition: width var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
+  height: 2.3px; border-radius: calc(1.15px * var(--corner-radius-scale));
+  background: color-mix(in srgb, var(--text-dim) 82%, var(--panel));
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--bg) 45%, transparent);
+  transition: width var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
 }
 .prompt-nav-tick:hover { border: 0; background: transparent; }
 .prompt-nav-tick:hover .prompt-nav-tick-bar,
-.prompt-nav-tick.hovered .prompt-nav-tick-bar { background: var(--accent); }
-.prompt-nav-tick[aria-current="true"] .prompt-nav-tick-bar { background: var(--accent); }
+.prompt-nav-tick.hovered .prompt-nav-tick-bar,
+.prompt-nav-tick[aria-current="true"] .prompt-nav-tick-bar {
+  background: var(--accent);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--accent) 48%, transparent);
+}
 .prompt-nav-tick:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 
 /* Recent-turns panel revealed on hover/focus, left of the tape and centered
    against it. */
 .prompt-nav-panel {
-  position: absolute; top: 50%; right: calc(100% + 8px); transform: translateY(-50%);
+  --prompt-nav-panel-blur: 32px;
+  position: absolute; top: 50%; right: calc(100% + 9.2px); transform: translateY(-50%);
   width: min(340px, 42vw); max-height: min(440px, 70vh); overflow-y: auto;
   display: flex; flex-direction: column; gap: 2px;
   background: var(--material-glass); border: 1px solid var(--material-glass-border);
   border-radius: var(--radius-control); box-shadow: var(--material-glass-highlight), var(--material-glass-shadow);
   padding: 6px; z-index: 6; text-align: left;
 }
+body[data-glass="clear"] .prompt-nav-panel { --prompt-nav-panel-blur: 22px; }
 .prompt-nav-row {
   display: flex; align-items: baseline; gap: 8px; width: 100%;
   border: 0; background: none; cursor: pointer; color: inherit;
@@ -4860,10 +4879,8 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
   border: 0; color: var(--text); background: transparent; font-size: 17px; letter-spacing: -.04em;
 }
 .polyth-mark {
-  display: grid; place-items: center; width: 29px; height: 29px; border-radius: var(--radius-control);
-  border: 1px solid color-mix(in srgb, var(--accent-ink) 24%, var(--accent));
-  background: var(--accent); color: var(--accent-ink);
-  font: 800 18px/1 Georgia, serif; box-shadow: var(--inset-hi);
+  width: 29px; height: 29px; flex: none; border-radius: var(--radius-control);
+  object-fit: contain;
 }
 .header-global-search {
   display: flex; align-items: center; gap: 8px; width: min(250px, 20vw); height: 34px; margin-left: 10px;
@@ -5554,7 +5571,7 @@ html[dir="rtl"] input[type="number"] {
 /* ================= personalized workspace redesign ================= */
 .settings-page-widgets .settings-nav { background: var(--sunken); }
 .settings-page-widgets .settings-nav-head h2 { display: flex; align-items: center; gap: 8px; font-size: 16px; text-transform: lowercase; }
-.settings-page-widgets .settings-nav-head .polyth-mark { display: grid; place-items: center; width: 25px; height: 25px; border-radius: var(--radius-control); background: var(--accent); color: var(--accent-ink); font-size: 14px; }
+.settings-page-widgets .settings-nav-head .polyth-mark { width: 25px; height: 25px; }
 .settings-page-widgets .settings-pane { background: var(--bg); }
 .settings-page-widgets .settings-pane-body { padding: 0 22px 82px; }
 .settings-page-widgets .set-page-head { padding-top: 16px; }
@@ -7124,7 +7141,6 @@ color: var(--green);
 .workspace-mode-switch button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .header-brand { width: var(--control-h-sm); height: var(--control-h-sm); padding: 0; justify-content: center; gap: 0; }
 .header-brand strong { display: none; }
-.polyth-mark { width: 28px; height: 28px; font-size: var(--font-title); }
 .workspace-mode-switch { height: var(--control-h-sm); padding: 2px; gap: 2px; background: var(--sunken); }
 .workspace-mode-switch button { height: 26px; padding-inline: var(--space-3); border-radius: calc(var(--radius-control) - 2px); font-size: var(--font-meta); }
 .workspace-mode-switch button.active { background: var(--surface-overlay-strong); box-shadow: var(--inset-hi); font-weight: 700; }
@@ -9016,8 +9032,8 @@ width: var(--tap);
 }
 /* Keep the rail dense on desktop too. This late rule used to expand every
    tick to a 24px vertical slot, undoing the compact rail above. */
-.prompt-nav { width: 28px; }
-.prompt-nav-tick { width: 28px; height: 8px; }
+.prompt-nav { width: 32.2px; }
+.prompt-nav-tick { width: 32.2px; height: 9.2px; }
 .prompt-nav-page { height: 32px; }
 
 .agent-reply-header,
@@ -12220,7 +12236,7 @@ html[data-font] body :is(
     backdrop-filter: none;
   }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .app > .header, .sidebar, .railbar) { background: var(--material-glass); }
-  :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.dialog-panel, .sheet, .composer-card, .response-footer-metadata-grid, .workspace-customize-panel) { background: var(--material-glass-strong); }
+  :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.dialog-panel, .sheet, .composer-card, .response-footer-metadata-grid, .workspace-customize-panel, .error-banner) { background: var(--material-glass-strong); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.activity-group, .task-list) { background: var(--surface-activity); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.ui-glass-island, .ui-glass-dock) { background: var(--material-glass); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) .msg.user .bubble { background: var(--bubble-user-bg); }
@@ -12230,7 +12246,7 @@ html[data-font] body :is(
 
 @media (prefers-reduced-motion: reduce) {
   :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip) { background: var(--material-glass); }
-  :is(.dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel) { background: var(--material-glass-strong); }
+  :is(.dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .error-banner) { background: var(--material-glass-strong); }
    :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .app > .header, .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .mobile-island-sheet.sheet, .activity-group, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-model .picker-chip) {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
@@ -12490,11 +12506,11 @@ html[data-font] body :is(
 .agent-status-dock--status { cursor: default; }
 .agent-status-dock-icon { position: relative; display: grid; place-items: center; width: var(--icon-xl); height: var(--icon-xl); }
 .agent-status-dock-icon > i { position: absolute; inset-inline-end: 0; inset-block-end: 0; width: var(--space-2); height: var(--space-2); border: 2px solid var(--surface); border-radius: 50%; background: var(--green); animation: status-pulse 1.8s ease-in-out infinite; }
-.agent-status-dock-content { min-width: 0; display: grid; gap: var(--space-1); }
-.agent-status-dock-primary { min-width: 0; display: flex; align-items: center; gap: var(--space-2); }
-.agent-status-dock-primary strong { flex: none; max-width: 42%; overflow: hidden; color: var(--text); font-size: var(--font-label); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.agent-status-dock-content { min-width: 0; display: grid; align-content: center; gap: 0; }
+.agent-status-dock-primary { min-width: 0; display: grid; grid-template-columns: fit-content(72%) minmax(0, 1fr); align-items: baseline; gap: var(--space-2); line-height: 1.2; }
+.agent-status-dock-primary strong { min-width: 0; max-width: 100%; overflow: hidden; color: var(--text); font-size: var(--font-label); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .agent-status-dock-state { min-width: 0; overflow: hidden; color: var(--text-dim); font-size: var(--font-label); text-overflow: ellipsis; white-space: nowrap; }
-.agent-status-dock-secondary { min-width: 0; display: flex; align-items: center; gap: var(--space-2); overflow: hidden; color: var(--muted); font-size: var(--font-response-meta); }
+.agent-status-dock-secondary { min-width: 0; display: flex; align-items: center; gap: var(--space-2); overflow: hidden; color: var(--muted); font-size: var(--font-response-meta); line-height: 1.15; }
 .agent-status-dock-diff { display: inline-flex; align-items: center; gap: var(--space-2); white-space: nowrap; }
 .agent-status-dock-time { align-self: center; color: var(--muted); font-size: var(--font-response-meta); font-variant-numeric: tabular-nums; white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .agent-status-dock::after { animation: none; } }
@@ -12778,8 +12794,6 @@ body[data-desktop-low-resource="true"] .activity-live { transition: none; }
   .response-footer-duration { display: none; }
   .response-footer-actions { opacity: 1; pointer-events: auto; }
   .agent-status-dock { min-height: var(--activity-row-height); padding-inline: var(--space-3); }
-  .agent-status-dock-branch { display: none; }
-  .agent-status-dock-primary strong { max-width: 36%; }
   .ui-run-summary-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .msg.user .bubble { max-inline-size: min(96%, 640px); }
   :is(.activity-group, .activity-live) .task-activity-mark { width: var(--icon-md); flex-basis: var(--icon-md); }
@@ -13087,7 +13101,6 @@ body:not([data-glass="off"]) :is(
       .picker-pop,
       .menu-popup,
       .ac-popup,
-      .prompt-nav-panel,
       .selection-menu,
       .ui-tooltip,
       .turn-rate-limit .turn-rate-limit-action,
@@ -13100,6 +13113,15 @@ body:not([data-glass="off"]) :is(
         color-mix(in srgb, var(--material-glass) var(--material-glass-edge), transparent) 100%);
       -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
       backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
+    }
+    /* Prompt previews sit directly over conversation text and need stronger
+       optical separation than ordinary menus, especially in Clear glass. */
+    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .prompt-nav-panel {
+      background: radial-gradient(140% 140% at 50% 50%,
+        color-mix(in srgb, var(--material-glass) var(--material-glass-fill), transparent) 0%,
+        color-mix(in srgb, var(--material-glass) var(--material-glass-edge), transparent) 100%);
+      -webkit-backdrop-filter: blur(var(--prompt-nav-panel-blur)) saturate(var(--material-glass-saturation)) !important;
+      backdrop-filter: blur(var(--prompt-nav-panel-blur)) saturate(var(--material-glass-saturation)) !important;
     }
     /* The block owns the translucent surface; its nested code element keeps
        the inherited monospace treatment without painting a second rectangle. */
@@ -13116,7 +13138,8 @@ body:not([data-glass="off"]) :is(
       .settings-shell,
       .response-footer-metadata-grid,
       .workspace-customize-panel,
-      .attachment-preview-toolbar
+      .attachment-preview-toolbar,
+      .error-banner
     ) {
       background: radial-gradient(140% 140% at 50% 50%,
         color-mix(in srgb, var(--material-glass-strong) var(--material-glass-fill), transparent) 0%,
@@ -13174,7 +13197,8 @@ body[data-glass="off"] :is(
   .settings-shell,
   .response-footer-metadata-grid,
   .workspace-customize-panel,
-  .attachment-preview-toolbar
+  .attachment-preview-toolbar,
+  .error-banner
 ) {
   background: var(--material-glass-strong);
   -webkit-backdrop-filter: none !important;

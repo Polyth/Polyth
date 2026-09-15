@@ -99,6 +99,7 @@ export default defineWebPackage((host) => () => {
         onOpen: openCoach,
         isActive: () => host.store.getSnapshot().railPlugin === "personal-coach",
         subscribe: host.store.subscribe,
+        icon: host.ui.icons.coach,
       }),
     }),
     host.capabilities.register({
@@ -116,7 +117,7 @@ export default defineWebPackage((host) => () => {
       packageId: "personal-coach",
       label: t("coach.settings.title"),
       group: "Workspace",
-      icon: "◎",
+      icon: "coach",
       order: 34,
       component: () => createElement(CoachSettingsPage, {
         api,

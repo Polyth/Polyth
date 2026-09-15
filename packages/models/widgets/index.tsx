@@ -3,9 +3,11 @@ import "./mobilePicker.css";
 import { defineWebPackage } from "@polyth/web-sdk";
 import ModelsPage from "./ModelsPage.tsx";
 import {
-  invalidateRuntimeCatalogs,
   preloadRuntimeCatalogs,
+  resetRuntimeCatalogMemory,
 } from "./runtimeCatalog.ts";
+
+const DAILY_CACHE_MS = 24 * 60 * 60_000;
 
 export default defineWebPackage((host) => () => {
   let active = true;
@@ -44,6 +46,11 @@ export default defineWebPackage((host) => () => {
       await preloadRuntimeCatalogs({ projectId });
     })().catch(() => {});
   };
+  const dailyRefresh = window.setInterval(() => {
+    resetRuntimeCatalogMemory();
+    warmScope = undefined;
+    warmCatalogs();
+  }, DAILY_CACHE_MS);
   const onResourceMode = () => {
     warmScope = undefined;
     warmCatalogs();
@@ -51,6 +58,7 @@ export default defineWebPackage((host) => () => {
   window.addEventListener("polyth:desktop-performance-changed", onResourceMode);
   warmCatalogs();
   const off = [
+    () => window.clearInterval(dailyRefresh),
     () => window.removeEventListener("polyth:desktop-performance-changed", onResourceMode),
     host.store.subscribe(warmCatalogs),
     host.slots.register({
@@ -75,6 +83,6 @@ export default defineWebPackage((host) => () => {
     active = false;
     warmGeneration++;
     off.toReversed().forEach((dispose) => dispose());
-    invalidateRuntimeCatalogs();
+    resetRuntimeCatalogMemory();
   };
 });

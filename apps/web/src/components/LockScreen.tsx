@@ -65,7 +65,7 @@ export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
   return (
     <div className="lock-screen">
       <form className="lock-card" onSubmit={submit}>
-        <span className="welcome-mark">{tr("lockscreen.p")}</span>
+        <img className="welcome-mark" src="/icon-192.png" alt="" aria-hidden="true" />
         <h1>{tr("lockscreen.polythIsLocked")}</h1>
         <p className="lock-hint">Sign in to this Polyth server.</p>
         <TextInput

@@ -131,6 +131,7 @@ const GENERIC_SHELL_IMPORTS = new Set([
   "review/anchors.ts",
   "selectionActions.ts",
   "settings.ts",
+  "sessionStatusPopover.ts",
   "store.ts",
   "trackForm.ts",
   "uiPrefs.ts",

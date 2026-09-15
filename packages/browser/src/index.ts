@@ -138,6 +138,8 @@ export interface BrowserServiceOptions {
   unavailableReason?: string;
   /** Origins Polyth started (dev preview) — allowed loopback targets. */
   allowedOrigins?: () => string[];
+  /** Server-owned destinations that must match exactly (no apex/www alias). */
+  exactAllowedOrigins?: () => string[];
   resolve?: UrlPolicyOptions["resolve"];
   secrets?: ReadonlyArray<string>;
   maxSessions?: number;
@@ -268,6 +270,7 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
 
   const policyOpts = (browserSessionId?: string): UrlPolicyOptions => ({
     allowedOrigins: opts.allowedOrigins?.() ?? [],
+    exactAllowedOrigins: opts.exactAllowedOrigins?.() ?? [],
     approvedOrigins: new Set([
       ...approved,
       ...(browserSessionId ? approvedBySession.get(browserSessionId) ?? [] : []),

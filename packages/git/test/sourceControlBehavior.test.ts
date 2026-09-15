@@ -417,7 +417,7 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
     assert.match(agentStatus.textContent ?? "", /Luna/);
     assert.match(agentStatus.textContent ?? "", /Run focused checks and review the diff/);
     assert.match(agentStatus.textContent ?? "", /4 files.*\+10.*−4/s);
-    assert.match(agentStatus.textContent ?? "", /feature\/glass-ui/);
+    assert.doesNotMatch(agentStatus.textContent ?? "", /feature\/glass-ui/);
     assert.equal(agentStatus.textContent?.includes("Context"), false);
     assert.equal(agentStatus.textContent?.includes("Agent"), false);
 

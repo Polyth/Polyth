@@ -12,6 +12,7 @@ import type {
 } from "@polyth/contracts";
 import { REMOTE_CAPABILITY } from "@polyth/contracts";
 import {
+  SERVER_APPLICATION_SURFACE,
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
@@ -483,6 +484,14 @@ export default async function registerPackage(host: ServerPackageHost): Promise<
     driver,
     unavailableReason: "Browser engine unavailable. Install a supported desktop build or configure Chromium for development.",
     allowPublicOrigins: true,
+    // Resolve this on every hop: auth can change while a context is alive.
+    // The server exposes only its exact login origin and only while cookie-less
+    // loopback requests cannot inherit ambient operator/Space authority.
+    exactAllowedOrigins: () => {
+      const origin = host.services.get(SERVER_APPLICATION_SURFACE)
+        ?.controlledBrowserLoginOrigin();
+      return origin ? [origin] : [];
+    },
     append: (sessionId, type, data) => host.events.append(sessionId, type, data, { ignorable: true, producerPlugin: "browser" }),
   });
   host.services.provide(serverServiceKey<BrowserService>("browser"), browser);

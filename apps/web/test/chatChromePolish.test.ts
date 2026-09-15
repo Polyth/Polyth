@@ -73,7 +73,14 @@ test("chat, context and agent activity share human model presentation", () => {
   assert.doesNotMatch(contextRail, /session\.model\.providerID\}\/\$\{session\.model\.modelID/);
   assert.doesNotMatch(execution, /model \? `\$\{model\.providerID\}\/\$\{model\.modelID\}`/);
   assert.match(statusDock, /import "\.\/AgentStatusDock\.css"/);
+  assert.match(statusDock, /hasSecondary \? "agent-status-dock--stacked"/);
   assert.match(statusCss, /\.agent-status-dock-primary strong/);
+  assert.match(statusCss, /fit-content\(72%\)/);
+  assert.match(statusCss, /\.agent-status-dock--stacked \.agent-status-dock-content/);
+  assert.match(statusCss, /gap:\s*calc\(var\(--space-1\) \/ 2\)/);
+  assert.match(statusCss, /\.agent-status-dock-primary \{[^}]*line-height:\s*1\.2/s);
+  assert.match(statusCss, /\.agent-status-dock-secondary \{[^}]*line-height:\s*1\.15/s);
+  assert.match(statusDock, /title=\{model\}/);
 });
 
 test("shell no longer mutates model catalog or imports override-only chrome", () => {

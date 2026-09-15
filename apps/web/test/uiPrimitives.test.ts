@@ -177,6 +177,7 @@ test("AgentStatusDock is a passive live status unless a details action exists", 
     assert.equal(status.getAttribute("aria-busy"), "true");
     assert.ok(status.classList.contains("ui-glass-dock--medium"));
     assert.ok(!status.classList.contains("ui-glass-dock--strong"));
+    assert.ok(!status.classList.contains("agent-status-dock--stacked"));
     assert.equal(status.querySelector(".agent-status-dock-secondary"), null);
     assert.equal(passive.container.querySelector("button"), null);
   } finally { await passive.unmount(); }
@@ -194,9 +195,25 @@ test("AgentStatusDock is a passive live status unless a details action exists", 
     const button = actionable.container.querySelector<HTMLButtonElement>("button.agent-status-dock")!;
     await act(async () => { button.click(); });
     assert.equal(opened, 1);
+    assert.ok(button.classList.contains("agent-status-dock--stacked"));
     assert.equal(button.querySelector('[role="status"]')?.textContent, "Running tests");
     assert.equal(button.querySelector(".agent-status-dock-secondary")?.textContent, "1 file");
   } finally { await actionable.unmount(); }
+
+  const named = await mount(createElement(ui.AgentStatusDock, {
+    icon: createElement("span", null, "A"),
+    model: "Grok 4.6",
+    status: "Preparing reply…",
+    label: "Active run",
+    onClick: () => {},
+  }));
+  try {
+    const dock = named.container.querySelector(".agent-status-dock")!;
+    assert.ok(!dock.classList.contains("agent-status-dock--stacked"));
+    assert.equal(dock.querySelector(".agent-status-dock-secondary"), null);
+    assert.equal(dock.querySelector(".agent-status-dock-branch"), null);
+    assert.equal(dock.querySelector("strong")?.getAttribute("title"), "Grok 4.6");
+  } finally { await named.unmount(); }
 });
 
 test("IconButton: mandatory accessible name, pressed state, token-sized glyph", async () => {

@@ -6,8 +6,8 @@ import {
   BranchIcon,
   ChartIcon,
   ChatIcon,
+  CoachIcon,
   CombineIcon,
-  CompassIcon,
   CpuIcon,
   DatabaseIcon,
   DocsIcon,
@@ -78,7 +78,7 @@ export const RAIL_ICONS: Readonly<Record<string, RailIcon>> = {
   "markets.filings": glyph(ChartIcon),
   "polyth-link": glyph(QrCodeIcon),
   "task-trackers": glyph(TasksIcon),
-  "personal-coach": glyph(CompassIcon),
+  "personal-coach": glyph(CoachIcon),
 };
 
 /** Extensions without an icon get a neutral monochrome package glyph. */

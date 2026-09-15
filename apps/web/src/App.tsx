@@ -28,16 +28,17 @@ function ErrorBanner() {
   if (!message) return null;
   return (
     <Notice
+      key={message}
       tone="error"
       className="error-banner"
       role="alert"
       actions={<>
+        <IconButton icon={CloseIcon} label={tr("app.dismissError")} size="sm" onClick={clearUiError} />
         {action && (
           <Button size="sm" variant="ghost" onClick={() => { clearUiError(); void action.run(); }}>
             {action.label}
           </Button>
         )}
-        <IconButton icon={CloseIcon} label={tr("app.dismissError")} size="sm" onClick={clearUiError} />
       </>}
     >
       {message}

@@ -296,7 +296,7 @@ test("desktop header keeps brand, workspace modes, and a named utility cluster",
   const header = await read("../src/components/Header.tsx");
   const actions = await read("../src/widgets/builtinMiniWidgets.tsx");
   const sidebar = await read("../src/components/Sidebar.tsx");
-  assert.ok(header.includes('<span className="polyth-mark">{tr("header.p")}</span>'), "localized Polyth mark is visible");
+  assert.ok(header.includes('className="polyth-mark" src="/icon-192.png"'), "the Polyth ribbon mark is visible");
   assert.ok(header.includes('<strong>{tr("header.polyth")}</strong>'), "localized wordmark text is visible");
   assert.ok(header.includes('className="workspace-mode-switch"'), "Focus and Canvas remain next to the brand");
   assert.ok(!header.includes("header-breadcrumbs"), "project and branch crumbs are removed");

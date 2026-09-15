@@ -6,6 +6,7 @@ import {
   BranchIcon,
   ChartIcon,
   ChatIcon,
+  CoachIcon,
   CodeIcon,
   CombineIcon,
   CommandIcon,
@@ -58,6 +59,7 @@ const PACKAGE_ICONS: Readonly<Record<string, LucideIcon>> = {
   braces: JsonIcon,
   chart: ChartIcon,
   chat: ChatIcon,
+  coach: CoachIcon,
   code: CodeIcon,
   combine: CombineIcon,
   command: CommandIcon,
@@ -101,7 +103,7 @@ const PACKAGE_ICONS: Readonly<Record<string, LucideIcon>> = {
   usage: UsageIcon,
   user: SessionIcon,
   workflow: WorkflowIcon,
-  "\u25ce": CompassIcon,
+  "\u25ce": CoachIcon,
 };
 
 /** Package manifests carry semantic keys, never display glyphs. Unknown or

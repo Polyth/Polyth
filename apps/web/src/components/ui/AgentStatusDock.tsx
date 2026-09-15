@@ -10,7 +10,6 @@ export interface AgentStatusDockProps {
   files?: string | null;
   additions?: number;
   deletions?: number;
-  branch?: string;
   /** Localized accessible name for the dock. */
   label: string;
   /** Localized accessible name for the added/removed line counts. */
@@ -28,18 +27,24 @@ export default function AgentStatusDock({
   files,
   additions = 0,
   deletions = 0,
-  branch,
   label,
   diffLabel,
   onClick,
 }: AgentStatusDockProps) {
-  const hasSecondary = Boolean(files || additions > 0 || deletions > 0 || branch);
+  const hasSecondary = Boolean(files || additions > 0 || deletions > 0);
+  const dockClass = [
+    "ui-glass-dock",
+    "ui-glass-dock--medium",
+    "agent-status-dock",
+    hasSecondary ? "agent-status-dock--stacked" : "",
+    onClick ? "" : "agent-status-dock--status",
+  ].filter(Boolean).join(" ");
   const content = (
     <>
       <span className="agent-status-dock-icon" aria-hidden="true">{icon}<i /></span>
       <span className="agent-status-dock-content">
         <span className="agent-status-dock-primary">
-          <strong>{model}</strong>
+          <strong title={model}>{model}</strong>
           <span
             className="agent-status-dock-state"
             title={status}
@@ -55,7 +60,6 @@ export default function AgentStatusDock({
                 {deletions > 0 && <span className="negative">−{deletions}</span>}
               </span>
             )}
-            {branch && <span className="agent-status-dock-branch" title={branch}>{branch}</span>}
           </span>
         )}
       </span>
@@ -65,7 +69,7 @@ export default function AgentStatusDock({
   if (!onClick) {
     return (
       <div
-        className="ui-glass-dock ui-glass-dock--medium agent-status-dock agent-status-dock--status"
+        className={dockClass}
         role="status"
         aria-live="polite"
         aria-label={label}
@@ -78,7 +82,7 @@ export default function AgentStatusDock({
   return (
     <button
       type="button"
-      className="ui-glass-dock ui-glass-dock--medium agent-status-dock"
+      className={dockClass}
       aria-label={label}
       aria-busy="true"
       onClick={onClick}

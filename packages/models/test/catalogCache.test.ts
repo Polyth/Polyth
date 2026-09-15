@@ -46,6 +46,31 @@ test("authentication invalidation fences an older discovery response", async () 
   assert.equal(cache.peek("cursor"), "new account catalog");
 });
 
+test("persisted metadata paints synchronously across restart while stale data revalidates", async () => {
+  let now = 100;
+  let saved: string | null = null;
+  const storage = {
+    read: () => saved,
+    write: (value: string) => { saved = value; },
+    clear: () => { saved = null; },
+  };
+  createCatalogCache<string[]>(10, 2, () => now, storage).write("space/project/cursor", ["cached"]);
+
+  now = 111;
+  const restarted = createCatalogCache<string[]>(10, 2, () => now, storage);
+  assert.equal(restarted.peek("space/project/cursor"), undefined, "expired data is not authoritative");
+  assert.deepEqual(restarted.peekStale("space/project/cursor"), ["cached"], "last-known rows can paint without waiting");
+  let finish!: (value: string[]) => void;
+  const fresh = restarted.read("space/project/cursor", () => new Promise((resolve) => { finish = resolve; }));
+  assert.deepEqual(restarted.peekStale("space/project/cursor"), ["cached"], "refresh does not blank the picker");
+  finish(["fresh"]);
+  await fresh;
+  assert.deepEqual(restarted.peek("space/project/cursor"), ["fresh"]);
+
+  restarted.clear();
+  assert.equal(saved, null, "auth/settings invalidation removes persisted presentation data");
+});
+
 test("native catalogs are flat and OpenCode hides disconnected providers", () => {
   const codex = { harnessId: "codex", providerID: "openai", modelID: "luna", name: "Luna" };
   assert.equal(flatModelCatalog([codex]), true);

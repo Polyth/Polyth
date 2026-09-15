@@ -54,6 +54,7 @@ import {
   createServerServiceRegistry,
   discoverServerPackages,
   PairedSocketRegistry,
+  SERVER_APPLICATION_SURFACE,
   serverServiceKey,
   type HttpServerContext,
   type ServerPackageFactory,
@@ -88,6 +89,7 @@ import { settingsRoutes } from "./routes/settings.ts";
 import { opencodePendingRoutes } from "./routes/opencodePending.ts";
 import { browseRoutes } from "./routes/browse.ts";
 import { createAuthService, publicHttpIngress } from "./auth.ts";
+import { createServerApplicationSurface } from "./applicationSurface.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { createPushNotifier, createPushService } from "./push.ts";
 import { pushRoutes } from "./routes/push.ts";
@@ -488,6 +490,9 @@ type ChatWorkspaceForWs = NonNullable<Parameters<typeof createWsGateway>[4]>;
 export async function boot(opts: BootOptions = {}) {
   const port = opts.port ?? Number(process.env.PORT ?? 4400);
   opts.hostname ??= process.env.HOST;
+  const localhostAuthOptional = process.env.POLYTH_UI_PASSWORD_LOCALHOST === "optional";
+  let publicListeningPort: number | null = null;
+  let uiAuthentication: Pick<ReturnType<typeof createAuthService>, "enabled"> | null = null;
   const requestedDataDir = resolve(opts.dataDir ?? process.env.POLYTH_DATA_DIR ?? "./data");
   const writerLease = await acquireDataDirectoryLease(requestedDataDir);
   const dataDir = writerLease.canonicalDataDir;
@@ -597,6 +602,12 @@ export async function boot(opts: BootOptions = {}) {
   // they construct here; the composition root publishes the infrastructure
   // seams packages consume. Everything cross-package resolves lazily.
   const services = createServerServiceRegistry();
+  services.provide(SERVER_APPLICATION_SURFACE, createServerApplicationSurface({
+    hostname: opts.hostname,
+    listeningPort: () => publicListeningPort,
+    authenticationRequired: () => uiAuthentication?.enabled() ?? false,
+    localhostAuthOptional,
+  }));
   const harnesses = createHarnessRegistry();
   services.provide(serverServiceKey("harnesses"), harnesses);
   const capabilityContributions = createCapabilityContributionRegistry();
@@ -2373,9 +2384,10 @@ export async function boot(opts: BootOptions = {}) {
   const auth = createAuthService({
     file: `${dataDir}/auth.json`,
     envPassword: process.env.POLYTH_UI_PASSWORD,
-    localhostOptional: process.env.POLYTH_UI_PASSWORD_LOCALHOST === "optional",
+    localhostOptional: localhostAuthOptional,
     cookieName: `polyth_auth_p${port}`,
   });
+  uiAuthentication = auth;
   notificationAccountExists = (userId) => userId === "usr_owner" || auth.hasCredential(userId);
   attachLivePairedResolver = (resolver) => auth.attachPairedDeviceResolver(resolver);
   for (const resolver of queuedPairedResolvers) auth.attachPairedDeviceResolver(resolver);
@@ -2614,6 +2626,10 @@ export async function boot(opts: BootOptions = {}) {
   await new Promise<void>((res) => opts.hostname
     ? server.listen(port, opts.hostname, res)
     : server.listen(port, res));
+  const publicAddress = server.address();
+  publicListeningPort = publicAddress && typeof publicAddress !== "string"
+    ? publicAddress.port
+    : port;
   await new Promise<void>((res, reject) => {
     controlServer.once("error", reject);
     controlServer.listen(controlSocketPath, () => {
@@ -2622,7 +2638,7 @@ export async function boot(opts: BootOptions = {}) {
     });
   });
   if (process.platform !== "win32") chmodSync(controlSocketPath, 0o600);
-  console.log(`[polyth] server on http://${opts.hostname ?? "127.0.0.1"}:${port}  data=${dataDir}`);
+  console.log(`[polyth] server on http://${opts.hostname ?? "127.0.0.1"}:${publicListeningPort}  data=${dataDir}`);
   console.log(`[polyth] agent control on ${controlSocketPath}`);
 
   let shutdownPromise: Promise<void> | undefined;

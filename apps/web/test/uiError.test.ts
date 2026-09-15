@@ -18,3 +18,22 @@ test("transient errors replace stale actions and dismiss after seven seconds", (
   t.mock.timers.tick(1);
   assert.equal(getState().uiError, null);
 });
+
+test("keyed turn errors do not replay after a session remount", () => {
+  const firstKey = "session-a:turn-1:failed";
+  const secondKey = "session-b:turn-2:failed";
+  clearUiError();
+
+  setUiError("Session A failed", null, firstKey);
+  clearUiError();
+  setUiError("Session B failed", null, secondKey);
+  assert.equal(getState().uiError, "Session B failed");
+  clearUiError();
+
+  // Returning to either session must leave the banner dismissed; the durable
+  // server notification remains available in Notification Centre.
+  setUiError("Session A failed", null, firstKey);
+  assert.equal(getState().uiError, null);
+  setUiError("Session B failed", null, secondKey);
+  assert.equal(getState().uiError, null);
+});

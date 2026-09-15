@@ -980,7 +980,7 @@ const ActivityRow = memo(function ActivityRow({
   && prev.entering === next.entering && prev.liveFlight === next.liveFlight);
 
 // Right-edge prompt rail (WP4, restyled after polyth PromptNavigatorRail):
-// a thin vertical tape of ticks in a 28px gutter hugging the right edge of the
+// a thin vertical tape of ticks in a 32.2px gutter hugging the right edge of the
 // chat viewport, vertically centered. It is a SIBLING of the .timeline scroller
 // (absolute within .timeline-viewport), so it never scrolls away and never
 // competes with right-aligned user bubbles. Each tick is one real user prompt
@@ -1906,6 +1906,7 @@ export default function Timeline({
           requestComposerReplace(draft.text);
         },
       } : null,
+      transientTurnKey,
     );
   }, [transientTurnKey, turn, lastUser, sessionId]);
   useEffect(() => {

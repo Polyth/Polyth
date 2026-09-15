@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useGitStatus, refreshGitStatus } from "./gitStatusStore.ts";
 import { selectPendingChanges, sessionEditedPaths } from "../../../apps/web/src/pendingChanges.ts";
-import { openChanges, openWorkspacePane, setUiError, useActiveModel, useStore } from "../../../apps/web/src/store.ts";
+import { openChanges, setUiError, useActiveModel, useStore } from "../../../apps/web/src/store.ts";
 import { friendlyError } from "../../../apps/web/src/settings.ts";
 import { fmtDuration } from "../../../apps/web/src/format.ts";
 import { resolveModelPresentation } from "@polyth/contracts/model-presentation";
 import { api } from "@polyth/session/web-api";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import { toggleSessionStatusPopover } from "../../../apps/web/src/sessionStatusPopover.ts";
 import ProviderLogo from "../../models/widgets/ProviderLogo.tsx";
 import {
   AgentStatusDock,
@@ -92,7 +93,6 @@ export default function PendingChangesBar() {
   const session = useStore((state) =>
     state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null);
   const models = useStore((state) => state.models);
-  const branch = useStore((state) => state.gitBranch);
   const projectId = useStore((state) => state.activeProjectId);
   const repoRoot = useStore((state) => {
     const id = state.activeProjectId;
@@ -240,7 +240,6 @@ export default function PendingChangesBar() {
           : activityLabels[latestAssistant?.kind === "assistant" && latestAssistant.text ? 2 : 0]
             ?? tr("workspace.builtinsurfaces.working"));
     const elapsed = model.turn?.startedAt === undefined ? null : fmtDuration(now - model.turn.startedAt);
-    const branchName = branch || session?.branch || "";
     return (
       <AgentStatusDock
         icon={<ProviderLogo
@@ -255,13 +254,12 @@ export default function PendingChangesBar() {
         files={count > 0 ? bubbleCount : null}
         additions={totals?.additions}
         deletions={totals?.deletions}
-        branch={branchName}
         label={tr("pendingchangesbar.openActiveRunDetailsValue", { action })}
         diffLabel={tr("pendingchangesbar.valueAdditionsValueDeletions", {
           additions: totals?.additions ?? 0,
           deletions: totals?.deletions ?? 0,
         })}
-        onClick={() => openWorkspacePane("events")}
+        onClick={(event) => toggleSessionStatusPopover(event.currentTarget)}
       />
     );
   }

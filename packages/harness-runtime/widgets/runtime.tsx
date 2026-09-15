@@ -13,7 +13,7 @@ import { createApiTransport, defineWebPackage, type WebPackageHost, type Setting
 import { Button, Dialog, Notice, Select, Switch, Tabs, TabPanel, TextInput, Tooltip } from "../../../apps/web/src/components/ui/index.ts";
 import MoveControls from "../../../apps/web/src/components/MoveControls.tsx";
 import ProviderLogo from "../../models/widgets/ProviderLogo.tsx";
-import { invalidateRuntimeCatalogs, peekHarnessRoster, peekHarnessSnapshots, readHarnessRoster, readHarnessSnapshots, useCatalogRevision } from "@polyth/models/runtime-catalog";
+import { peekHarnessRoster, peekHarnessSnapshots, readHarnessRoster, readHarnessSnapshots, resetRuntimeCatalogMemory, useCatalogRevision } from "@polyth/models/runtime-catalog";
 import { activeBrowserAccountId } from "@polyth/web/account-storage";
 
 import { attachmentFacts, availabilityLabel, configurationSections, harnessDisplayName, integrationLabel, orderedHarnesses, pendingLabel, projectionFacts, resolvedAuto, routingLabel, runtimeFacts, summaryFacts, type CapabilityFact } from "./presentation.ts";
@@ -556,6 +556,6 @@ export default defineWebPackage((host) => () => {
   ];
   return () => {
     off.toReversed().forEach((dispose) => dispose());
-    invalidateRuntimeCatalogs();
+    resetRuntimeCatalogMemory();
   };
 });

@@ -37,6 +37,7 @@ const {
   peekHarnessSnapshots,
   preloadRuntimeCatalogs,
   readHarnessSnapshots,
+  resetRuntimeCatalogMemory,
   useRuntimeCatalog,
 } = await import("../widgets/runtimeCatalog.ts");
 const models: ModelDescriptor[] = [];
@@ -191,6 +192,46 @@ test("shell bootstrap preloads enabled catalogs, scopes returned data, and keeps
     await act(async () => { root.render(createElement(Harness, { models: [{ harnessId: "other", providerID: "p", modelID: "m", name: "changed" }], harnessId: "cursor" })); });
     assert.equal(catalog?.models[0]?.modelID, "cursor-a");
     assert.equal(cursorRequests(), 1, "the page-lifetime preview stays warm across rerenders and elapsed time");
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+    cheapSnapshots = [];
+  }
+});
+
+test("restart paints persisted Auto models and executable harnesses before revalidation", async () => {
+  invalidateRuntimeCatalogs();
+  requests.length = 0;
+  pending.clear();
+  cheapSnapshots = snapshot("codex", "persisted-auto", "warm");
+  const warming = preloadRuntimeCatalogs();
+  for (let attempt = 0; attempt < 20 && (!pending.has("codex") || !pending.has("cursor")); attempt++) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  pending.get("codex")!(snapshot("codex", "persisted-auto", "warm"));
+  pending.get("cursor")!(snapshot("cursor", "persisted-cursor", "warm"));
+  await warming;
+  await readHarnessSnapshots({ projectId: "warm", spaceId: "space-a" });
+  resetRuntimeCatalogMemory(false);
+
+  assert.equal(peekHarnessSnapshots({ projectId: "warm", spaceId: "space-a" })?.[0]?.identity.id, "codex",
+    "last-known executable harnesses survive the in-memory restart boundary");
+  const paints: string[] = [];
+  function Harness() {
+    const catalog = useRuntimeCatalog(null, models, agents, {
+      projectId: "warm",
+      spaceId: "space-a",
+      cwd: "/warm",
+    });
+    paints.push(catalog.models[0]?.modelID ?? "empty");
+    return null;
+  }
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(Harness)); });
+    assert.equal(paints[0], "persisted-auto", "the first post-restart paint does not wait for discovery");
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();

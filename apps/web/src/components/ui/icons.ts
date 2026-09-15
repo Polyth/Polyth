@@ -150,6 +150,7 @@ export {
   Command as CommandIcon,
   Compass as CompassIcon,
   Cpu as CpuIcon,
+  GraduationCap as CoachIcon,
   FileInput as FileInputIcon,
   FlaskConical as FlaskIcon,
   // lucide-react does not export these brand marks. Keep compatibility aliases backed

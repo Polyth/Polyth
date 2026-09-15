@@ -184,7 +184,7 @@ test("redirect hops re-run policy and private-network hops are blocked", async (
         "http://169.254.169.254/latest/meta-data": { title: "Metadata", text: "iam" },
       },
     }),
-    allowedOrigins: () => ["http://127.0.0.1:5173"],
+    exactAllowedOrigins: () => ["http://127.0.0.1:5173"],
   });
   const s = await svc.create({ projectId: "p1", url: HOME });
   svc.setViewerVisible(s.id, true);

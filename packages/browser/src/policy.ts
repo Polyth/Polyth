@@ -24,6 +24,9 @@ export type UrlCheckPurpose = "top-level" | "subresource";
 export interface UrlPolicyOptions {
   /** Origins Polyth itself started (preview/dev servers) — loopback allowed. */
   allowedOrigins?: ReadonlyArray<string>;
+  /** Server-owned origins compared exactly, without the human approval
+   *  convenience that aliases apex and `www` hosts. */
+  exactAllowedOrigins?: ReadonlyArray<string>;
   /** External origins the user explicitly approved. */
   approvedOrigins?: ReadonlySet<string>;
   /** Injectable DNS for tests; defaults to dns.lookup (all addresses). */
@@ -163,9 +166,16 @@ export async function checkUrl(raw: string, opts: UrlPolicyOptions = {}): Promis
   const canonical = url.toString();
   const origin = url.origin.toLowerCase();
   const allowed = new Set((opts.allowedOrigins ?? []).map((o) => o.toLowerCase()));
+  const exactAllowed = new Set(
+    (opts.exactAllowedOrigins ?? [])
+      .map(originOf)
+      .filter((candidate): candidate is string => candidate !== null),
+  );
   const approved = new Set([...(opts.approvedOrigins ?? [])].map((o) => o.toLowerCase()));
   const host = url.hostname.toLowerCase();
-  const listed = listedHas(allowed, origin) || listedHas(approved, origin);
+  const listed = exactAllowed.has(origin)
+    || listedHas(allowed, origin)
+    || listedHas(approved, origin);
   const privateNetwork = opts.privateNetwork ?? "allow";
 
   const allowPrivate = (): UrlDecision => {

@@ -21,6 +21,11 @@ import {
 } from "../reduce.ts";
 import { useUiSettings } from "../uiPrefs.ts";
 import ContextIndicator from "./ContextIndicator.tsx";
+import {
+  closeSessionStatusPopover,
+  toggleSessionStatusPopover,
+  useSessionStatusPopover,
+} from "../sessionStatusPopover.ts";
 import "./ConversationProgress.css";
 
 const TASK_MARK = { done: "✓", active: "●", failed: "×", pending: "○" } as const;
@@ -91,10 +96,14 @@ function useTaskProgressTitle(sessionId: string | undefined, tasks: readonly Isl
 }
 
 /** The centered desktop session overview. Task transitions temporarily borrow
- * the title so progress never has to jump around inside the conversation. */
-export default function DesktopSessionStatus() {
-  const anchorRef = useRef<HTMLButtonElement>(null);
-  const [open, setOpen] = useState(false);
+ * the title so progress never has to jump around inside the conversation.
+ * The popover can also open from the above-composer agent status dock. */
+export default function DesktopSessionStatus({ showTrigger = true }: { showTrigger?: boolean } = {}) {
+  const headerRef = useRef<HTMLButtonElement>(null);
+  const overlayAnchorRef = useRef<HTMLElement | null>(null);
+  const overlay = useSessionStatusPopover();
+  overlayAnchorRef.current = overlay.anchor ?? headerRef.current;
+  const fromDock = Boolean(overlay.anchor && overlay.anchor !== headerRef.current);
   const ui = useUiSettings();
   const sessions = useStore((state) => state.sessions);
   const events = useStore((state) => state.events);
@@ -123,31 +132,25 @@ export default function DesktopSessionStatus() {
   const gauge = contextGaugeForTelemetry(model, descriptor?.context, session?.contextWindow ?? null, telemetryStatus);
   const contextPercent = formatContextPercent(gauge);
   const contextNotice = contextTelemetryNotice(telemetryStatus, gauge);
+  const sessionIdRef = useRef(activeSessionId);
+
+  useEffect(() => {
+    if (sessionIdRef.current === activeSessionId) return;
+    sessionIdRef.current = activeSessionId;
+    closeSessionStatusPopover();
+  }, [activeSessionId]);
 
   if (!session || !status) return null;
 
-  return <div className="desktop-session-status">
-    <button
-      ref={anchorRef}
-      type="button"
-      className="desktop-session-status-trigger header-control"
-      aria-label={`Session: ${title}. Status: ${status.label}`}
-      aria-expanded={open}
-      aria-haspopup="dialog"
-      title={status.label}
-      onClick={() => setOpen((value) => !value)}
+  const popover = (
+    <Popover
+      open={overlay.open}
+      onClose={closeSessionStatusPopover}
+      anchorRef={overlayAnchorRef}
+      align="center"
+      side={fromDock ? "up" : "down"}
+      ariaLabel="Session overview"
     >
-      <ContextIndicator gauge={gauge} mode={ui.contextIndicatorMode} providerID={activeModel?.providerID} providerName={descriptor?.providerName} harnessId={descriptor?.harnessId ?? session.resolvedHarnessId} active={status.kind === "working"} telemetryStatus={telemetryStatus} />
-      <span className="desktop-session-status-mask">
-        <span
-          key={taskProgressTitle?.key ?? `title:${session.id}`}
-          className={`desktop-session-status-copy${taskProgressTitle ? ` task-progress ${taskProgressTitle.tone}` : ""}`}
-        ><span>{displayedTitle}</span></span>
-      </span>
-      <Icon.chevronDown />
-    </button>
-    {taskProgressTitle && <span className="sr-only" role="status" aria-live="polite">{displayedTitle}</span>}
-    <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} align="center" ariaLabel="Session overview">
       <div className="desktop-session-status-popover">
         <header>
           <span className={`desktop-session-status-dot ${status.kind}`} aria-hidden="true" />
@@ -177,10 +180,36 @@ export default function DesktopSessionStatus() {
           <h3>Recent sessions</h3>
           {recent.length > 0 ? <ul>{recent.map((item) => {
             const itemStatus = resolveSessionStatus(item);
-            return <li key={item.id}><button type="button" onClick={() => { void openSession(item.id); setOpen(false); }}><span className={`desktop-session-status-dot ${itemStatus.kind}`} aria-hidden="true" /><span>{sessionTitleOf(item, events)}</span><small>{itemStatus.label}</small></button></li>;
+            return <li key={item.id}><button type="button" onClick={() => { void openSession(item.id); closeSessionStatusPopover(); }}><span className={`desktop-session-status-dot ${itemStatus.kind}`} aria-hidden="true" /><span>{sessionTitleOf(item, events)}</span><small>{itemStatus.label}</small></button></li>;
           })}</ul> : <p>No recent sessions.</p>}
         </section>
       </div>
     </Popover>
+  );
+
+  if (!showTrigger) return popover;
+
+  return <div className="desktop-session-status">
+    <button
+      ref={headerRef}
+      type="button"
+      className="desktop-session-status-trigger header-control"
+      aria-label={`Session: ${title}. Status: ${status.label}`}
+      aria-expanded={overlay.open}
+      aria-haspopup="dialog"
+      title={status.label}
+      onClick={() => toggleSessionStatusPopover(headerRef.current)}
+    >
+      <ContextIndicator gauge={gauge} mode={ui.contextIndicatorMode} providerID={activeModel?.providerID} providerName={descriptor?.providerName} harnessId={descriptor?.harnessId ?? session.resolvedHarnessId} active={status.kind === "working"} telemetryStatus={telemetryStatus} />
+      <span className="desktop-session-status-mask">
+        <span
+          key={taskProgressTitle?.key ?? `title:${session.id}`}
+          className={`desktop-session-status-copy${taskProgressTitle ? ` task-progress ${taskProgressTitle.tone}` : ""}`}
+        ><span>{displayedTitle}</span></span>
+      </span>
+      <Icon.chevronDown />
+    </button>
+    {taskProgressTitle && <span className="sr-only" role="status" aria-live="polite">{displayedTitle}</span>}
+    {popover}
   </div>;
 }

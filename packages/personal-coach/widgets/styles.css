@@ -342,6 +342,11 @@
   border-radius: var(--radius-control);
   background: var(--surface-overlay);
 }
+.personal-coach-root .coach-nav-glyph > svg {
+  display: block;
+  inline-size: 15px;
+  block-size: 15px;
+}
 .personal-coach-root .coach-nav-copy { display: grid; gap: 1px; min-inline-size: 0; }
 .personal-coach-root .coach-nav-title { font-weight: 600; }
 .personal-coach-root .coach-nav-status {

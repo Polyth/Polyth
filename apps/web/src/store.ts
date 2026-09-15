@@ -1174,9 +1174,26 @@ export interface UiErrorAction {
 }
 
 let uiErrorTimer: ReturnType<typeof setTimeout> | undefined;
+const seenUiErrorKeys = new Set<string>();
+const UI_ERROR_KEY_CAP = 512;
 
 // One host-owned transient error surface. New failures replace stale ones.
-export function setUiError(message: string, action: UiErrorAction | null = null): void {
+// Keyed notices are remembered for this tab so remounting a session cannot
+// replay a durable notification that the server already recorded.
+export function setUiError(
+  message: string,
+  action: UiErrorAction | null = null,
+  dedupeKey?: string,
+): void {
+  if (dedupeKey !== undefined) {
+    if (seenUiErrorKeys.has(dedupeKey)) return;
+    seenUiErrorKeys.add(dedupeKey);
+    // ponytail: bound tab-lifetime replay memory; persist only if reload replay
+    // becomes a product requirement.
+    if (seenUiErrorKeys.size > UI_ERROR_KEY_CAP) {
+      seenUiErrorKeys.delete(seenUiErrorKeys.values().next().value!);
+    }
+  }
   if (uiErrorTimer !== undefined) clearTimeout(uiErrorTimer);
   uiErrorTimer = setTimeout(() => {
     uiErrorTimer = undefined;

@@ -78,6 +78,10 @@ test("agent status docks use compact borderless glass chrome", () => {
   assert.match(css, /\.agent-status-dock\.ui-glass-dock\s*\{[^}]*var\(--material-glass-control-fill\)[^}]*var\(--material-glass-control-edge\)/s);
   assert.match(css, /\.agent-status-dock-icon\s*\{[^}]*place-items:\s*center;[^}]*width:\s*var\(--icon-xl\)/s);
   assert.doesNotMatch(css, /\.agent-status-dock-icon\s*\{[^}]*margin-block-start:/s);
+  assert.match(css, /\.agent-status-dock-content\s*\{[^}]*align-content:\s*center;[^}]*gap:\s*0/s);
+  assert.match(css, /\.agent-status-dock-primary\s*\{[^}]*fit-content\(72%\)[^}]*align-items:\s*baseline;[^}]*line-height:\s*1\.2/s);
+  assert.match(css, /\.agent-status-dock-secondary\s*\{[^}]*line-height:\s*1\.15/s);
+  assert.doesNotMatch(css, /\.agent-status-dock-primary strong \{[^}]*max-width:\s*42%/);
 });
 
 test("conversation chrome shares one horizontal frame", () => {
@@ -218,6 +222,8 @@ test("task plans remain represented by the status surfaces", () => {
   const pendingChanges = read("../../../packages/git/widgets/PendingChangesBar.tsx");
   assert.match(pendingChanges, /const activeTask = model\.tasks\?\.items\.find/);
   assert.match(pendingChanges, /activeTask\?\.text/);
+  assert.match(pendingChanges, /toggleSessionStatusPopover\(event\.currentTarget\)/);
+  assert.doesNotMatch(pendingChanges, /openWorkspacePane\("events"\)/);
 });
 
 test("todowrite details use the same task presentation instead of raw input", () => {

@@ -124,7 +124,7 @@ const SETTINGS_ICON_BY_PAGE: Readonly<Record<string, string>> = {
   ssh: "server",
   tunnel: "qr",
   "chat-workspace": "chat",
-  "personal-coach": "compass",
+  "personal-coach": "coach",
 };
 
 function SettingsNavIcon({ pageId, icon }: { pageId: string; icon?: string }) {

@@ -125,6 +125,33 @@ test("www and apex share an approval in both directions", async () => {
   if (approvedApex.ok) assert.equal(approvedApex.origin, "https://www.example.com");
 });
 
+test("server-owned exact origins do not inherit the human www/apex alias", async () => {
+  const exactWww = await checkUrl("https://www.example.com/login", {
+    exactAllowedOrigins: ["https://www.example.com"],
+    resolve: publicDns,
+  });
+  assert.equal(exactWww.ok, true);
+
+  const apex = await checkUrl("https://example.com/", {
+    exactAllowedOrigins: ["https://www.example.com"],
+    resolve: publicDns,
+  });
+  assert.equal(apex.ok, false);
+  if (!apex.ok) assert.equal(apex.code, "approval-required");
+
+  const exactApex = await checkUrl("https://example.com/", {
+    exactAllowedOrigins: ["https://example.com"],
+    resolve: publicDns,
+  });
+  assert.equal(exactApex.ok, true);
+  const www = await checkUrl("https://www.example.com/", {
+    exactAllowedOrigins: ["https://example.com"],
+    resolve: publicDns,
+  });
+  assert.equal(www.ok, false);
+  if (!www.ok) assert.equal(www.code, "approval-required");
+});
+
 test("generic Browser still opens private and metadata targets without approval", async () => {
   for (const raw of ["http://127.0.0.1/", "http://10.1.2.3/", "http://192.168.1.1/", "http://169.254.169.254/"]) {
     const d = await checkUrl(raw, {});

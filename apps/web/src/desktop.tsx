@@ -140,7 +140,7 @@ function DesktopSettingsPage() {
   return (
     <div className="desktop-settings-page">
       <div className="desktop-settings-hero">
-        <span className="polyth-mark">p</span>
+        <img className="polyth-mark" src="/icon-192.png" alt="" aria-hidden="true" />
         <div>
           <strong>Polyth Desktop</strong>
           <span>Native workspace controls, background operation, and secure bundled runtime.</span>
