@@ -154,7 +154,6 @@ export interface WorkbenchLayoutTemplate {
   surfaces: readonly WorkbenchLayoutTemplateEntry[];
   sizes?: Partial<Record<WorkbenchRegion, number>>;
   collapsed?: readonly WorkbenchRegion[];
-  sidebarCollapsed?: boolean;
 }
 
 export interface WorkbenchProfileDefinition {

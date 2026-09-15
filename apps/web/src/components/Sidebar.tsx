@@ -57,9 +57,7 @@ import {
 import type { Project, SessionProjection } from "@polyth/contracts";
 
 const EXPANDED_PROJECTS_KEY = "polyth.sidebar.expandedProjects";
-/** Hover intent before a collapsed rail peeks the sessions back open, and the
- *  grace period an untouched peek keeps after the pointer leaves the sidebar. */
-export const PEEK_HOVER_MS = 3000;
+/** Grace period an untouched peek keeps after the pointer leaves the sidebar. */
 export const PEEK_LEAVE_MS = 5000;
 
 function loadExpandedProjects(activeProjectId: string | null): ReadonlySet<string> {
@@ -240,39 +238,28 @@ export default function Sidebar() {
     prevCompact.current = compact;
   }, [compact]);
 
-  // Sessions peek while the rail switch is off: hovering a project for
-  // PEEK_HOVER_MS slides the sessions out over the workspace. A click inside
-  // pins it until a click outside; an untouched peek closes PEEK_LEAVE_MS
-  // after the pointer leaves both the rail and the peek.
+  // Sessions peek while the rail switch is off: hovering a project slides the
+  // sessions out over the workspace. A click inside pins it until a click
+  // outside; an untouched peek closes PEEK_LEAVE_MS after the pointer leaves
+  // both the rail and the peek.
   const [peek, setPeek] = useState<{ projectId: string; pinned: boolean } | null>(null);
-  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const stopHover = () => {
-    if (hoverTimer.current !== null) clearTimeout(hoverTimer.current);
-    hoverTimer.current = null;
-  };
   const stopLeave = () => {
     if (leaveTimer.current !== null) clearTimeout(leaveTimer.current);
     leaveTimer.current = null;
   };
-  const closePeek = () => { stopHover(); stopLeave(); setPeek(null); };
-  useEffect(() => () => { stopHover(); stopLeave(); }, []);
+  const closePeek = () => { stopLeave(); setPeek(null); };
+  useEffect(() => () => { stopLeave(); }, []);
   useEffect(() => { if (!railCollapsed) closePeek(); }, [railCollapsed]);
-  const armPeek = (projectId: string) => {
-    if (!railCollapsed) return;
-    stopLeave();
-    stopHover();
-    if (peek?.projectId === projectId) return;
-    hoverTimer.current = setTimeout(() => setPeek({ projectId, pinned: false }), PEEK_HOVER_MS);
-  };
   const openPeek = (projectId: string) => {
     if (!railCollapsed) return;
-    stopHover();
     stopLeave();
-    setPeek({ projectId, pinned: false });
+    // Moving across the rail re-targets an open peek without losing its pin.
+    setPeek((current) => current?.projectId === projectId
+      ? current
+      : { projectId, pinned: current?.pinned === true });
   };
   const schedulePeekClose = () => {
-    stopHover();
     if (!peek || peek.pinned) return;
     stopLeave();
     leaveTimer.current = setTimeout(() => setPeek(null), PEEK_LEAVE_MS);
@@ -709,9 +696,8 @@ export default function Sidebar() {
                         draggable={manualReorder}
                         onClick={() => { activateProject(candidate.id); openPeek(candidate.id); }}
                         onPointerEnter={(event) => {
-                          if (event.pointerType === "mouse") armPeek(candidate.id);
+                          if (event.pointerType === "mouse") openPeek(candidate.id);
                         }}
-                        onPointerLeave={stopHover}
                         onContextMenu={(event) => onProjectContextMenu(event, candidate.id, "rail")}
                         onDragStart={(event) => startProjectDrag(event, candidate.id)}
                         onDragOver={(event) => {

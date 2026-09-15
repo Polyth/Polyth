@@ -62,7 +62,7 @@ const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const store = await import("../src/store.ts");
 const { getSidebarViewMode, parseSidebarViewMode, setSidebarViewMode, VIEW_MODE_KEY } = await import("../src/sidebarPrefs.ts");
-const { default: Sidebar, PEEK_HOVER_MS, PEEK_LEAVE_MS } = await import("../src/components/Sidebar.tsx");
+const { default: Sidebar, PEEK_LEAVE_MS } = await import("../src/components/Sidebar.tsx");
 const { setSidebarLayout } = await import("../src/sidebarLayout.ts");
 
 const MouseEventCtor = (dom as unknown as { MouseEvent: typeof MouseEvent }).MouseEvent;
@@ -321,7 +321,7 @@ test("project menu selection keeps one multi-session selection across projects",
   }
 });
 
-test("the rail switch collapses only the sessions, which peek back on hover intent", async (t) => {
+test("the rail switch collapses only the sessions, which peek back on hover", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const ticket = store.beginProjectListRequest();
   store.publishProjectList(ticket, [project("alpha"), project("beta")]);
@@ -347,13 +347,10 @@ test("the rail switch collapses only the sessions, which peek back on hover inte
     assert.ok(peek, "the sessions live in a peek panel while collapsed");
     assert.equal(peek.classList.contains("open"), false);
 
-    // Hover intent: three seconds over a project, not a moment less.
+    // Hovering a project opens the peek at once.
     const betaRail = rail!.querySelector<HTMLElement>('[aria-label="beta"]')!;
     await act(async () => { pointer(betaRail, "pointerover"); });
-    await act(async () => { t.mock.timers.tick(PEEK_HOVER_MS - 1); });
-    assert.equal(peek.classList.contains("open"), false, "the peek waits out the full hover delay");
-    await act(async () => { t.mock.timers.tick(1); });
-    assert.equal(peek.classList.contains("open"), true);
+    assert.equal(peek.classList.contains("open"), true, "the peek opens on hover without a delay");
     assert.match(peek.textContent ?? "", /Beta session/, "the peek previews the hovered project");
     assert.equal(store.getState().activeProjectId, "alpha", "previewing never steals the active project");
 
@@ -366,8 +363,10 @@ test("the rail switch collapses only the sessions, which peek back on hover inte
 
     // Interacted with, it stays until a click outside — leaving does not close it.
     await act(async () => { pointer(betaRail, "pointerover"); });
-    await act(async () => { t.mock.timers.tick(PEEK_HOVER_MS); });
     await act(async () => { pointer(peek, "pointerdown"); });
+    // A pinned peek re-targets across the rail without losing its pin.
+    await act(async () => { pointer(rail!.querySelector<HTMLElement>('[aria-label="alpha"]')!, "pointerover"); });
+    assert.match(peek.textContent ?? "", /Alpha session one/, "hovering another project re-targets the peek");
     await act(async () => { pointer(betaRail, "pointerout"); });
     await act(async () => { t.mock.timers.tick(PEEK_LEAVE_MS * 2); });
     assert.equal(peek.classList.contains("open"), true, "a touched peek ignores the leave timer");

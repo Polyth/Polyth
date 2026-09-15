@@ -33,12 +33,6 @@ export const WORKBENCH_PREFS_VERSION = 1;
 
 export interface WorkbenchProfileRecord {
   layout: WorkbenchLayout;
-  /** The template's sidebar default has been applied once; an explicit user
-   *  choice wins from then on. */
-  sidebarDefaultApplied: boolean;
-  /** The user's sidebar state while this profile was active (restored on
-   *  re-activation); absent until the profile has been used. */
-  sidebarCollapsed?: boolean;
   /** The user moved/resized/swapped something: the layout is no longer the
    *  package-defined default (Reset returns to it). */
   customized: boolean;
@@ -78,13 +72,9 @@ export function parseWorkbenchPrefs(raw: string | null): WorkbenchPrefs | null {
       : {};
     for (const [id, record] of Object.entries(profiles).slice(0, MAX_PROFILES)) {
       if (!PROFILE_ID.test(id) || typeof record !== "object" || record === null) continue;
-      const value = record as {
-        layout?: unknown; sidebarDefaultApplied?: unknown; sidebarCollapsed?: unknown; customized?: unknown;
-      };
+      const value = record as { layout?: unknown; customized?: unknown };
       prefs.profiles[id] = {
         layout: parseLayout(value.layout),
-        sidebarDefaultApplied: value.sidebarDefaultApplied === true,
-        ...(typeof value.sidebarCollapsed === "boolean" ? { sidebarCollapsed: value.sidebarCollapsed } : {}),
         customized: value.customized === true,
       };
     }
@@ -128,7 +118,7 @@ export function migrateWorkspacePanePrefs(legacy: WorkspacePanePrefs): Workbench
     if (!id) continue;
     layout = resizeSurface(layout, id, dock ? { dockBlock: height } : { block: height });
   }
-  prefs.profiles[CONVERSATION_PROFILE_ID] = { layout, sidebarDefaultApplied: true, customized: false };
+  prefs.profiles[CONVERSATION_PROFILE_ID] = { layout, customized: false };
   prefs.lastResource = { ...legacy.lastResource };
   return prefs;
 }
@@ -162,7 +152,6 @@ export function profileRecord(
   if (existing) return existing;
   return {
     layout: template ? layoutFromTemplate(template) : emptyLayout(),
-    sidebarDefaultApplied: false,
     customized: false,
   };
 }

@@ -33,8 +33,6 @@ test("record round-trips and rejects other versions or junk", () => {
   prefs.activeProfile = "authoring";
   prefs.profiles.authoring = {
     layout: openSurface(layoutFromTemplate(CONVERSATION_TEMPLATE), "files", { region: "end" }),
-    sidebarDefaultApplied: true,
-    sidebarCollapsed: true,
     customized: true,
   };
   prefs.lastResource = { git: "changes:a.ts" };
@@ -94,7 +92,7 @@ test("restore drops transient windows per profile but keeps docked layouts", () 
   let layout = openSurface(layoutFromTemplate(CONVERSATION_TEMPLATE), "files", { region: "end" });
   layout = openSurface(layout, "git", { presentation: "floating" });
   layout = setPresentation(layout, "files", "fullscreen");
-  prefs.profiles.conversation = { layout, sidebarDefaultApplied: false, customized: false };
+  prefs.profiles.conversation = { layout, customized: false };
   const restored = restoreWorkbenchPrefs(prefs);
   const restoredLayout = restored.profiles.conversation!.layout;
   assert.deepEqual(restoredLayout.floating, []);
@@ -176,7 +174,6 @@ test("store: profile activation is gated, layouts are per profile, fallback keep
         { surface: "files", region: "end" },
       ],
       sizes: { start: 340 },
-      sidebarCollapsed: true,
     },
   });
   assert.equal(store.activateWorkbenchProfile("authoring"), false);

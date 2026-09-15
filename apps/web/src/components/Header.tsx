@@ -63,6 +63,7 @@ function CapabilityNav() {
   };
   if (placements.workflow === undefined) topRail = moveAfter(topRail, "workflow", "session");
   if (placements.terminal === undefined) topRail = moveAfter(topRail, "terminal", "files");
+  topRail = topRail.filter((capability) => capability.descriptor.id !== "session");
   const terminalLabel = tr("terminalview.openTerminalShortcut", {
     shortcut: formatCombo(keymap.viewTerminal, MOD === "⌘"),
   });
@@ -114,6 +115,7 @@ function CapabilityNav() {
               title={label}
               aria-label={label}
               aria-pressed={isActive(c)}
+              data-pane-launcher={c.descriptor.id}
               draggable={customizeActive}
               onDragStart={(event) => {
                 event.dataTransfer.effectAllowed = "move";

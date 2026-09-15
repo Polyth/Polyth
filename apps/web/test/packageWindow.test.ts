@@ -51,6 +51,12 @@ test("portal and launcher interaction belong to their package window", () => {
   assert.equal(pathBelongsToPackageWindow([node("data-package-window-owner", "git")], "files"), false);
 });
 
+test("top workspace launchers close their package window on a second click", async () => {
+  const source = await readFile(new URL("../src/components/Header.tsx", import.meta.url), "utf8");
+  assert.match(source, /data-pane-launcher=\{c\.descriptor\.id\}/);
+  assert.match(source, /topRail = topRail\.filter\(\(capability\) => capability\.descriptor\.id !== "session"\)/);
+});
+
 test("compact package windows are fullscreen-only", async () => {
   const source = await readFile(new URL("../src/components/ContextRail.tsx", import.meta.url), "utf8");
   assert.match(source, /effectivePaneMode = compact && isWorkspacePane \? "fullscreen" : paneMode/);

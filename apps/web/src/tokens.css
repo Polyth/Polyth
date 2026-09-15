@@ -92,6 +92,10 @@
   --conversation-row-gap: calc(8px * var(--density-scale));
   --conversation-group-gap: calc(16px * var(--density-scale));
   --conversation-message-gap: calc(24px * var(--density-scale));
+  /* Vertical rhythm inside rendered Markdown. Derived from the response type
+     size so it tracks the interface font setting, and from density so prose
+     breathes the way the rest of the shell does. */
+  --prose-gap: calc(var(--font-response) * 0.62 * var(--density-scale));
   --tap: 44px;
   --control-h-sm: 32px;
   --control-h: 40px;

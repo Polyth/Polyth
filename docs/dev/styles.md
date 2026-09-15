@@ -117,6 +117,7 @@ list — other docs link here instead of restating it.
 | `--conversation-row-gap` | Gap between repeated activity rows. |
 | `--conversation-group-gap` | Gap between activity or response groups. |
 | `--conversation-message-gap` | Gap between separate conversation messages. |
+| `--prose-gap` | Font- and density-scaled rhythm inside rendered response prose. |
 | `--tap` | Minimum 44px interactive hit dimension. |
 | `--control-h-sm` | Compact 32px control visual. |
 | `--control-h` | Standard 40px control visual. |

@@ -15,7 +15,6 @@ import type {
   WorkbenchSnapshot,
 } from "@polyth/web-sdk";
 import { isWorkspaceSurface, listSurfaces, type RailSurface } from "../surfaces.ts";
-import { getSidebarLayout, setSidebarLayout } from "../sidebarLayout.ts";
 import {
   ANY_REGION,
   CHAT_SURFACE_ID,
@@ -184,7 +183,6 @@ function updateLayout(
  *  windows. A project's layout never leaks into another project's record. */
 export function setWorkbenchProject(projectId: string | null): void {
   if (projectId === runtime.projectId) return;
-  rememberSidebar();
   const prefs = projectId === null ? emptyWorkbenchPrefs() : readWorkbenchPrefs(projectId);
   const activeProfile = resolveProfile(prefs.activeProfile);
   runtime = {
@@ -192,7 +190,6 @@ export function setWorkbenchProject(projectId: string | null): void {
     prefs: withProfile({ ...prefs, activeProfile }, activeProfile),
     phoneFocus: null,
   };
-  applySidebarFor(activeProfile);
   notify();
 }
 
@@ -201,41 +198,6 @@ function resolveProfile(profileId: string): string {
   const definition = getWorkbenchProfile(profileId);
   if (!definition) return CONVERSATION_PROFILE_ID;
   return profileSummary(definition).available ? profileId : CONVERSATION_PROFILE_ID;
-}
-
-// ---- sidebar defaults -----------------------------------------------------------------
-
-function rememberSidebar(): void {
-  const record = runtime.prefs.profiles[runtime.prefs.activeProfile];
-  if (!record) return;
-  const collapsed = getSidebarLayout().collapsed;
-  if (record.sidebarCollapsed === collapsed) return;
-  runtime = {
-    ...runtime,
-    prefs: {
-      ...runtime.prefs,
-      profiles: { ...runtime.prefs.profiles, [runtime.prefs.activeProfile]: { ...record, sidebarCollapsed: collapsed } },
-    },
-  };
-  if (runtime.projectId !== null) writeWorkbenchPrefs(runtime.projectId, runtime.prefs);
-}
-
-function applySidebarFor(profileId: string): void {
-  const record = runtime.prefs.profiles[profileId];
-  if (!record) return;
-  if (record.sidebarCollapsed !== undefined) {
-    if (getSidebarLayout().collapsed !== record.sidebarCollapsed) setSidebarLayout({ collapsed: record.sidebarCollapsed });
-    return;
-  }
-  if (record.sidebarDefaultApplied) return;
-  const template = getWorkbenchProfile(profileId)?.defaultLayout;
-  const next: WorkbenchProfileRecord = { ...record, sidebarDefaultApplied: true };
-  if (template?.sidebarCollapsed !== undefined) {
-    next.sidebarCollapsed = template.sidebarCollapsed;
-    if (getSidebarLayout().collapsed !== template.sidebarCollapsed) setSidebarLayout({ collapsed: template.sidebarCollapsed });
-  }
-  runtime = { ...runtime, prefs: { ...runtime.prefs, profiles: { ...runtime.prefs.profiles, [profileId]: next } } };
-  if (runtime.projectId !== null) writeWorkbenchPrefs(runtime.projectId, runtime.prefs);
 }
 
 // ---- profiles --------------------------------------------------------------------------
@@ -247,11 +209,9 @@ export function activateWorkbenchProfile(profileId: string): boolean {
   const definition = getWorkbenchProfile(profileId);
   if (!definition || !profileSummary(definition).available) return false;
   if (runtime.prefs.activeProfile === profileId) return true;
-  rememberSidebar();
   const prefs = withProfile({ ...runtime.prefs, activeProfile: profileId }, profileId);
   runtime = { ...runtime, prefs, phoneFocus: null };
   if (runtime.projectId !== null) writeWorkbenchPrefs(runtime.projectId, prefs);
-  applySidebarFor(profileId);
   notify();
   return true;
 }
@@ -274,16 +234,11 @@ subscribeWorkbenchProfiles(() => {
 export function resetWorkbenchProfile(profileId: string = runtime.prefs.activeProfile): void {
   const definition = getWorkbenchProfile(profileId);
   if (!definition) return;
-  const record = runtime.prefs.profiles[profileId];
   commit({
     ...runtime.prefs,
     profiles: {
       ...runtime.prefs.profiles,
-      [profileId]: {
-        layout: layoutFromTemplate(definition.defaultLayout),
-        sidebarDefaultApplied: record?.sidebarDefaultApplied ?? false,
-        customized: false,
-      },
+      [profileId]: { layout: layoutFromTemplate(definition.defaultLayout), customized: false },
     },
   });
 }
