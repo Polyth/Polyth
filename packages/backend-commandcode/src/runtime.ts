@@ -20,7 +20,7 @@ export const COMMANDCODE_CAPABILITIES: RuntimeCapabilities = {
   streaming: true,
   permissions: false,
   questions: true,
-  compaction: false,
+  compaction: true,
   // Official AgentEvents expose nested-agent lifecycle/progress. This claim is
   // observability only; Polyth does not pretend it can independently spawn or
   // control Command Code subagents.
@@ -54,7 +54,7 @@ export type CommandCodePermissionMode = "auto-accept" | "dont-ask";
 
 type CommandCodeAcceptedMutation = {
   operationId: string;
-  mutationKind: "turn-submit" | "turn-steer" | "question-reply" | "question-reject";
+  mutationKind: "turn-submit" | "turn-steer" | "session-compact" | "question-reply" | "question-reject";
   entityId?: string;
 };
 
@@ -85,6 +85,7 @@ const validAcceptedMutation = (value: unknown): value is CommandCodeAcceptedMuta
     && (
       entry.mutationKind === "turn-submit"
       || entry.mutationKind === "turn-steer"
+      || entry.mutationKind === "session-compact"
       || entry.mutationKind === "question-reply"
       || entry.mutationKind === "question-reject"
     )
@@ -203,6 +204,8 @@ export function createCommandCodeRuntime(options: {
   let nativeSessionId = "";
   let createOperationId = "";
   let activeOperationId = "";
+  let activeControlOperationId = "";
+  let activeControlCompactionObserved = false;
   let activeFailure = "";
   let abortRequested = false;
   let translateState: ReturnType<typeof createCommandCodeTranslateState> | undefined;
@@ -247,6 +250,19 @@ export function createCommandCodeRuntime(options: {
     && entry.mutationKind === mutationKind
     && (entityId === undefined || entry.entityId === entityId)));
 
+  const emitConfirmedCompaction = () => {
+    if (activeControlCompactionObserved) return;
+    activeControlCompactionObserved = true;
+    const now = Date.now();
+    emit({ type: "session/compacted" });
+    emit({
+      type: "context/updated",
+      source: "unknown",
+      updatedAt: now,
+      compaction: { active: false, lastAt: now },
+    });
+  };
+
   const clearActiveTurn = () => {
     activeOperationId = "";
     activeFailure = "";
@@ -261,6 +277,25 @@ export function createCommandCodeRuntime(options: {
       activeFailure = safeError(message.error);
       return;
     }
+    if (message.type === "commandcode-record" && message.operationId === activeControlOperationId) {
+      const outer = message.record && typeof message.record === "object" && !Array.isArray(message.record)
+        ? message.record as Record<string, unknown>
+        : undefined;
+      const event = outer?.type === "event" && outer.event && typeof outer.event === "object" && !Array.isArray(outer.event)
+        ? outer.event as Record<string, unknown>
+        : undefined;
+      if (event?.type === "compaction_start") {
+        emit({
+          type: "context/updated",
+          source: "unknown",
+          updatedAt: Date.now(),
+          compaction: { active: true },
+        });
+      } else if (event?.type === "compaction_done") {
+        emitConfirmedCompaction();
+      }
+      return;
+    }
     if (message.type === "commandcode-record") {
       if (message.operationId !== activeOperationId || !translateState) return;
       const outer = message.record && typeof message.record === "object" && !Array.isArray(message.record)
@@ -273,6 +308,10 @@ export function createCommandCodeRuntime(options: {
       }
       if (translateState.runError) activeFailure = safeError(translateState.runError);
       if (translateState.interrupted) abortRequested = true;
+      return;
+    }
+    if (message.type === "turn-exit" && message.operationId === activeControlOperationId) {
+      activeControlOperationId = "";
       return;
     }
     if (message.type !== "turn-exit" || message.operationId !== activeOperationId) return;
@@ -376,7 +415,7 @@ export function createCommandCodeRuntime(options: {
     history: async () => [],
     async startTurnOperation(request, operationId) {
       if (!connected) return { kind: "unknown", operationId, message: "Command Code worker is disconnected" };
-      if (activeOperationId) return { kind: "rejected", code: "busy", message: "Command Code is already processing a turn" };
+      if (activeOperationId || activeControlOperationId) return { kind: "rejected", code: "busy", message: "Command Code is already processing native work" };
       const state = await readBinding(bindingFile);
       if (!state || !bindingId || state.bindingId !== bindingId) {
         return { kind: "rejected", code: "unknown-session", message: "Command Code native binding is not established" };
@@ -443,7 +482,7 @@ export function createCommandCodeRuntime(options: {
     },
     startTurn: async () => { throw new Error("operation-aware Command Code admission is required"); },
     async steer(_sessionId, text) {
-      if (!activeOperationId) return false;
+      if (!activeOperationId || activeControlOperationId) return false;
       const operationId = `compat-steer:${randomUUID()}`;
       const outcome = await runtime.steerOperation!(_sessionId, text, operationId);
       if (outcome.kind === "confirmed") return true;
@@ -452,7 +491,7 @@ export function createCommandCodeRuntime(options: {
     },
     async steerOperation(_sessionId, text, operationId) {
       if (!connected) return { kind: "unknown", operationId, message: "Command Code worker is disconnected" };
-      if (!activeOperationId) {
+      if (!activeOperationId || activeControlOperationId) {
         return { kind: "rejected", code: "runtime-rejected", message: "Command Code has no active turn to steer" };
       }
       try {
@@ -503,7 +542,7 @@ export function createCommandCodeRuntime(options: {
         pendingQuestions.delete(requestId);
         return { kind: "confirmed", value: {} };
       }
-      if (!activeOperationId || !pendingQuestions.has(requestId)) {
+      if (!activeOperationId || activeControlOperationId || !pendingQuestions.has(requestId)) {
         return { kind: "rejected", code: "not-found", message: "Command Code question is no longer pending" };
       }
       try {
@@ -531,6 +570,61 @@ export function createCommandCodeRuntime(options: {
         return { kind: "unknown", operationId, message: safeError(error instanceof Error ? error.message : error) };
       }
     },
+    async compact(sessionId, model) {
+      const operationId = `compat-compact:${randomUUID()}`;
+      const outcome = await runtime.compactOperation!(sessionId, operationId, model);
+      if (outcome.kind === "confirmed") return;
+      if (outcome.kind === "rejected") throw Object.assign(new Error(outcome.message), { code: outcome.code });
+      throw Object.assign(new Error(outcome.message), { code: "outcome-unknown", operationId });
+    },
+    async compactOperation(_sessionId, operationId) {
+      if (!connected) return { kind: "unknown", operationId, message: "Command Code worker is disconnected" };
+      const before = await readBinding(bindingFile).catch(() => undefined);
+      if (hasBindingReceipt(before, operationId, "session-compact")) {
+        rememberAccepted(operationId, "session-compact");
+        emitConfirmedCompaction();
+        return { kind: "confirmed", value: {} };
+      }
+      if (activeOperationId || activeControlOperationId) {
+        return { kind: "rejected", code: "busy", message: "Command Code is already processing native work" };
+      }
+      if (!before || !bindingId || before.bindingId !== bindingId || !before.nativeSessionId) {
+        return { kind: "rejected", code: "runtime-rejected", message: "Command Code has no exact native session to compact" };
+      }
+      activeControlOperationId = operationId;
+      activeControlCompactionObserved = false;
+      try {
+        await rpc.request<{ nativeSessionId: string }>({
+          type: "start_turn",
+          operationId,
+          controlAction: "compact",
+          cwd: context.cwd,
+          text: "",
+          bindingPath: bindingFile,
+          bridgePath,
+          nativeSessionId: before.nativeSessionId,
+        }, 120_000);
+        const durable = await readBinding(bindingFile).catch(() => undefined);
+        if (!hasBindingReceipt(durable, operationId, "session-compact")) {
+          return { kind: "unknown", operationId, message: "Command Code compaction returned without its durable receipt" };
+        }
+        rememberAccepted(operationId, "session-compact");
+        emitConfirmedCompaction();
+        return { kind: "confirmed", value: {} };
+      } catch (error) {
+        const durable = await readBinding(bindingFile).catch(() => undefined);
+        if (hasBindingReceipt(durable, operationId, "session-compact")) {
+          rememberAccepted(operationId, "session-compact");
+          emitConfirmedCompaction();
+          return { kind: "confirmed", value: {} };
+        }
+        const code = (error as { code?: string }).code;
+        if (code === "runtime-rejected" || code === "busy" || code === "unsupported") {
+          return { kind: "rejected", code, message: safeError(error instanceof Error ? error.message : error) };
+        }
+        return { kind: "unknown", operationId, message: safeError(error instanceof Error ? error.message : error) };
+      }
+    },
     endpoint: async () => endpoint,
     protocol: async () => "legacy",
     async reconcile(binding) {
@@ -546,7 +640,7 @@ export function createCommandCodeRuntime(options: {
         backendSessionId: binding.backendSessionId ?? state?.bindingId ?? bindingId,
         reconciliationOrdinal: binding.reconciliationOrdinal ?? 0,
         state: {
-          value: !matches ? "unknown" : activeOperationId ? "running" : "idle",
+          value: !matches ? "unknown" : activeOperationId || activeControlOperationId ? "running" : "idle",
           comparison: { domain: rpc.authorityId, order: ++order },
           ...(createOperationId && accepted.length === 0 ? { causalOperationId: createOperationId } : {}),
         },
