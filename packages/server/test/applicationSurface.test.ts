@@ -9,6 +9,7 @@ test("controlled Browser self-origin is live and requires strict UI authenticati
   let port: number | null = null;
   let authRequired = false;
   const surface = createServerApplicationSurface({
+    localTrustedDeployment: true,
     hostname: "0.0.0.0",
     listeningPort: () => port,
     authenticationRequired: () => authRequired,
@@ -24,12 +25,22 @@ test("controlled Browser self-origin is live and requires strict UI authenticati
   assert.equal(surface.controlledBrowserLoginOrigin(), null, "an existing Browser rechecks live auth state");
 
   const bypassed = createServerApplicationSurface({
+    localTrustedDeployment: true,
     hostname: "127.0.0.1",
     listeningPort: () => 4400,
     authenticationRequired: () => true,
     localhostAuthOptional: true,
   });
   assert.equal(bypassed.controlledBrowserLoginOrigin(), null, "localhost bypass is ambient authority");
+
+  const hosted = createServerApplicationSurface({
+    localTrustedDeployment: false,
+    hostname: "127.0.0.1",
+    listeningPort: () => 4400,
+    authenticationRequired: () => true,
+    localhostAuthOptional: false,
+  });
+  assert.equal(hosted.controlledBrowserLoginOrigin(), null, "hosted tenants get no loopback login primitive");
 });
 
 test("browser-reachable listener origins normalize wildcards and IPv6 exactly", () => {

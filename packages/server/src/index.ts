@@ -603,6 +603,7 @@ export async function boot(opts: BootOptions = {}) {
   // seams packages consume. Everything cross-package resolves lazily.
   const services = createServerServiceRegistry();
   services.provide(SERVER_APPLICATION_SURFACE, createServerApplicationSurface({
+    localTrustedDeployment: spaceGateway.deployment === "local-trusted",
     hostname: opts.hostname,
     listeningPort: () => publicListeningPort,
     authenticationRequired: () => uiAuthentication?.enabled() ?? false,

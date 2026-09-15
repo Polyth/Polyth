@@ -44,7 +44,7 @@ files under native `public` asset directories; `cap sync` replaces them.
 
 Source artwork is centralized in `apps/mobile/resources/`:
 
-- `icon-only.svg`
+- `icon-only.png`
 - `icon-background.svg`
 - `splash.svg`
 - `splash-dark.svg`

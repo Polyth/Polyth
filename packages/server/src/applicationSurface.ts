@@ -1,6 +1,8 @@
 import type { ServerApplicationSurface } from "@polyth/plugins";
 
 export interface ServerApplicationSurfaceOptions {
+  /** Hosted tenants must not receive a server-loopback login primitive. */
+  localTrustedDeployment: boolean;
   /** Address passed to Server.listen; wildcard binds are not browser targets. */
   hostname?: string;
   /** Null until the public listener has bound. */
@@ -41,7 +43,9 @@ export function createServerApplicationSurface(
 ): ServerApplicationSurface {
   return {
     controlledBrowserLoginOrigin() {
-      if (!opts.authenticationRequired() || opts.localhostAuthOptional) return null;
+      if (!opts.localTrustedDeployment
+        || !opts.authenticationRequired()
+        || opts.localhostAuthOptional) return null;
       const port = opts.listeningPort();
       return port === null ? null : browserReachableHttpOrigin(opts.hostname, port);
     },

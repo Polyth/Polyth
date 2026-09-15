@@ -180,9 +180,10 @@ export const serverServiceKey = <T>(name: string): CapabilityKey<T> =>
 /** Server-owned login surface exposed to controlled browser packages.
  *
  * The returned origin is a network reachability exception only. It is present
- * only while the public listener requires ordinary UI authentication and an
- * isolated browser therefore cannot inherit ambient loopback authority. It
- * does not authenticate the browser or confer a Space identity.
+ * only for a local-trusted deployment while the public listener requires
+ * ordinary UI authentication and an isolated browser therefore cannot inherit
+ * ambient loopback authority. It does not authenticate the browser or confer
+ * a Space identity.
  */
 export interface ServerApplicationSurface {
   controlledBrowserLoginOrigin(): string | null;
