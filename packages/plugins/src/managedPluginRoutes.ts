@@ -9,9 +9,15 @@ import type { PluginRegistry } from "./managedRegistry.ts";
 import type { ServerPackageHost } from "./serverPackage.ts";
 import { invokePackageRpc } from "./packageRpc.ts";
 import { createInvocationLeaseStore } from "./invocationLeases.ts";
-import { assertApprovedConnection, completeOauthFromTx, setTokenConnection, startOauth } from "./connections.ts";
+import {
+  assertApprovedConnection,
+  completeOauthFromTx,
+  retireConnectionIds,
+  setTokenConnection,
+  startOauth,
+} from "./connections.ts";
 import { connectionFingerprint } from "./connectionFingerprint.ts";
-import { assertAuthConnectionGranted } from "./grants.ts";
+import { assertAuthConnectionGranted, retireConnectionApprovals } from "./grants.ts";
 import {
   assertDeploymentPackageMutator,
   assertSpacePackageDisable,
@@ -245,6 +251,21 @@ export function managedPluginRoutes(
     const { path, method } = request;
     if (path !== "/api/plugins" && !path.startsWith("/api/plugins/")) return false;
     const storage = host.spaceStorage(request.space);
+    const retireRemovedConnections = async <T>(id: string, mutation: () => Promise<T>): Promise<T> => {
+      const before = new Set((registry.canonicalManifest(id).connections ?? []).map((spec) => spec.id));
+      const result = await mutation();
+      const after = new Set((registry.canonicalManifest(id).connections ?? []).map((spec) => spec.id));
+      const removed = [...before].filter((connectionId) => !after.has(connectionId));
+      if (removed.length === 0) return result;
+      const spaces = host.packageSpaces?.() ?? [{ spaceId: request.space.spaceId, storage }];
+      const vault = secretVault(host);
+      for (const space of spaces) {
+        retireConnectionApprovals(space.storage, id, removed);
+        await retireConnectionIds(vault, space.storage, id, space.spaceId, removed);
+      }
+      return result;
+    };
+
     if (path === "/api/plugins" && method === "GET") {
       request.json(200, registry.list(storage));
       return true;
@@ -350,16 +371,16 @@ export function managedPluginRoutes(
       } else if (operation === "update") {
         assertDeploymentPackageMutator(request);
         invocationLeases.revokePackage(id);
-        request.json(200, await registry.update(id, { storage }));
+        request.json(200, await retireRemovedConnections(id, () => registry.update(id, { storage })));
       } else if (operation === "rollback") {
         assertDeploymentPackageMutator(request);
         invocationLeases.revokePackage(id);
         const input = await request.body();
-        request.json(200, await registry.rollback(
+        request.json(200, await retireRemovedConnections(id, () => registry.rollback(
           id,
           typeof input.version === "string" ? input.version : undefined,
           storage,
-        ));
+        )));
       } else if (operation === "grants") {
         assertSpacePackageGrant(request, request.space);
         if (!storage) throw Object.assign(new Error("space storage required"), { code: "invalid-input" });
@@ -372,13 +393,13 @@ export function managedPluginRoutes(
           ? (input.connections as unknown[])
             .filter((item): item is string => typeof item === "string" && item.length > 0)
           : [];
-        request.json(200, await registry.grant(
+        request.json(200, await retireRemovedConnections(id, () => registry.grant(
           id,
           capabilityNames,
           storage,
           request.space.userId,
           connectionIds,
-        ));
+        )));
       } else if (operation === "rpc") {
         if (!host || !storage) throw Object.assign(new Error("space storage required"), { code: "invalid-input" });
         const input = await request.body();
