@@ -13,7 +13,7 @@ import {
 import type { SnippetDef } from "@polyth/session/web-api";
 import { parseGithubUrl, type GithubAttachResult } from "@polyth/github/attachments";
 import { openSettingsPage, useStore } from "../store.ts";
-import { listSlots, slotRegistryVersion, subscribeSlots } from "../slots.ts";
+import { listSlots, slotVersion, subscribeSlots } from "../slots.ts";
 import { tr } from "../i18n/index.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import { dismissKeyboard } from "../mobileViewport.ts";
@@ -80,7 +80,7 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
   const asSheet = useShellMode() === "phone";
   const sessionId = useStore((state) => state.activeSessionId);
   const projectId = useStore((state) => state.activeProjectId);
-  useSyncExternalStore(subscribeSlots, slotRegistryVersion, slotRegistryVersion);
+  useSyncExternalStore(subscribeSlots, slotVersion, slotVersion);
 
   const providers: ExtensionProvider[] = listSlots("composer.leading").flatMap((entry) => {
     const kind = entry.meta.contributionKind;
