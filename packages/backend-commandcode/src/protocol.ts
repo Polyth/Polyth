@@ -398,9 +398,26 @@ export function translateCommandCodeRecord(
         state.model ??= current;
       }
       const tokens = usage(event.usage);
-      if (!tokens || !current) return [];
-      state.usageFrames += 1;
-      return [{ type: "usage/recorded", model: current, tokens }];
+      const promptTokens = inputUsage(event.usage);
+      const out: RuntimeEvent[] = [];
+      // `/context` documents provider-reported last-request usage as its
+      // ground truth, then adds local estimates for content appended afterward.
+      // AgentEvent exposes the former but not the estimator. Report the exact
+      // request input count as derived occupancy; do not invent a model limit
+      // or claim that it includes the assistant/tool content added afterward.
+      if (promptTokens !== undefined) {
+        out.push({
+          type: "context/updated",
+          usedTokens: Math.max(0, promptTokens),
+          source: "derived",
+          updatedAt: Date.now(),
+        });
+      }
+      if (tokens && current) {
+        state.usageFrames += 1;
+        out.push({ type: "usage/recorded", model: current, tokens });
+      }
+      return out;
     }
     case "run_error":
       state.runError = errorText(event.error) ?? stringValue(event.message)?.trim() ?? "Command Code run failed";

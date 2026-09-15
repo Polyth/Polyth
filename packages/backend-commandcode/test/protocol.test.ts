@@ -21,14 +21,22 @@ test("Command Code maps streaming, title, tools, usage, compaction and subagents
     type: "event",
     event: { type: "tool_running", toolCallId: "t1", description: "Read a.ts" },
   }, state), [{ type: "tool/started", callId: "t1", tool: "read_file", input: { file_path: "a.ts" } }]);
-  assert.deepEqual(translateCommandCodeRecord({
+  const requestEnd = translateCommandCodeRecord({
     type: "event",
     event: { type: "model_request_end", usage: { input_tokens: 10, output_tokens: 5, reasoning_tokens: 2 }, cost: 123 },
-  }, state), [{
+  }, state);
+  assert.equal(requestEnd[0]?.type, "context/updated");
+  if (requestEnd[0]?.type === "context/updated") {
+    assert.equal(requestEnd[0].usedTokens, 10);
+    assert.equal(requestEnd[0].source, "derived");
+    assert.equal(requestEnd[0].limitTokens, undefined);
+    assert.equal(requestEnd[0].fraction, undefined);
+  }
+  assert.deepEqual(requestEnd[1], {
     type: "usage/recorded",
     model: { providerID: "moonshotai", modelID: "moonshotai/Kimi-K3" },
     tokens: { input: 10, output: 5, reasoning: 2 },
-  }]);
+  });
   const compacted = translateCommandCodeRecord({ type: "event", event: { type: "compaction_done", tokensSaved: 2000 } }, state);
   assert.equal(compacted[0]?.type, "session/compacted");
   assert.equal(compacted[1]?.type, "context/updated");
@@ -139,16 +147,18 @@ test("run terminal events become control evidence without entering canonical his
 
 test("undocumented native cost fields never become canonical cost telemetry", () => {
   const state = createCommandCodeTranslateState("turn-cost", { providerID: "command-code", modelID: "model" });
-  const usage = translateCommandCodeRecord({
+  const events = translateCommandCodeRecord({
     type: "event",
     event: { type: "model_request_end", usage: { input: 2, output: 1, cost: 42 }, cost: 42 },
   }, state);
-  assert.deepEqual(usage, [{
+  assert.equal(events[0]?.type, "context/updated");
+  const usage = events.find((event) => event.type === "usage/recorded");
+  assert.deepEqual(usage, {
     type: "usage/recorded",
     model: { providerID: "command-code", modelID: "model" },
     tokens: { input: 2, output: 1 },
-  }]);
-  assert.equal("cost" in (usage[0] ?? {}), false);
+  });
+  assert.equal("cost" in (usage ?? {}), false);
 
   const fallback = translateCommandCodeRecord({
     type: "result",
@@ -160,20 +170,56 @@ test("undocumented native cost fields never become canonical cost telemetry", ()
   assert.equal("cost" in (fallback[0] ?? {}), false);
 });
 
-test("native model_request_end identifies the default model for usage accounting", () => {
+test("native model_request_end identifies the default model and reports last-request occupancy", () => {
   const state = createCommandCodeTranslateState("turn-default-model");
-  assert.deepEqual(translateCommandCodeRecord({
+  const events = translateCommandCodeRecord({
     type: "event",
     event: {
       type: "model_request_end",
       model: "moonshotai/Kimi-K3",
       usage: { input: 8, output: 3 },
     },
-  }, state), [{
+  }, state);
+  assert.equal(events[0]?.type, "context/updated");
+  if (events[0]?.type === "context/updated") {
+    assert.equal(events[0].usedTokens, 8);
+    assert.equal(events[0].source, "derived");
+  }
+  assert.deepEqual(events[1], {
     type: "usage/recorded",
     model: { providerID: "moonshotai", modelID: "moonshotai/Kimi-K3" },
     tokens: { input: 8, output: 3 },
-  }]);
+  });
+});
+
+test("context occupancy never invents a model limit or accumulates final result usage", () => {
+  const state = createCommandCodeTranslateState("turn-context", {
+    providerID: "command-code",
+    modelID: "native-model",
+  });
+  const events = translateCommandCodeRecord({
+    type: "event",
+    event: {
+      type: "model_request_end",
+      model: "native-model",
+      usage: { inputTokens: 12345, outputTokens: 900 },
+    },
+  }, state);
+  const context = events.find((event) => event.type === "context/updated");
+  assert.ok(context && context.type === "context/updated");
+  assert.equal(context.usedTokens, 12345);
+  assert.equal(context.source, "derived");
+  assert.equal(context.limitTokens, undefined);
+  assert.equal(context.remainingTokens, undefined);
+  assert.equal(context.fraction, undefined);
+
+  const finalEvents = translateCommandCodeRecord({
+    type: "result",
+    subtype: "success",
+    finalText: "Done",
+    usage: { input: 12345, output: 900 },
+  }, state);
+  assert.equal(finalEvents.some((event) => event.type === "context/updated"), false);
 });
 
 test("final result closes streamed chunks when message_end is missing", () => {

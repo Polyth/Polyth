@@ -7,16 +7,19 @@ const requestedTitle = process.env.POLYTH_COMMANDCODE_TITLE?.trim();
 const requestedOperationId = process.env.POLYTH_COMMANDCODE_OPERATION_ID?.trim();
 const controlPath = process.env.POLYTH_COMMANDCODE_CONTROL_FILE?.trim();
 const controlToken = process.env.POLYTH_COMMANDCODE_CONTROL_TOKEN?.trim();
+const requestedControlAction = process.env.POLYTH_COMMANDCODE_CONTROL_ACTION?.trim();
 for (const key of [
   "POLYTH_COMMANDCODE_BINDING_FILE",
   "POLYTH_COMMANDCODE_TITLE",
   "POLYTH_COMMANDCODE_OPERATION_ID",
   "POLYTH_COMMANDCODE_CONTROL_FILE",
   "POLYTH_COMMANDCODE_CONTROL_TOKEN",
+  "POLYTH_COMMANDCODE_CONTROL_ACTION",
   "POLYTH_COMMANDCODE_BIN",
   "POLYTH_COMMANDCODE_BRIDGE_PATH",
 ]) delete process.env[key];
 const MAX_CONTROL_BYTES = 64 * 1024;
+const compactSentinel = "__POLYTH_COMMANDCODE_COMPACT__:" + (requestedOperationId || "");
 let nativeSessionId = "";
 let bindingSerial = Promise.resolve();
 const pendingQuestions = new Map();
@@ -59,6 +62,7 @@ const updateBinding = (update) => {
 
 const validMutationKind = (value) => value === "turn-submit"
   || value === "turn-steer"
+  || value === "session-compact"
   || value === "question-reply"
   || value === "question-reject";
 
@@ -295,18 +299,48 @@ const waitForQuestionAnswer = (toolCallId, input, signal) => new Promise((resolv
 
 export default async function polythCommandCodeBridge(cmd) {
   const controlServer = await startControlServer(cmd);
-  if (requestedTitle) cmd.setSessionName(requestedTitle);
+  if (requestedTitle && !requestedControlAction) cmd.setSessionName(requestedTitle);
   cmd.on("run_start", (event) => {
     if (event && typeof event.sessionId === "string" && event.sessionId) nativeSessionId = event.sessionId;
   });
-  cmd.on("session_titled", (event) => persistNativeTitle(event?.title));
+  cmd.on("session_titled", (event) => {
+    if (!requestedControlAction) void persistNativeTitle(event?.title);
+  });
   cmd.on("run_end", () => {
     for (const pending of [...pendingQuestions.values()]) pending.resolve({ action: "reject", aborted: true });
     pendingQuestions.clear();
     try { controlServer.close(); } catch {}
   });
   cmd.hooks({
+    transformInput: async ({ text }) => {
+      if (requestedControlAction !== "compact") return undefined;
+      if (!requestedOperationId || text !== compactSentinel) {
+        failClosed("native compaction control input did not match its operation receipt");
+        return { action: "handled" };
+      }
+      try {
+        await cmd.sessions.compact();
+        // Persist only after the native mutation succeeds. If the worker ACK is
+        // then lost, Polyth can recover this exact session-compact operation
+        // without ever issuing a second compaction.
+        await persistMutationReceipt(requestedOperationId, "session-compact");
+      } catch {
+        // A throwing transformInput hook is normally skipped by Command Code.
+        // That fallback is unsafe for a Polyth control sentinel because it
+        // would become model-visible input, so terminate instead.
+        failClosed("native Command Code compaction failed before a durable receipt was written");
+        return { action: "handled" };
+      }
+      return { action: "handled" };
+    },
     onTurnStart: async ({ state }) => {
+      if (requestedControlAction) {
+        // transformInput must fully consume every Polyth session-control prompt.
+        // Reaching the model loop would risk a billable turn and violates the
+        // control contract, so fail before turn_start/model_request_start.
+        failClosed("Command Code session-control input unexpectedly reached the model loop");
+        return state;
+      }
       await persistTurnBinding();
       return state;
     },

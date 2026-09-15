@@ -13,10 +13,12 @@ test("Command Code advertises only the native surfaces Polyth actually integrate
   assert.equal(COMMANDCODE_CAPABILITIES.subagents, true);
   assert.equal(COMMANDCODE_CAPABILITIES.mcp, true);
   assert.equal(COMMANDCODE_CAPABILITIES.questions, true);
-  assert.equal(COMMANDCODE_CAPABILITIES.contextOccupancy, "unknown");
+  assert.equal(COMMANDCODE_CAPABILITIES.compaction, true);
+  assert.equal(COMMANDCODE_CAPABILITIES.contextOccupancy, "derived");
 
+  // Polyth does not yet replace Command Code's interactive per-tool permission
+  // prompt. Follow-Polyth and Plan mode both stay inside the native engine.
   assert.equal(COMMANDCODE_CAPABILITIES.permissions, false);
-  assert.equal(COMMANDCODE_CAPABILITIES.compaction, false);
   assert.equal(COMMANDCODE_CAPABILITIES.fork, false);
   assert.equal(COMMANDCODE_CAPABILITIES.cost, false);
   assert.deepEqual(COMMANDCODE_CAPABILITIES.commands, {
@@ -32,15 +34,17 @@ test("Command Code headless launch stays explicit, exact-resume and fail-closed"
   assert.match(COMMANDCODE_WORKER_SOURCE, /"--no-auto-update"/);
   assert.match(COMMANDCODE_WORKER_SOURCE, /"--tools-enable", "todo_write,ask_user_question"/);
   assert.match(COMMANDCODE_WORKER_SOURCE, /args\.push\("--resume", message\.nativeSessionId\)/);
-  assert.match(COMMANDCODE_WORKER_SOURCE, /"--permission-mode", permissionMode/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /message\.permissionMode === "auto-accept" \|\| message\.permissionMode === "plan"/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /args\.push\("--permission-mode", permissionMode\)/);
   assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /--yolo|--dangerously-skip-permissions/);
   assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /--trust/);
   assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /--continue/);
+  assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /permissionMode === "default"/);
 });
 
 test("Command Code admission waits for the exact current turn receipt, not a stale resumed session id", () => {
   assert.match(COMMANDCODE_WORKER_SOURCE, /acceptedMutations/);
-  assert.match(COMMANDCODE_WORKER_SOURCE, /entry\?\.operationId === operationId && entry\?\.mutationKind === "turn-submit"/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /entry\?\.operationId === operationId && entry\?\.mutationKind === mutationKind/);
   assert.match(COMMANDCODE_WORKER_SOURCE, /waitForTurnAdmission\([\s\S]*message\.operationId/);
   assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /const readNativeSessionId/);
 });
@@ -52,7 +56,7 @@ test("Command Code worker emits terminal evidence only after admission or observ
 });
 
 test("resuming Command Code receives the latest canonical Polyth title", () => {
-  assert.match(COMMANDCODE_WORKER_SOURCE, /POLYTH_COMMANDCODE_TITLE: message\.title \|\| ""/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /POLYTH_COMMANDCODE_TITLE: compactControl \? "" : message\.title \|\| ""/);
   assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /POLYTH_COMMANDCODE_TITLE: message\.nativeSessionId \?/);
 });
 
@@ -72,6 +76,14 @@ test("native ask_user_question is intercepted before headless auto-answer", () =
       < COMMANDCODE_BRIDGE_SOURCE.indexOf("pending.resolve(answer)"),
     "question response must be durably receipted before the Mod hook is released",
   );
+});
+
+test("native manual compaction is consumed before the model loop and durably receipted", () => {
+  assert.match(COMMANDCODE_BRIDGE_SOURCE, /transformInput/);
+  assert.match(COMMANDCODE_BRIDGE_SOURCE, /await cmd\.sessions\.compact\(\)/);
+  assert.match(COMMANDCODE_BRIDGE_SOURCE, /persistMutationReceipt\(requestedOperationId, "session-compact"\)/);
+  assert.match(COMMANDCODE_BRIDGE_SOURCE, /session-control input unexpectedly reached the model loop/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /mutationKind: compactControl \? "session-compact" : "turn-submit"/);
 });
 
 test("Command Code question schema is normalized at the adapter boundary", () => {
@@ -178,7 +190,7 @@ test("subagent capability is backed by native AgentEvent snapshots", () => {
   );
 });
 
-test("model request usage is recorded without pretending it is context occupancy", () => {
+test("model request usage also reports honest last-request context occupancy", () => {
   const state = createCommandCodeTranslateState("turn-context", {
     providerID: "anthropic",
     modelID: "anthropic/claude-sonnet-4-5",
@@ -191,7 +203,14 @@ test("model request usage is recorded without pretending it is context occupancy
       usage: { input_tokens: 82_000, output_tokens: 1_200 },
     },
   }, state);
-  assert.equal(events.some((event) => event.type === "context/updated"), false);
+  const context = events.find((event) => event.type === "context/updated");
+  assert.ok(context && context.type === "context/updated");
+  if (context?.type === "context/updated") {
+    assert.equal(context.usedTokens, 82_000);
+    assert.equal(context.source, "derived");
+    assert.equal(context.limitTokens, undefined);
+    assert.equal(context.fraction, undefined);
+  }
   const usage = events.find((event) => event.type === "usage/recorded");
   assert.equal(usage?.type, "usage/recorded");
   if (usage?.type === "usage/recorded") {
@@ -213,11 +232,15 @@ test("missing native input usage is not misreported as zero context occupancy", 
   assert.equal(events.some((event) => event.type === "usage/recorded"), true);
 });
 
-test("compaction events report only unknown context state", () => {
+test("compaction events report lifecycle without inventing post-compact token counts", () => {
   const state = createCommandCodeTranslateState("turn-compact");
   const started = translateCommandCodeRecord({ type: "event", event: { type: "compaction_start" } }, state);
   assert.equal(started[0]?.type, "context/updated");
-  if (started[0]?.type === "context/updated") assert.equal(started[0].compaction?.active, true);
+  if (started[0]?.type === "context/updated") {
+    assert.equal(started[0].source, "unknown");
+    assert.equal(started[0].compaction?.active, true);
+    assert.equal(started[0].usedTokens, undefined);
+  }
 
   const done = translateCommandCodeRecord({ type: "event", event: { type: "compaction_done", tokensSaved: 41_300 } }, state);
   assert.equal(done[0]?.type, "session/compacted");
@@ -226,5 +249,6 @@ test("compaction events report only unknown context state", () => {
     assert.equal(done[1].source, "unknown");
     assert.equal(done[1].compaction?.active, false);
     assert.equal(typeof done[1].compaction?.lastAt, "number");
+    assert.equal(done[1].usedTokens, undefined);
   }
 });
