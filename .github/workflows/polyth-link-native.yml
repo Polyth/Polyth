@@ -14,6 +14,7 @@ on:
       - "apps/mobile/src/ConnectionScreen.tsx"
       - "apps/mobile/capacitor.config.ts"
       - "apps/mobile/package.json"
+      - "apps/mobile/resources/**"
       - "codemagic.yaml"
       - ".github/workflows/polyth-link-native.yml"
   push:
@@ -31,6 +32,7 @@ on:
       - "apps/mobile/src/ConnectionScreen.tsx"
       - "apps/mobile/capacitor.config.ts"
       - "apps/mobile/package.json"
+      - "apps/mobile/resources/**"
       - "codemagic.yaml"
       - ".github/workflows/polyth-link-native.yml"
   workflow_dispatch:
@@ -61,6 +63,7 @@ jobs:
 
       - run: npm ci
       - run: npm run build:web
+      - run: npm --workspace @polyth/mobile run assets
       - run: cd apps/mobile && npx cap sync android
       - run: cd apps/mobile/android && ./gradlew :app:assembleDebug --stacktrace
 
@@ -82,6 +85,7 @@ jobs:
 
       - run: npm ci
       - run: npm run build:web
+      - run: npm --workspace @polyth/mobile run assets
       - run: cd apps/mobile && npx cap sync ios
       - run: npm --workspace @polyth/mobile run native:ios
       - run: >-

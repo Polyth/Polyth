@@ -8,7 +8,7 @@
   "desktopName": "polyth.desktop",
   "main": "dist/main.js",
   "scripts": {
-    "build": "node --experimental-strip-types build.ts",
+    "build": "node scripts/prepare-icon.mjs && node --experimental-strip-types build.ts",
     "stage:chromium": "node stage-chromium.mjs",
     "download:opencode": "node download-opencode.mjs",
     "start": "electron .",
