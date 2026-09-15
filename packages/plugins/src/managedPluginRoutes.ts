@@ -26,6 +26,7 @@ import {
 } from "./lifecycleAuth.ts";
 import { assertOauthTxMatchesActive, consumeOauthTx, oauthRedirectOrigin } from "./oauthTx.ts";
 import { notFound, optionalSecretVault, secretVault } from "./pluginRouteShared.ts";
+import { withInitialPermissionReview } from "./managedPluginReview.ts";
 
 const fail = (code: string, message: string): never => {
   throw Object.assign(new Error(message), { code });
@@ -267,7 +268,8 @@ export function managedPluginRoutes(
     };
 
     if (path === "/api/plugins" && method === "GET") {
-      request.json(200, registry.list(storage));
+      request.json(200, registry.list(storage).map((plugin) =>
+        withInitialPermissionReview(registry, storage, plugin)));
       return true;
     }
     if (path === "/api/plugins/install" && method === "POST") {
