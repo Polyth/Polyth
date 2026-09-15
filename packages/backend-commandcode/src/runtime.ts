@@ -44,13 +44,14 @@ export const COMMANDCODE_CAPABILITIES: RuntimeCapabilities = {
     },
   },
   commands: { discovery: "unsupported", invoke: "unsupported" },
-  // model_request_end usage is per-inference token accounting, not a documented
-  // current-context occupancy snapshot. Keep occupancy unknown until Command Code
-  // exposes a stable machine-readable contract for it.
-  contextOccupancy: "unknown",
+  // AgentEvent exposes the provider-reported input count for each completed
+  // model request. That is the same native ground-truth component `/context`
+  // starts from, but the CLI then adds local estimates for content appended
+  // after the request. Polyth therefore reports this honestly as derived.
+  contextOccupancy: "derived",
 };
 
-export type CommandCodePermissionMode = "auto-accept" | "dont-ask";
+export type CommandCodePermissionMode = "auto-accept" | "dont-ask" | "plan";
 
 type CommandCodeAcceptedMutation = {
   operationId: string;
