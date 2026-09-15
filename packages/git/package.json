@@ -10,7 +10,7 @@
     "./diff": "./widgets/prDiff.ts"
   },
   "polyth": {
-    "serverEntry": "./src/serverEntry.ts",
+    "serverEntry": "./src/sourceControlServerEntry.ts",
     "webEntry": "./widgets/index.tsx",
     "descriptor": {
       "name": "Git",

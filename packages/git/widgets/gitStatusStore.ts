@@ -10,6 +10,12 @@ interface StatusEntry {
   timer: ReturnType<typeof setInterval> | null;
 }
 
+export interface GitSourceControlContext {
+  label: string;
+  provider: "github" | "gitlab" | "generic";
+  source: "repository" | "project" | "global" | "system";
+}
+
 const entries = new Map<string, StatusEntry>();
 const globalListeners = new Set<() => void>();
 
@@ -31,7 +37,6 @@ function notify(value: StatusEntry): void {
   for (const listener of [...globalListeners]) listener();
 }
 
-/** Sync read of already-fetched status. Does not start a network call. */
 export function peekGitStatus(projectId: string, sessionId?: string | null): GitStatus | null {
   return entries.get(contextKey(projectId, sessionId))?.status ?? null;
 }
@@ -51,10 +56,20 @@ export function cacheGitStatus(
   notify(value);
 }
 
-/** Live Context projection from cached Git status. Null = not a repo / unknown. */
-export function gitContextSnapshot(status: GitStatus | null): ProjectContextSnapshot | null {
+export function gitContextSnapshot(
+  status: GitStatus | null,
+  sourceControl?: GitSourceControlContext | null,
+): ProjectContextSnapshot | null {
   if (!status || status.isRepo === false) return null;
   const items = [{ label: "Branch", value: status.branch || "HEAD" }];
+  if (sourceControl) {
+    const provider = sourceControl.provider === "github"
+      ? "GitHub"
+      : sourceControl.provider === "gitlab"
+        ? "GitLab"
+        : "Git";
+    items.push({ label: "Source control", value: `${provider} · ${sourceControl.label}` });
+  }
   if (status.ahead > 0 || status.behind > 0) {
     items.push({ label: "Sync", value: `${status.ahead} ahead · ${status.behind} behind` });
   }
@@ -65,7 +80,6 @@ export function gitContextSnapshot(status: GitStatus | null): ProjectContextSnap
   };
 }
 
-/** Shared, deduplicated status fetch used by GitView, the rail, and the composer bar. */
 export function refreshGitStatus(projectId: string, sessionId?: string | null): Promise<GitStatus | null> {
   const value = entry(projectId, sessionId);
   if (value.inFlight) return value.inFlight;

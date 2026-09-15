@@ -7,6 +7,7 @@ import { gitlabText, type GitlabMessageKey } from "../src/i18n/index.ts";
 
 const api = createApiTransport();
 interface Context { accounts: GitlabAccount[]; remotes: GitRemoteLocation[]; binding: GitlabRemoteBinding | null; reason?: string }
+interface CurrentChangeRequest { number: number; title: string; url: string; changedFiles: number; additions: number; deletions: number }
 const message = (error: unknown, fallback: string): string => {
   if (!(error instanceof Error)) return fallback;
   try { const parsed = JSON.parse(error.message); if (typeof parsed.reason === "string") return parsed.reason; } catch { /* Already a plain diagnostic. */ }
@@ -116,9 +117,29 @@ export function GitlabIdentity({ host, projectId }: { host: WebPackageHost; proj
   </div>;
 }
 
+function GitlabChangeRequestState({ host, projectId }: { host: WebPackageHost; projectId: string }) {
+  const [mergeRequest, setMergeRequest] = useState<CurrentChangeRequest | null>(null);
+  useEffect(() => {
+    let stale = false;
+    setMergeRequest(null);
+    void api.get<HostingResult<CurrentChangeRequest>>(`/api/gitlab/pr/current?projectId=${encodeURIComponent(projectId)}`)
+      .then(result => { if (!stale && result.ok) setMergeRequest(result.data); })
+      .catch(() => {});
+    return () => { stale = true; };
+  }, [projectId]);
+  if (!mergeRequest) return null;
+  return <host.ui.components.Button
+    size="sm"
+    variant="ghost"
+    title={mergeRequest.title}
+    onClick={() => host.navigation.openWorkspacePane("gitlab")}
+  >MR !{mergeRequest.number}</host.ui.components.Button>;
+}
+
 export function installGitlabAccounts(host: WebPackageHost): Array<() => void> {
   return [
     host.slots.register({ slot: "settings.integrations", id: "gitlab.accounts", order: 20, render: () => <GitlabAccounts host={host} /> }),
-    host.slots.register({ slot: "git.repository.identity", id: "gitlab.identity", order: 20, render: props => typeof props.projectId === "string" ? <GitlabIdentity host={host} projectId={props.projectId} /> : null }),
+    host.slots.register({ slot: "git.repository.identity.provider", id: "gitlab.identity", order: 20, render: props => typeof props.projectId === "string" ? <GitlabIdentity host={host} projectId={props.projectId} /> : null }),
+    host.slots.register({ slot: "git.repository.change-request.provider", id: "gitlab.change-request", order: 20, render: props => typeof props.projectId === "string" ? <GitlabChangeRequestState host={host} projectId={props.projectId} /> : null }),
   ];
 }
