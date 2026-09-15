@@ -1141,23 +1141,58 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
             </section>
           </div>
 
-          {status && status.staged.length > 0 && !mobileDetail && (
+          {status && status.staged.length > 0 && (
             <section className="git-commit-composer" aria-label={tr("gitview.commitStagedChanges")}>
-              <div className="git-commit-heading">
-                <strong>{status.staged.length === 1 ? tr("gitview.commitOneStagedFile") : tr("gitview.commitStagedFilesValue", { count: status.staged.length })}</strong>
-                <span className="muted">{tr("gitview.changesAreCommittedTo")} <span className="mono">{status.branch || "HEAD"}</span></span>
-              </div>
-              <Textarea className="commit-msg" minRows={2} maxRows={6} autoGrow placeholder={tr("gitview.commitMessage")} value={commitMsg} onChange={(event) => setCommitMsg(event.target.value)} />
-              <div className="commit-row">
-                <Button size="sm" iconStart={AssistIcon} busy={generating} disabled={generating || busy} onClick={() => {
-                  setGenerating(true);
-                  void api.gitCommitMessage(projectId, sessionId ?? undefined)
-                    .then((result) => { if (result.message) setCommitMsg(result.message); })
-                    .catch((error) => setUiError(friendlyError(tr("gitview.generate"), error)))
-                    .finally(() => setGenerating(false));
-                }}>{tr("gitview.generate")}</Button>
-                <Button size="sm" variant="primary" busy={busy && !!commitMsg.trim()} disabled={!commitMsg.trim() || busy} onClick={() => void run(commitStaged)}>{tr("gitview.commit")}</Button>
-                <Button size="sm" iconStart={SyncIcon} busy={busyRemote === "sync"} disabled={busy || busyRemote !== null} onClick={() => void runRemote("sync")}>{tr("gitview.syncRepository")}</Button>
+              <Textarea
+                className="git-commit-msg"
+                minRows={2}
+                maxRows={6}
+                autoGrow
+                aria-label={tr("gitview.commitMessage")}
+                placeholder={tr("gitview.commitMessage")}
+                value={commitMsg}
+                onChange={(event) => setCommitMsg(event.target.value)}
+              />
+              <div className="git-commit-rail">
+                <div className="git-commit-heading">
+                  <strong>{status.staged.length === 1 ? tr("gitview.commitOneStagedFile") : tr("gitview.commitStagedFilesValue", { count: status.staged.length })}</strong>
+                  <span className="git-commit-branch" title={status.branch || "HEAD"}>
+                    <UiIcon icon={BranchIcon} size="sm" />
+                    <span className="mono">{status.branch || "HEAD"}</span>
+                  </span>
+                </div>
+                <div className="git-commit-actions">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    iconStart={AssistIcon}
+                    title={tr("gitview.generateWithAi")}
+                    busy={generating}
+                    disabled={generating || busy}
+                    onClick={() => {
+                      setGenerating(true);
+                      void api.gitCommitMessage(projectId, sessionId ?? undefined)
+                        .then((result) => { if (result.message) setCommitMsg(result.message); })
+                        .catch((error) => setUiError(friendlyError(tr("gitview.generate"), error)))
+                        .finally(() => setGenerating(false));
+                    }}
+                  >{tr("gitview.generate")}</Button>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    className="git-commit-submit"
+                    busy={busy && !!commitMsg.trim()}
+                    disabled={!commitMsg.trim() || busy}
+                    onClick={() => void run(commitStaged)}
+                  >{tr("gitview.commit")}</Button>
+                  <Button
+                    size="sm"
+                    iconStart={SyncIcon}
+                    busy={busyRemote === "sync"}
+                    disabled={busy || busyRemote !== null}
+                    onClick={() => void runRemote("sync")}
+                  >{tr("gitview.syncRepository")}</Button>
+                </div>
               </div>
             </section>
           )}
