@@ -149,6 +149,16 @@ test("capability expansion does not inherit new access", () => {
     { name: "network.fetch", constraints: { origins: ["https://api.example.com", "https://other.example"] } },
   ]);
   assert.deepEqual(broaderOrigin[0]?.constraints?.origins, ["https://other.example"]);
+
+  const unbounded = expandedCapabilities(current, [{ name: "network.fetch" }]);
+  assert.deepEqual(unbounded, [{ name: "network.fetch" }]);
+
+  const fileExpansion = expandedCapabilities([
+    { name: "project.files.read", constraints: { paths: ["docs/**"] } },
+  ], [
+    { name: "project.files.read", constraints: { paths: ["docs/**", "src/**"] } },
+  ]);
+  assert.deepEqual(fileExpansion[0]?.constraints?.paths, ["src/**"]);
 });
 
 test("reference packages parse as sandboxed v1 manifests", () => {
@@ -196,4 +206,55 @@ test("v1 rejects custom sandbox UI, widgets, settings pages, and unsafe icons", 
     ...valid,
     display: { ...valid.display, icon: "<img src=x>" },
   })).ok, false);
+});
+
+test("v2 parses native contributions and scoped optional authority", () => {
+  const parsed = parsePackageManifestJson(JSON.stringify({
+    ...valid,
+    manifestVersion: 2,
+    contributes: {
+      surfaces: [{ id: "main", title: "Workspace" }],
+      attachmentProviders: [{ id: "tasks", label: "Tasks" }],
+      messageActions: [{ id: "create-task", label: "Create task", roles: ["assistant"] }],
+      sessionActions: [{ id: "export", label: "Export session" }],
+      commands: [{ id: "task", name: "task", description: "Attach a task" }],
+      toolRenderers: [{
+        id: "deployments",
+        matcher: { tools: ["deploy.status"] },
+        presentation: { title: "Deployment", output: "table" },
+        dynamic: true,
+      }],
+      statusBadges: [{ id: "sync", label: "Synced" }],
+      settingsSections: [{ id: "account", title: "Account" }],
+      contextProviders: [{ id: "project-context", label: "Project context" }],
+      widgets: [{ id: "summary", title: "Summary", description: "Current state" }],
+    },
+    capabilities: [
+      { name: "project.files.read", paths: ["docs/**"] },
+      { name: "model.generate", required: false, modelClasses: ["utility"], maxOutputTokens: 512 },
+    ],
+  }));
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok || parsed.manifest.manifestVersion !== 2) return;
+  assert.equal(parsed.manifest.contributes?.messageActions?.[0]?.roles?.[0], "assistant");
+  assert.equal(parsed.manifest.contributes?.toolRenderers?.[0]?.presentation?.output, "table");
+  assert.deepEqual(parsed.manifest.capabilities?.[0]?.constraints?.paths, ["docs/**"]);
+  assert.equal(parsed.manifest.capabilities?.[1]?.required, false);
+});
+
+test("v2 bounds contribution counts and rejects unsafe capability scopes", () => {
+  const tooMany = Array.from({ length: 33 }, (_, index) => ({ id: `a${index}`, label: `Action ${index}` }));
+  assert.equal(parsePackageManifestJson(JSON.stringify({
+    ...valid,
+    manifestVersion: 2,
+    contributes: { messageActions: tooMany },
+  })).ok, false);
+
+  for (const paths of [["../secret"], ["/absolute"], ["safe\\escape"]]) {
+    assert.equal(parsePackageManifestJson(JSON.stringify({
+      ...valid,
+      manifestVersion: 2,
+      capabilities: [{ name: "project.files.read", paths }],
+    })).ok, false);
+  }
 });

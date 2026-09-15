@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { PackageManifestV1 } from "@polyth/package-sdk/manifest";
+import type { PackageManifest } from "@polyth/package-sdk/manifest";
 import { loadCanonicalManifest } from "./canonical.ts";
 import type { ManagedPluginManifest } from "./managedManifest.ts";
 import {
@@ -15,7 +15,7 @@ import {
 export interface VersionRecord {
   version: string;
   dir: string;
-  canonical: PackageManifestV1;
+  canonical: PackageManifest;
   legacy: ManagedPluginManifest;
   integrity: string;
   ui?: { integrity: string };
@@ -110,9 +110,7 @@ export function migratePersisted(raw: unknown[]): PersistedPackage[] {
 export function migratePackageLayout(home: string): void {
   const legacyDot = join(home, ".versions");
   const versionsRoot = join(home, "versions");
-  if (existsSync(legacyDot) && !existsSync(versionsRoot)) {
-    renameSync(legacyDot, versionsRoot);
-  }
+  if (existsSync(legacyDot) && !existsSync(versionsRoot)) renameSync(legacyDot, versionsRoot);
   const active = readActiveSync(home);
   if (active && existsSync(versionDir(home, active))) return;
   if (!hasInstallManifest(home)) return;
@@ -139,9 +137,7 @@ export function invalidateVersionCache(cache: Map<string, VersionRecord>, home: 
     cache.delete(recordKey(home, version));
     return;
   }
-  for (const key of [...cache.keys()]) {
-    if (key.startsWith(`${home}::`)) cache.delete(key);
-  }
+  for (const key of [...cache.keys()]) if (key.startsWith(`${home}::`)) cache.delete(key);
 }
 
 export function listInstalledVersions(home: string): string[] {

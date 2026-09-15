@@ -6,6 +6,7 @@ import { githubProvider } from "./GithubView.tsx";
 
 const api = createApiTransport();
 interface Context { remotes: GitRemoteLocation[]; user: HostingStatus["user"] }
+interface CurrentChangeRequest { number: number; title: string; url: string; changedFiles: number; additions: number; deletions: number }
 function useContext(host: WebPackageHost, explicitProjectId?: string) {
   const state = useSyncExternalStore(host.store.subscribe, host.store.getSnapshot, host.store.getSnapshot);
   const projectId = explicitProjectId ?? state.activeProjectId;
@@ -21,6 +22,26 @@ export function GithubIdentity({ host, projectId }: { host: WebPackageHost; proj
   const { context } = useContext(host, projectId);
   if (!context?.remotes.some(r => r.hostname === "github.com")) return null;
   return <host.ui.components.Button size="sm" variant="ghost" title="GitHub CLI account" onClick={() => host.navigation.openSettingsPage("integrations")}>GitHub · {context.user ? `@${context.user.login}` : "gh"}</host.ui.components.Button>;
+}
+function GithubChangeRequestState({ host, projectId }: { host: WebPackageHost; projectId: string }) {
+  const { context } = useContext(host, projectId);
+  const [pullRequest, setPullRequest] = useState<CurrentChangeRequest | null>(null);
+  const applicable = context?.remotes.some(r => r.hostname === "github.com") === true;
+  useEffect(() => {
+    let stale = false;
+    setPullRequest(null);
+    if (applicable) void api.get<HostingResult<CurrentChangeRequest>>(`/api/github/pr/current?projectId=${encodeURIComponent(projectId)}`)
+      .then(result => { if (!stale && result.ok) setPullRequest(result.data); })
+      .catch(() => {});
+    return () => { stale = true; };
+  }, [applicable, projectId]);
+  if (!pullRequest) return null;
+  return <host.ui.components.Button
+    size="sm"
+    variant="ghost"
+    title={pullRequest.title}
+    onClick={() => host.navigation.openWorkspacePane("github")}
+  >PR #{pullRequest.number}</host.ui.components.Button>;
 }
 function GithubIntegration({ host }: { host: WebPackageHost }) {
   const { projectId, context } = useContext(host);
@@ -56,6 +77,7 @@ function GithubIntegration({ host }: { host: WebPackageHost }) {
 export function installGithubIntegration(host: WebPackageHost): Array<() => void> {
   return [
     host.slots.register({ slot: "settings.integrations", id: "github.integration", order: 10, render: () => <GithubIntegration host={host} /> }),
-    host.slots.register({ slot: "git.repository.identity", id: "github.identity", order: 10, render: props => typeof props.projectId === "string" ? <GithubIdentity host={host} projectId={props.projectId} /> : null }),
+    host.slots.register({ slot: "git.repository.identity.provider", id: "github.identity", order: 10, render: props => typeof props.projectId === "string" ? <GithubIdentity host={host} projectId={props.projectId} /> : null }),
+    host.slots.register({ slot: "git.repository.change-request.provider", id: "github.change-request", order: 10, render: props => typeof props.projectId === "string" ? <GithubChangeRequestState host={host} projectId={props.projectId} /> : null }),
   ];
 }

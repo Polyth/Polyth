@@ -2,6 +2,7 @@ import "./styles.css";
 import "./mobile.css";
 import "./source-control-polish.css";
 import { createElement } from "react";
+import { resolveSourceControlContext } from "@polyth/contracts/source-control";
 import { defineWebPackage } from "@polyth/web-sdk";
 import { withSurfaceContent } from "@polyth/web-sdk/surface-content";
 import GitSettings from "./GitSettings.tsx";
@@ -9,6 +10,7 @@ import GitView from "./GitView.tsx";
 import PendingChangesBar from "./PendingChangesBar.tsx";
 import RecentChangesWidget from "./RecentChangesWidget.tsx";
 import GitProjectSource from "./GitProjectSource.tsx";
+import SourceControlIdentity from "./SourceControlIdentity.tsx";
 import { IsolationBadge, IsolationCard, IsolationListBadge } from "./IsolationCard.tsx";
 import {
   gitContextSnapshot,
@@ -16,16 +18,29 @@ import {
   refreshGitStatus,
   subscribeGitStatus,
 } from "./gitStatusStore.ts";
+import {
+  getSourceControlProfileState,
+  subscribeSourceControlProfiles,
+} from "./sourceControlProfiles.ts";
+import {
+  peekRepositorySourceControlRemote,
+  subscribeRepositorySourceControlRemotes,
+} from "./sourceControlRemote.ts";
+import { reconcileSourceControlIdentity } from "./sourceControlRuntime.ts";
 
 export default defineWebPackage((host) => () => {
   const refreshActive = () => {
     const projectId = host.store.getSnapshot().activeProjectId;
-    if (projectId) void refreshGitStatus(projectId);
+    if (!projectId) return;
+    void refreshGitStatus(projectId);
+    void reconcileSourceControlIdentity(projectId).catch(() => undefined);
   };
   refreshActive();
   const off = [
-    host.settings.registerPage({ id: "git", packageId: "git", label: "Git", group: "Engineering", icon: "git", order: 30, component: GitSettings }),
+    host.settings.registerPage({ id: "git", packageId: "git", label: "Source Control", group: "Engineering", icon: "git", order: 30, component: GitSettings }),
     host.slots.register({ slot: "project.create.options", id: "git-clone-project", order: 20, render: (props) => createElement(GitProjectSource, { ...props, host }) }),
+    host.slots.register({ slot: "git.repository.identity", id: "git.source-control-identity", order: 5, render: (props) => typeof props.projectId === "string" ? createElement(SourceControlIdentity, { host, projectId: props.projectId }) : null }),
+    host.slots.register({ slot: "git.repository.identity", id: "git.change-request-state", order: 15, render: (props) => <host.ui.Slot slot="git.repository.change-request.provider" context={props} /> }),
     host.slots.register({ slot: "session.timeline.after", id: "git-isolation-card", order: 20, render: () => createElement(IsolationCard) }),
     host.slots.register({ slot: "session.header.actions", id: "git-isolation-badge", order: 15, render: () => createElement(IsolationBadge) }),
     host.slots.register({
@@ -42,10 +57,34 @@ export default defineWebPackage((host) => () => {
     host.projectContext.register({
       id: "git",
       order: 2,
-      getSnapshot: (projectId) => gitContextSnapshot(peekGitStatus(projectId)),
-      subscribe: subscribeGitStatus,
+      getSnapshot: (projectId) => {
+        const profiles = getSourceControlProfileState();
+        const resolution = resolveSourceControlContext({
+          profiles: profiles.profiles,
+          remote: peekRepositorySourceControlRemote(projectId),
+          repositoryProfileId: profiles.repositoryProfileIds[projectId],
+          globalProfileId: profiles.globalDefaultProfileId,
+        });
+        const sourceControl = resolution.ok ? {
+          label: resolution.profile?.label ?? "System Git",
+          provider: resolution.provider,
+          source: resolution.source,
+        } : {
+          label: "Profile unavailable",
+          provider: resolution.provider,
+          source: resolution.source,
+        };
+        return gitContextSnapshot(peekGitStatus(projectId), sourceControl);
+      },
+      subscribe: (listener) => {
+        const offGit = subscribeGitStatus(listener);
+        const offProfiles = subscribeSourceControlProfiles(listener);
+        const offRemotes = subscribeRepositorySourceControlRemotes(listener);
+        return () => { offGit(); offProfiles(); offRemotes(); };
+      },
     }),
     host.store.subscribe(refreshActive),
+    subscribeSourceControlProfiles(refreshActive),
   ];
   return () => off.toReversed().forEach((dispose) => dispose());
 });

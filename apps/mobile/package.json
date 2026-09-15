@@ -11,13 +11,13 @@
     "./runtime": "./src/runtime.ts"
   },
   "scripts": {
-    "sync": "cap sync && node scripts/configure-ios-polyth-link.mjs",
-    "copy": "cap copy",
+    "sync": "npm run assets && cap sync && node scripts/configure-ios-polyth-link.mjs",
+    "copy": "npm run assets && cap copy",
     "native:ios": "bash scripts/build-polyth-link-ios.sh",
-    "open:android": "cap open android",
-    "open:ios": "npm run native:ios && cap open ios",
-    "build:android": "cap build android",
-    "build:ios": "npm run native:ios && cap build ios",
+    "open:android": "npm run assets && cap open android",
+    "open:ios": "npm run assets && npm run native:ios && cap open ios",
+    "build:android": "npm run assets && cap build android",
+    "build:ios": "npm run assets && npm run native:ios && cap build ios",
     "assets": "capacitor-assets generate --android && capacitor-assets generate --ios"
   },
   "dependencies": {
