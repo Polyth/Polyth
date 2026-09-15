@@ -228,12 +228,14 @@ function capabilityLine(capability: PackageCapabilityRequestDto): string {
   const label = tr(`packages.plugins.capability.${capability.name}` as Parameters<typeof tr>[0]);
   const view = capabilityReviewView(capability);
   const detail = [
-    ...(view.origins.length ? [`origins: ${view.origins.join(", ")}`] : []),
-    ...(view.methods.length ? [`methods: ${view.methods.join(", ")}`] : []),
-    ...(view.modelClasses.length ? [`models: ${view.modelClasses.join(", ")}`] : []),
-    ...(view.maxOutputTokens !== undefined ? [`max output: ${view.maxOutputTokens} tokens`] : []),
+    ...(view.origins.length ? [`${tr("packages.plugins.origins")}: ${view.origins.join(", ")}`] : []),
+    ...(view.methods.length ? [`${tr("packages.plugins.methods")}: ${view.methods.join(", ")}`] : []),
+    ...(view.modelClasses.length ? [`${tr("packages.plugins.models")}: ${view.modelClasses.join(", ")}`] : []),
+    ...(view.maxOutputTokens !== undefined ? [tr("packages.plugins.maxOutputTokens", { count: view.maxOutputTokens })] : []),
   ];
-  const requirement = view.required ? "required" : "optional";
+  const requirement = view.required
+    ? tr("packages.plugins.requiredAccess")
+    : tr("packages.plugins.optionalAccess");
   return `${label} · ${requirement}${detail.length ? ` · ${detail.join(" · ")}` : ""}`;
 }
 
@@ -597,20 +599,20 @@ export function ManagedPluginsSection() {
                         ? <>
                             <Button size="sm" onClick={() => void approveReview(selectedPlugin)}>{tr("packages.plugins.reviewUpdate")}</Button>
                             {selectedPlugin.permissions.review.capabilities.some((item) => !capabilityReviewView(item).required) && (
-                              <Button size="sm" variant="quiet" onClick={() => void approveReview(selectedPlugin, { includeOptional: true })}>Approve update + optional access</Button>
+                              <Button size="sm" variant="quiet" onClick={() => void approveReview(selectedPlugin, { includeOptional: true })}>{tr("packages.plugins.approveUpdateAndOptional")}</Button>
                             )}
                           </>
                         : !selectedPlugin.enabled
                           ? <>
                               <Button size="sm" onClick={() => void approveReview(selectedPlugin, { enableAfter: true })}>{tr("packages.plugins.reviewAndEnable")}</Button>
                               {selectedPlugin.permissions.review.capabilities.some((item) => !capabilityReviewView(item).required) && (
-                                <Button size="sm" variant="quiet" onClick={() => void approveReview(selectedPlugin, { enableAfter: true, includeOptional: true })}>Enable + optional access</Button>
+                                <Button size="sm" variant="quiet" onClick={() => void approveReview(selectedPlugin, { enableAfter: true, includeOptional: true })}>{tr("packages.plugins.enableAndOptional")}</Button>
                               )}
                             </>
                           : <>
                               <Button size="sm" onClick={() => void approveReview(selectedPlugin)}>{tr("packages.plugins.approveAccess")}</Button>
                               {selectedPlugin.permissions.review.capabilities.some((item) => !capabilityReviewView(item).required) && (
-                                <Button size="sm" variant="quiet" onClick={() => void approveReview(selectedPlugin, { includeOptional: true })}>Approve optional access too</Button>
+                                <Button size="sm" variant="quiet" onClick={() => void approveReview(selectedPlugin, { includeOptional: true })}>{tr("packages.plugins.approveOptionalToo")}</Button>
                               )}
                             </>}
                     </div>
