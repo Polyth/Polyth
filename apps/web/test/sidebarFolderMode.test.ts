@@ -329,7 +329,7 @@ test("the rail switch collapses only the sessions, which peek back on hover", as
   store.setSessions("alpha", sessionsByProject.alpha!);
   store.setSessions("beta", sessionsByProject.beta!);
   setSidebarViewMode("rail");
-  setSidebarLayout({ collapsed: true });
+  setSidebarLayout({ collapsed: true, width: 332 });
 
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -354,6 +354,15 @@ test("the rail switch collapses only the sessions, which peek back on hover", as
     assert.match(peek.textContent ?? "", /Beta session/, "the peek previews the hovered project");
     assert.equal(store.getState().activeProjectId, "alpha", "previewing never steals the active project");
 
+    const resize = peek.querySelector<HTMLElement>(".sidebar-resize--peek");
+    assert.ok(resize, "the open peek exposes its resize handle at the outer edge");
+    await act(async () => {
+      resize.dispatchEvent(new MouseEventCtor("mousedown", { bubbles: true, clientX: 100 }));
+      window.dispatchEvent(new MouseEventCtor("mousemove", { bubbles: true, clientX: 132 }));
+      window.dispatchEvent(new MouseEventCtor("mouseup", { bubbles: true, clientX: 132 }));
+    });
+    assert.equal(peek.style.width, "306px", "dragging the peek edge resizes the sessions column");
+
     // Untouched, it closes five seconds after the pointer leaves the sidebar.
     await act(async () => { pointer(betaRail, "pointerout"); });
     await act(async () => { t.mock.timers.tick(PEEK_LEAVE_MS - 1); });
@@ -363,7 +372,13 @@ test("the rail switch collapses only the sessions, which peek back on hover", as
 
     // Interacted with, it stays until a click outside — leaving does not close it.
     await act(async () => { pointer(betaRail, "pointerover"); });
-    await act(async () => { pointer(peek, "pointerdown"); });
+    const betaSession = peek.querySelector<HTMLButtonElement>('[aria-label="Open Beta session"]')!;
+    await act(async () => {
+      pointer(betaSession, "pointerdown");
+      click(betaSession);
+      await Promise.resolve();
+    });
+    assert.equal(peek.classList.contains("open"), true, "clicking a session keeps the interacted peek open");
     // A pinned peek re-targets across the rail without losing its pin.
     await act(async () => { pointer(rail!.querySelector<HTMLElement>('[aria-label="alpha"]')!, "pointerover"); });
     assert.match(peek.textContent ?? "", /Alpha session one/, "hovering another project re-targets the peek");
@@ -377,7 +392,7 @@ test("the rail switch collapses only the sessions, which peek back on hover", as
     await act(async () => { click(switchEl!); });
     assert.equal(switchEl?.getAttribute("aria-checked"), "true");
     assert.equal(container.querySelector(".sidebar-sessions-peek"), null);
-    assert.match(container.querySelector(".sidebar-focused-project")?.textContent ?? "", /Alpha session one/);
+    assert.match(container.querySelector(".sidebar-focused-project")?.textContent ?? "", /Beta session/);
   } finally {
     setSidebarLayout({ collapsed: false });
     await act(async () => { root.unmount(); });

@@ -653,6 +653,7 @@ export default function Sidebar() {
                 : tr("contextrail.collapseValue", { value: tr("sidebar.projectsAndSessions") })}
             >
               <Switch
+                className="sidebar-rail-toggle"
                 checked={!collapsed}
                 label={collapsed
                   ? tr("sidebar.expandProjectsAndSessions")
@@ -1138,11 +1139,9 @@ export default function Sidebar() {
           context={{ projectId: activeProjectId, sessionId: activeSessionId, expanded }}
           customizable
         />
-        </div>
-        </div>)}
-        {!compact && !collapsed && (
+        {!compact && (!collapsed || peek) && (
           <div
-            className="sidebar-resize"
+            className={`sidebar-resize${railCollapsed ? " sidebar-resize--peek" : ""}`}
             role="separator"
             aria-orientation="vertical"
             aria-label={tr("sidebar.resizeSidebar")}
@@ -1154,6 +1153,8 @@ export default function Sidebar() {
             onKeyDown={onResizeKey}
           />
         )}
+        </div>
+        </div>)}
       </nav>
       {importingProject && (
         <ImportSessionsDialog projectId={importingProject} onClose={() => setImportingProject(null)} />

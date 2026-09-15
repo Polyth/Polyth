@@ -90,7 +90,7 @@
 .pkg-harnesses-switch-marker summary::marker { content: ""; }
 .pkg-harnesses-switch-marker summary::-webkit-details-marker { display: none; }
 .pkg-harnesses-switch-marker summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-control); }
-.pkg-harnesses-switch-marker-label { min-width: 0; max-width: 100%; flex: 0 1 auto; display: inline-flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: var(--space-1) var(--space-2); padding-inline: var(--space-2); background: var(--bg); text-align: center; }
+.pkg-harnesses-switch-marker-label { min-width: 0; max-width: 100%; flex: 0 1 auto; display: inline-flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: var(--space-1) var(--space-2); padding-inline: var(--space-2); text-align: center; }
 .pkg-harnesses-switch-marker-leg { min-width: 0; max-width: 100%; display: inline-flex; align-items: center; gap: var(--space-1); }
 .pkg-harnesses-switch-marker-name { min-width: 0; color: var(--text-dim); font-weight: 600; overflow-wrap: anywhere; }
 .pkg-harnesses-switch-marker-arrow { flex: none; color: var(--faint); }
