@@ -6,6 +6,11 @@ import type { RuntimeCommandDescriptor } from "@polyth/contracts";
 
 export type CommandScope = "user" | "project" | "builtin";
 
+export interface ExtensionCommandBinding {
+  packageId: string;
+  contributionId: string;
+}
+
 export interface SlashCommand {
   name: string;
   description: string;
@@ -30,19 +35,44 @@ export interface CommandList {
   snippets: Snippet[];
 }
 
+export const extensionCommandId = (binding: ExtensionCommandBinding): string =>
+  `extension:${encodeURIComponent(binding.packageId)}:${encodeURIComponent(binding.contributionId)}`;
+
+export function parseExtensionCommandId(id: string): ExtensionCommandBinding | null {
+  if (!id.startsWith("extension:")) return null;
+  const parts = id.slice("extension:".length).split(":");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+  try {
+    const packageId = decodeURIComponent(parts[0]);
+    const contributionId = decodeURIComponent(parts[1]);
+    if (!packageId || !contributionId) return null;
+    return { packageId, contributionId };
+  } catch {
+    return null;
+  }
+}
+
+export const extensionCommandBinding = (
+  command: Pick<SlashCommand, "id">,
+): ExtensionCommandBinding | null => parseExtensionCommandId(command.id ?? "");
+
 export const mergeCommandCatalog = (
   polyth: readonly SlashCommand[],
   native: readonly RuntimeCommandDescriptor[],
 ): CatalogCommand[] => [...polyth, ...native];
 
-const COMMAND_SCOPE_RANK: Record<CommandScope | "native", number> = {
+const COMMAND_SCOPE_RANK: Record<CommandScope | "extension" | "native", number> = {
   project: 0,
   user: 1,
   builtin: 2,
-  native: 3,
+  extension: 3,
+  native: 4,
 };
 
-/** Typed `/name` precedence when no explicit selection: project > user > builtin > native. */
+/** Typed `/name` precedence when no explicit selection:
+ * project > user > builtin > extension > native. Extension transport stays a
+ * normal SlashCommand DTO; the host-reserved id carries its invocation
+ * identity and precedence class without widening legacy owner vocabularies. */
 export const commandPrecedence = (
   name: string,
   catalog: readonly CatalogCommand[],
@@ -59,7 +89,9 @@ export const commandPrecedence = (
     }
     const polyth = cmd as SlashCommand;
     if (polyth.name.toLowerCase() !== normalized) continue;
-    const rank = COMMAND_SCOPE_RANK[polyth.scope] ?? COMMAND_SCOPE_RANK.builtin;
+    const rank = extensionCommandBinding(polyth)
+      ? COMMAND_SCOPE_RANK.extension
+      : COMMAND_SCOPE_RANK[polyth.scope] ?? COMMAND_SCOPE_RANK.builtin;
     if (!best || rank < best.rank) best = { item: polyth, rank };
   }
   return best?.item;

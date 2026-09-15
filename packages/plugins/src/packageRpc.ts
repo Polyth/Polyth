@@ -1,5 +1,15 @@
 import type { JsonObject, ProjectService, SessionService, SpaceContext, SpaceStorage } from "@polyth/contracts";
-import type { DeclaredCapability, PackageManifestV1 } from "@polyth/package-sdk/manifest";
+import {
+  parseContributionResult,
+  type ContributionCompletion,
+  type ExternalResource,
+  type StructuredContext,
+} from "@polyth/package-sdk";
+import type {
+  CapabilityConstraints,
+  DeclaredCapability,
+  PackageManifest,
+} from "@polyth/package-sdk/manifest";
 import { brokerFetch } from "./networkBroker.ts";
 import {
   assertApprovedConnection,
@@ -10,10 +20,23 @@ import {
 } from "./connections.ts";
 import type { PackageOpaqueVault } from "./connections.ts";
 import { grantsAsDeclared, readGrants } from "./grants.ts";
+import type { InvocationLeaseIdentity, InvocationLeaseStore } from "./invocationLeases.ts";
 import { kvDelete, kvGet, kvSet } from "./packageKv.ts";
 
 function fail(code: string, message: string): never {
   throw Object.assign(new Error(message), { code });
+}
+
+export interface PackageModelRequest {
+  prompt: string;
+  maxOutputTokens: number;
+  timeoutMs: number;
+}
+
+export interface PackageModelResult {
+  text: string;
+  modelClass: "utility";
+  inputTruncated: boolean;
 }
 
 export interface PackageRpcDeps {
@@ -22,28 +45,90 @@ export interface PackageRpcDeps {
   sessions: SessionService;
   projects: ProjectService;
   appendEvent: (sessionId: string, type: string, data: JsonObject) => Promise<unknown>;
-  manifest: PackageManifestV1;
+  manifest: PackageManifest;
   enabled: boolean;
   sessionId?: string;
   projectId?: string;
   log?: (line: string) => void;
   secrets?: PackageOpaqueVault;
+  invocationLeases?: InvocationLeaseStore;
+  invocationIdentity?: InvocationLeaseIdentity;
+  generateModel?: (request: PackageModelRequest) => Promise<PackageModelResult>;
+}
+
+/** Constraint arrays are allowlists. `undefined` means unbounded, therefore
+ * the intersection with an unbounded side is the other side — never
+ * `undefined`. */
+const intersectStrings = <T extends string>(
+  declared: readonly T[] | undefined,
+  granted: readonly T[] | undefined,
+): T[] | undefined => {
+  if (declared === undefined && granted === undefined) return undefined;
+  if (declared === undefined) return granted ? [...new Set(granted)] : undefined;
+  if (granted === undefined) return [...new Set(declared)];
+  const allowed = new Set<T>(declared);
+  return [...new Set(granted.filter((item) => allowed.has(item)))];
+};
+
+function intersectConstraints(
+  declared: CapabilityConstraints | undefined,
+  granted: CapabilityConstraints | undefined,
+): CapabilityConstraints | undefined {
+  if (!declared && !granted) return undefined;
+  const origins = intersectStrings(declared?.origins, granted?.origins);
+  const methods = intersectStrings(declared?.methods, granted?.methods);
+  const modelClasses = intersectStrings(declared?.modelClasses, granted?.modelClasses);
+  const maxOutputTokens = declared?.maxOutputTokens === undefined
+    ? granted?.maxOutputTokens
+    : granted?.maxOutputTokens === undefined
+      ? declared.maxOutputTokens
+      : Math.min(declared.maxOutputTokens, granted.maxOutputTokens);
+  return {
+    ...(origins !== undefined ? { origins } : {}),
+    ...(methods !== undefined ? { methods } : {}),
+    ...(modelClasses !== undefined ? { modelClasses } : {}),
+    ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+  };
 }
 
 export function effectiveCapabilities(
-  manifest: PackageManifestV1,
+  manifest: PackageManifest,
   storage: SpaceStorage,
-): { granted: DeclaredCapability[]; names: Set<string>; origins: string[] } {
+): { granted: DeclaredCapability[]; names: Set<string> } {
   const declared = manifest.capabilities ?? [];
   const grants = readGrants(storage, manifest.id);
-  const granted = grantsAsDeclared(grants).filter((item) =>
-    declared.some((cap) => cap.name === item.name));
-  const names = new Set(granted.map((item) => item.name));
-  const network = granted.find((item) => item.name === "network.fetch");
-  const declaredNetwork = declared.find((item) => item.name === "network.fetch");
-  const allowed = new Set(declaredNetwork?.constraints?.origins ?? []);
-  const origins = (network?.constraints?.origins ?? []).filter((origin) => allowed.has(origin));
-  return { granted, names, origins };
+  const persisted = grantsAsDeclared(grants);
+  const granted: DeclaredCapability[] = [];
+  for (const capability of declared) {
+    const grant = persisted.find((item) => item.name === capability.name);
+    if (!grant) continue;
+    const constraints = intersectConstraints(capability.constraints, grant.constraints);
+    granted.push({
+      name: capability.name,
+      ...(constraints ? { constraints } : {}),
+    });
+  }
+  return { granted, names: new Set(granted.map((item) => item.name)) };
+}
+
+function safeExternalResource(body: Record<string, unknown>, fallbackProvider: string): ExternalResource {
+  const provider = typeof body.provider === "string" && body.provider.trim()
+    ? body.provider.trim()
+    : fallbackProvider;
+  const parsed = parseContributionResult({ resources: [{ ...body, provider }] });
+  const resource = parsed.resources?.[0];
+  if (!resource) fail("INVALID_REQUEST", "extension resource is invalid");
+  return resource;
+}
+
+function safeStructuredContext(body: Record<string, unknown>, fallbackProvider: string): StructuredContext {
+  const provider = typeof body.provider === "string" && body.provider.trim()
+    ? body.provider.trim()
+    : fallbackProvider;
+  const parsed = parseContributionResult({ context: [{ ...body, provider }] });
+  const context = parsed.context?.[0];
+  if (!context) fail("INVALID_REQUEST", "extension context is invalid");
+  return context;
 }
 
 export async function invokePackageRpc(
@@ -54,11 +139,13 @@ export async function invokePackageRpc(
   if (!deps.enabled) fail("PACKAGE_DISABLED", "package is disabled");
   const declared = deps.manifest.capabilities ?? [];
   const effective = effectiveCapabilities(deps.manifest, deps.storage);
-  const requireCap = (name: string): void => {
+  const requireCap = (name: string): DeclaredCapability => {
     if (!declared.some((cap) => cap.name === name)) {
       fail("CAPABILITY_UNDECLARED", `capability "${name}" is not declared`);
     }
-    if (!effective.names.has(name)) fail("CAPABILITY_DENIED", `capability "${name}" is not granted`);
+    const capability = effective.granted.find((item) => item.name === name);
+    if (!capability) fail("CAPABILITY_DENIED", `capability "${name}" is not granted`);
+    return capability;
   };
   const body = payload && typeof payload === "object" && !Array.isArray(payload)
     ? payload as Record<string, unknown>
@@ -75,6 +162,11 @@ export async function invokePackageRpc(
 
   try {
     switch (method) {
+      case "contribution.complete": {
+        if (!deps.invocationLeases || !deps.invocationIdentity) fail("HOST_UNAVAILABLE", "invocation authority is unavailable");
+        deps.invocationLeases.complete(deps.invocationIdentity, body as unknown as ContributionCompletion);
+        return { accepted: true };
+      }
       case "session.read": {
         requireCap("session.read");
         if (!deps.sessionId) return null;
@@ -96,8 +188,33 @@ export async function invokePackageRpc(
         if (!await sessionOwned(sessionId)) fail("RESOURCE_NOT_FOUND", "session not found");
         await deps.appendEvent(sessionId, "package/context", {
           packageId: deps.manifest.id,
+          provider: deps.manifest.id,
+          sourceId: `legacy:${Date.now()}`,
           title: deps.manifest.display.name,
+          summary: text.slice(0, 500),
           text,
+          content: text,
+          retrievedAt: Date.now(),
+        });
+        return { ok: true };
+      }
+      case "context.append": {
+        requireCap("context.append");
+        const sessionId = deps.sessionId;
+        if (!sessionId || !await sessionOwned(sessionId)) fail("RESOURCE_NOT_FOUND", "session not found");
+        const context = safeStructuredContext(body, deps.manifest.id);
+        await deps.appendEvent(sessionId, "package/context", {
+          packageId: deps.manifest.id,
+          provider: context.provider,
+          sourceId: context.sourceId,
+          title: context.title,
+          uri: context.uri ?? "",
+          retrievedAt: context.retrievedAt,
+          freshUntil: context.freshUntil ?? 0,
+          summary: context.summary,
+          text: context.content,
+          content: context.content,
+          metadata: (context.metadata ?? {}) as JsonObject,
         });
         return { ok: true };
       }
@@ -110,23 +227,36 @@ export async function invokePackageRpc(
       }
       case "attachments.create": {
         requireCap("attachments.create");
-        const title = typeof body.title === "string" ? body.title.slice(0, 200) : "";
-        const text = typeof body.text === "string" ? body.text.slice(0, 8_000) : "";
+        const resource = safeExternalResource(body, deps.manifest.id);
         const sessionId = deps.sessionId;
-        if (typeof sessionId !== "string" || !sessionId || !title) {
-          return fail("INVALID_REQUEST", "session and title are required");
-        }
-        if (!await sessionOwned(sessionId)) fail("RESOURCE_NOT_FOUND", "session not found");
+        if (!sessionId || !await sessionOwned(sessionId)) fail("RESOURCE_NOT_FOUND", "session not found");
         await deps.appendEvent(sessionId, "package/attached", {
           packageId: deps.manifest.id,
-          resourceId: typeof body.resourceId === "string" ? body.resourceId.slice(0, 200) : "",
-          title,
-          subtitle: typeof body.subtitle === "string" ? body.subtitle.slice(0, 200) : "",
-          url: typeof body.url === "string" ? body.url.slice(0, 2_000) : "",
-          kind: typeof body.kind === "string" ? body.kind.slice(0, 64) : "context",
-          text,
+          provider: resource.provider,
+          resourceId: resource.resourceId,
+          title: resource.title,
+          subtitle: resource.subtitle ?? "",
+          url: resource.url ?? "",
+          summary: resource.summary ?? "",
+          text: resource.text ?? "",
+          retrievedAt: resource.retrievedAt ?? Date.now(),
+          freshUntil: resource.freshUntil ?? 0,
+          metadata: (resource.metadata ?? {}) as JsonObject,
         });
         return { ok: true };
+      }
+      case "model.generate": {
+        const capability = requireCap("model.generate");
+        if (!deps.generateModel) fail("HOST_UNAVAILABLE", "model generation is unavailable");
+        const classes = capability.constraints?.modelClasses ?? [];
+        if (!classes.includes("utility")) fail("CAPABILITY_DENIED", "utility model generation is not granted");
+        const prompt = typeof body.prompt === "string" ? body.prompt.trim().slice(0, 24_000) : "";
+        if (!prompt) fail("INVALID_REQUEST", "prompt is required");
+        const grantedMax = capability.constraints?.maxOutputTokens ?? 1_024;
+        const requestedMax = Number.isInteger(body.maxOutputTokens) ? Number(body.maxOutputTokens) : Math.min(1_024, grantedMax);
+        const maxOutputTokens = Math.min(Math.max(requestedMax, 1), grantedMax, 4_096);
+        const timeoutMs = Math.min(Math.max(Number(body.timeoutMs) || 30_000, 1_000), 60_000);
+        return deps.generateModel({ prompt, maxOutputTokens, timeoutMs });
       }
       case "storage.get": {
         requireCap("storage.package");
@@ -143,8 +273,14 @@ export async function invokePackageRpc(
         return { ok: true };
       }
       case "network.fetch": {
-        requireCap("network.fetch");
+        const network = requireCap("network.fetch");
         const url = typeof body.url === "string" ? body.url : "";
+        const methodName = (typeof body.method === "string" ? body.method : "GET").toUpperCase();
+        const allowedMethods = network.constraints?.methods;
+        if (allowedMethods !== undefined && !allowedMethods.includes(methodName as NonNullable<CapabilityConstraints["methods"]>[number])) {
+          fail("CAPABILITY_DENIED", `network method ${methodName} is not granted`);
+        }
+        const origins = network.constraints?.origins ?? [];
         const connectionId = typeof body.connectionId === "string" ? body.connectionId : undefined;
         const spec = connectionId
           ? (deps.manifest.connections ?? []).find((item) => item.id === connectionId)
@@ -165,7 +301,7 @@ export async function invokePackageRpc(
         if (connectionId && !authorization) fail("CONNECTION_REQUIRED", "connection is not connected");
         return brokerFetch({
           url,
-          method: typeof body.method === "string" ? body.method : "GET",
+          method: methodName,
           headers: body.headers && typeof body.headers === "object"
             ? Object.fromEntries(
               Object.entries(body.headers as Record<string, unknown>)
@@ -174,7 +310,7 @@ export async function invokePackageRpc(
             : undefined,
           body: typeof body.body === "string" ? body.body : undefined,
           ...(authorization ? { authorization } : {}),
-        }, effective.origins);
+        }, origins);
       }
       case "auth.connection": {
         requireCap("auth.connection");

@@ -375,6 +375,33 @@ export async function disconnectConnection(
   });
 }
 
+/** Permanently retire declarations removed by a successfully activated package
+ * version. A later version that reuses the same connection id must be reviewed
+ * and reconnected as a new authority; an old opaque credential can never
+ * become reachable again merely because its id/fingerprint returned. */
+export async function retireConnectionIds(
+  vault: PackageOpaqueVault | undefined,
+  storage: SpaceStorage,
+  packageId: string,
+  spaceId: string,
+  connectionIds: readonly string[],
+): Promise<void> {
+  if (connectionIds.length === 0) return;
+  await withPackageSecretsLock(spaceId, packageId, () => {
+    for (const connectionId of connectionIds) {
+      vault?.deleteOpaque(vaultKey(spaceId, packageId, connectionId));
+    }
+    const stored = loadPublic(storage, packageId);
+    let changed = false;
+    for (const connectionId of connectionIds) {
+      if (!(connectionId in stored)) continue;
+      delete stored[connectionId];
+      changed = true;
+    }
+    if (changed) savePublic(storage, packageId, stored);
+  });
+}
+
 export async function deleteConnectionSecrets(
   vault: PackageOpaqueVault | undefined,
   storage: SpaceStorage,

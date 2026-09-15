@@ -11,6 +11,13 @@ import {
   type HandshakeReady,
   type ProtocolEnvelope,
 } from "./protocol.ts";
+import {
+  type ContributionCompletion,
+  type ContributionInvocation,
+  type ContributionResult,
+  type ExternalResource,
+  type StructuredContext,
+} from "./contributions.ts";
 import { type RemoteUiAction, type RemoteUiNode } from "./remoteUi.ts";
 
 export interface PolythPort {
@@ -50,9 +57,20 @@ export interface PolythConnectionStatus {
   error?: string;
 }
 
+export interface PolythModelResult {
+  text: string;
+  modelClass: "utility";
+  inputTruncated: boolean;
+}
+
 export interface PolythHost {
   readonly ready: HandshakeReady;
   hasCapability(name: string): boolean;
+  contributions: {
+    onInvoke(
+      handler: (invocation: ContributionInvocation) => ContributionResult | void | Promise<ContributionResult | void>,
+    ): () => void;
+  };
   ui: {
     render(tree: RemoteUiNode): Promise<void>;
     onAction(id: string, handler: (action: RemoteUiAction) => void): () => void;
@@ -67,12 +85,17 @@ export interface PolythHost {
   };
   session: {
     read(): Promise<PolythSessionSnapshot | null>;
+    /** Legacy text helper. Prefer context.append for provenance-aware context. */
     appendContext(text: string): Promise<void>;
+  };
+  context: {
+    append(input: StructuredContext): Promise<void>;
   };
   project: {
     readMetadata(): Promise<PolythProjectSnapshot | null>;
   };
   attachments: {
+    /** Legacy resource helper kept for v1 packages. Prefer addResource. */
     create(input: {
       resourceId: string;
       title: string;
@@ -81,6 +104,14 @@ export interface PolythHost {
       kind?: string;
       text?: string;
     }): Promise<void>;
+    addResource(input: ExternalResource): Promise<void>;
+  };
+  model: {
+    generate(input: {
+      prompt: string;
+      maxOutputTokens?: number;
+      timeoutMs?: number;
+    }): Promise<PolythModelResult>;
   };
   storage: {
     get(key: string): Promise<string | null>;
@@ -166,39 +197,10 @@ async function connectOnPort(port: PolythPort, timeoutMs = REQUEST_TIMEOUT_MS): 
   const pending = new Map<string, Pending>();
   const actionHandlers = new Map<string, Set<(action: RemoteUiAction) => void>>();
   const composerActionHandlers = new Set<(actionId: string) => void>();
+  let contributionHandler: ((invocation: ContributionInvocation) => ContributionResult | void | Promise<ContributionResult | void>) | null = null;
   let seq = 0;
   let disposed = false;
   let ready: HandshakeReady | null = null;
-
-  const onMessage = (event: MessageEvent) => {
-    const envelope = parseEnvelope(event.data);
-    if (!envelope) return;
-    if (envelope.kind === "event" && envelope.method === "ui.action") {
-      const payload = envelope.payload as RemoteUiAction | undefined;
-      if (!payload || typeof payload.id !== "string") return;
-      for (const handler of actionHandlers.get(payload.id) ?? []) handler(payload);
-      return;
-    }
-    if (envelope.kind === "event" && envelope.method === "composer.action") {
-      const payload = envelope.payload as { actionId?: unknown } | undefined;
-      if (!payload || typeof payload.actionId !== "string" || !payload.actionId) return;
-      for (const handler of composerActionHandlers) handler(payload.actionId);
-      return;
-    }
-    if (envelope.kind !== "response" || !envelope.id) return;
-    const waiter = pending.get(envelope.id);
-    if (!waiter) return;
-    clearTimeout(waiter.timer);
-    pending.delete(envelope.id);
-    if (envelope.ok) waiter.resolve(envelope.payload);
-    else {
-      waiter.reject(new PackageHostError(
-        (envelope.error?.code ?? "HOST_REJECTED") as PackageErrorCode,
-        envelope.error?.message ?? "request failed",
-      ));
-    }
-  };
-  port.addEventListener("message", onMessage);
 
   const send = (envelope: ProtocolEnvelope): void => {
     if (disposed) throw new PackageHostError("PACKAGE_DISABLED", "runtime is disposed");
@@ -231,6 +233,82 @@ async function connectOnPort(port: PolythPort, timeoutMs = REQUEST_TIMEOUT_MS): 
     });
   };
 
+  const completeContribution = async (
+    invocation: ContributionInvocation,
+    handler: NonNullable<typeof contributionHandler>,
+  ): Promise<void> => {
+    let completion: ContributionCompletion;
+    try {
+      const result = await handler(invocation);
+      completion = {
+        invocationId: invocation.invocationId,
+        lease: invocation.lease,
+        ok: true,
+        ...(result ? { result } : {}),
+      };
+    } catch (cause) {
+      completion = {
+        invocationId: invocation.invocationId,
+        lease: invocation.lease,
+        ok: false,
+        error: {
+          message: (cause instanceof Error ? cause.message : String(cause)).slice(0, 1_000),
+        },
+      };
+    }
+    try {
+      await request("contribution.complete", completion);
+    } catch {
+      // Host disposal/expiry is authoritative; an extension cannot revive an invocation.
+    }
+  };
+
+  const onMessage = (event: MessageEvent) => {
+    const envelope = parseEnvelope(event.data);
+    if (!envelope) return;
+    if (envelope.kind === "event" && envelope.method === "ui.action") {
+      const payload = envelope.payload as RemoteUiAction | undefined;
+      if (!payload || typeof payload.id !== "string") return;
+      for (const handler of actionHandlers.get(payload.id) ?? []) handler(payload);
+      return;
+    }
+    if (envelope.kind === "event" && envelope.method === "composer.action") {
+      const payload = envelope.payload as { actionId?: unknown } | undefined;
+      if (!payload || typeof payload.actionId !== "string" || !payload.actionId) return;
+      for (const handler of composerActionHandlers) handler(payload.actionId);
+      return;
+    }
+    if (envelope.kind === "event" && envelope.method === "contribution.invoke") {
+      const invocation = envelope.payload as ContributionInvocation | undefined;
+      if (!invocation || typeof invocation.invocationId !== "string" || typeof invocation.lease !== "string") return;
+      const handler = contributionHandler;
+      if (!handler) {
+        void request("contribution.complete", {
+          invocationId: invocation.invocationId,
+          lease: invocation.lease,
+          ok: false,
+          error: { message: "extension has no contribution invocation handler" },
+        } satisfies ContributionCompletion).catch(() => {});
+        return;
+      }
+      void completeContribution(invocation, handler);
+      return;
+    }
+    if (envelope.kind !== "response" || !envelope.id) return;
+    const waiter = pending.get(envelope.id);
+    if (!waiter) return;
+    clearTimeout(waiter.timer);
+    pending.delete(envelope.id);
+    if (envelope.ok) waiter.resolve(envelope.payload);
+    else {
+      waiter.reject(new PackageHostError(
+        (envelope.error?.code ?? "HOST_REJECTED") as PackageErrorCode,
+        envelope.error?.message ?? "request failed",
+      ));
+    }
+  };
+  port.addEventListener("message", onMessage);
+
   const handshake = await request("runtime.hello") as HandshakeReady;
   if (!handshake || handshake.protocolVersion !== PROTOCOL_VERSION) {
     port.removeEventListener("message", onMessage);
@@ -245,6 +323,17 @@ async function connectOnPort(port: PolythPort, timeoutMs = REQUEST_TIMEOUT_MS): 
       return ready!;
     },
     hasCapability: (name) => capabilities.has(name),
+    contributions: {
+      onInvoke: (handler) => {
+        if (contributionHandler) {
+          throw new PackageHostError("INVALID_REQUEST", "a contribution invocation handler is already registered");
+        }
+        contributionHandler = handler;
+        return () => {
+          if (contributionHandler === handler) contributionHandler = null;
+        };
+      },
+    },
     ui: {
       render: async (tree) => {
         await request("ui.render", tree);
@@ -277,11 +366,18 @@ async function connectOnPort(port: PolythPort, timeoutMs = REQUEST_TIMEOUT_MS): 
       read: () => request("session.read") as Promise<PolythSessionSnapshot | null>,
       appendContext: (text) => request("session.appendContext", { text }).then(() => undefined),
     },
+    context: {
+      append: (input) => request("context.append", input).then(() => undefined),
+    },
     project: {
       readMetadata: () => request("project.readMetadata") as Promise<PolythProjectSnapshot | null>,
     },
     attachments: {
       create: (input) => request("attachments.create", input).then(() => undefined),
+      addResource: (input) => request("attachments.create", input).then(() => undefined),
+    },
+    model: {
+      generate: (input) => request("model.generate", input) as Promise<PolythModelResult>,
     },
     storage: {
       get: (key) => request("storage.get", { key }) as Promise<string | null>,
@@ -313,6 +409,7 @@ async function connectOnPort(port: PolythPort, timeoutMs = REQUEST_TIMEOUT_MS): 
       pending.clear();
       actionHandlers.clear();
       composerActionHandlers.clear();
+      contributionHandler = null;
       disposed = true;
       queueMicrotask(() => port.close?.());
     },

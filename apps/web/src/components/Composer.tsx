@@ -50,7 +50,7 @@ import {
   type PromptRewrite,
 } from "../nextAction.ts";
 import { latestCompletedExchange } from "@polyth/session/next-action";
-import SlotHost from "./slots/SlotHost.ts";
+import SlotHost from "./slots/SlotHost.tsx";
 import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 import { dragKind, dropIntoSession } from "../dnd.ts";
 import {
@@ -90,6 +90,7 @@ import {
   type ComposerCommand,
   type InsertPlan,
 } from "../composer/discovery.ts";
+import { isHostOnlyExtensionCommand } from "../composer/extensionCommandGate.ts";
 import {
   loadComposerConfig, saveComposerConfig, consumeComposerConfig,
   withAutoThinking, withExplicitThinking, withModelForNextTurn,
@@ -1321,7 +1322,12 @@ export default function Composer({
       return;
     }
     if (command === "") return;
-    if (command === null && noModels) {
+    const selectedNativeCommand = command === null && commandCatalog.state === "available"
+      ? nativeCommandInput(t, commandCatalog.items, selectedCommandRef.current)
+      : undefined;
+    const hostOnlyExtensionCommand = isHostOnlyExtensionCommand(selectedNativeCommand)
+      && attachments.length === 0;
+    if (command === null && noModels && !hostOnlyExtensionCommand) {
       // Never a silent no-op: pressing Enter while the model catalog is empty
       // (backend still starting / restarting) surfaces the same guidance as
       // the composer banner instead of appearing to swallow the message.
@@ -1333,7 +1339,7 @@ export default function Composer({
       );
       return;
     }
-    if (command === null && profileMissing) return;
+    if (command === null && profileMissing && !hostOnlyExtensionCommand) return;
     // Capture the target session at send time — project/session switches must
     // never reroute a send (delivery admission handles active turns server-side).
     // Keep text/pills in the scoped draft until admission is authoritative.
@@ -1386,9 +1392,6 @@ export default function Composer({
           modelID: selected.modelID,
           ...(sentThinking ? { variant: sentThinking } : {}),
         }
-      : undefined;
-    const selectedNativeCommand = command === null && commandCatalog.state === "available"
-      ? nativeCommandInput(t, commandCatalog.items, selectedCommandRef.current)
       : undefined;
     const modelHarnessId = selectedDescriptor?.harnessId ?? draftExecution.model?.harnessId;
     const creationHarness = selectedProfile
@@ -2120,13 +2123,18 @@ export default function Composer({
 
   const borrowedEpochPending = session?.status === "epoch-pending"
     && session.runtimeControl === "borrowed";
+  const draftNativeCommand = !queueEdit && !shellMode && commandCatalog.state === "available"
+    ? nativeCommandInput(text.trim(), commandCatalog.items, selectedCommandRef.current)
+    : undefined;
+  const hostOnlyExtensionCommandReady = isHostOnlyExtensionCommand(draftNativeCommand)
+    && attachments.length === 0;
   const sendDisabled = creatingSession
     || sendPending
     || failedSend?.kind === "unknown"
     || queueEditSaving
     || borrowedEpochPending
     || (queueEdit ? !text.trim() : (!text.trim() && attachments.length === 0))
-    || (!queueEdit && !shellMode && (noModels || profileMissing));
+    || (!queueEdit && !shellMode && (noModels || profileMissing) && !hostOnlyExtensionCommandReady);
   const hasDraft = text.trim() !== "" || attachments.length > 0;
   // On phones the composer only unfolds when it is actually being used: focus,
   // a shell command, or a draft in progress. A working turn alone keeps it in
@@ -2210,7 +2218,7 @@ export default function Composer({
           {tr("composer.largePasteBanner")}
         </Notice>
       )}
-      {showModelWarning && (
+      {showModelWarning && !hostOnlyExtensionCommandReady && (
         <div className="composer-note composer-runtime-unavailable" role="status">
           <span>
             {modelAbsence === "loading"
@@ -2224,7 +2232,7 @@ export default function Composer({
           )}
         </div>
       )}
-      {profileMissing && (
+      {profileMissing && !hostOnlyExtensionCommandReady && (
         <div className="composer-note composer-profile-missing" role="alert">
           {PROFILE_MISSING_NOTE}
         </div>

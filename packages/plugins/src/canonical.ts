@@ -4,6 +4,7 @@ import type { TrustClass } from "@polyth/contracts";
 import {
   parsePackageManifestDocument,
   isPackageCapabilityName,
+  type PackageManifest,
   type PackageManifestV1,
 } from "@polyth/package-sdk/manifest";
 import { parseManifest, type ManagedPluginManifest } from "./managedManifest.ts";
@@ -13,13 +14,19 @@ export function isV1Document(value: unknown): value is Record<string, unknown> {
     && (value as { manifestVersion?: unknown }).manifestVersion === 1;
 }
 
+export function isPackageDocument(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const version = (value as { manifestVersion?: unknown }).manifestVersion;
+  return version === 1 || version === 2;
+}
+
 export function loadCanonicalManifest(dir: string): {
-  canonical: PackageManifestV1;
+  canonical: PackageManifest;
   legacy: ManagedPluginManifest;
 } {
-  const v1Path = join(dir, "polyth-package.json");
-  if (existsSync(v1Path) && statSync(v1Path).isFile()) {
-    const canonical = parsePackageManifestDocument(JSON.parse(readFileSync(v1Path, "utf8")));
+  const manifestPath = join(dir, "polyth-package.json");
+  if (existsSync(manifestPath) && statSync(manifestPath).isFile()) {
+    const canonical = parsePackageManifestDocument(JSON.parse(readFileSync(manifestPath, "utf8")));
     return { canonical, legacy: legacyFromCanonical(canonical) };
   }
   const pkgPath = join(dir, "package.json");
@@ -30,7 +37,7 @@ export function loadCanonicalManifest(dir: string): {
       description?: unknown;
       polyth?: Record<string, unknown>;
     };
-    if (isV1Document(pkg.polyth)) {
+    if (isPackageDocument(pkg.polyth)) {
       const polyth = pkg.polyth;
       const document = {
         ...polyth,
@@ -69,7 +76,7 @@ export function canonicalFromLegacy(legacy: ManagedPluginManifest): PackageManif
   };
 }
 
-export function legacyFromCanonical(canonical: PackageManifestV1): ManagedPluginManifest {
+export function legacyFromCanonical(canonical: PackageManifest): ManagedPluginManifest {
   const trust: TrustClass = canonical.runtime?.kind === "trusted-local"
     ? (canonical.runtime.server ? "privileged" : "workspace")
     : canonical.capabilities?.some((cap) => cap.name === "network.fetch" || cap.name === "auth.connection")

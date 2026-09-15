@@ -2,6 +2,8 @@
 
 Start with [AGENTS.md](../../AGENTS.md) and the [package-development skill](../../.agents/skills/polyth-packages/SKILL.md). This guide is an implementation checklist, not a frozen API reference. Read the current exported types and a current caller before copying a pattern.
 
+For remotely installable or sandboxed managed extensions, use the dedicated [Extension Platform guide](extensions.md). Managed extensions use `@polyth/package-sdk`; first-party workspace feature packages use the package/web-sdk seams described below.
+
 ## Choose the owner
 
 Feature logic/routes belong to `packages/<feature>/src/`; feature UI belongs to its `widgets/` directory. Generic shared host behavior belongs to `apps/web`. Tenant infrastructure belongs to tenancy/server, and native provider integration belongs to its backend. Do not create a new feature by editing the host's App/Main switches or package registries.

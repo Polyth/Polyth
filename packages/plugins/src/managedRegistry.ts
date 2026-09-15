@@ -17,7 +17,8 @@ import {
   assertEngineCompatible,
   requiredAssets,
   type DeclaredCapability,
-  type PackageManifestV1,
+  type PackageManifest,
+  type PackageManifestV2,
 } from "@polyth/package-sdk/manifest";
 import { loadCanonicalManifest } from "./canonical.ts";
 import { type ManagedPluginManifest } from "./managedManifest.ts";
@@ -43,6 +44,7 @@ import {
   deleteGrants,
   grantCapabilities,
   missingGrants,
+  missingRequiredGrants,
   readConnectionFingerprints,
   readGrants,
 } from "./grants.ts";
@@ -88,7 +90,7 @@ export interface PluginRegistry {
   grant(id: string, capabilityNames: string[], storage: SpaceStorage, grantedBy?: string, connectionIds?: string[]): Promise<InstalledPluginDto>;
   update(id: string, opts?: { storage?: SpaceStorage }): Promise<InstalledPluginDto>;
   rollback(id: string, version?: string, storage?: SpaceStorage): Promise<InstalledPluginDto>;
-  canonicalManifest(id: string): PackageManifestV1;
+  canonicalManifest(id: string): PackageManifest;
   activeIdentity(id: string): { packageId: string; version: string; integrity: string; installGeneration: string };
   installDir(id: string): string;
   isEnabled(id: string, storage?: SpaceStorage): boolean;
@@ -117,11 +119,33 @@ const assertServerEntryAllowed = (manifest: ManagedPluginManifest, source: strin
   }
 };
 
-function runtimeKindOf(canonical: PackageManifestV1): InstalledPluginDto["runtimeKind"] {
+function runtimeKindOf(canonical: PackageManifest): InstalledPluginDto["runtimeKind"] {
   return canonical.runtime?.kind === "sandboxed" ? "sandboxed" : "trusted-local";
 }
 
-function sandboxContributions(canonical: PackageManifestV1, pluginId: string): UiSlotItem[] {
+function contributionItem(input: {
+  pluginId: string;
+  kind: string;
+  id: string;
+  slot: UiSlotItem["slot"];
+  order?: number;
+  props: Record<string, unknown>;
+}): UiSlotItem {
+  return {
+    slot: input.slot,
+    id: `${input.pluginId}.${input.kind}.${input.id}`,
+    module: `sandbox-contribution:${input.kind}:${input.id}`,
+    ...(input.order !== undefined ? { order: input.order } : {}),
+    props: {
+      pluginId: input.pluginId,
+      contributionKind: input.kind,
+      contributionId: input.id,
+      ...input.props,
+    } as JsonObject,
+  };
+}
+
+function sandboxContributions(canonical: PackageManifest, pluginId: string): UiSlotItem[] {
   const items: UiSlotItem[] = [];
   for (const surface of canonical.contributes?.surfaces ?? []) {
     items.push({
@@ -134,7 +158,7 @@ function sandboxContributions(canonical: PackageManifestV1, pluginId: string): U
         surfaceId: surface.id,
         title: surface.title,
         description: surface.description ?? "",
-      } as unknown as JsonObject,
+      } as JsonObject,
     });
   }
   for (const action of canonical.contributes?.composerActions ?? []) {
@@ -147,8 +171,78 @@ function sandboxContributions(canonical: PackageManifestV1, pluginId: string): U
         actionId: action.id,
         label: action.label,
         description: action.description ?? "",
-      } as unknown as JsonObject,
+        icon: action.icon ?? "",
+      } as JsonObject,
     });
+  }
+  if (canonical.manifestVersion !== 2) return items;
+  const v2 = canonical as PackageManifestV2;
+  for (const provider of v2.contributes?.attachmentProviders ?? []) {
+    items.push(contributionItem({
+      pluginId, kind: "attachment-provider", id: provider.id, slot: "composer.leading", order: provider.order,
+      props: { label: provider.label, description: provider.description ?? "", icon: provider.icon ?? "" },
+    }));
+  }
+  for (const action of v2.contributes?.messageActions ?? []) {
+    items.push(contributionItem({
+      pluginId, kind: "message-action", id: action.id, slot: "session.message.actions", order: action.order,
+      props: { label: action.label, description: action.description ?? "", icon: action.icon ?? "", roles: action.roles ?? [] },
+    }));
+  }
+  for (const action of v2.contributes?.sessionActions ?? []) {
+    items.push(contributionItem({
+      pluginId, kind: "session-action", id: action.id, slot: "session.header.actions", order: action.order,
+      props: { label: action.label, description: action.description ?? "", icon: action.icon ?? "" },
+    }));
+  }
+  for (const command of v2.contributes?.commands ?? []) {
+    items.push(contributionItem({
+      pluginId, kind: "command", id: command.id, slot: "commandPalette.commands", order: command.order,
+      props: { name: command.name, label: command.label ?? command.name, description: command.description, icon: command.icon ?? "" },
+    }));
+  }
+  for (const renderer of v2.contributes?.toolRenderers ?? []) {
+    items.push(contributionItem({
+      pluginId, kind: "tool-renderer", id: renderer.id, slot: "session.timeline.event", order: renderer.order,
+      props: {
+        label: renderer.label ?? renderer.id,
+        matcher: renderer.matcher,
+        presentation: renderer.presentation ?? {},
+        dynamic: renderer.dynamic === true,
+      },
+    }));
+  }
+  for (const badge of v2.contributes?.statusBadges ?? []) {
+    items.push(contributionItem({
+      pluginId, kind: "status-badge", id: badge.id, slot: "session.list.badges", order: badge.order,
+      props: { label: badge.label, description: badge.description ?? "", icon: badge.icon ?? "" },
+    }));
+  }
+  for (const section of v2.contributes?.settingsSections ?? []) {
+    items.push(contributionItem({
+      pluginId, kind: "settings-section", id: section.id, slot: "settings.integrations", order: section.order,
+      props: { title: section.title, description: section.description ?? "", icon: section.icon ?? "" },
+    }));
+  }
+  for (const provider of v2.contributes?.contextProviders ?? []) {
+    items.push(contributionItem({
+      pluginId, kind: "context-provider", id: provider.id, slot: "contextRail.tabs", order: provider.order,
+      props: { label: provider.label, description: provider.description ?? "", icon: provider.icon ?? "" },
+    }));
+  }
+  for (const widget of v2.contributes?.widgets ?? []) {
+    const defaultSlot = widget.defaultSlot ?? "workspace.right";
+    items.push(contributionItem({
+      pluginId, kind: "widget", id: widget.id, slot: "widget.catalog", order: widget.order,
+      props: {
+        title: widget.title,
+        description: widget.description,
+        icon: widget.icon ?? "",
+        kind: "widget",
+        defaultSlot,
+        supportedSlots: [defaultSlot],
+      },
+    }));
   }
   return items;
 }
@@ -247,8 +341,9 @@ export function createPluginRegistry(opts: PluginRegistryOptions): PluginRegistr
   const capabilityRequests = (caps: readonly DeclaredCapability[]): PackageCapabilityRequestDto[] =>
     caps.map((cap) => ({
       name: cap.name,
-      ...(cap.constraints?.origins?.length ? { constraints: { origins: cap.constraints.origins } } : {}),
-    }));
+      ...(cap.required === false ? { required: false } : {}),
+      ...(cap.constraints ? { constraints: cap.constraints } : {}),
+    } as unknown as PackageCapabilityRequestDto));
 
   const activePermissions = (
     pkg: RuntimePackage,
@@ -480,7 +575,7 @@ export function createPluginRegistry(opts: PluginRegistryOptions): PluginRegistr
     record: VersionRecord,
   ): boolean => {
     for (const space of enabledSpaces(pluginId)) {
-      if (missingGrants(readGrants(space.storage, pluginId), record.canonical.capabilities ?? []).length > 0) {
+      if (missingRequiredGrants(readGrants(space.storage, pluginId), record.canonical.capabilities ?? []).length > 0) {
         return false;
       }
       if (connectionReviewRequired(space.storage, pluginId, record.canonical.connections ?? [])) return false;
@@ -498,6 +593,9 @@ export function createPluginRegistry(opts: PluginRegistryOptions): PluginRegistr
     if (current.version === target.version && current.integrity === target.integrity) {
       delete pkg.persisted.candidateVersion;
       return true;
+    }
+    if (runtimeKindOf(current.canonical) === "sandboxed" && runtimeKindOf(target.canonical) !== "sandboxed") {
+      throw err("conflict", "an update cannot change a sandboxed package into a trusted-local package; reinstall explicitly");
     }
     if (!versionCompatible(id, target)) return false;
     const hadScope = scopes.has(id);
@@ -595,7 +693,7 @@ export function createPluginRegistry(opts: PluginRegistryOptions): PluginRegistr
         const record = activeRecord(pkg);
         if (record.canonical.runtime?.kind === "sandboxed") {
           if (!storage) throw err("conflict", "sandboxed packages require permission approval before enable");
-          const missing = missingGrants(readGrants(storage, id), record.canonical.capabilities ?? []);
+          const missing = missingRequiredGrants(readGrants(storage, id), record.canonical.capabilities ?? []);
           if (missing.length > 0 || connectionReviewRequired(storage, id, record.canonical.connections ?? [])) {
             persist();
             throw err("conflict", "sandboxed packages require permission approval before enable");
@@ -737,6 +835,7 @@ export function createPluginRegistry(opts: PluginRegistryOptions): PluginRegistr
       return withLock(id, async () => {
         const pkg = get(id);
         const home = pluginHomeOf(id);
+        const current = activeRecord(pkg);
         const staging = uniqueStaging();
         try {
           const staged = await stageInstallSource({
@@ -747,6 +846,9 @@ export function createPluginRegistry(opts: PluginRegistryOptions): PluginRegistr
           });
           const prepared = await prepareDir(staged.pkgDir, pkg.persisted.source);
           if (prepared.legacy.id !== id) throw err("invalid-input", "updated package id does not match");
+          if (runtimeKindOf(current.canonical) === "sandboxed" && runtimeKindOf(prepared.canonical) !== "sandboxed") {
+            throw err("conflict", "an update cannot change a sandboxed package into a trusted-local package; reinstall explicitly");
+          }
           await publishVersion(home, prepared.version, staged.pkgDir);
           invalidateVersionCache(versionCache, home, prepared.version);
           pkg.persisted.candidateVersion = prepared.version;

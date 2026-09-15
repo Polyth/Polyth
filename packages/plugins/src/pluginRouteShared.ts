@@ -14,9 +14,14 @@ export interface PluginConfigService {
 export const notFound = (message = "plugin UI bundle not found") =>
   Object.assign(new Error(message), { code: "not-found" });
 
-export function secretVault(host?: ServerPackageHost): PackageOpaqueVault {
+export function optionalSecretVault(host?: ServerPackageHost): PackageOpaqueVault | undefined {
   const safe = host?.services.get(serverServiceKey<SecureSafeService>("secure-safe"));
-  if (!safe?.putOpaque) {
+  return safe?.putOpaque ? safe : undefined;
+}
+
+export function secretVault(host?: ServerPackageHost): PackageOpaqueVault {
+  const safe = optionalSecretVault(host);
+  if (!safe) {
     throw Object.assign(new Error("Secure Safe is not available"), { code: "HOST_UNAVAILABLE" });
   }
   return safe;
