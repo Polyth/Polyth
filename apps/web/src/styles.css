@@ -13271,6 +13271,9 @@ body:not([data-glass="off"]) .header-profile { border: 0; background: transparen
       backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
       background-clip: padding-box;
     }
+    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .activity-group.current {
+      border-color: color-mix(in srgb, var(--accent-line) 58%, var(--material-glass-border));
+    }
     body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .msg.user .bubble {
       background: radial-gradient(140% 140% at 50% 50%,
         color-mix(in srgb, var(--bubble-user-bg) var(--material-glass-fill), transparent) 0%,
