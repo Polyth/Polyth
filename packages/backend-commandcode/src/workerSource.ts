@@ -430,7 +430,10 @@ const startTurn = async (message) => {
   if (message.nativeSessionId) args.push("--resume", message.nativeSessionId);
   if (!compactControl && message.model) args.push("--model", message.model);
   if (!compactControl && message.effort) args.push("--effort", message.effort);
-  const permissionMode = !compactControl && message.permissionMode === "auto-accept" ? "auto-accept" : "dont-ask";
+  const permissionMode = !compactControl
+    && (message.permissionMode === "auto-accept" || message.permissionMode === "plan")
+      ? message.permissionMode
+      : "dont-ask";
   args.push("--permission-mode", permissionMode);
   const controlPath = String(message.bindingPath) + ".control." + randomUUID() + ".json";
   const controlToken = randomUUID() + randomUUID();
