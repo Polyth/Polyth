@@ -38,7 +38,9 @@ export function connectionSecurityView(spec: PackageConnectionContribution): Pac
   };
 }
 
-/** Browser-safe review rows. Approved unchanged connections are omitted. */
+/** Browser-safe review rows. Approved unchanged connections are omitted.
+ * A target id absent from the active manifest is always new, even if stale
+ * approval bytes for that id somehow survived an older version. */
 export function connectionReviewItems(
   active: readonly PackageConnectionContribution[],
   target: readonly PackageConnectionContribution[],
@@ -48,7 +50,7 @@ export function connectionReviewItems(
   const out: PackageConnectionReviewDto[] = [];
   for (const spec of target) {
     const previous = byId.get(spec.id);
-    if (approved[spec.id] === connectionFingerprint(spec)) continue;
+    if (previous && approved[spec.id] === connectionFingerprint(spec)) continue;
     out.push({
       id: spec.id,
       label: spec.label,
