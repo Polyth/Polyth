@@ -26,6 +26,9 @@ test("new-session branch picker fetches the remote on open and lists remote bran
   assert.match(composer, /const refreshBranchesFromRemote = useCallback/);
   assert.match(composer, /await api\.gitFetch\(projectId\)\.catch\(\(\) => undefined\)/);
   assert.match(composer, /onBranchPickerOpen: refreshBranchesFromRemote/);
+  assert.match(composer, /id: "new-worktree"/);
+  assert.match(composer, /createDefaultWorktree\(/);
+  assert.match(await read("../src/init.ts"), /api\.createWorktree\([\s\S]*?base \|\| undefined,[\s\S]*?true,/);
   assert.match(composer, /!worktree\.branch\?\.startsWith\("polyth\/isolate\/"\)/);
   assert.match(composer, /!candidate\.name\.startsWith\("polyth\/isolate\/"\)/);
   // Isolation only forks from a live checkout.
@@ -38,6 +41,9 @@ test("new-session branch picker fetches the remote on open and lists remote bran
   assert.match(composer, /api\.createWorktree\(\s*activeProjectId,\s*newSessionTarget\.branch,\s*undefined,\s*newSessionTarget\.base,/);
 
   assert.match(contextBar, /onBranchPickerOpen\?: \(\) => void;/);
+  assert.match(contextBar, /onRefreshBranches\?: \(\) => void;/);
+  assert.match(contextBar, /worktreesessiondialog\.filterByBranchOrPath/);
+  assert.match(contextBar, /action: \{/);
   assert.match(contextBar, /\{\.\.\.\(onBranchPickerOpen \? \{ onOpen: onBranchPickerOpen \} : \{\}\)\}/);
   assert.match(contextBar, /\{\.\.\.\(onOpen \? \{ onOpen \} : \{\}\)\}/);
   assert.match(contextBar, /className="context-isolation-control"/);

@@ -55,7 +55,8 @@ test("sidebar uses contextual tree actions and no permanent footer", async () =>
   assert.doesNotMatch(styles, /\.session-worktree-empty/);
   assert.match(styles, /\.session-worktree-toggle\s*\{[\s\S]*?width: auto;/);
   assert.match(styles, /\.session-worktree-actions\s*\{[\s\S]*?flex: none;/);
-  assert.match(styles, /\.session-worktree-head:hover \.session-worktree-actions,[\s\S]*?opacity: 1;/);
+  assert.match(styles, /@media \(hover: hover\) and \(pointer: fine\) \{[\s\S]*?\.session-worktree-head:hover \.session-worktree-actions,[\s\S]*?opacity: 1;/);
+  assert.match(styles, /@media \(any-pointer: coarse\) \{[\s\S]*?\.session-worktree-head:hover \.session-worktree-actions,[\s\S]*?opacity: 0;/);
   assert.doesNotMatch(styles, /\.project-tree-sessions::before/);
   assert.match(styles, /\.session-btn::before\s*\{[\s\S]*?border-radius:\s*var\(--radius-control\)/);
   assert.match(styles, /\.sidebar-drawer-header\s*\{[\s\S]*?var\(--safe-top\)/,

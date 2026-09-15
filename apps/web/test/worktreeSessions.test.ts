@@ -1,6 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { randomWorktreeSlug, suggestWorktreeBranch, worktreeLabel, worktreeSlug } from "../src/worktreeSessions.ts";
+import {
+  isTemporaryWorktreeBranch,
+  randomWorktreeSlug,
+  semanticWorktreeBranch,
+  suggestWorktreeBranch,
+  temporaryWorktreeBranch,
+  worktreeLabel,
+  worktreeSlug,
+} from "../src/worktreeSessions.ts";
 
 test("worktree branch suggestion expands template tokens and sanitizes titles", () => {
   const now = new Date("2026-08-20T06:00:00.000Z");
@@ -26,5 +34,20 @@ test("worktree labels prefer branch and fall back to the checkout folder", () =>
 });
 
 test("random worktree defaults are branch-safe", () => {
-  assert.match(randomWorktreeSlug(), /^worktree-[a-z0-9]{6}$/);
+  assert.match(randomWorktreeSlug(), /^[a-z]+-[a-z]+-\d{4}$/);
+  const first = temporaryWorktreeBranch([], () => 0, () => 1);
+  const second = temporaryWorktreeBranch([first], () => 0, () => 1);
+  assert.equal(first, "temp/red-panther-1000");
+  assert.equal(second, "temp/iron-dawn-1001");
+  assert.equal(isTemporaryWorktreeBranch(first), true);
+  assert.equal(isTemporaryWorktreeBranch("feat/red-panther-1000"), false);
+  assert.equal(isTemporaryWorktreeBranch("temp/custom-name-1234"), false);
+});
+
+test("model titles become unique conventional worktree branches", () => {
+  assert.equal(semanticWorktreeBranch("Fix login crash", []), "fix/login-crash");
+  assert.equal(
+    semanticWorktreeBranch("Add branch picker", ["feat/branch-picker"]),
+    "feat/branch-picker-2",
+  );
 });

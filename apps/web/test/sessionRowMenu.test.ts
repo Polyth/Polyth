@@ -1,7 +1,7 @@
 // Session row actions (P2-W1), mounted through a real React root: every row
 // owns one ui/Menu reachable through right-click, long-press, Shift+F10, and
-// a single ellipsis trigger (hover-revealed on fine pointers; on touch, the
-// active/open/focused row). The menu carries delete/archive/pin/labels with correct ARIA menu
+// a single ellipsis trigger (hover-revealed on mouse-only pointers; on touch,
+// only the open or keyboard-focused row). The menu carries delete/archive/pin/labels with correct ARIA menu
 // roles and the keyboard contract (focus lands in the menu, arrows cycle,
 // Escape closes back to the opener). Every menu/swipe deletion confirms, with
 // additional activity context for a running session. Quick archive/delete

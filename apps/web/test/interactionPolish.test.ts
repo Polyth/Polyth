@@ -20,7 +20,8 @@ test("queue reorders by dragging while pane tabs retain keyboard controls", asyn
   assert.doesNotMatch(queue, /<MoveControls/);
   assert.match(pane, /<MoveControls/);
   assert.match(pane, /moveTab\(p, t\.id, targetIndex\)/);
-  assert.match(css, /@media \(pointer: coarse\), \(max-width: 480px\)[\s\S]*?\.pane-tab-group\.active > \.reorder-controls\s*\{\s*display:\s*inline-flex/);
+  assert.match(css, /@media \(max-width: 480px\)[\s\S]*?\.pane-tab-group\.active > \.reorder-controls\s*\{\s*display:\s*inline-flex/);
+  assert.match(css, /@media \(any-pointer: coarse\)[\s\S]*?\.pane-tab-group\.active > \.reorder-controls\s*\{\s*display:\s*none/);
 });
 
 test("every remaining double-click shortcut has a discoverable mobile alternative", async () => {
@@ -76,33 +77,43 @@ test("tablet rest state does not paint Shift/hover edit chrome on every item", a
   const css = await readWebStyles();
   assert.doesNotMatch(
     css,
-    /@media \(pointer: coarse\) \{[^}]*\.agent-reply-actions \{[^}]*opacity:\s*1/s,
-    "reply actions stay hover/focus-revealed on coarse pointers",
+    /@media \(any-pointer: coarse\) \{[^}]*\.agent-reply-actions \{[^}]*opacity:\s*1/s,
+    "reply actions stay hover/focus-revealed on touch-capable screens",
   );
   assert.doesNotMatch(
     css,
-    /@media \(pointer: coarse\) \{[\s\S]{0,800}?\.msg-actions \{ opacity:\s*1/,
-    "message hover actions are not forced onto every tablet row",
+    /@media \(any-pointer: coarse\) \{[\s\S]{0,800}?\.msg-actions \{ opacity:\s*1/,
+    "message hover actions are not forced onto every hybrid-tablet row",
   );
   assert.doesNotMatch(
     css,
-    /@media \(pointer: coarse\) \{[\s\S]{0,1200}?\.session-worktree-actions,[\s\S]{0,80}?opacity:\s*1/,
+    /@media \(any-pointer: coarse\) \{[\s\S]{0,1200}?\.session-worktree-actions,[\s\S]{0,80}?opacity:\s*1/,
     "worktree and folder edit buttons are not forced onto every group",
   );
   assert.doesNotMatch(
     css,
-    /@media \(pointer: coarse\), \(max-width: 960px\) \{\s*\.session-menu-trigger \{ opacity:\s*1/,
-    "session ⋯ is not persistent on every coarse/drawer row",
+    /@media \(any-pointer: coarse\), \(max-width: 960px\) \{\s*\.session-row\.active \.session-menu-trigger/,
+    "session ⋯ is not persistent on every hybrid-tablet row including active",
   );
   assert.match(
     css,
-    /@media \(pointer: coarse\), \(max-width: 960px\) \{[\s\S]*?\.session-row\.active \.session-menu-trigger/,
-    "the current session still exposes its row menu trigger",
+    /@media \(any-pointer: coarse\), \(max-width: 960px\) \{[\s\S]*?\.session-row\.menu-open \.session-menu-trigger/,
+    "an open row menu still exposes its trigger",
   );
   assert.match(
     css,
-    /@media \(hover: none\) and \(pointer: coarse\) and \(min-width: 481px\) \{\s*\.msg-actions \{ display:\s*none;/,
+    /@media \(any-pointer: coarse\) and \(min-width: 481px\) \{\s*\.msg-actions \{ display:\s*none;/,
     "tablet messages use the overflow entry instead of an always-on hover strip",
+  );
+  assert.match(
+    css,
+    /@media \(any-pointer: coarse\) \{[\s\S]*?\.project-actions,[\s\S]*?opacity:\s*0/,
+    "project row actions hide in rest on touch-capable screens",
+  );
+  assert.match(
+    css,
+    /@media \(hover: hover\) and \(pointer: fine\) \{\s*\.session-worktree-head:hover \.session-worktree-actions/,
+    "worktree actions reveal only on mouse-only hover",
   );
 });
 

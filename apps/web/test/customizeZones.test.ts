@@ -11,6 +11,7 @@ const read = (relative: string) => readFile(new URL(relative, import.meta.url), 
 test("bare Shift ignores text editing and disarms as soon as typing starts", async () => {
   const dom = new Window();
   let fineHover = true;
+  let anyCoarse = false;
   Object.assign(globalThis, {
     window: dom as unknown as Window & typeof globalThis,
     document: dom.document as unknown as Document,
@@ -20,6 +21,7 @@ test("bare Shift ignores text editing and disarms as soon as typing starts", asy
     configurable: true,
     value: (query: string) => ({
       get matches() {
+        if (query.includes("any-pointer: coarse")) return anyCoarse;
         return fineHover && query.includes("hover: hover") && query.includes("pointer: fine");
       },
       media: query,
@@ -62,6 +64,26 @@ test("bare Shift ignores text editing and disarms as soon as typing starts", asy
     await act(async () => button.dispatchEvent(new dom.KeyboardEvent("keydown", { key: "Shift", bubbles: true }) as unknown as Event));
     assert.equal(container.textContent, "idle", "coarse/touch pointers must not arm Shift edit mode");
     assert.equal(document.body.dataset.shiftHeld, undefined);
+
+    fineHover = true;
+    anyCoarse = true;
+    button.focus();
+    await act(async () => button.dispatchEvent(new dom.KeyboardEvent("keydown", { key: "Shift", bubbles: true }) as unknown as Event));
+    assert.equal(container.textContent, "idle", "hybrid tablets (any-pointer:coarse + fine hover) must not arm Shift");
+    assert.equal(document.body.dataset.shiftHeld, undefined);
+
+    anyCoarse = false;
+    button.focus();
+    await act(async () => button.dispatchEvent(new dom.KeyboardEvent("keydown", { key: "Shift", bubbles: true }) as unknown as Event));
+    assert.equal(container.textContent, "armed", "mouse-only desktops still arm Shift");
+    await act(async () => button.dispatchEvent(new dom.PointerEvent("pointerdown", { pointerType: "touch", bubbles: true }) as unknown as Event));
+    assert.equal(container.textContent, "idle", "touch pointerdown clears stuck virtual Shift");
+
+    button.focus();
+    await act(async () => button.dispatchEvent(new dom.KeyboardEvent("keydown", { key: "Shift", bubbles: true }) as unknown as Event));
+    assert.equal(container.textContent, "armed");
+    await act(async () => button.dispatchEvent(new dom.Event("touchstart", { bubbles: true })));
+    assert.equal(container.textContent, "idle", "touchstart clears stuck virtual Shift without pointerType");
   } finally {
     await act(async () => root.unmount());
     container.remove();
@@ -81,7 +103,8 @@ test("Shift exposes editors without a resting gap or content overlap", async () 
     read("../src/useShiftArmed.ts"),
   ]);
   assert.match(shift, /canArmShiftPointer/);
-  assert.match(shift, /FINE_HOVER_QUERY/);
+  assert.match(shift, /SHIFT_MOUSE_POINTER_QUERY/);
+  assert.match(shift, /ANY_COARSE_POINTER_QUERY/);
   assert.match(header, /useCustomizeActive/);
   assert.match(styles, /body\[data-shift-held\] \.customize-zone:hover/);
   assert.doesNotMatch(styles, /body\[data-shift-held\] \.customize-zone\s*[,\{]/);
