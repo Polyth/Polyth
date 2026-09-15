@@ -1,22 +1,13 @@
 // Pure branch-name helpers for worktree-backed sessions.
+import { worktreeSlug } from "@polyth/session/worktree-names";
 
-export function worktreeSlug(value: string): string {
-  return value
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48)
-    .replace(/-+$/g, "") || "session";
-}
-
-/** A compact, branch-safe default for a new worktree. The user can always
- * replace it before creation; randomness avoids collisions between quick
- * worktrees that have no session title yet. */
-export function randomWorktreeSlug(): string {
-  return `worktree-${Math.random().toString(36).slice(2, 8)}`;
-}
+export {
+  isTemporaryWorktreeBranch,
+  randomWorktreeSlug,
+  semanticWorktreeBranch,
+  temporaryWorktreeBranch,
+  worktreeSlug,
+} from "@polyth/session/worktree-names";
 
 function safeBranch(raw: string): string {
   const parts = raw

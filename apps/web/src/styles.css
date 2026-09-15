@@ -907,8 +907,10 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   pointer-events: none;
   transition: opacity var(--motion-fast) var(--motion-ease);
 }
-.session-worktree-head:hover .session-worktree-actions,
-.session-worktree-head:focus-within .session-worktree-actions { opacity: 1; pointer-events: auto; }
+@media (hover: hover) and (pointer: fine) {
+  .session-worktree-head:hover .session-worktree-actions,
+  .session-worktree-head:focus-within .session-worktree-actions { opacity: 1; pointer-events: auto; }
+}
 .session-worktree-actions > button {
   width: 36px;
   height: 36px;
@@ -3480,10 +3482,12 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
   opacity: 0; pointer-events: none; transform: translateY(-2px);
   transition: opacity var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-ease);
 }
-.msg > .bubble:hover ~ .msg-meta .msg-actions,
-.msg > .msg-meta:hover .msg-actions,
-.msg-meta:focus-within .msg-actions,
-.msg-actions:focus-within { opacity: 1; pointer-events: auto; transform: none; }
+@media (hover: hover) and (pointer: fine) {
+  .msg > .bubble:hover ~ .msg-meta .msg-actions,
+  .msg > .msg-meta:hover .msg-actions,
+  .msg-meta:focus-within .msg-actions,
+  .msg-actions:focus-within { opacity: 1; pointer-events: auto; transform: none; }
+}
 .msg-actions button[disabled] { opacity: 0.55; cursor: not-allowed; }
 .msg-action-btn {
   position: relative; display: inline-grid; place-items: center;
@@ -3589,7 +3593,7 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .msg-actions-item-label { flex: 1; }
 .msg-actions-item:hover, .msg-actions-item:focus-visible { background: var(--panel); }
 .msg-actions-item[disabled] { opacity: 0.55; cursor: not-allowed; }
-@media (hover: none) and (pointer: coarse) and (min-width: 481px) {
+@media (any-pointer: coarse) and (min-width: 481px) {
   .msg-actions { display: none; }
   .msg-actions-entry { display: inline-flex; }
   .msg-actions-popup { display: flex; }
@@ -3770,8 +3774,10 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 }
 .session-folder-toggle:hover { color: inherit; }
 .session-folder-del { background: none; border: 0; color: var(--muted); cursor: pointer; opacity: 0; padding: 2px 8px; }
-.session-folder-head:hover .session-folder-del,
-.session-folder-head:focus-within .session-folder-del { opacity: 1; }
+@media (hover: hover) and (pointer: fine) {
+  .session-folder-head:hover .session-folder-del,
+  .session-folder-head:focus-within .session-folder-del { opacity: 1; }
+}
 .session-folder-empty { padding: 2px 22px 6px; font-size: var(--font-meta); }
 /* WP13 Group-by section heads (status / worktree / plugin modes) */
 .session-group-head {
@@ -5160,7 +5166,8 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .bubble > :last-child { margin-bottom: 0; }
 /* Hover copy on the answer body: the button floats at the end of the text
    block with a translucent backdrop that shades the text beneath it. It
-   reveals on pointer hover and keyboard focus, and stays visible on touch. */
+   reveals on mouse hover and keyboard focus. Touch-capable screens hide it
+   in rest so sticky :hover cannot paint edit chrome on every bubble. */
 .msg.assistant > .bubble { position: relative; }
 .bubble-copy {
   position: absolute; z-index: 4;
@@ -5168,8 +5175,10 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
   opacity: 0; pointer-events: none;
   transition: opacity var(--motion-fast) var(--motion-ease);
 }
-.msg.assistant > .bubble:hover .bubble-copy,
-.msg.assistant > .bubble:focus-within .bubble-copy { opacity: 1; pointer-events: auto; }
+@media (hover: hover) and (pointer: fine) {
+  .msg.assistant > .bubble:hover .bubble-copy,
+  .msg.assistant > .bubble:focus-within .bubble-copy { opacity: 1; pointer-events: auto; }
+}
 .bubble-copy .copy-btn {
   color: var(--text);
   background: color-mix(in srgb, var(--panel) 84%, transparent);
@@ -7173,8 +7182,10 @@ color: var(--green);
   display: inline-flex; align-items: center; gap: 2px; margin-left: auto;
   opacity: 0; pointer-events: none; transition: opacity var(--motion-fast) var(--motion-ease);
 }
-.agent-reply-header:hover .agent-reply-actions,
-.agent-reply-header:focus-within .agent-reply-actions { opacity: 1; pointer-events: auto; }
+@media (hover: hover) and (pointer: fine) {
+  .agent-reply-header:hover .agent-reply-actions,
+  .agent-reply-header:focus-within .agent-reply-actions { opacity: 1; pointer-events: auto; }
+}
 .agent-reply-actions button,
 .assistant-gallery-shortcut {
   width: 28px; height: 28px; display: grid; place-items: center; padding: 0;
@@ -8950,19 +8961,19 @@ width: var(--tap);
   .folder-row-enter { display: inline-flex; }
 }
 
-@media (pointer: coarse), (max-width: 480px) {
-.pane-tab-group.active > .reorder-controls { display: inline-flex; }
+@media (max-width: 480px) {
+  .pane-tab-group.active > .reorder-controls { display: inline-flex; }
 }
 
 
 /* Exactly one menu trigger per input mode. Fine pointers reveal it on row
    hover/focus. Touch and drawer layouts reserve its footprint so timestamps
-   stay aligned, but only the active, focused, or open row shows the glyph —
-   painting ⋯ on every row reads as Shift-held edit mode. Long-press, swipe,
-   and the row context menu still reach every session. */
-@media (pointer: coarse), (max-width: 960px) {
+   stay aligned, but only the open or keyboard-focused row shows the glyph —
+   painting ⋯ on every row (including the active session) reads as Shift-held
+   edit mode. Long-press, swipe, and the row context menu still reach every
+   session. Hybrid tablets use any-pointer:coarse, not pointer:coarse alone. */
+@media (any-pointer: coarse), (max-width: 960px) {
   .session-row .session-btn { padding-right: calc(var(--tap) + 8px); }
-  .session-row.active .session-menu-trigger,
   .session-row.menu-open .session-menu-trigger,
   .session-row:focus-within .session-menu-trigger {
     opacity: 1;
@@ -13266,4 +13277,46 @@ body[data-glass="off"] :is(.scrim, .dialog-backdrop, .sheet-backdrop) {
 
 @container polyth-remote-ui (max-width: 36rem) {
   .polyth-remote-ui-inline { flex-direction: column; align-items: stretch; }
+}
+
+/* Touch-capable screens: rest list stays clean even when the primary pointer
+   reports fine/hover (hybrid Android tablets). Sticky :hover cannot revive
+   edit chrome — only explicit open/focus states may show controls. */
+@media (any-pointer: coarse) {
+  .project-actions,
+  .project-card-shell:hover .project-actions,
+  .project-card-shell:focus-within .project-actions,
+  .sidebar-focused-project > .project-card-shell .project-actions {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .project-actions:has(button[aria-expanded="true"]) {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .session-worktree-head:hover .session-worktree-actions,
+  .session-worktree-head:focus-within .session-worktree-actions,
+  .session-folder-head:hover .session-folder-del,
+  .session-folder-head:focus-within .session-folder-del,
+  .msg > .bubble:hover ~ .msg-meta .msg-actions,
+  .msg > .msg-meta:hover .msg-actions,
+  .msg-meta:focus-within .msg-actions,
+  .msg-actions:focus-within,
+  .msg.assistant > .bubble:hover .bubble-copy,
+  .msg.assistant > .bubble:focus-within .bubble-copy,
+  .agent-reply-header:hover .agent-reply-actions,
+  .agent-reply-header:focus-within .agent-reply-actions {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .session-row:hover .session-menu-trigger {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .session-row.menu-open .session-menu-trigger,
+  .session-row:focus-within .session-menu-trigger {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .pane-tab-group.active > .reorder-controls { display: none; }
 }

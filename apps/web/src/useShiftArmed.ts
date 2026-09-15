@@ -7,7 +7,11 @@ import { useSyncExternalStore } from "react";
 let shiftKeyDown = false;
 let listening = false;
 const subscribers = new Set<() => void>();
-const FINE_HOVER_QUERY = "(hover: hover) and (pointer: fine)";
+
+/** Fine hover-capable primary pointer — necessary but not sufficient for Shift. */
+export const SHIFT_MOUSE_POINTER_QUERY = "(hover: hover) and (pointer: fine)";
+/** Any touch screen, including hybrid tablets that also report pointer:fine. */
+export const ANY_COARSE_POINTER_QUERY = "(any-pointer: coarse)";
 
 const snapshot = (): boolean => shiftKeyDown;
 
@@ -15,12 +19,13 @@ export function shouldArmShift(key: string, editingText: boolean): boolean {
   return key === "Shift" && !editingText;
 }
 
-/** Desktop Shift+hover customization needs a hover-capable fine pointer.
- *  Coarse/touch shells (tablets) must not latch this mode from a virtual
- *  Shift key, a bluetooth keyboard, or a stuck modifier. */
+/** Desktop Shift+hover customization needs a mouse-only pointer environment.
+ *  Hybrid tablets (any-pointer:coarse + pointer:fine) and pure touch shells
+ *  must not latch this mode from a virtual Shift key or stuck modifier. */
 export function canArmShiftPointer(): boolean {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") return true;
-  return window.matchMedia(FINE_HOVER_QUERY).matches;
+  return window.matchMedia(SHIFT_MOUSE_POINTER_QUERY).matches
+    && !window.matchMedia(ANY_COARSE_POINTER_QUERY).matches;
 }
 
 function isTextEditing(target: EventTarget | null): boolean {
@@ -49,6 +54,16 @@ function setKeyDown(down: boolean): void {
   for (const notify of [...subscribers]) notify();
 }
 
+function disarmIfTouchPointer(event: Event): void {
+  if (event.type === "touchstart") {
+    setKeyDown(false);
+    return;
+  }
+  if ("pointerType" in event && (event as PointerEvent).pointerType === "touch") {
+    setKeyDown(false);
+  }
+}
+
 function ensureListeners(): void {
   if (listening || typeof window === "undefined") return;
   listening = true;
@@ -63,12 +78,16 @@ function ensureListeners(): void {
     if (event.key === "Shift") setKeyDown(false);
   });
   window.addEventListener("blur", () => setKeyDown(false));
-  const hoverPointer = typeof window.matchMedia === "function"
-    ? window.matchMedia(FINE_HOVER_QUERY)
-    : null;
-  hoverPointer?.addEventListener?.("change", () => {
-    if (!hoverPointer.matches) setKeyDown(false);
-  });
+  window.addEventListener("pointerdown", disarmIfTouchPointer);
+  window.addEventListener("touchstart", disarmIfTouchPointer);
+  if (typeof window.matchMedia === "function") {
+    for (const query of [SHIFT_MOUSE_POINTER_QUERY, ANY_COARSE_POINTER_QUERY]) {
+      const list = window.matchMedia(query);
+      list.addEventListener?.("change", () => {
+        if (!canArmShiftPointer()) setKeyDown(false);
+      });
+    }
+  }
 }
 
 /** True while the Shift key is held. Arms the shift-hover customization

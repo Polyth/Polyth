@@ -29,6 +29,8 @@ function ContextSelector({
   ariaLabel,
   onPick,
   onOpen,
+  onRefresh,
+  refreshing,
 }: {
   kind: "project" | "branch";
   value: string;
@@ -39,13 +41,21 @@ function ContextSelector({
   ariaLabel: string;
   onPick: (id: string) => void;
   onOpen?: () => void;
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }) {
   const phone = useShellMode() === "phone";
   const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState("");
   const current = selectedId ?? choices.find((choice) => choice.label === value)?.id;
+  const query = filter.trim().toLocaleLowerCase();
+  const shown = query
+    ? choices.filter((choice) => `${choice.label} ${choice.detail ?? ""}`.toLocaleLowerCase().includes(query))
+    : choices;
   // §22: open on pointer-down, then dismiss the keyboard — a click can be
   // swallowed by the reflow the dismissal causes (see sheetTrigger.ts).
   const triggerHandlers = useSheetTrigger(phone, () => {
+    setFilter("");
     onOpen?.();
     setOpen(true);
     void dismissKeyboard();
@@ -87,14 +97,35 @@ function ContextSelector({
         <span className="context-trigger-caret" aria-hidden="true"><Icon.chevronDown /></span>
       </button>
       {open && (
-        <Sheet title={sheetTitle} className="context-sheet" onClose={() => setOpen(false)}>
+        <Sheet
+          title={sheetTitle}
+          className="context-sheet"
+          size={kind === "branch" ? "tall" : "auto"}
+          onClose={() => setOpen(false)}
+          {...(kind === "branch" ? {
+            search: {
+              value: filter,
+              onChange: setFilter,
+              placeholder: tr("worktreesessiondialog.filterByBranchOrPath"),
+              ariaLabel: tr("worktreesessiondialog.filterByBranchOrPath"),
+            },
+          } : {})}
+          {...(kind === "branch" && onRefresh ? {
+            action: {
+              label: refreshing ? tr("common.loading") : tr("common.refresh"),
+              onClick: onRefresh,
+            },
+          } : {})}
+        >
           <div role="listbox" aria-label={sheetTitle}>
-            {choices.map((choice) => (
+            {shown.map((choice) => (
               <SheetRow
                 key={choice.id}
                 title={choice.label}
                 {...(choice.detail ? { meta: choice.detail } : {})}
-                icon={kind === "project" ? <Icon.files /> : <Icon.branch />}
+                icon={kind === "project"
+                  ? <Icon.files />
+                  : choice.id === "new-worktree" ? <Icon.plus /> : <Icon.branch />}
                 selected={choice.id === current}
                 onClick={() => {
                   onPick(choice.id);
@@ -102,7 +133,7 @@ function ContextSelector({
                 }}
               />
             ))}
-            {choices.length === 0 && <p className="sheet-empty">{tr("mobile.sessioncontextbar.nothingToChooseHereYet")}</p>}
+            {shown.length === 0 && <p className="sheet-empty">{tr("mobile.sessioncontextbar.nothingToChooseHereYet")}</p>}
           </div>
         </Sheet>
       )}
@@ -123,6 +154,9 @@ export interface SessionContextBarProps {
   /** Fired the first time the branch picker opens — used to fetch the remote
    *  so server-only branches appear in the list. */
   onBranchPickerOpen?: () => void;
+  /** Explicit remote refresh shown in the phone sheet title row. */
+  onRefreshBranches?: () => void;
+  branchRefreshing?: boolean;
   /** Start the new session in a managed checkout based on the selected live
    *  worktree. This stays visible beside location instead of hiding in it. */
   workInIsolation?: boolean;
@@ -141,6 +175,8 @@ export default function SessionContextBar({
   branchLoading,
   onPickBranch,
   onBranchPickerOpen,
+  onRefreshBranches,
+  branchRefreshing,
   workInIsolation,
   onToggleWorkInIsolation,
   isolationDisabled,
@@ -168,6 +204,8 @@ export default function SessionContextBar({
         ariaLabel={tr("mobile.sessioncontextbar.worktreeCurrentValue", { branchName })}
         onPick={onPickBranch}
         {...(onBranchPickerOpen ? { onOpen: onBranchPickerOpen } : {})}
+        {...(onRefreshBranches ? { onRefresh: onRefreshBranches } : {})}
+        {...(branchRefreshing ? { refreshing: true } : {})}
       />
       {onToggleWorkInIsolation && (
         <span

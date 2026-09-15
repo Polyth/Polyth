@@ -1,5 +1,5 @@
 // Bootstrapping + user actions: REST load, WS wiring, session lifecycle.
-import { api } from "@polyth/session/web-api";
+import { api, errorCodeOf } from "@polyth/session/web-api";
 import { SyncClient, type SyncStatus } from "./sync.ts";
 import { applyRemoteClientSettings, initSettingsSync } from "./settingsSync.ts";
 import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown } from "./format.ts";
@@ -8,7 +8,7 @@ import { formatAppUrl, parseAppUrl, settingsPageFromSearch } from "./router.ts";
 import * as store from "./store.ts";
 import { resolveActiveProjectId } from "./projectRegistry.ts";
 import type { AttachmentRef, HarnessSelection, JsonObject, ModelRef, Project, ProjectCloneInput, ProjectPatch, ResumeTurnOptions, SessionEvent, SessionProjection } from "@polyth/contracts";
-import { suggestWorktreeBranch } from "./worktreeSessions.ts";
+import { suggestWorktreeBranch, temporaryWorktreeBranch } from "./worktreeSessions.ts";
 import { installPushDeepLinks, registerServiceWorker } from "./push.ts";
 import { notificationCentre } from "./notificationCentre.ts";
 import { applyComposerSeed, hydrateComposerDraft } from "./drafts.ts";
@@ -1220,9 +1220,9 @@ export async function startIsolatedSession(
   return sessionId;
 }
 
-/** Create a linked worktree on a fresh, template-named branch and return its
- *  path. `base` picks the ref the new branch starts from (a branch name, tag,
- *  or SHA); omitted, it forks from the project checkout's current HEAD. */
+/** Create a linked worktree on a fresh branch and return its path. Untitled
+ *  sessions start with a unique codename; titled ones use the existing semantic
+ *  template. `base` selects the starting ref, or the current HEAD when omitted. */
 export async function createDefaultWorktree(
   projectId: string,
   title?: string,
@@ -1236,12 +1236,28 @@ export async function createDefaultWorktree(
     ...worktrees.map((worktree) => worktree.branch).filter((branch): branch is string => !!branch),
     ...branches.branches.map((branch) => branch.name),
   ];
-  const branch = suggestWorktreeBranch(
-    store.getState().settings.branchTemplate,
-    title || base || "session",
-    taken,
-  );
-  return (await api.createWorktree(projectId, branch, undefined, base || undefined)).path;
+  const attempted: string[] = [];
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const known = [...taken, ...attempted];
+    const branch = title
+      ? suggestWorktreeBranch(store.getState().settings.branchTemplate, title, known)
+      : temporaryWorktreeBranch(known);
+    attempted.push(branch);
+    try {
+      return (await api.createWorktree(
+        projectId,
+        branch,
+        undefined,
+        base || undefined,
+        true,
+      )).path;
+    } catch (error) {
+      // `newBranchOnly` makes Git the final collision authority. Another
+      // device may win after our list call; choose a different codename.
+      if (errorCodeOf(error) !== "conflict") throw error;
+    }
+  }
+  throw Object.assign(new Error("could not allocate a unique worktree branch"), { code: "conflict" });
 }
 
 export async function createSession(projectId: string, opts: CreateSessionOptions = {}): Promise<string> {

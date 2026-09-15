@@ -25,6 +25,7 @@ import {
   sendMessage,
   abortSession,
   createSession,
+  createDefaultWorktree,
   startIsolatedSession,
   rememberProjectModelSelection,
   reconnectSync,
@@ -182,6 +183,7 @@ const modelIdentityMatches = (
 
 type NewSessionTarget =
   | { kind: "main" }
+  | { kind: "new-worktree"; base?: string }
   | { kind: "worktree"; path: string }
   /** Check the branch out in a fresh linked worktree. `base` is set for a
    *  remote-only branch — the new local branch starts from that remote ref. */
@@ -213,6 +215,8 @@ function useComposerLocation(session: SessionProjection | null): {
   const [worktrees, setWorktrees] = useState<Worktree[]>([]);
   const [branches, setBranches] = useState<GitBranches>({ current: "", branches: [] });
   const [branchLoading, setBranchLoading] = useState(false);
+  const [branchRefreshing, setBranchRefreshing] = useState(false);
+  const branchRefreshRunRef = useRef(0);
   const [selectedBranchId, setSelectedBranchId] = useState(
     intendedWorktree ? `worktree:${intendedWorktree}` : "main",
   );
@@ -226,6 +230,8 @@ function useComposerLocation(session: SessionProjection | null): {
 
   useEffect(() => {
     let active = true;
+    branchRefreshRunRef.current += 1;
+    setBranchRefreshing(false);
     setSelectedBranchId(intendedWorktree ? `worktree:${intendedWorktree}` : "main");
     setWorkInIsolation(false);
     const sessionId = session?.id;
@@ -234,7 +240,10 @@ function useComposerLocation(session: SessionProjection | null): {
     if (session || !projectId) {
       setWorktrees([]);
       setBranches({ current: "", branches: [] });
-      return () => { active = false; };
+      return () => {
+        active = false;
+        branchRefreshRunRef.current += 1;
+      };
     }
     setBranchLoading(true);
     void Promise.all([api.listWorktrees(projectId), api.gitBranches(projectId, sessionId)])
@@ -260,15 +269,20 @@ function useComposerLocation(session: SessionProjection | null): {
       .finally(() => {
         if (active) setBranchLoading(false);
       });
-    return () => { active = false; };
+    return () => {
+      active = false;
+      branchRefreshRunRef.current += 1;
+    };
   }, [projectId, session?.id, session?.worktreePath, session?.branch, newSessionIntent?.worktreePath, branch, worktreeTopology]);
 
   // Fired when the branch picker opens: fetch the remote (best effort) and
   // re-read the branch list so server-only branches become selectable. Runs
   // at most once per project so reopening the picker stays instant.
-  const refreshBranchesFromRemote = useCallback(() => {
-    if (session || !projectId || remoteFetchedRef.current === projectId) return;
+  const refreshBranchesFromRemote = useCallback((force = false) => {
+    if (session || !projectId || branchRefreshing || (!force && remoteFetchedRef.current === projectId)) return;
+    const run = ++branchRefreshRunRef.current;
     remoteFetchedRef.current = projectId;
+    setBranchRefreshing(true);
     void (async () => {
       try {
         await api.gitFetch(projectId).catch(() => undefined);
@@ -276,14 +290,17 @@ function useComposerLocation(session: SessionProjection | null): {
           api.listWorktrees(projectId),
           api.gitBranches(projectId),
         ]);
+        if (branchRefreshRunRef.current !== run) return;
         setWorktrees(nextWorktrees.filter((worktree) => !isManagedIsolationBranch(worktree.branch)));
         setBranches(nextBranches);
       } catch {
         // A failed refresh leaves the already-loaded local branches in place.
-        remoteFetchedRef.current = null;
+        if (branchRefreshRunRef.current === run) remoteFetchedRef.current = null;
+      } finally {
+        if (branchRefreshRunRef.current === run) setBranchRefreshing(false);
       }
     })();
-  }, [projectId, session]);
+  }, [branchRefreshing, projectId, session]);
 
   const currentBranchName = worktrees.find((worktree) => worktree.isMain)?.branch
     || branches.current
@@ -334,12 +351,20 @@ function useComposerLocation(session: SessionProjection | null): {
       return choices;
     }
 
-    const choices: LocationChoice[] = [{
-      id: "main",
-      label: currentBranchName || tr("composer.mainWorkspace"),
-      detail: tr("composer.mainWorkspace"),
-      target: { kind: "main" },
-    }];
+    const choices: LocationChoice[] = [
+      {
+        id: "new-worktree",
+        label: tr("gitview.newWorktree"),
+        detail: currentBranchName || tr("composer.openInANewWorktree"),
+        target: { kind: "new-worktree", ...(currentBranchName ? { base: currentBranchName } : {}) },
+      },
+      {
+        id: "main",
+        label: currentBranchName || tr("composer.mainWorkspace"),
+        detail: tr("composer.mainWorkspace"),
+        target: { kind: "main" },
+      },
+    ];
     for (const worktree of worktrees.filter((candidate) => !candidate.isMain)) {
       choices.push({
         id: `worktree:${worktree.path}`,
@@ -450,6 +475,8 @@ function useComposerLocation(session: SessionProjection | null): {
       ...(branchLoading ? { branchLoading: true } : {}),
       onPickBranch: pickBranch,
       onBranchPickerOpen: refreshBranchesFromRemote,
+      onRefreshBranches: () => refreshBranchesFromRemote(true),
+      branchRefreshing,
       workInIsolation,
       onToggleWorkInIsolation: toggleWorkInIsolation,
       isolationDisabled: !projectId || !currentBranchName || branchLoading,
@@ -1563,6 +1590,13 @@ export default function Composer({
             : newSessionIntent?.worktreePath;
           if (newSessionTarget.kind === "worktree") {
             worktreePath = newSessionTarget.path;
+          } else if (newSessionTarget.kind === "new-worktree") {
+            worktreePath = await createDefaultWorktree(
+              activeProjectId,
+              undefined,
+              newSessionTarget.base,
+            );
+            assertScopeStillCurrent();
           } else if (newSessionTarget.kind === "branch") {
             worktreePath = (await api.createWorktree(
               activeProjectId,
