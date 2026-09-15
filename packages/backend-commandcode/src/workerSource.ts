@@ -37,7 +37,7 @@ const runtimeRejected = (message) => Object.assign(new Error(message), { code: "
 const outcomeUnknown = (message) => Object.assign(new Error(message), { code: "outcome-unknown" });
 const windowsShim = (value) => process.platform === "win32" && /\\.(?:cmd|bat)$/i.test(value);
 
-const readTurnAdmission = async (path, operationId) => {
+const readTurnAdmission = async (path, operationId, mutationKind = "turn-submit") => {
   try {
     const value = JSON.parse(await readFile(path, "utf8"));
     const nativeSessionId = typeof value?.nativeSessionId === "string" && value.nativeSessionId
@@ -45,8 +45,8 @@ const readTurnAdmission = async (path, operationId) => {
       : undefined;
     if (!nativeSessionId || !operationId) return undefined;
     const accepted = Array.isArray(value?.acceptedMutations)
-      ? value.acceptedMutations.some((entry) => entry?.operationId === operationId && entry?.mutationKind === "turn-submit")
-      : Array.isArray(value?.acceptedOperations)
+      ? value.acceptedMutations.some((entry) => entry?.operationId === operationId && entry?.mutationKind === mutationKind)
+      : mutationKind === "turn-submit" && Array.isArray(value?.acceptedOperations)
         ? value.acceptedOperations.includes(operationId)
         : false;
     return accepted ? { nativeSessionId } : undefined;
@@ -55,10 +55,10 @@ const readTurnAdmission = async (path, operationId) => {
   }
 };
 
-const waitForTurnAdmission = async (path, turn, expected, operationId) => {
+const waitForTurnAdmission = async (path, turn, expected, operationId, mutationKind = "turn-submit") => {
   const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
-    const admission = await readTurnAdmission(path, operationId);
+    const admission = await readTurnAdmission(path, operationId, mutationKind);
     if (admission) {
       if (expected && admission.nativeSessionId !== expected) {
         throw new Error("Command Code resumed a different native session");
@@ -66,11 +66,11 @@ const waitForTurnAdmission = async (path, turn, expected, operationId) => {
       return admission.nativeSessionId;
     }
     if (turn.child.exitCode !== null || turn.child.signalCode) {
-      throw new Error("Command Code exited before native turn admission");
+      throw new Error("Command Code exited before native operation admission");
     }
     await sleep(20);
   }
-  throw new Error("Command Code did not persist the exact turn admission receipt before timeout");
+  throw new Error("Command Code did not persist the exact native operation receipt before timeout");
 };
 
 const parseOutput = (turn, chunk) => {
@@ -387,7 +387,7 @@ const attachToolRelay = (turn) => {
   return failRelay;
 };
 
-const preAdmissionMessage = (stderr) => {
+const preAdmissionMessage = (stderr, controlAction) => {
   const detail = safeError(stderr);
   if (/untrusted|workspace.{0,20}trust|trust.{0,20}workspace/i.test(detail)) {
     return "Command Code requires this workspace to be trusted. Open Command Code in this workspace, approve trust, then retry in Polyth";
@@ -395,15 +395,19 @@ const preAdmissionMessage = (stderr) => {
   if (/not authenticated|sign.?in|log.?in|authentication required/i.test(detail)) {
     return "Command Code authentication is required. Sign in with Command Code, then retry in Polyth";
   }
+  const operation = controlAction === "compact" ? "compaction" : "turn";
   return detail
-    ? "Command Code rejected the turn before native admission: " + detail
-    : "Command Code rejected the turn before native admission";
+    ? "Command Code rejected the " + operation + " before native admission: " + detail
+    : "Command Code rejected the " + operation + " before native admission";
 };
 
 const startTurn = async (message) => {
   if (active) throw Object.assign(new Error("Command Code is already processing a turn"), { code: "busy" });
-  const toolBridge = validToolBridge(message.toolBridge);
-  if (message.toolBridge && !toolBridge) throw runtimeRejected("Command Code received an invalid Polyth tool bridge");
+  const compactControl = message.controlAction === "compact";
+  if (message.controlAction && !compactControl) throw runtimeRejected("Command Code received an unsupported native session control");
+  if (compactControl && !message.nativeSessionId) throw runtimeRejected("Command Code compaction requires an exact native session id");
+  const toolBridge = compactControl ? undefined : validToolBridge(message.toolBridge);
+  if (!compactControl && message.toolBridge && !toolBridge) throw runtimeRejected("Command Code received an invalid Polyth tool bridge");
   const args = [
     "-p",
     "--output-format", "json",
@@ -412,21 +416,21 @@ const startTurn = async (message) => {
     "--tools-enable", "todo_write,ask_user_question",
     "--mod", bridgePath,
   ];
-  if (typeof message.capabilityModPath === "string" && message.capabilityModPath.trim()) {
+  if (!compactControl && typeof message.capabilityModPath === "string" && message.capabilityModPath.trim()) {
     args.push("--mod", message.capabilityModPath);
   }
-  if (typeof message.toolModPath === "string" && message.toolModPath.trim() && toolBridge) {
+  if (!compactControl && typeof message.toolModPath === "string" && message.toolModPath.trim() && toolBridge) {
     args.push("--mod", message.toolModPath);
   }
-  if (Array.isArray(message.skillRoots)) {
+  if (!compactControl && Array.isArray(message.skillRoots)) {
     for (const root of message.skillRoots.slice(0, 64)) {
       if (typeof root === "string" && root.trim()) args.push("--skill", root);
     }
   }
   if (message.nativeSessionId) args.push("--resume", message.nativeSessionId);
-  if (message.model) args.push("--model", message.model);
-  if (message.effort) args.push("--effort", message.effort);
-  const permissionMode = message.permissionMode === "auto-accept" ? "auto-accept" : "dont-ask";
+  if (!compactControl && message.model) args.push("--model", message.model);
+  if (!compactControl && message.effort) args.push("--effort", message.effort);
+  const permissionMode = !compactControl && message.permissionMode === "auto-accept" ? "auto-accept" : "dont-ask";
   args.push("--permission-mode", permissionMode);
   const controlPath = String(message.bindingPath) + ".control." + randomUUID() + ".json";
   const controlToken = randomUUID() + randomUUID();
@@ -437,10 +441,11 @@ const startTurn = async (message) => {
     // Polyth owns the canonical title. Every exact resume receives the latest
     // title seen by the session service, so manual renames converge natively
     // without transcript/config scraping.
-    POLYTH_COMMANDCODE_TITLE: message.title || "",
+    POLYTH_COMMANDCODE_TITLE: compactControl ? "" : message.title || "",
     POLYTH_COMMANDCODE_OPERATION_ID: message.operationId,
     POLYTH_COMMANDCODE_CONTROL_FILE: controlPath,
     POLYTH_COMMANDCODE_CONTROL_TOKEN: controlToken,
+    POLYTH_COMMANDCODE_CONTROL_ACTION: compactControl ? "compact" : "",
   };
   const child = spawn(command, args, {
     cwd: message.cwd,
@@ -456,6 +461,8 @@ const startTurn = async (message) => {
     toolBridge,
     operationId: message.operationId,
     bindingPath: message.bindingPath,
+    mutationKind: compactControl ? "session-compact" : "turn-submit",
+    controlAction: compactControl ? "compact" : undefined,
     stdout: Buffer.alloc(0),
     stderr: "",
     runObserved: false,
@@ -466,7 +473,7 @@ const startTurn = async (message) => {
   };
   active = turn;
   turn.closeToolRelay = attachToolRelay(turn);
-  send({ type: "turn-spawned", operationId: turn.operationId });
+  send({ type: "turn-spawned", operationId: turn.operationId, ...(turn.controlAction ? { controlAction: turn.controlAction } : {}) });
   child.stdout.on("data", (chunk) => {
     try { parseOutput(turn, chunk); }
     catch (error) {
@@ -485,31 +492,42 @@ const startTurn = async (message) => {
     turn.closeToolRelay();
     void rm(controlPath, { force: true }).catch(() => undefined);
     if (active === turn) active = null;
-    void readTurnAdmission(turn.bindingPath, turn.operationId).then((admission) => {
+    void readTurnAdmission(turn.bindingPath, turn.operationId, turn.mutationKind).then((admission) => {
       // A process that died before run_start AND before the exact admission
       // receipt is a proven non-application. Do not manufacture a terminal
       // canonical turn event for it. Once either proof exists, the outcome can
       // no longer be silently downgraded to rejection.
       if (admission || turn.runObserved) {
-        send({ type: "turn-exit", operationId: turn.operationId, code, signal, stderr: safeError(turn.stderr) });
+        send({
+          type: "turn-exit",
+          operationId: turn.operationId,
+          code,
+          signal,
+          stderr: safeError(turn.stderr),
+          ...(turn.controlAction ? { controlAction: turn.controlAction } : {}),
+        });
       }
     });
   });
-  child.stdin.end(String(message.text || ""));
+  const submittedText = compactControl
+    ? "__POLYTH_COMMANDCODE_COMPACT__:" + String(message.operationId || "")
+    : String(message.text || "");
+  child.stdin.end(submittedText);
   try {
     const nativeSessionId = await waitForTurnAdmission(
       message.bindingPath,
       turn,
       message.nativeSessionId,
       message.operationId,
+      turn.mutationKind,
     );
     return { nativeSessionId };
   } catch (error) {
     if (child.exitCode === null && !child.signalCode) child.kill("SIGTERM");
     await turn.closed.catch(() => undefined);
-    const durableAdmission = await readTurnAdmission(message.bindingPath, message.operationId);
+    const durableAdmission = await readTurnAdmission(message.bindingPath, message.operationId, turn.mutationKind);
     if (!turn.runObserved && !durableAdmission) {
-      throw runtimeRejected(preAdmissionMessage(turn.stderr));
+      throw runtimeRejected(preAdmissionMessage(turn.stderr, turn.controlAction));
     }
     throw outcomeUnknown(error instanceof Error ? error.message : String(error));
   }
@@ -523,13 +541,13 @@ const handle = async (message) => {
     if (message.type === "start_turn") return response(id, true, await startTurn(message));
     if (message.type === "steer") {
       const turn = active;
-      if (!turn) throw runtimeRejected("Command Code has no active turn to steer");
+      if (!turn || turn.controlAction) throw runtimeRejected("Command Code has no active turn to steer");
       await deliverQueuedMessage(turn, String(message.text || ""), "steer", String(message.operationId || ""));
       return response(id, true, {});
     }
     if (message.type === "answer_question") {
       const turn = active;
-      if (!turn) throw runtimeRejected("Command Code has no active question to answer");
+      if (!turn || turn.controlAction) throw runtimeRejected("Command Code has no active question to answer");
       await deliverQuestionAnswer(
         turn,
         String(message.requestId || ""),
