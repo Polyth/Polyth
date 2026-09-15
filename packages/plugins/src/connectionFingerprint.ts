@@ -38,7 +38,24 @@ export function connectionSecurityView(spec: PackageConnectionContribution): Pac
   };
 }
 
-/** Browser-safe review rows. Approved unchanged connections are omitted.
+/** Review rows for the currently installed version (initial enable/re-enable).
+ * A matching approved fingerprint is already safe and is omitted; otherwise
+ * there is no prior active security definition to show, so the row is new. */
+export function currentConnectionReviewItems(
+  specs: readonly PackageConnectionContribution[],
+  approved: Record<string, string>,
+): PackageConnectionReviewDto[] {
+  return specs.flatMap((spec) => approved[spec.id] === connectionFingerprint(spec)
+    ? []
+    : [{
+        id: spec.id,
+        label: spec.label,
+        kind: "new" as const,
+        next: connectionSecurityView(spec),
+      }]);
+}
+
+/** Browser-safe update review rows. Approved unchanged connections are omitted.
  * A target id absent from the active manifest is always new, even if stale
  * approval bytes for that id somehow survived an older version. */
 export function connectionReviewItems(
