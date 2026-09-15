@@ -106,6 +106,30 @@ export function approveConnectionDefinitions(
   return fingerprints;
 }
 
+/** Forget approvals for declarations removed by an activated package version.
+ * This is deliberately destructive: if a later version reuses an id, the
+ * connection is treated as new and must be reviewed again. */
+export function retireConnectionApprovals(
+  storage: SpaceStorage,
+  packageId: string,
+  connectionIds: readonly string[],
+): void {
+  if (connectionIds.length === 0) return;
+  const state = loadGrantState(storage, packageId);
+  const fingerprints = { ...(state.connectionFingerprints ?? {}) };
+  let changed = false;
+  for (const id of connectionIds) {
+    if (!(id in fingerprints)) continue;
+    delete fingerprints[id];
+    changed = true;
+  }
+  if (!changed) return;
+  saveGrantState(storage, packageId, {
+    grants: state.grants ?? [],
+    connectionFingerprints: fingerprints,
+  });
+}
+
 export function connectionReviewRequired(
   storage: SpaceStorage,
   packageId: string,
