@@ -2053,6 +2053,9 @@ export async function boot(opts: BootOptions = {}) {
   // --- session service composition. Package-owned dependencies come from the
   // registry; optional seams degrade honestly when a package failed to load.
   const gitService = svc<TrackWorkflowDeps["git"]>("git");
+  const temporaryWorktreeBranches = svc<{
+    renameForSessionTitle(sessionId: string, title: string): Promise<string | null>;
+  }>("git.temporary-worktree-branches");
   const terminalService = svc<TrackWorkflowDeps["terminals"]>("terminal");
   const commandService = svc<CommandExpandService>("commands");
   // Attachment preparation seam (stat + `_inbox/*` materialize). Optional: if
@@ -2263,6 +2266,9 @@ export async function boot(opts: BootOptions = {}) {
         }
       },
       onUsage: (sessionId, tokens) => goalService()?.recordUsage(sessionId, { ...tokens, cacheRead: 0, cacheWrite: 0 }),
+      onSessionTitleChanged: async (sessionId, title) => {
+        await temporaryWorktreeBranches?.renameForSessionTitle(sessionId, title);
+      },
     },
   });
   requestAgentToolPermission = sessions.requestAgentToolPermission.bind(sessions);

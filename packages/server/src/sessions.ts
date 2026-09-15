@@ -357,6 +357,9 @@ export interface OrgStore {
 export interface TurnHooks {
   onTurnCompleted?(sessionId: string, assistantText: string): void;
   onUsage?(sessionId: string, tokens: { input: number; output: number; reasoning?: number }): void;
+  /** Observe an accepted semantic title. Feature services may use this to
+   * settle temporary presentation or workspace metadata after work starts. */
+  onSessionTitleChanged?(sessionId: string, title: string, source: "runtime" | "fallback"): void | Promise<void>;
   /** Decorate the next admitted turn after compaction. The returned context is
    *  persisted on user/message before it is sent to the runtime. */
   beforeTurn?(
@@ -2354,6 +2357,8 @@ export function createSessionService(deps: {
     });
     autoTitleRequested.delete(sessionId);
     autoTitlePrompt.delete(sessionId);
+    void Promise.resolve(hooks.onSessionTitleChanged?.(sessionId, fallback, "fallback"))
+      .catch((error) => console.error("[polyth] session title follow-up failed", error));
   }
 
   const cachedCapabilities = async (runtime: AgentRuntime): Promise<RuntimeCapabilities> => {
@@ -2946,6 +2951,8 @@ export function createSessionService(deps: {
             autoTitleRequested.delete(sessionId);
             autoTitlePrompt.delete(sessionId);
             clearTitleFallbackTimer(sessionId);
+            void Promise.resolve(hooks.onSessionTitleChanged?.(sessionId, title, "runtime"))
+              .catch((error) => console.error("[polyth] session title follow-up failed", error));
           }
         }
         break;
@@ -7953,6 +7960,35 @@ export function createSessionService(deps: {
         await store.upsertProjection(next);
         publishProjection(next);
       }
+    },
+
+    async renameWorktreeBranch(sessionId, input) {
+      return withSessionLock(sessionId, async () => {
+        const current = await store.projection(sessionId);
+        if (!current) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        if (!current.worktreePath || resolve(current.worktreePath) !== resolve(input.worktreePath)) {
+          throw Object.assign(new Error("session worktree changed before branch rename"), { code: "conflict" });
+        }
+        if (current.branch === input.to) return current;
+        if (current.branch !== input.from) {
+          throw Object.assign(new Error("session branch changed before branch rename"), { code: "conflict" });
+        }
+        if (!input.to.trim() || input.to.length > 200) {
+          throw Object.assign(new Error("renamed branch is invalid"), { code: "invalid-input" });
+        }
+        await appendAndBroadcast(sessionId, "session/worktree-branch-renamed", {
+          worktreePath: current.worktreePath,
+          from: input.from,
+          to: input.to,
+        }, { ignorable: true, producerPlugin: "git" });
+        const updated = await applyProjection(sessionId, (projection) => ({
+          ...projection,
+          branch: input.to,
+          updatedAt: Date.now(),
+        }));
+        if (!updated) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        return updated;
+      });
     },
 
     async patchIsolation(sessionId, isolation) {

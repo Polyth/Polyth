@@ -123,6 +123,41 @@ test("rename validates and appends session/metadata-changed before projection", 
   await assert.rejects(() => sessions.rename!("nope", "x"), /not found/);
 });
 
+test("verified in-place worktree branch rename persists before projection", async () => {
+  const worktreePath = "/repo-worktrees/temp-red-panther";
+  const { sessions, store } = makeService({
+    worktrees: {
+      list: async () => [
+        { path: worktreePath, branch: "temp/red-panther-4821" },
+      ],
+    },
+  });
+  const { id } = await sessions.create({ projectId: "p1", worktreePath });
+
+  await sessions.renameWorktreeBranch!(id, {
+    worktreePath,
+    from: "temp/red-panther-4821",
+    to: "feat/branch-picker",
+  });
+
+  assert.equal((await sessions.snapshot(id)).branch, "feat/branch-picker");
+  const renamed = (await store.events(id)).find((event) => event.type === "session/worktree-branch-renamed");
+  assert.deepEqual(renamed?.data, {
+    worktreePath,
+    from: "temp/red-panther-4821",
+    to: "feat/branch-picker",
+  });
+  await assert.rejects(
+    () => sessions.renameWorktreeBranch!(id, {
+      worktreePath: "/different",
+      from: "feat/branch-picker",
+      to: "feat/other",
+    }),
+    /worktree changed/,
+  );
+  await store.close();
+});
+
 test("draft CAS preserves the authoritative projection on a stale writer", async () => {
   const { sessions, store } = makeService();
   try {
