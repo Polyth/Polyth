@@ -28,6 +28,7 @@ import {
 import { registerGitHandoffSources } from "./handoffSources.ts";
 import { createWorktreeTopologyWatch } from "./worktreeTopology.ts";
 import { createIsolationService, type IsolationService } from "./sessionIntegration.ts";
+import { createTemporaryWorktreeBranchService, type TemporaryWorktreeBranchService } from "./temporaryWorktreeBranches.ts";
 
 const COMMIT_PROMPT_VERSION = 2;
 const COMMIT_OUTPUT_TOKENS = 120;
@@ -530,6 +531,7 @@ export function gitRoutes(deps: {
           branch,
           ...(input.path ? { path: String(input.path) } : {}),
           ...(input.base ? { base: String(input.base) } : {}),
+          ...(input.newBranchOnly === true ? { newBranchOnly: true } : {}),
         });
         // Git has accepted the topology change and the checkout is complete —
         // `worktree add` does not return until it is. Announce before
@@ -702,6 +704,15 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   // walkthrough capture — published at load time under the well-known key.
   const git = createGitService();
   host.services.provide(serverServiceKey<GitService>("git"), git);
+  host.services.provide(
+    serverServiceKey<TemporaryWorktreeBranchService>("git.temporary-worktree-branches"),
+    createTemporaryWorktreeBranchService({
+      git,
+      projects: host.projects,
+      sessions: host.sessions,
+      worktreesChanged: (projectId) => host.broadcast.worktreesChanged?.(projectId),
+    }),
+  );
   let routes: RouteHandler | null = null;
   return {
     remoteAccess: GIT_REMOTE_ACCESS,

@@ -6,7 +6,8 @@
     ".": "./src/root.ts",
     "./web-api": "./src/webApiAccountScoped.ts",
     "./next-action": "./src/nextAction.ts",
-    "./queue-pause": "./src/queuePause.ts"
+    "./queue-pause": "./src/queuePause.ts",
+    "./worktree-names": "./src/worktreeNames.ts"
   },
   "dependencies": {
     "@polyth/contracts": "0.1.0",

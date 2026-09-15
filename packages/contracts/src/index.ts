@@ -1677,6 +1677,13 @@ export interface SessionService {
   organize?(sessionId: string, patch: SessionOrganizePatch): Promise<void>;
   /** Projection-only reconciliation after a linked worktree is removed. */
   markWorktreeMissing?(projectId: string, worktreePath: string): Promise<void>;
+  /** Record a verified in-place branch rename without resetting the runtime:
+   * the checkout path and execution authority are unchanged. */
+  renameWorktreeBranch?(sessionId: string, input: {
+    worktreePath: string;
+    from: string;
+    to: string;
+  }): Promise<SessionProjection>;
   /** Persist isolation metadata without changing runtime cwd. */
   patchIsolation?(sessionId: string, isolation: SessionIsolation | null): Promise<SessionProjection>;
   /**

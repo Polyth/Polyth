@@ -1085,8 +1085,11 @@ export const api = {
       jfetch<Worktree[]>(`/api/worktrees?projectId=${encodeURIComponent(projectId)}${options?.status ? "&status=1" : ""}`),
       [],
     ),
-  createWorktree: (projectId: string, branch: string, wtPath?: string, base?: string) =>
-    jfetch<Worktree>(`/api/worktrees`, json("POST", { projectId, branch, path: wtPath, base })),
+  createWorktree: (projectId: string, branch: string, wtPath?: string, base?: string, newBranchOnly?: boolean) =>
+    jfetch<Worktree>(`/api/worktrees`, json("POST", {
+      projectId, branch, path: wtPath, base,
+      ...(newBranchOnly ? { newBranchOnly: true } : {}),
+    })),
   /** Rejects with code `worktree-dirty` when uncommitted changes would be lost; pass `force` after the user confirms.
    *  `ok: true` means Git removal (or an already-absent worktree) succeeded. `metadataCleanupFailed` /
    *  `branchCleanupFailed` are follow-up warnings: session rows may still need `worktreeState: missing`
