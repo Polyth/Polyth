@@ -9,6 +9,7 @@ export interface PromptPrefixContributorDiagnostic {
 export interface PromptPrefixDiagnostics {
   version: 1;
   coverage: "polyth-capability-prefix";
+  harnessId?: string;
   identity: string;
   bundleRevision: string;
   contributorCount: number;
