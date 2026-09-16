@@ -60,7 +60,7 @@ const text = (body: Record<string, unknown>, key: string): string => {
 const statusFor: Readonly<Record<string, number>> = {
   unauthorized: 401, 'invalid-credentials': 401, 'invalid-claim': 401,
   forbidden: 403, 'wrong-origin': 403, 'insecure-transport': 403, 'reauth-required': 403, 'managed-identity': 403,
-  'not-found': 404, conflict: 409, 'last-owner': 409, 'invalid-transition': 409, 'setup-completed': 409,
+  'not-found': 404, conflict: 409, 'last-owner': 409, 'last-auth-method': 409, 'invalid-transition': 409, 'setup-completed': 409,
   'invalid-input': 400, 'request-timeout': 408, 'recovery-ack-required': 400, 'body-too-large': 413, 'rate-limited': 429,
   'recovery-required': 503, unavailable: 503,
 };
@@ -126,6 +126,7 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
           if (path === '/api/auth/accounts') send(200, { currentAccountId: actor.userId, accounts: [identity.accounts.current(token!)] });
           else if (path === '/api/auth/sessions') send(200, { sessions: identity.sessions.list(token!) });
           else if (path === '/api/auth/me') send(200, identity.accounts.current(token!));
+          else if (path === '/api/auth/passkeys') send(200, { passkeys: identity.passkeys.list(token!) });
           else throw controlError('not-found', 'Authentication route not found');
           return true;
         }
@@ -153,6 +154,15 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
           issued(result);
         } else if (req.method === 'POST' && path === '/api/auth/login') {
           issued(await identity.credentials.login({ login: text(body, 'login'), password: text(body, 'password'), address: req.socket.remoteAddress, label: req.headers['user-agent'] }));
+        } else if (req.method === 'POST' && path === '/api/auth/passkeys/authenticate/options') {
+          send(200, identity.passkeys.beginAuthentication());
+        } else if (req.method === 'POST' && path === '/api/auth/passkeys/authenticate/complete') {
+          issued(identity.passkeys.completeAuthentication({
+            credentialId: text(body, 'credentialId'), clientDataJSON: text(body, 'clientDataJSON'),
+            authenticatorData: text(body, 'authenticatorData'), signature: text(body, 'signature'),
+            userHandle: body.userHandle === null || typeof body.userHandle === 'string' ? body.userHandle : undefined,
+            label: req.headers['user-agent'],
+          }));
         } else if (req.method === 'POST' && path === '/api/auth/recover') {
           await identity.credentials.recover({ login: text(body, 'login'), code: text(body, 'code'), password: text(body, 'password'), address: req.socket.remoteAddress });
           res.setHeader('Set-Cookie', cookie(cookieName, '', 0)); send(200, { ok: true });
@@ -166,6 +176,16 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
             await identity.credentials.reauthenticate(token!, text(body, 'password'), req.socket.remoteAddress); send(200, { ok: true });
           } else if (req.method === 'POST' && path === '/api/auth/password') {
             await identity.credentials.changePassword(token!, text(body, 'password')); res.setHeader('Set-Cookie', cookie(cookieName, '', 0)); send(200, { ok: true });
+          } else if (req.method === 'POST' && path === '/api/auth/passkeys/register/options') {
+            send(200, identity.passkeys.beginRegistration(token!, text(body, 'name')));
+          } else if (req.method === 'POST' && path === '/api/auth/passkeys/register/complete') {
+            send(200, identity.passkeys.completeRegistration(token!, {
+              name: text(body, 'name'), clientDataJSON: text(body, 'clientDataJSON'),
+              attestationObject: text(body, 'attestationObject'),
+              ...(typeof body.credentialId === 'string' ? { credentialId: body.credentialId } : {}),
+            }));
+          } else if (req.method === 'DELETE' && /^\/api\/auth\/passkeys\/pky_[a-f0-9-]{36}$/.test(path)) {
+            identity.passkeys.remove(token!, path.slice('/api/auth/passkeys/'.length), body.expectedRevision as number); send(200, { ok: true });
           } else if (req.method === 'DELETE' && /^\/api\/auth\/sessions\/ses_[a-f0-9-]{36}$/.test(path)) {
             identity.sessions.revoke(token!, path.slice('/api/auth/sessions/'.length), body.expectedRevision as number); send(200, { ok: true });
           } else throw controlError('not-found', 'Authentication route not found');

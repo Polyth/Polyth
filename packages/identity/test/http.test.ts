@@ -5,9 +5,10 @@ import { once } from 'node:events';
 import { WebSocket, WebSocketServer } from 'ws';
 import { createIdentityHttpAdapter } from '../src/http.ts';
 import { fixture } from './fixtures.ts';
+import { authenticator } from './webauthnTestkit.ts';
 
 async function httpFixture(t: TestContext, useSecureOrigin = false) {
-  const f = fixture(t);
+  let f!: ReturnType<typeof fixture>;
   let adapter: ReturnType<typeof createIdentityHttpAdapter>;
   const server = createServer((req, res) => {
     void (async () => {
@@ -19,7 +20,9 @@ async function httpFixture(t: TestContext, useSecureOrigin = false) {
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const address = server.address(); assert.ok(address && typeof address === 'object');
   const origin = `http://127.0.0.1:${address.port}`;
-  adapter = createIdentityHttpAdapter(f.identity, { origin: useSecureOrigin ? origin.replace('http:', 'https:') : origin, localOnly: !useSecureOrigin });
+  const identityOrigin = useSecureOrigin ? origin.replace('http:', 'https:') : origin;
+  f = fixture(t, { webauthn: { origin: identityOrigin } });
+  adapter = createIdentityHttpAdapter(f.identity, { origin: identityOrigin, localOnly: !useSecureOrigin });
   const sockets = new WebSocketServer({ noServer: true });
   server.on('upgrade', (req, socket, head) => {
     try { adapter.authorizeUpgrade(req); }
@@ -146,4 +149,43 @@ test('HTTP parser rejects oversized and non-object JSON without leaking submitte
   assert.equal(tooBig.status, 413); assert.deepEqual(tooBig.value, { error: 'body-too-large' });
   const invalid = await b.request('/api/auth/login', []);
   assert.equal(invalid.status, 400);
+});
+
+test('HTTP passkey flow is same-origin/CSRF bound, replay-safe, and preserves the last sign-in method', async t => {
+  const f = await httpFixture(t), b = f.browser();
+  await f.setup(b);
+  const rpId = new URL(f.origin).hostname;
+  const key = authenticator(t, rpId);
+
+  assert.equal((await b.request('/api/auth/passkeys/register/options', { name: 'Browser key' }, { 'x-polyth-csrf': '' })).status, 403);
+  const options = await b.request('/api/auth/passkeys/register/options', { name: 'Browser key' });
+  assert.equal(options.status, 200);
+  assert.equal(options.value.rp.id, rpId);
+  const registered = await b.request('/api/auth/passkeys/register/complete', {
+    name: 'Browser key', ...key.registration(options.value.challenge, f.origin),
+  });
+  assert.equal(registered.status, 200);
+  assert.match(registered.value.id, /^pky_/);
+  assert.equal((await b.request('/api/auth/passkeys')).value.passkeys.length, 1);
+
+  await b.request('/api/auth/logout', {});
+  assert.equal((await b.request('/api/auth/passkeys/register/options', { name: 'No session' })).status, 401);
+
+  const authOptions = await b.request('/api/auth/passkeys/authenticate/options', {});
+  assert.equal(authOptions.status, 200);
+  const assertion = key.assertion(authOptions.value.challenge, 1, f.origin);
+  const login = await b.request('/api/auth/passkeys/authenticate/complete', assertion);
+  assert.equal(login.status, 200);
+  assert.equal((await b.request('/api/auth/me')).status, 200);
+  assert.equal((await b.request('/api/auth/passkeys/authenticate/complete', assertion)).status, 401);
+
+  // Simulate an account whose passkey is now the only usable sign-in method.
+  const me = await b.request('/api/auth/me');
+  f.control.transaction(() => f.control.run('DELETE FROM password_credentials WHERE user_id=?', me.value.id));
+  const list = await b.request('/api/auth/passkeys');
+  const passkey = list.value.passkeys[0];
+  const denied = await b.request(`/api/auth/passkeys/${passkey.id}`, { expectedRevision: passkey.revision }, {}, 'DELETE');
+  assert.equal(denied.status, 409);
+  assert.deepEqual(denied.value, { error: 'last-auth-method' });
+  assert.equal((await b.request('/api/auth/passkeys')).value.passkeys.length, 1);
 });
