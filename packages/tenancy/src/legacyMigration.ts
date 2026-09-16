@@ -44,7 +44,7 @@ export type LegacyOwnershipProofKind =
   | "project-space-owner";
 
 export interface LegacyOwnershipProof {
-  resourceKind: "user" | "space" | "project" | "session" | "agent-profile";
+  resourceKind: "user" | "space" | "project" | "session" | "label" | "agent-profile";
   resourceId: string;
   ownerUserId: string;
   source: LegacySourceKind;
@@ -52,7 +52,7 @@ export interface LegacyOwnershipProof {
 }
 
 export interface LegacyPlannedAdoption {
-  kind: "user-alias" | "project" | "session" | "agent-profile";
+  kind: "user-alias" | "project" | "session" | "label" | "agent-profile";
   resourceId: string;
   ownerUserId: string;
   source: LegacySourceKind;
@@ -180,9 +180,14 @@ function inspectSqlite(
   issues: LegacyMigrationIssue[],
 ): {
   sessions: Array<{ id: string; projectId?: string; spaceId?: string }>;
+  labels: Array<{ id: string; spaceId?: string }>;
   profileIds: string[];
 } {
-  const result = { sessions: [] as Array<{ id: string; projectId?: string; spaceId?: string }>, profileIds: [] as string[] };
+  const result = {
+    sessions: [] as Array<{ id: string; projectId?: string; spaceId?: string }>,
+    labels: [] as Array<{ id: string; spaceId?: string }>,
+    profileIds: [] as string[],
+  };
   if (!source.present) return result;
   let db: DatabaseSync | undefined;
   try {
@@ -227,6 +232,30 @@ function inspectSqlite(
           ...(nonEmpty(parsed.projectId) ? { projectId: parsed.projectId } : {}),
           ...(nonEmpty(parsed.spaceId) ? { spaceId: parsed.spaceId } : {}),
         });
+      }
+    }
+    if (tables.has("labels")) {
+      const columns = new Set(
+        (db.prepare("PRAGMA table_info(labels)").all() as Array<{ name: string }>).map((row) => row.name),
+      );
+      if (!columns.has("id") || !columns.has("space_id")) {
+        issues.push({
+          code: "unsupported-label-schema",
+          severity: "blocking",
+          source: "sessions",
+          detail: "Labels table must expose id and space_id before ownership migration",
+        });
+      } else {
+        const rows = db.prepare("SELECT id, space_id AS spaceId FROM labels ORDER BY id").all() as Array<{ id: string; spaceId: string | null }>;
+        source.counts.labels = rows.length;
+        source.counts.ownerlessLabels = rows.filter((row) => row.spaceId === null).length;
+        for (const row of rows) {
+          if (!nonEmpty(row.id)) {
+            issues.push({ code: "invalid-label-id", severity: "blocking", source: "sessions", detail: "Label row has an invalid id" });
+            continue;
+          }
+          result.labels.push({ id: row.id, ...(nonEmpty(row.spaceId) ? { spaceId: row.spaceId } : {}) });
+        }
       }
     }
     if (tables.has("agent_profiles")) {
@@ -452,6 +481,22 @@ export function inventoryLegacyMigration(opts: LegacyInventoryOptions): LegacyMi
     addOwnership({ resourceKind: "session", resourceId: session.id, ownerUserId: owner, source: "sessions", proof: project.spaceId ? "project-space-owner" : "verified-legacy-owner" });
     if (!session.spaceId) {
       addAdoption({ kind: "session", resourceId: session.id, ownerUserId: owner, source: "sessions", reason: project.spaceId ? "project-space-owner" : "verified-legacy-owner" });
+    }
+  }
+
+  for (const label of sqlite.labels) {
+    if (label.spaceId) {
+      const owner = spaceOwners.get(label.spaceId);
+      if (!owner) {
+        issues.push({ code: "label-space-without-owner", severity: "blocking", source: "sessions", resourceId: label.id, detail: `Label Space ${label.spaceId} has no proven owner` });
+        continue;
+      }
+      addOwnership({ resourceKind: "label", resourceId: label.id, ownerUserId: owner, source: "sessions", proof: "explicit-space-owner" });
+    } else if (canAdoptLegacyResources) {
+      addOwnership({ resourceKind: "label", resourceId: label.id, ownerUserId: LEGACY_OWNER_ALIAS, source: "sessions", proof: "verified-legacy-owner" });
+      addAdoption({ kind: "label", resourceId: label.id, ownerUserId: LEGACY_OWNER_ALIAS, source: "sessions", reason: "verified-legacy-owner" });
+    } else {
+      issues.push({ code: "label-owner-unproven", severity: "blocking", source: "sessions", resourceId: label.id, detail: "Legacy label has no proven Space owner" });
     }
   }
 

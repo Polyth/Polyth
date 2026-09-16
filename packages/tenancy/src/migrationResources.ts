@@ -9,10 +9,10 @@ import { inventoryLegacyMigration, LEGACY_OWNER_ALIAS } from "./legacyMigration.
 import { parseLegacyTenancyState, type TenancyFile } from "./legacyTenancy.ts";
 import { verifyMigrationStage, type MigrationStageManifest } from "./migrationStage.ts";
 
-const fail = (code: string): never => {
+function fail(code: string): never {
   throw Object.assign(new Error("Legacy resource ownership cannot be adopted safely"), { code });
-};
-const hash = (value: string): string => createHash("sha256").update(value).digest("hex");
+}
+const hash = (value: string | Buffer): string => createHash("sha256").update(value).digest("hex");
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 
 export interface ApplyLegacyResourceAdoptionsOptions {
@@ -41,8 +41,14 @@ function stageArtifact(manifest: MigrationStageManifest, kind: "tenancy" | "proj
 function readStageJson(manifest: MigrationStageManifest, stageRoot: string, kind: "tenancy" | "projects" | "profile-owners"): unknown | undefined {
   const artifact = stageArtifact(manifest, kind);
   if (artifact.status === "absent") return undefined;
-  if (artifact.status !== "copied") fail("stage-quarantined");
-  return JSON.parse(readFileSync(join(stageRoot, artifact.file), "utf8")) as unknown;
+  if (artifact.status !== "copied" || !artifact.sha256 || artifact.bytes === undefined) fail("stage-quarantined");
+  const file = join(stageRoot, artifact.file);
+  const stat = lstatSync(file);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) fail("stage-artifact-changed");
+  const bytes = readFileSync(file);
+  if (bytes.length !== artifact.bytes || hash(bytes) !== artifact.sha256) fail("stage-artifact-changed");
+  try { return JSON.parse(bytes.toString("utf8")) as unknown; }
+  catch { fail("invalid-stage-artifact"); }
 }
 function syncDirectory(path: string): void {
   const fd = openSync(path, "r");
@@ -156,35 +162,49 @@ export function applyLegacyResourceAdoptions(opts: ApplyLegacyResourceAdoptionsO
   const sessionAdoptions = new Map(
     resourceAdoptions.filter(row => row.kind === "session").map(row => [row.resourceId, row]),
   );
+  const labelAdoptions = new Map(
+    resourceAdoptions.filter(row => row.kind === "label").map(row => [row.resourceId, row]),
+  );
   const sessionsArtifact = stageArtifact(manifest, "sessions");
-  if ((sessionAdoptions.size > 0 || owners.size > 0) && sessionsArtifact.status === "copied") {
+  if ((sessionAdoptions.size > 0 || labelAdoptions.size > 0) && sessionsArtifact.status !== "copied") fail("stage-incomplete");
+  if ((sessionAdoptions.size > 0 || labelAdoptions.size > 0) && sessionsArtifact.status === "copied") {
     const sessionFile = join(dataRoot, manifest.inventory.sources.find(source => source.kind === "sessions")?.path ?? "sessions.db");
     let db: DatabaseSync | undefined;
     try {
       if (lstatSync(sessionFile).isSymbolicLink()) fail("unsafe-source-file");
       db = new DatabaseSync(sessionFile);
       db.exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA trusted_schema=OFF; BEGIN IMMEDIATE");
-      const update = db.prepare("UPDATE projections SET data=? WHERE session_id=?");
-      for (const [sessionId, adoption] of sessionAdoptions) {
-        const row = db.prepare("SELECT data FROM projections WHERE session_id=?").get(sessionId) as { data: string } | undefined;
-        if (!row) fail("migration-adoption-target-missing");
-        const projection = JSON.parse(row.data) as Record<string, unknown>;
-        const projectId = typeof projection.projectId === "string" ? projection.projectId : undefined;
-        const target = projectId ? projectSpace.get(projectId) : undefined;
-        if (!target || target !== ownerSpaces.get(adoption.ownerUserId)) fail("migration-adoption-conflict");
-        if (projection.spaceId !== undefined && projection.spaceId !== target) fail("migration-adoption-conflict");
-        if (projection.spaceId === undefined) {
-          update.run(JSON.stringify({ ...projection, spaceId: target }), sessionId);
-          sessionsAdopted++;
+      if (sessionAdoptions.size > 0) {
+        const selectSession = db.prepare("SELECT data FROM projections WHERE session_id=?");
+        const updateSession = db.prepare("UPDATE projections SET data=? WHERE session_id=?");
+        for (const [sessionId, adoption] of sessionAdoptions) {
+          const row = selectSession.get(sessionId) as { data: string } | undefined;
+          if (!row) fail("migration-adoption-target-missing");
+          const projection = JSON.parse(row.data) as Record<string, unknown>;
+          const projectId = typeof projection.projectId === "string" ? projection.projectId : undefined;
+          const target = projectId ? projectSpace.get(projectId) : undefined;
+          if (!target || target !== ownerSpaces.get(adoption.ownerUserId)) fail("migration-adoption-conflict");
+          if (projection.spaceId !== undefined && projection.spaceId !== target) fail("migration-adoption-conflict");
+          if (projection.spaceId === undefined) {
+            updateSession.run(JSON.stringify({ ...projection, spaceId: target }), sessionId);
+            sessionsAdopted++;
+          }
         }
       }
-      const hasLabels = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='labels'").get();
-      if (hasLabels) {
-        const ownerless = Number((db.prepare("SELECT count(*) AS n FROM labels WHERE space_id IS NULL").get() as { n: number | bigint }).n);
-        if (ownerless > 0) {
-          if (ownerSpaces.size !== 1) fail("migration-label-ownership-ambiguous");
-          const target = [...ownerSpaces.values()][0]!;
-          labelsAdopted = Number(db.prepare("UPDATE labels SET space_id=? WHERE space_id IS NULL").run(target).changes);
+      if (labelAdoptions.size > 0) {
+        const hasLabels = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='labels'").get();
+        if (!hasLabels) fail("migration-adoption-target-missing");
+        const select = db.prepare("SELECT space_id AS spaceId FROM labels WHERE id=?");
+        const updateLabel = db.prepare("UPDATE labels SET space_id=? WHERE id=? AND space_id IS NULL");
+        for (const [labelId, adoption] of labelAdoptions) {
+          const row = select.get(labelId) as { spaceId: string | null } | undefined;
+          const target = ownerSpaces.get(adoption.ownerUserId);
+          if (!row || !target) fail("migration-adoption-target-missing");
+          if (row.spaceId !== null && row.spaceId !== target) fail("migration-adoption-conflict");
+          if (row.spaceId === null) {
+            if (Number(updateLabel.run(target, labelId).changes) !== 1) fail("migration-adoption-conflict");
+            labelsAdopted++;
+          }
         }
       }
       db.exec("COMMIT");
@@ -194,8 +214,6 @@ export function applyLegacyResourceAdoptions(opts: ApplyLegacyResourceAdoptionsO
       try { db?.exec("ROLLBACK"); } catch { /* preserve cause */ }
       throw cause;
     } finally { try { db?.close(); } catch { /* preserve result */ } }
-  } else if (sessionAdoptions.size > 0) {
-    fail("stage-incomplete");
   }
 
   let profilesAdopted = 0;
