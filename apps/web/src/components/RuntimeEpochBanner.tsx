@@ -6,6 +6,10 @@ import { setUiError, upsertSession, useActiveModel, useStore } from "../store.ts
 import { friendlyError } from "../settings.ts";
 import { tr } from "../i18n/index.ts";
 import { runtimeDiagnosticFacts, uncertainRecoveryWarning } from "../runtimeDiagnostics.ts";
+import {
+  fetchPromptPrefixDiagnostics,
+  type PromptPrefixDiagnostics,
+} from "../promptPrefixDiagnostics.ts";
 import Button from "./ui/Button.tsx";
 
 const EMPTY_EVENTS: never[] = [];
@@ -21,15 +25,21 @@ function RuntimeRecoveryDetails({
 }) {
   const [open, setOpen] = useState(false);
   const [debug, setDebug] = useState<SessionDebugDto | null>(null);
+  const [promptPrefix, setPromptPrefix] = useState<PromptPrefixDiagnostics | null>(null);
 
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    void api.sessionDebug(sessionId).then((row) => {
-      if (!cancelled) setDebug(row.debug);
+    void Promise.all([
+      api.sessionDebug(sessionId),
+      fetchPromptPrefixDiagnostics(session.projectId, sessionId).catch(() => null),
+    ]).then(([row, prefix]) => {
+      if (cancelled) return;
+      setDebug(row.debug);
+      setPromptPrefix(prefix);
     }).catch(() => undefined);
     return () => { cancelled = true; };
-  }, [open, sessionId]);
+  }, [open, session.projectId, sessionId]);
 
   const facts = runtimeDiagnosticFacts({
     status: session.status,
@@ -37,6 +47,7 @@ function RuntimeRecoveryDetails({
     binding: session.runtimeBinding,
     events,
     debug,
+    promptPrefix,
   });
 
   return (
