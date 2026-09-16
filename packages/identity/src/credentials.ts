@@ -24,6 +24,12 @@ export function createCredentials(control: ControlPlane, passwords: PasswordServ
     if (!row) throw invalidCredentials();
     return row.login_name;
   };
+  const breakGlassReason = (value: unknown): string => {
+    if (typeof value !== 'string' || value.trim().length < 10 || value.trim().length > 500 || /[\x00-\x1f\x7f]/.test(value)) {
+      throw controlError('invalid-input', 'Break-glass reason must contain 10–500 printable characters');
+    }
+    return value.trim();
+  };
   return {
     async login(input: { login: string; password: string; address?: string; label?: string }) {
       let login: string;
@@ -72,6 +78,29 @@ export function createCredentials(control: ControlPlane, passwords: PasswordServ
       });
       // Every old session, including the caller, is invalid. Require a fresh
       // login rather than returning a cached token in a replay receipt.
+    },
+    async operatorResetPassword(input: { userId: string; password: string; installationId: string; reason: string }) {
+      const installation = control.installation();
+      if (input.installationId !== installation.id) throw controlError('forbidden', 'Installation confirmation does not match');
+      breakGlassReason(input.reason);
+      validateNewPassword(input.password);
+      const observed = control.get<{ status: string; managed: number; auth_epoch: number; password_hash: string }>(
+        `SELECT p.status,u.managed,p.auth_epoch,c.password_hash FROM principals p JOIN users u ON u.id=p.id
+         JOIN password_credentials c ON c.user_id=p.id WHERE p.id=? AND p.kind='user'`, input.userId,
+      );
+      if (!observed || observed.status !== 'active' || observed.managed) throw controlError('not-found', 'Eligible local account not found');
+      const encoded = await passwords.hash(input.password);
+      control.transaction(() => {
+        const current = control.get<{ status: string; managed: number; auth_epoch: number; password_hash: string }>(
+          `SELECT p.status,u.managed,p.auth_epoch,c.password_hash FROM principals p JOIN users u ON u.id=p.id
+           JOIN password_credentials c ON c.user_id=p.id WHERE p.id=? AND p.kind='user'`, input.userId,
+        );
+        if (!current || current.status !== 'active' || current.managed || current.auth_epoch !== observed.auth_epoch
+          || current.password_hash !== observed.password_hash) throw controlError('conflict', 'Account credentials changed; retry break-glass recovery');
+        control.run('UPDATE password_credentials SET password_hash=?,changed_at_ms=? WHERE user_id=?', encoded, now(), input.userId);
+        invalidate(input.userId);
+        control.audit('operator:break-glass', 'auth.break-glass-password-reset', input.userId);
+      });
     },
     async recover(input: { login: string; code: string; password: string; address?: string }) {
       let login: string;

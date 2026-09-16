@@ -9,7 +9,7 @@ export interface CompleteSetup {
   claimToken: string; browserBinding: string; name: string; organizationName: string;
   login: string; password: string; recoverySetId: string; recoveryAcknowledged: boolean;
 }
-export function createSetup(control: ControlPlane, passwords: PasswordService, sessions: SessionService, now: () => number) {
+export function createSetup(control: ControlPlane, passwords: PasswordService, sessions: SessionService, now: () => number, passkeysAvailable: () => boolean = () => false) {
   const assertSetup = (): void => {
     const state = control.installation().state;
     if (state === 'ready') throw controlError('setup-completed', 'Setup is complete; sign in to continue');
@@ -27,7 +27,7 @@ export function createSetup(control: ControlPlane, passwords: PasswordService, s
     return row;
   };
   return {
-    status(): SetupStatus { return { state: control.installation().state, methods: ['password'] }; },
+    status(): SetupStatus { return { state: control.installation().state, methods: passkeysAvailable() ? ['password', 'passkey'] : ['password'] }; },
     /** Operator-only: expose through an app-owned console/installer, NEVER a
      * public HTTP endpoint. Rotating a claim invalidates the prior browser. */
     issueClaim() {

@@ -12,7 +12,7 @@ export interface IdentitySession {
 }
 export interface SetupStatus {
   state: 'uninitialized' | 'claimed' | 'configuring' | 'ready' | 'recovery';
-  methods: readonly ['password'];
+  methods: readonly ('password' | 'passkey')[];
 }
 export interface SessionSummary {
   id: string; label: string; current: boolean; createdAt: number;

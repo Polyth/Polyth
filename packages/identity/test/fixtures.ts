@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { openControlPlane } from '@polyth/control-plane';
-import { createIdentityService, type PasswordService } from '../src/index.ts';
+import { createIdentityService, type PasswordService, type WebAuthnConfig } from '../src/index.ts';
 
 // Transaction tests deliberately inject a non-production verifier. The real
 // asynchronous scrypt implementation has separate crypto/worker-bound tests.
@@ -12,12 +12,12 @@ export const testPasswords = (): PasswordService => ({
   async verify(password, encoded) { return { valid: encoded === `test-only:${password}` || encoded === `legacy-only:${password}`, needsRehash: encoded?.startsWith('legacy-only:') ?? false }; },
   close() {},
 });
-export function fixture(t: TestContext, options: { passwords?: PasswordService; idleMs?: number; absoluteMs?: number } = {}) {
+export function fixture(t: TestContext, options: { passwords?: PasswordService; idleMs?: number; absoluteMs?: number; webauthn?: WebAuthnConfig } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'polyth-identity-'));
   const control = openControlPlane({ directory });
   let clock = 1_800_000_000_000;
   const passwords = options.passwords ?? testPasswords();
-  const identity = createIdentityService(control, { passwords, now: () => clock, idleMs: options.idleMs, absoluteMs: options.absoluteMs });
+  const identity = createIdentityService(control, { passwords, now: () => clock, idleMs: options.idleMs, absoluteMs: options.absoluteMs, webauthn: options.webauthn });
   t.after(() => { identity.close(); control.close(); rmSync(directory, { recursive: true, force: true }); });
   return { directory, control, identity, now: () => clock, advance: (ms: number) => { clock += ms; } };
 }
