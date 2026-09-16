@@ -2,7 +2,7 @@ import { Fragment, useEffect, useState } from "react";
 import type { WorkflowRunDto } from "@polyth/contracts";
 import { openWorkspacePane, useStore, type AppView } from "../store.ts";
 import { isWorkspaceSurface, listSurfaces } from "../surfaces.ts";
-import { api } from "@polyth/session/web-api";
+import { api, httpStatusOf } from "@polyth/session/web-api";
 import {
   prioritizeWorkflowRuns,
   workflowFinishedCount,
@@ -70,7 +70,9 @@ export default function StatusBar() {
           setWorkflowState(activeRuns.length > 0 ? { projectId: project.id, runs: activeRuns } : null);
           schedule(activeRuns.length > 0);
         })
-        .catch(() => schedule(false));
+        // 404 means the Workflows package is disabled on this server: stop
+        // polling instead of spamming the console every 30s forever.
+        .catch((error) => { if (httpStatusOf(error) !== 404) schedule(false); });
     };
     refresh();
     const unsubscribe = subscribeWorkflowRuns((updated) => {

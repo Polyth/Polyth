@@ -31,6 +31,7 @@ const STATUS: Record<string, number> = {
   "runtime-timeout": 504,
   "runtime-disconnected": 503,
   "local-runtime-only": 409,
+  "desktop-runtime-unavailable": 503,
 };
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {

@@ -85,7 +85,10 @@ export default function ChatWorkspaceView(props: {
     setSettings(wsSettings);
   }, [projectId]);
 
-  useEffect(() => { void load(); }, [load]);
+  // A missing browser runtime is a state to show, not an unhandled rejection.
+  useEffect(() => {
+    void load().catch((error) => setBundleNotice(error instanceof Error ? error.message : String(error)));
+  }, [load]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -162,8 +165,9 @@ export default function ChatWorkspaceView(props: {
     } catch (error) {
       if (error instanceof ApiError && error.code === "profile-locked") {
         setProfileLocked(true);
+        return;
       }
-      throw error;
+      setBundleNotice(error instanceof Error ? error.message : String(error));
     }
   };
 

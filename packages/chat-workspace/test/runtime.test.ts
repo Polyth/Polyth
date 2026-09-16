@@ -21,6 +21,15 @@ test("waits for a local device by default instead of silently starting remote Ch
   assert.equal(selected.usedRemoteFallback, false);
 });
 
+test("local-only waits for its device instead of streaming a remote browser", () => {
+  const selected = selectChatWorkspaceRuntime(
+    [{ kind: "server-remote", available: true, localRendering: false, localProfileState: false }],
+    { mode: "local-only", allowRemoteFallback: false },
+  );
+  assert.equal(selected.selected, null);
+  assert.equal(selected.waitingForDevice, true);
+});
+
 test("uses remote fallback only when explicitly allowed", () => {
   const selected = selectChatWorkspaceRuntime(
     [{ kind: "server-remote", available: true, localRendering: false, localProfileState: false }],

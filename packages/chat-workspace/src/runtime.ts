@@ -26,6 +26,9 @@ export interface ChatWorkspaceRuntimeSelection {
   usedRemoteFallback: boolean;
 }
 
+// Default is the local Desktop runtime: provider pixels and logins stay on the
+// device. Streaming a server-side Chromium is never automatic — the user picks
+// "Remote server" in the runtime menu when they want it.
 export const DEFAULT_CHAT_WORKSPACE_RUNTIME_PREFERENCE: ChatWorkspaceRuntimePreference = {
   mode: "local-first",
   allowRemoteFallback: false,
