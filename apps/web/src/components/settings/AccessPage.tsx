@@ -4,8 +4,7 @@ import {
   accountState,
   changeAccountPassword,
   createAccount,
-  removeAccount,
-  switchAccount,
+  disableAccount,
   type AccountChoice,
 } from "../../accounts.ts";
 import { authJson, fetchAuthStatus } from "../../authClient.ts";
@@ -18,7 +17,6 @@ import { Button, TextInput } from "../ui/index.ts";
 const when = (ts: number): string => new Date(ts).toLocaleString(getLocale());
 type AccessDevice = AuthDeviceDto & { revision?: number; expiresAt?: number };
 
-/** "Chrome on macOS"-ish from a stored user-agent; raw prefix as fallback. */
 const deviceLabel = (ua: string): string => {
   if (!ua) return tr("settings.accesspage.unknownDevice");
   const browser =
@@ -43,16 +41,23 @@ async function browserSessions(): Promise<AccessDevice[]> {
   throw new Error("Invalid session response");
 }
 
+const authError = (response: Response, body: Record<string, unknown>): Error => new Error(
+  typeof body.message === "string"
+    ? body.message
+    : typeof body.error === "string" ? body.error.replace(/-/g, " ") : `HTTP ${response.status}`,
+);
+
 export default function AccessPage() {
   const [status, setStatus] = useState<BrowserAuthStatus | null>(null);
   const [devices, setDevices] = useState<AccessDevice[]>([]);
   const [accounts, setAccounts] = useState<AccountChoice[]>([]);
   const [currentAccountId, setCurrentAccountId] = useState("");
   const [canManage, setCanManage] = useState(false);
-  const [switchingTo, setSwitchingTo] = useState<string | null>(null);
-  const [switchPassword, setSwitchPassword] = useState("");
+  const [managementPassword, setManagementPassword] = useState("");
+  const [newLogin, setNewLogin] = useState("");
   const [newName, setNewName] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -70,61 +75,64 @@ export default function AccessPage() {
   }, []);
   useEffect(() => { refresh(); }, [refresh]);
 
+  const reauthenticate = async (passwordValue: string): Promise<void> => {
+    const result = await authJson("/api/auth/reauthenticate", { password: passwordValue });
+    if (!result.response.ok) throw authError(result.response, result.body);
+  };
+
   const revoke = (id: string) => {
     const device = devices.find((entry) => entry.id === id);
     void authJson(`/api/auth/sessions/${encodeURIComponent(id)}`, {
       ...(device?.revision ? { expectedRevision: device.revision } : {}),
     }, "DELETE").then(({ response, body }) => {
-      if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : `HTTP ${response.status}`);
-      refresh();
+      if (!response.ok) throw authError(response, body);
+      if (device?.current) location.reload();
+      else refresh();
     }).catch((e) => setErr(e instanceof Error ? e.message : String(e)));
   };
   const signOutAll = async () => {
     if (!await confirmAlert(tr("settings.accesspage.signOutEveryDeviceIncludingThisOne"), { title: tr("settings.accesspage.signOutEverywhere"), confirmLabel: tr("settings.accesspage.signOut") })) return;
     void authJson("/api/auth/logout-all", {}).then(({ response, body }) => {
-      if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : `HTTP ${response.status}`);
+      if (!response.ok) throw authError(response, body);
       location.reload();
     }).catch((e) => setErr(e instanceof Error ? e.message : String(e)));
   };
   const addAccount = async () => {
-    if (busy || !newName.trim() || newPassword.length < 8) return;
+    if (busy || !newLogin.trim() || !newName.trim() || newPassword.length < 12 || !managementPassword) return;
     setBusy(true); setErr(""); setNotice("");
     try {
-      await createAccount(newName.trim(), newPassword);
-      setNewName(""); setNewPassword("");
-      setNotice("Account created.");
+      await reauthenticate(managementPassword);
+      await createAccount(newLogin.trim().toLowerCase(), newName.trim(), newPassword);
+      setNewLogin(""); setNewName(""); setNewPassword(""); setManagementPassword("");
+      setNotice("Account created. Access to organizations and Spaces must be granted explicitly.");
       refresh();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
   };
   const savePassword = async () => {
-    if (busy || password.length < 12 || !currentAccountId) return;
+    if (busy || !currentPassword || password.length < 12 || !currentAccountId) return;
     setBusy(true); setErr(""); setNotice("");
     try {
-      await changeAccountPassword(currentAccountId, password);
-      setPassword("");
-      setNotice("Password updated.");
+      await changeAccountPassword(currentAccountId, currentPassword, password);
+      setCurrentPassword(""); setPassword("");
+      location.reload();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
   };
-  const doSwitch = async (accountId: string) => {
-    if (busy || switchPassword.length === 0) return;
-    setBusy(true); setErr("");
+  const disable = async (account: AccountChoice) => {
+    if (!managementPassword) {
+      setErr("Enter your current password under Account management before disabling an account.");
+      return;
+    }
+    if (!await confirmAlert(`Disable ${account.name}? Their identity remains durable and tenant data is retained for recovery.`, { title: "Disable account", confirmLabel: "Disable" })) return;
+    setBusy(true); setErr(""); setNotice("");
     try {
-      const result = await switchAccount(accountId, switchPassword);
-      if (!result.ok) setErr(result.message ?? "Couldn’t sign in to that account.");
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally { setBusy(false); }
-  };
-  const remove = async (account: AccountChoice) => {
-    if (!await confirmAlert(`Remove ${account.name} from this server? Their tenant data is retained for safe recovery.`, { title: "Remove account", confirmLabel: tr("common.remove") })) return;
-    setBusy(true); setErr("");
-    try {
-      await removeAccount(account.id);
-      if (switchingTo === account.id) { setSwitchingTo(null); setSwitchPassword(""); }
+      await reauthenticate(managementPassword);
+      await disableAccount(account);
+      setManagementPassword("");
+      setNotice(`${account.name} is disabled. Existing sessions were revoked.`);
       refresh();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -142,7 +150,7 @@ export default function AccessPage() {
       <Row label="Server" hint="The Polyth server this browser is connected to." itemId="access.server">
         <span className="mono">{typeof location === "undefined" ? "Polyth" : location.host}</span>
       </Row>
-      <Row label="Current account" hint="Projects, Spaces, settings, presets, and restoration use this identity." itemId="access.account">
+      <Row label="Current account" hint="Projects, Spaces, settings, presets, and restoration use this immutable identity." itemId="access.account">
         <span className="tag">{current?.name ?? currentAccountId}</span>
       </Row>
       <Row label={tr("settings.accesspage.passwordProtection")} hint="Canonical account authentication is required by this server." itemId="access.protection">
@@ -154,49 +162,50 @@ export default function AccessPage() {
         <Row
           key={account.id}
           label={account.current ? `${account.name} · Current` : account.name}
-          hint={account.id}
+          hint={`${account.id}${account.status ? ` · ${account.status}` : ""}`}
         >
           <div className="set-row-control">
-            {!account.current && (
-              <Button size="sm" disabled={busy} onClick={() => {
-                setSwitchingTo((currentId) => currentId === account.id ? null : account.id);
-                setSwitchPassword("");
-                setErr("");
-              }}>Switch</Button>
-            )}
-            {canManage && !account.current && account.id !== "usr_owner" && (
-              <Button size="sm" variant="danger" disabled={busy} onClick={() => void remove(account)}>Remove</Button>
+            {canManage && !account.current && !account.managed && account.status !== "disabled" && (
+              <Button size="sm" variant="danger" disabled={busy} onClick={() => void disable(account)}>Disable</Button>
             )}
           </div>
         </Row>
       ))}
-      {switchingTo && (
-        <Row label={`Sign in as ${accounts.find((account) => account.id === switchingTo)?.name ?? switchingTo}`} hint="Enter that account’s login name and passphrase from the lock screen to switch safely.">
-          <div className="set-row-control">
-            <TextInput uiSize="sm" type="password" value={switchPassword} autoComplete="current-password" placeholder="Password" aria-label="Account password" onChange={(event) => setSwitchPassword(event.target.value)} />
-            <Button size="sm" variant="primary" busy={busy} disabled={!switchPassword} onClick={() => void doSwitch(switchingTo)}>Sign in</Button>
-          </div>
-        </Row>
-      )}
+      <Row label="Switch account" hint="Sign out, then enter the other account’s login name. Account IDs are not login credentials.">
+        <Button size="sm" onClick={() => void authJson("/api/auth/logout", {}).then(() => location.reload())}>Sign out</Button>
+      </Row>
 
       {canManage && (
         <>
-          <div className="set-page-head"><h3>Add account</h3></div>
-          <Row label="New account" hint="Canonical account provisioning is available only when the server grants owner management capability.">
+          <div className="set-page-head"><h3>Account management</h3></div>
+          <Row label="Confirm owner password" hint="Creating or disabling accounts requires recent reauthentication.">
+            <TextInput
+              uiSize="sm"
+              type="password"
+              value={managementPassword}
+              autoComplete="current-password"
+              placeholder="Current password"
+              aria-label="Owner password"
+              onChange={(event) => setManagementPassword(event.target.value)}
+            />
+          </Row>
+          <Row label="New account" hint="Identity creation does not grant organization, Space, project, or secret access.">
             <div className="set-row-control">
-              <TextInput uiSize="sm" value={newName} placeholder="Name" aria-label="New account name" onChange={(event) => setNewName(event.target.value)} />
-              <TextInput uiSize="sm" type="password" value={newPassword} autoComplete="new-password" placeholder="Password" aria-label="New account password" onChange={(event) => setNewPassword(event.target.value)} />
-              <Button size="sm" busy={busy} disabled={!newName.trim() || newPassword.length < 12} onClick={() => void addAccount()}>Add</Button>
+              <TextInput uiSize="sm" value={newLogin} autoComplete="off" placeholder="Login" aria-label="New account login" onChange={(event) => setNewLogin(event.target.value)} />
+              <TextInput uiSize="sm" value={newName} placeholder="Display name" aria-label="New account name" onChange={(event) => setNewName(event.target.value)} />
+              <TextInput uiSize="sm" type="password" value={newPassword} autoComplete="new-password" placeholder="Passphrase · 12+ characters" aria-label="New account passphrase" onChange={(event) => setNewPassword(event.target.value)} />
+              <Button size="sm" busy={busy} disabled={!managementPassword || !newLogin.trim() || !newName.trim() || newPassword.length < 12} onClick={() => void addAccount()}>Add</Button>
             </div>
           </Row>
         </>
       )}
 
       <div className="set-page-head"><h3>Credentials</h3></div>
-      <Row label="Change password" hint="Canonical password changes require recent reauthentication; the server will reject a stale session." itemId="access.password">
+      <Row label="Change password" hint="Changing the password revokes remembered sessions; sign in again afterwards." itemId="access.password">
         <div className="set-row-control">
-          <TextInput uiSize="sm" type="password" value={password} autoComplete="new-password" placeholder="New passphrase" aria-label="New passphrase" onChange={(event) => setPassword(event.target.value)} />
-          <Button size="sm" busy={busy} disabled={password.length < 12} onClick={() => void savePassword()}>Save</Button>
+          <TextInput uiSize="sm" type="password" value={currentPassword} autoComplete="current-password" placeholder="Current password" aria-label="Current password" onChange={(event) => setCurrentPassword(event.target.value)} />
+          <TextInput uiSize="sm" type="password" value={password} autoComplete="new-password" placeholder="New passphrase · 12+ characters" aria-label="New passphrase" onChange={(event) => setPassword(event.target.value)} />
+          <Button size="sm" busy={busy} disabled={!currentPassword || password.length < 12} onClick={() => void savePassword()}>Save</Button>
         </div>
       </Row>
 
