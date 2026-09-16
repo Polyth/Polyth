@@ -75,6 +75,22 @@ test("undefined composition is an omitted patch field, not a reset", async (t) =
   const updated = await registry.update!(project.id, { name: "Renamed", composition: undefined });
   assert.equal(updated.name, "Renamed"); assert.deepEqual(updated.composition, composition());
 });
+test("composition and current project-icon normalization commit atomically", async (t) => {
+  const { root, registry } = fixture(t); const project = await registry.add(root, "Original");
+  const engineering: ProjectComposition = { version: 1, directions: ["engineering"], packageOverrides: {} };
+  const safeSvg = "data:image/svg+xml,%3Csvg%20viewBox%3D%220%200%201%201%22%3E%3Cpath%20d%3D%22M0%200h1v1H0z%22/%3E%3C/svg%3E";
+  const updated = await registry.update!(project.id, { composition: engineering, icon: safeSvg });
+  assert.deepEqual(updated.composition, engineering);
+  assert.match(updated.icon ?? "", /^data:image\/svg\+xml;base64,/);
+  const committedIcon = updated.icon;
+
+  const finance: ProjectComposition = { version: 1, directions: ["finance"], packageOverrides: {} };
+  const unsafeSvg = "data:image/svg+xml,%3Csvg%3E%3Cscript%3Ealert(1)%3C/script%3E%3C/svg%3E";
+  await assert.rejects(() => registry.update!(project.id, { composition: finance, icon: unsafeSvg }), { code: "invalid-input" });
+  const after = await registry.get(project.id);
+  assert.deepEqual(after!.composition, engineering);
+  assert.equal(after!.icon, committedIcon);
+});
 test("canonical PATCH route persists composition and the old organization route does not intercept it", async (t) => {
   const { projectRoutes } = await import("../src/routes/projects.ts");
   const { orgRoutes } = await import("../src/routes/org.ts");
