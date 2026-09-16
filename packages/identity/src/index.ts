@@ -11,6 +11,17 @@ export type { IdentityUser, IdentitySession, SessionSummary, SetupStatus } from 
 export type { CompleteSetup } from './setup.ts';
 export type { PasswordService } from './passwords.ts';
 export type { WebAuthnConfig, PasskeySummary } from './passkeys.ts';
+export { canonicalHttpsIssuer, createProviderFramework } from './providers/index.ts';
+export type {
+  IdentityProviderAdapter,
+  NormalizedExternalIdentity,
+  ProviderCapabilities,
+  ProviderConfiguration,
+  ProviderNetworkBroker,
+  ProviderPurpose,
+  ProviderSecretBroker,
+  ProviderTransactionStart,
+} from './providers/index.ts';
 
 export function createIdentityService(control: ControlPlane, opts: {
   now?: () => number; idleMs?: number; absoluteMs?: number;
