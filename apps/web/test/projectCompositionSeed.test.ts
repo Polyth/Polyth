@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { WorkbenchProfileDefinition } from "@polyth/web-sdk";
-import { selectInitialWorkbenchProfile } from "../src/projectCompositionPlan.ts";
+import { projectSetupRecovery, selectInitialWorkbenchProfile } from "../src/projectCompositionPlan.ts";
 
 const profile = (id: string, order: number, directions: string[], recommended = true): WorkbenchProfileDefinition => ({
   id, label: id, description: id, order, ownerPackageId: id,
@@ -38,4 +38,16 @@ test("general projects and non-recommended profiles do not force a workbench", (
   assert.equal(selectInitialWorkbenchProfile(
     { version: 1, directions: ["engineering"], packageOverrides: {} }, [profile("eng", 1, ["engineering"], false)],
   ), null);
+});
+
+test("setup recovery never traps an unresolved project and never abandons an unsafe known one", () => {
+  assert.deepEqual(projectSetupRecovery(false, false), {
+    canExit: true, canRetry: false, exitKind: "close",
+  });
+  assert.deepEqual(projectSetupRecovery(false, true), {
+    canExit: false, canRetry: true, exitKind: null,
+  });
+  assert.deepEqual(projectSetupRecovery(true, true), {
+    canExit: true, canRetry: true, exitKind: "open-anyway",
+  });
 });
