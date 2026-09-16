@@ -30,8 +30,26 @@ test("phone composer never reserves empty widget slots or leaks desktop actions"
     "only the microphone makes the leading extension lane visible");
   assert.match(css, /\.composer-mobile \.composer-actions > \.composer-extensions\s*\{[^}]*display:\s*none;[^}]*width:\s*0;/s,
     "desktop trailing widgets do not reflow the phone composer");
-  assert.match(css, /\.composer-mobile \.composer-actions > \.composer-extensions:has\(\.mic-btn\)/,
-    "a user-moved microphone remains supported without exposing other widgets");
+  assert.doesNotMatch(css, /\.composer-mobile \.composer-actions > \.composer-extensions:has\(\.mic-btn\)/,
+    "the microphone cannot be moved into the trailing action lane");
+  assert.match(css, /\.composer-simple \.composer-primary \.send\s*\{[^}]*display:\s*inline-flex;/s,
+    "Send remains visible as the terminal action even with an empty draft");
+});
+
+test("the primary action is terminal and draft engagement survives blur", async () => {
+  const composer = await read("../src/components/Composer.tsx");
+  const voice = await read("../../../packages/dictation/widgets/voice.tsx");
+  const primary = composer.indexOf('<span className="composer-primary">');
+  const trailingCustomize = composer.indexOf('<CustomizeZoneButton slot="composer.trailing" />');
+  assert.ok(primary > trailingCustomize, "the primary action follows trailing customization controls");
+  const queue = composer.indexOf('className="send composer-delivery composer-queue"');
+  const menu = composer.indexOf('className="composer-send-options"');
+  assert.ok(queue > menu, "the queue/send action follows active-run alternatives");
+  assert.match(composer.slice(primary), /className="send"/, "idle compositions retain Send");
+  assert.match(composer, /const expanded = !phoneLayout \|\| inputFocused \|\| shellMode \|\| hasDraft;/,
+    "a typed draft stays expanded after the input blurs");
+  assert.doesNotMatch(voice, /supportedSlots:\s*\[[\s\S]*?"composer\.trailing"/,
+    "voice cannot be placed after the primary action");
 });
 
 test("thinking effort lives in the model picker", async () => {

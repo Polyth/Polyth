@@ -374,18 +374,34 @@ test("sheets escape their ancestors: portal, top-most Escape, contained focus", 
   );
 });
 
-test("session edited-file labels stay visible above the phone composer", async () => {
+test("session edited-file labels stay collapsed until the user opens the dock", async () => {
   const pending = await read("../../../packages/git/widgets/PendingChangesBar.tsx");
-  assert.match(pending, /useShellMode\(\)/, "pending changes follow the shared phone shell seam");
-  assert.match(
+  const gitCss = await read("../../../packages/git/widgets/styles.css");
+  assert.match(pending, /if \(!detailsOpen\) \{/, "the edited-files dock stays collapsed until opened");
+  assert.doesNotMatch(
     pending,
     /if \(!detailsOpen && !phone\)/,
-    "phones skip the collapsed count bubble so filename labels stay in the dock",
+    "phone no longer skips the collapsed count bubble",
   );
   assert.match(
     pending,
-    /!phone && \([\s\S]*?setDetailsOpen\(false\)/,
-    "collapse is desktop-only once the file list is open",
+    /setDetailsOpen\(false\)/,
+    "collapse remains available after the file list is open",
+  );
+  assert.match(
+    gitCss,
+    /\.pending-changes-file\s*\{[^}]*font:\s*400 var\(--font-meta\) \/ 1\.4 var\(--mono\)/s,
+    "file rows use compact technical type, not editor/code size",
+  );
+  assert.match(
+    gitCss,
+    /\.pending-changes-file\s*\{[^}]*min-height:\s*var\(--control-h-sm\)/s,
+    "visible file rows stay compact; coarse pointers grow the tap box separately",
+  );
+  assert.match(
+    gitCss,
+    /\.pending-changes-file::after\s*\{[^}]*var\(--hit-min\)/s,
+    "the tap box grows on coarse pointers without stretching the list",
   );
 });
 
@@ -394,10 +410,10 @@ test("the composer is adaptive, with one primary action at a time", async () => 
   assert.ok(composer.includes("composer-collapsed"), "an idle phone composer is compact");
   assert.ok(composer.includes("composer-expanded"), "focus expands it");
   assert.ok(composer.includes("composer-input-active"), "textarea focus is exposed for keyboard-safe shell CSS");
-  assert.ok(composer.includes("composer-has-draft"), "the draft state drives the mic/send morph");
+  assert.ok(composer.includes("composer-has-draft"), "the draft state keeps the composer engaged");
   assert.ok(
-    composer.includes("const expanded = !phoneLayout || inputFocused || shellMode"),
-    "focus and shell mode expand the phone composer; a working turn alone keeps it minified (Stop stays in the collapsed row)",
+    composer.includes("const expanded = !phoneLayout || inputFocused || shellMode || hasDraft"),
+    "focus, shell mode, and an existing draft expand the phone composer; a working turn alone keeps it minified (Stop stays in the collapsed row)",
   );
   assert.ok(composer.includes('hasDraft ? " composer-has-draft" : ""'),
     "text and attachments retain their independent draft state");
@@ -524,8 +540,10 @@ test("phone CSS keeps the layout inside the visible viewport", async () => {
   assert.match(phone, /touch-action: manipulation/, "§28: no accidental double-tap zoom on controls");
   assert.match(phone, /body\[data-keyboard="open"\]/, "§43: the empty state yields to the keyboard");
   assert.match(phone, /body\[data-band="short"\] \.hero-body \{ display: none; \}/, "a short band drops the empty state entirely");
-  assert.match(phone, /composer-mobile:not\(\.composer-has-draft\) \.composer-primary \.send \{ display: none; \}/);
-  assert.match(phone, /composer-mobile\.composer-has-draft \.composer-mobile-extensions \.mic-btn\s*\{\s*display:\s*none;/);
+  assert.doesNotMatch(phone, /composer-mobile:not\(\.composer-has-draft\) \.composer-primary \.send \{ display: none; \}/,
+    "an empty composer keeps its disabled Send affordance instead of swapping to mic");
+  assert.doesNotMatch(phone, /composer-mobile\.composer-has-draft \.composer-mobile-extensions \.mic-btn\s*\{\s*display:\s*none;/,
+    "dictation remains available after text is entered");
   assert.match(
     phone,
     /\.composer-mobile \.composer-mobile-extensions \{[^}]*max-width:\s*var\(--tap\);[^}]*overflow-x:\s*auto;/s,

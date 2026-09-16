@@ -37,6 +37,20 @@ test("phone navigator uses the canonical viewport, safe-area, and semantic color
   }
 });
 
+test("phone project rows omit session totals and group backgrounds", async () => {
+  const [source, css] = await Promise.all([
+    read("../src/components/mobile/MobileNavigator.tsx"),
+    read("../src/components/mobile/MobileNavigator.css"),
+  ]);
+
+  assert.doesNotMatch(source, /sidebar\.sessionlist\.valueSessions/,
+    "project rows do not show a total session count beneath the project name");
+  assert.doesNotMatch(source, /mobile-nav-project-meta-copy/,
+    "the removed session-count metadata node is not rendered");
+  assert.match(css, /\.mobile-nav-project\s*\{[^}]*background:\s*transparent;/s);
+  assert.match(css, /\.mobile-nav-project\.is-current\s*\{[^}]*background:\s*transparent;/s);
+});
+
 test("phone navigator keeps the tap floor while compacting its rhythm", async () => {
   const [source, css] = await Promise.all([
     read("../src/components/mobile/MobileNavigator.tsx"),
@@ -156,7 +170,7 @@ test("phone navigator shares project sorting and reorders from the project row",
   assert.match(source, /aria-expanded=\{expanded\}/);
   assert.match(css, /\.mobile-nav-project\.is-dragging > \.mobile-nav-project-head\s*\{[^}]*touch-action:\s*none;/s);
   assert.match(css, /\.mobile-nav-project\.is-drag-over\s*> \.mobile-nav-project-head/);
-  assert.match(css, /\.mobile-nav-project\s*\{[^}]*background:\s*color-mix/s);
+  assert.match(css, /\.mobile-nav-project\s*\{[^}]*background:\s*transparent;/s);
   assert.doesNotMatch(css, /\.mobile-nav-disclosure/);
   assert.doesNotMatch(css, /\.mobile-nav-project-drag-handle/);
 });

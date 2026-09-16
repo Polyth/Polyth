@@ -103,8 +103,9 @@ flex: none; color: var(--text-dim);
   .model-pop {
     width: min(360px, calc(100vw - 2 * var(--screen-gutter) - var(--safe-left) - var(--safe-right)));
     min-width: 0;
-    height: auto;
+    height: min(560px, calc(var(--visual-vh, 100dvh) * 0.52));
     max-height: min(560px, calc(var(--visual-vh, 100dvh) * 0.52));
+    border-radius: var(--radius-surface);
   }
   .model-picker-header {
     display: flex;

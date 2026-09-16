@@ -1,4 +1,9 @@
 import { useSyncExternalStore } from "react";
+import {
+  markProjectPresentationChanged,
+  PROJECT_PRESENTATION_HYDRATED_EVENT,
+  projectPresentationEventProjectId,
+} from "../projectPresentationSync.ts";
 
 export type WorkspaceMode = "chat" | "widgets" | "edit";
 
@@ -10,7 +15,12 @@ function load(projectId: string | null): WorkspaceMode {
   if (projectId === null) return "chat";
   try {
     const stored = localStorage.getItem(workspaceModeStorageKey(projectId));
-    return stored === "widgets" || stored === "edit" ? stored : "chat";
+    if (stored === "widgets" || stored === "edit") return stored;
+    if (stored !== null) {
+      const parsed = JSON.parse(stored) as unknown;
+      if (parsed === "widgets" || parsed === "edit") return parsed;
+    }
+    return "chat";
   }
   catch { return "chat"; }
 }
@@ -27,7 +37,10 @@ export function setWorkspaceMode(next: WorkspaceMode): void {
   if (next === mode) return;
   mode = next;
   if (projectId !== null) {
-    try { localStorage.setItem(workspaceModeStorageKey(projectId), mode); } catch { /* private mode */ }
+    try {
+      localStorage.setItem(workspaceModeStorageKey(projectId), mode);
+      markProjectPresentationChanged(projectId, "workspaceMode");
+    } catch { /* private mode */ }
   }
   for (const listener of [...listeners]) listener();
 }
@@ -37,6 +50,15 @@ export function setWorkspaceModeProject(nextProjectId: string | null): void {
   projectId = nextProjectId;
   mode = load(projectId);
   for (const listener of [...listeners]) listener();
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener(PROJECT_PRESENTATION_HYDRATED_EVENT, (event) => {
+    const hydratedProjectId = projectPresentationEventProjectId(event);
+    if (hydratedProjectId === null || hydratedProjectId !== projectId) return;
+    mode = load(projectId);
+    for (const listener of [...listeners]) listener();
+  });
 }
 
 export function useWorkspaceMode(): WorkspaceMode {

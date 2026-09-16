@@ -870,6 +870,48 @@ test("model picker keeps one height across sparse, dense, filtered, and empty ha
   assert.ok(shortHeader.bottom <= shortSearch.top + 0.5, "chrome still does not overlap on a short viewport");
   assert.ok(shortSearch.bottom <= shortList.top + 0.5, "search stays above the scrolling list");
   assert.ok(shortList.bottom <= shortShortcuts.top + 0.5, "shortcuts remain reachable below the list");
+
+  // Chromium's default page has a fine pointer even at a phone-sized
+  // viewport. Use a touch context and emulate the actual coarse-pointer
+  // media features so the phone geometry and its user-scaled radius are
+  // exercised, not just parsed.
+  assert.ok(browser);
+  const mobileContext = await browser.newContext({ viewport: { width: 390, height: 720 }, hasTouch: true });
+  const mobilePage = await mobileContext.newPage();
+  const cdp = await mobileContext.newCDPSession(mobilePage);
+  await cdp.send("Emulation.setEmulatedMedia", {
+    features: [
+      { name: "pointer", value: "coarse" },
+      { name: "any-pointer", value: "coarse" },
+      { name: "hover", value: "none" },
+      { name: "any-hover", value: "none" },
+    ],
+  });
+  try {
+    await mobilePage.setContent(`<style>${css}</style><div style="display:flex;gap:20px;align-items:flex-start">${pop("mobile-sparse", 2)}${pop("mobile-dense", 8)}</div>`);
+    const mobileGeometry = await mobilePage.evaluate(() => {
+      const sparse = document.querySelector<HTMLElement>("#mobile-sparse")!;
+      const dense = document.querySelector<HTMLElement>("#mobile-dense")!;
+      const defaultRadius = getComputedStyle(sparse).borderRadius;
+      document.documentElement.style.setProperty("--corner-radius-scale", "0.5");
+      const scaledRadius = getComputedStyle(sparse).borderRadius;
+      return {
+        sparseHeight: sparse.getBoundingClientRect().height,
+        denseHeight: dense.getBoundingClientRect().height,
+        defaultRadius,
+        scaledRadius,
+      };
+    });
+    assert.ok(Math.abs(mobileGeometry.sparseHeight - 720 * 0.52) < 1,
+      `phone picker uses the compact visual-viewport height (${mobileGeometry.sparseHeight}px)`);
+    assert.equal(mobileGeometry.denseHeight, mobileGeometry.sparseHeight,
+      "phone harness catalogs keep the same outer height");
+    assert.equal(mobileGeometry.defaultRadius, "12px", "phone picker uses the surface radius token");
+    assert.equal(mobileGeometry.scaledRadius, "6px", "phone picker follows the selected rounding scale");
+  } finally {
+    await cdp.send("Emulation.setEmulatedMedia", { features: [] });
+    await mobileContext.close();
+  }
   await page.setViewportSize({ width: 390, height: 720 });
 });
 

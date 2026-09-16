@@ -3650,6 +3650,25 @@ export interface ProjectPatch {
   defaults?: ProjectDefaults;
 }
 
+/** Presentation-only state shared by every client of one project. The web
+ * client owns the schema of each value; the server only bounds the known keys
+ * and stores the JSON record beside its project. */
+export const PROJECT_PRESENTATION_SETTING_KEYS = [
+  "widgetLayout",
+  "workspacePanel",
+  "workspacePane",
+  "workbenchLayout",
+  "capabilityLayout",
+  "workspaceMode",
+] as const;
+export type ProjectPresentationSettingKey = typeof PROJECT_PRESENTATION_SETTING_KEYS[number];
+
+export interface ProjectPresentationSettingsDto {
+  revision: number;
+  updatedAt: number;
+  settings: Partial<Record<ProjectPresentationSettingKey, JsonValue>>;
+}
+
 /** Clone a GitHub/GitLab repository on the current Polyth host or an SSH host. */
 export interface ProjectCloneInput {
   repository: string;
@@ -3668,6 +3687,12 @@ export interface ProjectService {
   get(id: string): Promise<Project | undefined>;
   /** PATCH metadata/defaults; optional so old fakes remain valid. */
   update?(id: string, patch: ProjectPatch): Promise<Project>;
+  /** Presentation-only layout state, isolated with the project scope. */
+  getPresentationSettings?(id: string): Promise<ProjectPresentationSettingsDto>;
+  putPresentationSettings?(
+    id: string,
+    settings: Record<string, unknown>,
+  ): Promise<ProjectPresentationSettingsDto>;
   /** Register a project whose path lives on a remote machine — the local
    *  existence check does not apply. Optional so old fakes remain valid. */
   addRemote?(path: string, remote: ProjectRemote, name?: string): Promise<Project>;

@@ -6,9 +6,12 @@ import { readFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
 import { atomicWriteSync } from "@polyth/plugins";
 import { createHash, randomUUID } from "node:crypto";
 import { basename, dirname, resolve } from "node:path";
+import { PROJECT_PRESENTATION_SETTING_KEYS } from "@polyth/contracts";
 import type {
+  JsonValue,
   Project,
   ProjectPatch,
+  ProjectPresentationSettingsDto,
   ProjectRemote,
   ProjectService,
   SpaceContext,
@@ -19,7 +22,16 @@ interface PackageWorkspaceMarker {
   packageId: string;
 }
 
-type StoredProject = Project & { internal?: PackageWorkspaceMarker };
+type StoredProject = Project & {
+  internal?: PackageWorkspaceMarker;
+  presentation?: StoredProjectPresentationSettings;
+};
+
+interface StoredProjectPresentationSettings {
+  revision: number;
+  updatedAt: number;
+  settings: Record<string, JsonValue>;
+}
 
 /** Project registry with tenancy. `ProjectService` methods on this object are
  *  the UNSCOPED, server-internal view: the runtime pool and session service
@@ -50,6 +62,71 @@ const IMAGE_ICON = /^data:(image\/(?:png|svg\+xml|x-icon|vnd\.microsoft\.icon))(
 const PROJECT_ICON_PATH = /^\/assets\/project-icons\/[a-z0-9]+(?:-[a-z0-9]+)*\.svg$/;
 const HARNESS_ID = /^[a-z][a-z0-9-]*$/;
 const PACKAGE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const MAX_PROJECT_PRESENTATION_BYTES = 256 * 1024;
+const PROJECT_PRESENTATION_KEYS = new Set<string>(PROJECT_PRESENTATION_SETTING_KEYS);
+
+const emptyPresentationSettings = (): ProjectPresentationSettingsDto => ({
+  revision: 0,
+  updatedAt: 0,
+  settings: {},
+});
+
+function isJsonValue(value: unknown): value is JsonValue {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  if (typeof value !== "object") return false;
+  return Object.values(value as Record<string, unknown>).every(isJsonValue);
+}
+
+function presentationDto(value: unknown): ProjectPresentationSettingsDto {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return emptyPresentationSettings();
+  const stored = value as Partial<StoredProjectPresentationSettings>;
+  const revision = stored.revision;
+  const updatedAt = stored.updatedAt;
+  if (typeof revision !== "number" || !Number.isFinite(revision)
+    || typeof updatedAt !== "number" || !Number.isFinite(updatedAt)
+    || !stored.settings || typeof stored.settings !== "object" || Array.isArray(stored.settings)) {
+    return emptyPresentationSettings();
+  }
+  const settings: Partial<Record<typeof PROJECT_PRESENTATION_SETTING_KEYS[number], JsonValue>> = {};
+  for (const [key, item] of Object.entries(stored.settings)) {
+    if (PROJECT_PRESENTATION_KEYS.has(key) && isJsonValue(item)) {
+      settings[key as typeof PROJECT_PRESENTATION_SETTING_KEYS[number]] = item;
+    }
+  }
+  return {
+    revision: Math.max(0, Math.trunc(revision)),
+    updatedAt: Math.max(0, updatedAt),
+    settings,
+  };
+}
+
+function normalizeIncomingPresentationSettings(value: unknown): Record<string, JsonValue> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw Object.assign(new Error("presentation settings must be an object"), { code: "invalid-input" });
+  }
+  const settings: Record<string, JsonValue> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (!PROJECT_PRESENTATION_KEYS.has(key)) {
+      throw Object.assign(new Error(`unknown presentation setting: ${key}`), { code: "invalid-input" });
+    }
+    if (!isJsonValue(item)) {
+      throw Object.assign(new Error(`presentation setting ${key} is not JSON`), { code: "invalid-input" });
+    }
+    settings[key] = item;
+  }
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(settings);
+  } catch {
+    throw Object.assign(new Error("presentation settings must be JSON"), { code: "invalid-input" });
+  }
+  if (Buffer.byteLength(serialized, "utf8") > MAX_PROJECT_PRESENTATION_BYTES) {
+    throw Object.assign(new Error("presentation settings exceed 256 KiB"), { code: "invalid-input" });
+  }
+  return settings;
+}
 
 function sanitizeProjectIconSvg(svg: string): string {
   return svg
@@ -117,7 +194,7 @@ const isPackageWorkspace = (project: StoredProject): project is StoredProject & 
   project.internal?.kind === "package-workspace" && typeof project.internal.packageId === "string";
 
 const publicProject = (project: StoredProject): Project => {
-  const { internal: _internal, ...visible } = project;
+  const { internal: _internal, presentation: _presentation, ...visible } = project;
   return { ...visible };
 };
 
@@ -326,6 +403,22 @@ export function createProjectService(
         }
         persist();
         return publicProject(project);
+      },
+      async getPresentationSettings(id): Promise<ProjectPresentationSettingsDto> {
+        return presentationDto(requireUserProject(id).presentation);
+      },
+      async putPresentationSettings(id, input): Promise<ProjectPresentationSettingsDto> {
+        const project = requireUserProject(id);
+        const settings = normalizeIncomingPresentationSettings(input);
+        const current = presentationDto(project.presentation);
+        const next: StoredProjectPresentationSettings = {
+          revision: current.revision + 1,
+          updatedAt: Date.now(),
+          settings,
+        };
+        project.presentation = next;
+        persist();
+        return { ...next, settings: { ...next.settings } };
       },
     };
   };

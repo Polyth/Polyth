@@ -2,7 +2,7 @@
 // keyboard-inset awareness (useAnchoredPosition), Escape + outside-press
 // dismissal, focus restored to the anchor. Menus get role/keyboard semantics
 // from Menu.tsx; content surfaces (filters, small forms) use this directly.
-import { useEffect, useRef, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { useEffect, useRef, type CSSProperties, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useEscape } from "../../useEscape.ts";
 import { useAnchoredPosition, type AnchoredAlign, type AnchoredSide } from "./useAnchoredPosition.ts";
@@ -50,9 +50,26 @@ export default function Popover({
   restoreFocusRef,
 }: PopoverProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
+  const pointerInside = useRef(false);
   const packageWindowOwner = usePackageWindowOwner();
   const position = useAnchoredPosition(open, anchorRef, surfaceRef, { align, side, stableAnchor, compact });
   useEscape(open, onClose);
+
+  // Same ghost-click contract as Sheet: the opening gesture's click can land
+  // on the compact surface that just appeared under the finger (harness tabs
+  // in the model picker). Keyboard activation (detail 0) is never swallowed.
+  const onPointerDownCapture = compact
+    ? () => { pointerInside.current = true; }
+    : undefined;
+  const onClickCapture = compact
+    ? (event: MouseEvent<HTMLDivElement>) => {
+      if (event.detail > 0 && !pointerInside.current) {
+        event.stopPropagation();
+        event.preventDefault();
+      }
+      pointerInside.current = false;
+    }
+    : undefined;
 
   // Focus management: optional initial focus, anchor restore on close.
   useEffect(() => {
@@ -77,7 +94,13 @@ export default function Popover({
 
   return createPortal(
     <>
-      <div className="ui-popover-backdrop" data-package-window-owner={packageWindowOwner ?? undefined} onPointerDown={onClose} />
+      <div
+        className="ui-popover-backdrop"
+        data-package-window-owner={packageWindowOwner ?? undefined}
+        onPointerDown={onClose}
+        {...(onPointerDownCapture ? { onPointerDownCapture } : {})}
+        {...(onClickCapture ? { onClickCapture } : {})}
+      />
       <div
         ref={surfaceRef}
         {...(role === "presentation" ? {} : { role })}
@@ -88,6 +111,8 @@ export default function Popover({
         data-overflow={overflow}
         {...(compact ? { "data-compact": "true" } : {})}
         data-package-window-owner={packageWindowOwner ?? undefined}
+        {...(onPointerDownCapture ? { onPointerDownCapture } : {})}
+        {...(onClickCapture ? { onClickCapture } : {})}
       >
         {children}
       </div>

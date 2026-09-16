@@ -231,13 +231,11 @@
   margin: 0 0 var(--space-1);
   padding: 1px var(--space-1) var(--space-1);
   border-radius: var(--radius-card);
-  /* Luminance group, not a nested card: the wash starts on the name and
-     continues through that project's sessions while they are open. */
-  background: color-mix(in srgb, var(--text) 4.5%, transparent);
+  background: transparent;
 }
 
 .mobile-nav-project.is-current {
-  background: color-mix(in srgb, var(--text) 7%, transparent);
+  background: transparent;
 }
 
 .mobile-nav-project-head {
@@ -328,13 +326,6 @@
   font-size: var(--nav-meta-size);
   font-weight: 400;
   line-height: var(--font-meta-lh);
-}
-
-.mobile-nav-project-meta-copy {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .mobile-nav-project-rename {

@@ -11,6 +11,11 @@ import {
 import { getState, subscribeStore } from "../store.ts";
 import { tr } from "../i18n/index.ts";
 import { areaRecommends, getArea, listAreas } from "./areas.ts";
+import {
+  markProjectPresentationChanged,
+  PROJECT_PRESENTATION_HYDRATED_EVENT,
+  projectPresentationEventProjectId,
+} from "../projectPresentationSync.ts";
 
 export type WidgetZone = "header" | "left" | "main" | "right" | "bottom" | "floating";
 export type { WidgetAudience, WidgetScope, WidgetSize } from "@polyth/contracts";
@@ -1049,6 +1054,7 @@ const write = (layout: WidgetLayout, projectId: string | null): boolean => {
   if (projectId === null) return true;
   try {
     localStorage.setItem(widgetLayoutStorageKey(projectId), serializeWidgetLayout(layout));
+    markProjectPresentationChanged(projectId, "widgetLayout");
     return true;
   } catch {
     return false;
@@ -1103,6 +1109,21 @@ subscribeStore(() => {
   for (const listener of [...listeners]) listener();
   for (const listener of [...statusListeners]) listener();
 });
+
+if (typeof window !== "undefined") {
+  window.addEventListener(PROJECT_PRESENTATION_HYDRATED_EVENT, (event) => {
+    const hydratedProjectId = projectPresentationEventProjectId(event);
+    if (hydratedProjectId === null || hydratedProjectId !== activeProjectId) return;
+    if (writeTimer !== null) clearTimeout(writeTimer);
+    writeTimer = null;
+    state = parseWidgetLayout(read(activeProjectId), knownWidgetDefinitions());
+    history = [];
+    future = [];
+    saveStatus = "saved";
+    for (const listener of [...listeners]) listener();
+    for (const listener of [...statusListeners]) listener();
+  });
+}
 
 function commit(next: WidgetLayout, recordHistory = true, immediate = false): void {
   if (next === state) return;

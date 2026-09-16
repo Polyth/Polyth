@@ -44,6 +44,7 @@ import type {
   Project,
   ProjectCloneInput,
   ProjectPatch,
+  ProjectPresentationSettingsDto,
   QueueItemDto,
   ResumeTurnOptions,
   RuntimeDiagnosticsDto,
@@ -663,6 +664,16 @@ export const api = {
   deleteProject: (id: string) => jfetch<void>(`/api/projects/${id}`, { method: "DELETE" }),
   patchProject: (id: string, patch: ProjectPatch) =>
     jfetch<Project>(`/api/projects/${id}`, json("PATCH", patch)),
+  projectPresentationSettings: (projectId: string) =>
+    jfetch<ProjectPresentationSettingsDto>(`/api/projects/${encodeURIComponent(projectId)}/settings`),
+  projectPresentationSettingsSave: (
+    projectId: string,
+    settings: Record<string, unknown>,
+    opts?: { keepalive?: boolean },
+  ) => jfetch<ProjectPresentationSettingsDto>(`/api/projects/${encodeURIComponent(projectId)}/settings`, {
+    ...json("PUT", { settings }),
+    ...(opts?.keepalive ? { keepalive: true } : {}),
+  }),
 
   listSessions: (projectId: string) => jfetch<SessionProjection[]>(`/api/sessions?projectId=${encodeURIComponent(projectId)}`),
   createSession: (input: { projectId: string; harness?: HarnessSelection; title?: string; model?: ModelRef; agent?: string; worktreePath?: string }) =>

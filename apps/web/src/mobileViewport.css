@@ -1,9 +1,8 @@
 /* Native keyboard resize already removes the covered keyboard strip from the
-   WebView. Keep only the deliberate optical gap under the new-chat dock while
-   text entry is active; reusing the full-screen safe area here lifts the whole
-   context + composer block unnecessarily. */
-@media (max-width: 720px) {
-  body[data-keyboard="open"] #app-canvas-root .hero-dock {
-    padding-bottom: var(--space-2);
+   WebView. Keep only the optical gap under the new-chat dock while text entry
+   is active; the home-indicator safe area would otherwise lift the composer. */
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  body[data-keyboard="open"] .hero-dock {
+    padding-bottom: var(--space-1);
   }
 }

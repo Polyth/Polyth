@@ -35,6 +35,21 @@ function inlineAllowlistedIcon(name: string, svg: string, _color: string): strin
 export function projectRoutes(spaces: SpaceServicesFor, fetchImpl: IconifyFetch = fetch): RouteHandler {
   return async (rc) => {
     const { path, method, body, json } = rc;
+    const settingsMatch = path.match(/^\/api\/projects\/([^/]+)\/settings$/);
+    if (settingsMatch && (method === "GET" || method === "PUT")) {
+      const { projects } = spaces(rc.space);
+      if (!projects.getPresentationSettings || !projects.putPresentationSettings) {
+        throw Object.assign(new Error("project settings are unavailable"), { code: "not-supported" });
+      }
+      const projectId = decodeURIComponent(settingsMatch[1]!);
+      if (method === "GET") {
+        json(200, await projects.getPresentationSettings(projectId));
+        return true;
+      }
+      const input = await body();
+      json(200, await projects.putPresentationSettings(projectId, input.settings as Record<string, unknown>));
+      return true;
+    }
     const match = path.match(/^\/api\/projects\/([^/]+)$/);
     if (!match || method !== "PATCH") return false;
     const { projects } = spaces(rc.space);

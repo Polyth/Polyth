@@ -2181,7 +2181,7 @@ export default function Composer({
   // its minified resting state (same as the fresh-session composer) so a busy
   // agent never inflates the interaction dock — Stop stays reachable in the
   // collapsed row.
-  const expanded = !phoneLayout || inputFocused || shellMode;
+  const expanded = !phoneLayout || inputFocused || shellMode || hasDraft;
   const stateClass = phoneLayout
     ? ` composer-mobile ${expanded ? "composer-expanded" : "composer-collapsed"}${inputFocused ? " composer-input-active" : ""}${hasDraft ? " composer-has-draft" : ""}`
     : "";
@@ -2415,35 +2415,11 @@ export default function Composer({
           <div className="composer-config">
             {!phoneLayout && modelControl}
           </div>
+          {!phoneLayout && <CustomizeZoneButton slot="composer.trailing" />}
           <span className="composer-primary">
             {canStop ? (
               (working && (queueEdit || (followUp === "queue" && (!sendDisabled || emptySteerItem)))) ? (
                 <div className="composer-send-split">
-                    <button
-                      className="send composer-delivery composer-queue"
-                      onClick={() => send()}
-                      aria-label={queueEdit
-                        ? tr("composer.saveQueuedMessageInIts")
-                        : emptySteerItem
-                          ? tr("queuedmessagelist.steer")
-                          : tr("composer.queueMessageUntilTheCurrentResponseFinishes")}
-                      title={queueEdit
-                        ? tr("composer.saveQueuedMessageInIts")
-                        : emptySteerItem
-                          ? tr("queuedmessagelist.steer")
-                          : tr("composer.queueMessageUntilTheCurrentResponseFinishes")}
-                      aria-busy={!!emptySteerItem && steeringQueuedId === emptySteerItem.id}
-                      disabled={queueEdit
-                        ? queueEditSaving || !text.trim()
-                        : !!emptySteerItem && steeringQueuedId !== null}
-                    >
-                      {emptySteerItem ? <SendIcon /> : queueEdit ? <CheckIcon /> : <QueueIcon />}
-                      <span className="composer-action-label">{queueEdit
-                        ? tr("common.save")
-                        : emptySteerItem
-                          ? tr("settings.pages.steer")
-                          : tr("composer.queue")}</span>
-                  </button>
                   <Menu
                     label={tr("composer.moreActiveRunActions")}
                     align="end"
@@ -2478,6 +2454,31 @@ export default function Composer({
                       </button>
                     )}
                   </Menu>
+                    <button
+                      className="send composer-delivery composer-queue"
+                      onClick={() => send()}
+                      aria-label={queueEdit
+                        ? tr("composer.saveQueuedMessageInIts")
+                        : emptySteerItem
+                          ? tr("queuedmessagelist.steer")
+                          : tr("composer.queueMessageUntilTheCurrentResponseFinishes")}
+                      title={queueEdit
+                        ? tr("composer.saveQueuedMessageInIts")
+                        : emptySteerItem
+                          ? tr("queuedmessagelist.steer")
+                          : tr("composer.queueMessageUntilTheCurrentResponseFinishes")}
+                      aria-busy={!!emptySteerItem && steeringQueuedId === emptySteerItem.id}
+                      disabled={queueEdit
+                        ? queueEditSaving || !text.trim()
+                        : !!emptySteerItem && steeringQueuedId !== null}
+                    >
+                      {emptySteerItem ? <SendIcon /> : queueEdit ? <CheckIcon /> : <QueueIcon />}
+                      <span className="composer-action-label">{queueEdit
+                        ? tr("common.save")
+                        : emptySteerItem
+                          ? tr("settings.pages.steer")
+                        : tr("composer.queue")}</span>
+                  </button>
                 </div>
               ) : (
                 <button
@@ -2500,7 +2501,6 @@ export default function Composer({
               </button>
             )}
           </span>
-          {!phoneLayout && <CustomizeZoneButton slot="composer.trailing" />}
         </div>
       </div>
       {focusMode && (
