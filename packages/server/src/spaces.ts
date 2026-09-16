@@ -12,6 +12,8 @@ import {
   createTenancyStore,
   deploymentProfileFromEnv,
   migrateToSpaces,
+  noSuchSpace,
+  spaceStorageDir,
   type AuditSink,
   type MigrationResult,
   type SpaceHints,
@@ -25,6 +27,8 @@ import type {
   SpaceContext,
 } from "@polyth/contracts";
 import type { ProjectRegistry } from "./projects.ts";
+import { createCanonicalSpaceGateway } from "./canonicalSpaces.ts";
+import { canonicalSecurity } from "./runtimeSecurity.ts";
 import {
   createSpaceGuard,
   createSpaceServices,
@@ -43,6 +47,12 @@ export interface SpaceSessionStore {
 const SPACE_COOKIE = "polyth_space";
 export const SPACE_HEADER = "x-polyth-space";
 
+type SystemSpaceContext = SpaceContext & {
+  /** Explicit server-only authority marker. Absence on ordinary SpaceContext
+   * means the context came from authenticated membership. */
+  readonly authority: { readonly kind: "system"; readonly serviceId: string };
+};
+
 /** What the gateway calls per request. Deliberately tiny: the gateway must not
  *  be able to reach around it into the registry. */
 export interface SpaceGateway {
@@ -50,8 +60,9 @@ export interface SpaceGateway {
    *  `unauthorized` for anonymous callers and `not-found` when an explicitly
    *  requested Space is not one this identity belongs to. */
   resolve(principal: AuthPrincipal, hints?: SpaceHints): SpaceContext;
-  /** Control-plane callers have no ambient identity; bind them explicitly to
-   *  the installation owner and an optional requested Space. */
+  /** Trusted server work may bind to a resource Space without impersonating a
+   * human member. Canonical mode returns a context marked authority=system;
+   * direct canonical APIs still refuse ambient internal identity. */
   resolveInternal(spaceId?: string | null): SpaceContext;
   /** Scoped services for a context. The only way a handler gets a session or
    *  project service. */
@@ -83,11 +94,83 @@ export interface SpaceGatewayHandle {
   migration: MigrationResult;
 }
 
+function canonicalSpaceGateway(opts: SpaceGatewayOptions): SpaceGatewayHandle | null {
+  const security = canonicalSecurity();
+  if (!security) return null;
+  if (security.control.installation().state !== "ready") {
+    throw Object.assign(new Error("Canonical setup must complete before the application runtime starts"), { code: "setup-required" });
+  }
+
+  const deployment = opts.deployment ?? deploymentProfileFromEnv();
+  const canonical = createCanonicalSpaceGateway({
+    control: security.control,
+    dataDir: opts.dataDir,
+    registry: opts.registry,
+    sessions: opts.sessions,
+    store: opts.store,
+    deployment,
+    ...(opts.cookieName ? { cookieName: opts.cookieName } : {}),
+    ...(opts.now ? { now: opts.now } : {}),
+  });
+  const ownerId = security.control.get<{ user_id: string }>(
+    `SELECT r.user_id FROM instance_roles r JOIN principals p ON p.id=r.user_id
+      WHERE r.role='owner' AND p.status='active' ORDER BY r.user_id LIMIT 1`,
+  )?.user_id;
+  const owner = ownerId ? canonical.store.user(ownerId) : undefined;
+  const defaultSpace = ownerId ? canonical.store.defaultSpaceFor(ownerId) : undefined;
+  if (!owner || !defaultSpace) {
+    throw Object.assign(new Error("Canonical authority is ready without an active owner/default Space"), { code: "recovery-required" });
+  }
+
+  const systemContext = (requested?: string | null): SystemSpaceContext => {
+    if (!requested && deployment === "multi-tenant-sandboxed") {
+      throw Object.assign(new Error("Internal services require an explicit Space in this deployment"), { code: "unauthorized" });
+    }
+    const space = requested
+      ? canonical.store.allSpaces().find((candidate) => candidate.id === requested)
+      : defaultSpace;
+    if (!space) throw noSuchSpace();
+    return {
+      spaceId: space.id,
+      spaceSlug: space.slug,
+      // This is deliberately not a user id from the tenancy registry. Any
+      // code that tries to turn a system context into a human membership fails
+      // closed rather than silently inheriting the installation owner.
+      userId: "system:polyth-runtime",
+      role: "owner",
+      deployment,
+      storageDir: spaceStorageDir(opts.dataDir, space),
+      authority: { kind: "system", serviceId: "polyth-runtime" },
+    };
+  };
+
+  const gateway: SpaceGateway = {
+    ...canonical,
+    resolveInternal: systemContext,
+  };
+  return {
+    gateway,
+    // Compatibility metadata only; canonical mode never runs legacy adoption
+    // during boot. The reviewed offline migration already made these durable.
+    migration: {
+      user: owner,
+      space: defaultSpace,
+      created: false,
+      projectsAdopted: 0,
+      sessionsAdopted: 0,
+    },
+  };
+}
+
 /** Build the tenancy boundary and run the initial migration. Idempotent: a
- *  second boot finds the Personal Space already present and adopts nothing. */
+ *  second boot finds the Personal Space already present and adopts nothing.
+ *  When bootstrap bound canonical security, legacy JSON is never opened. */
 export async function createSpaceGateway(
   opts: SpaceGatewayOptions,
 ): Promise<SpaceGatewayHandle> {
+  const canonical = canonicalSpaceGateway(opts);
+  if (canonical) return canonical;
+
   const deployment = opts.deployment ?? deploymentProfileFromEnv();
   const store = createTenancyStore({ file: `${opts.dataDir}/tenancy.json` });
   const audit = createAuditSink(opts.now ? { now: opts.now } : {});
@@ -143,10 +226,8 @@ export async function createSpaceGateway(
   const gateway: SpaceGateway = {
     resolve: (principal, hints) => resolver.forPrincipal(principal, hints),
     resolveInternal: (spaceId) => {
-      // A filesystem-protected local socket speaks for the operator, which is
-      // meaningful only where there IS an ambient operator. In a hosted
-      // deployment the installation owner is not a tenant that a service may
-      // act as, so the caller must be given a context by whatever invoked it.
+      // Compatibility-only legacy behavior. Canonical mode never reaches this
+      // branch and therefore never maps an internal service to a human owner.
       if (deployment === "multi-tenant-sandboxed") {
         throw Object.assign(
           new Error("internal services must be given an explicit space in this deployment"),
