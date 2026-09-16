@@ -31,3 +31,14 @@ No root lint or root typecheck script was declared at the audit baseline. Do not
 ## Safe test environments
 
 Do not hardcode a private IP, assume any port is the user's intended instance, or kill a process just because it occupies a preferred port. Establish the instance identity. Test mutation/restart/migration against isolated data and an isolated port; one data directory has one owner. Confirm fake runtimes do not call paid providers. Never point fixtures at the user's active data.
+
+## Identity migration preparation
+
+`node --experimental-strip-types scripts/migrate-identity.ts --help` describes the
+operator-only `inspect`, `stage` and `verify` commands. See
+[the migration preparation procedure](../dev/identity-migration.md) before use.
+Staging requires a stopped installation, a pinned inventory digest, and a private
+non-overlapping destination. It creates a scoped input capsule, not a full asset
+backup or an activated control authority. No live apply or automatic restart is
+exposed. Fixture tests live in `packages/tenancy/test/migrationStage.test.ts` and
+`scripts/test/migrate-identity.test.ts`.
