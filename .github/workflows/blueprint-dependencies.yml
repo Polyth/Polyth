@@ -1,0 +1,38 @@
+name: Blueprint Linux validation dependencies
+
+on:
+  push:
+    branches: [feat/identity-governed-workspaces-20260916]
+    paths: [.github/workflows/blueprint-dependencies.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blueprint-dependencies-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependencies:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.16.0
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Package only dependency files for offline Linux validation
+        run: |
+          tar -czf linux-validation-dependencies.tar.gz node_modules
+          sha256sum linux-validation-dependencies.tar.gz > linux-validation-dependencies.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blueprint-linux-dependencies
+          path: |
+            linux-validation-dependencies.tar.gz
+            linux-validation-dependencies.sha256
+          retention-days: 1
+          if-no-files-found: error
