@@ -2,6 +2,7 @@ import type { HarnessSelection, HarnessTransition } from "@polyth/contracts";
 import { defineWebPackage } from "@polyth/web-sdk";
 import base from "./runtime.tsx";
 import HarnessAuthRecovery from "./HarnessAuthRecovery.tsx";
+import HarnessSystemPrompt from "./HarnessSystemPrompt.tsx";
 import McpPage from "./McpPage.tsx";
 
 /** Canonical package entry: existing harness UI plus package-owned recovery and MCP surfaces. */
@@ -24,6 +25,15 @@ export default defineWebPackage((host) => () => {
       transition={props.harnessTransition as HarnessTransition | undefined}
     />,
   });
+  const disposeSystemPrompt = host.slots.register({
+    id: "harnesses.system-prompt",
+    slot: "settings.harness.detail",
+    order: 5,
+    meta: { harnessId: "*", sectionId: "system-prompt", label: "System prompt" },
+    render: (context) => context.sectionId === "system-prompt" && typeof context.harnessId === "string"
+      ? <HarnessSystemPrompt harnessId={context.harnessId} />
+      : null,
+  });
   const disposeMcp = host.settings.registerPage({
     id: "mcp",
     packageId: "harness-runtime",
@@ -35,6 +45,7 @@ export default defineWebPackage((host) => () => {
   });
   return () => {
     disposeMcp();
+    disposeSystemPrompt();
     disposeRecovery();
     disposeBase();
   };
