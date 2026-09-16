@@ -19,6 +19,31 @@ export async function runPlannerTask(taskId: string): Promise<boolean> {
   }
 }
 
+export async function reviewLoopVersion(
+  taskId: string,
+  action: "trust-current" | "run-once" | "reject",
+): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/schedule/${encodeURIComponent(taskId)}/trust`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action }),
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const payload = await res.json() as { message?: unknown; error?: unknown };
+        if (typeof payload.message === "string") message = payload.message;
+        else if (typeof payload.error === "string") message = payload.error;
+      } catch { /* use bounded generic transport error */ }
+      throw new Error(message);
+    }
+    return true;
+  } catch (cause) {
+    return fail(cause);
+  }
+}
+
 export async function pausePlannerTask(taskId: string, pause: boolean): Promise<boolean> {
   try {
     await api.schedulePause(taskId, pause);
