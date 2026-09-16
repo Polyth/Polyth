@@ -114,3 +114,13 @@ test("dot-prefixed nested directories are still overlapping project roots", t =>
   const result = inventoryLegacyMigration({ dataDir: root });
   assert.ok(result.issues.some(issue => issue.code === "overlapping-project-roots"));
 });
+
+test("read-only opening of a checkpointed WAL database does not invalidate a dry-run with empty auxiliary files", t => {
+  const root = fixture(t); auth(root); project(root);
+  const db = new DatabaseSync(join(root,"sessions.db"));
+  db.exec("PRAGMA journal_mode=WAL; CREATE TABLE projections(session_id TEXT PRIMARY KEY, data TEXT NOT NULL)");
+  db.prepare("INSERT INTO projections VALUES(?,?)").run("s",JSON.stringify({projectId:"p"}));db.close();
+  const first = inventoryLegacyMigration({dataDir:root}), second = inventoryLegacyMigration({dataDir:root});
+  assert.equal(first.safeToStage,true);
+  assert.deepEqual(first,second);
+});

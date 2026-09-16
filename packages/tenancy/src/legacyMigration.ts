@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
 import { isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { canonicalLegacyJson, digestLegacyFile, readLegacyFile, type LegacyFileDigest } from "./legacyFiles.ts";
+import { canonicalLegacyJson, digestLegacyFile, digestLegacySidecar, readLegacyFile, type LegacyFileDigest } from "./legacyFiles.ts";
 import { parseLegacyAuthState } from "./legacyAuth.ts";
 
 export const LEGACY_OWNER_ALIAS = "usr_owner";
@@ -31,7 +31,8 @@ export interface LegacySourceEvidence {
   sha256?: string;
   bytes?: number;
   counts: Record<string, number>;
-  /** WAL/journal bytes participate in the source fingerprint. SHM is not data. */
+  /** Nonempty WAL/journal payloads participate in the fingerprint. Empty
+   * auxiliary files and SHM carry no committed data. */
   sidecars?: Record<string, LegacyFileDigest>;
 }
 
@@ -100,7 +101,7 @@ function sourceEvidence(kind: LegacySourceKind, root: string, file: string): Leg
     return {
       kind, path: relativeEvidencePath(root, file), ...digest, counts: {},
       ...(kind === "sessions" ? { sidecars: {
-        wal: digestLegacyFile(`${file}-wal`), journal: digestLegacyFile(`${file}-journal`),
+        wal: digestLegacySidecar(`${file}-wal`), journal: digestLegacySidecar(`${file}-journal`),
       } } : {}),
     };
   } catch (error) {

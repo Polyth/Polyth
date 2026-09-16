@@ -3,6 +3,7 @@
 import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, type BigIntStats } from "node:fs";
 
+export const LEGACY_JSON_MAX_BYTES = 64 * 1024 * 1024;
 export interface LegacyFileDigest { present: boolean; sha256?: string; bytes?: number }
 export const legacyFileError = (code: string): Error => Object.assign(new Error(code), { code });
 const unchanged = (a: BigIntStats, b: BigIntStats): boolean =>
@@ -45,10 +46,17 @@ function readChecked(file: string, collect: boolean, maximum: number): { digest:
 /** JSON authority inputs are bounded; a larger source needs an explicit
  * migration design, not an unbounded allocation on the server request path. */
 export function readLegacyFile(file: string): { digest: LegacyFileDigest; data: Buffer | null } {
-  return readChecked(file, true, 64 * 1024 * 1024);
+  return readChecked(file, true, LEGACY_JSON_MAX_BYTES);
 }
 export function digestLegacyFile(file: string): LegacyFileDigest {
   return readChecked(file, false, Number.MAX_SAFE_INTEGER).digest;
+}
+/** SQLite can create an empty WAL while opening a checkpointed database read
+ * only. An empty auxiliary file has no committed payload; nonempty bytes are
+ * always fingerprinted, and unsafe files are still rejected before this step. */
+export function digestLegacySidecar(file: string): LegacyFileDigest {
+  const digest = digestLegacyFile(file);
+  return digest.bytes === 0 ? { present: false } : digest;
 }
 export function canonicalLegacyJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(item => canonicalLegacyJson(item ?? null)).join(",")}]`;

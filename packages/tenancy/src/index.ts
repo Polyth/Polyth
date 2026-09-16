@@ -61,3 +61,10 @@ export {
   type LegacyAuthSession,
   type LegacyAuthState,
 } from "./legacyAuth.ts";
+export {
+  stageLegacyMigration,
+  verifyMigrationStage,
+  type MigrationStageArtifact,
+  type MigrationStageManifest,
+  type StageLegacyMigrationOptions,
+} from "./migrationStage.ts";
