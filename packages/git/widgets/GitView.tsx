@@ -4,6 +4,7 @@ import { api, errorCodeOf, errorChangesOf, type GitBranches, type GitFileEntry, 
 import { layoutGraph, type GraphRow } from "./git/graph.ts";
 import { setGitPrefs, splitDiffRows, useGitPrefs } from "./gitPrefs.ts";
 import { refreshGitStatus, useGitStatus } from "./gitStatusStore.ts";
+import { gitDiffSnapshotDigestOf, mutateGitHunk, type GitHunkOperation } from "./hunkActions.ts";
 import { highlight, langOf } from "../../../apps/web/src/highlight.ts";
 import { getLocale, tr } from "../../../apps/web/src/i18n/index.ts";
 import { Icon } from "../../../apps/web/src/icons.tsx";
@@ -356,6 +357,7 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
   const [loadError, setLoadError] = useState("");
   const [selected, setSelected] = useState<GitSelection | null>(null);
   const [diff, setDiff] = useState("");
+  const [diffSnapshotDigest, setDiffSnapshotDigest] = useState("");
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState("");
   const [diffRetry, setDiffRetry] = useState(0);
@@ -477,11 +479,16 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
     if (!projectId || !selected || status?.isRepo === false) return;
     let active = true;
     setDiff("");
+    setDiffSnapshotDigest("");
     setDiffError("");
     setDiffLoading(true);
     setDraft(null);
     void api.gitDiff(projectId, selected.path, selected.staged, prefs.ignoreWhitespace, sessionId ?? undefined)
-      .then((result) => { if (active) setDiff(result.diff); })
+      .then((result) => {
+        if (!active) return;
+        setDiff(result.diff);
+        setDiffSnapshotDigest(gitDiffSnapshotDigestOf(result));
+      })
       .catch((cause) => {
         if (active) setDiffError(friendlyError(tr("gitview.couldntLoadTheFileDiff"), cause));
       })
@@ -556,6 +563,30 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
     } finally {
       setBusy(false);
     }
+  };
+
+  const runHunkAction = (operation: GitHunkOperation, hunk: DiffHunk, hunkIndex: number) => {
+    if (!projectId || !selected || !diffSnapshotDigest || busy) return;
+    const action = () => mutateGitHunk(operation, {
+      projectId,
+      ...(sessionId ? { sessionId } : {}),
+      path: selected.path,
+      hunkIndex,
+      hunkDigest: hunkDigest(hunk),
+      expectedSnapshotDigest: diffSnapshotDigest,
+      expectedStaged: selected.staged,
+      ...(prefs.ignoreWhitespace ? { ignoreWhitespace: true } : {}),
+    });
+    if (operation === "discard") {
+      setConfirmRequest({
+        title: tr("gitview.discardFileChanges"),
+        description: tr("gitview.revertValue", { path: selected.path }),
+        confirmLabel: tr("common.discardChanges"),
+        action,
+      });
+      return;
+    }
+    void run(action);
   };
 
   // One button: commit what's staged (when a message is present), then sync via
@@ -1089,10 +1120,20 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
                           <div key={index} className="git-diff-line"><span className="git-diff-ln">{index + 1}</span><DiffCode line={line} path={selected.path} /></div>
                         ))}
                         {hunks.map((hunk, index) => (
-                          <HunkBlock key={index} hunk={hunk} path={selected.path} onComment={() => {
-                            setDraft({ digest: hunkDigest(hunk), line: hunk.startNew });
-                            setDraftText("");
-                          }} />
+                          <HunkBlock
+                            key={index}
+                            hunk={hunk}
+                            hunkIndex={index}
+                            path={selected.path}
+                            staged={selected.staged}
+                            busy={busy}
+                            canMutate={!!diffSnapshotDigest}
+                            onMutate={(operation) => runHunkAction(operation, hunk, index)}
+                            onComment={() => {
+                              setDraft({ digest: hunkDigest(hunk), line: hunk.startNew });
+                              setDraftText("");
+                            }}
+                          />
                         ))}
                       </pre>
                       <CopyButton text={diff} />
@@ -1502,14 +1543,47 @@ function DiffCode({ line, path }: { line: string; path?: string }) {
   return <span dangerouslySetInnerHTML={{ __html: highlight(line, langOf(path)) }} />;
 }
 
-function HunkBlock({ hunk, path, onComment }: { hunk: DiffHunk; path: string; onComment: () => void }) {
+function HunkBlock({ hunk, path, staged, busy, canMutate, onMutate, onComment }: {
+  hunk: DiffHunk;
+  hunkIndex: number;
+  path: string;
+  staged: boolean;
+  busy: boolean;
+  canMutate: boolean;
+  onMutate: (operation: GitHunkOperation) => void;
+  onComment: () => void;
+}) {
   let lineNumber = hunk.startNew;
   return (
     <>
       <div className="git-diff-line diff-hunk">
         <span className="git-diff-ln" />
         <span>{hunk.header}</span>
-        <IconButton icon={AddIcon} size="sm" variant="ghost" className="hunk-comment-btn" title={tr("gitview.addReviewNoteForThisHunk")} label={tr("gitview.addReviewNote")} onClick={onComment} />
+        <span className="hunk-action-group">
+          <IconButton
+            icon={staged ? MinusIcon : StageIcon}
+            size="sm"
+            variant="ghost"
+            className="hunk-action-btn"
+            title={staged ? tr("gitview.unstage") : tr("gitview.stage")}
+            label={staged ? tr("gitview.unstage") : tr("gitview.stage")}
+            disabled={busy || !canMutate}
+            onClick={() => onMutate(staged ? "unstage" : "stage")}
+          />
+          {!staged && (
+            <IconButton
+              icon={UndoIcon}
+              size="sm"
+              variant="ghost"
+              className="hunk-action-btn"
+              title={tr("gitview.revert")}
+              label={tr("gitview.revert")}
+              disabled={busy || !canMutate}
+              onClick={() => onMutate("discard")}
+            />
+          )}
+          <IconButton icon={AddIcon} size="sm" variant="ghost" className="hunk-comment-btn hunk-action-btn" title={tr("gitview.addReviewNoteForThisHunk")} label={tr("gitview.addReviewNote")} onClick={onComment} />
+        </span>
       </div>
       {hunk.body.map((line, index) => {
         let className = "";
