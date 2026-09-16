@@ -3,9 +3,9 @@
 // across network/filesystem awaits.
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
-import { chmodSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, writeSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
-import { migrations } from './schema.ts';
+import { migrations } from './migrations.ts';
 
 export type InstallationState = 'uninitialized' | 'claimed' | 'configuring' | 'ready' | 'recovery';
 export interface Installation { id: string; state: InstallationState; authority_epoch: number; revision: number }
@@ -52,7 +52,9 @@ export function openControlPlane(opts: { directory: string }): ControlPlane {
   let newInstance = false;
   let id: string;
   if (!existsSync(sentinel)) {
-    if (existsSync(file)) throw recoveryRequired();
+    // An existing data root is not a fresh installation. Legacy adoption must
+    // use a separately reviewed migration, never invent a new owner over it.
+    if (existsSync(file) || readdirSync(root).length || readdirSync(opts.directory).some(name => name !== 'control-plane')) throw recoveryRequired();
     id = randomUUID();
     let fd: number | undefined;
     try {
@@ -123,7 +125,11 @@ export function openControlPlane(opts: { directory: string }): ControlPlane {
         throw e;
       } finally { depth--; }
     },
-    installation() { return control.get<Installation>('SELECT id,state,authority_epoch,revision FROM installation WHERE singleton=1')!; },
+    installation() {
+      const row = control.get<Installation>('SELECT id,state,authority_epoch,revision FROM installation WHERE singleton=1');
+      if (!row || row.id !== id) throw recoveryRequired();
+      return row;
+    },
     audit(actor, action, resource) {
       if (!depth) throw controlError('invalid-input', 'Audit must commit with its domain mutation');
       const row = control.run('INSERT INTO audit_events(actor_id,action,resource_id,occurred_at_ms,authority_epoch) VALUES(?,?,?,?,?)', actor, action, resource ?? null, Date.now(), control.installation().authority_epoch);
