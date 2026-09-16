@@ -20,8 +20,6 @@ const DIRECTION_COPY: Record<ProjectDirection, { label: string; description: str
   operations: { label: "Operations", description: "Schedules, workflows, monitoring and recurring work." },
 };
 
-const DIRECTION_SET = new Set<string>(PROJECT_DIRECTIONS);
-
 export const emptyProjectComposition = (): ProjectComposition => ({
   version: 1,
   directions: [],
@@ -38,6 +36,12 @@ export function compositionPackages(
     category: pkg.category,
     projectAffinity: pkg.projectAffinity,
   })));
+}
+
+export function configurableProjectPackages(packages: readonly PackageDescriptorDto[]): PackageDescriptorDto[] {
+  return packages
+    .filter((pkg) => !pkg.core && pkg.category !== "system")
+    .toSorted((a, b) => a.name.localeCompare(b.name));
 }
 
 export default function ProjectCompositionEditor({
@@ -69,12 +73,7 @@ export default function ProjectCompositionEditor({
     const ids = new Set(resolution.recommendedPackageIds);
     return packages.filter((pkg) => ids.has(pkg.id));
   }, [packages, resolution.recommendedPackageIds]);
-  const configurable = useMemo(() => packages
-    .filter((pkg) => !pkg.core && pkg.category !== "system")
-    .filter((pkg) => pkg.projectAffinity?.directions?.length
-      || pkg.category === "workspace"
-      || (typeof pkg.category === "string" && DIRECTION_SET.has(pkg.category)))
-    .sort((a, b) => a.name.localeCompare(b.name)), [packages]);
+  const configurable = useMemo(() => configurableProjectPackages(packages), [packages]);
 
   const commit = (next: ProjectComposition) => onChange(parseProjectComposition(next));
   const setGeneral = () => commit({ ...value, directions: [] });
