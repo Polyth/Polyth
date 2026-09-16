@@ -40,6 +40,36 @@ test("general projects and non-recommended profiles do not force a workbench", (
   ), null);
 });
 
+test("profile can inherit owning package affinity, while explicit profile affinity wins", () => {
+  const inherited: WorkbenchProfileDefinition = {
+    id: "markets",
+    label: "Markets",
+    description: "Markets",
+    order: 30,
+    ownerPackageId: "markets",
+    defaultLayout: { surfaces: [] },
+  };
+  const packageAffinity = (owner: string) => owner === "markets"
+    ? { directions: ["finance"] as const, recommended: true }
+    : undefined;
+  assert.equal(selectInitialWorkbenchProfile(
+    { version: 1, directions: ["finance"], packageOverrides: {} },
+    [inherited],
+    packageAffinity,
+  ), "markets");
+
+  const explicit: WorkbenchProfileDefinition = {
+    ...inherited,
+    id: "markets-research-only",
+    projectAffinity: { directions: ["research"], recommended: true },
+  };
+  assert.equal(selectInitialWorkbenchProfile(
+    { version: 1, directions: ["finance"], packageOverrides: {} },
+    [explicit],
+    packageAffinity,
+  ), null);
+});
+
 test("setup recovery never traps an unresolved project and never abandons an unsafe known one", () => {
   assert.deepEqual(projectSetupRecovery(false, false), {
     canExit: true, canRetry: false, exitKind: "close",

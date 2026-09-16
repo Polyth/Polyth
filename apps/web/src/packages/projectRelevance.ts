@@ -39,6 +39,14 @@ export function updateProjectPackageDescriptor(item: PackageDescriptorDto): void
   replaceProjectPackageCatalog(next);
 }
 
+/** Read-only discovery metadata for consumers that need package defaults rather
+ * than relevance itself (for example one-time workbench recommendation seeding).
+ * Return a detached value so consumers cannot mutate the canonical catalog. */
+export function projectPackageAffinity(ownerPackageId: string): ProjectAffinity | undefined {
+  const affinity = catalog.get(ownerPackageId)?.projectAffinity;
+  return affinity === undefined ? undefined : structuredClone(affinity);
+}
+
 export function setProjectCompositionContext(
   projectId: string | null,
   nextComposition: ProjectComposition | undefined,

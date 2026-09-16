@@ -1,21 +1,34 @@
-import { matchesProjectAffinity, type ProjectComposition } from "@polyth/contracts/project-composition";
+import {
+  matchesProjectAffinity,
+  type ProjectAffinity,
+  type ProjectComposition,
+} from "@polyth/contracts/project-composition";
 import type { WorkbenchProfileDefinition } from "@polyth/web-sdk";
 
-/** Pure, deterministic initial-profile planner. It consumes package-provided
- * affinity metadata only; no profile ids are hardcoded here. */
+export type PackageAffinityResolver = (ownerPackageId: string) => ProjectAffinity | undefined;
+
+/** Pure, deterministic initial-profile planner. Explicit profile affinity wins;
+ * otherwise a profile may inherit its owning package's discovery affinity.
+ * No profile or package ids are hardcoded here. */
 export function selectInitialWorkbenchProfile(
   composition: ProjectComposition,
   profiles: readonly WorkbenchProfileDefinition[],
+  packageAffinity: PackageAffinityResolver = () => undefined,
 ): string | null {
   if (composition.directions.length === 0) return null;
   const selected = new Set(composition.directions);
   return profiles
     .filter((profile) => profile.id !== "conversation")
-    .filter((profile) => profile.projectAffinity?.recommended === true)
-    .filter((profile) => matchesProjectAffinity(composition, profile.projectAffinity))
     .map((profile) => ({
       profile,
-      overlap: profile.projectAffinity?.directions?.filter((direction) => selected.has(direction)).length ?? 0,
+      affinity: profile.projectAffinity
+        ?? (profile.ownerPackageId ? packageAffinity(profile.ownerPackageId) : undefined),
+    }))
+    .filter(({ affinity }) => affinity?.recommended === true)
+    .filter(({ affinity }) => matchesProjectAffinity(composition, affinity))
+    .map(({ profile, affinity }) => ({
+      profile,
+      overlap: affinity?.directions?.filter((direction) => selected.has(direction)).length ?? 0,
     }))
     .sort((left, right) => right.overlap - left.overlap
       || left.profile.order - right.profile.order
