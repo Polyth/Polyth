@@ -46,13 +46,9 @@ const sanitizePublicIdentityHeaders = (req: IncomingMessage): void => {
   }
 };
 
-const authPath = (req: IncomingMessage): string | null => {
-  try {
-    const path = new URL(req.url ?? "/", "http://x").pathname;
-    return path.startsWith("/api/auth/") ? path : null;
-  } catch {
-    return null;
-  }
+const requestPath = (req: IncomingMessage): string | null => {
+  try { return new URL(req.url ?? "/", "http://x").pathname; }
+  catch { return null; }
 };
 
 export function createHttpHandler(deps: HttpDeps): HttpHandler {
@@ -63,8 +59,14 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
   if (!identityHttp) return core;
 
   return async (req, res, ingress: RequestIngress) => {
-    const path = authPath(req);
-    if (!path) return core(req, res, ingress);
+    const path = requestPath(req);
+    // Desktop/native readiness probes must not need a browser credential. The
+    // response contains no tenant data and cannot mutate authority.
+    if (path === "/api/health" && req.method === "GET") {
+      writeJson(res, 200, { ok: true, version: deps.version, capabilities: deps.capabilities() });
+      return;
+    }
+    if (!path?.startsWith("/api/auth/")) return core(req, res, ingress);
 
     if (deps.admission && !deps.admission.enter()) {
       if (!res.headersSent && !res.writableEnded) {
