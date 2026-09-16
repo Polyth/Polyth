@@ -70,6 +70,11 @@ export {
   type StageLegacyMigrationOptions,
 } from "./migrationStage.ts";
 export {
+  applyLegacyIdentityMigration,
+  type AppliedLegacyMigration,
+  type ApplyLegacyMigrationOptions,
+} from "./migrationApply.ts";
+export {
   parseLegacyTenancyState,
   loadLegacyTenancyState,
   type LegacyTenancyIssue,
