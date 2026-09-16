@@ -4,6 +4,7 @@
   "type": "module",
   "exports": { ".": "./src/index.ts" },
   "dependencies": {
-    "@polyth/contracts": "0.1.0"
+    "@polyth/contracts": "0.1.0",
+    "@polyth/control-plane": "0.1.0"
   }
 }
