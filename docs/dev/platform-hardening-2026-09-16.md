@@ -36,12 +36,13 @@ Observations are deliberately not synthesized into user/assistant messages. Pare
 
 ## P3 — prompt-prefix cache diagnostics
 
-The canonical `harness.capabilities` registry already provides deterministic id ordering and semantic descriptor revisions. Prompt-prefix diagnostics reuse the same `desiredBundleRevision()` used by provisioning instead of introducing a second cache-key algorithm.
+The canonical provisioning service assembles the effective desired capability state from the capability registry plus server-owned contributors such as global behavior and MCP state, then applies harness targeting before computing `desiredBundleRevision()`. Prompt-prefix diagnostics reuse that exact desired state and revision function instead of maintaining a second cache-key algorithm.
 
-The diagnostic identity covers the **Polyth-owned desired capability prefix** only. It does not claim to fingerprint opaque vendor-internal system prompts.
+The diagnostic identity covers the **Polyth-owned desired capability prefix for the selected harness** only. It does not claim to fingerprint opaque vendor-internal system prompts. A prompt targeted to one harness therefore rotates only that harness's prefix identity.
 
 Exposed data is content-free:
 
+- harness id when resolved,
 - prefix identity,
 - bundle revision,
 - contributor count,
@@ -49,10 +50,10 @@ Exposed data is content-free:
 
 Instruction bodies, context text, tool schemas, prompts, cwd, tokens, secrets, and timestamps are not returned. Project-level identities therefore remain stable across session ids, worktree paths, registration ordering, and process restart, while semantic capability changes rotate the identity.
 
-The read-only route is Space-scoped and validates an optional session/project pairing. Existing Runtime Recovery → Technical details shows the prefix identity and contributor revisions when available.
+The read-only route is Space-scoped, validates optional session/project/harness pairings, and derives the active harness from the session when available. Existing Runtime Recovery → Technical details shows the prefix identity and contributor revisions when available.
 
 ## Verification focus
 
-The test additions cover exact trust/version invalidation, fail-closed legacy migration, hunk stage/unstage/discard and stale snapshots, peer lineage/project boundaries and payload bounds, deterministic prefix identity, semantic rotation, volatile-metadata stability, content non-disclosure, route scoping, and technical-detail presentation.
+The test additions cover exact trust/version invalidation, fail-closed legacy migration, hunk stage/unstage/discard and stale snapshots, peer lineage/project boundaries and payload bounds, deterministic prefix identity, semantic rotation, harness targeting, volatile-metadata stability, content non-disclosure, route scoping, and technical-detail presentation.
 
 GitHub-hosted jobs were unavailable while this branch was implemented (jobs terminated before runner allocation). Do not treat that infrastructure failure as a passing or failing product test; merge review must distinguish connector/static inspection and locally reproduced Git hunk behavior from CI that actually executed.
