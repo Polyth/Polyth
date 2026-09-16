@@ -20,7 +20,9 @@
       "core": false,
       "enabled": true,
       "icon": "network",
-      "hasSettings": false
+      "hasSettings": false,
+      "category": "system",
+      "projectAffinity": {}
     }
   }
 }

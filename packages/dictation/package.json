@@ -22,7 +22,9 @@
       "enabled": true,
       "settingsGroup": "Workspace",
       "icon": "mic",
-      "hasSettings": true
+      "hasSettings": true,
+      "category": "workspace",
+      "projectAffinity": {}
     }
   },
   "dependencies": {
