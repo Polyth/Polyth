@@ -3,7 +3,7 @@ import { installIntegrationsPackage } from "./integrations.ts";
 import { installMcpPackage } from "./mcp.ts";
 import { configurePackageReconcile, reconcilePackage } from "./reconcile.ts";
 import { registerBuiltinPackageTours } from "./onboarding/builtinTours.ts";
-import { getState, openWorkspacePane, setActiveView } from "../store.ts";
+import { getState, openWorkspacePane, setActiveView, subscribeStore } from "../store.ts";
 import {
   activateWebPackage,
   loadWebPackageCatalog,
@@ -12,6 +12,7 @@ import {
 } from "./webEntries.ts";
 import { createPackageActivation } from "./activation.ts";
 import { webPackageHost } from "./webHost.ts";
+import { replaceProjectPackageCatalog, setProjectCompositionContext } from "./projectRelevance.ts";
 
 registerBuiltinPackageTours();
 
@@ -44,6 +45,15 @@ let catalogByCanonical = new Map<string, WebPackageAsset>();
 let loaderOptions: WebEntryLoaderOptions = {};
 
 const canonicalId = (id: string): string => aliases.get(id) ?? id;
+
+const syncProjectCompositionContext = (): void => {
+  const state = getState();
+  const project = state.projectRegistry.projects.find((candidate) => candidate.id === state.activeProjectId);
+  setProjectCompositionContext(project?.id ?? null, project?.composition);
+};
+
+subscribeStore(syncProjectCompositionContext);
+syncProjectCompositionContext();
 
 const runtimeOf = (canonical: string): PackageRuntime => {
   let rec = runtimes.get(canonical);
@@ -177,6 +187,7 @@ async function syncPackages(): Promise<void> {
   }
   catalogByCanonical = nextCatalog;
 
+  replaceProjectPackageCatalog(response.packages);
   packageStates.clear();
   for (const descriptor of response.packages) {
     packageStates.set(descriptor.id, descriptor.enabled);
