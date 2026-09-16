@@ -8,6 +8,7 @@ import { Button } from "./ui/index.ts";
 import { getState } from "../store.ts";
 import { updateProjectAppearance } from "../init.ts";
 import { tr } from "../i18n/index.ts";
+import { setProjectCompositionContext } from "../packages/projectRelevance.ts";
 import { projectSetupRecovery } from "../projectCompositionPlan.ts";
 import { seedInitialProjectWorkspace } from "../projectCompositionSeed.ts";
 import "./ProjectSetupFlowDialog.css";
@@ -67,6 +68,14 @@ export default function ProjectSetupFlowDialog({ onClose }: { onClose: () => voi
       setStage("error");
       return;
     }
+
+    // Clone/SSH-style sources may activate the project before its composition
+    // PATCH has completed. Set the selected composition as presentation context
+    // synchronously so queued relevance/widget reconciliation cannot observe a
+    // transient legacy "everything relevant" project and seed wrong defaults.
+    // The server PATCH in finish() remains the durable authority and this seam
+    // never changes package lifecycle or permissions.
+    setProjectCompositionContext(active.id, composition);
     setProject(active);
     setCompositionPersisted(sameComposition(active.composition, composition));
     void finish(active);
