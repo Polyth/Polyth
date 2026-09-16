@@ -36,6 +36,17 @@ export {
 } from "./paths.ts";
 export { AUDIT, createAuditSink, redact, type AuditSink } from "./audit.ts";
 export {
+  inventoryLegacyMigration,
+  LEGACY_OWNER_ALIAS,
+  type LegacyInventoryOptions,
+  type LegacyMigrationInventory,
+  type LegacyMigrationIssue,
+  type LegacyOwnershipProof,
+  type LegacyPlannedAdoption,
+  type LegacySourceEvidence,
+  type LegacySourceKind,
+} from "./legacyMigration.ts";
+export {
   BOOTSTRAP_USER_ID,
   DEFAULT_SPACE_NAME,
   migrateToSpaces,
