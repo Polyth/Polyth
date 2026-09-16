@@ -121,9 +121,11 @@ export default function ProjectCompositionEditor({
         <div className="project-composition-section-head">
           <div>
             <h3 id="project-composition-review">{tr("projectcomposition.workspace")}</h3>
-            <p>{loading ? tr("projectcomposition.readingInstalledTools") : value.directions.length === 0
-              ? tr("projectcomposition.generalVisible")
-              : tr("projectcomposition.enabledPackagesFit", { count: resolution.relevantPackageIds.length })}</p>
+            <p>{loading
+              ? tr("projectcomposition.readingInstalledTools")
+              : value.directions.length === 0
+                ? tr("projectcomposition.generalDescription")
+                : tr("projectcomposition.workspaceMenuHint")}</p>
           </div>
           <Button size="sm" variant="ghost" onClick={() => setCustomize((open) => !open)} aria-expanded={customize}>
             {customize ? tr("projectcomposition.done") : tr("projectcomposition.customize")}
@@ -136,7 +138,7 @@ export default function ProjectCompositionEditor({
             <div className="project-composition-chips">{recommended.map((pkg) => <span key={pkg.id}>{pkg.name}</span>)}</div>
           </div>
         )}
-        {error && <div className="project-composition-error" role="status">{tr("projectcomposition.recommendationsUnavailable")}</div>}
+        {error && <div className="project-composition-error" role="status">{tr("common.unavailable")}</div>}
 
         {customize && (
           <div className="project-package-list">
@@ -155,7 +157,6 @@ export default function ProjectCompositionEditor({
                 <Button size="sm" variant="ghost" aria-label={`${tr("common.remove")} ${id}`} onClick={() => setOverride(id, "auto")}>{tr("common.remove")}</Button>
               </div>
             ))}
-            {configurable.length === 0 && missingOverrides.length === 0 && !loading && <p className="project-package-empty">{tr("projectcomposition.noPackageChoices")}</p>}
           </div>
         )}
       </section>
