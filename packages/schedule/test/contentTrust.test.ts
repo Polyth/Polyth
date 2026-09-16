@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -196,11 +196,7 @@ test("legacy managed tasks migrate fail-closed instead of inheriting implicit tr
     sourceDigest: "a".repeat(64),
     loopId: "nightly",
   };
-  Bun?.write;
-  // Use Node's fs through a dynamic import-free write to keep this test
-  // compatible with the repository's strip-types runner.
-  const fs = require("node:fs") as typeof import("node:fs");
-  fs.writeFileSync(storage, JSON.stringify({ v: 2, tasks: [legacy], loopErrors: {} }));
+  writeFileSync(storage, JSON.stringify({ v: 2, tasks: [legacy], loopErrors: {} }));
 
   const schedule = createScheduleService({
     file: storage,
