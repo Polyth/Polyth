@@ -6,10 +6,12 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@polyth/control-plane": "0.1.0",
+    "@polyth/harness-runtime": "0.1.0",
+    "@polyth/identity": "0.1.0",
     "@polyth/secure-safe": "0.1.0",
     "@polyth/ssh": "0.1.0",
-    "@polyth/workflow": "0.1.0",
     "@polyth/tenancy": "0.1.0",
-    "@polyth/harness-runtime": "0.1.0"
+    "@polyth/workflow": "0.1.0"
   }
 }
