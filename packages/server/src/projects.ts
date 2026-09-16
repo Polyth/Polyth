@@ -48,10 +48,49 @@ export interface ProjectRegistry extends ProjectService {
 }
 
 const MAX_PROJECT_ICON_BYTES = 512 * 1024;
-const IMAGE_ICON = /^data:(image\/(?:png|svg\+xml|x-icon|vnd\.microsoft\.icon));base64,([A-Za-z0-9+/]+={0,2})$/;
+const IMAGE_ICON = /^data:(image\/(?:png|svg\+xml|x-icon|vnd\.microsoft\.icon))(?:;charset=utf-8)?;base64,([A-Za-z0-9+/]+={0,2})$/i;
 const PROJECT_ICON_PATH = /^\/assets\/project-icons\/[a-z0-9]+(?:-[a-z0-9]+)*\.svg$/;
 const HARNESS_ID = /^[a-z][a-z0-9-]*$/;
 const PACKAGE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+function sanitizeProjectIconSvg(svg: string): string {
+  return svg
+    .replace(/^\uFEFF/, "")
+    .replace(/<\?xml[\s\S]*?\?>/gi, "")
+    .replace(/<!doctype[\s\S]*?>/gi, "")
+    .replace(/<(script|foreignObject)\b[^>]*>[\s\S]*?<\/\1>/gi, "")
+    .replace(/\sxmlns:xlink\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
+    .replace(/\s(?:xlink:)?href\s*=\s*(?:"(?!#)[^"]*"|'(?!#)[^']*')/gi, "")
+    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
+    .trim();
+}
+
+function ensureProjectIconSvgXmlns(svg: string): string {
+  if (/\sxmlns\s*=\s*(["'])http:\/\/www\.w3\.org\/2000\/svg\1/i.test(svg)) return svg;
+  return svg.replace(/^<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
+}
+
+function decodeIncomingSvgDataUrl(icon: string): string | null {
+  const base64 = icon.match(/^data:image\/svg\+xml(?:;charset=utf-8)?;base64,([A-Za-z0-9+/]+={0,2})$/i);
+  if (base64) {
+    const bytes = Buffer.from(base64[1]!, "base64");
+    return bytes.length ? bytes.toString("utf8") : null;
+  }
+  const encoded = icon.match(/^data:image\/svg\+xml(?:;charset=utf-8)?,(.+)$/i);
+  if (encoded) {
+    try { return decodeURIComponent(encoded[1]!); } catch { return null; }
+  }
+  return null;
+}
+
+function normalizeIncomingProjectIcon(icon: string): string {
+  const svg = decodeIncomingSvgDataUrl(icon);
+  if (!svg) return icon;
+  if (/<\/?(?:script|foreignObject)\b/i.test(svg) || /\son\w+\s*=/i.test(svg) || /javascript:/i.test(svg)) return icon;
+  const clean = ensureProjectIconSvgXmlns(sanitizeProjectIconSvg(svg));
+  if (!/<svg[\s>]/i.test(clean)) return icon;
+  return `data:image/svg+xml;base64,${Buffer.from(clean).toString("base64")}`;
+}
 
 function validProjectIcon(icon: string): boolean {
   if (PROJECT_ICON_PATH.test(icon)) return true;
@@ -60,7 +99,7 @@ function validProjectIcon(icon: string): boolean {
   if (!match) return false;
   const bytes = Buffer.from(match[2]!, "base64");
   if (bytes.length === 0 || bytes.length > MAX_PROJECT_ICON_BYTES) return false;
-  const mime = match[1]!;
+  const mime = match[1]!.toLowerCase();
   if (mime === "image/png") return bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
   if (mime === "image/x-icon" || mime === "image/vnd.microsoft.icon") {
     return bytes.length >= 4 && bytes[0] === 0 && bytes[1] === 0 && bytes[2] === 1 && bytes[3] === 0;
@@ -120,6 +159,7 @@ export function createProjectService(
     atomicWriteSync(file, JSON.stringify(next, null, 2));
     items = next;
   };
+
   const add = async (path: string, name?: string, spaceId?: string, composition?: ProjectComposition): Promise<Project> => {
     const parsedComposition = composition === undefined ? undefined : parseProjectComposition(composition);
     const abs = resolve(path);
@@ -192,8 +232,7 @@ export function createProjectService(
           ...(spaceId ? { spaceId } : {}),
           remote: { kind: remote.kind, connectionId: remote.connectionId },
         };
-        items.push(project);
-        persist();
+        persist([...items, project]);
         return publicProject(project);
       },
       async update(id, patch: ProjectPatch): Promise<Project> {
@@ -222,11 +261,12 @@ export function createProjectService(
         }
         if (patch.icon !== undefined) {
           if (typeof patch.icon !== "string") throw Object.assign(new Error("icon must be text"), { code: "invalid-input" });
-          if (!validProjectIcon(patch.icon)) {
+          const icon = normalizeIncomingProjectIcon(patch.icon);
+          if (!validProjectIcon(icon)) {
             throw Object.assign(new Error("icon must be a short glyph or a safe SVG, ICO, or PNG under 512 KiB"), { code: "invalid-input" });
           }
-          if (patch.icon === "") delete project.icon;
-          else project.icon = patch.icon;
+          if (icon === "") delete project.icon;
+          else project.icon = icon;
         }
         if (patch.defaults !== undefined) {
           if (!patch.defaults || typeof patch.defaults !== "object" || Array.isArray(patch.defaults)) {
@@ -271,11 +311,12 @@ export function createProjectService(
     forSpace: (ctx) => view(ctx.spaceId),
     spaceOfProject: (id) => items.find((p) => p.id === id)?.spaceId,
     adoptIntoSpace(spaceId) {
-      const orphans = items.filter((p) => !p.spaceId && !isPackageWorkspace(p));
-      if (orphans.length === 0) return 0;
-      for (const project of orphans) project.spaceId = spaceId;
-      persist();
-      return orphans.length;
+      const next = items.map((project) =>
+        !project.spaceId && !isPackageWorkspace(project) ? { ...project, spaceId } : project);
+      const adopted = next.reduce((count, project, index) => count + (project !== items[index] ? 1 : 0), 0);
+      if (adopted === 0) return 0;
+      persist(next);
+      return adopted;
     },
     async ensurePackageWorkspace(input) {
       if (!input.spaceId) throw Object.assign(new Error("spaceId is required"), { code: "invalid-input" });
@@ -290,8 +331,9 @@ export function createProjectService(
         && project.internal.packageId === input.packageId);
       if (existing) {
         if (existing.path !== path) {
-          existing.path = path;
-          persist();
+          const replacement: StoredProject = { ...existing, path };
+          persist(items.map((item) => item === existing ? replacement : item));
+          return publicProject(replacement);
         }
         return publicProject(existing);
       }
@@ -307,8 +349,7 @@ export function createProjectService(
       if (collision) {
         throw Object.assign(new Error("package workspace id collision"), { code: "conflict" });
       }
-      items.push(project);
-      persist();
+      persist([...items, project]);
       return publicProject(project);
     },
   };
