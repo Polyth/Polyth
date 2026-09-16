@@ -10,6 +10,9 @@ const dom = new Window({ url: "http://localhost:3000/" });
 Object.assign(globalThis, {
   window: dom as unknown as typeof globalThis & Window,
   document: dom.document as unknown as Document,
+  getComputedStyle: (elt: Element, pseudo?: string | null) =>
+    (dom as unknown as { getComputedStyle(el: Element, pseudo?: string | null): CSSStyleDeclaration })
+      .getComputedStyle(elt, pseudo),
 });
 Object.defineProperty(globalThis, "navigator", { value: dom.navigator, configurable: true });
 Object.defineProperty(globalThis, "localStorage", { value: dom.localStorage, configurable: true });
@@ -235,10 +238,10 @@ test("tree mode nests sessions under project worktrees", async () => {
 
     const sessionIntent = store.getState().newSessionIntent;
     await act(async () => { click(focused!.querySelector(".project-card")!); });
-    const railSwitch = container.querySelector<HTMLElement>('.sidebar-rail-switch [role="switch"]')!;
-    assert.equal(railSwitch.getAttribute("aria-checked"), "false", "clicking the open project hides its sessions");
+    const railToggle = container.querySelector<HTMLElement>(".sidebar-rail-toggle")!;
+    assert.equal(railToggle.getAttribute("aria-expanded"), "false", "clicking the open project hides its sessions");
     assert.equal(store.getState().newSessionIntent, sessionIntent, "clicking the open project does not start a session");
-    await act(async () => { click(railSwitch); });
+    await act(async () => { click(railToggle); });
 
     const betaRail = rail.querySelector<HTMLElement>('[aria-label="beta"]');
     assert.ok(betaRail);
@@ -403,8 +406,9 @@ test("the rail switch collapses only the sessions, which peek back on hover", as
     const rail = container.querySelector(".sidebar-project-rail");
     assert.ok(rail, "the project icon rail survives the sessions-only collapse");
     assert.equal(container.querySelector(".sidebar-collapsed-rail"), null, "rail view never falls back to the thin rail");
-    const switchEl = container.querySelector<HTMLButtonElement>('.sidebar-rail-switch [role="switch"]');
-    assert.equal(switchEl?.getAttribute("aria-checked"), "false", "the collapse control is an off switch");
+    const toggle = container.querySelector<HTMLButtonElement>(".sidebar-rail-toggle");
+    assert.equal(toggle?.getAttribute("aria-expanded"), "false", "the collapse control reports the sessions column as collapsed");
+    assert.ok(toggle?.querySelector('path[d="M15 4v16"]'), "the rail toggle renders the sidebar-collapse glyph");
     const peek = container.querySelector<HTMLElement>(".sidebar-sessions-peek")!;
     assert.ok(peek, "the sessions live in a peek panel while collapsed");
     assert.equal(peek.classList.contains("open"), false);
@@ -451,8 +455,8 @@ test("the rail switch collapses only the sessions, which peek back on hover", as
     assert.equal(peek.classList.contains("open"), false, "a click outside dismisses the pinned peek");
 
     // Switching back on restores the inline sessions column.
-    await act(async () => { click(switchEl!); });
-    assert.equal(switchEl?.getAttribute("aria-checked"), "true");
+    await act(async () => { click(toggle!); });
+    assert.equal(toggle?.getAttribute("aria-expanded"), "true");
     assert.equal(container.querySelector(".sidebar-sessions-peek"), null);
     assert.equal(container.querySelector(".sidebar-focused-project .project-name")?.textContent, "beta");
     assert.match(container.querySelector(".sidebar-focused-sessions")?.textContent ?? "", /Beta session/);

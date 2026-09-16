@@ -2209,17 +2209,13 @@ export default function Composer({
       {!session && !creatingSession && <SessionContextBar {...contextBar} />}
       {/* Widget-areas (WA4): the project/branch meta row is a widget area. */}
       <SlotHost slot="composer.meta" context={slotContext} customizable />
-      {failedSend && (
+      {failedSend?.kind === "unavailable" && (
         <Notice
           tone="warning"
           className="composer-send-failure"
           role="alert"
-          {...(failedSend.kind === "unknown"
-            ? {}
-            : { actions: <Button size="sm" onClick={() => send()}>{tr("common.retry")}</Button> })}
-        >{failedSend.kind === "unknown"
-          ? "Checking whether this was applied…"
-          : tr("composer.sendUnavailableDraftPreserved")}</Notice>
+          actions={<Button size="sm" onClick={() => send()}>{tr("common.retry")}</Button>}
+        >{tr("composer.sendUnavailableDraftPreserved")}</Notice>
       )}
       {/* Widget-areas (WA4): the uncommitted-changes bar area, above the box. */}
       <SlotHost slot="composer.pending" context={slotContext} customizable />

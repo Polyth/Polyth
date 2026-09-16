@@ -1,9 +1,39 @@
+import { readFileSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { HarnessProvisioningQuery, HarnessRegistry, HarnessSelection, HarnessSnapshot, JsonValue, RouteHandler } from "@polyth/contracts";
+import type {
+    AgentCapabilityContribution,
+    AgentCapabilityContributionRegistry,
+    AgentCapabilityDescriptor,
+    Disposable,
+    HarnessContext,
+    HarnessProvisioningQuery,
+    HarnessRegistry,
+    HarnessSelection,
+    HarnessSnapshot,
+    JsonValue,
+    RouteHandler,
+} from "@polyth/contracts";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { createHarnessRegistry, type HarnessPreferences, harnessError } from "./index.ts";
+import { promptPrefixDiagnostics } from "./promptPrefixDiagnostics.ts";
+
+const MAX_HARNESS_SYSTEM_PROMPT = 64 * 1024;
+type StoredHarnessPreference = {
+    enabled?: boolean;
+    priority?: number;
+    systemPrompt?: string;
+};
+type StoredHarnessPreferences = Record<string, StoredHarnessPreference>;
+type HarnessSystemPromptDescriptor = AgentCapabilityDescriptor & { targetHarnessId: string };
+type ContextualCapabilityContribution = AgentCapabilityContribution & {
+    resolveCapabilities(context: HarnessContext): readonly AgentCapabilityDescriptor[];
+};
+type HarnessProvisioningDiagnostics = HarnessProvisioningQuery & {
+    desired?(context: HarnessContext): Promise<AgentCapabilityDescriptor[]>;
+};
+
 export function readHarnessSelection(value: unknown): HarnessSelection {
     if (value && typeof value === "object") {
         const input = value as Record<string, unknown>;
@@ -14,9 +44,9 @@ export function readHarnessSelection(value: unknown): HarnessSelection {
     }
     throw harnessError("invalid-input", "Choose Auto or a registered harness");
 }
-async function readPreferences(file: string): Promise<HarnessPreferences> {
+async function readPreferences(file: string): Promise<StoredHarnessPreferences> {
     try {
-        return JSON.parse(await readFile(file, "utf8")) as HarnessPreferences;
+        return JSON.parse(await readFile(file, "utf8")) as StoredHarnessPreferences;
     }
     catch (error) {
         if ((error as {
@@ -25,6 +55,22 @@ async function readPreferences(file: string): Promise<HarnessPreferences> {
             return {};
         throw error;
     }
+}
+function readPreferencesSync(file: string): StoredHarnessPreferences {
+    try {
+        return JSON.parse(readFileSync(file, "utf8")) as StoredHarnessPreferences;
+    }
+    catch (error) {
+        if ((error as { code?: string }).code === "ENOENT")
+            return {};
+        throw error;
+    }
+}
+async function writePreferences(file: string, preferences: StoredHarnessPreferences): Promise<void> {
+    await mkdir(dirname(file), { recursive: true });
+    const temporary = `${file}.${randomUUID()}.tmp`;
+    await writeFile(temporary, JSON.stringify(preferences), { mode: 0o600 });
+    await rename(temporary, file);
 }
 const prospectiveCandidate = (snapshot: HarnessSnapshot): boolean => {
     const state = snapshot.availability.state;
@@ -44,19 +90,22 @@ export function harnessRoutes(host: ServerPackageHost): RouteHandler {
         const preferenceFile = host.spaceStorage(request.space).path("harnesses/preferences.json");
         if (request.path === "/api/harnesses/preferences" && request.method === "PUT") {
             const input = await request.body();
-            const preferences: HarnessPreferences = {};
+            const existing = await readPreferences(preferenceFile);
+            const preferences: StoredHarnessPreferences = {};
             for (const provider of registry.providers()) {
                 const value = (input.preferences as HarnessPreferences | undefined)?.[provider.descriptor.id];
                 if (!value)
                     continue;
                 if (typeof value.enabled !== "boolean" || !Number.isInteger(value.priority) || Math.abs(value.priority!) > 10000)
                     throw harnessError("invalid-input", "Invalid harness preferences");
-                preferences[provider.descriptor.id] = { enabled: value.enabled, priority: value.priority };
+                const systemPrompt = existing[provider.descriptor.id]?.systemPrompt;
+                preferences[provider.descriptor.id] = {
+                    enabled: value.enabled,
+                    priority: value.priority,
+                    ...(typeof systemPrompt === "string" && systemPrompt.trim() ? { systemPrompt } : {}),
+                };
             }
-            await mkdir(dirname(preferenceFile), { recursive: true });
-            const temporary = `${preferenceFile}.${randomUUID()}.tmp`;
-            await writeFile(temporary, JSON.stringify(preferences), { mode: 0o600 });
-            await rename(temporary, preferenceFile);
+            await writePreferences(preferenceFile, preferences);
             registry.invalidate({ spaceId: request.space.spaceId });
             request.json(200, preferences);
             return true;
@@ -79,10 +128,6 @@ export function harnessRoutes(host: ServerPackageHost): RouteHandler {
                 throw harnessError("not-found", "harness not found");
             const detail = request.url.searchParams.get("detail") === "1";
             const force = request.url.searchParams.get("force") === "1";
-            // Draft catalog callers used to perform a client-side waterfall:
-            // cheap snapshots -> choose Auto -> second detail request. Keep Auto
-            // selection server-side so there is one network round-trip and the
-            // second phase reuses the same snapshot cache/singleflight entry.
             if (!harnessId && request.url.searchParams.get("auto") === "1") {
                 const summaries = await registry.snapshots(context, { force });
                 harnessId = summaries
@@ -119,6 +164,72 @@ export function harnessRoutes(host: ServerPackageHost): RouteHandler {
             }
             const context = { space: request.space, spaceId: request.space.spaceId, projectId: project?.id ?? "__default__", cwd: project?.path ?? process.cwd(), remote: Boolean(project?.remote) };
             request.json(200, query.status(context));
+            return true;
+        }
+        if (request.path === "/api/harnesses/prompt-prefix-diagnostics" && request.method === "GET") {
+            const requestedProjectId = request.url.searchParams.get("projectId") ?? undefined;
+            const sessionId = request.url.searchParams.get("sessionId") ?? undefined;
+            const requestedHarnessId = request.url.searchParams.get("harnessId") ?? undefined;
+            const session = sessionId ? await scoped.sessions.snapshot(sessionId) : undefined;
+            if (requestedProjectId && session && session.projectId !== requestedProjectId)
+                throw harnessError("invalid-input", "session does not belong to the requested project");
+            const projectId = requestedProjectId ?? session?.projectId;
+            const project = projectId ? await scoped.projects.get(projectId) : (await scoped.projects.list())[0];
+            if (projectId && !project)
+                throw harnessError("not-found", "project not found");
+            if (session && project && session.projectId !== project.id)
+                throw harnessError("not-found", "session project not found in this Space");
+            const resolvedHarnessId = session?.resolvedHarnessId
+                ?? (session?.harness?.mode === "pinned" ? session.harness.harnessId : undefined);
+            if (requestedHarnessId && resolvedHarnessId && requestedHarnessId !== resolvedHarnessId)
+                throw harnessError("invalid-input", "requested harness does not match the session runtime");
+            const harnessId = requestedHarnessId ?? resolvedHarnessId;
+            if (harnessId && !registry.providers().some((provider) => provider.descriptor.id === harnessId))
+                throw harnessError("not-found", "harness not found");
+            const context: HarnessContext = {
+                space: request.space,
+                spaceId: request.space.spaceId,
+                projectId: project?.id ?? "__default__",
+                cwd: session?.worktreePath ?? project?.path ?? process.cwd(),
+                remote: Boolean(project?.remote),
+                ...(sessionId ? { sessionId } : {}),
+            };
+            const provisioning = host.services.get(
+                serverServiceKey<HarnessProvisioningDiagnostics>("harness.provisioning"),
+            );
+            if (!provisioning?.desired)
+                throw harnessError("unsupported", "prompt prefix diagnostics are unavailable");
+            request.json(200, promptPrefixDiagnostics(await provisioning.desired(context), harnessId));
+            return true;
+        }
+        const systemPrompt = request.path.match(/^\/api\/harnesses\/([a-z][a-z0-9-]*)\/system-prompt$/);
+        if (systemPrompt && (request.method === "GET" || request.method === "PUT")) {
+            const harnessId = systemPrompt[1]!;
+            if (!registry.providers().some((provider) => provider.descriptor.id === harnessId))
+                throw harnessError("not-found", "harness not found");
+            if (request.method === "GET") {
+                const preferences = await readPreferences(preferenceFile);
+                request.json(200, { systemPrompt: preferences[harnessId]?.systemPrompt ?? "" });
+                return true;
+            }
+            const input = await request.body();
+            if (typeof input.systemPrompt !== "string" || input.systemPrompt.length > MAX_HARNESS_SYSTEM_PROMPT || input.systemPrompt.includes("\0"))
+                throw harnessError("invalid-input", `System prompt must be text up to ${MAX_HARNESS_SYSTEM_PROMPT} characters`);
+            const preferences = await readPreferences(preferenceFile);
+            const current = preferences[harnessId] ?? {};
+            if (input.systemPrompt.trim()) {
+                preferences[harnessId] = { ...current, systemPrompt: input.systemPrompt };
+            }
+            else {
+                const { systemPrompt: _systemPrompt, ...rest } = current;
+                if (Object.keys(rest).length)
+                    preferences[harnessId] = rest;
+                else
+                    delete preferences[harnessId];
+            }
+            await writePreferences(preferenceFile, preferences);
+            registry.invalidate({ spaceId: request.space.spaceId, harnessId });
+            request.json(200, { systemPrompt: preferences[harnessId]?.systemPrompt ?? "" });
             return true;
         }
         const control = request.path.match(/^\/api\/harnesses\/([a-z][a-z0-9-]*)\/controls\/([^/]+)$/);
@@ -178,7 +289,62 @@ export function harnessRoutes(host: ServerPackageHost): RouteHandler {
         return false;
     };
 }
+
+function harnessSystemPromptContribution(
+    host: ServerPackageHost,
+    registry: HarnessRegistry,
+): ContextualCapabilityContribution {
+    return {
+        descriptor: {
+            id: "harness-runtime.system-prompts",
+            kind: "instruction",
+            owner: "harness-runtime",
+            scope: "deployment",
+            revision: "1",
+            title: "Harness system prompts",
+            text: "",
+        },
+        resolveCapabilities(context: HarnessContext): readonly AgentCapabilityDescriptor[] {
+            if (!context.space)
+                return [];
+            const preferences = readPreferencesSync(host.spaceStorage(context.space).path("harnesses/preferences.json"));
+            return registry.providers().flatMap((provider) => {
+                const text = preferences[provider.descriptor.id]?.systemPrompt;
+                if (typeof text !== "string" || !text.trim() || text.length > MAX_HARNESS_SYSTEM_PROMPT)
+                    return [];
+                return [{
+                    id: `harness-runtime.system-prompt.${provider.descriptor.id}`,
+                    kind: "instruction",
+                    owner: "harness-runtime",
+                    scope: "space",
+                    spaceId: context.spaceId,
+                    revision: "1",
+                    title: `${provider.descriptor.name} system prompt`,
+                    text,
+                    targetHarnessId: provider.descriptor.id,
+                } as HarnessSystemPromptDescriptor];
+            });
+        },
+    };
+}
+
 export default function registerPackage(host: ServerPackageHost) {
-    host.services.require(serverServiceKey<ReturnType<typeof createHarnessRegistry>>("harnesses")).configurePolicy(async (context) => context.space ? readPreferences(host.spaceStorage(context.space).path("harnesses/preferences.json")) : {});
-    return { routes: harnessRoutes(host), remoteAccess: localOnlyRemoteAccess(["harnesses"]) };
+    const registry = host.services.require(serverServiceKey<ReturnType<typeof createHarnessRegistry>>("harnesses"));
+    registry.configurePolicy(async (context) => context.space ? readPreferences(host.spaceStorage(context.space).path("harnesses/preferences.json")) : {});
+    let promptContribution: Disposable | undefined;
+    return {
+        routes: harnessRoutes(host),
+        remoteAccess: localOnlyRemoteAccess(["harnesses"]),
+        onEnable() {
+            if (promptContribution)
+                return;
+            const capabilities = host.services.require(serverServiceKey<AgentCapabilityContributionRegistry>("harness.capabilities"));
+            promptContribution = capabilities.register("harness-runtime", harnessSystemPromptContribution(host, registry));
+        },
+        onDisable() {
+            const contribution = promptContribution;
+            promptContribution = undefined;
+            return contribution?.dispose();
+        },
+    };
 }

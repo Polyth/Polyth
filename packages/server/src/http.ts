@@ -960,6 +960,12 @@ async function dispatchHttp(
         // dead backend) are honest 503s with their actionable message — a
         // masked 500 would hide "install opencode on <host>" from the user.
         : e.code === "auth-rejected" ? 401
+        // A harness/provider bridge that answered "no" is upstream news, not a
+        // Polyth bug. Masking it as 500 replaces the actionable reason ("Polyth
+        // agent-tools bridge failed to connect (Codex status:
+        // authenticationRequired)") with "An internal server error occurred."
+        // in the harness reconnect surface.
+        : e.code === "native-failure" ? 502
         : e.code === "unavailable" || e.code === "unreachable" ? 503
         : e.code === "invalid-response" ? 502
         : e.code === "unsupported" || e.code === "capability-unsupported" ? 501

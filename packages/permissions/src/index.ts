@@ -134,3 +134,54 @@ export function createAutoAcceptStore(file: string): AutoAcceptStore {
     },
   };
 }
+
+// ---- content-bound trust -----------------------------------------------------
+
+/** The authorization subject for one exact version of repository-controlled
+ * executable content. Consumers keep their own canonical state and embed the
+ * immutable receipt rather than creating a parallel permission database. */
+export interface ContentTrustSubject {
+  spaceId: string;
+  projectId: string;
+  sourceKind: string;
+  sourceIdentity: string;
+  contentDigest: string;
+  semanticDigest?: string;
+}
+
+export type ContentTrustApprovalScope = "current-version" | "once";
+
+export interface ContentTrustReceipt extends ContentTrustSubject {
+  version: 1;
+  approvalScope: ContentTrustApprovalScope;
+  approvedAt: number;
+}
+
+export function issueContentTrustReceipt(
+  subject: ContentTrustSubject,
+  approvalScope: ContentTrustApprovalScope,
+  approvedAt = Date.now(),
+): ContentTrustReceipt {
+  if (!subject.spaceId || !subject.projectId || !subject.sourceKind
+    || !subject.sourceIdentity || !subject.contentDigest) {
+    throw new Error("content trust subject is incomplete");
+  }
+  return { version: 1, ...subject, approvalScope, approvedAt };
+}
+
+/** Any identity, content, semantic, Space, project, or requested-scope mismatch
+ * invalidates trust. Unknown/malformed state is therefore fail-closed. */
+export function contentTrustMatches(
+  receipt: ContentTrustReceipt | undefined,
+  subject: ContentTrustSubject,
+  approvalScope?: ContentTrustApprovalScope,
+): boolean {
+  if (!receipt || receipt.version !== 1) return false;
+  return receipt.spaceId === subject.spaceId
+    && receipt.projectId === subject.projectId
+    && receipt.sourceKind === subject.sourceKind
+    && receipt.sourceIdentity === subject.sourceIdentity
+    && receipt.contentDigest === subject.contentDigest
+    && (receipt.semanticDigest ?? "") === (subject.semanticDigest ?? "")
+    && (approvalScope === undefined || receipt.approvalScope === approvalScope);
+}

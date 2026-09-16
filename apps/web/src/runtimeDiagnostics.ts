@@ -4,6 +4,7 @@ import type {
   SessionEvent,
   SessionProjection,
 } from "@polyth/contracts";
+import type { PromptPrefixDiagnostics } from "./promptPrefixDiagnostics.ts";
 
 export interface RuntimeDiagnosticFact {
   label: string;
@@ -58,6 +59,7 @@ export function runtimeDiagnosticFacts(input: {
   binding?: PersistedRuntimeBinding;
   events: readonly SessionEvent[];
   debug?: SessionDebugDto | null;
+  promptPrefix?: PromptPrefixDiagnostics | null;
 }): RuntimeDiagnosticFact[] {
   const counts = input.debug?.counts ?? countsFromEvents(input.events);
   const epoch = input.debug?.runtimeBinding?.epoch ?? input.binding?.epoch ?? 0;
@@ -83,6 +85,27 @@ export function runtimeDiagnosticFacts(input: {
     facts.push({ label: "Omitted messages", value: String(plan.omittedMessages) });
     if (plan.sectionsCapped.length > 0) {
       facts.push({ label: "Capped sections", value: plan.sectionsCapped.join(", ") });
+    }
+  }
+  if (input.promptPrefix) {
+    facts.push(
+      { label: "Prompt prefix", value: input.promptPrefix.identity },
+      { label: "Capability bundle", value: input.promptPrefix.bundleRevision },
+      { label: "Prefix coverage", value: input.promptPrefix.coverage },
+      { label: "Prefix contributors", value: String(input.promptPrefix.contributorCount) },
+    );
+    const visible = input.promptPrefix.contributors.slice(0, 24);
+    for (const contributor of visible) {
+      facts.push({
+        label: `Prefix · ${contributor.id}`,
+        value: `${contributor.kind} · ${contributor.revision}`,
+      });
+    }
+    if (input.promptPrefix.contributors.length > visible.length) {
+      facts.push({
+        label: "Prefix contributors omitted",
+        value: String(input.promptPrefix.contributors.length - visible.length),
+      });
     }
   }
   return facts;

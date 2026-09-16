@@ -81,7 +81,7 @@ export function scanLoopsDir(projectRoot: string): LoopFileResult[] {
         continue;
       }
       const text = readFileSync(path, "utf8");
-      const digest = createHash("sha256").update(text).digest("hex").slice(0, 16);
+      const digest = createHash("sha256").update(text).digest("hex");
       out.push({ path, digest, ...parseLoopFile(text) });
     } catch (e) {
       out.push({ path, digest: "", parseError: e instanceof Error ? e.message : String(e) });

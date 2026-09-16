@@ -200,6 +200,7 @@ export const CORE_LOCAL_ONLY_PREFIXES: readonly string[] = [
   "/api/system",
   "/api/agent",
   "/api/browse",
+  "/api/iconify",
   "/api/opencode",
   "/api/push",
   "/api/models/enabled",

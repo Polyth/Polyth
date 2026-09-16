@@ -22,6 +22,7 @@ import StarterPicker, { StarterIcon } from "../mobile/StarterPicker.tsx";
 import { requestComposerInsert } from "../../composerInsert.ts";
 import { useGitStatus } from "../../../../../packages/git/widgets/gitStatusStore.ts";
 import { useShellMode } from "../../responsiveShell.ts";
+import { useSpaces } from "../../spaces.ts";
 import { tapFeedback } from "../../haptics.ts";
 import { dismissKeyboard } from "../../mobileViewport.ts";
 import { useSheetTrigger } from "../mobile/sheetTrigger.ts";
@@ -282,6 +283,7 @@ function ArchivedComposerGuard({ sessionId }: { sessionId: string }) {
 
 function SessionSurface() {
   const workspaceMode = useWorkspaceMode();
+  const spaceId = useSpaces().activeSpaceId ?? undefined;
   const projectId = useStore((s) => s.activeProjectId);
   const sessionId = useStore((s) => s.activeSessionId);
   const openingSessionId = useStore((s) => s.openingSessionId);
@@ -321,6 +323,18 @@ function SessionSurface() {
 
   const pendingQuestions = model.questions.filter((q) => q.status === "pending");
   const archived = composerBlockedByArchive(session);
+  // Recovery notices live above the composer, so this slot carries the harness
+  // identity the composer's own execution rail used to be the only source of.
+  const composerBeforeContext = {
+    projectId,
+    sessionId,
+    editing: false,
+    spaceId,
+    harnessSelection: session?.harness,
+    resolvedHarnessId: session?.resolvedHarnessId,
+    harnessTransition: session?.harnessTransition,
+    pendingHarnessSelection: session?.harness,
+  };
 
   return (
     <>
@@ -331,13 +345,13 @@ function SessionSurface() {
       {pendingQuestions.length > 0 && <QuestionCards questions={pendingQuestions} />}
        {archived && sessionId
         ? <>
-            <SlotHost slot="session.composer.before" context={{ projectId, sessionId, editing: false }} customizable />
+            <SlotHost slot="session.composer.before" context={composerBeforeContext} customizable />
             <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />
             <SlotHost slot="session.footer" context={{ projectId, sessionId, editing: false }} customizable />
             <ArchivedComposerGuard sessionId={sessionId} />
           </>
         : <div className="conversation-composer-dock">
-            <SlotHost slot="session.composer.before" context={{ projectId, sessionId, editing: false }} customizable />
+            <SlotHost slot="session.composer.before" context={composerBeforeContext} customizable />
             <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />
             <SlotHost slot="session.footer" context={{ projectId, sessionId, editing: false }} customizable />
             {(spawning || awaitingTurn) && (

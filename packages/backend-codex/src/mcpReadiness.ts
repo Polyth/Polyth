@@ -3,6 +3,8 @@ import type { CodexNativeMcp } from "./provisioner.ts";
 
 export const CODEX_AGENT_TOOLS_MCP_NAME = "polyth-agent-tools";
 
+const AGENT_TOOLS_CAPABILITY_ID = "polyth.agent-tools";
+
 export const CODEX_MCP_STARTUP_TIMEOUT_SEC = 15;
 
 type CodexMcpStatusRow = {
@@ -25,6 +27,10 @@ const TERMINAL_FAILURES = new Set([
 ]);
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isPolythAgentToolsBridge = (server: CodexNativeMcp): boolean =>
+  server.capabilityId === AGENT_TOOLS_CAPABILITY_ID
+  || server.name === CODEX_AGENT_TOOLS_MCP_NAME;
 
 export function hasPolythAgentToolsMcp(mcpServers: unknown): boolean {
   return Boolean(
@@ -89,6 +95,11 @@ export async function waitForCodexNativeMcp(
     initialPollIntervalMs,
     options.maxPollIntervalMs ?? 150,
   );
+  const bridgeExpected = expected.find(isPolythAgentToolsBridge);
+  // Only Polyth's own bridge gates admission. User MCP servers are verified
+  // separately and must not delay or deny Codex session admission.
+  if (!bridgeExpected) return;
+
   const deadline = Date.now() + timeoutMs;
   let nextPollIntervalMs = initialPollIntervalMs;
   let lastStatus = "missing";
@@ -98,25 +109,18 @@ export async function waitForCodexNativeMcp(
   while (true) {
     try {
       const rows = await listCodexMcpStatusRows(rpc, threadId);
-      let allReady = true;
-      for (const server of expected) {
-        const row = rows.find((candidate) => candidate.name === server.name);
-        const readiness = serverReady(row, server.tools);
-        lastStatus = readiness.lastStatus;
-        lastMissingTools = readiness.missingTools;
-        if (readiness.lastStatus && TERMINAL_FAILURES.has(readiness.lastStatus)) {
-          throw Object.assign(
-            new Error(`Polyth agent-tools bridge failed to connect (Codex status: ${readiness.lastStatus})`),
-            { code: "native-failure" },
-          );
-        }
-        if (!readiness.ready) {
-          allReady = false;
-          break;
-        }
+      const row = rows.find((candidate) => candidate.name === bridgeExpected.name);
+      const readiness = serverReady(row, bridgeExpected.tools);
+      lastStatus = readiness.lastStatus;
+      lastMissingTools = readiness.missingTools;
+      if (TERMINAL_FAILURES.has(readiness.lastStatus)) {
+        throw Object.assign(
+          new Error(`Polyth agent-tools bridge failed to connect (Codex status: ${readiness.lastStatus})`),
+          { code: "native-failure" },
+        );
       }
+      if (readiness.ready) return;
       lastError = "";
-      if (allReady) return;
     } catch (error) {
       if ((error as { code?: string }).code === "native-failure") throw error;
       lastError = error instanceof Error ? error.message : String(error);

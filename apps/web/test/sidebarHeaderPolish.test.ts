@@ -16,6 +16,8 @@ test("sidebar uses contextual tree actions and no permanent footer", async () =>
   assert.doesNotMatch(sidebar, /project-count/);
   assert.match(sidebar, /className="project-new-session"/);
   assert.doesNotMatch(sidebar, /className="side-foot"/);
+  assert.match(sidebar, /icon=\{SidebarRailCollapseIcon\}/);
+  assert.doesNotMatch(sidebar, /sidebar-rail-toggle[\s\S]{0,80}Switch/);
   assert.match(sidebar, /className="sidebar-service-bar customize-zone"/);
   assert.match(sidebar, /className="sidebar-drawer-header"/);
   // Compact drawer replaced the decorative identity block with a working
