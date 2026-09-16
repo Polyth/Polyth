@@ -1,4 +1,5 @@
 export { canonicalHttpsIssuer, createProviderFramework } from './framework.ts';
+export { githubDeviceFlowConfigured, githubIdentityAdapter } from './github/index.ts';
 export type {
   IdentityProviderAdapter,
   NormalizedExternalIdentity,
