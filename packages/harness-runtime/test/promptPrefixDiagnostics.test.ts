@@ -28,9 +28,11 @@ const instruction = (
   ...(targetHarnessId ? { targetHarnessId } : {}),
 } as AgentCapabilityDescriptor);
 
-function resolved(order: Array<[string, AgentCapabilityDescriptor]>, ctx = context) {
+function resolved(descriptors: readonly AgentCapabilityDescriptor[], ctx = context) {
   const registry = createCapabilityContributionRegistry();
-  for (const [owner, descriptor] of order) registry.register(owner, { descriptor });
+  for (const descriptor of descriptors) {
+    registry.register(descriptor.owner, { descriptor });
+  }
   return registry.resolve(ctx);
 }
 
@@ -38,8 +40,8 @@ test("prompt prefix identity is stable across registration ordering and registry
   const alpha = instruction("alpha", "policy", "Use the project policy.");
   const beta = instruction("beta", "review", "Review before editing.");
 
-  const first = promptPrefixDiagnostics(resolved([["beta", beta], ["alpha", alpha]]), "codex");
-  const second = promptPrefixDiagnostics(resolved([["alpha", alpha], ["beta", beta]]), "codex");
+  const first = promptPrefixDiagnostics(resolved([beta, alpha]), "codex");
+  const second = promptPrefixDiagnostics(resolved([alpha, beta]), "codex");
 
   assert.equal(first.identity, second.identity);
   assert.equal(first.bundleRevision, second.bundleRevision);
@@ -51,10 +53,10 @@ test("prompt prefix identity is stable across registration ordering and registry
 
 test("semantic capability changes rotate prefix identity even without declared revision bump", () => {
   const before = promptPrefixDiagnostics(resolved([
-    ["alpha", instruction("alpha", "policy", "Use policy A.")],
+    instruction("alpha", "policy", "Use policy A."),
   ]), "codex");
   const after = promptPrefixDiagnostics(resolved([
-    ["alpha", instruction("alpha", "policy", "Use policy B.")],
+    instruction("alpha", "policy", "Use policy B."),
   ]), "codex");
 
   assert.notEqual(before.contributors[0]?.revision, after.contributors[0]?.revision);
@@ -64,8 +66,8 @@ test("semantic capability changes rotate prefix identity even without declared r
 
 test("volatile session and cwd metadata do not perturb a project prefix", () => {
   const descriptor = instruction("alpha", "policy", "Use the stable project policy.");
-  const one = promptPrefixDiagnostics(resolved([["alpha", descriptor]], context), "codex");
-  const two = promptPrefixDiagnostics(resolved([["alpha", descriptor]], {
+  const one = promptPrefixDiagnostics(resolved([descriptor], context), "codex");
+  const two = promptPrefixDiagnostics(resolved([descriptor], {
     ...context,
     sessionId: "session-b",
     cwd: "/different/worktree/path",
@@ -81,16 +83,8 @@ test("harness-targeted prompts rotate only the target harness prefix", () => {
   const claudeB = instruction("harness-runtime", "system-prompt-claude", "Claude B", "claude");
   const codex = instruction("harness-runtime", "system-prompt-codex", "Codex only", "codex");
 
-  const before = resolved([
-    ["alpha", common],
-    ["harness-runtime-a", claudeA],
-    ["harness-runtime-b", codex],
-  ]);
-  const after = resolved([
-    ["alpha", common],
-    ["harness-runtime-a", claudeB],
-    ["harness-runtime-b", codex],
-  ]);
+  const before = resolved([common, claudeA, codex]);
+  const after = resolved([common, claudeB, codex]);
 
   const codexBefore = promptPrefixDiagnostics(before, "codex");
   const codexAfter = promptPrefixDiagnostics(after, "codex");
@@ -113,7 +107,7 @@ test("harness-targeted prompts rotate only the target harness prefix", () => {
 test("diagnostics expose contributor identity/revisions but never prompt content", () => {
   const secretLookingText = "Never surface this instruction body: token=abc123";
   const result = promptPrefixDiagnostics(resolved([
-    ["alpha", instruction("alpha", "policy", secretLookingText)],
+    instruction("alpha", "policy", secretLookingText),
   ]), "codex");
   const serialized = JSON.stringify(result);
 
