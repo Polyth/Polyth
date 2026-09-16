@@ -16,7 +16,14 @@
       "enabled": true,
       "settingsGroup": "Workspace",
       "icon": "chart",
-      "hasSettings": false
+      "hasSettings": false,
+      "category": "finance",
+      "projectAffinity": {
+        "directions": [
+          "finance"
+        ],
+        "recommended": true
+      }
     }
   },
   "dependencies": {

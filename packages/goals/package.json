@@ -18,7 +18,11 @@
       "enabled": true,
       "settingsGroup": "Workspace",
       "icon": "target",
-      "hasSettings": false
+      "hasSettings": false,
+      "category": "workspace",
+      "projectAffinity": {
+        "recommended": true
+      }
     }
   },
   "dependencies": {

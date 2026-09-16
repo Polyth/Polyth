@@ -19,7 +19,14 @@
       "enabled": true,
       "settingsGroup": "Engineering",
       "icon": "gitlab",
-      "hasSettings": false
+      "hasSettings": false,
+      "category": "engineering",
+      "projectAffinity": {
+        "directions": [
+          "engineering",
+          "operations"
+        ]
+      }
     }
   },
   "dependencies": {
