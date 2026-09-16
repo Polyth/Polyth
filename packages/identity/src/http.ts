@@ -64,6 +64,7 @@ const statusFor: Readonly<Record<string, number>> = {
   'invalid-input': 400, 'request-timeout': 408, 'recovery-ack-required': 400, 'body-too-large': 413, 'rate-limited': 429,
   'recovery-required': 503, unavailable: 503,
 };
+const accountStatusPath = /^\/api\/auth\/accounts\/([A-Za-z0-9][A-Za-z0-9_-]{0,199})\/status$/;
 
 export function createIdentityHttpAdapter(identity: IdentityService, options: {
   /** App/operator configuration, never req.headers.host or forwarded headers. */
@@ -124,11 +125,7 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
             send(200, {
               currentAccountId: actor.userId,
               canManage: identity.accounts.canManage(token!),
-              accounts: accounts.map(account => ({
-                ...account,
-                name: account.displayName,
-                current: account.id === actor.userId,
-              })),
+              accounts: accounts.map(account => ({ ...account, name: account.displayName, current: account.id === actor.userId })),
             });
           } else if (path === '/api/auth/sessions') send(200, { sessions: identity.sessions.list(token!) });
           else if (path === '/api/auth/me') send(200, identity.accounts.current(token!));
@@ -187,28 +184,30 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
               login: text(body, 'login'), name: text(body, 'name'), password: text(body, 'password'),
             });
             send(200, { ...account, name: account.displayName, current: false });
-          } else if (req.method === 'POST' && /^\/api\/auth\/accounts\/usr_[a-f0-9-]+\/status$/.test(path)) {
-            const userId = path.slice('/api/auth/accounts/'.length, -'/status'.length);
-            const status = text(body, 'status');
-            const account = identity.accounts.setStatus(
-              token!, userId,
-              status as 'active' | 'suspended' | 'offboarding' | 'disabled',
-              Number(body.expectedRevision),
-            );
-            send(200, { ...account, name: account.displayName, current: account.id === identity.accounts.current(token!).id });
-          } else if (req.method === 'POST' && path === '/api/auth/passkeys/register/options') {
-            send(200, identity.passkeys.beginRegistration(token!, text(body, 'name')));
-          } else if (req.method === 'POST' && path === '/api/auth/passkeys/register/complete') {
-            send(200, identity.passkeys.completeRegistration(token!, {
-              name: text(body, 'name'), clientDataJSON: text(body, 'clientDataJSON'),
-              attestationObject: text(body, 'attestationObject'),
-              ...(typeof body.credentialId === 'string' ? { credentialId: body.credentialId } : {}),
-            }));
-          } else if (req.method === 'DELETE' && /^\/api\/auth\/passkeys\/pky_[a-f0-9-]{36}$/.test(path)) {
-            identity.passkeys.remove(token!, path.slice('/api/auth/passkeys/'.length), body.expectedRevision as number); send(200, { ok: true });
-          } else if (req.method === 'DELETE' && /^\/api\/auth\/sessions\/ses_[a-f0-9-]{36}$/.test(path)) {
-            identity.sessions.revoke(token!, path.slice('/api/auth/sessions/'.length), body.expectedRevision as number); send(200, { ok: true });
-          } else throw controlError('not-found', 'Authentication route not found');
+          } else {
+            const statusMatch = req.method === 'POST' ? accountStatusPath.exec(path) : null;
+            if (statusMatch) {
+              const status = text(body, 'status');
+              const account = identity.accounts.setStatus(
+                token!, statusMatch[1]!,
+                status as 'active' | 'suspended' | 'offboarding' | 'disabled',
+                Number(body.expectedRevision),
+              );
+              send(200, { ...account, name: account.displayName, current: account.id === identity.accounts.current(token!).id });
+            } else if (req.method === 'POST' && path === '/api/auth/passkeys/register/options') {
+              send(200, identity.passkeys.beginRegistration(token!, text(body, 'name')));
+            } else if (req.method === 'POST' && path === '/api/auth/passkeys/register/complete') {
+              send(200, identity.passkeys.completeRegistration(token!, {
+                name: text(body, 'name'), clientDataJSON: text(body, 'clientDataJSON'),
+                attestationObject: text(body, 'attestationObject'),
+                ...(typeof body.credentialId === 'string' ? { credentialId: body.credentialId } : {}),
+              }));
+            } else if (req.method === 'DELETE' && /^\/api\/auth\/passkeys\/pky_[a-f0-9-]{36}$/.test(path)) {
+              identity.passkeys.remove(token!, path.slice('/api/auth/passkeys/'.length), body.expectedRevision as number); send(200, { ok: true });
+            } else if (req.method === 'DELETE' && /^\/api\/auth\/sessions\/ses_[a-f0-9-]{36}$/.test(path)) {
+              identity.sessions.revoke(token!, path.slice('/api/auth/sessions/'.length), body.expectedRevision as number); send(200, { ok: true });
+            } else throw controlError('not-found', 'Authentication route not found');
+          }
         }
       } catch (error) {
         const code = (error as { code?: unknown } | null)?.code;
