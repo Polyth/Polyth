@@ -2140,7 +2140,7 @@ export function createSessionService(deps: {
                   : "failed";
         const barrierState = unresolved
           ? "blocked"
-          : authoritativeState.value === "unknown" && !stoppedTurnRecorded
+          : authoritativeState.value === "unknown"
             ? "unknown"
             : "ready";
         await broadcastTail(sessionId, () => durable.settleReconciliation(
