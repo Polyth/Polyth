@@ -402,6 +402,8 @@ export const ar: AppMessages = {
   "markdown.mermaid.zoomIn": "تكبير الصورة",
   "markdown.mermaid.zoomOut": "تصغير العرض",
   "markdown.render.blockedImageSource": "مصدر الصورة المحظور",
+  "markdown.render.collapseCode": "طي الشفرة",
+  "markdown.render.expandCode": "توسيع الشفرة",
   "markdown.render.openValueValue": "افتح {path} {value}",
   "markdown.render.raw": "خام",
   "markdown.render.tree": "شجرة",

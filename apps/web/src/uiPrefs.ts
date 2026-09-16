@@ -323,6 +323,9 @@ export function applyUiSettings(s: UiSettings = settings): void {
   b.style?.setProperty("--font-title", `${s.headerFontSize}px`);
   b.style?.setProperty("--font-heading", `${s.headerFontSize}px`);
   b.style?.setProperty("--editor-font-size", `${s.editorFontSize}px`);
+  // `--font-code` is declared on :root as var(--editor-font-size). A body-only
+  // editor size never reaches that alias, so publish the same value on <html>.
+  document.documentElement.style?.setProperty("--editor-font-size", `${s.editorFontSize}px`);
   const topRail = RAIL_ICON_GEOMETRY[s.topRailIconSize];
   const rightRail = RAIL_ICON_GEOMETRY[s.rightRailIconSize];
   b.style?.setProperty("--rail-icon-size-top", topRail.box);

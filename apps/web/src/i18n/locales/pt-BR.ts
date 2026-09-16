@@ -402,6 +402,8 @@ export const ptBR: AppMessages = {
   "markdown.mermaid.zoomIn": "Aumentar zoom",
   "markdown.mermaid.zoomOut": "Diminuir zoom",
   "markdown.render.blockedImageSource": "fonte de imagem bloqueada",
+  "markdown.render.collapseCode": "Recolher código",
+  "markdown.render.expandCode": "Expandir código",
   "markdown.render.openValueValue": "Abra {path} {value}",
   "markdown.render.raw": "Cru",
   "markdown.render.tree": "Árvore",

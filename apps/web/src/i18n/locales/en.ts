@@ -405,6 +405,8 @@ export const en = {
   "markdown.mermaid.zoomIn": "Zoom in",
   "markdown.mermaid.zoomOut": "Zoom out",
   "markdown.render.blockedImageSource": "blocked image source",
+  "markdown.render.collapseCode": "Collapse code",
+  "markdown.render.expandCode": "Expand code",
   "markdown.render.openValueValue": "Open {path}{value}",
   "markdown.render.raw": "Raw",
   "markdown.render.tree": "Tree",

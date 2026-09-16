@@ -1,4 +1,4 @@
-import type { HarnessTransition } from "@polyth/contracts";
+import type { HarnessSelection, HarnessTransition } from "@polyth/contracts";
 import { defineWebPackage } from "@polyth/web-sdk";
 import base from "./runtime.tsx";
 import HarnessAuthRecovery from "./HarnessAuthRecovery.tsx";
@@ -17,6 +17,7 @@ export default defineWebPackage((host) => () => {
       spaceId={props.spaceId as string | undefined}
       sessionId={props.sessionId as string | undefined}
       resolvedHarnessId={props.resolvedHarnessId as string | undefined}
+      pendingHarnessSelection={props.pendingHarnessSelection as HarnessSelection | undefined}
       transition={props.harnessTransition as HarnessTransition | undefined}
     />,
   });

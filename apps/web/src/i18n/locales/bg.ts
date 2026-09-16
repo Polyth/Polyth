@@ -402,6 +402,8 @@ export const bg: AppMessages = {
   "markdown.mermaid.zoomIn": "Увеличаване",
   "markdown.mermaid.zoomOut": "Намаляване на мащаба",
   "markdown.render.blockedImageSource": "блокиран източник на изображение",
+  "markdown.render.collapseCode": "Свий кода",
+  "markdown.render.expandCode": "Разгъни кода",
   "markdown.render.openValueValue": "Отвори {path} {value}",
   "markdown.render.raw": "Сурово",
   "markdown.render.tree": "Дърво",

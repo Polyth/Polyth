@@ -1654,14 +1654,20 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 /* Markdown code stays part of the conversation material. Keep an opaque
    fallback for unsupported/low-resource clients; the glass pass below applies
    the user's transparency preference when the surface can use it. */
-.msg .bubble :is(code, pre) {
+.msg .bubble :is(code, pre),
+.msg .bubble .md-code-block {
   background: var(--material-glass-medium);
   border-color: var(--material-glass-border);
   background-clip: padding-box;
 }
-.msg .bubble pre code {
+.msg .bubble pre code,
+.msg .bubble .md-code-block pre {
   background: transparent;
   border-color: transparent;
+}
+.msg .bubble pre,
+.msg .bubble pre code {
+  font-size: var(--font-code);
 }
 /* An inline identifier is a word in a sentence, not a boxed-out control. It
    drops the outline for a quiet tint, pads optically so the prose line box
@@ -3498,6 +3504,104 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .jt-null { color: var(--muted); font-style: italic; }
 .jt-brace { color: var(--muted); }
 .jt-count { color: var(--muted); font-size: var(--font-meta); margin: 0 6px; }
+
+/* Markdown fenced code: highlight + copy inside + auto-collapse. The frame
+   owns the sunken/glass surface and --radius-control so collapse clips to
+   the user radius. Glyphs fade via mask into that same fill; git .copy-wrap
+   is unchanged. */
+.md-code-block {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+  margin-block: var(--space-2);
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  background-clip: padding-box;
+}
+.md-code-block.is-collapsed {
+  max-height: calc(var(--visual-vh, 100dvh) / 3);
+}
+.md-code-block-body {
+  min-width: 0;
+  max-width: 100%;
+}
+.md-code-block.is-collapsed .md-code-block-body {
+  -webkit-mask-image: linear-gradient(to bottom, #000 58%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 58%, transparent 100%);
+  -webkit-mask-size: 100% calc(var(--visual-vh, 100dvh) / 3);
+  mask-size: 100% calc(var(--visual-vh, 100dvh) / 3);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: 0 0;
+  mask-position: 0 0;
+}
+.md-code-block pre,
+.md-code-block pre code {
+  font-size: var(--font-code);
+}
+.md-code-block pre {
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  overflow: auto;
+  padding-block: var(--space-3);
+  padding-inline: var(--space-3);
+  padding-block-end: calc(var(--space-3) + var(--control-h-sm));
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+.md-code-block .json-tree {
+  padding-block-end: calc(var(--space-3) + var(--control-h-sm));
+}
+.md-code-block-toggle {
+  position: absolute;
+  z-index: 1;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.md-code-block-toggle:hover,
+.md-code-block-toggle:focus-visible {
+  color: var(--text);
+  background: transparent;
+}
+.md-code-block.is-collapsed .md-code-block-toggle {
+  inset-inline: 0;
+  inset-block-end: 0;
+  block-size: 42%;
+  align-items: end;
+  padding-block-end: var(--space-2);
+}
+.md-code-block.is-expanded .md-code-block-toggle {
+  inset-inline-start: 50%;
+  inset-block-end: var(--space-2);
+  width: max(var(--control-h-sm), var(--hit-min));
+  height: max(var(--control-h-sm), var(--hit-min));
+  transform: translateX(-50%);
+  border-radius: var(--radius-control);
+}
+.md-code-block > .copy-btn {
+  position: absolute;
+  z-index: 2;
+  inset-inline-end: var(--space-2);
+  inset-block-end: var(--space-2);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--muted);
+}
+.md-code-block > .copy-btn:hover:not(:disabled) {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text);
+}
 
 /* gallery */
 .gallery-dialog { gap: 6px; }
@@ -12445,8 +12549,8 @@ html[data-font] body :is(
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
-  body[data-desktop-low-resource="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .app > .header, .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .mobile-island-sheet.sheet, .activity-group, .activity-group::before, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip),
-  html[data-reduce-animations="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .app > .header, .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .mobile-island-sheet.sheet, .activity-group, .activity-group::before, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip) {
+  body[data-desktop-low-resource="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .app > .header, .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .msg .bubble pre, .msg .bubble .md-code-block, .mobile-island-sheet.sheet, .activity-group, .activity-group::before, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip),
+  html[data-reduce-animations="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .app > .header, .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .msg .bubble pre, .msg .bubble .md-code-block, .mobile-island-sheet.sheet, .activity-group, .activity-group::before, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip) {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
@@ -12456,6 +12560,8 @@ html[data-font] body :is(
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) .activity-group::before { background: var(--surface-activity); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.ui-glass-island, .ui-glass-dock) { background: var(--material-glass); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) .msg.user .bubble { background: var(--bubble-user-bg); }
+  :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.msg .bubble pre, .msg .bubble .md-code-block) { background: var(--material-glass-medium); }
+  :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) .msg .bubble .md-code-block pre { background: transparent; }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) .mobile-island-sheet.sheet { background: var(--panel); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip) { background: var(--material-glass); }
 }
@@ -12474,6 +12580,8 @@ html[data-font] body :is(
   .activity-group::before { background: var(--surface-activity); }
   :is(.ui-glass-island, .ui-glass-dock) { background: var(--material-glass); }
   .msg.user .bubble { background: var(--bubble-user-bg); }
+  :is(.msg .bubble pre, .msg .bubble .md-code-block) { background: var(--material-glass-medium); }
+  .msg .bubble .md-code-block pre { background: transparent; }
   .mobile-island-sheet.sheet { background: var(--panel); }
   :is(.turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip) { background: var(--material-glass); }
 }
@@ -13367,8 +13475,19 @@ body:not([data-glass="off"]) .header-profile { border: 0; background: transparen
       .ui-tooltip,
       .turn-rate-limit .turn-rate-limit-action,
       .turn-rate-limit .turn-rate-limit-model .picker-chip,
-      .jump-latest,
-      .msg .bubble pre
+      .jump-latest
+    ) {
+      background: radial-gradient(140% 140% at 50% 50%,
+        color-mix(in srgb, var(--material-glass) var(--material-glass-fill), transparent) 0%,
+        color-mix(in srgb, var(--material-glass) var(--material-glass-edge), transparent) 100%);
+      -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
+      backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
+    }
+    /* Conversation code is its own :is() so nested pre can clear the filter
+       without inheriting the railbar :has() specificity from chrome above. */
+    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) :is(
+      .msg .bubble pre,
+      .msg .bubble .md-code-block
     ) {
       background: radial-gradient(140% 140% at 50% 50%,
         color-mix(in srgb, var(--material-glass) var(--material-glass-fill), transparent) 0%,
@@ -13387,11 +13506,12 @@ body:not([data-glass="off"]) .header-profile { border: 0; background: transparen
     }
     /* The block owns the translucent surface; its nested code element keeps
        the inherited monospace treatment without painting a second rectangle. */
-    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .msg .bubble pre code {
+    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .msg .bubble pre code,
+    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .msg .bubble .md-code-block pre {
       background: transparent;
       border-color: transparent;
-      -webkit-backdrop-filter: none;
-      backdrop-filter: none;
+      -webkit-backdrop-filter: none !important;
+      backdrop-filter: none !important;
     }
     body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) :is(
       .composer-card,
@@ -13498,6 +13618,16 @@ body[data-glass="off"] .activity-group {
 }
 body[data-glass="off"] .msg.user .bubble {
   background: var(--bubble-user-bg);
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+body[data-glass="off"] :is(.msg .bubble pre, .msg .bubble .md-code-block) {
+  background: var(--material-glass-medium);
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+body[data-glass="off"] .msg .bubble .md-code-block pre {
+  background: transparent;
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
