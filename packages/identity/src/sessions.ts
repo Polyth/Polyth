@@ -6,6 +6,9 @@ export interface IssuedSession { token: string; session: IdentitySession }
 interface SessionRow extends IdentitySession { lastSeenAt: number }
 export interface SessionService {
   resolve(token: string | null | undefined): IdentitySession | null;
+  /** Revalidate an already-bound channel without possessing its cookie token.
+   * Never extends idle lifetime; use only after the initial token-authenticated bind. */
+  resolveId(id: string, expectedUserId?: string): IdentitySession | null;
   require(token: string | null | undefined, elevated?: boolean): IdentitySession;
   issue(userId: string, label?: string): IssuedSession;
   logout(token: string | null): void;
@@ -23,6 +26,20 @@ export function createSessions(control: ControlPlane, opts: { now: () => number;
   }
   const { now } = opts;
   const dto = (row: IdentitySession): IdentitySession => ({ id: row.id, userId: row.userId, displayName: row.displayName, userRevision: row.userRevision, createdAt: row.createdAt, expiresAt: row.expiresAt, elevatedAt: row.elevatedAt });
+  const liveById = (id: string, expectedUserId?: string): IdentitySession | null => {
+    if (!/^ses_[a-f0-9-]{36}$/.test(id) || control.installation().state !== 'ready') return null;
+    const time = now();
+    const row = control.get<SessionRow>(
+      `SELECT s.id,s.user_id AS userId,u.display_name AS displayName,p.revision AS userRevision,
+              s.created_at_ms AS createdAt,s.expires_at_ms AS expiresAt,s.elevated_at_ms AS elevatedAt,s.last_seen_at_ms AS lastSeenAt
+         FROM auth_sessions s JOIN users u ON u.id=s.user_id JOIN principals p ON p.id=u.id
+        WHERE s.id=? AND p.status='active' AND p.kind='user' AND s.auth_epoch=p.auth_epoch
+          AND s.expires_at_ms>? AND s.last_seen_at_ms>? AND s.created_at_ms<=?
+          ${expectedUserId ? 'AND s.user_id=?' : ''}`,
+      ...(expectedUserId ? [id, time, time - idleMs, time, expectedUserId] : [id, time, time - idleMs, time]),
+    );
+    return row ? dto(row) : null;
+  };
   const service: SessionService = {
     cookieName: () => `polyth_auth_${digest(control.installation().id).slice(0, 16)}`,
     resolve(token) {
@@ -44,6 +61,9 @@ export function createSessions(control: ControlPlane, opts: { now: () => number;
         control.transaction(() => control.run('UPDATE auth_sessions SET last_seen_at_ms=? WHERE id=? AND last_seen_at_ms=?', time, row.id, row.lastSeenAt));
       }
       return dto(row);
+    },
+    resolveId(id, expectedUserId) {
+      return liveById(id, expectedUserId);
     },
     require(token, elevated = false) {
       const session = service.resolve(token);
