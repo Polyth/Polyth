@@ -1,9 +1,20 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { HarnessProvisioningQuery, HarnessRegistry, HarnessSelection, HarnessSnapshot, JsonValue, RouteHandler } from "@polyth/contracts";
+import type {
+    AgentCapabilityContributionRegistry,
+    HarnessContext,
+    HarnessProvisioningQuery,
+    HarnessRegistry,
+    HarnessSelection,
+    HarnessSnapshot,
+    JsonValue,
+    RouteHandler,
+} from "@polyth/contracts";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { createHarnessRegistry, type HarnessPreferences, harnessError } from "./index.ts";
+import { promptPrefixDiagnostics } from "./promptPrefixDiagnostics.ts";
+
 export function readHarnessSelection(value: unknown): HarnessSelection {
     if (value && typeof value === "object") {
         const input = value as Record<string, unknown>;
@@ -14,18 +25,18 @@ export function readHarnessSelection(value: unknown): HarnessSelection {
     }
     throw harnessError("invalid-input", "Choose Auto or a registered harness");
 }
+
 async function readPreferences(file: string): Promise<HarnessPreferences> {
     try {
         return JSON.parse(await readFile(file, "utf8")) as HarnessPreferences;
     }
     catch (error) {
-        if ((error as {
-            code?: string;
-        }).code === "ENOENT")
+        if ((error as { code?: string }).code === "ENOENT")
             return {};
         throw error;
     }
 }
+
 const prospectiveCandidate = (snapshot: HarnessSnapshot): boolean => {
     const state = snapshot.availability.state;
     return snapshot.policy.enabled
@@ -35,6 +46,7 @@ const prospectiveCandidate = (snapshot: HarnessSnapshot): boolean => {
         && snapshot.availability.authenticated !== false
         && (state === "ready" || state === "unknown");
 };
+
 export function harnessRoutes(host: ServerPackageHost): RouteHandler {
     return async (request) => {
         if (!request.path.startsWith("/api/harnesses"))
@@ -61,12 +73,18 @@ export function harnessRoutes(host: ServerPackageHost): RouteHandler {
             request.json(200, preferences);
             return true;
         }
-        const contextForRequest = async () => {
+        const contextForRequest = async (): Promise<HarnessContext> => {
             const projectId = request.url.searchParams.get("projectId");
             const project = projectId ? await scoped.projects.get(projectId) : (await scoped.projects.list())[0];
             if (projectId && !project)
                 throw harnessError("not-found", "project not found");
-            return { space: request.space, spaceId: request.space.spaceId, projectId: project?.id ?? "__default__", cwd: project?.path ?? process.cwd(), remote: Boolean(project?.remote) };
+            return {
+                space: request.space,
+                spaceId: request.space.spaceId,
+                projectId: project?.id ?? "__default__",
+                cwd: project?.path ?? process.cwd(),
+                remote: Boolean(project?.remote),
+            };
         };
         if (request.path === "/api/harnesses/roster" && request.method === "GET") {
             request.json(200, await registry.roster(await contextForRequest()));
@@ -79,10 +97,6 @@ export function harnessRoutes(host: ServerPackageHost): RouteHandler {
                 throw harnessError("not-found", "harness not found");
             const detail = request.url.searchParams.get("detail") === "1";
             const force = request.url.searchParams.get("force") === "1";
-            // Draft catalog callers used to perform a client-side waterfall:
-            // cheap snapshots -> choose Auto -> second detail request. Keep Auto
-            // selection server-side so there is one network round-trip and the
-            // second phase reuses the same snapshot cache/singleflight entry.
             if (!harnessId && request.url.searchParams.get("auto") === "1") {
                 const summaries = await registry.snapshots(context, { force });
                 harnessId = summaries
@@ -104,7 +118,12 @@ export function harnessRoutes(host: ServerPackageHost): RouteHandler {
         if (request.path === "/api/harnesses" && request.method === "GET") {
             const context = await contextForRequest();
             const [probes, preferences] = await Promise.all([registry.probe(context), readPreferences(preferenceFile)]);
-            request.json(200, registry.providers().map((provider) => ({ ...provider.descriptor, enabled: preferences[provider.descriptor.id]?.enabled ?? true, priority: preferences[provider.descriptor.id]?.priority ?? provider.descriptor.priority, ...probes.find((p) => p.harnessId === provider.descriptor.id) })));
+            request.json(200, registry.providers().map((provider) => ({
+                ...provider.descriptor,
+                enabled: preferences[provider.descriptor.id]?.enabled ?? true,
+                priority: preferences[provider.descriptor.id]?.priority ?? provider.descriptor.priority,
+                ...probes.find((p) => p.harnessId === provider.descriptor.id),
+            })));
             return true;
         }
         if (request.path === "/api/harnesses/capabilities" && request.method === "GET") {
@@ -117,8 +136,40 @@ export function harnessRoutes(host: ServerPackageHost): RouteHandler {
                 request.json(200, []);
                 return true;
             }
-            const context = { space: request.space, spaceId: request.space.spaceId, projectId: project?.id ?? "__default__", cwd: project?.path ?? process.cwd(), remote: Boolean(project?.remote) };
+            const context: HarnessContext = {
+                space: request.space,
+                spaceId: request.space.spaceId,
+                projectId: project?.id ?? "__default__",
+                cwd: project?.path ?? process.cwd(),
+                remote: Boolean(project?.remote),
+            };
             request.json(200, query.status(context));
+            return true;
+        }
+        if (request.path === "/api/harnesses/prompt-prefix-diagnostics" && request.method === "GET") {
+            const requestedProjectId = request.url.searchParams.get("projectId");
+            const sessionId = request.url.searchParams.get("sessionId") ?? undefined;
+            const session = sessionId ? await scoped.sessions.snapshot(sessionId) : undefined;
+            if (requestedProjectId && session && session.projectId !== requestedProjectId)
+                throw harnessError("invalid-input", "session does not belong to the requested project");
+            const projectId = requestedProjectId ?? session?.projectId;
+            const project = projectId ? await scoped.projects.get(projectId) : (await scoped.projects.list())[0];
+            if (projectId && !project)
+                throw harnessError("not-found", "project not found");
+            if (session && project && session.projectId !== project.id)
+                throw harnessError("not-found", "session project not found in this Space");
+            const context: HarnessContext = {
+                space: request.space,
+                spaceId: request.space.spaceId,
+                projectId: project?.id ?? "__default__",
+                cwd: session?.worktreePath ?? project?.path ?? process.cwd(),
+                remote: Boolean(project?.remote),
+                ...(sessionId ? { sessionId } : {}),
+            };
+            const contributions = host.services.get(
+                serverServiceKey<AgentCapabilityContributionRegistry>("harness.capabilities"),
+            );
+            request.json(200, promptPrefixDiagnostics(contributions?.resolve(context) ?? []));
             return true;
         }
         const control = request.path.match(/^\/api\/harnesses\/([a-z][a-z0-9-]*)\/controls\/([^/]+)$/);
@@ -165,7 +216,11 @@ export function harnessRoutes(host: ServerPackageHost): RouteHandler {
                 throw harnessError("unsupported", "harness switching is unavailable");
             if (input.timing !== undefined && input.timing !== "after-turn" && input.timing !== "stop-now")
                 throw harnessError("invalid-input", "invalid switch timing");
-            request.json(200, await scoped.sessions.switchHarness(match[1]!, readHarnessSelection(input.selection), input.timing as "after-turn" | "stop-now" | undefined));
+            request.json(200, await scoped.sessions.switchHarness(
+                match[1]!,
+                readHarnessSelection(input.selection),
+                input.timing as "after-turn" | "stop-now" | undefined,
+            ));
             return true;
         }
         const cancel = request.path.match(/^\/api\/harnesses\/sessions\/([^/]+)\/cancel$/);
@@ -178,7 +233,12 @@ export function harnessRoutes(host: ServerPackageHost): RouteHandler {
         return false;
     };
 }
+
 export default function registerPackage(host: ServerPackageHost) {
-    host.services.require(serverServiceKey<ReturnType<typeof createHarnessRegistry>>("harnesses")).configurePolicy(async (context) => context.space ? readPreferences(host.spaceStorage(context.space).path("harnesses/preferences.json")) : {});
+    host.services.require(serverServiceKey<ReturnType<typeof createHarnessRegistry>>("harnesses")).configurePolicy(
+        async (context) => context.space
+            ? readPreferences(host.spaceStorage(context.space).path("harnesses/preferences.json"))
+            : {},
+    );
     return { routes: harnessRoutes(host), remoteAccess: localOnlyRemoteAccess(["harnesses"]) };
 }
