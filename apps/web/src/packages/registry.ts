@@ -1,4 +1,5 @@
 import { api } from "@polyth/session/web-api";
+import { invalidateRuntimeCatalogs } from "@polyth/models/runtime-catalog";
 import { installIntegrationsPackage } from "./integrations.ts";
 import { installMcpPackage } from "./mcp.ts";
 import { configurePackageReconcile, reconcilePackage } from "./reconcile.ts";
@@ -48,6 +49,8 @@ let catalogByCanonical = new Map<string, WebPackageAsset>();
 let loaderOptions: WebEntryLoaderOptions = {};
 
 const canonicalId = (id: string): string => aliases.get(id) ?? id;
+const isHarnessTopologyPackage = (id: string): boolean =>
+  id === "harness-runtime" || id.startsWith("backend-");
 
 const syncProjectCompositionContext = (): void => {
   const state = getState();
@@ -173,6 +176,7 @@ function knownCanonicalIds(): string[] {
 configurePackageReconcile({
   packageStates,
   applyCanonicalState: (id) => {
+    if (isHarnessTopologyPackage(id)) invalidateRuntimeCatalogs();
     refreshDesired(canonicalId(id));
     void applyCanonicalState(id);
   },
@@ -182,6 +186,9 @@ configurePackageReconcile({
 });
 
 async function syncPackages(): Promise<void> {
+  const previousHarnessStates = new Map(
+    [...packageStates].filter(([id]) => isHarnessTopologyPackage(id)),
+  );
   const [catalog, response] = await Promise.all([
     loadWebPackageCatalog(loaderOptions),
     api.packagesList(),
@@ -205,6 +212,12 @@ async function syncPackages(): Promise<void> {
   for (const descriptor of response.packages) {
     packageStates.set(descriptor.id, descriptor.enabled);
   }
+  const nextHarnessStates = new Map(
+    [...packageStates].filter(([id]) => isHarnessTopologyPackage(id)),
+  );
+  const harnessTopologyChanged = previousHarnessStates.size !== nextHarnessStates.size
+    || [...nextHarnessStates].some(([id, value]) => previousHarnessStates.get(id) !== value);
+  if (harnessTopologyChanged) invalidateRuntimeCatalogs();
 
   const ids = knownCanonicalIds();
   for (const id of ids) refreshDesired(id);
