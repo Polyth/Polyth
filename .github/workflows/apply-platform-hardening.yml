@@ -1,0 +1,64 @@
+name: Apply platform hardening
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: platform-hardening-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  apply-p0:
+    if: github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'feat/content-trust-hunk-observations-prompt-diagnostics-')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Apply content-bound trust implementation
+        run: python3 scripts/apply-platform-hardening-p0.py
+
+      - name: Align workspace lockfile
+        run: npm install --package-lock-only --ignore-scripts
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Typecheck affected packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          for project in packages/permissions packages/schedule packages/session packages/server; do
+            echo "::group::tsc $project"
+            npx tsc --noEmit -p "$project"
+            echo "::endgroup::"
+          done
+
+      - name: Run schedule and permission tests
+        run: node --experimental-strip-types --test packages/schedule/test/*.test.ts packages/permissions/test/*.test.ts
+
+      - name: Build web packages and shell
+        run: npm run build:web
+
+      - name: Commit verified P0 result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "polyth-platform-worker"
+          git config user.email "polyth-platform-worker@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Bind repository loop trust to exact content"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
