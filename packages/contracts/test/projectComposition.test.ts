@@ -14,6 +14,18 @@ test("legacy and general projects keep enabled unclassified/affine packages, wit
   assert.equal(projectPackageDecision({ ...engineering(), directions: [] }, finance).relevant, true);
   assert.equal(projectPackageDecision(engineering(), { id: "custom", enabled: true }).reason, "universal");
 });
+test("recommendations come from matching affinity, not General or manual Show", () => {
+  const general = { ...engineering(), directions: [] };
+  assert.equal(projectPackageDecision(general, finance).recommended, false);
+  const manual = engineering();
+  manual.packageOverrides.finance = "include";
+  assert.equal(projectPackageDecision(manual, finance).reason, "included");
+  assert.equal(projectPackageDecision(manual, finance).recommended, false);
+  assert.equal(projectPackageDecision(
+    engineering(),
+    { id: "universal", enabled: true, projectAffinity: { recommended: true } },
+  ).recommended, true);
+});
 test("precedence: disabled > excluded > included > affinity, including mini-widget affinity", () => {
   const c = engineering();
   assert.equal(projectPackageDecision(c, finance).reason, "unrelated");
