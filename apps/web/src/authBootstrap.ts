@@ -6,6 +6,7 @@ export interface BrowserAuthStatus extends AuthStatusDto {
   state?: BrowserInstallationState;
   methods?: string[];
   csrfToken?: string;
+  bootstrapMode?: 'setup';
 }
 
 export function validateAuthStatus(value: unknown): BrowserAuthStatus {
@@ -22,12 +23,15 @@ export function validateAuthStatus(value: unknown): BrowserAuthStatus {
   if (status.csrfToken !== undefined && !/^[a-f0-9]{64}$/.test(status.csrfToken)) {
     throw new Error('Invalid authentication nonce');
   }
+  if (status.bootstrapMode !== undefined && status.bootstrapMode !== 'setup') {
+    throw new Error('Invalid bootstrap mode');
+  }
   return status;
 }
 
 export function authBootstrapPhase(status: unknown): 'setup' | 'locked' | 'ready' | 'unavailable' {
   const value = validateAuthStatus(status);
   if (value.state === 'recovery') return 'unavailable';
-  if (value.state && value.state !== 'ready') return 'setup';
+  if (value.bootstrapMode === 'setup' || (value.state && value.state !== 'ready')) return 'setup';
   return value.authorized ? 'ready' : 'locked';
 }
