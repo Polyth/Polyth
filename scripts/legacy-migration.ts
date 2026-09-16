@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import {
   applyLegacyIdentityMigration,
+  applyLegacyResourceAdoptions,
   inventoryLegacyMigration,
   stageLegacyMigration,
   verifyMigrationStage,
@@ -20,7 +21,7 @@ const required = (name: string): string => {
   if (!result) throw Object.assign(new Error(`${name} is required`), { code: "invalid-input" });
   return result;
 };
-const print = (value: unknown): void => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+const print = (result: unknown): void => process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 
 function usage(): never {
   process.stderr.write([
@@ -28,9 +29,11 @@ function usage(): never {
     "  npm run migration:legacy -- inventory --data <dir>",
     "  npm run migration:legacy -- stage --data <dir> --stage <dir> --inventory-digest <sha256>",
     "  npm run migration:legacy -- verify --stage <dir> --manifest-digest <sha256>",
+    "  npm run migration:legacy -- adopt --data <dir> --stage <dir> --manifest-digest <sha256>",
     "  npm run migration:legacy -- apply --data <dir> --stage <dir> --manifest-digest <sha256>",
     "",
-    "Run stage/apply with Polyth stopped. Digests are deliberate operator acknowledgements.",
+    "Run stage/adopt/apply with Polyth stopped. Digests are deliberate operator acknowledgements.",
+    "After adopt, run inventory + stage again and apply the new capsule.",
   ].join("\n"));
   process.exit(2);
 }
@@ -73,13 +76,18 @@ try {
       plannedAdoptions: result.inventory.plannedAdoptions,
       issues: result.inventory.issues,
     });
-  } else if (command === "apply") {
-    const result = applyLegacyIdentityMigration({
+  } else if (command === "adopt") {
+    print(applyLegacyResourceAdoptions({
       dataDir: required("--data"),
       stageDir: required("--stage"),
       expectedManifestDigest: required("--manifest-digest"),
-    });
-    print(result);
+    }));
+  } else if (command === "apply") {
+    print(applyLegacyIdentityMigration({
+      dataDir: required("--data"),
+      stageDir: required("--stage"),
+      expectedManifestDigest: required("--manifest-digest"),
+    }));
   } else {
     usage();
   }
