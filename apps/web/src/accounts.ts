@@ -31,18 +31,19 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(path, init);
   const body = await response.json().catch(() => ({})) as Record<string, unknown>;
   if (!response.ok) {
-    const error = Object.assign(
+    throw Object.assign(
       new Error(typeof body.message === "string" ? body.message : `HTTP ${response.status}`),
-      {
-        status: response.status,
-        code: typeof body.error === "string" ? body.error : undefined,
-      },
+      { status: response.status, code: typeof body.error === "string" ? body.error : undefined },
     );
-    throw error;
   }
   return body as T;
 };
-
+const authFailure = (response: Response, body: Record<string, unknown>): Error => Object.assign(
+  new Error(typeof body.message === "string"
+    ? body.message
+    : typeof body.error === "string" ? body.error.replace(/-/g, " ") : `HTTP ${response.status}`),
+  { status: response.status, code: typeof body.error === "string" ? body.error : undefined },
+);
 const legacyJson = (method: string, body?: Record<string, unknown>): RequestInit => ({
   method,
   headers: { "content-type": "application/json" },
@@ -112,27 +113,40 @@ export async function accountState(): Promise<AccountState> {
   };
 }
 
-export async function createAccount(name: string, password: string): Promise<AccountChoice> {
-  // Legacy compatibility surface. Canonical account creation requires an
-  // explicit login and is exposed by the redesigned access page separately.
-  const result = await request<AccountChoice>("/api/auth/accounts", legacyJson("POST", { name, password }));
-  return result;
+export async function createAccount(login: string, name: string, password: string): Promise<AccountChoice> {
+  const canonical = await authJson("/api/auth/accounts", { login, name, password });
+  if (canonical.response.ok) return canonical.body as unknown as AccountChoice;
+  if (canonical.response.status !== 404) throw authFailure(canonical.response, canonical.body);
+  return request<AccountChoice>("/api/auth/accounts", legacyJson("POST", { name, password }));
 }
 
-export async function changeAccountPassword(accountId: string, password: string): Promise<void> {
-  const canonical = await authJson("/api/auth/password", { password });
-  if (canonical.response.ok) return;
-  if (canonical.response.status !== 404) {
-    throw Object.assign(new Error(typeof canonical.body.message === "string" ? canonical.body.message : `HTTP ${canonical.response.status}`), {
-      status: canonical.response.status,
-      code: typeof canonical.body.error === "string" ? canonical.body.error : undefined,
-    });
+export async function changeAccountPassword(
+  accountId: string,
+  currentPassword: string,
+  password: string,
+): Promise<void> {
+  const reauth = await authJson("/api/auth/reauthenticate", { password: currentPassword });
+  if (reauth.response.status === 404) {
+    await request(`/api/auth/accounts/${encodeURIComponent(accountId)}/password`, legacyJson("PUT", { password }));
+    return;
   }
-  await request(`/api/auth/accounts/${encodeURIComponent(accountId)}/password`, legacyJson("PUT", { password }));
+  if (!reauth.response.ok) throw authFailure(reauth.response, reauth.body);
+  const changed = await authJson("/api/auth/password", { password });
+  if (!changed.response.ok) throw authFailure(changed.response, changed.body);
 }
 
-export const removeAccount = (accountId: string): Promise<void> =>
-  request(`/api/auth/accounts/${encodeURIComponent(accountId)}`, { method: "DELETE" });
+export async function disableAccount(account: Pick<AccountChoice, "id" | "revision">): Promise<void> {
+  if (!Number.isSafeInteger(account.revision) || account.revision! < 1) {
+    throw Object.assign(new Error("Account revision is missing; refresh before disabling"), { code: "conflict" });
+  }
+  const canonical = await authJson(`/api/auth/accounts/${encodeURIComponent(account.id)}/status`, {
+    status: "disabled",
+    expectedRevision: account.revision,
+  });
+  if (canonical.response.ok) return;
+  if (canonical.response.status !== 404) throw authFailure(canonical.response, canonical.body);
+  await request(`/api/auth/accounts/${encodeURIComponent(account.id)}`, { method: "DELETE" });
+}
 
 export async function switchAccount(login: string, password: string): Promise<AccountLoginResult> {
   const result = await loginAccount(login, password);
