@@ -21,7 +21,7 @@ test('canonical installation setup never boots the workspace runtime early', () 
     assert.equal(authBootstrapPhase({ required: true, authorized: false, scope: 'anonymous', state }), 'setup');
   }
   assert.equal(authBootstrapPhase({ required: true, authorized: false, scope: 'anonymous', state: 'recovery' }), 'unavailable');
-  assert.equal(authBootstrapPhase({ required: true, authorized: true, scope: 'ui-session', state: 'ready', bootstrapMode: 'setup' }), 'setup');
+  assert.equal(authBootstrapPhase({ required: true, authorized: true, scope: 'ui-session', state: 'ready', bootstrapMode: 'setup' }), 'restart');
   assert.equal(authBootstrapPhase({ required: true, authorized: true, scope: 'ui-session', state: 'ready' }), 'ready');
 });
 
@@ -38,11 +38,12 @@ test('auth prefetch rejects unavailable or missing account authority', async () 
   } finally { globalThis.fetch = previous; consumeAuthPrefetch(); }
 });
 
-test('bootstrap error and revocation paths cannot advance to ready', () => {
+test('bootstrap error, setup-only restart and revocation paths cannot advance to ready', () => {
   const source = readFileSync(new URL('../src/bootstrap.tsx', import.meta.url), 'utf8');
   assert.match(source, /catch\(\(\) => \{ if \(!cancelled && !invalidated\) setPhase\("unavailable"\)/);
   assert.match(source, /const onAuthRequired = \(\) => \{ invalidated = true; setPhase\("locked"\); \}/);
   assert.match(source, /if \(cancelled \|\| invalidated\) return;/);
   assert.match(source, /if \(phase === "setup"\) return <SetupScreen/);
+  assert.match(source, /if \(phase === "restart"\) return <SetupScreen key=\{locale\} restartRequired \/>/);
   assert.doesNotMatch(source, /if \(!s\.required \|\| s\.authorized\)/);
 });
