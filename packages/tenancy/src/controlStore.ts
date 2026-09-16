@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { ControlPlane } from "@polyth/control-plane";
+import { digest, type ControlPlane } from "@polyth/control-plane";
+import { executeOnce, type MutationReceipt } from "@polyth/control-plane/operations";
 import {
   roleAtLeast,
   type SpaceDto,
@@ -34,6 +35,9 @@ const optionalVisual = (value: string | undefined, field: "color" | "icon"): str
 
 type UserRow = { id: string; name: string; createdAt: number };
 type SpaceRow = SpaceDto & { orgId: string; revision: number };
+type MembershipRow = { role: SpaceRole; createdAt: number; revision: number };
+type OperationOptions = { operationId?: string };
+type CreateOperationOptions = OperationOptions & { maxOwnedSpaces?: number };
 
 function dto(row: SpaceRow): SpaceDto {
   return {
@@ -54,6 +58,11 @@ function dto(row: SpaceRow): SpaceDto {
  * It deliberately does not provision identities or Personal Spaces. Account
  * creation belongs to the identity domain and grants belong to explicit admin
  * mutations. The legacy JSON registry may coexist only as migration input.
+ *
+ * Public mutation routes may pass a durable operationId. Canonical writes then
+ * use executeOnce(), so domain mutation + audit + outbox + replay receipt share
+ * one SQLite transaction. Direct trusted callers remain supported and still
+ * receive the same atomic audit/outbox invariant, just without replay caching.
  */
 export function createControlTenancyStore(control: ControlPlane, opts: { now?: () => number } = {}): TenancyStore {
   const now = opts.now ?? Date.now;
@@ -69,13 +78,14 @@ export function createControlTenancyStore(control: ControlPlane, opts: { now?: (
        FROM spaces WHERE id=?`,
     spaceId,
   );
-  const roleOf = (userId: string, spaceId: string): SpaceRole | undefined => control.get<{ role: SpaceRole }>(
-    `SELECT role FROM space_memberships
+  const membershipRow = (spaceId: string, userId: string): MembershipRow | undefined => control.get<MembershipRow>(
+    `SELECT role,created_at_ms AS createdAt,revision FROM space_memberships
       WHERE space_id=? AND principal_id=? AND state='active'
         AND role IN ('owner','admin','member','viewer')`,
     spaceId,
     userId,
-  )?.role;
+  );
+  const roleOf = (userId: string, spaceId: string): SpaceRole | undefined => membershipRow(spaceId, userId)?.role;
   const assertActiveUser = (userId: string): void => {
     if (!userRow(userId)) throw error("not-found", "Account not found");
   };
@@ -109,9 +119,48 @@ export function createControlTenancyStore(control: ControlPlane, opts: { now?: (
       WHERE space_id=? AND state='active' AND role IN ('owner','admin','member','viewer')`,
     spaceId,
   )?.n ?? 0;
-  const audit = (actorId: string, action: string, resourceId: string): void => {
-    control.bumpEpoch();
-    control.audit(actorId, action, resourceId);
+  const ownedSpaceCount = (userId: string): number => control.get<{ n: number }>(
+    `SELECT count(*) AS n FROM space_memberships
+      WHERE principal_id=? AND state='active' AND role='owner'`,
+    userId,
+  )?.n ?? 0;
+
+  const commitMutation = <T>(spec: {
+    actorId: string;
+    operationId?: string;
+    action: string;
+    resourceId: string;
+    request: unknown;
+    authorize: () => void;
+    mutate: () => T;
+    receipt: (value: T) => MutationReceipt;
+    replay: (receipt: MutationReceipt) => T;
+    bumpEpoch?: boolean;
+  }): T => {
+    if (!spec.operationId) {
+      return control.transaction(() => {
+        spec.authorize();
+        const value = spec.mutate();
+        if (spec.bumpEpoch !== false) control.bumpEpoch();
+        control.audit(spec.actorId, spec.action, spec.resourceId);
+        return value;
+      });
+    }
+    let produced = false;
+    let value!: T;
+    const result = executeOnce(control, {
+      actorId: spec.actorId,
+      operationId: spec.operationId,
+      action: spec.action,
+      resourceId: spec.resourceId,
+      request: spec.request,
+    }, spec.authorize, () => {
+      value = spec.mutate();
+      produced = true;
+      if (spec.bumpEpoch !== false) control.bumpEpoch();
+      return spec.receipt(value);
+    });
+    return produced ? value : spec.replay(result.receipt);
   };
 
   const store: TenancyStore = {
@@ -147,65 +196,114 @@ export function createControlTenancyStore(control: ControlPlane, opts: { now?: (
     },
     requireMembership,
     roleOf,
-    createSpace(input: CreateSpaceInput) {
-      assertActiveUser(input.ownerId);
+    createSpace(input: CreateSpaceInput, operation?: CreateOperationOptions) {
       const name = text(input.name, "name");
-      const orgId = uniqueOrgFor(input.ownerId);
-      const spaceId = id("spc");
-      // storage identity, unlike display name, is immutable and never reused.
-      const storageIdentity = spaceId;
       const color = optionalVisual(input.color, "color");
       const icon = optionalVisual(input.icon, "icon");
+      const operationId = operation?.operationId;
+      const spaceId = operationId
+        ? `spc_${digest(`space:create:${input.ownerId}:${operationId}`).slice(0, 32)}`
+        : id("spc");
+      const storageIdentity = spaceId;
       const time = now();
-      return control.transaction(() => {
-        if (input.isDefault && control.get(
-          `SELECT 1 FROM spaces s JOIN space_memberships m ON m.space_id=s.id
-            WHERE m.principal_id=? AND m.state='active' AND s.is_default=1 LIMIT 1`, input.ownerId,
-        )) throw error("conflict", "This account already has a default Space");
-        control.run(
-          `INSERT INTO spaces(id,org_id,name,storage_identity,kind,is_default,color,icon,created_at_ms,updated_at_ms)
-           VALUES(?,?,?,?,?,?,?,?,?,?)`,
-          spaceId, orgId, name, storageIdentity, "shared", input.isDefault ? 1 : 0, color ?? null, icon ?? null, time, time,
-        );
-        control.run(
-          `INSERT INTO space_memberships(space_id,principal_id,role,state,created_at_ms)
-           VALUES(?,?,'owner','active',?)`,
-          spaceId, input.ownerId, time,
-        );
-        audit(input.ownerId, "space.created", spaceId);
-        return dto(spaceRow(spaceId)!);
+      const maximum = operation?.maxOwnedSpaces;
+      if (maximum !== undefined && (!Number.isSafeInteger(maximum) || maximum < 1)) {
+        throw error("invalid-input", "Invalid Space ownership limit");
+      }
+      let orgId = "";
+      return commitMutation({
+        actorId: input.ownerId,
+        operationId,
+        action: "space.created",
+        resourceId: spaceId,
+        request: { name, color: color ?? null, icon: icon ?? null, isDefault: input.isDefault === true },
+        authorize() {
+          assertActiveUser(input.ownerId);
+          orgId = uniqueOrgFor(input.ownerId);
+        },
+        mutate() {
+          if (maximum !== undefined && ownedSpaceCount(input.ownerId) >= maximum) {
+            throw error("invalid-input", `a user may own at most ${maximum} spaces`);
+          }
+          if (input.isDefault && control.get(
+            `SELECT 1 FROM spaces s JOIN space_memberships m ON m.space_id=s.id
+              WHERE m.principal_id=? AND m.state='active' AND s.is_default=1 LIMIT 1`, input.ownerId,
+          )) throw error("conflict", "This account already has a default Space");
+          control.run(
+            `INSERT INTO spaces(id,org_id,name,storage_identity,kind,is_default,color,icon,created_at_ms,updated_at_ms)
+             VALUES(?,?,?,?,?,?,?,?,?,?)`,
+            spaceId, orgId, name, storageIdentity, "shared", input.isDefault ? 1 : 0, color ?? null, icon ?? null, time, time,
+          );
+          control.run(
+            `INSERT INTO space_memberships(space_id,principal_id,role,state,created_at_ms)
+             VALUES(?,?,'owner','active',?)`,
+            spaceId, input.ownerId, time,
+          );
+          return dto(spaceRow(spaceId)!);
+        },
+        receipt: () => ({ resourceId: spaceId, revision: spaceRow(spaceId)!.revision, state: "active" }),
+        replay() {
+          requireMembership(input.ownerId, spaceId, "viewer");
+          const row = spaceRow(spaceId);
+          if (!row) throw noSuchSpace();
+          return dto(row);
+        },
       });
     },
-    renameSpace(userId, spaceId, patch) {
-      requireMembership(userId, spaceId, "admin");
+    renameSpace(userId, spaceId, patch, operation?: OperationOptions) {
       if (patch.name === undefined && patch.color === undefined && patch.icon === undefined) return dto(spaceRow(spaceId)!);
       const name = patch.name === undefined ? undefined : text(patch.name, "name");
       const color = patch.color === undefined ? undefined : optionalVisual(patch.color, "color") ?? null;
       const icon = patch.icon === undefined ? undefined : optionalVisual(patch.icon, "icon") ?? null;
-      return control.transaction(() => {
-        const row = spaceRow(spaceId);
-        if (!row) throw noSuchSpace();
-        control.run(
-          `UPDATE spaces SET name=?,color=?,icon=?,updated_at_ms=?,revision=revision+1 WHERE id=? AND revision=?`,
-          name ?? row.name,
-          color === undefined ? row.color ?? null : color,
-          icon === undefined ? row.icon ?? null : icon,
-          now(), spaceId, row.revision,
-        );
-        audit(userId, "space.updated", spaceId);
-        return dto(spaceRow(spaceId)!);
+      return commitMutation({
+        actorId: userId,
+        operationId: operation?.operationId,
+        action: "space.updated",
+        resourceId: spaceId,
+        request: { name: name ?? null, color: color ?? null, icon: icon ?? null },
+        authorize: () => { assertActiveUser(userId); },
+        mutate() {
+          requireMembership(userId, spaceId, "admin");
+          const row = spaceRow(spaceId);
+          if (!row) throw noSuchSpace();
+          control.run(
+            `UPDATE spaces SET name=?,color=?,icon=?,updated_at_ms=?,revision=revision+1 WHERE id=? AND revision=?`,
+            name ?? row.name,
+            color === undefined ? row.color ?? null : color,
+            icon === undefined ? row.icon ?? null : icon,
+            now(), spaceId, row.revision,
+          );
+          return dto(spaceRow(spaceId)!);
+        },
+        receipt: () => ({ resourceId: spaceId, revision: spaceRow(spaceId)!.revision, state: "active" }),
+        replay() {
+          requireMembership(userId, spaceId, "viewer");
+          const row = spaceRow(spaceId);
+          if (!row) throw noSuchSpace();
+          return dto(row);
+        },
       });
     },
-    deleteSpace(userId, spaceId) {
-      requireMembership(userId, spaceId, "owner");
-      control.transaction(() => {
-        const row = spaceRow(spaceId);
-        if (!row) throw noSuchSpace();
-        if (row.isDefault) throw error("forbidden", "The default Space cannot be deleted");
-        control.run("DELETE FROM device_selections WHERE space_id=?", spaceId);
-        control.run("DELETE FROM space_memberships WHERE space_id=?", spaceId);
-        control.run("DELETE FROM spaces WHERE id=?", spaceId);
-        audit(userId, "space.deleted", spaceId);
+    deleteSpace(userId, spaceId, operation?: OperationOptions) {
+      commitMutation({
+        actorId: userId,
+        operationId: operation?.operationId,
+        action: "space.deleted",
+        resourceId: spaceId,
+        request: {},
+        authorize: () => { assertActiveUser(userId); },
+        mutate() {
+          requireMembership(userId, spaceId, "owner");
+          const row = spaceRow(spaceId);
+          if (!row) throw noSuchSpace();
+          if (row.isDefault) throw error("forbidden", "The default Space cannot be deleted");
+          control.run("DELETE FROM device_selections WHERE space_id=?", spaceId);
+          control.run("DELETE FROM space_memberships WHERE space_id=?", spaceId);
+          control.run("DELETE FROM spaces WHERE id=?", spaceId);
+          return row.revision;
+        },
+        receipt: (revision) => ({ resourceId: spaceId, revision, state: "deleted" }),
+        replay: (receipt) => receipt.revision,
       });
     },
     defaultSpaceFor(userId) {
@@ -229,45 +327,67 @@ export function createControlTenancyStore(control: ControlPlane, opts: { now?: (
           ORDER BY created_at_ms,principal_id`, spaceId,
       );
     },
-    addMember(actorId, spaceId, userId, role) {
-      requireMembership(actorId, spaceId, "admin");
-      assertActiveUser(userId);
+    addMember(actorId, spaceId, userId, role, operation?: OperationOptions) {
       const time = now();
-      return control.transaction(() => {
-        const existing = control.get<{ role: string; createdAt: number }>(
-          "SELECT role,created_at_ms AS createdAt FROM space_memberships WHERE space_id=? AND principal_id=?",
-          spaceId, userId,
-        );
-        if (existing?.role === "owner" && role !== "owner" && activeOwnerCount(spaceId, userId) === 0) {
-          throw error("last-owner", "The last active Space owner must be preserved");
-        }
-        if (existing) {
+      const resourceId = `${spaceId}:${userId}`;
+      return commitMutation({
+        actorId,
+        operationId: operation?.operationId,
+        action: "space.member-set",
+        resourceId,
+        request: { spaceId, userId, role },
+        authorize: () => { assertActiveUser(actorId); },
+        mutate() {
+          requireMembership(actorId, spaceId, "admin");
+          assertActiveUser(userId);
+          const existing = membershipRow(spaceId, userId);
+          if (existing?.role === "owner" && role !== "owner" && activeOwnerCount(spaceId, userId) === 0) {
+            throw error("last-owner", "The last active Space owner must be preserved");
+          }
+          if (existing) {
+            control.run(
+              "UPDATE space_memberships SET role=?,state='active',revision=revision+1 WHERE space_id=? AND principal_id=?",
+              role, spaceId, userId,
+            );
+            return { userId, spaceId, role, createdAt: existing.createdAt };
+          }
           control.run(
-            "UPDATE space_memberships SET role=?,state='active',revision=revision+1 WHERE space_id=? AND principal_id=?",
-            role, spaceId, userId,
+            "INSERT INTO space_memberships(space_id,principal_id,role,state,created_at_ms) VALUES(?,?,?,'active',?)",
+            spaceId, userId, role, time,
           );
-          audit(actorId, "space.member-role-updated", `${spaceId}:${userId}`);
-          return { userId, spaceId, role, createdAt: existing.createdAt };
-        }
-        control.run(
-          "INSERT INTO space_memberships(space_id,principal_id,role,state,created_at_ms) VALUES(?,?,?,'active',?)",
-          spaceId, userId, role, time,
-        );
-        audit(actorId, "space.member-added", `${spaceId}:${userId}`);
-        return { userId, spaceId, role, createdAt: time };
+          return { userId, spaceId, role, createdAt: time };
+        },
+        receipt: () => ({ resourceId, revision: membershipRow(spaceId, userId)!.revision, state: "active" }),
+        replay() {
+          requireMembership(actorId, spaceId, "viewer");
+          const row = membershipRow(spaceId, userId);
+          if (!row) throw noSuchSpace();
+          return { userId, spaceId, role: row.role, createdAt: row.createdAt };
+        },
       });
     },
-    removeMember(actorId, spaceId, userId) {
-      requireMembership(actorId, spaceId, "admin");
-      const role = roleOf(userId, spaceId);
-      if (!role) throw noSuchSpace();
-      if (role === "owner" && activeOwnerCount(spaceId, userId) === 0) {
-        throw error("last-owner", "The last active Space owner must be preserved");
-      }
-      control.transaction(() => {
-        control.run("DELETE FROM device_selections WHERE user_id=? AND space_id=?", userId, spaceId);
-        control.run("DELETE FROM space_memberships WHERE space_id=? AND principal_id=?", spaceId, userId);
-        audit(actorId, "space.member-removed", `${spaceId}:${userId}`);
+    removeMember(actorId, spaceId, userId, operation?: OperationOptions) {
+      const resourceId = `${spaceId}:${userId}`;
+      commitMutation({
+        actorId,
+        operationId: operation?.operationId,
+        action: "space.member-removed",
+        resourceId,
+        request: { spaceId, userId },
+        authorize: () => { assertActiveUser(actorId); },
+        mutate() {
+          requireMembership(actorId, spaceId, "admin");
+          const existing = membershipRow(spaceId, userId);
+          if (!existing) throw noSuchSpace();
+          if (existing.role === "owner" && activeOwnerCount(spaceId, userId) === 0) {
+            throw error("last-owner", "The last active Space owner must be preserved");
+          }
+          control.run("DELETE FROM device_selections WHERE user_id=? AND space_id=?", userId, spaceId);
+          control.run("DELETE FROM space_memberships WHERE space_id=? AND principal_id=?", spaceId, userId);
+          return existing.revision;
+        },
+        receipt: (revision) => ({ resourceId, revision, state: "deleted" }),
+        replay: (receipt) => receipt.revision,
       });
     },
     selection(deviceKey, userId) {
