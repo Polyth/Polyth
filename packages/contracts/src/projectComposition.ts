@@ -99,7 +99,13 @@ export function projectPackageDecision(composition: ProjectComposition | undefin
   else if (!pkg.projectAffinity?.directions?.length) reason = "universal";
   else reason = matchesProjectAffinity(composition, pkg.projectAffinity) ? "direction" : "unrelated";
   const relevant = !["disabled", "excluded", "unrelated"].includes(reason);
-  return { id: pkg.id, relevant, recommended: relevant && pkg.projectAffinity?.recommended === true, reason };
+  const inferredRecommendation = reason === "direction" || reason === "universal";
+  return {
+    id: pkg.id,
+    relevant,
+    recommended: inferredRecommendation && pkg.projectAffinity?.recommended === true,
+    reason,
+  };
 }
 /** A contribution cannot reopen an irrelevant/disabled owner. Explicit inclusion
  * intentionally exposes the owner's tools even outside their recommended use. */
