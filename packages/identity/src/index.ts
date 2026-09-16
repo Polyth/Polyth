@@ -13,8 +13,16 @@ export type { PasswordService } from './passwords.ts';
 export type { WebAuthnConfig, PasskeySummary } from './passkeys.ts';
 export { createIdentityLinks } from './links.ts';
 export type { LinkedIdentitySummary, ProviderFramework } from './links.ts';
-export { canonicalHttpsIssuer, createProviderFramework, githubDeviceFlowConfigured, githubIdentityAdapter } from './providers/index.ts';
+export {
+  canonicalHttpsIssuer,
+  createGitLabIdentityAdapter,
+  createProviderFramework,
+  githubDeviceFlowConfigured,
+  githubIdentityAdapter,
+} from './providers/index.ts';
 export type {
+  GitLabOidcVerifier,
+  GitLabOidcVerificationInput,
   IdentityProviderAdapter,
   NormalizedExternalIdentity,
   ProviderCapabilities,
