@@ -7,6 +7,7 @@ import Dialog from "./a11y/Dialog.tsx";
 import { Button } from "./ui/index.ts";
 import { getState } from "../store.ts";
 import { updateProjectAppearance } from "../init.ts";
+import { tr } from "../i18n/index.ts";
 import { seedInitialProjectWorkspace } from "../projectCompositionSeed.ts";
 import "./ProjectSetupFlowDialog.css";
 
@@ -57,7 +58,7 @@ export default function ProjectSetupFlowDialog({ onClose }: { onClose: () => voi
     const state = getState();
     const active = state.projectRegistry.projects.find((item) => item.id === state.activeProjectId) ?? null;
     if (!active) {
-      setError("The project was created but could not be resolved. Refresh projects and try again.");
+      setError(tr("projectcomposition.createdNotResolved"));
       setStage("error");
       return;
     }
@@ -80,10 +81,10 @@ export default function ProjectSetupFlowDialog({ onClose }: { onClose: () => voi
 
   if (stage === "finalizing") {
     return (
-      <Dialog title="Preparing your workspace" onClose={() => {}} size="sm" className="project-setup-flow-dialog">
+      <Dialog title={tr("projectcomposition.preparingWorkspace")} onClose={() => {}} size="sm" className="project-setup-flow-dialog">
         <div className="project-setup-progress" role="status" aria-live="polite">
           <div className="project-setup-spinner" aria-hidden="true" />
-          <div><strong>Applying project setup…</strong><p>Keeping your package choices and workspace recommendations project-local.</p></div>
+          <div><strong>{tr("projectcomposition.applyingSetup")}</strong><p>{tr("projectcomposition.applyingSetupHint")}</p></div>
         </div>
       </Dialog>
     );
@@ -91,27 +92,27 @@ export default function ProjectSetupFlowDialog({ onClose }: { onClose: () => voi
 
   if (stage === "error") {
     return (
-      <Dialog title="Finish project setup" onClose={compositionPersisted ? cancel : () => {}} size="sm" className="project-setup-flow-dialog">
-        <div className="project-setup-error" role="alert">{error || "Project setup did not finish."}</div>
+      <Dialog title={tr("projectcomposition.finishSetup")} onClose={compositionPersisted ? cancel : () => {}} size="sm" className="project-setup-flow-dialog">
+        <div className="project-setup-error" role="alert">{error || tr("projectcomposition.setupFailed")}</div>
         <div className="project-setup-actions">
-          {compositionPersisted && <Button variant="ghost" onClick={cancel}>Open anyway</Button>}
-          <Button variant="primary" onClick={() => project && void finish(project)} disabled={!project}>Retry</Button>
+          {compositionPersisted && <Button variant="ghost" onClick={cancel}>{tr("projectcomposition.openAnyway")}</Button>}
+          <Button variant="primary" onClick={() => project && void finish(project)} disabled={!project}>{tr("common.retry")}</Button>
         </div>
       </Dialog>
     );
   }
 
   return (
-    <Dialog title="Set up your project" onClose={cancel} size="lg" className="project-setup-flow-dialog">
+    <Dialog title={tr("projectcomposition.setupTitle")} onClose={cancel} size="lg" className="project-setup-flow-dialog">
       <div className="project-setup-intro">
-        <span className="project-setup-step">Workspace</span>
-        <h2>Shape the workspace around what you’re doing</h2>
-        <p>Pick one or more directions. This only changes what Polyth surfaces first; globally enabled packages and permissions stay separate.</p>
+        <span className="project-setup-step">{tr("projectcomposition.workspace")}</span>
+        <h2>{tr("projectcomposition.setupHeadline")}</h2>
+        <p>{tr("projectcomposition.setupHint")}</p>
       </div>
       <ProjectCompositionEditor value={composition} onChange={setComposition} />
       <div className="project-setup-actions">
-        <Button variant="ghost" onClick={cancel}>Cancel</Button>
-        <Button variant="primary" onClick={continueToPicker}>Choose project source</Button>
+        <Button variant="ghost" onClick={cancel}>{tr("common.cancel")}</Button>
+        <Button variant="primary" onClick={continueToPicker}>{tr("projectcomposition.chooseProjectSource")}</Button>
       </div>
     </Dialog>
   );
