@@ -70,6 +70,11 @@ export {
   type StageLegacyMigrationOptions,
 } from "./migrationStage.ts";
 export {
+  applyLegacyResourceAdoptions,
+  type AppliedLegacyResourceAdoptions,
+  type ApplyLegacyResourceAdoptionsOptions,
+} from "./migrationResources.ts";
+export {
   applyLegacyIdentityMigration,
   type AppliedLegacyMigration,
   type ApplyLegacyMigrationOptions,
