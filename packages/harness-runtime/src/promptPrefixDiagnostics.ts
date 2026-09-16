@@ -14,9 +14,10 @@ export interface PromptPrefixContributorDiagnostic {
  *
  * This deliberately does NOT claim to fingerprint opaque vendor-internal
  * system prompts. It fingerprints the same harness-filtered desired capability
- * bundle Polyth provisions. The canonical registry has already normalized each
- * descriptor revision from semantic fields, so instruction/tool/schema changes
- * rotate this identity even when a package forgot to bump a declared revision.
+ * bundle Polyth provisions. The provisioning service supplies the fully
+ * assembled desired state, whose descriptors already carry semantic revisions,
+ * so instruction/tool/schema changes rotate this identity even when a package
+ * forgot to bump a declared revision.
  */
 export interface PromptPrefixDiagnostics {
   version: 1;
