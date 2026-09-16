@@ -14,6 +14,7 @@ export type { WebAuthnConfig, PasskeySummary } from './passkeys.ts';
 export { createIdentityLinks } from './links.ts';
 export type { LinkedIdentitySummary, ProviderFramework } from './links.ts';
 export {
+  bitbucketIdentityAdapter,
   canonicalHttpsIssuer,
   createGitLabIdentityAdapter,
   createProviderFramework,
