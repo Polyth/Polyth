@@ -228,6 +228,10 @@ export function subscribePackages(callback: () => void): () => void {
   return () => { listeners.delete(callback); };
 }
 
-export function whenPackagesSettled(): Promise<void> {
-  return Promise.all([...runtimes.values()].map((rec) => rec.inflight ?? Promise.resolve())).then(() => undefined);
+export async function whenPackagesSettled(): Promise<void> {
+  // bootPackages() and init() start concurrently. Waiting only on runtime
+  // records could resolve before catalog/API discovery has even populated them.
+  // The queue is the authoritative latest boot/reconcile barrier.
+  await bootQueue;
+  await Promise.all([...runtimes.values()].map((rec) => rec.inflight ?? Promise.resolve()));
 }
