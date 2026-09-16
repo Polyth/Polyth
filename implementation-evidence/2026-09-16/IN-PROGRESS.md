@@ -1,12 +1,16 @@
-# Blueprint implementation — working branch, NOT release-qualified
+# Blueprint implementation — NOT release-qualified
 
-Source archive: `polyth-full-implementation-blueprint-2026-09-16(1).zip`.
-Source checkout: `29f13bdd2e4b5451d129e58a0476108f9ea31098`.
-Blueprint baseline: `ff883b3f245545306f107c8fdc90b872e76762d0`.
 Branch: `feat/identity-governed-workspaces-20260916`.
+Code checkpoint: `af6529cda869908a8537977481e2a668725948df`.
 
-The branch is an implementation workspace. A created branch or this record is not an accepted task. No feature is declared complete by this file. The final evidence manifest must distinguish source inspection, passing automated tests, browser evidence, external adapters, native/physical-device evidence, and remaining release blockers.
+Read [CHECKPOINT.md](CHECKPOINT.md) for implemented scope, exact verification,
+remaining integration work, and environment failures. [checkpoint.json](checkpoint.json)
+is the machine-readable status for all 104 blueprint tasks.
 
-Initial sequence: transactional control authority and safe legacy handling; removal of ambient human identity and fail-open bootstrap; account-first setup/login and session revocation; then downstream scoped authorization and feature integration in dependency order.
+The local identity SDK and HTTP adapter are staged, not activated in the main
+server. Legacy JSON auth/tenancy and ambient owner behavior have NOT been fully
+replaced. Do not merge or deploy this branch as a completed blueprint release.
 
-The scoped dependency workflow installs the pinned lockfile without lifecycle scripts on Linux and publishes only `node_modules` for offline validation. It does not use deployment secrets, access private application data, call model providers, or run deployment jobs. The repository's ordinary CI remains manual-only.
+The Linux dependency workflow failed before any runner steps executed, including
+one retry. It produced no dependency artifact. No successful CI, full application
+build, browser E2E, native-device, or complete blueprint acceptance is claimed.
