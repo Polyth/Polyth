@@ -30,7 +30,7 @@ import {
 import EmptyState from "./EmptyState.tsx";
 import {
   Button, CloseIcon, ComposeIcon, FilterIcon, IconButton, Menu, Popover,
-  SearchIcon, SidebarIcon, SortIcon, Switch, Tooltip,
+  SearchIcon, SidebarIcon, SidebarRailCollapseIcon, SortIcon, Tooltip,
   type MenuEntry,
 } from "./ui/index.ts";
 import {
@@ -56,6 +56,7 @@ import {
   type SessionDateFilter,
 } from "../sessionDates.ts";
 import type { Project, SessionProjection } from "@polyth/contracts";
+import ProjectGlyph from "./ProjectGlyph.tsx";
 
 const EXPANDED_PROJECTS_KEY = "polyth.sidebar.expandedProjects";
 /** Grace period an untouched peek keeps after the pointer leaves the sidebar. */
@@ -78,30 +79,6 @@ function loadExpandedProjects(activeProjectId: string | null): ReadonlySet<strin
  *  in wide mode, where the sidebar is a plain inline column). */
 function closeDrawer(): void {
   if (getState().sidebarOpen) setSidebarOpen(false);
-}
-
-function ProjectGlyph({ project }: { project: Project }) {
-  return (
-    <span className="project-glyph" style={project.color ? { color: project.color } : undefined}>
-      {project.icon
-        ? project.icon.startsWith("/assets/project-icons/")
-          ? <span className="project-glyph-mask" aria-hidden="true" style={{ WebkitMaskImage: `url("${project.icon}")`, maskImage: `url("${project.icon}")` }} />
-          : project.icon.startsWith("data:image/")
-            ? <img src={project.icon} alt="" />
-            : <span aria-hidden="true">{project.icon}</span>
-        : <Icon.files />}
-      {project.remote && (
-        <span
-          className="project-remote-marker"
-          role="img"
-          aria-label={tr("ssh.sshprojectsource.remoteProject")}
-          title={tr("ssh.sshprojectsource.remoteProject")}
-        >
-          <Icon.globe />
-        </span>
-      )}
-    </span>
-  );
 }
 
 function sessionsNeedAttention(candidates: readonly SessionProjection[]): boolean {
@@ -751,19 +728,15 @@ export default function Sidebar() {
         <div className={`sidebar-expanded-shell${effectiveViewMode === "rail" ? " sidebar-expanded-shell--project-rail" : ""}`}>
         {effectiveViewMode === "rail" && (
           <div className="sidebar-project-rail" aria-label={tr("commandpalette.projects")}>
-            <span
-              className="sidebar-rail-switch"
-              title={collapsed
-                ? tr("sidebar.expandProjectsAndSessions")
-                : tr("contextrail.collapseValue", { value: tr("sidebar.projectsAndSessions") })}
-            >
-              <Switch
+            <span className="sidebar-rail-switch">
+              <IconButton
+                icon={SidebarRailCollapseIcon}
                 className="sidebar-rail-toggle"
-                checked={!collapsed}
                 label={collapsed
                   ? tr("sidebar.expandProjectsAndSessions")
                   : tr("contextrail.collapseValue", { value: tr("sidebar.projectsAndSessions") })}
-                onChange={(next) => { closePeek(); setSidebarLayout({ collapsed: !next }); }}
+                aria-expanded={!collapsed}
+                onClick={() => { closePeek(); setSidebarLayout({ collapsed: !collapsed }); }}
               />
             </span>
             <div className="sidebar-project-rail-list">

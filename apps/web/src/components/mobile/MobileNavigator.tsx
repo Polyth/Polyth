@@ -21,6 +21,7 @@ import {
 } from "../../init.ts";
 import { resolveSessionStatus, type SessionRowStatus } from "../../sessionStatus.ts";
 import { Icon } from "../../icons.tsx";
+import ProjectGlyph from "../ProjectGlyph.tsx";
 import { getLocale, tr } from "../../i18n/index.ts";
 import { friendlyError } from "../../settings.ts";
 import { confirmAlert } from "../../alerts.ts";
@@ -925,15 +926,7 @@ export default function MobileNavigator() {
                 >
                   {/* Same project mark as the desktop navigator: the chosen
                       icon and colour are project identity, not decoration. */}
-                  <span className="project-glyph" style={project.color ? { color: project.color } : undefined}>
-                    {project.icon
-                      ? project.icon.startsWith("/assets/project-icons/")
-                        ? <span className="project-glyph-mask" aria-hidden="true" style={{ WebkitMaskImage: `url("${project.icon}")`, maskImage: `url("${project.icon}")` }} />
-                        : project.icon.startsWith("data:image/")
-                          ? <img src={project.icon} alt="" />
-                          : <span aria-hidden="true">{project.icon}</span>
-                      : <Icon.files />}
-                  </span>
+                  <ProjectGlyph project={project} />
                   {renamingProjectId === project.id ? (
                     <input
                       className="mobile-nav-project-rename"

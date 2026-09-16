@@ -83,8 +83,10 @@ test("suggested Iconify icons persist as validator-safe SVG data, never picker h
   assert.match(stored, /^data:image\/svg\+xml;base64,/);
   assert.equal(embeddedIconifyName(stored), "ph:folder");
   const decoded = new TextDecoder().decode(Uint8Array.from(atob(stored.split(",", 2)[1] ?? ""), (char) => char.charCodeAt(0)));
-  assert.doesNotMatch(decoded, /https?:|xlink:href|xmlns=/i);
-  assert.match(decoded, /#b4532a/);
+  const withoutW3 = decoded.replace(/\sxmlns(?::[\w-]+)?\s*=\s*["']https?:\/\/www\.w3\.org\/[^"']*["']/gi, "");
+  assert.doesNotMatch(withoutW3, /https?:|xlink:href/i);
+  assert.match(decoded, /xmlns=["']http:\/\/www\.w3\.org\/2000\/svg["']/);
+  assert.match(decoded, /currentColor/i);
   assert.equal(await persistProjectIcon("/assets/project-icons/folder.svg", "#b4532a", async () => { throw new Error("should not load"); }), "/assets/project-icons/folder.svg");
 });
 
@@ -94,8 +96,8 @@ test("legacy charset SVG data URLs are rewritten to safe base64 before save", as
   const stored = await persistProjectIcon(legacy, "#123abc", async () => { throw new Error("should not load"); });
   assert.equal(isSafePersistedProjectIcon(stored), true);
   const decoded = new TextDecoder().decode(Uint8Array.from(atob(stored.split(",", 2)[1] ?? ""), (char) => char.charCodeAt(0)));
-  assert.match(decoded, /#123abc/);
-  assert.doesNotMatch(decoded, /xmlns=|currentColor/i);
+  assert.match(decoded, /xmlns=["']http:\/\/www\.w3\.org\/2000\/svg["']/);
+  assert.match(decoded, /currentColor/i);
 });
 
 test("remote icons persist as self-contained SVG data while retaining their Iconify identity", () => {
@@ -109,8 +111,8 @@ test("remote icons persist as self-contained SVG data while retaining their Icon
   assert.equal(storedProjectIconSelection(stored), "iconify:ph:magnifying-glass");
   assert.equal(projectIconMaskUrl(stored), "/api/iconify/ph/magnifying-glass.svg");
   const decoded = new TextDecoder().decode(Uint8Array.from(atob(stored.split(",", 2)[1] ?? ""), (char) => char.charCodeAt(0)));
-  assert.match(decoded, /#b4532a/);
-  assert.doesNotMatch(decoded, /currentColor/);
+  assert.match(decoded, /xmlns=["']http:\/\/www\.w3\.org\/2000\/svg["']/);
+  assert.match(decoded, /currentColor/i);
 });
 
 test("embedded Iconify metadata rejects unsupported providers", () => {

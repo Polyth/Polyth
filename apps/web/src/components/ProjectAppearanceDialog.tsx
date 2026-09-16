@@ -30,7 +30,13 @@ import {
   revokeProjectIconMaskBlobUrls,
   searchProjectIcons,
 } from "../projectIconLoader.ts";
-import { Icon as ProjectGlyphIcon } from "../icons.tsx";
+import { ProjectIconBody } from "./ProjectGlyph.tsx";
+import {
+  isProjectIconBundledPath,
+  isProjectIconRasterDataUrl,
+  isProjectIconSvgDataUrl,
+  projectIconMaskStyle,
+} from "../projectIconGlyph.ts";
 import CopyButton from "./CopyButton.tsx";
 import Picker from "./Picker.tsx";
 import {
@@ -113,12 +119,26 @@ function useIconMask(value: string): string {
 function IconArt({ value, initial, className, variant = "cell" }: { value: string; initial: string; className?: string; variant?: "cell" | "glyph" }) {
   const mask = useIconMask(value);
   if (variant === "glyph") {
-    if (uploadedIcon(value)) return <img src={value} alt="" />;
-    if (mask) return <span className="project-glyph-mask" aria-hidden="true" style={{ WebkitMaskImage: `url("${mask}")`, maskImage: `url("${mask}")` }} />;
-    return <ProjectGlyphIcon.files />;
+    if (isProjectIconSvgDataUrl(value) || isProjectIconBundledPath(value)) {
+      return <ProjectIconBody icon={value} loadingFallback={<span className="project-glyph-mask is-loading" aria-hidden="true" />} />;
+    }
+    if (mask) {
+      return <span className="project-glyph-mask" aria-hidden="true" style={{ WebkitMaskImage: `url("${mask}")`, maskImage: `url("${mask}")` }} />;
+    }
+    if (iconifyProjectIconName(value) || embeddedIconifyName(value)) {
+      return <span className="project-glyph-mask is-loading" aria-hidden="true" />;
+    }
+    if (isProjectIconRasterDataUrl(value)) return <img src={value} alt="" />;
+    if (value) return <span aria-hidden="true">{value}</span>;
+    return null;
   }
   if (uploadedIcon(value)) return <img className={className} src={value} alt="" />;
-  if (mask) return <span className={className} aria-hidden="true" style={{ WebkitMaskImage: `url("${mask}")`, maskImage: `url("${mask}")` }} />;
+  if (mask || projectIconMaskStyle(value)) {
+    const style = mask
+      ? { WebkitMaskImage: `url("${mask}")`, maskImage: `url("${mask}")` }
+      : projectIconMaskStyle(value)!;
+    return <span className={className} aria-hidden="true" style={style} />;
+  }
   return <span className={`${className ?? ""} is-initial`} aria-hidden="true">{initial}</span>;
 }
 

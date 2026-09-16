@@ -9,15 +9,19 @@ function sanitizeProjectIconSvg(svg: string): string {
     .replace(/<\?xml[\s\S]*?\?>/gi, "")
     .replace(/<!doctype[\s\S]*?>/gi, "")
     .replace(/<(script|foreignObject)\b[^>]*>[\s\S]*?<\/\1>/gi, "")
-    .replace(/\s(?:xml)?ns(?::[\w-]+)?\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
+    .replace(/\sxmlns:xlink\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
     .replace(/\s(?:xlink:)?href\s*=\s*(?:"(?!#)[^"]*"|'(?!#)[^']*')/gi, "")
     .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
     .trim();
 }
 
-function inlineAllowlistedIcon(name: string, svg: string, color: string): string {
-  const ink = /^#[0-9a-f]{6}$/i.test(color) ? color.toLocaleLowerCase() : "#000000";
-  let clean = sanitizeProjectIconSvg(svg).replace(/currentColor/gi, ink);
+function ensureProjectIconSvgXmlns(svg: string): string {
+  if (/\sxmlns\s*=\s*(["'])http:\/\/www\.w3\.org\/2000\/svg\1/i.test(svg)) return svg;
+  return svg.replace(/^<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
+}
+
+function inlineAllowlistedIcon(name: string, svg: string, _color: string): string {
+  let clean = ensureProjectIconSvgXmlns(sanitizeProjectIconSvg(svg));
   if (!/^<svg[\s>]/i.test(clean)) {
     throw Object.assign(new Error("Couldn’t prepare the selected project icon."), { code: "invalid-input" });
   }

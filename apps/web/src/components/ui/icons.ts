@@ -8,6 +8,7 @@
 import {
   Archive,
   Bell,
+  createLucideIcon,
   KeyRound,
   Pencil,
   Repeat,
@@ -168,3 +169,10 @@ export {
 } from "lucide-react";
 
 export type { LucideIcon } from "lucide-react";
+
+/** Tabler "Layout Sidebar Right Collapse" glyph for the project-rail toggle. */
+export const SidebarRailCollapseIcon = createLucideIcon("sidebar-rail-collapse", [
+  ["path", { d: "M4 6a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2H6a2 2 0 0 1 -2 -2z", key: "rail-frame" }],
+  ["path", { d: "M15 4v16", key: "rail-divider" }],
+  ["path", { d: "m9 10 2 2 -2 2", key: "rail-chevron" }],
+]);

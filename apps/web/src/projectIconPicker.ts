@@ -43,7 +43,7 @@ function encodeSvgDataUrl(svg: string): string {
   return `${ICONIFY_DATA_PREFIX}${btoa(binary)}`;
 }
 
-function decodeSvgDataUrl(value: string): string | null {
+export function decodeSvgDataUrl(value: string): string | null {
   try {
     if (value.startsWith(ICONIFY_DATA_PREFIX)) {
       const binary = atob(value.slice(ICONIFY_DATA_PREFIX.length));
@@ -65,11 +65,29 @@ export function sanitizeProjectIconSvg(svg: string): string {
     .replace(/^\uFEFF/, "")
     .replace(/<\?xml[\s\S]*?\?>/gi, "")
     .replace(/<!doctype[\s\S]*?>/gi, "")
-    .replace(/<(script|foreignObject|metadata)\b[^>]*>[\s\S]*?<\/\1>/gi, "")
-    .replace(/\s(?:xml)?ns(?::[\w-]+)?\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
+    .replace(/<(script|foreignObject)\b[^>]*>[\s\S]*?<\/\1>/gi, "")
+    .replace(/\sxmlns:xlink\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
     .replace(/\s(?:xlink:)?href\s*=\s*(?:"(?!#)[^"]*"|'(?!#)[^']*')/gi, "")
     .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
     .trim();
+}
+
+export function ensureProjectIconSvgXmlns(svg: string): string {
+  if (/\sxmlns\s*=\s*(["'])http:\/\/www\.w3\.org\/2000\/svg\1/i.test(svg)) return svg;
+  return svg.replace(/^<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
+}
+
+export function isProjectIconBundledPath(icon: string): boolean {
+  return PROJECT_ICON_ASSET.test(icon);
+}
+
+export function isProjectIconSvgDataUrl(icon: string): boolean {
+  return icon.startsWith("data:image/svg+xml");
+}
+
+export function isProjectIconRasterDataUrl(icon: string): boolean {
+  if (!icon.startsWith("data:image/")) return false;
+  return !isProjectIconSvgDataUrl(icon);
 }
 
 export function isSafePersistedProjectIcon(icon: string): boolean {
@@ -117,8 +135,7 @@ export async function persistProjectIcon(
   }
   const svg = decodeSvgDataUrl(trimmed);
   if (svg) {
-    const ink = /^#[0-9a-f]{6}$/i.test(color) ? color.toLocaleLowerCase() : "#000000";
-    const stored = encodeSvgDataUrl(sanitizeProjectIconSvg(svg).replace(/currentColor/gi, ink));
+    const stored = encodeSvgDataUrl(ensureProjectIconSvgXmlns(sanitizeProjectIconSvg(svg)));
     if (!isSafePersistedProjectIcon(stored)) throw new Error("Couldn’t prepare the selected project icon.");
     return stored;
   }
@@ -354,10 +371,9 @@ export function storedProjectIconSelection(value: string | undefined): string {
   return remoteName ? iconifyProjectIconValue(remoteName) : value ?? "";
 }
 
-export function inlineIconifySvgDataUrl(name: string, svg: string, color: string): string {
+export function inlineIconifySvgDataUrl(name: string, svg: string, _color: string): string {
   if (!isSupportedIconifyName(name)) return "";
-  const ink = /^#[0-9a-f]{6}$/i.test(color) ? color.toLocaleLowerCase() : "#000000";
-  let clean = sanitizeProjectIconSvg(svg).replace(/currentColor/gi, ink);
+  let clean = ensureProjectIconSvgXmlns(sanitizeProjectIconSvg(svg));
   if (!/^<svg[\s>]/i.test(clean)) return "";
   const openingEnd = clean.indexOf(">");
   if (openingEnd < 0) return "";

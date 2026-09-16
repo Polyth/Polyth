@@ -4,27 +4,19 @@ import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { useShellMode } from "../../../apps/web/src/responsiveShell.ts";
 import {
   CheckIcon,
-  FolderIcon,
   Icon,
   ResponsiveOverlay,
   TextInput,
 } from "../../../apps/web/src/components/ui/index.ts";
+import ProjectGlyph from "../../../apps/web/src/components/ProjectGlyph.tsx";
 
 export function PlannerProjectMark({ project }: { project: Project }): ReactNode {
-  if (project.icon?.startsWith("/assets/project-icons/")) {
-    return (
-      <span
-        className="planner-project-mask"
-        aria-hidden="true"
-        style={{ WebkitMaskImage: `url("${project.icon}")`, maskImage: `url("${project.icon}")` }}
-      />
-    );
-  }
-  if (project.icon?.startsWith("data:image/")) {
-    return <img className="planner-project-img" src={project.icon} alt="" />;
-  }
-  if (project.icon) return <span aria-hidden="true">{project.icon}</span>;
-  return <Icon icon={FolderIcon} size="sm" />;
+  return (
+    <ProjectGlyph
+      project={project}
+      maskClassName="planner-project-mask project-glyph-mask"
+    />
+  );
 }
 
 export default function PlannerProjectPicker({
@@ -131,7 +123,7 @@ export default function PlannerProjectPicker({
                   onClose();
                 }}
               >
-                <span className="planner-project-mark" style={project.color ? { color: project.color } : undefined}>
+                <span className="planner-project-mark">
                   <PlannerProjectMark project={project} />
                 </span>
                 <span className="planner-picker-copy">

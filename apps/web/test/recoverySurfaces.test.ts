@@ -61,12 +61,10 @@ test("recovery surfaces preserve drafts and never auto-send a failed turn", asyn
   const banner = await readFile(new URL("../src/components/RuntimeEpochBanner.tsx", import.meta.url), "utf8");
 
   assert.match(composer, /<Notice[\s\S]*?className="composer-send-failure"[\s\S]*?role="alert"/);
-  assert.match(composer, /Checking whether this was applied/);
-  // An uncertain outcome is reported without a retry action — the composer
-  // never re-offers a mutation that may already have applied. It also no
-  // longer disables sending: a new message is a new intent, and the server
-  // queues it behind the uncertain turn instead of replaying it.
-  assert.match(composer, /failedSend\.kind === "unknown"[\s\S]{0,24}\?\s*\{\}/);
+  assert.match(composer, /failedSend\?\.kind === "unavailable"/);
+  assert.doesNotMatch(composer, /failedSend(?:\?\.)?kind === "unknown"/);
+  // An uncertain outcome is not surfaced as a retryable composer notice: the
+  // mutation may already have applied, so offering replay would risk a duplicate.
   assert.doesNotMatch(composer, /sendDisabled = [\s\S]{0,200}failedSend/);
   assert.match(timeline, /applyComposerSeed\(sessionId, `turn-failed:\$\{turn\.turnId\}`/);
   assert.match(timeline, /requestComposerReplace\(draft\.text\)/);

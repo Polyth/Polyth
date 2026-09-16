@@ -552,22 +552,11 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 /* Rail view collapses only the sessions column: the project icons keep their
    width and the sessions return as a floating panel anchored to the rail. */
 .sidebar-rail-switch { display: grid; flex: none; place-items: center; margin-block-end: var(--space-1); }
-.sidebar-rail-toggle.switch { width: 30px; height: 18px; }
-.sidebar-rail-toggle .switch-track {
-  width: 30px;
-  height: 18px;
-  padding: 2px;
-  border-color: var(--control-border);
-  background: var(--sunken);
-  box-shadow: var(--inset-hi);
+.sidebar-rail-toggle {
+  width: 40px;
+  height: 40px;
+  color: var(--text-dim);
 }
-.sidebar-rail-toggle.switch i {
-  width: 12px;
-  height: 12px;
-  background: var(--text-dim);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, .32);
-}
-.sidebar-rail-toggle.switch[aria-checked="true"] i { transform: translateX(12px); }
 .sidebar--animate-width {
   transition: width var(--motion-normal) var(--motion-ease),
     min-width var(--motion-normal) var(--motion-ease);

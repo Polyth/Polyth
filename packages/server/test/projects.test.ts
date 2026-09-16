@@ -81,13 +81,14 @@ test("project appearance accepts sanitised Iconify SVG data urls", async () => {
   mkdirSync(root);
   const projects = createProjectService(dir);
   const project = await projects.add(root);
-  const icon = svgDataUrl('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><metadata id="polyth-iconify">ph:folder</metadata><path fill="#b4532a" d="M0 0h1v1H0z"/></svg>');
+  const icon = svgDataUrl('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><metadata id="polyth-iconify">ph:folder</metadata><path fill="currentColor" d="M0 0h1v1H0z"/></svg>');
   const stored = (await projects.update!(project.id, { icon })).icon ?? "";
   assert.match(stored, /^data:image\/svg\+xml;base64,/);
   const decoded = Buffer.from(stored.split(",", 2)[1] ?? "", "base64").toString("utf8");
   assert.match(decoded, /polyth-iconify/);
   assert.match(decoded, /ph:folder/);
-  assert.doesNotMatch(decoded, /xmlns=/);
+  assert.match(decoded, /xmlns=["']http:\/\/www\.w3\.org\/2000\/svg["']/);
+  assert.match(decoded, /currentColor/i);
 });
 
 test("project appearance PATCH materializes picker Iconify handles into safe SVG data", async () => {

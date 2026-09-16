@@ -57,10 +57,15 @@ function sanitizeProjectIconSvg(svg: string): string {
     .replace(/<\?xml[\s\S]*?\?>/gi, "")
     .replace(/<!doctype[\s\S]*?>/gi, "")
     .replace(/<(script|foreignObject)\b[^>]*>[\s\S]*?<\/\1>/gi, "")
-    .replace(/\s(?:xml)?ns(?::[\w-]+)?\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
+    .replace(/\sxmlns:xlink\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
     .replace(/\s(?:xlink:)?href\s*=\s*(?:"(?!#)[^"]*"|'(?!#)[^']*')/gi, "")
     .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
     .trim();
+}
+
+function ensureProjectIconSvgXmlns(svg: string): string {
+  if (/\sxmlns\s*=\s*(["'])http:\/\/www\.w3\.org\/2000\/svg\1/i.test(svg)) return svg;
+  return svg.replace(/^<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
 }
 
 function decodeIncomingSvgDataUrl(icon: string): string | null {
@@ -80,7 +85,7 @@ function normalizeIncomingProjectIcon(icon: string): string {
   const svg = decodeIncomingSvgDataUrl(icon);
   if (!svg) return icon;
   if (/<\/?(?:script|foreignObject)\b/i.test(svg) || /\son\w+\s*=/i.test(svg) || /javascript:/i.test(svg)) return icon;
-  const clean = sanitizeProjectIconSvg(svg);
+  const clean = ensureProjectIconSvgXmlns(sanitizeProjectIconSvg(svg));
   if (!/<svg[\s>]/i.test(clean)) return icon;
   return `data:image/svg+xml;base64,${Buffer.from(clean).toString("base64")}`;
 }
