@@ -74,6 +74,13 @@ export function registerSlot(
   };
 }
 
+/** Raw registration probe. Unlike listSlots(), this intentionally ignores
+ * project relevance so lifecycle code can distinguish an irrelevant mounted
+ * contribution from a package that simply has not registered yet. */
+export function hasSlotRegistration(slot: UiSlot, id: string): boolean {
+  return registry.get(slot)?.has(id) === true;
+}
+
 /** Deterministic listing: `order` then `id`, independent of registration time. */
 export function listSlots(slot: UiSlot): SlotItem[] {
   return [...(registry.get(slot)?.values() ?? [])]
