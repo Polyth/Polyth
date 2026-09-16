@@ -40,6 +40,7 @@ function fixture(path = ":memory:", options: {
   const executing = new Set<string>();
   let releaseUnknown = false;
   let createUnknown = false;
+  let createRejected = false;
   let exposeReceipt = true;
   let abortStops = false;
   const nativeCreates: string[] = [];
@@ -60,6 +61,7 @@ function fixture(path = ":memory:", options: {
       const accepted: NonNullable<RuntimeSnapshot["acceptedOperations"]> = [];
       const create = async (request: { sessionId: string }, operationId: string) => {
         assert.equal(executing.size, 0, "no target native session while previous engine can execute");
+        if (createRejected) return { kind: "rejected" as const, code: "native-failure", message: "target bridge failed to connect" };
         nativeId = randomUUID(); lastCreateId = operationId; nativeCreates.push(nativeId);
         accepted.push({ operationId, mutationKind: "session-reset", backendSessionId: nativeId, receipt: nativeId });
         if (createUnknown) return { kind: "unknown" as const, operationId, message: "response lost" };
@@ -179,7 +181,7 @@ function fixture(path = ":memory:", options: {
   return { get store() { return store; }, get sessions() { return sessions; }, engines, nativeCreates, broadcasts, beginShutdown,
     async idle(id: string) { await until(async () => { const events = await store.events(id); return (await store.projection(id))?.status === "idle" && (events.findLast(e => e.type === "turn/stopped")?.seq ?? 0) > (events.findLast(e => e.type === "user/message")?.seq ?? 0); }); },
     async close() { await drain(); detach.forEach((off) => off()); await store.close(); },
-    async restart() { await drain(); detach.forEach((off) => off()); await store.close(); store = createStore(path); sessions = makeSessions(); }, setReleaseUnknown(value: boolean) { releaseUnknown = value; }, setCreateUnknown(value: boolean, receipt = true) { createUnknown = value; exposeReceipt = receipt; }, setAbortStops(value: boolean) { abortStops = value; } };
+    async restart() { await drain(); detach.forEach((off) => off()); await store.close(); store = createStore(path); sessions = makeSessions(); }, setReleaseUnknown(value: boolean) { releaseUnknown = value; }, setCreateUnknown(value: boolean, receipt = true) { createUnknown = value; exposeReceipt = receipt; }, setCreateRejected(value: boolean) { createRejected = value; }, setAbortStops(value: boolean) { abortStops = value; } };
 }
 
 test("A1 A2 → B1 → A retains one canonical session, cwd and confirmed context; stale A gets a new native leg", async () => {
@@ -374,6 +376,19 @@ test("lost target create response is never replayed; exact receipt resumes trans
   f.setCreateUnknown(false, true);
   assert.equal((await f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" })).resolvedHarnessId, "fake-b");
   assert.equal(f.nativeCreates.length, count); await f.close();
+});
+
+test("a rejected target create keeps reporting its reason and recovers once the target accepts", async () => {
+  const f = fixture(); const { id } = await f.sessions.create({ projectId: "p" });
+  f.setCreateRejected(true);
+  const count = f.nativeCreates.length;
+  const reason = { code: "native-failure", message: "target bridge failed to connect" };
+  await assert.rejects(f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" }), reason);
+  await assert.rejects(f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" }), reason);
+  assert.equal(f.nativeCreates.length, count);
+  f.setCreateRejected(false);
+  assert.equal((await f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" })).resolvedHarnessId, "fake-b");
+  await f.close();
 });
 
 

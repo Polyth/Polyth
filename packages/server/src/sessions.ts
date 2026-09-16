@@ -5977,6 +5977,11 @@ export function createSessionService(deps: {
       const events = await store.events(sessionId);
       const intent = events.findLast((event) => event.type === "harness/native-create-requested" && event.data.transitionId === transition!.id);
       let operation = intent ? (await durable.operations(sessionId)).find((op) => op.ownerEventSeq === intent.seq) : undefined;
+      // A rejected create is settled: the target gave a definitive
+      // non-application answer, so a retry claims a fresh operation. Reusing it
+      // would report the unresolved-outcome dead end below on every later
+      // attempt, hiding the real reason and never recovering once it is fixed.
+      if (operation?.state === "rejected") operation = undefined;
       if (!operation) {
         operation = (await broadcastTail(sessionId, () => durable.prepareOperation({
           sessionId,

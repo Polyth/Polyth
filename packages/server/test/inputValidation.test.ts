@@ -46,6 +46,12 @@ const probeRoutes: RouteHandler = async ({ path, body, json }) => {
       { code: "epoch-proof-required" },
     );
   }
+  if (path === "/api/probe/native") {
+    throw Object.assign(
+      new Error("Polyth agent-tools bridge failed to connect (Codex status: authenticationRequired)"),
+      { code: "native-failure" },
+    );
+  }
   if (path === "/api/probe/git") {
     throw Object.assign(
       new Error("Updates were rejected because the remote contains work that you do not have locally"),
@@ -269,6 +275,22 @@ test("failed git subprocesses are 422s that keep the git error, not masked 500s"
     assert.deepEqual(await response.json(), {
       error: "git-failed",
       message: "Updates were rejected because the remote contains work that you do not have locally",
+    });
+  } finally {
+    app.server.close();
+  }
+});
+
+test("a harness bridge refusal is a 502 that keeps the provider reason, not a masked 500", async () => {
+  const app = await start();
+  try {
+    // "Reconnect" on the in-chat harness recovery card must show why the
+    // provider said no, not "An internal server error occurred."
+    const response = await fetch(`${app.base}/api/probe/native`);
+    assert.equal(response.status, 502);
+    assert.deepEqual(await response.json(), {
+      error: "native-failure",
+      message: "Polyth agent-tools bridge failed to connect (Codex status: authenticationRequired)",
     });
   } finally {
     app.server.close();
