@@ -1220,6 +1220,37 @@ test("an idle reopen never floats a recent cached running tool", async () => {
   }
 });
 
+test("a hidden tab commits activity directly and never replays it on return", async () => {
+  const { viewport } = activityOverlayHost();
+  const root = createRoot(viewport.querySelector(".timeline")!.firstElementChild!);
+  const settled = tool({ id: "call-visible", callId: "call-visible" });
+  const running = tool({ id: "call-hidden", callId: "call-hidden", status: "running", output: undefined, finishTime: undefined, time: Date.now() });
+  const previous = Object.getOwnPropertyDescriptor(document, "hidden");
+  try {
+    await act(async () => root.render(createElement(ActivityGroupView, {
+      g: activityGroup("activity-hidden", [settled]),
+      subagents: null,
+    })));
+
+    Object.defineProperty(document, "hidden", { configurable: true, value: true });
+    await act(async () => document.dispatchEvent(new dom.Event("visibilitychange")));
+    await act(async () => root.render(createElement(ActivityGroupView, {
+      g: activityGroup("activity-hidden", [settled, running]),
+      subagents: null,
+    })));
+    assert.equal(viewport.querySelector(".activity-live"), null, "activity arriving while hidden is rendered in its final folded position");
+
+    Object.defineProperty(document, "hidden", { configurable: true, value: false });
+    await act(async () => document.dispatchEvent(new dom.Event("visibilitychange")));
+    assert.equal(viewport.querySelector(".activity-live"), null, "returning to the tab does not replay missed flight");
+  } finally {
+    if (previous) Object.defineProperty(document, "hidden", previous);
+    else delete (document as Document & { hidden?: boolean }).hidden;
+    await act(async () => root.unmount());
+    viewport.remove();
+  }
+});
+
 test("an action that arrives already finished still appears outside the block first", async () => {
   const { viewport } = activityOverlayHost();
   const root = createRoot(viewport.querySelector(".timeline")!.firstElementChild!);

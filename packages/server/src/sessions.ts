@@ -2102,10 +2102,11 @@ export function createSessionService(deps: {
         }
         // Warm-restart recovery: the rebind above only succeeds against the
         // SAME verified owned backend session. When it is demonstrably alive
-        // (definite running/idle evidence), lift any turn stranded `unknown` by
-        // a Polyth restart out of the admission barrier so the session is
-        // usable again on that same backend — the operation stays `unknown`.
-        if (authoritativeState.value === "running" || authoritativeState.value === "idle") {
+        // (definite running/idle evidence) or indeterminate after a restart
+        // reattach (unknown), lift any turn stranded `unknown` by a Polyth
+        // restart out of the admission barrier so the session is usable again
+        // on that same backend — the operation stays `unknown`.
+        if (authoritativeState.value === "running" || authoritativeState.value === "idle" || authoritativeState.value === "unknown") {
           const recovered = await broadcastTail(sessionId, () =>
             durable.recoverRestartInterruptedTurns({
               sessionId,
@@ -2148,7 +2149,7 @@ export function createSessionService(deps: {
           barrierState,
           unresolved
             ? `operation ${unresolved.operationId} remains ${unresolved.state}`
-            : authoritativeState.value === "unknown"
+            : barrierState === "unknown"
               ? "runtime status evidence is insufficient"
               : undefined,
         ));

@@ -554,16 +554,36 @@ function actionIncomplete(item: ActivityItem): boolean {
 function useActionSchedule(items: ActivityItem[], allowLive = true): ActionSchedule {
   // id -> start of its turn outside the block; 0 means it never gets one.
   const turns = useRef(new Map<string, number>());
+  // Items observed while the document is hidden are already history when the
+  // reader returns. Keep their ids fenced so the visible transition cannot
+  // reinterpret them as fresh arrivals and replay a backlog over the chat.
+  const hiddenItems = useRef(new Set<string>());
   const cursor = useRef(0);
   const mounted = useRef(false);
-  const [, redraw] = useState(0);
+  const [visibilityVersion, redraw] = useState(0);
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const onVisibility = () => redraw((value) => value + 1);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
   const at = Date.now();
+  const visible = typeof document === "undefined" || !document.hidden;
   const onlyFreshLive = items.length === 1
     && actionIncomplete(items[0]!)
     && at - Math.min(at, items[0]!.time) < ACTION_SHOW_MS;
   const restore = !mounted.current && !onlyFreshLive;
   for (const item of items) {
+    if (!visible) {
+      hiddenItems.current.add(item.id);
+      turns.current.set(item.id, 0);
+      continue;
+    }
     if (turns.current.has(item.id)) continue;
+    if (hiddenItems.current.has(item.id)) {
+      turns.current.set(item.id, 0);
+      continue;
+    }
     // An idle/historical group never takes the stage: revisited sessions paint
     // cached history first, then the reconcile suffix would otherwise look like
     // a burst of live arrivals and fly in over the answer.
@@ -607,7 +627,7 @@ function useActionSchedule(items: ActivityItem[], allowLive = true): ActionSched
     if (!Number.isFinite(next)) return;
     const timer = window.setTimeout(() => redraw((value) => value + 1), Math.max(0, next - Date.now()));
     return () => window.clearTimeout(timer);
-  }, [next]);
+  }, [next, visibilityVersion]);
   return { showing, leaving, scheduled };
 }
 
