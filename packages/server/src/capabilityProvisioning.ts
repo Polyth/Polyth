@@ -188,6 +188,11 @@ const rankId = (id: string): string => {
   return `2:${id}`;
 };
 
+const targetsHarness = (descriptor: AgentCapabilityDescriptor, harnessId: string): boolean => {
+  const target = (descriptor as AgentCapabilityDescriptor & { targetHarnessId?: unknown }).targetHarnessId;
+  return target === undefined || target === harnessId;
+};
+
 const isDurableApplicationState = (
   _lifetime: HarnessCapabilityTargetLifetime,
   _context: HarnessContext,
@@ -654,7 +659,7 @@ export function createCapabilityProvisioningController(opts: {
       const mcpSnapshot = applyContext.space
         ? opts.mcp.projection(applyContext.space, projectScopeId(applyContext))
         : undefined;
-      items = await desired(applyContext, mcpSnapshot);
+      items = (await desired(applyContext, mcpSnapshot)).filter((item) => targetsHarness(item, provider.descriptor.id));
       const desiredRevision = desiredBundleRevision(items);
       if (!provider.provisioner || !support) {
         const next = unsupportedResult(items, "Harness has no capability provisioner");
@@ -742,7 +747,7 @@ export function createCapabilityProvisioningController(opts: {
         ? (ctx, keepRevisions) => provider.provisioner!.release!(ctx, { keepRevisions }) : undefined);
       target = targetOf(context, provider.descriptor.id, lifetime);
       if (!items.length) {
-        try { items = await desired(context); } catch { items = []; }
+        try { items = (await desired(context)).filter((item) => targetsHarness(item, provider.descriptor.id)); } catch { items = []; }
       }
       const desiredRevision = desiredBundleRevision(items);
       const reason = sanitize({
