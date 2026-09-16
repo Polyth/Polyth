@@ -29,7 +29,102 @@ export const ICONIFY_PROJECT_ICON_PREFIX = "iconify:";
 export const PROJECT_ICON_PREFIXES = PROJECT_ICON_LIBRARIES.map(({ id }) => id).join(",");
 
 const ICONIFY_METADATA_ID = "polyth-iconify";
-const ICONIFY_DATA_PREFIX = "data:image/svg+xml;charset=utf-8,";
+const ICONIFY_DATA_PREFIX = "data:image/svg+xml;base64,";
+const ICONIFY_DATA_PREFIX_LEGACY = "data:image/svg+xml;charset=utf-8,";
+
+const PROJECT_ICON_ASSET = /^\/assets\/project-icons\/[a-z0-9]+(?:-[a-z0-9]+)*\.svg$/;
+const PERSISTED_IMAGE_ICON = /^data:(image\/(?:png|svg\+xml|x-icon|vnd\.microsoft\.icon))(?:;charset=utf-8)?;base64,([A-Za-z0-9+/]+={0,2})$/i;
+const MAX_PROJECT_ICON_BYTES = 512 * 1024;
+
+function encodeSvgDataUrl(svg: string): string {
+  const bytes = new TextEncoder().encode(svg);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return `${ICONIFY_DATA_PREFIX}${btoa(binary)}`;
+}
+
+function decodeSvgDataUrl(value: string): string | null {
+  try {
+    if (value.startsWith(ICONIFY_DATA_PREFIX)) {
+      const binary = atob(value.slice(ICONIFY_DATA_PREFIX.length));
+      return new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)));
+    }
+    if (value.startsWith(ICONIFY_DATA_PREFIX_LEGACY)) {
+      return decodeURIComponent(value.slice(ICONIFY_DATA_PREFIX_LEGACY.length));
+    }
+    const match = value.match(/^data:image\/svg\+xml(?:;charset=utf-8)?,(.*)$/i);
+    if (match) return decodeURIComponent(match[1] ?? "");
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export function sanitizeProjectIconSvg(svg: string): string {
+  return svg
+    .replace(/^\uFEFF/, "")
+    .replace(/<\?xml[\s\S]*?\?>/gi, "")
+    .replace(/<!doctype[\s\S]*?>/gi, "")
+    .replace(/<(script|foreignObject|metadata)\b[^>]*>[\s\S]*?<\/\1>/gi, "")
+    .replace(/\s(?:xml)?ns(?::[\w-]+)?\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
+    .replace(/\s(?:xlink:)?href\s*=\s*(?:"(?!#)[^"]*"|'(?!#)[^']*')/gi, "")
+    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
+    .trim();
+}
+
+export function isSafePersistedProjectIcon(icon: string): boolean {
+  if (!icon) return true;
+  if (PROJECT_ICON_ASSET.test(icon)) return true;
+  if (!icon.startsWith("data:")) return icon.length <= 16;
+  const match = icon.match(PERSISTED_IMAGE_ICON);
+  if (!match) return false;
+  if (match[1] !== "image/svg+xml") return true;
+  try {
+    const binary = atob(match[2]!);
+    if (binary.length === 0 || binary.length > MAX_PROJECT_ICON_BYTES) return false;
+    const withoutNs = binary.replace(/\sxmlns(?::[\w-]+)?\s*=\s*["']https?:\/\/www\.w3\.org\/[^"']*["']/gi, "");
+    return /<svg[\s>]/i.test(binary)
+      && !/<\/?(?:script|foreignObject)\b/i.test(binary)
+      && !/\son\w+\s*=/i.test(binary)
+      && !/(?:javascript:|https?:|\bdata:)/i.test(withoutNs);
+  } catch {
+    return false;
+  }
+}
+
+export async function persistProjectIcon(
+  value: string,
+  color: string,
+  loadSvg: (name: string) => Promise<string>,
+): Promise<string> {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const remoteName = iconifyProjectIconName(trimmed)
+    ?? (isSupportedIconifyName(trimmed) ? trimmed : null)
+    ?? embeddedIconifyName(trimmed);
+  if (remoteName) {
+    try {
+      const stored = inlineIconifySvgDataUrl(remoteName, await loadSvg(remoteName), color);
+      if (stored && isSafePersistedProjectIcon(stored)) return stored;
+    } catch {
+      const svg = decodeSvgDataUrl(trimmed);
+      if (svg) {
+        const stored = inlineIconifySvgDataUrl(remoteName, svg, color);
+        if (stored && isSafePersistedProjectIcon(stored)) return stored;
+      }
+    }
+    throw new Error("Couldn’t prepare the selected project icon.");
+  }
+  const svg = decodeSvgDataUrl(trimmed);
+  if (svg) {
+    const ink = /^#[0-9a-f]{6}$/i.test(color) ? color.toLocaleLowerCase() : "#000000";
+    const stored = encodeSvgDataUrl(sanitizeProjectIconSvg(svg).replace(/currentColor/gi, ink));
+    if (!isSafePersistedProjectIcon(stored)) throw new Error("Couldn’t prepare the selected project icon.");
+    return stored;
+  }
+  if (isSafePersistedProjectIcon(trimmed)) return trimmed;
+  throw new Error("Couldn’t prepare the selected project icon.");
+}
 
 const LIBRARY_LABELS = new Map<string, string>(
   PROJECT_ICON_LIBRARIES.map(({ id, label }) => [id, label]),
@@ -243,18 +338,15 @@ export function iconifySvgUrl(name: string): string {
   const separator = name.indexOf(":");
   const prefix = name.slice(0, separator);
   const iconName = name.slice(separator + 1);
-  return `https://api.iconify.design/${encodeURIComponent(prefix)}/${encodeURIComponent(iconName)}.svg`;
+  return `/api/iconify/${encodeURIComponent(prefix)}/${encodeURIComponent(iconName)}.svg`;
 }
 
 export function embeddedIconifyName(value: string | undefined): string | null {
-  if (!value?.startsWith(ICONIFY_DATA_PREFIX)) return null;
-  try {
-    const svg = decodeURIComponent(value.slice(ICONIFY_DATA_PREFIX.length));
-    const match = svg.match(/<metadata\s+id=["']polyth-iconify["']>([^<]+)<\/metadata>/i);
-    return match?.[1] && isSupportedIconifyName(match[1]) ? match[1] : null;
-  } catch {
-    return null;
-  }
+  if (!value) return null;
+  const svg = decodeSvgDataUrl(value);
+  if (!svg) return null;
+  const match = svg.match(/<metadata\s+id=["']polyth-iconify["']>([^<]+)<\/metadata>/i);
+  return match?.[1] && isSupportedIconifyName(match[1]) ? match[1] : null;
 }
 
 export function storedProjectIconSelection(value: string | undefined): string {
@@ -265,25 +357,21 @@ export function storedProjectIconSelection(value: string | undefined): string {
 export function inlineIconifySvgDataUrl(name: string, svg: string, color: string): string {
   if (!isSupportedIconifyName(name)) return "";
   const ink = /^#[0-9a-f]{6}$/i.test(color) ? color.toLocaleLowerCase() : "#000000";
-  let clean = svg
-    .replace(/<\?xml[\s\S]*?\?>/gi, "")
-    .replace(/<!doctype[\s\S]*?>/gi, "")
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/<metadata\s+id=["']polyth-iconify["']>[\s\S]*?<\/metadata>/gi, "")
-    .trim();
-  if (!/^<svg\b/i.test(clean)) return "";
-  clean = clean.replace(/currentColor/gi, ink);
+  let clean = sanitizeProjectIconSvg(svg).replace(/currentColor/gi, ink);
+  if (!/^<svg[\s>]/i.test(clean)) return "";
   const openingEnd = clean.indexOf(">");
   if (openingEnd < 0) return "";
   const metadata = `<metadata id="${ICONIFY_METADATA_ID}">${name}</metadata>`;
   clean = `${clean.slice(0, openingEnd + 1)}${metadata}${clean.slice(openingEnd + 1)}`;
-  return `${ICONIFY_DATA_PREFIX}${encodeURIComponent(clean)}`;
+  const stored = encodeSvgDataUrl(clean);
+  return isSafePersistedProjectIcon(stored) ? stored : "";
 }
 
 export function projectIconMaskUrl(value: string): string {
-  const remoteName = iconifyProjectIconName(value) ?? embeddedIconifyName(value);
+  if (value.startsWith("/assets/project-icons/")) return value;
+  const remoteName = embeddedIconifyName(value);
   if (remoteName) return iconifySvgUrl(remoteName);
-  return value.startsWith("/assets/project-icons/") ? value : "";
+  return "";
 }
 
 export function iconifySearchUrl(query: string, library: ProjectIconLibrary | "all" = "all", limit = 64): string {
@@ -293,7 +381,7 @@ export function iconifySearchUrl(query: string, library: ProjectIconLibrary | "a
   });
   if (library === "all") params.set("prefixes", PROJECT_ICON_PREFIXES);
   else params.set("prefix", library);
-  return `https://api.iconify.design/search?${params.toString()}`;
+  return `/api/iconify/search?${params.toString()}`;
 }
 
 export function filterSupportedIconifyNames(names: readonly unknown[]): string[] {

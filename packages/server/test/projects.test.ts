@@ -56,7 +56,9 @@ test("project appearance accepts safe uploaded PNG and standard SVG icons", asyn
   assert.equal(png.icon, pngDataUrl);
 
   const svg = svgDataUrl('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4"/></svg>');
-  assert.equal((await projects.update!(project.id, { icon: svg })).icon, svg);
+  const storedSvg = (await projects.update!(project.id, { icon: svg })).icon ?? "";
+  assert.match(storedSvg, /^data:image\/svg\+xml;base64,/);
+  assert.match(Buffer.from(storedSvg.split(",", 2)[1] ?? "", "base64").toString("utf8"), /<circle cx="5"/);
   assert.equal(
     (await projects.update!(project.id, { icon: "/assets/project-icons/folder.svg" })).icon,
     "/assets/project-icons/folder.svg",
@@ -71,6 +73,59 @@ test("project appearance rejects unsafe SVG icons", async () => {
   const project = await projects.add(root);
   const unsafe = svgDataUrl("<svg><script>alert(1)</script></svg>");
   await assert.rejects(() => projects.update!(project.id, { icon: unsafe }), /safe SVG/);
+});
+
+test("project appearance accepts sanitised Iconify SVG data urls", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-projects-"));
+  const root = join(dir, "workspace");
+  mkdirSync(root);
+  const projects = createProjectService(dir);
+  const project = await projects.add(root);
+  const icon = svgDataUrl('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><metadata id="polyth-iconify">ph:folder</metadata><path fill="#b4532a" d="M0 0h1v1H0z"/></svg>');
+  const stored = (await projects.update!(project.id, { icon })).icon ?? "";
+  assert.match(stored, /^data:image\/svg\+xml;base64,/);
+  const decoded = Buffer.from(stored.split(",", 2)[1] ?? "", "base64").toString("utf8");
+  assert.match(decoded, /polyth-iconify/);
+  assert.match(decoded, /ph:folder/);
+  assert.doesNotMatch(decoded, /xmlns=/);
+});
+
+test("project appearance PATCH materializes picker Iconify handles into safe SVG data", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-projects-"));
+  const root = join(dir, "workspace");
+  mkdirSync(root);
+  const projects = createProjectService(dir);
+  const tenancy = await testTenancy({ dataDir: dir, projects });
+  const project = await projects.forSpace(tenancy.defaultContext).add(root, "Before");
+  const fetchImpl = async (input: string | URL | Request) => {
+    assert.match(String(input), /https:\/\/api\.iconify\.design\/ph\/folder\.svg/);
+    return new Response('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M0 0h1v1H0z"/></svg>', { status: 200 });
+  };
+  const server = createHttpServer({
+    sessions: {} as never,
+    spaces: tenancy.gateway,
+    runtimes: {} as never,
+    capabilities: () => [],
+    webDist: dir,
+    version: "test",
+    routes: [projectRoutes(tenancy.services, fetchImpl)],
+  });
+  server.listen(0);
+  await once(server, "listening");
+  const port = (server.address() as { port: number }).port;
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/projects/${project.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ icon: "iconify:ph:folder", color: "#b4532a" }),
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json() as { icon?: string };
+    assert.match(body.icon ?? "", /^data:image\/svg\+xml;base64,/);
+    assert.doesNotMatch(body.icon ?? "", /iconify:ph:folder/);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });
 
 test("project metadata PATCH is served by the project route", async () => {

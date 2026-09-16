@@ -46,10 +46,44 @@ export interface ProjectRegistry extends ProjectService {
 }
 
 const MAX_PROJECT_ICON_BYTES = 512 * 1024;
-const IMAGE_ICON = /^data:(image\/(?:png|svg\+xml|x-icon|vnd\.microsoft\.icon));base64,([A-Za-z0-9+/]+={0,2})$/;
+const IMAGE_ICON = /^data:(image\/(?:png|svg\+xml|x-icon|vnd\.microsoft\.icon))(?:;charset=utf-8)?;base64,([A-Za-z0-9+/]+={0,2})$/i;
 const PROJECT_ICON_PATH = /^\/assets\/project-icons\/[a-z0-9]+(?:-[a-z0-9]+)*\.svg$/;
 const HARNESS_ID = /^[a-z][a-z0-9-]*$/;
 const PACKAGE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+function sanitizeProjectIconSvg(svg: string): string {
+  return svg
+    .replace(/^\uFEFF/, "")
+    .replace(/<\?xml[\s\S]*?\?>/gi, "")
+    .replace(/<!doctype[\s\S]*?>/gi, "")
+    .replace(/<(script|foreignObject)\b[^>]*>[\s\S]*?<\/\1>/gi, "")
+    .replace(/\s(?:xml)?ns(?::[\w-]+)?\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
+    .replace(/\s(?:xlink:)?href\s*=\s*(?:"(?!#)[^"]*"|'(?!#)[^']*')/gi, "")
+    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
+    .trim();
+}
+
+function decodeIncomingSvgDataUrl(icon: string): string | null {
+  const base64 = icon.match(/^data:image\/svg\+xml(?:;charset=utf-8)?;base64,([A-Za-z0-9+/]+={0,2})$/i);
+  if (base64) {
+    const bytes = Buffer.from(base64[1]!, "base64");
+    return bytes.length ? bytes.toString("utf8") : null;
+  }
+  const encoded = icon.match(/^data:image\/svg\+xml(?:;charset=utf-8)?,(.+)$/i);
+  if (encoded) {
+    try { return decodeURIComponent(encoded[1]!); } catch { return null; }
+  }
+  return null;
+}
+
+function normalizeIncomingProjectIcon(icon: string): string {
+  const svg = decodeIncomingSvgDataUrl(icon);
+  if (!svg) return icon;
+  if (/<\/?(?:script|foreignObject)\b/i.test(svg) || /\son\w+\s*=/i.test(svg) || /javascript:/i.test(svg)) return icon;
+  const clean = sanitizeProjectIconSvg(svg);
+  if (!/<svg[\s>]/i.test(clean)) return icon;
+  return `data:image/svg+xml;base64,${Buffer.from(clean).toString("base64")}`;
+}
 
 function validProjectIcon(icon: string): boolean {
   if (PROJECT_ICON_PATH.test(icon)) return true;
@@ -58,15 +92,12 @@ function validProjectIcon(icon: string): boolean {
   if (!match) return false;
   const bytes = Buffer.from(match[2]!, "base64");
   if (bytes.length === 0 || bytes.length > MAX_PROJECT_ICON_BYTES) return false;
-  const mime = match[1]!;
+  const mime = match[1]!.toLowerCase();
   if (mime === "image/png") return bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
   if (mime === "image/x-icon" || mime === "image/vnd.microsoft.icon") {
     return bytes.length >= 4 && bytes[0] === 0 && bytes[1] === 0 && bytes[2] === 1 && bytes[3] === 0;
   }
   const svg = bytes.toString("utf8");
-  // SVG namespace declarations commonly contain the W3C URL; they are not
-  // resource fetches and remain safe to accept. All other remote/data URLs
-  // are refused so an uploaded icon cannot pull in active external content.
   const svgWithoutNamespaces = svg.replace(/\sxmlns(?::[\w-]+)?\s*=\s*["']https?:\/\/www\.w3\.org\/[^"']*["']/gi, "");
   return /<svg[\s>]/i.test(svg)
     && !/<\/?(?:script|foreignObject)\b/i.test(svg)
@@ -243,11 +274,12 @@ export function createProjectService(
         }
         if (patch.icon !== undefined) {
           if (typeof patch.icon !== "string") throw Object.assign(new Error("icon must be text"), { code: "invalid-input" });
-          if (!validProjectIcon(patch.icon)) {
+          const icon = normalizeIncomingProjectIcon(patch.icon);
+          if (!validProjectIcon(icon)) {
             throw Object.assign(new Error("icon must be a short glyph or a safe SVG, ICO, or PNG under 512 KiB"), { code: "invalid-input" });
           }
-          if (patch.icon === "") delete project.icon;
-          else project.icon = patch.icon;
+          if (icon === "") delete project.icon;
+          else project.icon = icon;
         }
         if (patch.defaults !== undefined) {
           if (!patch.defaults || typeof patch.defaults !== "object" || Array.isArray(patch.defaults)) {

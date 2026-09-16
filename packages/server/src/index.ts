@@ -88,6 +88,7 @@ import { sessionRetentionRoutes } from "./routes/sessionRetention.ts";
 import { settingsRoutes } from "./routes/settings.ts";
 import { opencodePendingRoutes } from "./routes/opencodePending.ts";
 import { browseRoutes } from "./routes/browse.ts";
+import { iconifyRoutes } from "./routes/iconify.ts";
 import { createAuthService, publicHttpIngress } from "./auth.ts";
 import { createServerApplicationSurface } from "./applicationSurface.ts";
 import { authRoutes } from "./routes/auth.ts";
@@ -2561,6 +2562,7 @@ export async function boot(opts: BootOptions = {}) {
     nativePushRoutes(nativePush),
     notificationRoutes(notifications),
     browseRoutes(),
+    iconifyRoutes(),
     async (request) => {
       if (request.path.startsWith("/api/mcp/") || request.path.startsWith("/api/plugins")) return false;
       return settingsRoute(request);
