@@ -11,7 +11,7 @@ export type { IdentityUser, IdentitySession, SessionSummary, SetupStatus } from 
 export type { CompleteSetup } from './setup.ts';
 export type { PasswordService } from './passwords.ts';
 export type { WebAuthnConfig, PasskeySummary } from './passkeys.ts';
-export { canonicalHttpsIssuer, createProviderFramework } from './providers/index.ts';
+export { canonicalHttpsIssuer, createProviderFramework, githubDeviceFlowConfigured, githubIdentityAdapter } from './providers/index.ts';
 export type {
   IdentityProviderAdapter,
   NormalizedExternalIdentity,
