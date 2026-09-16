@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
-import { api } from "@polyth/session/web-api";
 import { authBootstrapPhase } from "./authBootstrap.ts";
+import { fetchAuthStatus } from "./authClient.ts";
 import { Button } from "./components/ui/index.ts";
 import { tr } from "./i18n/index.ts";
 import { consumeAuthPrefetch } from "./authPrefetch.ts";
@@ -37,6 +37,7 @@ import { bootPackages } from "./packages/registry.ts";
 import { getLocaleSnapshot, subscribeLocale } from "./i18n/index.ts";
 import App from "./App.tsx";
 import LockScreen from "./components/LockScreen.tsx";
+import SetupScreen from "./components/SetupScreen.tsx";
 import { dismissTopEscapeLayer } from "./useEscape.ts";
 import { isWorkspaceSurface, listSurfaces } from "./surfaces.ts";
 import { installNativeMobileIntegration } from "@polyth/mobile/native";
@@ -47,28 +48,18 @@ import { openPendingNativePushAfterHydration, reconcileNativePushForeground } fr
 applySettingsToDom(getState().settings);
 applyUiSettings();
 applyBackgroundToDom();
-// UX-MOBILE-01: publish visual-viewport geometry before first paint so the
-// sticky interaction zone is never laid out against a stale 100vh.
 startMobileViewport();
 exposeSlots();
 exposeSurfaces();
 exposeCapabilities();
 exposeWidgets();
 exposeAreas();
-// Widget-areas (WA1): register the built-in placement areas before any widget
-// plugin boots, so `canPlaceWidget` fit hints and the Widget Library see the
-// full area catalogue from the first render.
 installBuiltinAreas();
 installBuiltinMiniWidgets();
 installSystemWidgets();
-// Every rail capability is also a placeable mini-widget; subscribes to the
-// capability registry so packages that register late still get a widget.
 installCapabilityWidgets();
-// NTF-01: bell + panel arrive through the slot registry, never via App.tsx.
 installNotificationCentre();
 installRuntimeEpochBanner();
-// No-op in browsers; Electron's preload exposes the bridge that enables the
-// desktop settings page and custom titlebar controls through existing slots.
 installDesktopIntegration();
 installNativeMobileIntegration({
   handleBack: () => {
@@ -101,14 +92,12 @@ installNativeMobileIntegration({
   },
   setKeyboardInset: setNativeKeyboardInset,
 });
-// Palette commands + keyboard shortcuts: one install, synced with the
-// capability registry from then on (UX-PERSONAS: search sees every tool).
 installShell();
 installNativeConnectionCommands();
 installCommandSlotBridge();
 
-// F16: init() loads REST data and opens /ws — it must not run until the
-// server explicitly authorizes this device. A missing password is not permission.
+// No package, private REST preload or WebSocket is admitted until the server
+// proves both canonical identity and a fully started application runtime.
 let booted = false;
 const bootOnce = (): void => {
   if (booted) return;
@@ -118,21 +107,19 @@ const bootOnce = (): void => {
   void init().then(openPendingNativePushAfterHydration).catch(() => undefined);
 };
 
+type BootstrapPhase = "checking" | "setup" | "locked" | "ready" | "unavailable";
+
 function Root() {
-  const [phase, setPhase] = useState<"checking" | "locked" | "ready" | "unavailable">("checking");
+  const [phase, setPhase] = useState<BootstrapPhase>("checking");
   const locale = useSyncExternalStore(subscribeLocale, getLocaleSnapshot, getLocaleSnapshot);
 
   useEffect(() => {
     let cancelled = false;
     let invalidated = false;
-    // main.tsx started this fetch before the app graph downloaded; falling
-    // back to a fresh call covers re-mounts (locale switches remount Root).
-    void (consumeAuthPrefetch() ?? api.authStatus())
-      .then(async (s) => {
-        // Account restoration above must finish before the trusted native
-        // connection namespace selects its app-owned persistence backend.
+    void (consumeAuthPrefetch() ?? fetchAuthStatus())
+      .then(async (status) => {
         if (cancelled || invalidated) return;
-        const nextPhase = authBootstrapPhase(s);
+        const nextPhase = authBootstrapPhase(status);
         if (nextPhase === "ready") {
           await initializeClientReliabilityContext();
           if (cancelled || invalidated) return;
@@ -140,9 +127,7 @@ function Root() {
         }
         if (!cancelled && !invalidated) setPhase(nextPhase);
       })
-      // No verified authority means no package activation, private UI or WS boot.
       .catch(() => { if (!cancelled && !invalidated) setPhase("unavailable"); });
-    // Mid-session 401 (session revoked / password newly set) re-locks the UI.
     const onAuthRequired = () => { invalidated = true; setPhase("locked"); };
     window.addEventListener("polyth:auth-required", onAuthRequired);
     return () => {
@@ -171,9 +156,8 @@ function Root() {
       </div>
     </div>
   );
+  if (phase === "setup") return <SetupScreen key={locale} />;
   if (phase === "locked") {
-    // After a mid-session revoke the store/WS state is stale — reload for a
-    // clean slate. Initial login also revalidates the cookie and account namespace.
     return <LockScreen key={locale} onUnlocked={() => location.reload()} />;
   }
   return <App key={locale} />;
