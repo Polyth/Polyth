@@ -43,11 +43,14 @@ export interface IdentityResolver {
 
 export function createIdentityResolver(opts: {
   ownerUserId: string;
+  /** Compatibility only. Canonical identity must carry an explicit userId. */
+  ambientOwner?: boolean;
   /** Trusted deployments let the local control socket act as the operator.
    *  Hosted deployments never grant ambient tenancy to a service. */
   deployment: DeploymentProfile;
 }): IdentityResolver {
   const { ownerUserId } = opts;
+  const ambientOwner = opts.ambientOwner ?? true;
   const identifiedUser = (principal: AuthPrincipal): string | undefined => {
     const userId = (principal as IdentifiedPrincipal).userId;
     return typeof userId === "string" && userId ? userId : undefined;
@@ -57,21 +60,30 @@ export function createIdentityResolver(opts: {
       switch (principal.kind) {
         case "anonymous":
           return null;
-        case "local-user":
+        case "local-user": {
+          const userId = identifiedUser(principal) ?? (ambientOwner ? ownerUserId : undefined);
+          if (!userId) return null;
           return {
-            userId: identifiedUser(principal) ?? ownerUserId,
+            userId,
             deviceKey: `local:${principal.sessionId ?? "loopback"}`,
           };
-        case "ui-session":
+        }
+        case "ui-session": {
+          const userId = identifiedUser(principal) ?? (ambientOwner ? ownerUserId : undefined);
+          if (!userId) return null;
           return {
-            userId: identifiedUser(principal) ?? ownerUserId,
+            userId,
             deviceKey: `ui:${principal.rememberedDeviceId}`,
           };
-        case "paired-device":
+        }
+        case "paired-device": {
+          const userId = identifiedUser(principal) ?? (ambientOwner ? ownerUserId : undefined);
+          if (!userId) return null;
           return {
-            userId: identifiedUser(principal) ?? ownerUserId,
+            userId,
             deviceKey: `device:${principal.deviceId}`,
           };
+        }
         case "internal-service":
           // The local control socket (Polyth's own MCP) is filesystem-protected
           // and speaks for the operator, so in a trusted deployment it resolves
@@ -80,7 +92,7 @@ export function createIdentityResolver(opts: {
           // In a hosted deployment there IS no ambient operator: a service must
           // be handed an explicit context by whatever invoked it, so it gets
           // none here.
-          if (opts.deployment === "local-trusted") {
+          if (ambientOwner && opts.deployment === "local-trusted") {
             return { userId: ownerUserId, deviceKey: `service:${principal.serviceId}` };
           }
           return null;
@@ -120,11 +132,14 @@ const accountName = (userId: string): string => {
 
 export function createSpaceResolver(opts: {
   store: TenancyStore;
+  /** Legacy-only lazy provisioning. Canonical control-plane mode is fail-closed. */
+  provisionMissing?: boolean;
   identities: IdentityResolver;
   dataDir: string;
   deployment: DeploymentProfile;
 }): SpaceResolver {
   const { store, identities, dataDir, deployment } = opts;
+  const provisionMissing = opts.provisionMissing ?? true;
 
   const contextFor = (userId: string, space: SpaceDto, role: SpaceContext["role"]): SpaceContext => ({
     spaceId: space.id,
@@ -141,6 +156,10 @@ export function createSpaceResolver(opts: {
   };
 
   const ensureUser = (identity: Identity): void => {
+    if (!provisionMissing) {
+      if (!store.user(identity.userId)) throw error("unauthorized", "account is not active");
+      return;
+    }
     if (!store.user(identity.userId)) {
       store.createUser(accountName(identity.userId), identity.userId);
     }
