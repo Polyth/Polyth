@@ -83,7 +83,7 @@ type ProviderRow = {
 };
 type TransactionRow = {
   id: string; provider_config_id: string; purpose: ProviderPurpose; browser_binding_hash: string;
-  secret_ref: string; return_to: string; expires_at_ms: number; exchange_started_at_ms: number | null; consumed_at_ms: number | null;
+  secret_ref: string; return_to: string; expires_at_ms: number; actor_user_id: string | null; actor_session_id: string | null; exchange_started_at_ms: number | null; consumed_at_ms: number | null;
   cancelled_at_ms: number | null; result_json: string | null;
 };
 
@@ -118,7 +118,7 @@ export function createProviderFramework(control: ControlPlane, opts: {
     return { provider, adapter };
   };
   const transaction = (state: string): TransactionRow | undefined => control.get<TransactionRow>(
-    `SELECT id,provider_config_id,purpose,browser_binding_hash,secret_ref,return_to,expires_at_ms,exchange_started_at_ms,consumed_at_ms,cancelled_at_ms,result_json
+    `SELECT id,provider_config_id,purpose,browser_binding_hash,secret_ref,return_to,expires_at_ms,actor_user_id,actor_session_id,exchange_started_at_ms,consumed_at_ms,cancelled_at_ms,result_json
        FROM provider_transactions WHERE state_hash=?`, tokenHash('browser', `provider-state:${state}`),
   );
   const browserHash = (binding: string): string => tokenHash('browser', `provider-browser:${binding}`);
@@ -185,11 +185,17 @@ export function createProviderFramework(control: ControlPlane, opts: {
         return config(row(provider.id)!);
       });
     },
-    async begin(input: { providerId: string; purpose: ProviderPurpose; browserBinding: string; callbackUrl: string; returnTo: string }): Promise<ProviderTransactionStart> {
+    async begin(input: { providerId: string; purpose: ProviderPurpose; browserBinding: string; callbackUrl: string; returnTo: string; actorUserId?: string; actorSessionId?: string }): Promise<ProviderTransactionStart> {
       const { provider, adapter } = enabled(input.providerId), flowPurpose = purpose(input.purpose);
       if (!adapter.capabilities.web) throw controlError('unavailable', 'Provider does not support browser login');
       if (typeof input.browserBinding !== 'string' || input.browserBinding.length < 32 || input.browserBinding.length > 512) throw controlError('invalid-input', 'Invalid browser binding');
       const callbackUrl = callback(input.callbackUrl), returnTo = returnPath(input.returnTo);
+      if (flowPurpose === 'link') {
+        if (!input.actorUserId || !input.actorSessionId || !control.get(
+          'SELECT 1 FROM auth_sessions s JOIN principals p ON p.id=s.user_id WHERE s.id=? AND s.user_id=? AND p.status=\'active\' AND p.kind=\'user\' AND s.auth_epoch=p.auth_epoch',
+          input.actorSessionId, input.actorUserId,
+        )) throw controlError('unauthorized', 'Linking requires the current authenticated account');
+      } else if (input.actorUserId !== undefined || input.actorSessionId !== undefined) throw controlError('invalid-input', 'Actor binding is valid only for account linking');
       const state = newToken(), nonce = newToken(), verifier = newToken();
       const started = await adapter.begin({
         providerId: provider.id, issuer: provider.issuer, purpose: flowPurpose,
@@ -203,8 +209,8 @@ export function createProviderFramework(control: ControlPlane, opts: {
       const id = `ptx_${randomUUID()}`, createdAt = now(), expiresAt = createdAt + ttl;
       try {
         control.transaction(() => {
-          control.run(`INSERT INTO provider_transactions(id,provider_config_id,purpose,state_hash,browser_binding_hash,secret_ref,return_to,created_at_ms,expires_at_ms)
-            VALUES(?,?,?,?,?,?,?,?,?)`, id, provider.id, flowPurpose, tokenHash('browser', `provider-state:${state}`), browserHash(input.browserBinding), secretRef, returnTo, createdAt, expiresAt);
+          control.run(`INSERT INTO provider_transactions(id,provider_config_id,purpose,state_hash,browser_binding_hash,secret_ref,return_to,created_at_ms,expires_at_ms,actor_user_id,actor_session_id)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id, provider.id, flowPurpose, tokenHash('browser', `provider-state:${state}`), browserHash(input.browserBinding), secretRef, returnTo, createdAt, expiresAt, input.actorUserId ?? null, input.actorSessionId ?? null);
           control.audit('system:identity', 'identity.provider-flow-began', id);
         });
       } catch (cause) {
@@ -213,7 +219,7 @@ export function createProviderFramework(control: ControlPlane, opts: {
       }
       return { id, providerId: provider.id, purpose: flowPurpose, state, authorizationUrl: authUrl.href, expiresAt, returnTo };
     },
-    async complete(input: { providerId: string; purpose: ProviderPurpose; state: string; browserBinding: string; code: string }) {
+    async complete(input: { providerId: string; purpose: ProviderPurpose; state: string; browserBinding: string; code: string; actorUserId?: string; actorSessionId?: string }, commit?: (identity: NormalizedExternalIdentity) => void) {
       const providerId = cleanId(input.providerId), flowPurpose = purpose(input.purpose);
       if (typeof input.state !== 'string' || !/^[a-f0-9]{64}$/.test(input.state)
         || typeof input.browserBinding !== 'string' || typeof input.code !== 'string' || !input.code || input.code.length > 8192) {
@@ -222,6 +228,8 @@ export function createProviderFramework(control: ControlPlane, opts: {
       const tx = transaction(input.state);
       if (!tx || tx.provider_config_id !== providerId || tx.purpose !== flowPurpose
         || tx.browser_binding_hash !== browserHash(input.browserBinding)) throw controlError('invalid-provider-transaction', 'Identity transaction does not match');
+      if (flowPurpose === 'link' && (tx.actor_user_id !== input.actorUserId || tx.actor_session_id !== input.actorSessionId))
+        throw controlError('invalid-provider-transaction', 'Link transaction belongs to another account session');
       if (tx.cancelled_at_ms !== null) throw controlError('cancelled', 'Identity transaction was cancelled');
       if (tx.consumed_at_ms !== null) throw controlError('replayed', 'Identity transaction was already consumed');
       if (tx.expires_at_ms <= now()) throw controlError('expired', 'Identity transaction expired');
@@ -254,6 +262,7 @@ export function createProviderFramework(control: ControlPlane, opts: {
         if (!latest || latest.id !== tx.id || latest.exchange_started_at_ms === null || latest.consumed_at_ms !== null || latest.cancelled_at_ms !== null || latest.expires_at_ms <= now()) {
           throw controlError('replayed', 'Identity transaction is no longer active');
         }
+        commit?.(identity);
         control.run('UPDATE provider_transactions SET consumed_at_ms=?,result_json=?,revision=revision+1 WHERE id=? AND consumed_at_ms IS NULL AND cancelled_at_ms IS NULL', now(), encoded, tx.id);
         control.audit('system:identity', 'identity.provider-flow-completed', tx.id);
       });
