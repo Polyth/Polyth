@@ -1,6 +1,7 @@
 import "./styles.css";
 import "./mobile.css";
 import "./source-control-polish.css";
+import "./hunk-actions.css";
 import { createElement } from "react";
 import { resolveSourceControlContext } from "@polyth/contracts/source-control";
 import { defineWebPackage } from "@polyth/web-sdk";
