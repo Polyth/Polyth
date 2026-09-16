@@ -1,25 +1,24 @@
 name: Apply platform hardening
 
 on:
-  pull_request:
-    branches: [master]
-    types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - feat/content-trust-hunk-observations-prompt-diagnostics-20260916
 
 permissions:
   contents: write
 
 concurrency:
-  group: platform-hardening-${{ github.event.pull_request.number }}
+  group: platform-hardening-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   apply-p0:
-    if: github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'feat/content-trust-hunk-observations-prompt-diagnostics-')
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
 
       - uses: actions/setup-node@v4
@@ -61,4 +60,4 @@ jobs:
           git add -A
           git diff --cached --check
           git commit -m "Bind repository loop trust to exact content"
-          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+          git push origin "HEAD:${{ github.ref_name }}"
