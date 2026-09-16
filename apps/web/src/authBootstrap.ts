@@ -29,9 +29,10 @@ export function validateAuthStatus(value: unknown): BrowserAuthStatus {
   return status;
 }
 
-export function authBootstrapPhase(status: unknown): 'setup' | 'locked' | 'ready' | 'unavailable' {
+export function authBootstrapPhase(status: unknown): 'setup' | 'restart' | 'locked' | 'ready' | 'unavailable' {
   const value = validateAuthStatus(status);
   if (value.state === 'recovery') return 'unavailable';
+  if (value.bootstrapMode === 'setup' && value.state === 'ready') return 'restart';
   if (value.bootstrapMode === 'setup' || (value.state && value.state !== 'ready')) return 'setup';
   return value.authorized ? 'ready' : 'locked';
 }
