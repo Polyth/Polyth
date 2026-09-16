@@ -65,11 +65,11 @@ test('browser transaction hashes capabilities at rest and completes exactly once
 });
 test('purpose/browser/provider mixups are rejected before token exchange',async t=>{
   const f=fixture(t); await configured(f); await configured(f,'other');
-  const tx=await f.framework.begin({providerId:'work',purpose:'link',browserBinding:'b'.repeat(64),callbackUrl:'https://polyth.example/auth/callback',returnTo:'/settings'});
+  const tx=await f.framework.begin({providerId:'work',purpose:'login',browserBinding:'b'.repeat(64),callbackUrl:'https://polyth.example/auth/callback',returnTo:'/settings'});
   for(const input of [
-    {providerId:'work',purpose:'login' as const,browserBinding:'b'.repeat(64)},
-    {providerId:'work',purpose:'link' as const,browserBinding:'c'.repeat(64)},
-    {providerId:'other',purpose:'link' as const,browserBinding:'b'.repeat(64)},
+    {providerId:'work',purpose:'setup' as const,browserBinding:'b'.repeat(64)},
+    {providerId:'work',purpose:'login' as const,browserBinding:'c'.repeat(64)},
+    {providerId:'other',purpose:'login' as const,browserBinding:'b'.repeat(64)},
   ]) await assert.rejects(f.framework.complete({...input,state:tx.state,code:'sub'}));
   assert.equal(f.exchanges(),0);
 });
@@ -97,6 +97,7 @@ test('link uniqueness prevents takeover and never grants organization membership
   assert.throws(()=>f.framework.link('usr_b','work',identity),e=>(e as {code?:string}).code==='conflict');
   assert.equal(f.control.get('SELECT 1 FROM organization_memberships WHERE user_id=?','usr_a'),undefined);
 });
+
 test('an uncertain started exchange is fenced and never replayed',async t=>{
   const f=fixture(t); await configured(f);
   const tx=await f.framework.begin({providerId:'work',purpose:'login',browserBinding:'b'.repeat(64),callbackUrl:'https://polyth.example/cb',returnTo:'/'});
@@ -105,9 +106,11 @@ test('an uncertain started exchange is fenced and never replayed',async t=>{
   assert.equal(f.exchanges(),0);
   assert.equal(await f.framework.cancel({state:tx.state,browserBinding:'b'.repeat(64)}),false);
 });
+
 test('same subject at a distinct canonical issuer is a distinct identity',async t=>{
   const f=fixture(t); await configured(f,'one');
   let two=await f.framework.configure({id:'two',kind:'fake',issuer:'https://other.example'});
+  // fake adapter normalizer is generic; enabling a different issuer is enough to prove DB key partitioning.
   two=f.framework.setEnabled('two',two.revision,true);
   f.framework.link('usr_a','one',{issuer:'https://issuer.example',subject:'42'});
   f.framework.link('usr_b','two',{issuer:'https://other.example',subject:'42'});
