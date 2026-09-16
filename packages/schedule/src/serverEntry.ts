@@ -115,7 +115,7 @@ export function scheduleRoutes(deps: {
       const input = await body();
       const projectId = String(input.projectId ?? "");
       const project = await deps.projects.get(projectId);
-      if (!project) {
+      if (!project || (project.spaceId !== undefined && project.spaceId !== rc.space.spaceId)) {
         json(404, { error: "not-found", message: "project not found" });
         return true;
       }
@@ -146,7 +146,7 @@ export function scheduleRoutes(deps: {
         return true;
       }
       const project = await deps.projects.get(task.projectId);
-      if (!project) {
+      if (!project || (project.spaceId !== undefined && project.spaceId !== rc.space.spaceId)) {
         json(404, { error: "not-found", message: "project not found" });
         return true;
       }
@@ -233,7 +233,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
             .find((file) => file.path === task.sourcePath && file.loop?.id === task.loopId);
           // This immediate re-read closes the scanner interval window for any
           // external/manual/agent/Git mutation of repository-controlled input.
-          assertLoopExecutionTrusted(task, current, project.spaceId);
+          const owningSpaceId = project.spaceId ?? task.trustReceipt?.spaceId ?? "";
+          assertLoopExecutionTrusted(task, current, owningSpaceId);
         }
         const mode = task.target?.mode ?? (task.sessionId ? "existing-session" : "new-session-per-run");
         let sessionId: string | undefined;
