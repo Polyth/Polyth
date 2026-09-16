@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { WorkbenchProfileDefinition } from "@polyth/web-sdk";
-import { selectInitialWorkbenchProfile } from "../src/projectCompositionSeed.ts";
+import { selectInitialWorkbenchProfile } from "../src/projectCompositionPlan.ts";
 
 const profile = (id: string, order: number, directions: string[], recommended = true): WorkbenchProfileDefinition => ({
   id, label: id, description: id, order, ownerPackageId: id,
@@ -18,6 +18,17 @@ test("initial profile is metadata-driven and prefers the strongest direction ove
   assert.equal(selectInitialWorkbenchProfile(
     { version: 1, directions: ["finance", "research"], packageOverrides: {} }, profiles,
   ), "finance-research");
+});
+
+test("ties are deterministic by profile order then id", () => {
+  const profiles = [
+    profile("z-last", 8, ["engineering"]),
+    profile("b-first", 4, ["engineering"]),
+    profile("a-first", 4, ["engineering"]),
+  ];
+  assert.equal(selectInitialWorkbenchProfile(
+    { version: 1, directions: ["engineering"], packageOverrides: {} }, profiles,
+  ), "a-first");
 });
 
 test("general projects and non-recommended profiles do not force a workbench", () => {
