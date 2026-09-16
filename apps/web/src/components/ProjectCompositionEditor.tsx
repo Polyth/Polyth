@@ -8,16 +8,17 @@ import {
   type ProjectDirection,
 } from "@polyth/contracts/project-composition";
 import { api } from "@polyth/session/web-api";
+import { tr, type TranslationKey } from "../i18n/index.ts";
 import { Button } from "./ui/index.ts";
 import "./ProjectCompositionEditor.css";
 
-const DIRECTION_COPY: Record<ProjectDirection, { label: string; description: string }> = {
-  engineering: { label: "Engineering", description: "Code, infrastructure, source control and terminals." },
-  research: { label: "Research", description: "Knowledge, browsing, notes and structured exploration." },
-  wellbeing: { label: "Wellbeing", description: "Goals, routines, reflection and personal coaching." },
-  finance: { label: "Finance", description: "Markets, portfolios and financial research." },
-  home: { label: "Home", description: "Home systems, devices and automations." },
-  operations: { label: "Operations", description: "Schedules, workflows, monitoring and recurring work." },
+const DIRECTION_COPY: Record<ProjectDirection, { label: TranslationKey; description: TranslationKey }> = {
+  engineering: { label: "projectcomposition.direction.engineering", description: "projectcomposition.direction.engineeringDescription" },
+  research: { label: "projectcomposition.direction.research", description: "projectcomposition.direction.researchDescription" },
+  wellbeing: { label: "projectcomposition.direction.wellbeing", description: "projectcomposition.direction.wellbeingDescription" },
+  finance: { label: "projectcomposition.direction.finance", description: "projectcomposition.direction.financeDescription" },
+  home: { label: "projectcomposition.direction.home", description: "projectcomposition.direction.homeDescription" },
+  operations: { label: "projectcomposition.direction.operations", description: "projectcomposition.direction.operationsDescription" },
 };
 
 export const emptyProjectComposition = (): ProjectComposition => ({
@@ -93,19 +94,19 @@ export default function ProjectCompositionEditor({
       <section className="project-composition-section" aria-labelledby="project-composition-purpose">
         <div className="project-composition-section-head">
           <div>
-            <h3 id="project-composition-purpose">What are you working on?</h3>
-            <p>Choose one or more. This changes what Polyth surfaces first; it never changes permissions.</p>
+            <h3 id="project-composition-purpose">{tr("projectcomposition.whatAreYouWorkingOn")}</h3>
+            <p>{tr("projectcomposition.purposeHint")}</p>
           </div>
         </div>
         <div className="project-direction-grid">
           <button type="button" className={`project-direction-card${value.directions.length === 0 ? " is-selected" : ""}`} aria-pressed={value.directions.length === 0} onClick={setGeneral}>
-            <strong>General</strong><span>Keep every globally enabled tool available.</span>
+            <strong>{tr("projectcomposition.general")}</strong><span>{tr("projectcomposition.generalDescription")}</span>
           </button>
           {PROJECT_DIRECTIONS.map((direction) => {
             const copy = DIRECTION_COPY[direction];
             const selected = value.directions.includes(direction);
             return <button key={direction} type="button" className={`project-direction-card${selected ? " is-selected" : ""}`} aria-pressed={selected} onClick={() => toggleDirection(direction)}>
-              <strong>{copy.label}</strong><span>{copy.description}</span>
+              <strong>{tr(copy.label)}</strong><span>{tr(copy.description)}</span>
             </button>;
           })}
         </div>
@@ -114,23 +115,23 @@ export default function ProjectCompositionEditor({
       <section className="project-composition-section project-composition-review" aria-labelledby="project-composition-review">
         <div className="project-composition-section-head">
           <div>
-            <h3 id="project-composition-review">Workspace</h3>
-            <p>{loading ? "Reading installed tools…" : value.directions.length === 0
-              ? "General projects keep your globally enabled packages visible."
-              : `${resolution.relevantPackageIds.length} enabled packages fit this project.`}</p>
+            <h3 id="project-composition-review">{tr("projectcomposition.workspace")}</h3>
+            <p>{loading ? tr("projectcomposition.readingInstalledTools") : value.directions.length === 0
+              ? tr("projectcomposition.generalVisible")
+              : tr("projectcomposition.enabledPackagesFit", { count: resolution.relevantPackageIds.length })}</p>
           </div>
           <Button size="sm" variant="ghost" onClick={() => setCustomize((open) => !open)} aria-expanded={customize}>
-            {customize ? "Done" : "Customize"}
+            {customize ? tr("projectcomposition.done") : tr("projectcomposition.customize")}
           </Button>
         </div>
 
         {!loading && !error && recommended.length > 0 && (
-          <div className="project-composition-recommended" aria-label="Recommended tools">
-            <span className="project-composition-kicker">Recommended</span>
+          <div className="project-composition-recommended" aria-label={tr("projectcomposition.recommendedTools")}>
+            <span className="project-composition-kicker">{tr("projectcomposition.recommended")}</span>
             <div className="project-composition-chips">{recommended.map((pkg) => <span key={pkg.id}>{pkg.name}</span>)}</div>
           </div>
         )}
-        {error && <div className="project-composition-error" role="status">Package recommendations unavailable. Your selection can still be saved.</div>}
+        {error && <div className="project-composition-error" role="status">{tr("projectcomposition.recommendationsUnavailable")}</div>}
 
         {customize && (
           <div className="project-package-list">
@@ -138,12 +139,12 @@ export default function ProjectCompositionEditor({
               const state = value.packageOverrides[pkg.id] ?? "auto";
               return <div className="project-package-row" key={pkg.id}>
                 <div><strong>{pkg.name}</strong><span>{pkg.description}</span></div>
-                {pkg.enabled ? <div className="project-package-choice" role="group" aria-label={`${pkg.name} visibility`}>
-                  {(["auto", "include", "exclude"] as const).map((choice) => <button key={choice} type="button" className={state === choice ? "is-selected" : ""} aria-pressed={state === choice} onClick={() => setOverride(pkg.id, choice)}>{choice === "auto" ? "Auto" : choice === "include" ? "Show" : "Hide"}</button>)}
-                </div> : <span className="project-package-disabled">Disabled globally</span>}
+                {pkg.enabled ? <div className="project-package-choice" role="group" aria-label={tr("projectcomposition.visibility", { name: pkg.name })}>
+                  {(["auto", "include", "exclude"] as const).map((choice) => <button key={choice} type="button" className={state === choice ? "is-selected" : ""} aria-pressed={state === choice} onClick={() => setOverride(pkg.id, choice)}>{choice === "auto" ? tr("projectcomposition.auto") : choice === "include" ? tr("projectcomposition.show") : tr("projectcomposition.hide")}</button>)}
+                </div> : <span className="project-package-disabled">{tr("projectcomposition.disabledGlobally")}</span>}
               </div>;
             })}
-            {configurable.length === 0 && !loading && <p className="project-package-empty">No project-scoped package choices are available yet.</p>}
+            {configurable.length === 0 && !loading && <p className="project-package-empty">{tr("projectcomposition.noPackageChoices")}</p>}
           </div>
         )}
       </section>
