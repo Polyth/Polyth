@@ -3,12 +3,14 @@
 // with defaults on load — boot with an empty in-memory registry and leave the
 // file untouched until a deliberate user write succeeds.
 import { readFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
-import { atomicWriteSync } from "@polyth/plugins";
+import { atomicWriteSync } from "@polyth/plugins/atomic-write";
+import { parseProjectComposition } from "@polyth/contracts/project-composition";
 import { createHash, randomUUID } from "node:crypto";
 import { basename, dirname, resolve } from "node:path";
 import type {
   Project,
   ProjectPatch,
+  ProjectComposition,
   ProjectRemote,
   ProjectService,
   SpaceContext,
@@ -118,7 +120,7 @@ const isPackageWorkspace = (project: StoredProject): project is StoredProject & 
 
 const publicProject = (project: StoredProject): Project => {
   const { internal: _internal, ...visible } = project;
-  return { ...visible };
+  return structuredClone(visible);
 };
 
 export function createProjectService(
@@ -127,28 +129,21 @@ export function createProjectService(
 ): ProjectRegistry {
   const file = `${dataDir}/projects.json`;
   let items: StoredProject[] = [];
-  // An unreadable registry means the in-memory list is empty because we could
-  // not read it, not because there are no projects. The first write would
-  // otherwise replace the user's entire project registry with `[]`.
   let unreadable = false;
   try {
     const parsed = JSON.parse(readFileSync(file, "utf8")) as StoredProject[];
+    if (!Array.isArray(parsed)) throw new Error("project registry must be an array");
     items = parsed;
   } catch (err) {
-    // Missing file = first run. Anything else (corrupt JSON, unreadable) keeps
-    // empty in-memory state and does NOT rewrite the file with defaults.
     if ((err as NodeJS.ErrnoException).code !== "ENOENT" && existsSync(file)) {
       unreadable = true;
       console.warn("[polyth] projects.json is unreadable; starting with an empty registry (file left untouched)");
     }
   }
 
-  const persist = () => {
+  const persist = (next: StoredProject[] = items) => {
     mkdirSync(dirname(file), { recursive: true });
     if (unreadable) {
-      // Keep whatever we could not parse: it is the only copy of the user's
-      // project registry, and a human can still recover paths from it. Move it
-      // aside once, then write normally from here on.
       const quarantine = `${file}.unreadable-${Date.now()}`;
       try {
         renameSync(file, quarantine);
@@ -161,35 +156,28 @@ export function createProjectService(
       }
       unreadable = false;
     }
-    atomicWriteSync(file, JSON.stringify(items, null, 2));
+    atomicWriteSync(file, JSON.stringify(next, null, 2));
+    items = next;
   };
-  // `spaceId` is threaded through the private helpers rather than read from a
-  // caller-supplied field: a scoped view binds it, the unscoped view leaves it
-  // undefined, and no request path can choose it.
-  const add = async (path: string, name?: string, spaceId?: string): Promise<Project> => {
+
+  const add = async (path: string, name?: string, spaceId?: string, composition?: ProjectComposition): Promise<Project> => {
+    const parsedComposition = composition === undefined ? undefined : parseProjectComposition(composition);
     const abs = resolve(path);
     if (!existsSync(abs)) throw Object.assign(new Error(`path does not exist: ${abs}`), { code: "invalid-path" });
-    // Two Spaces may legitimately register the same directory; only a
-    // same-Space duplicate is deduplicated. Internal package workspaces are
-    // never returned as a user's project merely because their paths match.
     const existing = items.find((p) => !isPackageWorkspace(p) && p.path === abs && p.spaceId === spaceId);
     if (existing) return publicProject(existing);
     const project: StoredProject = {
       id: randomUUID(),
       path: abs,
       name: name || basename(abs),
+      ...(parsedComposition ? { composition: parsedComposition } : {}),
       createdAt: Date.now(),
       ...(spaceId ? { spaceId } : {}),
     };
-    items.push(project);
-    persist();
+    persist([...items, project]);
     return publicProject(project);
   };
 
-  // One code path serves both views. `spaceId === undefined` is the unscoped
-  // server-internal view; a bound spaceId is the request-facing view, and a
-  // row belonging to another Space is indistinguishable from a row that does
-  // not exist (`not-found`, never `forbidden`) so ids cannot be probed.
   const view = (spaceId?: string): ProjectService => {
     const visible = (p: StoredProject): boolean => spaceId === undefined || p.spaceId === spaceId;
     const find = (id: string): StoredProject | undefined => {
@@ -198,8 +186,6 @@ export function createProjectService(
     };
     const requireUserProject = (id: string): StoredProject => {
       const project = find(id);
-      // Internal runtime anchors are intentionally indistinguishable from
-      // missing projects on user mutation surfaces.
       if (!project || isPackageWorkspace(project)) {
         throw Object.assign(new Error("project not found"), { code: "not-found" });
       }
@@ -214,32 +200,22 @@ export function createProjectService(
         const project = find(id);
         return project ? publicProject(project) : undefined;
       },
-      add: (path, name) => add(path, name, spaceId),
-      async create(path, name) {
+      add: (path, name, composition) => add(path, name, spaceId, composition),
+      async create(path, name, composition) {
+        if (composition !== undefined) parseProjectComposition(composition);
         const abs = resolve(path);
         mkdirSync(abs, { recursive: true });
-        return add(abs, name, spaceId);
+        return add(abs, name, spaceId, composition);
       },
       async remove(id) {
-        // A delete that names another tenant's project must not silently
-        // succeed either — it removes nothing and says not-found. Internal
-        // package workspaces cannot be removed through ProjectService.
         const project = publicProject(requireUserProject(id));
-        items = items.filter((p) => p.id !== id);
-        persist();
-        // Project deletion is canonical even if best-effort auxiliary cleanup
-        // fails. Stores also resolve only existing project IDs, so a failed hook
-        // can leave at most unreachable garbage, never a cross-tenant reference.
+        persist(items.filter((p) => p.id !== id));
         try {
           await opts.onRemoved?.(project);
         } catch (cause) {
           console.warn(`[polyth] project cleanup skipped for ${project.id}`, cause);
         }
       },
-
-      // Remote-bound project: `path` lives on the machine behind `remote`, so
-      // the local existence check does not apply. Callers (the SSH routes)
-      // validate the path on the remote host before registering.
       async addRemote(path, remote: ProjectRemote, name?: string): Promise<Project> {
         if (!path.startsWith("/")) {
           throw Object.assign(new Error("remote path must be absolute"), { code: "invalid-input" });
@@ -256,13 +232,19 @@ export function createProjectService(
           ...(spaceId ? { spaceId } : {}),
           remote: { kind: remote.kind, connectionId: remote.connectionId },
         };
-        items.push(project);
-        persist();
+        persist([...items, project]);
         return publicProject(project);
       },
-
       async update(id, patch: ProjectPatch): Promise<Project> {
-        const project = requireUserProject(id);
+        const existing = requireUserProject(id);
+        if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+          throw Object.assign(new Error("project patch must be an object"), { code: "invalid-input" });
+        }
+        const project = structuredClone(existing);
+        if (patch.composition !== undefined) {
+          if (patch.composition === null) delete project.composition;
+          else project.composition = parseProjectComposition(patch.composition);
+        }
         if (patch.name !== undefined) {
           if (typeof patch.name !== "string") throw Object.assign(new Error("name must be text"), { code: "invalid-input" });
           const name = patch.name.trim();
@@ -306,10 +288,7 @@ export function createProjectService(
           if (patch.defaults.agentProfileId !== undefined && patch.defaults.agentProfileId !== null && typeof patch.defaults.agentProfileId !== "string") {
             throw Object.assign(new Error("defaults.agentProfileId must be a profile id or null"), { code: "invalid-input" });
           }
-          // Harness-qualified model refs are a client-side catalog identity.
-          // ProjectDefaults stores that identity canonically as ModelRef + the
-          // separate harness selection, so never persist harnessId inside model.
-          const defaults = { ...patch.defaults };
+          const defaults = structuredClone(patch.defaults);
           const model = defaults.model as ({ providerID: string; modelID: string; harnessId?: unknown } | null | undefined);
           if (model?.harnessId !== undefined) {
             const harnessId = model.harnessId;
@@ -317,14 +296,11 @@ export function createProjectService(
               throw Object.assign(new Error("defaults.model.harnessId must be a valid harness id"), { code: "invalid-input" });
             }
             defaults.model = { providerID: model.providerID, modelID: model.modelID };
-            // An explicit harness in the same patch wins. Otherwise preserve
-            // the exact harness-qualified model the client selected.
             if (defaults.harness === undefined) defaults.harness = { mode: "pinned", harnessId };
           }
-          // shallow-merge defaults so a partial patch never wipes other defaults
           project.defaults = { ...project.defaults, ...defaults };
         }
-        persist();
+        persist(items.map((item) => item === existing ? project : item));
         return publicProject(project);
       },
     };
@@ -335,11 +311,12 @@ export function createProjectService(
     forSpace: (ctx) => view(ctx.spaceId),
     spaceOfProject: (id) => items.find((p) => p.id === id)?.spaceId,
     adoptIntoSpace(spaceId) {
-      const orphans = items.filter((p) => !p.spaceId && !isPackageWorkspace(p));
-      if (orphans.length === 0) return 0;
-      for (const project of orphans) project.spaceId = spaceId;
-      persist();
-      return orphans.length;
+      const next = items.map((project) =>
+        !project.spaceId && !isPackageWorkspace(project) ? { ...project, spaceId } : project);
+      const adopted = next.reduce((count, project, index) => count + (project !== items[index] ? 1 : 0), 0);
+      if (adopted === 0) return 0;
+      persist(next);
+      return adopted;
     },
     async ensurePackageWorkspace(input) {
       if (!input.spaceId) throw Object.assign(new Error("spaceId is required"), { code: "invalid-input" });
@@ -353,11 +330,10 @@ export function createProjectService(
         && project.spaceId === input.spaceId
         && project.internal.packageId === input.packageId);
       if (existing) {
-        // Space roots can move between deployments. Refresh the runtime path
-        // when the owning package resolves its workspace again.
         if (existing.path !== path) {
-          existing.path = path;
-          persist();
+          const replacement: StoredProject = { ...existing, path };
+          persist(items.map((item) => item === existing ? replacement : item));
+          return publicProject(replacement);
         }
         return publicProject(existing);
       }
@@ -373,8 +349,7 @@ export function createProjectService(
       if (collision) {
         throw Object.assign(new Error("package workspace id collision"), { code: "conflict" });
       }
-      items.push(project);
-      persist();
+      persist([...items, project]);
       return publicProject(project);
     },
   };
