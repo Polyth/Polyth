@@ -1,0 +1,124 @@
+import { createServer, type Server, type ServerResponse } from "node:http";
+import { existsSync, statSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { extname, resolve, sep } from "node:path";
+import type { CanonicalSecurity } from "./canonicalSecurity.ts";
+
+const MIME: Readonly<Record<string, string>> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+  ".woff2": "font/woff2",
+};
+
+export interface SetupServerOptions {
+  security: CanonicalSecurity;
+  webDist: string;
+  version: string;
+}
+
+export interface SetupServerHandle {
+  server: Server;
+  shutdown(): Promise<void>;
+}
+
+const json = (res: ServerResponse, status: number, body: unknown): void => {
+  res.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+  });
+  res.end(JSON.stringify(body));
+};
+
+const inside = (root: string, candidate: string): boolean =>
+  candidate === root || candidate.startsWith(`${root}${sep}`);
+
+async function staticFile(root: string, pathname: string): Promise<{ data: Buffer; type: string } | null> {
+  let decoded: string;
+  try { decoded = decodeURIComponent(pathname); } catch { return null; }
+  if (decoded.includes("\0")) return null;
+  const candidate = resolve(root, `.${decoded === "/" ? "/index.html" : decoded}`);
+  const chosen = inside(root, candidate) && existsSync(candidate) && statSync(candidate).isFile()
+    ? candidate
+    : resolve(root, "index.html");
+  if (!inside(root, chosen) || !existsSync(chosen) || !statSync(chosen).isFile()) return null;
+  return { data: await readFile(chosen), type: MIME[extname(chosen)] ?? "application/octet-stream" };
+}
+
+/**
+ * Minimal authority-only server used before installation setup completes.
+ * It deliberately exposes no project/session/package runtime and owns no
+ * application stores. A completed setup requires a process restart before the
+ * full composition root is admitted.
+ */
+export function createSetupServer(options: SetupServerOptions): SetupServerHandle {
+  const root = resolve(options.webDist);
+  const server = createServer((req, res) => {
+    void (async () => {
+      let url: URL;
+      try { url = new URL(req.url ?? "/", "http://setup.invalid"); }
+      catch { json(res, 400, { error: "invalid-path" }); return; }
+      const path = url.pathname;
+
+      if (req.method === "GET" && path === "/api/health") {
+        json(res, 200, {
+          ok: true,
+          version: options.version,
+          setup: true,
+          state: options.security.control.installation().state,
+          capabilities: [],
+        });
+        return;
+      }
+      if (path.startsWith("/api/auth/")) {
+        if (await options.security.http.handle(req, res)) return;
+        json(res, 404, { error: "not-found" });
+        return;
+      }
+      if (path.startsWith("/api/")) {
+        json(res, 503, { error: "setup-required" });
+        return;
+      }
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        json(res, 405, { error: "method-not-allowed" });
+        return;
+      }
+      const asset = await staticFile(root, path);
+      if (!asset) { json(res, 404, { error: "not-found" }); return; }
+      res.writeHead(200, {
+        "content-type": asset.type,
+        "cache-control": path === "/" || path.endsWith(".html") ? "no-store" : "public, max-age=3600",
+        "x-content-type-options": "nosniff",
+        "content-security-policy": "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws: wss:; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+      });
+      res.end(req.method === "HEAD" ? undefined : asset.data);
+    })().catch(() => {
+      if (!res.headersSent && !res.writableEnded) json(res, 500, { error: "internal-error" });
+      else res.destroy();
+    });
+  });
+
+  server.on("upgrade", (_request, socket) => {
+    socket.end("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n", () => socket.destroy());
+  });
+
+  let closed = false;
+  return {
+    server,
+    async shutdown() {
+      if (closed) return;
+      closed = true;
+      server.closeAllConnections();
+      await new Promise<void>((resolveClose) => {
+        if (!server.listening) { resolveClose(); return; }
+        const timer = setTimeout(resolveClose, 2_000);
+        server.close(() => { clearTimeout(timer); resolveClose(); });
+      });
+    },
+  };
+}
