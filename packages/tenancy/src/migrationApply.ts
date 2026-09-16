@@ -1,15 +1,7 @@
 import { createHash } from "node:crypto";
 import {
-  chmodSync,
-  closeSync,
-  fsyncSync,
-  lstatSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  rmSync,
+  chmodSync, closeSync, fsyncSync, lstatSync, mkdirSync, openSync,
+  readFileSync, realpathSync, renameSync, rmSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { openControlPlane, type ControlPlane } from "@polyth/control-plane";
@@ -71,8 +63,6 @@ function copiedJson(manifest: MigrationStageManifest, stageRoot: string, kind: "
 function effectiveCredentials(auth: LegacyAuthState): Map<string, string> {
   const result = new Map<string, string>();
   if (auth.passwordHash) result.set(LEGACY_OWNER_ALIAS, auth.passwordHash);
-  // This matches the legacy runtime: an explicit v2 credential supersedes the
-  // historical owner passwordHash for the same account.
   for (const credential of auth.credentials) result.set(credential.userId, credential.passwordHash);
   return result;
 }
@@ -98,10 +88,11 @@ function populate(control: ControlPlane, manifest: MigrationStageManifest, auth:
       && proof.ownerUserId === LEGACY_OWNER_ALIAS && proof.proof === "verified-legacy-owner");
   if (!ownerProven) fail("migration-owner-unproven");
 
-  // Canonical `ready` means the whole installation is governed. Publishing an
-  // identity authority while projects/sessions/profiles still require legacy
-  // ownership stamping would reopen ambient-owner semantics through resources.
-  if (manifest.inventory.plannedAdoptions.length > 0) fail("migration-resource-adoption-required");
+  // user-alias is consumed by this identity import itself. Every other planned
+  // adoption is a durable resource hole and must be materialized first.
+  if (manifest.inventory.plannedAdoptions.some((adoption) => adoption.kind !== "user-alias")) {
+    fail("migration-resource-adoption-required");
+  }
 
   const credentials = effectiveCredentials(auth);
   const users = new Map(tenancy.users.map((user) => [user.id, user]));
@@ -137,7 +128,6 @@ function populate(control: ControlPlane, manifest: MigrationStageManifest, auth:
       control.run("INSERT INTO principals(id,kind,status) VALUES(?,'user','active')", user.id);
       control.run("INSERT INTO users(id,display_name,created_at_ms,updated_at_ms) VALUES(?,?,?,?)", user.id, user.name, user.createdAt, Math.max(user.createdAt, now));
     }
-
     control.run("INSERT INTO organizations(id,name,slug) VALUES(?,?,?)", organizationId, "Imported Polyth", `imported-${manifest.inventory.inventoryDigest.slice(0, 12)}`);
     for (const userId of userIds) {
       control.run("INSERT INTO organization_memberships(org_id,user_id,role) VALUES(?,?,?)", organizationId, userId, userId === LEGACY_OWNER_ALIAS ? "owner" : "member");
@@ -149,46 +139,38 @@ function populate(control: ControlPlane, manifest: MigrationStageManifest, auth:
     for (const space of spaces) {
       control.run(
         "INSERT INTO spaces(id,org_id,name,storage_identity,kind,is_default,color,icon,created_at_ms,updated_at_ms) VALUES(?,?,?,?,?,?,?,?,?,?)",
-        space.id,
-        organizationId,
-        space.name,
-        space.slug,
+        space.id, organizationId, space.name, space.slug,
         space.isDefault && membershipOwners.get(space.id) === LEGACY_OWNER_ALIAS ? "personal" : "shared",
-        space.isDefault ? 1 : 0,
-        space.color ?? null,
-        space.icon ?? null,
-        space.createdAt,
-        space.updatedAt,
+        space.isDefault ? 1 : 0, space.color ?? null, space.icon ?? null,
+        space.createdAt, space.updatedAt,
       );
     }
     for (const member of memberships) {
       control.run("INSERT INTO space_memberships(space_id,principal_id,role,created_at_ms) VALUES(?,?,?,?)", member.spaceId, member.userId, member.role, member.createdAt);
     }
-
     for (const [deviceKey, spaceId] of Object.entries(tenancy.selections)) {
       for (const member of memberships) if (member.spaceId === spaceId) {
         control.run("INSERT OR IGNORE INTO device_selections(device_key,user_id,space_id) VALUES(?,?,?)", deviceKey, member.userId, spaceId);
       }
     }
-
     for (const [userId, passwordHash] of credentials) {
       control.run("INSERT INTO password_credentials(user_id,login_name,password_hash,changed_at_ms) VALUES(?,?,?,?)", userId, logins.get(userId)!, passwordHash, now);
     }
-
     control.run("INSERT INTO legacy_imports(name,digest,imported_at_ms) VALUES(?,?,?)", "migration-stage", manifest.manifestDigest, now);
-    for (const source of manifest.inventory.sources) if (source.present && source.sha256 && (source.kind === "auth" || source.kind === "tenancy")) {
-      control.run("INSERT INTO legacy_imports(name,digest,imported_at_ms) VALUES(?,?,?)", `${source.kind}.json`, source.sha256, now);
+    for (const source of manifest.inventory.sources) {
+      if (source.present && source.sha256 && (source.kind === "auth" || source.kind === "tenancy")) {
+        control.run("INSERT INTO legacy_imports(name,digest,imported_at_ms) VALUES(?,?,?)", `${source.kind}.json`, source.sha256, now);
+      }
     }
     control.run("UPDATE installation SET state='ready',revision=revision+1 WHERE singleton=1");
     control.bumpEpoch();
     control.audit(LEGACY_OWNER_ALIAS, "migration.legacy-identity-adopted", manifest.id);
   });
 
-  const installationId = control.installation().id;
   return {
     migrationId: manifest.id,
     manifestDigest: manifest.manifestDigest,
-    installationId,
+    installationId: control.installation().id,
     usersImported: userIds.length,
     spacesImported: spaces.length,
     credentialsImported: credentials.size,
@@ -197,12 +179,6 @@ function populate(control: ControlPlane, manifest: MigrationStageManifest, auth:
   };
 }
 
-/**
- * Apply only a separately verified, non-quarantined capsule. The canonical
- * authority is built under a private temporary root and becomes visible to the
- * installation only by the final directory rename after it is already ready.
- * Legacy remembered sessions are intentionally revoked rather than translated.
- */
 export function applyLegacyIdentityMigration(opts: ApplyLegacyMigrationOptions): AppliedLegacyMigration {
   const manifest = verifyMigrationStage(opts.stageDir, opts.expectedManifestDigest);
   if (manifest.status !== "verified" || !manifest.inventory.safeToStage || manifest.inventory.issues.length) fail("stage-quarantined");
@@ -235,8 +211,6 @@ export function applyLegacyIdentityMigration(opts: ApplyLegacyMigrationOptions):
     control.close();
     control = undefined;
 
-    // Reopen before publication so migration/schema/integrity checks exercise
-    // exactly the bytes that will become authoritative.
     const check = openControlPlane({ directory: temporary });
     try {
       if (check.installation().state !== "ready") fail("migration-not-ready");
