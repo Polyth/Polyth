@@ -29,9 +29,16 @@ import {
 import { reconcileSourceControlIdentity } from "./sourceControlRuntime.ts";
 
 export default defineWebPackage((host) => () => {
-  const refreshActive = () => {
+  // The store notifies on every applied event batch, so an unfiltered listener
+  // ran a status fetch plus a full identity reconcile (remotes + identity, and
+  // possibly an identity write) per streamed batch. Only a project switch needs
+  // that; live status freshness is the pollers' job in useGitStatus. Profile
+  // edits force a run because the resolved identity, not the project, changed.
+  let scope = "";
+  const refreshActive = (force = false) => {
     const projectId = host.store.getSnapshot().activeProjectId;
-    if (!projectId) return;
+    if (!projectId || (projectId === scope && !force)) return;
+    scope = projectId;
     void refreshGitStatus(projectId);
     void reconcileSourceControlIdentity(projectId).catch(() => undefined);
   };
@@ -83,8 +90,8 @@ export default defineWebPackage((host) => () => {
         return () => { offGit(); offProfiles(); offRemotes(); };
       },
     }),
-    host.store.subscribe(refreshActive),
-    subscribeSourceControlProfiles(refreshActive),
+    host.store.subscribe(() => refreshActive()),
+    subscribeSourceControlProfiles(() => refreshActive(true)),
   ];
   return () => off.toReversed().forEach((dispose) => dispose());
 });

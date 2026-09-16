@@ -78,7 +78,7 @@ export interface PickerProps {
 }
 
 export default function Picker({
-  label,
+  label = "",
   items,
   value,
   values,
