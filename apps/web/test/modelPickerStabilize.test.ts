@@ -608,6 +608,11 @@ test("every harness catalog uses the same compact popover surface on desktop and
   assert.doesNotMatch(source, /sheetSize="tall"/);
   assert.doesNotMatch(styles, /\.model-pop--compact/);
   assert.match(styles, /\.model-pop\s*\{[^}]*height:\s*min\(560px,\s*72vh\)/s);
+  assert.match(
+    styles,
+    /\.model-pop \.pkg-harnesses-tablist \.provider-logo\s*\{[^}]*color:\s*currentColor;/s,
+    "compact picker harness logos inherit selected-tab color",
+  );
   assert.match(source, /getViewportMetrics\(\)/, "phone opening checks whether the keyboard is actually open");
   assert.match(source, /if \(keyboardWasOpen\) void dismissal\.then\(reveal\)/,
     "phone opening waits for keyboard geometry only when needed");

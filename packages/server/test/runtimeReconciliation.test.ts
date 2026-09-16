@@ -920,6 +920,64 @@ test("a stopped turn can send again when reconciliation status is unknown", asyn
   await store.close();
 });
 
+test("interrupt send-now dispatches even when the abort outcome is unknown and the stop arrives late", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-interrupt-unknown-"));
+  const endpoint = endpointFor(dir);
+  let active = false;
+  let submissions = 0;
+  let statusOrder = 0;
+  const listeners = new Set<(sessionId: string, event: RuntimeEvent) => void>();
+  const emit = (sessionId: string, ev: RuntimeEvent) => { for (const l of listeners) l(sessionId, ev); };
+  const runtime: AgentRuntime = {
+    ...runtimeWithSnapshot(endpoint, (binding) => ({
+      authorityId: binding.authorityId,
+      generation: binding.generation,
+      location: binding.location,
+      backendSessionId: binding.backendSessionId!,
+      reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+      // ACP-style: the prompt is still running while cancellation is in flight.
+      state: { value: active ? "running" : "idle", comparison: { domain: "acp-status", order: ++statusOrder } },
+      completeness: { events: "partial", permissions: "partial", questions: "partial" },
+      permissions: [],
+      questions: [],
+      events: [],
+    })),
+    startTurn: async (req) => {
+      submissions += 1;
+      active = true;
+      emit(req.sessionId, { type: "turn/started", turnId: `t${submissions}` });
+    },
+    abortOperation: async (_sid, operationId) => ({
+      kind: "unknown" as const,
+      operationId,
+      message: "ACP cancellation has no acknowledgement; waiting for the prompt result",
+    }),
+    onEvent(cb) {
+      listeners.add(cb);
+      return { dispose: () => listeners.delete(cb) };
+    },
+  };
+  const { sessions, store } = makeHarness(runtime, dir);
+  const { id } = await sessions.create({ projectId: "project-1", title: "Interrupt unknown" });
+  await sessions.send(id, { text: "turn" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  const queued = await sessions.send(id, { text: "later", delivery: "queue" });
+  assert.equal(queued.queued, true);
+  await sessions.queueSendNow!(id, queued.queueId!, "urgent");
+
+  // Cancellation in flight: reconciliation observes the runtime still running,
+  // then the cancelled prompt finally emits its terminal stop.
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  active = false;
+  emit(id, { type: "turn/stopped", turnId: "t1", reason: "aborted" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  assert.equal(submissions, 2, "the urgent message must dispatch after the late aborted stop");
+  assert.deepEqual(await sessions.queueList!(id), []);
+  await store.close();
+});
+
 test("send queues behind an unknown turn when replacement is unavailable", async () => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-orphaned-turn-"));
   const endpoint = endpointFor(dir);

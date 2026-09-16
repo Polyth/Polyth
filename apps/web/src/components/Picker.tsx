@@ -7,7 +7,7 @@ import {
 } from "react";
 import { filterPickerItems, type PickerItem } from "../picker.ts";
 import { useShellMode } from "../responsiveShell.ts";
-import { dismissKeyboard } from "../mobileViewport.ts";
+import { dismissKeyboard, getViewportMetrics } from "../mobileViewport.ts";
 import { tapFeedback } from "../haptics.ts";
 import Sheet, { SheetRow } from "./mobile/Sheet.tsx";
 import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
@@ -40,10 +40,12 @@ export interface PickerProps {
     onAction: (id: string) => void;
   };
   /** Named list-footer action (e.g. `Create profile…`). A disabledReason is
-   *  visible text, with an optional operable secondary route. */
+   *  visible text, with an optional operable secondary route. Actions close
+   *  the picker by default; set stayOpen for refresh/retry actions. */
   footerAction?: {
     label: string;
     run: () => void;
+    stayOpen?: boolean;
     disabledReason?: string;
     secondaryLabel?: string;
     secondaryRun?: () => void;
@@ -61,6 +63,8 @@ export interface PickerProps {
   };
   /** Extra class on the root (responsive layout hooks, e.g. picker-profile). */
   className?: string;
+  /** Extra class on the portalled popover (when its surface needs scoped geometry). */
+  popoverClassName?: string;
   /** Accessible trigger name; keeps the full label when text is condensed. */
   ariaLabel?: string;
   /** Icon rendered in place of the uppercase label key (compact triggers). */
@@ -91,6 +95,7 @@ export default function Picker({
   trailingAction,
   footerAction,
   className,
+  popoverClassName,
   ariaLabel,
   triggerIcon,
   mobileSheet,
@@ -107,14 +112,22 @@ export default function Picker({
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const openRequestRef = useRef(0);
   const pickerId = useId();
   const listId = `${pickerId}-listbox`;
 
+  useEffect(() => () => {
+    openRequestRef.current += 1;
+  }, []);
+
   const close = () => {
+    openRequestRef.current += 1;
     setOpen(false);
     if (!asSheet) triggerRef.current?.focus();
   };
-  // §22: never raise a sheet under an open keyboard.
+  // §22: never raise a mobile picker under an open keyboard. Waiting for the
+  // visual viewport to settle also keeps the anchored popover from opening at
+  // the keyboard-shifted position.
   const toggleOpen = () => {
     if (open) {
       close();
@@ -122,8 +135,19 @@ export default function Picker({
     }
     setQ("");
     onOpen?.();
-    setOpen(true);
-    if (phone) void dismissKeyboard();
+    const request = ++openRequestRef.current;
+    const reveal = () => {
+      if (request === openRequestRef.current) setOpen(true);
+    };
+    if (!phone) {
+      reveal();
+      return;
+    }
+    const viewport = getViewportMetrics();
+    const keyboardWasOpen = viewport.covering || viewport.keyboardInset > 0;
+    const dismissal = dismissKeyboard();
+    if (keyboardWasOpen) void dismissal.then(reveal);
+    else reveal();
   };
   const triggerHandlers = useSheetTrigger(asSheet, toggleOpen);
 
@@ -141,7 +165,7 @@ export default function Picker({
 
   const isCurrent = (id: string) => (multi ? values.includes(id) : id === value);
   const pick = (id: string) => {
-    if (asSheet) tapFeedback();
+    if (phone) tapFeedback();
     onPick(id);
     if (!multi) close();
   };
@@ -244,7 +268,7 @@ export default function Picker({
               aria-disabled={footerAction.disabledReason ? true : undefined}
               onClick={() => {
                 if (footerAction.disabledReason) return;
-                close();
+                if (!footerAction.stayOpen) close();
                 footerAction.run();
               }}
             >{footerAction.label}</button>
@@ -256,10 +280,13 @@ export default function Picker({
           open
           onClose={close}
           anchorRef={triggerRef}
+          align="start"
           side={_direction === "up" ? "up" : "down"}
           compact={phone}
+          stableAnchor={phone}
           ariaLabel={label}
-          className="picker-pop"
+          className={`picker-pop${popoverClassName ? ` ${popoverClassName}` : ""}`}
+          restoreFocusRef={triggerRef}
           {...(!searchable && !phone ? { initialFocus: ".picker-list" } : {})}
         >
             {popoverToggle && (
@@ -356,7 +383,7 @@ export default function Picker({
                   aria-disabled={footerAction.disabledReason ? true : undefined}
                   onClick={() => {
                     if (footerAction.disabledReason) return;
-                    close();
+                    if (!footerAction.stayOpen) close();
                     footerAction.run();
                   }}
                 >

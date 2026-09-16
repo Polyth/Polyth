@@ -1650,6 +1650,7 @@ export function createStore(dbPath: string): Store {
         ...(projection.runtimeLeg ? { closedLeg: { ...projection.runtimeLeg, endedAt: Date.now() } } : {}),
         leg: { ...input.harness.leg },
       }, { ignorable: true });
+      const sameHarnessFreshLeg = input.harness?.leg.harnessId === projection.resolvedHarnessId;
       const nextProjection: SessionProjection = {
         ...projection,
         ...(input.harness ? {
@@ -1657,10 +1658,12 @@ export function createStore(dbPath: string): Store {
           resolvedHarnessId: input.harness.leg.harnessId,
           runtimeLeg: input.harness.leg,
           harnessTransition: undefined,
-          model: undefined,
-          agent: undefined,
-          agentProfileId: undefined,
-          contextWindow: undefined,
+          ...(sameHarnessFreshLeg ? { contextWindow: undefined } : {
+            model: undefined,
+            agent: undefined,
+            agentProfileId: undefined,
+            contextWindow: undefined,
+          }),
         } : projection.runtimeLeg ? { runtimeLeg: { ...projection.runtimeLeg, id: randomUUID(), nativeSessionId: replacement.backendSessionId, startedAt: Date.now(), canonicalThroughSeq: 0, bootstrap: "continuity" as const } } : {}),
         backendSessionId: replacement.backendSessionId,
         runtimeBinding: replacement,

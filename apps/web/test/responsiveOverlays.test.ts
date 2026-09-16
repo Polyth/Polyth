@@ -664,10 +664,6 @@ test("context selectors give a long label room and shrink instead of overflowing
     `<div class="context-selector context-selector-${id}"><button class="chip picker-chip">` +
     `<span class="picker-trigger-icon">•</span><span class="picker-chip-text">${text}</span>` +
     `<span class="picker-caret">v</span></button></div>`;
-  const phoneSelector = (id: string, text: string) =>
-    `<div class="context-selector context-selector-${id}"><button class="context-trigger">` +
-    `<span class="context-trigger-icon">•</span><span class="context-trigger-name">${text}</span>` +
-    `<span class="context-trigger-caret">v</span></button></div>`;
   const short = "Polyth";
   const long = "feature/a-rather-long-branch-name-for-testing-and-verifying-the-compact-context-bar";
 
@@ -676,7 +672,7 @@ test("context selectors give a long label room and shrink instead of overflowing
     const barWidth = Math.min(width - 16, 900);
     await page.setContent(`<style>${css}</style>
       <div class="session-context-bar" id="bar" style="width:${barWidth}px">
-        ${chip("project", short)}<span class="context-sep"></span>${chip("branch", long)}
+      ${chip("project", short)}<span class="context-sep"></span>${chip("branch", long)}
       </div>`);
     const oneLong = await page.evaluate(() => {
       const bar = document.querySelector<HTMLElement>("#bar")!;
@@ -717,7 +713,7 @@ test("context selectors give a long label room and shrink instead of overflowing
   await page.setViewportSize({ width: 390, height: 720 });
   await page.setContent(`<style>${css}</style>
     <div class="session-context-bar" id="bar" style="width:374px">
-      ${phoneSelector("project", short)}<span class="context-sep"></span>${phoneSelector("branch", long)}
+        ${chip("project", short)}<span class="context-sep"></span>${chip("branch", long)}
     </div>`);
   const phone = await page.evaluate(() => {
     const bar = document.querySelector<HTMLElement>("#bar")!;
@@ -737,9 +733,9 @@ test("standalone isolation switch shares the context row without entering the wo
   assert.ok(page);
   const css = `${await read("../src/styles.css")}\n${await read("../src/moduleContent.css")}`;
   const selector = (kind: string, text: string) =>
-    `<div class="context-selector context-selector-${kind}"><button class="context-trigger">` +
-    `<span class="context-trigger-icon">•</span><span class="context-trigger-name">${text}</span>` +
-    `<span class="context-trigger-caret">v</span></button></div>`;
+    `<div class="context-selector context-selector-${kind}"><button class="chip picker-chip">` +
+    `<span class="picker-trigger-icon">•</span><span class="picker-chip-text">${text}</span>` +
+    `<span class="picker-caret">v</span></button></div>`;
   const isolation = `<span class="context-isolation-control" data-active="true">` +
     `<span class="context-isolation-label">Isolate</span>` +
     `<button class="switch ui-switch" role="switch" aria-checked="true">` +

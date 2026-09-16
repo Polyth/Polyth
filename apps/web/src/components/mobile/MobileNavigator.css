@@ -51,23 +51,9 @@
 }
 
 /* ---- material ----------------------------------------------------------
- * Quiet Glass: the navigator samples the conversation it covers, the toolbar
- * is a thinner lamina over the navigator. Both stay a deliberate Appearance
- * choice — "Glass off" and low-resource mode keep the opaque surface. */
-@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .mobile-navigator {
-    background: color-mix(in srgb, var(--material-glass-strong) 88%, transparent);
-    -webkit-backdrop-filter: blur(calc(var(--material-glass-blur) * 1.6)) saturate(var(--material-glass-saturation));
-    backdrop-filter: blur(calc(var(--material-glass-blur) * 1.6)) saturate(var(--material-glass-saturation));
-  }
-
-  body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .mobile-nav-toolbar {
-    background: color-mix(in srgb, var(--material-glass-chrome) 62%, transparent);
-    -webkit-backdrop-filter: blur(calc(var(--material-glass-blur) * 2)) saturate(var(--material-glass-saturation));
-    backdrop-filter: blur(calc(var(--material-glass-blur) * 2)) saturate(var(--material-glass-saturation));
-  }
-}
-
+ * The full-screen navigator shares the mobile Workspace's opaque surface.
+ * Its toolbar stays part of that same surface so switching between the two
+ * destinations does not change the page material underneath the controls. */
 .mobile-nav-toolbar {
   position: sticky;
   top: 0;
@@ -82,7 +68,7 @@
     max(var(--nav-gutter), var(--safe-right))
     var(--space-1)
     max(var(--nav-gutter), var(--safe-left));
-  background: var(--material-glass-chrome);
+  background: transparent;
 }
 
 .mobile-nav-toolbar::after {

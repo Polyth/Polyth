@@ -207,6 +207,74 @@ test("A1 A2 → B1 → A retains one canonical session, cwd and confirmed contex
   await f.close();
 });
 
+test("rewind replacement creates a fresh leg across non-fork harnesses", async () => {
+  const f = fixture();
+  try {
+    const { id } = await f.sessions.create({ projectId: "p" });
+    for (const text of ["keep", "replace me"]) {
+      await f.sessions.send(id, { text });
+      f.engines.at(-1)!.complete();
+      await f.idle(id);
+    }
+    for (const harnessId of ["fake-b", "fake-c", "fake-a", "fake-a"]) {
+      const target = (await f.store.events(id)).findLast((event) => event.type === "user/message")!;
+      await f.sessions.rewind!(id, target.seq);
+
+      const submitted = await f.sessions.send(id, {
+        text: `edited replacement on ${harnessId}`,
+        harness: { mode: "pinned", harnessId },
+      });
+      assert.equal(typeof submitted.turnId, "string");
+      await until(async () => (f.engines.at(-1)?.requests.length ?? 0) > 0);
+      const engine = f.engines.at(-1)!;
+      assert.equal(engine.harnessId, harnessId);
+      assert.match(engine.requests.at(-1)!.text, new RegExp(`edited replacement on ${harnessId}$`));
+      assert.match(engine.requests.at(-1)!.text, /keep/);
+      assert.doesNotMatch(engine.requests.at(-1)!.text, /replace me/);
+      const events = await f.store.events(id);
+      assert.equal(
+        (events.findLast((event) => event.type === "session/rewind-cleared")?.data as { replaced?: boolean }).replaced,
+        true,
+      );
+      assert.equal((await f.store.projection(id))?.harnessTransition, undefined);
+      engine.complete();
+      await f.idle(id);
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+test("queued rewind replacement refreshes the dispatcher after a non-fork leg reset", async () => {
+  const f = fixture();
+  try {
+    const { id } = await f.sessions.create({ projectId: "p" });
+    await f.sessions.send(id, { text: "keep" });
+    f.engines[0]!.complete();
+    await f.idle(id);
+
+    await f.sessions.send(id, { text: "replace me" });
+    const target = (await f.store.events(id)).findLast((event) => event.type === "user/message")!;
+    await f.sessions.rewind!(id, target.seq);
+    const pending = await f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" });
+    assert.equal(pending.harnessTransition?.phase, "requested");
+
+    const queued = await f.sessions.send(id, { text: "edited queued" });
+    assert.equal(queued.queued, true);
+    f.engines[0]!.complete();
+    await until(async () => f.engines.some((engine) =>
+      engine.harnessId === "fake-b" && engine.requests.some((request) => request.text.endsWith("edited queued"))));
+
+    const engine = f.engines.findLast((candidate) =>
+      candidate.harnessId === "fake-b" && candidate.requests.some((request) => request.text.endsWith("edited queued")))!;
+    assert.equal(engine.requests.at(-1)!.text.endsWith("edited queued"), true);
+    engine.complete();
+    await f.idle(id);
+  } finally {
+    await f.close();
+  }
+});
+
 test("rate-limit recovery switches harness before resending the selected model", async () => {
   const f = fixture();
   try {
