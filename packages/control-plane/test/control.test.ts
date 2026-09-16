@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
@@ -12,6 +12,40 @@ function fixture(t: test.TestContext) {
   t.after(() => {control.close();rmSync(directory,{recursive:true,force:true});});
   return {directory,control};
 }
+
+test("fresh authority tolerates only the writer lease and empty runtime scaffold", t => {
+  const directory=mkdtempSync(join(tmpdir(),"polyth-control-bootstrap-"));
+  t.after(()=>rmSync(directory,{recursive:true,force:true}));
+  writeFileSync(join(directory,".polyth-writer.lock"),"");
+  mkdirSync(join(directory,"runtimes","opencode"),{recursive:true});
+  const control=openControlPlane({directory});
+  t.after(()=>control.close());
+  assert.equal(control.installation().state,"uninitialized");
+});
+
+test("fresh authority rejects data hidden behind bootstrap-shaped artifacts", t => {
+  const cases: Array<(directory:string)=>void> = [
+    directory=>writeFileSync(join(directory,"packages.json"),"{}"),
+    directory=>{mkdirSync(join(directory,"runtimes","opencode"),{recursive:true});writeFileSync(join(directory,"runtimes","opencode","runtime.json"),"{}");},
+    directory=>{mkdirSync(join(directory,"runtimes","other"),{recursive:true});},
+    directory=>{mkdirSync(join(directory,".polyth-writer.lock"));},
+  ];
+  for(const arrange of cases){
+    const directory=mkdtempSync(join(tmpdir(),"polyth-control-bootstrap-reject-"));
+    t.after(()=>rmSync(directory,{recursive:true,force:true}));
+    arrange(directory);
+    assert.throws(()=>openControlPlane({directory}),{code:"recovery-required"});
+  }
+});
+
+test("fresh authority rejects symlinked bootstrap artifacts", t => {
+  const directory=mkdtempSync(join(tmpdir(),"polyth-control-bootstrap-link-"));
+  const target=mkdtempSync(join(tmpdir(),"polyth-control-bootstrap-target-"));
+  t.after(()=>{rmSync(directory,{recursive:true,force:true});rmSync(target,{recursive:true,force:true});});
+  symlinkSync(target,join(directory,"runtimes"),"dir");
+  assert.throws(()=>openControlPlane({directory}),{code:"recovery-required"});
+});
+
 test("control authority has strict schema, private paths and a stable sentinel", t => {
   const {directory,control} = fixture(t);
   assert.equal(statSync(control.file).mode & 0o777,0o600);

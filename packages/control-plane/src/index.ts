@@ -16,6 +16,31 @@ export const recoveryRequired = (): Error => Object.assign(
 export const controlError = (code: string, message: string): Error => Object.assign(new Error(message), { code });
 export const digest = (value: string | Buffer): string => createHash('sha256').update(value).digest('hex');
 
+const assertFreshBootstrapArtifacts = (directory: string): void => {
+  for (const name of readdirSync(directory)) {
+    if (name === 'control-plane') continue;
+    const path = join(directory, name);
+    const info = lstatSync(path);
+    if (name === '.polyth-writer.lock') {
+      if (info.isSymbolicLink() || !info.isFile()) throw recoveryRequired();
+      continue;
+    }
+    if (name === 'runtimes') {
+      if (info.isSymbolicLink() || !info.isDirectory()) throw recoveryRequired();
+      const runtimeKinds = readdirSync(path);
+      if (runtimeKinds.length === 0) continue;
+      if (runtimeKinds.length !== 1 || runtimeKinds[0] !== 'opencode') throw recoveryRequired();
+      const opencode = join(path, 'opencode');
+      const opencodeInfo = lstatSync(opencode);
+      if (opencodeInfo.isSymbolicLink() || !opencodeInfo.isDirectory() || readdirSync(opencode).length !== 0) {
+        throw recoveryRequired();
+      }
+      continue;
+    }
+    throw recoveryRequired();
+  }
+};
+
 /** Only ENOENT denotes an absent legacy file. Corruption never becomes []/{}. */
 export function readLegacyJson(file: string): { value: unknown; digest: string } | null {
   let text: string;
@@ -54,7 +79,8 @@ export function openControlPlane(opts: { directory: string }): ControlPlane {
   if (!existsSync(sentinel)) {
     // An existing data root is not a fresh installation. Legacy adoption must
     // use a separately reviewed migration, never invent a new owner over it.
-    if (existsSync(file) || readdirSync(root).length || readdirSync(opts.directory).some(name => name !== 'control-plane')) throw recoveryRequired();
+    if (existsSync(file) || readdirSync(root).length) throw recoveryRequired();
+    assertFreshBootstrapArtifacts(opts.directory);
     id = randomUUID();
     let fd: number | undefined;
     try {
