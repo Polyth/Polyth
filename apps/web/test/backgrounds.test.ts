@@ -39,6 +39,9 @@ test("background and glass controls are wired into Appearance and the held-Shift
   assert.match(app, /<BackgroundQuickPicker \/>/);
   assert.match(pages, /data-settings-item="appearance\.background"[\s\S]*<BackgroundPicker \/>/);
   assert.match(pages, /itemId="appearance\.glass"[\s\S]*ui\.glassEffect/);
+  assert.match(pages, /<Popover[\s\S]*className="theme-picker-pop"/);
+  assert.match(pages, /autoFocus=\{!phone\}/);
+  assert.doesNotMatch(styles, /theme-picker-pop \{[\s\S]{0,200}inset:\s*auto 8px/);
   assert.match(picker, /useShiftArmed\(\)/);
   assert.match(styles, /\.background-quick-trigger\s*\{[^}]*position:\s*fixed;[^}]*inset-inline-end:/s);
   assert.doesNotMatch(styles, /\.workspace > \.main\s*\{[^}]*background:/s);

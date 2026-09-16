@@ -186,6 +186,7 @@ export default function StarterPicker({ context, commands, skills, onPick, onClo
         open
         title={form.id ? tr("mobile.starterpicker.editStarter") : tr("mobile.starterpicker.newStarter")}
         desktop="dialog"
+        phone="sheet"
         dialogSize="md"
         sheetSize="tall"
         className="starter-sheet"
@@ -274,6 +275,7 @@ export default function StarterPicker({ context, commands, skills, onPick, onClo
       open
       title={tr("mobile.starterpicker.addAStarter")}
       desktop="dialog"
+      phone="sheet"
       dialogSize="lg"
       sheetSize="tall"
       className="starter-sheet"

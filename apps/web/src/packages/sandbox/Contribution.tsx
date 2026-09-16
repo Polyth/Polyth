@@ -364,6 +364,7 @@ function LauncherContribution({
         onClose={close}
         title={descriptor.title}
         desktop="dialog"
+        phone="sheet"
         restoreFocusRef={triggerRef}
         sheetSize={compact ? "auto" : "tall"}
         dialogSize={compact ? "sm" : "md"}
@@ -440,6 +441,7 @@ export function SandboxCommandInvocationOverlay({
       onClose={close}
       title={`${plugin.name} · ${label}`}
       desktop="dialog"
+      phone="sheet"
       sheetSize="tall"
       dialogSize="md"
     >

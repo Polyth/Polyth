@@ -2,7 +2,7 @@
 // The compact composer stays writing-first; this menu owns attachments,
 // context and compose utilities. Quick actions accelerate common outcomes but
 // never replace the labelled source-of-truth rows below them.
-import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   addMenuRows,
   type AddMenuAction,
@@ -17,9 +17,8 @@ import { listSlots, slotVersion, subscribeSlots } from "../slots.ts";
 import { tr } from "../i18n/index.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import { dismissKeyboard } from "../mobileViewport.ts";
-import Sheet from "./mobile/Sheet.tsx";
-import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
 import { useDismissibleMenu } from "./a11y/Menu.ts";
+import Popover from "./ui/Popover.tsx";
 import SlotHost from "./slots/SlotHost.ts";
 import ResponsiveOverlay from "./ui/ResponsiveOverlay.tsx";
 import {
@@ -77,7 +76,7 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
   const [providerOpen, setProviderOpen] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const asSheet = useShellMode() === "phone";
+  const phone = useShellMode() === "phone";
   const sessionId = useStore((state) => state.activeSessionId);
   const projectId = useStore((state) => state.activeProjectId);
   useSyncExternalStore(subscribeSlots, slotVersion, slotVersion);
@@ -101,7 +100,7 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
     triggerRef.current?.focus();
   };
   const onMenuKeyDown = useDismissibleMenu({
-    open: open && !asSheet,
+    open,
     menuRef,
     triggerRef,
     onClose: () => setOpen(false),
@@ -113,17 +112,16 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
       return;
     }
     setOpen(true);
-    if (asSheet) void dismissKeyboard();
+    if (phone) void dismissKeyboard();
   };
-  const triggerHandlers = useSheetTrigger(asSheet, toggleOpen);
 
   useEffect(() => {
-    if (!open || asSheet) return;
+    if (!open) return;
     const first = menuRef.current?.querySelector<HTMLButtonElement>(
       "button[role='menuitem']:not([aria-disabled='true'])",
     );
     first?.focus();
-  }, [open, asSheet]);
+  }, [open]);
 
   const rows = addMenuRows({
     hasProject: props.hasProject,
@@ -166,28 +164,14 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
     return row ? [{ row, label, icon }] : [];
   });
 
-  const onSheetMenuKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-    const items = Array.from(
-      menuRef.current?.querySelectorAll<HTMLButtonElement>("button[role='menuitem']") ?? [],
-    );
-    if (items.length === 0) return;
-    e.preventDefault();
-    const at = items.indexOf(document.activeElement as HTMLButtonElement);
-    const next = e.key === "ArrowDown"
-      ? items[(at + 1) % items.length]
-      : items[(at - 1 + items.length) % items.length];
-    next?.focus();
-  };
-
   const menuRows = (
     <div
       id="composer-add-menu"
       ref={menuRef}
       role="menu"
       aria-label={tr("composeraddmenu.addContextOrUseAComposerTool")}
-      className={`add-menu add-menu-v2 ${asSheet ? "add-menu-sheet-list" : props.direction}`}
-      onKeyDown={asSheet ? onSheetMenuKey : onMenuKeyDown}
+      className={`add-menu add-menu-v2 ${props.direction}`}
+      onKeyDown={onMenuKeyDown}
     >
       {quickActions.length > 0 && (
         <div className="add-menu-quick" role="group" aria-label={tr("composeraddmenu.addFilesContextAndTools")}>
@@ -290,25 +274,30 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
         type="button"
         className="chip composer-add-trigger"
         aria-label={tr("composeraddmenu.addFilesContextAndTools")}
-        aria-haspopup={asSheet ? "dialog" : "menu"}
+        aria-haspopup="menu"
         aria-expanded={open}
-        {...(open && !asSheet ? { "aria-controls": "composer-add-menu" } : {})}
-        {...triggerHandlers}
+        {...(open ? { "aria-controls": "composer-add-menu" } : {})}
+        onClick={toggleOpen}
       >
         <span aria-hidden="true" className="composer-add-icon"><PlusIcon /></span>
         <span className="composer-add-label">{tr("common.add")}</span>
       </button>
-      {open && asSheet && (
-        <Sheet
-          title={tr("common.add")}
-          className="composer-add-sheet"
+      {open && (
+        <Popover
+          open
           onClose={closeToTrigger}
+          anchorRef={triggerRef}
+          side={props.direction === "up" ? "up" : "down"}
+          align="start"
+          compact={phone}
+          ariaLabel={tr("composeraddmenu.addFilesContextAndTools")}
+          className="composer-add-pop"
+          role="presentation"
           restoreFocusRef={triggerRef}
         >
           {menuRows}
-        </Sheet>
+        </Popover>
       )}
-      {open && !asSheet && menuRows}
       {githubOpen && (
         <GithubLinkDialog
           attachGithub={props.attachGithub}
@@ -320,6 +309,8 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
         onClose={() => { setProviderOpen(null); triggerRef.current?.focus(); }}
         title={activeProvider?.label ?? "Extension provider"}
         desktop="dialog"
+        phone="sheet"
+        anchorRef={triggerRef}
         sheetSize="tall"
         dialogSize="md"
         restoreFocusRef={triggerRef}

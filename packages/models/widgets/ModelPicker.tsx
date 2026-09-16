@@ -1,6 +1,7 @@
-// P2-W3A model picker: a quiet composer chip that opens one catalog surface —
-// an anchored popover on desktop (search, keyboard navigation, provider
-// groups, favorites with drag reorder) and the shared bottom Sheet on phones.
+// P2-W3A model picker: a quiet composer chip that opens one compact catalog
+// surface — an anchored Quiet Glass popover on every form factor (search,
+// keyboard navigation, provider groups, favorites with drag reorder on desktop
+// and up/down reorder on coarse pointers).
 // Every row stays calm (name + one meta line); the full technical card
 // (context, modalities, reasoning, tools, pricing, availability) lives behind
 // an explicit per-row details view, never on the row itself.
@@ -33,7 +34,6 @@ import {
 import { useShellMode } from "@polyth/web/responsive-shell";
 import { dismissKeyboard } from "@polyth/web/mobile-viewport";
 import { tapFeedback } from "@polyth/web/haptics";
-import { useSheetTrigger } from "@polyth/web/sheet-trigger";
 import {
   Button,
   ChevronDownIcon,
@@ -42,8 +42,6 @@ import {
   IconButton,
   Menu,
   ResponsiveOverlay,
-  SheetRow,
-  SheetSection,
   TextInput,
   type MenuEntry,
 } from "@polyth/web/ui";
@@ -344,11 +342,11 @@ export default function ModelPicker({
 
   // Keyboard navigation keeps the active row visible inside the scroll area.
   useEffect(() => {
-    if (!open || phone) return;
+    if (!open) return;
     listRef.current
       ?.querySelector(".model-picker-row.active")
       ?.scrollIntoView({ block: "nearest" });
-  }, [open, phone, activeKey]);
+  }, [open, activeKey]);
 
   const closeDetails = () => {
     setDetail(null);
@@ -513,7 +511,6 @@ export default function ModelPicker({
     setOpen(true);
     if (phone) void dismissKeyboard();
   };
-  const triggerHandlers = useSheetTrigger(phone, toggleOpen);
 
   const onSearchKey = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "ArrowDown") {
@@ -572,6 +569,18 @@ export default function ModelPicker({
     return <span className="model-capability-icons" aria-label={icons.map(([label]) => label).join(", ")}>{icons.map(([label, icon]) => <span key={label} title={label} aria-hidden="true">{icon}</span>)}</span>;
   };
 
+  const moveFavorite = (model: ModelDescriptor, delta: number) => {
+    const key = modelKey(model);
+    const index = favorites.findIndex((favorite) => modelKey(favorite) === key);
+    const target = favorites[index + delta];
+    if (target) reorderModelFavorites(key, modelKey(target));
+  };
+  const moveProvider = (providerId: string, delta: number) => {
+    const index = providerIds.indexOf(providerId);
+    const target = providerIds[index + delta];
+    if (target) reorderModelProviders(providerIds, providerId, target);
+  };
+
   const row = (model: ModelDescriptor, group: "favorites" | "recent" | "provider") => {
     const selected = isSelected(model);
     const key = modelKey(model);
@@ -621,67 +630,39 @@ export default function ModelPicker({
             )}
           </strong>
         </span>
-        {capabilityIcons(model)}
-        {variantMenu(model)}
-        {!flatCatalog && star(model)}
+        {phone && editing && favoriteDrag ? (
+          <span className="model-row-tools">
+            <IconButton
+              type="button"
+              className="model-row-tool"
+              icon={ChevronUpIcon}
+              size="sm"
+              variant="ghost"
+              label={tr("modelpicker.moveValueUp", { name: model.name })}
+              disabled={favorites.findIndex((favorite) => modelKey(favorite) === key) <= 0}
+              onClick={(event) => { event.stopPropagation(); moveFavorite(model, -1); }}
+            />
+            <IconButton
+              type="button"
+              className="model-row-tool"
+              icon={ChevronDownIcon}
+              size="sm"
+              variant="ghost"
+              label={tr("modelpicker.moveValueDown", { name: model.name })}
+              disabled={favorites.findIndex((favorite) => modelKey(favorite) === key) >= favorites.length - 1}
+              onClick={(event) => { event.stopPropagation(); moveFavorite(model, 1); }}
+            />
+          </span>
+        ) : (
+          <>
+            {capabilityIcons(model)}
+            {variantMenu(model)}
+            {!flatCatalog && star(model)}
+          </>
+        )}
       </div>
     );
   };
-
-  // ---- mobile sheet rows -----------------------------------------------------
-  const moveFavorite = (model: ModelDescriptor, delta: number) => {
-    const key = modelKey(model);
-    const index = favorites.findIndex((favorite) => modelKey(favorite) === key);
-    const target = favorites[index + delta];
-    if (target) reorderModelFavorites(key, modelKey(target));
-  };
-  const moveProvider = (providerId: string, delta: number) => {
-    const index = providerIds.indexOf(providerId);
-    const target = providerIds[index + delta];
-    if (target) reorderModelProviders(providerIds, providerId, target);
-  };
-  const sheetRow = (model: ModelDescriptor, group: "favorites" | "recent" | "provider") => (
-    <SheetRow
-      key={`${group}:${modelKey(model)}`}
-      title={model.name}
-      icon={(
-        <>{editing && group === "favorites" && <span className="model-sheet-grip" aria-hidden="true">⠿</span>}<ProviderLogo providerID={model.providerID} providerName={model.providerName} harnessId={model.harnessId} className="model-row-provider-logo" /></>
-      )}
-      selected={isSelected(model)}
-      onClick={() => choose(model)}
-      ariaLabel={tr("modelpicker.useValue", { name: model.name })}
-      trailing={editing && group === "favorites" ? (
-        <span className="sheet-row-tools">
-          <IconButton
-            type="button"
-            className="sheet-row-tool"
-            icon={ChevronUpIcon}
-            size="sm"
-            variant="ghost"
-            label={tr("modelpicker.moveValueUp", { name: model.name })}
-            disabled={favorites.findIndex((favorite) => modelKey(favorite) === modelKey(model)) <= 0}
-            onClick={() => moveFavorite(model, -1)}
-          />
-          <IconButton
-            type="button"
-            className="sheet-row-tool"
-            icon={ChevronDownIcon}
-            size="sm"
-            variant="ghost"
-            label={tr("modelpicker.moveValueDown", { name: model.name })}
-            disabled={favorites.findIndex((favorite) => modelKey(favorite) === modelKey(model)) >= favorites.length - 1}
-            onClick={() => moveFavorite(model, 1)}
-          />
-        </span>
-      ) : (
-        <span className="sheet-row-tools">
-          {capabilityIcons(model)}
-          {variantMenu(model)}
-          {!flatCatalog && star(model, "sheet")}
-        </span>
-      )}
-    />
-  );
 
   const trigger = (
     <button
@@ -692,7 +673,7 @@ export default function ModelPicker({
       aria-label={tr("modelpicker.selectModelCurrentValue", { label })}
       aria-haspopup="dialog"
       aria-expanded={open}
-      {...triggerHandlers}
+      onClick={toggleOpen}
     >
       {selectedModel && (
         <ProviderLogo
@@ -746,111 +727,27 @@ export default function ModelPicker({
         side={direction === "up" ? "up" : "down"}
         align="start"
         stableAnchor
-        className={phone ? "model-sheet" : "model-pop"}
+        className="model-pop"
         popoverOverflow="visible"
         initialFocus={!phone ? ".model-pop-search input" : undefined}
-        sheetSize="tall"
-        sheetSearch={{
-          value: pickerState.query,
-          onChange: (query: string) => {
-            dispatchPicker({ type: "search", query });
-            setActive(0);
-            closeDetails();
-          },
-          placeholder: tr("modelpicker.searchModels"),
-          ariaLabel: tr("modelpicker.searchModels"),
-        }}
-        {...(reorderableOnPhone ? {
-          sheetAction: {
-            label: editing ? tr("common.done") : tr("common.edit"),
-            pressed: editing,
-            onClick: () => setEditing((current) => !current),
-          },
-        } : {})}
       >
         <div ref={pickerShellRef} className="model-picker-shell">
-          {header && <div className="model-picker-header">{header}</div>}
-          {phone ? (detail ? detailsPanelContent : (
-            <div role="listbox" aria-label={tr("modelpicker.models")}>
-              {flatCatalog && flatRows.map((model) => sheetRow(model, "provider"))}
-              {shownFavorites.length > 0 && (
-                <SheetSection title={tr("modelpicker.favorites")} count={favorites.length}>
-                  {shownFavorites.map((model) => sheetRow(model, "favorites"))}
-                </SheetSection>
-              )}
-              {recents.length > 0 && (
-                <SheetSection title="Recent" count={recents.length}>
-                  {recents.map((model) => sheetRow(model, "recent"))}
-                </SheetSection>
-              )}
-              {providers.map((provider) => {
-                const items = provider.models.filter((model) => !isFavorite(prefs, modelKey(model)) && !prefs.recents.includes(modelKey(model)));
-                if (items.length === 0) return null;
-                const expanded = isExpanded(provider.id);
-                const shown = items.filter((model) => flatRowIndex.has(modelKey(model)));
-                const providerIndex = providerIds.indexOf(provider.id);
-                return (
-                  <section className="sheet-section" key={provider.id}>
-                    <h3 className="sheet-section-head">
-                      <button
-                        type="button"
-                        className="sheet-section-toggle"
-                        aria-expanded={expanded}
-                        onClick={() => setExpanded(provider.id, !expanded)}
-                      >
-                        <ProviderLogo
-                          providerID={provider.id}
-                          providerName={provider.name}
-                          harnessId={unanimousHarnessId(provider.models)}
-                          className="model-provider-logo"
-                        />
-                        <span>{provider.name}</span>
-                        <small>{items.length}</small>
-                        {!editing && (
-                          <span className={`sheet-section-caret${expanded ? " open" : ""}`} aria-hidden="true">
-                            <Icon.chevronDown />
-                          </span>
-                        )}
-                      </button>
-                      {editing && !q && (
-                        <span className="sheet-section-tools">
-                          <IconButton
-                            type="button"
-                            className="sheet-row-tool"
-                            icon={ChevronUpIcon}
-                            size="sm"
-                            variant="ghost"
-                            label={tr("modelpicker.moveValueUp", { name: provider.name })}
-                            disabled={providerIndex <= 0}
-                            onClick={() => moveProvider(provider.id, -1)}
-                          />
-                          <IconButton
-                            type="button"
-                            className="sheet-row-tool"
-                            icon={ChevronDownIcon}
-                            size="sm"
-                            variant="ghost"
-                            label={tr("modelpicker.moveValueDown", { name: provider.name })}
-                            disabled={providerIndex >= providerIds.length - 1}
-                            onClick={() => moveProvider(provider.id, 1)}
-                          />
-                        </span>
-                      )}
-                    </h3>
-                    {expanded && shown.map((model) => sheetRow(model, "provider"))}
-                  </section>
-                );
-              })}
-              {filtered.length === 0 && (
-                <p className="sheet-empty">
-                  {catalogLoading ? tr("common.loading") : tr("modelpicker.noModelsFound")}
-                </p>
-              )}
-              {hiddenMatchCount > 0 && (
-                <p className="picker-more">{hiddenMatchCount} {tr("picker.moreRefineTheFilter")}</p>
+          {(header || (phone && reorderableOnPhone)) && (
+            <div className="model-picker-header">
+              {header}
+              {phone && reorderableOnPhone && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  pressed={editing}
+                  onClick={() => setEditing((current) => !current)}
+                >
+                  {editing ? tr("common.done") : tr("common.edit")}
+                </Button>
               )}
             </div>
-          )) : (
+          )}
+          {phone && detail ? detailsPanelContent : (
             <div className="model-pop-content">
               <div className="model-pop-search">
                 <TextInput
@@ -913,25 +810,51 @@ export default function ModelPicker({
                       }}
                       onDragEnd={() => setDragging(null)}
                     >
-                      <button
-                        type="button"
-                        className="model-provider-head"
-                        aria-expanded={expanded}
-                        onClick={() => setExpanded(provider.id, !expanded)}
-                      >
-                        <span className="model-provider-grip" aria-hidden="true">⠿</span>
-                        <ProviderLogo
-                          providerID={provider.id}
-                          providerName={provider.name}
-                          harnessId={unanimousHarnessId(provider.models)}
-                          className="model-provider-logo"
-                        />
-                        <strong>{provider.name}</strong>
-                        <small>{items.length}</small>
-                        <span className={`model-provider-caret${expanded ? " open" : ""}`} aria-hidden="true">
-                          <Icon.chevronDown />
-                        </span>
-                      </button>
+                      <div className="model-provider-head-row">
+                        <button
+                          type="button"
+                          className="model-provider-head"
+                          aria-expanded={expanded}
+                          onClick={() => setExpanded(provider.id, !expanded)}
+                        >
+                          <span className="model-provider-grip" aria-hidden="true">⠿</span>
+                          <ProviderLogo
+                            providerID={provider.id}
+                            providerName={provider.name}
+                            harnessId={unanimousHarnessId(provider.models)}
+                            className="model-provider-logo"
+                          />
+                          <strong>{provider.name}</strong>
+                          <small>{items.length}</small>
+                          <span className={`model-provider-caret${expanded ? " open" : ""}`} aria-hidden="true">
+                            <Icon.chevronDown />
+                          </span>
+                        </button>
+                        {phone && editing && !q && (
+                          <span className="model-provider-tools">
+                            <IconButton
+                              type="button"
+                              className="model-row-tool"
+                              icon={ChevronUpIcon}
+                              size="sm"
+                              variant="ghost"
+                              label={tr("modelpicker.moveValueUp", { name: provider.name })}
+                              disabled={providerIds.indexOf(provider.id) <= 0}
+                              onClick={() => moveProvider(provider.id, -1)}
+                            />
+                            <IconButton
+                              type="button"
+                              className="model-row-tool"
+                              icon={ChevronDownIcon}
+                              size="sm"
+                              variant="ghost"
+                              label={tr("modelpicker.moveValueDown", { name: provider.name })}
+                              disabled={providerIds.indexOf(provider.id) >= providerIds.length - 1}
+                              onClick={() => moveProvider(provider.id, 1)}
+                            />
+                          </span>
+                        )}
+                      </div>
                       {expanded && <div>{shown.map((model) => row(model, "provider"))}</div>}
                     </section>
                   );
@@ -945,9 +868,11 @@ export default function ModelPicker({
                   <div className="picker-more">{hiddenMatchCount} {tr("picker.moreRefineTheFilter")}</div>
                 )}
               </div>
-              <footer className="model-picker-shortcuts" aria-label="Keyboard shortcuts">
-                <span>↑↓ Navigate</span><span>Enter Select</span><span>/ Search</span>
-              </footer>
+              {!phone && (
+                <footer className="model-picker-shortcuts" aria-label="Keyboard shortcuts">
+                  <span>↑↓ Navigate</span><span>Enter Select</span><span>/ Search</span>
+                </footer>
+              )}
             </div>
           )}
         </div>

@@ -42,7 +42,8 @@ import {
   resolveSessionDefaultModel,
   useSessionDefaults,
 } from "../../sessionDefaults.ts";
-import { Button, Checkbox, Dialog, IconButton, Select, Textarea, TextInput } from "../ui/index.ts";
+import { Button, Checkbox, Dialog, IconButton, Popover, Select, Textarea, TextInput } from "../ui/index.ts";
+import { useShellMode } from "../../responsiveShell.ts";
 import { DeleteIcon } from "../ui/icons.ts";
 import { BackgroundPicker } from "../BackgroundPicker.tsx";
 import {
@@ -105,6 +106,8 @@ function ThemeSection() {
   const [jsonError, setJsonError] = useState("");
   const [query, setQuery] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
+  const phone = useShellMode() === "phone";
+  const themeTriggerRef = useRef<HTMLButtonElement>(null);
   // Each apply repaints ~35 CSS variables and notifies canvas consumers, so
   // hover preview is debounced on one shared timer: sweeping across the list
   // coalesces to a single apply per pause and a single restore on exit,
@@ -185,23 +188,23 @@ function ThemeSection() {
     updateSettings({ theme: id });
     setQuery("");
     setPickerOpen(false);
+    endPreview();
+  };
+  const closeThemePicker = () => {
+    setPickerOpen(false);
+    endPreview();
   };
   return (
     <div className="set-sec" data-settings-item="appearance.theme">
       <div className="set-sec-title">{tr("settings.pages.theme")}</div>
-      <div
-        className="theme-picker"
-        onBlur={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-            setPickerOpen(false);
-            endPreview();
-          }
-        }}
-      >
+      <div className="theme-picker">
         <button
+          ref={themeTriggerRef}
+          type="button"
           className="theme-picker-current"
           aria-expanded={pickerOpen}
-          aria-controls="theme-picker-options"
+          aria-controls="theme-picker-list"
+          aria-haspopup="listbox"
           onClick={() => setPickerOpen((open) => !open)}
         >
           <ThemeSwatches theme={currentEffective} />
@@ -209,9 +212,18 @@ function ThemeSection() {
           <b aria-hidden="true">⌄</b>
         </button>
         {pickerOpen && (
-          <div className="theme-picker-pop" id="theme-picker-options">
+          <Popover
+            open
+            onClose={closeThemePicker}
+            anchorRef={themeTriggerRef}
+            side="down"
+            compact={phone}
+            ariaLabel={tr("settings.pages.theme")}
+            className="theme-picker-pop"
+            restoreFocusRef={themeTriggerRef}
+          >
             <TextInput
-              autoFocus
+              autoFocus={!phone}
               role="combobox"
               aria-expanded="true"
               aria-controls="theme-picker-list"
@@ -219,13 +231,6 @@ function ThemeSection() {
               value={query}
               placeholder={tr("settings.pages.searchValueThemes", { length: choices.length })}
               onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  setPickerOpen(false);
-                  endPreview();
-                }
-              }}
             />
             <div className="theme-picker-list" id="theme-picker-list" role="listbox">
               {[bundledGroup, customGroup].map((group) => {
@@ -239,6 +244,7 @@ function ThemeSection() {
                       return (
                       <button
                         key={`${group}:${theme.id}`}
+                        type="button"
                         role="option"
                         aria-selected={settings.theme === theme.id}
                         className={settings.theme === theme.id ? "active" : ""}
@@ -259,7 +265,7 @@ function ThemeSection() {
               })}
               {filtered.length === 0 && <div className="theme-picker-empty">{tr("settings.pages.noMatchingThemes")}</div>}
             </div>
-          </div>
+          </Popover>
         )}
       </div>
       <div className="theme-swatch-strip" aria-label={tr("settings.pages.quickThemePreview")}>

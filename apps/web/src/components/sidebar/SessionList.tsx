@@ -167,6 +167,7 @@ function SessionRow({
   const [swipeRevealed, setSwipeRevealed] = useState(false);
   const [swipeX, setSwipeX] = useState<number | null>(null);
   const sessionBtnRef = useRef<HTMLButtonElement>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
   // Menus opened from the row itself (context menu, long-press, Shift+F10)
   // return focus to the row button; trigger-opened menus fall back to the
   // trigger inside ui/Menu.
@@ -508,6 +509,12 @@ function SessionRow({
           {(trigger) => (
             <button
               {...trigger}
+              ref={(node) => {
+                menuTriggerRef.current = node;
+                const ref = trigger.ref;
+                if (typeof ref === "function") ref(node);
+                else if (ref && typeof ref === "object") ref.current = node;
+              }}
               type="button"
               className="session-menu-trigger"
               title={actionsLabel}
@@ -529,16 +536,11 @@ function SessionRow({
         title={tr("sidebar.sessionlist.labels")}
         desktop="dialog"
         dialogSize="sm"
-        sheetSize="tall"
+        anchorRef={menuTriggerRef}
+        align="end"
+        side="down"
         className="session-label-picker"
-        restoreFocusRef={sessionBtnRef}
-        sheetSearch={{
-          value: labelQuery,
-          onChange: setLabelQuery,
-          placeholder: tr("sidebar.sessionlist.searchLabels"),
-          ariaLabel: tr("sidebar.sessionlist.searchLabels"),
-          role: "searchbox",
-        }}
+        restoreFocusRef={menuTriggerRef}
         onClose={() => setLabelPickerOpen(false)}
       >
         <TextInput

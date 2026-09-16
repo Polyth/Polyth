@@ -333,8 +333,7 @@ test("a sheet opens on pointer-down and survives the keyboard dismissal (§22)",
   assert.ok(trigger.includes("activate();"), "keyboard activation still arrives as a click");
 
   for (const [rel, name] of [
-    ["../../../packages/models/widgets/ModelPicker.tsx", "model"],
-    ["../src/components/Picker.tsx", "mode/thinking"],
+    ["../src/components/Picker.tsx", "mode/thinking (sheet opt-in)"],
     ["../src/components/mobile/SessionContextBar.tsx", "project/branch"],
     ["../src/components/workspace/builtinSurfaces.tsx", "starter"],
   ] as const) {
@@ -413,7 +412,8 @@ test("the composer is adaptive, with one primary action at a time", async () => 
   );
   assert.ok(!composer.includes("STARTER_SUGGESTIONS"), "starters come from the starter system, not hardcoded chips");
   const modelPicker = await read("../../../packages/models/widgets/ModelPicker.tsx");
-  assert.match(modelPicker, /<ResponsiveOverlay[\s\S]*className=\{phone \? "model-sheet"/, "phone model and harness controls use the shared sheet");
+  assert.match(modelPicker, /className="model-pop"/, "model picker uses the compact glass popover on every form factor");
+  assert.doesNotMatch(modelPicker, /className=\{phone \? "model-sheet"/, "phone model picker no longer defaults to a tall sheet");
   assert.ok(
     composer.includes('onClick={() => send()}'),
     "the primary active-run action retains the configured queue behavior",
