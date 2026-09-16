@@ -102,3 +102,20 @@ test("wrong operator manifest acknowledgement cannot activate canonical state", 
   }), { code: "stage-manifest-changed" });
   assert.equal(existsSync(join(f.dataDir, "control-plane")), false);
 });
+
+test("source drift after staging cannot activate stale canonical state", t => {
+  const f = fixture(t);
+  json(join(f.dataDir, "tenancy.json"), {
+    version: 1,
+    users: [{ id: "usr_owner", name: "Changed after staging", createdAt: 50 }],
+    spaces: [{ id: "spc_personal", name: "Personal", slug: "personal", createdAt: 60, updatedAt: 70, isDefault: true }],
+    memberships: [{ userId: "usr_owner", spaceId: "spc_personal", role: "owner", createdAt: 60 }],
+    selections: { desktop: "spc_personal" },
+  });
+  assert.throws(() => applyLegacyIdentityMigration({
+    dataDir: f.dataDir,
+    stageDir: f.stageDir,
+    expectedManifestDigest: f.stage.manifestDigest,
+  }), { code: "source-changed" });
+  assert.equal(existsSync(join(f.dataDir, "control-plane")), false);
+});

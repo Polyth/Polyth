@@ -34,7 +34,7 @@ test("canonical ready is fenced while a verified project still needs ownership a
 
   const inventory = inventoryLegacyMigration({ dataDir });
   assert.equal(inventory.safeToStage, true);
-  assert.ok(inventory.plannedAdoptions.some(row => row.resourceKind === "project" && row.resourceId === "project-1"));
+  assert.ok(inventory.plannedAdoptions.some(row => row.kind === "project" && row.resourceId === "project-1"));
   const stage = stageLegacyMigration({ dataDir, stageDir, expectedInventoryDigest: inventory.inventoryDigest });
   assert.equal(stage.status, "verified");
 

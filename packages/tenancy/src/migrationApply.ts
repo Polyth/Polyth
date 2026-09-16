@@ -6,14 +6,14 @@ import {
 import { join, resolve } from "node:path";
 import { openControlPlane, type ControlPlane } from "@polyth/control-plane";
 import { parseLegacyAuthState, type LegacyAuthState } from "./legacyAuth.ts";
-import { LEGACY_OWNER_ALIAS } from "./legacyMigration.ts";
+import { inventoryLegacyMigration, LEGACY_OWNER_ALIAS } from "./legacyMigration.ts";
 import { parseLegacyTenancyState, type TenancyFile } from "./legacyTenancy.ts";
 import { verifyMigrationStage, type MigrationStageManifest } from "./migrationStage.ts";
 
 const hash = (value: string | Buffer): string => createHash("sha256").update(value).digest("hex");
-const fail = (code: string): never => {
+function fail(code: string): never {
   throw Object.assign(new Error("Legacy migration cannot be activated safely"), { code });
-};
+}
 
 export interface AppliedLegacyMigration {
   migrationId: string;
@@ -30,6 +30,7 @@ export interface ApplyLegacyMigrationOptions {
   dataDir: string;
   stageDir: string;
   expectedManifestDigest: string;
+  profileOwnersFile?: string;
   now?: () => number;
 }
 
@@ -83,18 +84,23 @@ function allocateLogins(userIds: readonly string[]): Map<string, string> {
 }
 
 function populate(control: ControlPlane, manifest: MigrationStageManifest, auth: LegacyAuthState, tenancy: TenancyFile, now: number): AppliedLegacyMigration {
-  const ownerProven = manifest.inventory.ownership.some((proof) =>
+  const credentials = effectiveCredentials(auth);
+  const historicalAlias = manifest.inventory.ownership.some((proof) =>
     proof.resourceKind === "user" && proof.resourceId === LEGACY_OWNER_ALIAS
-      && proof.ownerUserId === LEGACY_OWNER_ALIAS && proof.proof === "verified-legacy-owner");
-  if (!ownerProven) fail("migration-owner-unproven");
+      && proof.ownerUserId === LEGACY_OWNER_ALIAS && proof.proof === "verified-legacy-owner")
+    || manifest.inventory.plannedAdoptions.some((adoption) =>
+      adoption.kind === "user-alias" && adoption.resourceId === LEGACY_OWNER_ALIAS
+        && adoption.ownerUserId === LEGACY_OWNER_ALIAS && adoption.reason === "legacy-alias");
+  // Tenant ownership alone is insufficient. Activation also requires a usable
+  // historical owner credential from auth.json so a Space owner cannot become
+  // the instance owner merely because the alias happens to match.
+  if (!historicalAlias || !credentials.has(LEGACY_OWNER_ALIAS)) fail("migration-owner-unproven");
 
   // user-alias is consumed by this identity import itself. Every other planned
   // adoption is a durable resource hole and must be materialized first.
   if (manifest.inventory.plannedAdoptions.some((adoption) => adoption.kind !== "user-alias")) {
     fail("migration-resource-adoption-required");
   }
-
-  const credentials = effectiveCredentials(auth);
   const users = new Map(tenancy.users.map((user) => [user.id, user]));
   for (const userId of credentials.keys()) {
     if (!users.has(userId)) users.set(userId, { id: userId, name: userId === LEGACY_OWNER_ALIAS ? "Owner" : userId, createdAt: now });
@@ -187,6 +193,16 @@ export function applyLegacyIdentityMigration(opts: ApplyLegacyMigrationOptions):
   if (dataRoot !== manifest.inventory.sourceRoot) fail("stage-source-mismatch");
   const controlRoot = join(dataRoot, "control-plane");
   if (!absent(controlRoot)) fail("canonical-authority-exists");
+
+  // A verified capsule proves what was staged, not that the stopped legacy
+  // installation is still the exact source the operator approved. Refingerprint
+  // it immediately before cutover so stale staged bytes can never replace newer
+  // legacy state.
+  const live = inventoryLegacyMigration({
+    dataDir: dataRoot,
+    ...(opts.profileOwnersFile ? { profileOwnersFile: opts.profileOwnersFile } : {}),
+  });
+  if (live.inventoryDigest !== manifest.inventory.inventoryDigest) fail("source-changed");
 
   const stageRoot = realpathSync.native(resolve(opts.stageDir));
   const authRaw = copiedJson(manifest, stageRoot, "auth");
