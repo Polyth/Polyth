@@ -42,9 +42,9 @@ function validFixture(t: test.TestContext) {
   });
   writeJson(join(dataDir, "tenancy.json"), {
     version: 1,
-    users: [{ id: "usr_owner", name: "Owner" }],
-    spaces: [{ id: "spc_personal", name: "Personal", slug: "personal", createdAt: 1, isDefault: true }],
-    memberships: [{ userId: "usr_owner", spaceId: "spc_personal", role: "owner" }],
+    users: [{ id: "usr_owner", name: "Owner", createdAt: 1 }],
+    spaces: [{ id: "spc_personal", name: "Personal", slug: "personal", createdAt: 1, updatedAt: 1, isDefault: true }],
+    memberships: [{ userId: "usr_owner", spaceId: "spc_personal", role: "owner", createdAt: 1 }],
     selections: {},
   });
   writeJson(join(dataDir, "projects.json"), [

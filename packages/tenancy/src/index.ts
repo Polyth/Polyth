@@ -68,3 +68,8 @@ export {
   type MigrationStageManifest,
   type StageLegacyMigrationOptions,
 } from "./migrationStage.ts";
+export {
+  parseLegacyTenancyState,
+  loadLegacyTenancyState,
+  type LegacyTenancyIssue,
+} from "./legacyTenancy.ts";

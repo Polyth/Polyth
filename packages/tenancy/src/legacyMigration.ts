@@ -4,6 +4,7 @@ import { isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { canonicalLegacyJson, digestLegacyFile, digestLegacySidecar, readLegacyFile, type LegacyFileDigest } from "./legacyFiles.ts";
 import { parseLegacyAuthState } from "./legacyAuth.ts";
+import { parseLegacyTenancyState, type TenancyFile, type LegacyTenancyIssue } from "./legacyTenancy.ts";
 
 export const LEGACY_OWNER_ALIAS = "usr_owner";
 
@@ -326,48 +327,35 @@ export function inventoryLegacyMigration(opts: LegacyInventoryOptions): LegacyMi
 
   const spaces = new Map<string, ParsedSpace>();
   const spaceOwners = new Map<string, string>();
-  const tenancy = parseJsonSource(byKind.tenancy, root, files.tenancy, issues);
-  if (tenancy !== undefined) {
-    if (!isRecord(tenancy) || !Array.isArray(tenancy.users) || !Array.isArray(tenancy.spaces) || !Array.isArray(tenancy.memberships)) {
-      issues.push({ code: "invalid-tenancy-shape", severity: "blocking", source: "tenancy", detail: "tenancy.json does not match the legacy registry shape" });
-    } else {
-      byKind.tenancy.counts.users = tenancy.users.length;
-      byKind.tenancy.counts.spaces = tenancy.spaces.length;
-      byKind.tenancy.counts.memberships = tenancy.memberships.length;
-      for (const row of tenancy.users) if (isRecord(row) && nonEmpty(row.id)) knownUsers.add(row.id);
-      for (const row of tenancy.spaces) {
-        if (!isRecord(row) || !nonEmpty(row.id)) {
-          issues.push({ code: "invalid-space", severity: "blocking", source: "tenancy", detail: "space is missing an id" });
-          continue;
-        }
-        if (spaces.has(row.id)) {
-          issues.push({ code: "duplicate-space", severity: "blocking", source: "tenancy", resourceId: row.id, detail: "duplicate Space id" });
-          continue;
-        }
-        spaces.set(row.id, { id: row.id });
-      }
-      for (const row of tenancy.memberships) {
-        if (!isRecord(row) || !nonEmpty(row.userId) || !nonEmpty(row.spaceId) || !nonEmpty(row.role)) {
-          issues.push({ code: "invalid-membership", severity: "blocking", source: "tenancy", detail: "membership row is incomplete" });
-          continue;
-        }
-        if (!spaces.has(row.spaceId) || !knownUsers.has(row.userId)) {
-          issues.push({ code: "orphan-membership", severity: "blocking", source: "tenancy", resourceId: `${row.spaceId}:${row.userId}`, detail: "membership references an unknown user or Space" });
-          continue;
-        }
-        if (row.role === "owner") {
-          const prior = spaceOwners.get(row.spaceId);
-          if (prior && prior !== row.userId) {
-            issues.push({ code: "multiple-space-owners", severity: "review", source: "tenancy", resourceId: row.spaceId, detail: `Space has multiple owner memberships (${prior}, ${row.userId})` });
-          } else {
-            spaceOwners.set(row.spaceId, row.userId);
-          }
-          addOwnership({ resourceKind: "space", resourceId: row.spaceId, ownerUserId: row.userId, source: "tenancy", proof: "explicit-space-owner" });
-          if (row.userId === LEGACY_OWNER_ALIAS) verifiedLegacyOwner = true;
-        }
+  const tenancyRaw = parseJsonSource(byKind.tenancy, root, files.tenancy, issues);
+  let tenancy: TenancyFile | undefined;
+  if (tenancyRaw !== undefined) {
+    if (isRecord(tenancyRaw)) for (const key of ["users", "spaces", "memberships"] as const) {
+      if (Array.isArray(tenancyRaw[key])) byKind.tenancy.counts[key] = tenancyRaw[key].length;
+    }
+    try { tenancy = parseLegacyTenancyState(tenancyRaw); }
+    catch (cause) {
+      for (const issue of (cause as { issues: LegacyTenancyIssue[] }).issues) {
+        issues.push({ code: "invalid-tenancy-shape", severity: "blocking", source: "tenancy", resourceId: issue.path,
+          detail: `Unsupported legacy tenancy record: ${issue.code}` });
       }
     }
   }
+  if (tenancy) {
+    for (const user of tenancy.users) knownUsers.add(user.id);
+    for (const space of tenancy.spaces) spaces.set(space.id, { id: space.id });
+    for (const member of tenancy.memberships) if (member.role === "owner") {
+      const prior = spaceOwners.get(member.spaceId);
+      if (prior && prior !== member.userId) {
+        issues.push({ code: "multiple-space-owners", severity: "review", source: "tenancy", resourceId: member.spaceId,
+          detail: "Multiple explicit owners require a reviewed preservation mapping" });
+      } else spaceOwners.set(member.spaceId, member.userId);
+      addOwnership({ resourceKind: "space", resourceId: member.spaceId, ownerUserId: member.userId, source: "tenancy", proof: "explicit-space-owner" });
+      if (member.userId === LEGACY_OWNER_ALIAS) verifiedLegacyOwner = true;
+    }
+  }
+  const canAdoptLegacyResources = verifiedLegacyOwner && knownUsers.size === 1
+    && !issues.some(issue => (issue.source === "auth" || issue.source === "tenancy") && issue.severity === "blocking");
 
   if (verifiedLegacyOwner) {
     addAdoption({ kind: "user-alias", resourceId: LEGACY_OWNER_ALIAS, ownerUserId: LEGACY_OWNER_ALIAS, source: byKind.tenancy.present ? "tenancy" : "auth", reason: "legacy-alias" });
@@ -432,7 +420,7 @@ export function inventoryLegacyMigration(opts: LegacyInventoryOptions): LegacyMi
       }
       projectOwners.set(project.id, owner);
       addOwnership({ resourceKind: "project", resourceId: project.id, ownerUserId: owner, source: "projects", proof: "project-space-owner" });
-    } else if (verifiedLegacyOwner && knownUsers.size === 1) {
+    } else if (canAdoptLegacyResources) {
       projectOwners.set(project.id, LEGACY_OWNER_ALIAS);
       addOwnership({ resourceKind: "project", resourceId: project.id, ownerUserId: LEGACY_OWNER_ALIAS, source: "projects", proof: "verified-legacy-owner" });
       addAdoption({ kind: "project", resourceId: project.id, ownerUserId: LEGACY_OWNER_ALIAS, source: "projects", reason: "verified-legacy-owner" });
@@ -498,7 +486,7 @@ export function inventoryLegacyMigration(opts: LegacyInventoryOptions): LegacyMi
   }
   for (const profileId of sqlite.profileIds) {
     if (explicitProfileOwners.has(profileId)) continue;
-    if (verifiedLegacyOwner && knownUsers.size === 1) {
+    if (canAdoptLegacyResources) {
       addOwnership({ resourceKind: "agent-profile", resourceId: profileId, ownerUserId: LEGACY_OWNER_ALIAS, source: "profile-owners", proof: "verified-legacy-owner" });
       addAdoption({ kind: "agent-profile", resourceId: profileId, ownerUserId: LEGACY_OWNER_ALIAS, source: "profile-owners", reason: "verified-legacy-owner" });
     } else {
