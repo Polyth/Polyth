@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isAgentPackageRelevant } from "../src/projectCompositionAgentGate.ts";
+import {
+  createAgentPackageRelevanceGate,
+  isAgentPackageRelevant,
+} from "../src/projectCompositionAgentGate.ts";
 
 const fixture = () => mkdtempSync(join(tmpdir(), "polyth-agent-composition-"));
 const write = (dir: string, file: string, value: unknown) => writeFileSync(join(dir, file), JSON.stringify(value));
@@ -42,4 +45,29 @@ test("legacy, missing and malformed relevance metadata fail open", () => {
   assert.equal(isAgentPackageRelevant(dir, "broken", { projectId: "legacy" }), true);
   assert.equal(isAgentPackageRelevant(dir, "broken", { projectId: "bad" }), true);
   assert.equal(isAgentPackageRelevant(dir, "missing", { projectId: "missing" }), true);
+});
+
+test("controller gate batches one context but observes later project changes", async () => {
+  const dir = fixture();
+  const context = { projectId: "p" };
+  write(dir, "package-composition.json", {
+    finance: { projectAffinity: { directions: ["finance"] } },
+    git: { projectAffinity: { directions: ["engineering"] } },
+  });
+  write(dir, "projects.json", [
+    { id: "p", composition: { version: 1, directions: ["engineering"], packageOverrides: {} } },
+  ]);
+  const relevant = createAgentPackageRelevanceGate(dir);
+  assert.equal(relevant("git", context), true);
+  assert.equal(relevant("finance", context), false);
+
+  // A synchronous resolve batch is internally consistent even if disk changes
+  // mid-stack. The cache expires before the next microtask/turn.
+  write(dir, "projects.json", [
+    { id: "p", composition: { version: 1, directions: ["finance"], packageOverrides: {} } },
+  ]);
+  assert.equal(relevant("finance", context), false);
+  await Promise.resolve();
+  assert.equal(relevant("finance", context), true);
+  assert.equal(relevant("git", context), false);
 });
