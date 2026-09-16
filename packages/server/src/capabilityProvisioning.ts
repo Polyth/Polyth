@@ -2,7 +2,7 @@ import { dirname } from "node:path";
 import {
   createCapabilityProvisioningController as createCoreCapabilityProvisioningController,
 } from "./capabilityProvisioningCore.ts";
-import { isAgentPackageRelevant } from "./projectCompositionAgentGate.ts";
+import { createAgentPackageRelevanceGate } from "./projectCompositionAgentGate.ts";
 
 export {
   reconcilePinnedHarness,
@@ -17,12 +17,12 @@ export function createCapabilityProvisioningController(
   opts: Parameters<typeof createCoreCapabilityProvisioningController>[0],
 ): ReturnType<typeof createCoreCapabilityProvisioningController> {
   const packageAllowed = opts.contributionAllowed;
-  const dataDir = dirname(opts.file);
+  const projectRelevant = createAgentPackageRelevanceGate(dirname(opts.file));
   return createCoreCapabilityProvisioningController({
     ...opts,
     contributionAllowed: (owner, context) => {
       if (packageAllowed?.(owner, context) === false) return false;
-      return isAgentPackageRelevant(dataDir, owner, context);
+      return projectRelevant(owner, context);
     },
   });
 }
