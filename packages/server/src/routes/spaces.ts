@@ -9,11 +9,33 @@ import {
   type RouteRequest,
   type SpacesStateDto,
 } from "@polyth/contracts";
-import type { AuditSink, SpaceResolver, TenancyStore } from "@polyth/tenancy";
+import type { AuditSink, CreateSpaceInput, SpaceResolver, TenancyStore } from "@polyth/tenancy";
 import { AUDIT } from "@polyth/tenancy";
 
 const invalid = (message: string): Error =>
   Object.assign(new Error(message), { code: "invalid-input" });
+
+const IDEMPOTENCY_KEY = /^(?:[a-f0-9]{32}|[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})$/i;
+
+/** 128-bit caller-owned operation identity. Missing remains backward compatible;
+ * malformed values never silently fall back to a non-idempotent mutation. */
+function operationId(rc: Pick<RouteRequest, "req">): string | undefined {
+  const raw = rc.req.headers["idempotency-key"];
+  if (raw === undefined) return undefined;
+  if (Array.isArray(raw) || typeof raw !== "string") throw invalid("Idempotency-Key must be a single 128-bit random ID");
+  const value = raw.trim().toLowerCase();
+  if (!IDEMPOTENCY_KEY.test(value)) throw invalid("Idempotency-Key must be a 128-bit random ID");
+  return value;
+}
+
+type MutationOperation = { operationId?: string };
+type CanonicalMutationStore = TenancyStore & {
+  createSpace(input: CreateSpaceInput, operation?: MutationOperation & { maxOwnedSpaces?: number }): ReturnType<TenancyStore["createSpace"]>;
+  renameSpace(userId: string, spaceId: string, patch: Parameters<TenancyStore["renameSpace"]>[2], operation?: MutationOperation): ReturnType<TenancyStore["renameSpace"]>;
+  deleteSpace(userId: string, spaceId: string, operation?: MutationOperation): void;
+  addMember(actorId: string, spaceId: string, userId: string, role: Parameters<TenancyStore["addMember"]>[3], operation?: MutationOperation): ReturnType<TenancyStore["addMember"]>;
+  removeMember(actorId: string, spaceId: string, userId: string, operation?: MutationOperation): void;
+};
 
 export interface SpaceRoutesDeps {
   store: TenancyStore;
@@ -27,6 +49,7 @@ export interface SpaceRoutesDeps {
 
 export function spaceRoutes(deps: SpaceRoutesDeps): RouteHandler {
   const { store, resolver, audit } = deps;
+  const mutations = store as CanonicalMutationStore;
   const limit = deps.maxSpacesPerUser ?? 24;
 
   const state = (userId: string, activeSpaceId: string): SpacesStateDto => {
@@ -53,15 +76,19 @@ export function spaceRoutes(deps: SpaceRoutesDeps): RouteHandler {
     }
 
     if (path === "/api/spaces" && method === "POST") {
+      const op = operationId(rc);
       const current = state(ctx.userId, ctx.spaceId);
-      if (!current.canCreate) throw invalid(`a user may own at most ${limit} spaces`);
+      // An idempotent retry may arrive after the first create reached the
+      // ownership limit. Let the canonical receipt replay before enforcing the
+      // limit again; the store checks maxOwnedSpaces on first execution only.
+      if (!op && !current.canCreate) throw invalid(`a user may own at most ${limit} spaces`);
       const body = await rc.body();
-      const space = store.createSpace({
+      const space = mutations.createSpace({
         name: String(body.name ?? ""),
         ownerId: ctx.userId,
         ...(typeof body.color === "string" ? { color: body.color } : {}),
         ...(typeof body.icon === "string" ? { icon: body.icon } : {}),
-      });
+      }, op ? { operationId: op, maxOwnedSpaces: limit } : undefined);
       audit.record(ctx, AUDIT.spaceCreated, { resource: { kind: "space", id: space.id } });
       rc.json(200, state(ctx.userId, ctx.spaceId));
       return true;
@@ -71,11 +98,12 @@ export function spaceRoutes(deps: SpaceRoutesDeps): RouteHandler {
     if (m && method === "PATCH") {
       const spaceId = m[1]!;
       const body = await rc.body();
-      const space = store.renameSpace(ctx.userId, spaceId, {
+      const op = operationId(rc);
+      const space = mutations.renameSpace(ctx.userId, spaceId, {
         ...(body.name !== undefined ? { name: String(body.name) } : {}),
         ...(body.color !== undefined ? { color: String(body.color) } : {}),
         ...(body.icon !== undefined ? { icon: String(body.icon) } : {}),
-      });
+      }, op ? { operationId: op } : undefined);
       audit.record(ctx, AUDIT.spaceRenamed, { resource: { kind: "space", id: space.id } });
       rc.json(200, state(ctx.userId, ctx.spaceId));
       return true;
@@ -88,7 +116,8 @@ export function spaceRoutes(deps: SpaceRoutesDeps): RouteHandler {
       if (spaceId === ctx.spaceId) {
         throw invalid("switch to another space before deleting this one");
       }
-      store.deleteSpace(ctx.userId, spaceId);
+      const op = operationId(rc);
+      mutations.deleteSpace(ctx.userId, spaceId, op ? { operationId: op } : undefined);
       audit.record(ctx, AUDIT.spaceDeleted, { resource: { kind: "space", id: spaceId } });
       rc.json(200, state(ctx.userId, ctx.spaceId));
       return true;
@@ -116,7 +145,8 @@ export function spaceRoutes(deps: SpaceRoutesDeps): RouteHandler {
       const body = await rc.body();
       const role = body.role;
       if (!isSpaceRole(role)) throw invalid("role must be viewer, member, admin, or owner");
-      const membership = store.addMember(ctx.userId, m[1]!, String(body.userId ?? ""), role);
+      const op = operationId(rc);
+      const membership = mutations.addMember(ctx.userId, m[1]!, String(body.userId ?? ""), role, op ? { operationId: op } : undefined);
       audit.record(ctx, AUDIT.memberAdded, {
         resource: { kind: "space", id: m[1]! },
         detail: { userId: membership.userId, role: membership.role },
@@ -127,7 +157,8 @@ export function spaceRoutes(deps: SpaceRoutesDeps): RouteHandler {
 
     m = path.match(/^\/api\/spaces\/([^/]+)\/members\/([^/]+)$/);
     if (m && method === "DELETE") {
-      store.removeMember(ctx.userId, m[1]!, m[2]!);
+      const op = operationId(rc);
+      mutations.removeMember(ctx.userId, m[1]!, m[2]!, op ? { operationId: op } : undefined);
       audit.record(ctx, AUDIT.memberRemoved, {
         resource: { kind: "space", id: m[1]! },
         detail: { userId: m[2]! },
