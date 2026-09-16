@@ -21,3 +21,27 @@ export function selectInitialWorkbenchProfile(
       || left.profile.order - right.profile.order
       || left.profile.id.localeCompare(right.profile.id))[0]?.profile.id ?? null;
 }
+
+export interface ProjectSetupRecovery {
+  canExit: boolean;
+  canRetry: boolean;
+  exitKind: "open-anyway" | "close" | null;
+}
+
+/** Recovery after a source mutation/finalization failure.
+ *
+ * - A known project with composition not yet durable must stay in Retry so the
+ *   flow cannot silently abandon a half-configured project and create another.
+ * - Once composition is durable, opening anyway is safe if workspace seeding
+ *   fails.
+ * - If the source reported success but the shell cannot resolve a project id,
+ *   there is no safe retry target; Close is the only non-dead-end action and a
+ *   later registry refresh can reveal the already-created project. */
+export function projectSetupRecovery(
+  compositionPersisted: boolean,
+  projectKnown: boolean,
+): ProjectSetupRecovery {
+  if (compositionPersisted) return { canExit: true, canRetry: projectKnown, exitKind: "open-anyway" };
+  if (!projectKnown) return { canExit: true, canRetry: false, exitKind: "close" };
+  return { canExit: false, canRetry: true, exitKind: null };
+}
