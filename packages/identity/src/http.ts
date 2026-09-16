@@ -14,7 +14,7 @@ const cookieToken = (request: IncomingMessage, name: string): string | null => {
   const cookie = request.headers.cookie;
   if (!cookie || cookie.length > 16_384) return null;
   const matches = cookie.split(';').map(part => part.trim()).filter(part => part.startsWith(`${name}=`));
-  if (matches.length !== 1) return null; // ambiguous duplicate cookies never choose an account
+  if (matches.length !== 1) return null;
   const token = matches[0]!.slice(name.length + 1);
   return validToken(token) ? token : null;
 };
@@ -81,8 +81,6 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
   const csrfCookie = `${cookieName}_csrf`;
   const cookie = (name: string, value: string, maxAge?: number): string => `${name}=${value}; Path=/; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}${maxAge === undefined ? '' : `; Max-Age=${maxAge}`}`;
   const transport = (req: IncomingMessage): void => {
-    // An ingress adapter for a trusted TLS proxy is a separate contract; do not
-    // turn X-Forwarded-Proto into authentication transport proof here.
     if (secure ? (req.socket as typeof req.socket & { encrypted?: boolean }).encrypted !== true : (!loopback(req.socket.remoteAddress) || !loopback(req.socket.localAddress))) {
       throw controlError('insecure-transport', 'A secure identity transport is required');
     }
@@ -96,8 +94,6 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
   return {
     cookieName,
     requireHuman,
-    /** Host WS message/upgrade gates must call this and close revoked sockets.
-     * No cookies or request headers can manufacture a paired transport grant. */
     authorizeUpgrade(req: IncomingMessage) {
       transport(req); sameOrigin(req);
       if (req.url !== '/ws') throw controlError('not-found', 'WebSocket route not found');
@@ -123,8 +119,18 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
         }
         if (req.method === 'GET') {
           const actor = requireHuman(req);
-          if (path === '/api/auth/accounts') send(200, { currentAccountId: actor.userId, accounts: [identity.accounts.current(token!)] });
-          else if (path === '/api/auth/sessions') send(200, { sessions: identity.sessions.list(token!) });
+          if (path === '/api/auth/accounts') {
+            const accounts = identity.accounts.list(token!);
+            send(200, {
+              currentAccountId: actor.userId,
+              canManage: identity.accounts.canManage(token!),
+              accounts: accounts.map(account => ({
+                ...account,
+                name: account.displayName,
+                current: account.id === actor.userId,
+              })),
+            });
+          } else if (path === '/api/auth/sessions') send(200, { sessions: identity.sessions.list(token!) });
           else if (path === '/api/auth/me') send(200, identity.accounts.current(token!));
           else if (path === '/api/auth/passkeys') send(200, { passkeys: identity.passkeys.list(token!) });
           else throw controlError('not-found', 'Authentication route not found');
@@ -176,6 +182,20 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
             await identity.credentials.reauthenticate(token!, text(body, 'password'), req.socket.remoteAddress); send(200, { ok: true });
           } else if (req.method === 'POST' && path === '/api/auth/password') {
             await identity.credentials.changePassword(token!, text(body, 'password')); res.setHeader('Set-Cookie', cookie(cookieName, '', 0)); send(200, { ok: true });
+          } else if (req.method === 'POST' && path === '/api/auth/accounts') {
+            const account = await identity.accounts.createLocal(token!, {
+              login: text(body, 'login'), name: text(body, 'name'), password: text(body, 'password'),
+            });
+            send(200, { ...account, name: account.displayName, current: false });
+          } else if (req.method === 'POST' && /^\/api\/auth\/accounts\/usr_[a-f0-9-]+\/status$/.test(path)) {
+            const userId = path.slice('/api/auth/accounts/'.length, -'/status'.length);
+            const status = text(body, 'status');
+            const account = identity.accounts.setStatus(
+              token!, userId,
+              status as 'active' | 'suspended' | 'offboarding' | 'disabled',
+              Number(body.expectedRevision),
+            );
+            send(200, { ...account, name: account.displayName, current: account.id === identity.accounts.current(token!).id });
           } else if (req.method === 'POST' && path === '/api/auth/passkeys/register/options') {
             send(200, identity.passkeys.beginRegistration(token!, text(body, 'name')));
           } else if (req.method === 'POST' && path === '/api/auth/passkeys/register/complete') {
@@ -198,7 +218,6 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
           const retry = (error as { retryAfterSec?: number }).retryAfterSec;
           res.setHeader('Retry-After', Number.isSafeInteger(retry) && retry! > 0 ? retry! : 1);
         }
-        // Never send SQL/KDF/IdP error details, request data, cookies or claims.
         send(statusFor[safeCode] ?? 500, { error: safeCode });
       }
       return true;
