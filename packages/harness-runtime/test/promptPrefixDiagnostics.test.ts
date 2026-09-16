@@ -15,6 +15,7 @@ const instruction = (
   owner: string,
   name: string,
   text: string,
+  targetHarnessId?: string,
 ): AgentCapabilityDescriptor => ({
   id: `${owner}.${name}`,
   kind: "instruction",
@@ -24,7 +25,8 @@ const instruction = (
   revision: "declared-v1",
   title: name,
   text,
-});
+  ...(targetHarnessId ? { targetHarnessId } : {}),
+} as AgentCapabilityDescriptor);
 
 function resolved(order: Array<[string, AgentCapabilityDescriptor]>, ctx = context) {
   const registry = createCapabilityContributionRegistry();
@@ -36,11 +38,12 @@ test("prompt prefix identity is stable across registration ordering and registry
   const alpha = instruction("alpha", "policy", "Use the project policy.");
   const beta = instruction("beta", "review", "Review before editing.");
 
-  const first = promptPrefixDiagnostics(resolved([["beta", beta], ["alpha", alpha]]));
-  const second = promptPrefixDiagnostics(resolved([["alpha", alpha], ["beta", beta]]));
+  const first = promptPrefixDiagnostics(resolved([["beta", beta], ["alpha", alpha]]), "codex");
+  const second = promptPrefixDiagnostics(resolved([["alpha", alpha], ["beta", beta]]), "codex");
 
   assert.equal(first.identity, second.identity);
   assert.equal(first.bundleRevision, second.bundleRevision);
+  assert.equal(first.harnessId, "codex");
   assert.deepEqual(first.contributors.map((item) => item.id), ["alpha.policy", "beta.review"]);
   assert.equal(first.contributorCount, 2);
   assert.equal(first.coverage, "polyth-capability-prefix");
@@ -49,10 +52,10 @@ test("prompt prefix identity is stable across registration ordering and registry
 test("semantic capability changes rotate prefix identity even without declared revision bump", () => {
   const before = promptPrefixDiagnostics(resolved([
     ["alpha", instruction("alpha", "policy", "Use policy A.")],
-  ]));
+  ]), "codex");
   const after = promptPrefixDiagnostics(resolved([
     ["alpha", instruction("alpha", "policy", "Use policy B.")],
-  ]));
+  ]), "codex");
 
   assert.notEqual(before.contributors[0]?.revision, after.contributors[0]?.revision);
   assert.notEqual(before.bundleRevision, after.bundleRevision);
@@ -61,22 +64,57 @@ test("semantic capability changes rotate prefix identity even without declared r
 
 test("volatile session and cwd metadata do not perturb a project prefix", () => {
   const descriptor = instruction("alpha", "policy", "Use the stable project policy.");
-  const one = promptPrefixDiagnostics(resolved([["alpha", descriptor]], context));
+  const one = promptPrefixDiagnostics(resolved([["alpha", descriptor]], context), "codex");
   const two = promptPrefixDiagnostics(resolved([["alpha", descriptor]], {
     ...context,
     sessionId: "session-b",
     cwd: "/different/worktree/path",
-  }));
+  }), "codex");
 
   assert.equal(one.identity, two.identity);
   assert.equal(one.bundleRevision, two.bundleRevision);
+});
+
+test("harness-targeted prompts rotate only the target harness prefix", () => {
+  const common = instruction("alpha", "policy", "Common project policy.");
+  const claudeA = instruction("harness-runtime", "system-prompt-claude", "Claude A", "claude");
+  const claudeB = instruction("harness-runtime", "system-prompt-claude", "Claude B", "claude");
+  const codex = instruction("harness-runtime", "system-prompt-codex", "Codex only", "codex");
+
+  const before = resolved([
+    ["alpha", common],
+    ["harness-runtime-a", claudeA],
+    ["harness-runtime-b", codex],
+  ]);
+  const after = resolved([
+    ["alpha", common],
+    ["harness-runtime-a", claudeB],
+    ["harness-runtime-b", codex],
+  ]);
+
+  const codexBefore = promptPrefixDiagnostics(before, "codex");
+  const codexAfter = promptPrefixDiagnostics(after, "codex");
+  const claudeBefore = promptPrefixDiagnostics(before, "claude");
+  const claudeAfter = promptPrefixDiagnostics(after, "claude");
+
+  assert.equal(codexBefore.identity, codexAfter.identity);
+  assert.equal(codexBefore.bundleRevision, codexAfter.bundleRevision);
+  assert.notEqual(claudeBefore.identity, claudeAfter.identity);
+  assert.deepEqual(codexBefore.contributors.map((item) => item.id), [
+    "alpha.policy",
+    "harness-runtime.system-prompt-codex",
+  ]);
+  assert.deepEqual(claudeBefore.contributors.map((item) => item.id), [
+    "alpha.policy",
+    "harness-runtime.system-prompt-claude",
+  ]);
 });
 
 test("diagnostics expose contributor identity/revisions but never prompt content", () => {
   const secretLookingText = "Never surface this instruction body: token=abc123";
   const result = promptPrefixDiagnostics(resolved([
     ["alpha", instruction("alpha", "policy", secretLookingText)],
-  ]));
+  ]), "codex");
   const serialized = JSON.stringify(result);
 
   assert.doesNotMatch(serialized, /Never surface/);
