@@ -31,16 +31,15 @@ export interface PromptPrefixDiagnostics {
 export function promptPrefixDiagnostics(
   descriptors: readonly AgentCapabilityDescriptor[],
 ): PromptPrefixDiagnostics {
-  const contributors = descriptors
-    .map((descriptor): PromptPrefixContributorDiagnostic => ({
-      id: descriptor.id,
-      kind: descriptor.kind,
-      owner: descriptor.owner,
-      scope: descriptor.scope,
-      revision: descriptor.revision,
-    }))
-    .sort((left, right) => left.id.localeCompare(right.id));
-  const bundleRevision = desiredBundleRevision(contributors as AgentCapabilityDescriptor[]);
+  const ordered = [...descriptors].sort((left, right) => left.id.localeCompare(right.id));
+  const bundleRevision = desiredBundleRevision(ordered);
+  const contributors = ordered.map((descriptor): PromptPrefixContributorDiagnostic => ({
+    id: descriptor.id,
+    kind: descriptor.kind,
+    owner: descriptor.owner,
+    scope: descriptor.scope,
+    revision: descriptor.revision,
+  }));
   return {
     version: 1,
     coverage: "polyth-capability-prefix",
