@@ -3,6 +3,7 @@
 // composed here so they cannot accidentally fall through to legacy routes.
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { UNTRUSTED_INGRESS_HEADERS, type RequestIngress } from "./auth.ts";
+import { canonicalSecurity } from "./runtimeSecurity.ts";
 import {
   createHttpHandler as createCoreHttpHandler,
   createPublicHttpServer,
@@ -55,7 +56,9 @@ const authPath = (req: IncomingMessage): string | null => {
 };
 
 export function createHttpHandler(deps: HttpDeps): HttpHandler {
-  const { identityHttp, ...coreDeps } = deps;
+  const boundIdentity = canonicalSecurity()?.http;
+  const identityHttp = deps.identityHttp ?? boundIdentity;
+  const { identityHttp: _explicitIdentityHttp, ...coreDeps } = deps;
   const core = createCoreHttpHandler(coreDeps);
   if (!identityHttp) return core;
 
