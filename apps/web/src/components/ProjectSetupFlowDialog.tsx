@@ -8,6 +8,7 @@ import { Button } from "./ui/index.ts";
 import { getState } from "../store.ts";
 import { updateProjectAppearance } from "../init.ts";
 import { tr } from "../i18n/index.ts";
+import { projectSetupRecovery } from "../projectCompositionPlan.ts";
 import { seedInitialProjectWorkspace } from "../projectCompositionSeed.ts";
 import "./ProjectSetupFlowDialog.css";
 
@@ -59,9 +60,8 @@ export default function ProjectSetupFlowDialog({ onClose }: { onClose: () => voi
     const active = state.projectRegistry.projects.find((item) => item.id === state.activeProjectId) ?? null;
     if (!active) {
       // The source has already completed its mutation but the shell cannot yet
-      // resolve the authoritative project. Do not trap the user in a modal with
-      // no retry target: closing is safe and lets the normal registry refresh
-      // recover the already-created project without issuing another mutation.
+      // resolve the authoritative project. Closing is safe: a later registry
+      // refresh can reveal the already-created project without another write.
       setProject(null);
       setError(tr("projectcomposition.createdNotResolved"));
       setStage("error");
@@ -96,13 +96,13 @@ export default function ProjectSetupFlowDialog({ onClose }: { onClose: () => voi
   }
 
   if (stage === "error") {
-    const canExit = compositionPersisted || project === null;
+    const recovery = projectSetupRecovery(compositionPersisted, project !== null);
     return (
-      <Dialog title={tr("projectcomposition.finishSetup")} onClose={canExit ? cancel : () => {}} size="sm" className="project-setup-flow-dialog">
+      <Dialog title={tr("projectcomposition.finishSetup")} onClose={recovery.canExit ? cancel : () => {}} size="sm" className="project-setup-flow-dialog">
         <div className="project-setup-error" role="alert">{error || tr("projectcomposition.setupFailed")}</div>
         <div className="project-setup-actions">
-          {canExit && <Button variant="ghost" onClick={cancel}>{compositionPersisted ? tr("projectcomposition.openAnyway") : tr("common.close")}</Button>}
-          {project && <Button variant="primary" onClick={() => void finish(project)}>{tr("common.retry")}</Button>}
+          {recovery.exitKind && <Button variant="ghost" onClick={cancel}>{recovery.exitKind === "open-anyway" ? tr("projectcomposition.openAnyway") : tr("common.close")}</Button>}
+          {recovery.canRetry && project && <Button variant="primary" onClick={() => void finish(project)}>{tr("common.retry")}</Button>}
         </div>
       </Dialog>
     );
