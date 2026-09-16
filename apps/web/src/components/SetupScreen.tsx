@@ -10,7 +10,7 @@ const errorMessage = (body: Record<string, unknown>, status: number): string =>
       ? body.error.replace(/-/g, " ")
       : `HTTP ${status}`;
 
-export default function SetupScreen() {
+export default function SetupScreen({ restartRequired = false }: { restartRequired?: boolean }) {
   const [claimToken, setClaimToken] = useState("");
   const [recoverySetId, setRecoverySetId] = useState("");
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
@@ -72,14 +72,14 @@ export default function SetupScreen() {
     } finally { setBusy(false); }
   };
 
-  if (complete) return (
+  if (complete || restartRequired) return (
     <div className="lock-screen">
       <div className="lock-card">
         <img className="welcome-mark" src="/icon-192.png" alt="" aria-hidden="true" />
         <h1>Polyth is ready</h1>
         <p className="lock-hint">The canonical owner account and recovery credentials are committed.</p>
-        <p className="lock-hint">Restart Polyth once to start the full workspace runtime.</p>
-        <Button variant="primary" onClick={() => location.reload()}>Check again</Button>
+        <p className="lock-hint">Restart the Polyth server once to start the full workspace runtime.</p>
+        <Button variant="primary" onClick={() => location.reload()}>Check after restart</Button>
       </div>
     </div>
   );
