@@ -64,7 +64,7 @@ export default function HarnessSystemPrompt({ harnessId }: { harnessId: string }
           <span>Additional instructions used only by this harness, after Polyth&apos;s global behavior.</span>
         </div>
       </div>
-      {error ? <Notice tone="danger">{error}</Notice> : null}
+      {error ? <Notice tone="error">{error}</Notice> : null}
       {notice ? <Notice tone="success">{notice}</Notice> : null}
       <label htmlFor={fieldId}>Additional system prompt</label>
       <Textarea
@@ -79,7 +79,7 @@ export default function HarnessSystemPrompt({ harnessId }: { harnessId: string }
         disabled={loading || busy}
         spellCheck
       />
-      <div className="settings-actions">
+      <div className="pkg-harnesses-settings-actions">
         <span>{value.length.toLocaleString()} / {MAX_SYSTEM_PROMPT.toLocaleString()}</span>
         <Button onClick={() => void save()} disabled={loading || busy || value === saved}>
           {busy ? "Saving…" : "Save"}
