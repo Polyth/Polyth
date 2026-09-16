@@ -79,6 +79,20 @@ test("diagnostic facts use the conceptual runtime inspector fields", () => {
         restored: false,
       },
     },
+    promptPrefix: {
+      version: 1,
+      coverage: "polyth-capability-prefix",
+      identity: "prefix-abc",
+      bundleRevision: "bundle-def",
+      contributorCount: 1,
+      contributors: [{
+        id: "example.policy",
+        kind: "instruction",
+        owner: "example",
+        scope: "project",
+        revision: "semantic-123",
+      }],
+    },
   });
   const byLabel = Object.fromEntries(facts.map((fact) => [fact.label, fact.value]));
   assert.equal(byLabel.Engine, "OpenCode");
@@ -89,6 +103,10 @@ test("diagnostic facts use the conceptual runtime inspector fields", () => {
   assert.equal(byLabel["Unknown operations"], "1");
   assert.equal(byLabel["Omitted messages"], "2");
   assert.equal(byLabel["Capped sections"], "dialogue");
+  assert.equal(byLabel["Prompt prefix"], "prefix-abc");
+  assert.equal(byLabel["Capability bundle"], "bundle-def");
+  assert.equal(byLabel["Prefix contributors"], "1");
+  assert.equal(byLabel["Prefix · example.policy"], "instruction · semantic-123");
   const blob = JSON.stringify(facts);
   assert.equal(blob.includes("owned:raw-authority-should-not-appear"), false);
   assert.equal(blob.includes("SECRET_PROMPT"), false);
@@ -100,6 +118,7 @@ test("runtime recovery banner discloses technical details without App.tsx", asyn
   assert.match(banner, /runtimeRecovery\.technicalDetails/);
   assert.match(banner, /runtime-recovery-details/);
   assert.match(banner, /api\.sessionDebug/);
+  assert.match(banner, /fetchPromptPrefixDiagnostics/);
   assert.match(banner, /uncertainRecoveryWarning/);
   assert.doesNotMatch(banner, /runtimeRecovery\.keepBlocked/);
   assert.match(banner, /runtimeRecovery\.leaveBlocked/);
