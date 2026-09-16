@@ -7,7 +7,8 @@
 // Canonical API is ingress-aware `resolve()`. Loopback optional never applies
 // to Polyth Link ingress, even when the tunnel physically connects via 127.0.0.1.
 import { randomBytes, scryptSync, timingSafeEqual, createHash } from "node:crypto";
-import { readFileSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
+import { loadAuthState, type StoredSession } from "./authState.ts";
 import { dirname } from "node:path";
 import { atomicWriteSync } from "@polyth/plugins";
 import type {
@@ -192,28 +193,6 @@ export const UNTRUSTED_INGRESS_HEADERS = [
   "x-polyth-link-device",
 ] as const;
 
-interface StoredCredential {
-  userId: string;
-  passwordHash: string;
-}
-
-interface StoredSession {
-  id: string;
-  userId: string;
-  tokenHash: string;
-  createdAt: number;
-  lastSeenAt: number;
-  label: string;
-}
-
-interface AuthFile {
-  version: number;
-  /** Legacy bootstrap-owner hash. Kept readable for backwards compatibility. */
-  passwordHash: string | null;
-  credentials: StoredCredential[];
-  sessions: StoredSession[];
-}
-
 type IdentifiedPrincipal = AuthPrincipal & { userId?: string };
 
 export const isLoopbackAddress = (addr: string | undefined): boolean =>
@@ -296,38 +275,7 @@ export function createAuthService(opts: AuthServiceOptions): AuthService {
   const localUser = { kind: "local-user", trustedLoopback: true, userId: ownerUserId } as AuthPrincipal;
   let pairedResolver: PairedDeviceResolver | undefined = opts.resolvePairedDevice;
 
-  let stored: AuthFile = { version: 2, passwordHash: null, credentials: [], sessions: [] };
-  let adoptedLegacySessions = false;
-  try {
-    const raw = JSON.parse(readFileSync(opts.file, "utf8")) as Partial<AuthFile> & {
-      sessions?: Array<Partial<StoredSession>>;
-    };
-    stored = {
-      version: 2,
-      passwordHash: typeof raw.passwordHash === "string" ? raw.passwordHash : null,
-      credentials: Array.isArray(raw.credentials)
-        ? raw.credentials.filter((credential): credential is StoredCredential =>
-            !!credential && typeof credential.userId === "string" && typeof credential.passwordHash === "string")
-        : [],
-      sessions: Array.isArray(raw.sessions)
-        ? raw.sessions.filter((session) =>
-            !!session && typeof session.id === "string" && typeof session.tokenHash === "string"
-            && typeof session.createdAt === "number" && typeof session.lastSeenAt === "number")
-            .map((session) => {
-              const userId = typeof session.userId === "string" && session.userId ? session.userId : ownerUserId;
-              if (session.userId !== userId) adoptedLegacySessions = true;
-              return {
-                id: session.id!,
-                userId,
-                tokenHash: session.tokenHash!,
-                createdAt: session.createdAt!,
-                lastSeenAt: session.lastSeenAt!,
-                label: typeof session.label === "string" ? session.label : "",
-              };
-            })
-        : [],
-    };
-  } catch { /* first boot or unreadable — start clean */ }
+  const { stored, adoptedLegacySessions } = loadAuthState(opts.file, ownerUserId);
 
   // Env password wins for the bootstrap owner but is never written to disk:
   // removing the variable returns to the stored owner hash/credential.

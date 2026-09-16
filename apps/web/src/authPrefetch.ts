@@ -2,6 +2,7 @@
 // while the authenticated account namespace is restored before the app graph
 // evaluates account-scoped browser preferences.
 import type { AuthStatusDto } from "@polyth/session/web-api";
+import { validateAuthStatus } from "./authBootstrap.ts";
 import { setActiveBrowserAccount } from "./accountStorage.ts";
 
 let inflight: Promise<AuthStatusDto> | null = null;
@@ -22,20 +23,18 @@ export function prefetchAuthStatus(): Promise<AuthStatusDto> {
   if (inflight) return inflight;
   inflight = fetch("/api/auth/status").then(async (res) => {
     if (!res.ok) throw new Error(`auth status: HTTP ${res.status}`);
-    const status = await res.json() as AuthStatusDto;
+    const status = validateAuthStatus(await res.json());
     if (status.authorized) {
       // Account listing is protected; anonymous auth status never reveals
       // which users exist on the server. A remembered cookie can safely use
       // this endpoint to restore the browser-local account namespace.
-      await fetch("/api/auth/accounts")
-        .then(async (accountsResponse) => {
-          if (!accountsResponse.ok) return;
-          const state = await accountsResponse.json() as { currentAccountId?: unknown };
-          if (typeof state.currentAccountId === "string" && state.currentAccountId) {
-            acceptAuthenticatedBrowserAccount(state.currentAccountId);
-          }
-        })
-        .catch(() => undefined);
+      const accountsResponse = await fetch("/api/auth/accounts");
+      if (!accountsResponse.ok) throw new Error("Authenticated account scope is unavailable");
+      const state = await accountsResponse.json() as { currentAccountId?: unknown };
+      if (typeof state.currentAccountId !== "string" || !state.currentAccountId.trim()) {
+        throw new Error("Authenticated account scope is missing");
+      }
+      acceptAuthenticatedBrowserAccount(state.currentAccountId);
     }
     return status;
   });

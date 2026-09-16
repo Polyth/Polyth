@@ -23,11 +23,9 @@ export function deploymentProfileFromEnv(
   env: Record<string, string | undefined> = process.env,
 ): DeploymentProfile {
   const raw = env.POLYTH_DEPLOYMENT_PROFILE;
+  if (raw === undefined) return "local-trusted";
   if (isDeploymentProfile(raw)) return raw;
-  if (raw) {
-    console.warn(`[polyth] unknown POLYTH_DEPLOYMENT_PROFILE=${raw}; falling back to local-trusted`);
-  }
-  return "local-trusted";
+  throw error("invalid-deployment-profile", "POLYTH_DEPLOYMENT_PROFILE must name a supported deployment profile");
 }
 
 /** Durable identity behind one authenticated request channel. */

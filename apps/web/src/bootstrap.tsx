@@ -1,6 +1,9 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { api } from "@polyth/session/web-api";
+import { authBootstrapPhase } from "./authBootstrap.ts";
+import { Button } from "./components/ui/index.ts";
+import { tr } from "./i18n/index.ts";
 import { consumeAuthPrefetch } from "./authPrefetch.ts";
 import { init, navigateBackInApp, openNativeAppPath, setSyncForeground } from "./init.ts";
 import { flushClientPersistence } from "./clientPersistence.ts";
@@ -105,7 +108,7 @@ installNativeConnectionCommands();
 installCommandSlotBridge();
 
 // F16: init() loads REST data and opens /ws — it must not run until the
-// server says this device is authorized (or that no password is set).
+// server explicitly authorizes this device. A missing password is not permission.
 let booted = false;
 const bootOnce = (): void => {
   if (booted) return;
@@ -116,27 +119,31 @@ const bootOnce = (): void => {
 };
 
 function Root() {
-  const [phase, setPhase] = useState<"checking" | "locked" | "ready">("checking");
+  const [phase, setPhase] = useState<"checking" | "locked" | "ready" | "unavailable">("checking");
   const locale = useSyncExternalStore(subscribeLocale, getLocaleSnapshot, getLocaleSnapshot);
 
   useEffect(() => {
     let cancelled = false;
+    let invalidated = false;
     // main.tsx started this fetch before the app graph downloaded; falling
     // back to a fresh call covers re-mounts (locale switches remount Root).
     void (consumeAuthPrefetch() ?? api.authStatus())
       .then(async (s) => {
         // Account restoration above must finish before the trusted native
         // connection namespace selects its app-owned persistence backend.
-        if (!s.required || s.authorized) {
+        if (cancelled || invalidated) return;
+        const nextPhase = authBootstrapPhase(s);
+        if (nextPhase === "ready") {
           await initializeClientReliabilityContext();
+          if (cancelled || invalidated) return;
           await reconcileNativePushForeground(true).catch(() => undefined);
         }
-        if (!cancelled) setPhase(s.required && !s.authorized ? "locked" : "ready");
+        if (!cancelled && !invalidated) setPhase(nextPhase);
       })
-      // Status unreachable → proceed; init()'s own error banner reports it.
-      .catch(() => { if (!cancelled) setPhase("ready"); });
+      // No verified authority means no package activation, private UI or WS boot.
+      .catch(() => { if (!cancelled && !invalidated) setPhase("unavailable"); });
     // Mid-session 401 (session revoked / password newly set) re-locks the UI.
-    const onAuthRequired = () => setPhase("locked");
+    const onAuthRequired = () => { invalidated = true; setPhase("locked"); };
     window.addEventListener("polyth:auth-required", onAuthRequired);
     return () => {
       cancelled = true;
@@ -155,16 +162,19 @@ function Root() {
   useEffect(() => { if (phase === "ready") bootOnce(); }, [phase]);
 
   if (phase === "checking") return null;
+  if (phase === "unavailable") return (
+    <div className="lock-screen">
+      <div className="lock-card">
+        <h1>{tr("lockscreen.polythIsLocked")}</h1>
+        <p className="lock-hint" role="status">{tr("lockscreen.couldnTReachTheServer")}</p>
+        <Button onClick={() => location.reload()}>{tr("common.retry")}</Button>
+      </div>
+    </div>
+  );
   if (phase === "locked") {
     // After a mid-session revoke the store/WS state is stale — reload for a
-    // clean slate; on the initial lock just proceed into the normal boot.
-    return <LockScreen key={locale} onUnlocked={() => {
-      if (booted) {
-        location.reload();
-        return;
-      }
-      void initializeClientReliabilityContext().then(() => setPhase("ready"));
-    }} />;
+    // clean slate. Initial login also revalidates the cookie and account namespace.
+    return <LockScreen key={locale} onUnlocked={() => location.reload()} />;
   }
   return <App key={locale} />;
 }
