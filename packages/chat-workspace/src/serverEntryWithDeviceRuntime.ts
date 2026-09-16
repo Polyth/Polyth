@@ -78,6 +78,9 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   const waitingForDesktop = async (
     request: Parameters<NonNullable<ServerPackage["routes"]>>[0],
   ): Promise<boolean> => {
+    // Contributed routes see every request, so the gate must never answer for
+    // another package's path (e.g. `/api/worktrees?projectId=…`).
+    if (!request.path.startsWith("/api/chat-workspace/")) return false;
     const projectId = projectIdFor(request);
     if (!projectId) return false;
     const storage = host.spaceStorage(request.space);
