@@ -4,4 +4,5 @@ import { securityMigration } from './securityMigration.ts';
 import { passkeyMigration } from './passkeyMigration.ts';
 import { providerMigration } from './providerMigration.ts';
 import { providerLinkMigration } from './providerLinkMigration.ts';
-export const migrations = [...v1, securityMigration, passkeyMigration, providerMigration, providerLinkMigration];
+import { domainMigration } from './domainMigration.ts';
+export const migrations = [...v1, securityMigration, passkeyMigration, providerMigration, providerLinkMigration, domainMigration];
