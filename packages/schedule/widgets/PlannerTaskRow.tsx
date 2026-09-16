@@ -23,8 +23,25 @@ import {
   deletePlannerTask,
   duplicatePlannerTask,
   pausePlannerTask,
+  reviewLoopVersion,
   runPlannerTask,
 } from "./plannerTaskActions.ts";
+
+type LoopTrustView = ScheduleTaskDto & {
+  sourcePath?: string;
+  sourceDigest?: string;
+  trustState?: "untrusted" | "trusted-current-version" | "changed-since-trust";
+  trustReceipt?: { contentDigest: string; approvedAt: number };
+  pendingVersion?: { changedFields: string[]; observedAt: number };
+  rejectedSourceDigest?: string;
+};
+
+function repositorySourceLabel(path: string | undefined): string {
+  if (!path) return ".agents/loops";
+  const normalized = path.replace(/\\/g, "/");
+  const marker = normalized.lastIndexOf("/.agents/");
+  return marker >= 0 ? normalized.slice(marker + 1) : normalized.split("/").at(-1) ?? path;
+}
 
 function PlannerTaskRow({
   task,
@@ -44,6 +61,11 @@ function PlannerTaskRow({
   onChanged: () => void;
 }) {
   const loopFile = isLoopFile(task);
+  const loopTask = task as LoopTrustView;
+  const trustPending = loopFile && loopTask.trustState !== "trusted-current-version";
+  const explicitlyBlocked = trustPending
+    && !!loopTask.sourceDigest
+    && loopTask.rejectedSourceDigest === loopTask.sourceDigest;
   const [enabled, setEnabled] = useState(task.enabled);
   useEffect(() => { setEnabled(task.enabled); }, [task.enabled, task.id]);
 
@@ -63,14 +85,30 @@ function PlannerTaskRow({
     else onChanged();
   };
 
+  const review = (action: "trust-current" | "run-once" | "reject") => {
+    void reviewLoopVersion(task.id, action).then((ok) => { if (ok) onChanged(); });
+  };
+
+  const trustEntries: MenuEntry[] = trustPending
+    ? [
+        { id: "trust-current", label: "Trust this version", icon: PlayIcon, onSelect: () => review("trust-current") },
+        { id: "run-once", label: "Run this version once", icon: PlayIcon, onSelect: () => review("run-once") },
+        { id: "reject-version", label: "Keep blocked", icon: PauseIcon, onSelect: () => review("reject") },
+        "separator",
+      ]
+    : [];
+
   const entries: MenuEntry[] = [
-    { id: "run", label: tr("scheduleview.runNow"), icon: PlayIcon, onSelect: () => void runPlannerTask(task.id).then((ok) => { if (ok) onChanged(); }) },
+    ...trustEntries,
+    ...(!trustPending
+      ? [{ id: "run", label: tr("scheduleview.runNow"), icon: PlayIcon, onSelect: () => void runPlannerTask(task.id).then((ok) => { if (ok) onChanged(); }) } satisfies MenuEntry]
+      : []),
     { id: "edit", label: tr("common.edit"), icon: EditIcon, onSelect: onEdit },
     { id: "runs", label: tr("scheduleview.viewRuns"), onSelect: onViewRuns },
     ...(!loopFile
       ? [{ id: "duplicate", label: tr("scheduleview.duplicate"), icon: CopyIcon, onSelect: () => void duplicatePlannerTask(task).then((ok) => { if (ok) onChanged(); }) } satisfies MenuEntry]
       : []),
-    ...(!completed
+    ...(!completed && !trustPending
       ? [{
           id: "toggle",
           label: enabled ? tr("common.pause") : tr("scheduleview.activate"),
@@ -86,6 +124,10 @@ function PlannerTaskRow({
       : []),
   ];
 
+  const oldDigest = loopTask.trustReceipt?.contentDigest;
+  const newDigest = loopTask.sourceDigest;
+  const changedFields = loopTask.pendingVersion?.changedFields ?? [];
+
   return (
     <div className={`planner-task${enabled ? "" : " is-paused"}${completed ? " is-completed" : ""}`}>
       <span className="planner-task-time">{timeLabel}</span>
@@ -95,6 +137,9 @@ function PlannerTaskRow({
             <span title={tr("scheduleview.managedByLoopFile")}>
               <Badge tone="accent">{tr("scheduleview.loop")}</Badge>
             </span>
+          )}
+          {trustPending && (
+            <Badge tone="accent">{explicitlyBlocked ? "Blocked" : "Review required"}</Badge>
           )}
           {title}
         </span>
@@ -110,11 +155,21 @@ function PlannerTaskRow({
             {summary}
           </span>
         </span>
+        {trustPending && (
+          <span
+            className="planner-task-error"
+            title={loopTask.sourcePath}
+          >
+            {repositorySourceLabel(loopTask.sourcePath)}
+            {oldDigest && newDigest ? ` · ${oldDigest.slice(0, 8)} → ${newDigest.slice(0, 8)}` : newDigest ? ` · ${newDigest.slice(0, 8)}` : ""}
+            {changedFields.length ? ` · ${changedFields.join(", ")}` : ""}
+          </span>
+        )}
         {task.parseError && <span className="planner-task-error">{task.parseError}</span>}
         {task.lastError && <span className="planner-task-error">{tr("scheduleview.lastRunFailed")} {task.lastError}</span>}
       </button>
       <div className="planner-task-tools">
-        {showActiveSwitch && (
+        {showActiveSwitch && !trustPending && (
           <Switch
             checked={enabled}
             onChange={(next) => void toggle(next)}

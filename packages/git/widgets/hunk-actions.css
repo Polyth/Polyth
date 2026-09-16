@@ -1,0 +1,22 @@
+.hunk-action-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.hunk-action-btn {
+  margin-block: -4px;
+  opacity: 0;
+}
+
+.diff-hunk:hover .hunk-action-btn,
+.hunk-action-btn:focus-visible {
+  opacity: 1;
+}
+
+@media (pointer: coarse) {
+  .hunk-action-btn {
+    opacity: 1;
+  }
+}

@@ -8,8 +8,14 @@
 // and reconciliation of Markdown-managed loops from .agents/loops.
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
 import { atomicWriteSync } from "@polyth/plugins";
-import { randomUUID } from "node:crypto";
+import {
+  contentTrustMatches,
+  issueContentTrustReceipt,
+  type ContentTrustReceipt,
+  type ContentTrustSubject,
+} from "@polyth/permissions";
 import { describeCron, nextRun, nextRuns, validateCron } from "./cron.ts";
 import type { LoopFileResult } from "./loops.ts";
 
@@ -31,6 +37,17 @@ export interface ScheduleTarget {
 }
 
 export type OverlapPolicy = "skip" | "queue" | "parallel";
+export type LoopTrustState = "untrusted" | "trusted-current-version" | "changed-since-trust";
+
+/** Visible metadata for repository content awaiting a trust decision. The
+ * unapproved executable prompt is intentionally not duplicated into this
+ * record; approval re-reads the repository and validates this digest. */
+export interface PendingLoopVersion {
+  sourceDigest: string;
+  semanticDigest: string;
+  changedFields: string[];
+  observedAt: number;
+}
 
 export interface ScheduleRunRecord {
   runId: string;
@@ -69,12 +86,19 @@ export interface ScheduleTask {
   /** Managed-loop provenance (WP10 §3). UI-created tasks are "ui". */
   source?: "ui" | "loop-file";
   sourcePath?: string;
+  /** Current observed repository digest, whether trusted or not. */
   sourceDigest?: string;
   parseError?: string;
   loopId?: string;
   /** Pause on a file-managed task overrides the file's enabled flag locally. */
   enabledOverride?: boolean;
   agentProfile?: string;
+  /** Authorization for the exact executable snapshot currently stored in
+   * prompt/cadence/title/agentProfile. */
+  trustReceipt?: ContentTrustReceipt;
+  trustState?: LoopTrustState;
+  pendingVersion?: PendingLoopVersion;
+  rejectedSourceDigest?: string;
 }
 
 export interface ScheduleTaskInput {
@@ -144,6 +168,12 @@ export interface ScheduleService {
   /** Reconcile .agents/loops scan results with managed tasks. An explicit
    *  (user-requested) rescan clears dismissals so fresh diagnostics show. */
   syncLoops(projectId: string, scan: LoopFileResult[], opts?: { explicit?: boolean }): { tasks: ScheduleTask[]; errors: Array<{ path: string; error: string }> };
+  /** Promote exactly the current repository version to executable state. */
+  trustLoopVersion(id: string, spaceId: string, file: LoopFileResult): ScheduleTask;
+  /** Execute exactly the current version once without granting persistent trust. */
+  runLoopVersionOnce(id: string, spaceId: string, file: LoopFileResult): Promise<ScheduleTask>;
+  /** Record an explicit decision to keep this version blocked. */
+  rejectLoopVersion(id: string): ScheduleTask;
   /** Visible (non-dismissed) persisted scan diagnostics. */
   loopErrors(projectId?: string): Array<{ path: string; error: string }>;
   /** Hide one diagnostic until its error text changes on a later scan. */
@@ -199,6 +229,85 @@ function mirrorCadence(t: ScheduleTask): void {
   if (t.cadence.kind === "every") t.everyMinutes = t.cadence.everyMinutes;
 }
 
+const loopExecutableShape = (loop: NonNullable<LoopFileResult["loop"]>) => ({
+  title: loop.title,
+  cadence: { kind: "cron" as const, expression: loop.cron, timeZone: loop.timeZone },
+  enabled: loop.enabled,
+  agentProfile: loop.agentProfile ?? null,
+  prompt: loop.prompt,
+});
+
+export function loopSemanticDigest(loop: NonNullable<LoopFileResult["loop"]>): string {
+  return createHash("sha256").update(JSON.stringify(loopExecutableShape(loop))).digest("hex");
+}
+
+function applyLoopExecutable(task: ScheduleTask, loop: NonNullable<LoopFileResult["loop"]>): void {
+  task.prompt = loop.prompt;
+  task.cadence = { kind: "cron", expression: loop.cron, timeZone: loop.timeZone };
+  task.title = loop.title;
+  if (loop.agentProfile) task.agentProfile = loop.agentProfile;
+  else delete task.agentProfile;
+  mirrorCadence(task);
+}
+
+function changedLoopFields(
+  task: ScheduleTask,
+  loop: NonNullable<LoopFileResult["loop"]>,
+  sourcePath: string,
+): string[] {
+  const fields: string[] = [];
+  if (task.sourcePath && task.sourcePath !== sourcePath) fields.push("sourcePath");
+  if (task.prompt !== loop.prompt) fields.push("prompt");
+  if (task.title !== loop.title) fields.push("title");
+  if (task.cadence.kind !== "cron"
+    || task.cadence.expression !== loop.cron
+    || task.cadence.timeZone !== loop.timeZone) fields.push("schedule");
+  if ((task.agentProfile ?? "") !== (loop.agentProfile ?? "")) fields.push("agentProfile");
+  return fields;
+}
+
+function trustSubject(task: Pick<ScheduleTask, "projectId">, file: LoopFileResult, spaceId: string): ContentTrustSubject {
+  if (!file.loop || !file.digest) throw err("loop version is not executable", "content-trust-changed");
+  return {
+    spaceId,
+    projectId: task.projectId,
+    sourceKind: "agents-loop",
+    sourceIdentity: file.path,
+    contentDigest: file.digest,
+    semanticDigest: loopSemanticDigest(file.loop),
+  };
+}
+
+/** Final dispatch-time guard. Git status/diffs are deliberately irrelevant:
+ * external edits, pulls, checkouts, merges and rebases all reduce to the bytes
+ * currently on disk and therefore the content/semantic digests below. */
+export function assertLoopExecutionTrusted(
+  task: ScheduleTask,
+  file: LoopFileResult | undefined,
+  spaceId: string,
+): void {
+  if (task.source !== "loop-file") return;
+  if (!file?.loop || !task.sourcePath || file.path !== task.sourcePath || file.digest !== task.sourceDigest) {
+    throw err("Loop content changed since approval. Refresh and review the current version.", "content-trust-changed");
+  }
+  if (!contentTrustMatches(task.trustReceipt, trustSubject(task, file, spaceId))) {
+    throw err("Loop content is not trusted for this exact version.", "content-trust-required");
+  }
+}
+
+function observedPending(
+  file: LoopFileResult,
+  observedAt: number,
+  changedFields: string[],
+): PendingLoopVersion {
+  return {
+    sourceDigest: file.digest,
+    semanticDigest: file.loop ? loopSemanticDigest(file.loop) : "",
+    changedFields: changedFields.length ? changedFields : ["content"],
+    observedAt,
+  };
+}
+
 /** Next fire time. One-shots aim at their `at`; intervals run from the last
  *  run; cron next-run comes from the shared cron path (DST-deterministic). */
 export function computeNextRun(
@@ -228,7 +337,8 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
   // task id -> in-flight run promise (overlap policy consults this)
   const running = new Map<string, Promise<void>>();
 
-  // one-time migration: legacy tasks without cadence get one derived from kind
+  // One-time migration. Pre-content-trust managed tasks are never grandfathered
+  // into execution merely because their old path/digest record exists.
   let migrated = false;
   for (const t of tasks) {
     if (!t.cadence) {
@@ -237,11 +347,17 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
         : { kind: "every", everyMinutes: t.everyMinutes ?? 1 };
       migrated = true;
     }
+    if (t.source === "loop-file" && !t.trustReceipt) {
+      t.trustState = "untrusted";
+      t.enabled = false;
+      t.nextRunAt = null;
+      migrated = true;
+    }
   }
 
   const save = (): void => {
     mkdirSync(dirname(opts.file), { recursive: true });
-    atomicWriteSync(opts.file, JSON.stringify({ v: 2, tasks, loopErrors: loopErrorsByProject }, null, 2));
+    atomicWriteSync(opts.file, JSON.stringify({ v: 3, tasks, loopErrors: loopErrorsByProject }, null, 2));
   };
   if (migrated) save();
 
@@ -255,7 +371,10 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     t.history = [rec, ...(t.history ?? [])].slice(0, HISTORY_LIMIT);
   };
 
-  const execute = async (task: ScheduleTask): Promise<void> => {
+  /** `task` owns canonical history/clock state; `executableTask` may be an
+   * exact one-shot repository snapshot which must never replace canonical
+   * approved prompt/cadence fields. */
+  const execute = async (task: ScheduleTask, executableTask: ScheduleTask = task): Promise<void> => {
     const runId = randomUUID();
     // Mark before running so a slow runner can never double-fire.
     task.lastRunAt = now();
@@ -267,7 +386,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     pushHistory(task, rec);
     save();
     try {
-      const outcome = await opts.runner.run(task, runId);
+      const outcome = await opts.runner.run(executableTask, runId);
       rec.status = "ok";
       rec.finishedAt = now();
       if (outcome?.sessionId) {
@@ -285,7 +404,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
   };
 
   /** Fire honoring the overlap policy (default: skip while a run is active). */
-  const fire = async (task: ScheduleTask): Promise<void> => {
+  const fire = async (task: ScheduleTask, executableTask: ScheduleTask = task): Promise<void> => {
     const policy = task.overlapPolicy ?? "skip";
     const active = running.get(task.id);
     if (active && policy === "skip") {
@@ -299,7 +418,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
       return;
     }
     const start = active && policy === "queue" ? active.catch(() => {}) : Promise.resolve();
-    const p = start.then(() => execute(task)).finally(() => {
+    const p = start.then(() => execute(task, executableTask)).finally(() => {
       if (running.get(task.id) === p) running.delete(task.id);
     });
     running.set(task.id, p);
@@ -344,8 +463,15 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     },
     update(id, patch) {
       const t = mustGet(id);
-      if (t.source === "loop-file" && (patch.prompt !== undefined || patch.cadence !== undefined || patch.kind !== undefined || patch.at !== undefined || patch.everyMinutes !== undefined)) {
-        throw err(`this task is managed by ${t.sourcePath ?? "a loop file"}; edit the file instead`, "conflict");
+      if (t.source === "loop-file") {
+        if (patch.prompt !== undefined || patch.cadence !== undefined || patch.kind !== undefined
+          || patch.at !== undefined || patch.everyMinutes !== undefined || patch.title !== undefined) {
+          throw err(`this task is managed by ${t.sourcePath ?? "a loop file"}; edit the file instead`, "conflict");
+        }
+        if (patch.enabled === true && t.trustState !== "trusted-current-version") {
+          throw err("trust the current loop version before activating it", "content-trust-required");
+        }
+        if (patch.enabled !== undefined) t.enabledOverride = patch.enabled;
       }
       const merged: ScheduleTaskInput = {
         projectId: patch.projectId ?? t.projectId,
@@ -391,6 +517,9 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     setEnabled(id, enabled) {
       const t = mustGet(id);
       if (t.source === "loop-file") {
+        if (enabled && t.trustState !== "trusted-current-version") {
+          throw err("trust the current loop version before activating it", "content-trust-required");
+        }
         // Local override; the file's enabled flag stays authoritative on disk.
         t.enabledOverride = enabled;
       }
@@ -403,12 +532,17 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     },
     async runNow(id) {
       const t = mustGet(id);
+      if (t.source === "loop-file" && t.trustState !== "trusted-current-version") {
+        throw err("this repository-managed loop version is blocked pending trust", "content-trust-required");
+      }
       await fire(t);
       return t;
     },
     async tick() {
       const t0 = now();
-      const due = tasks.filter((t) => t.enabled && !t.parseError && t.nextRunAt !== null && t.nextRunAt <= t0);
+      const due = tasks.filter((t) => t.enabled && !t.parseError
+        && (t.source !== "loop-file" || t.trustState === "trusted-current-version")
+        && t.nextRunAt !== null && t.nextRunAt <= t0);
       for (const t of due) await fire(t);
       return due.length;
     },
@@ -437,12 +571,20 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
         if (!file.loop) {
           if (file.parseError) {
             errors.push({ path: file.path, error: file.parseError });
-            // A broken file keeps its existing healthy task (paused clock is
-            // preferable to silent deletion), flagged with the parse error.
+            // A broken file keeps its existing last-approved task/history but
+            // changed bytes immediately invalidate execution.
             const existing = tasks.find((t) => t.projectId === projectId && t.source === "loop-file" && t.sourcePath === file.path);
             if (existing) {
               existing.parseError = file.parseError;
               if (existing.loopId) seenIds.add(existing.loopId);
+              if (file.digest && file.digest !== existing.sourceDigest) {
+                existing.sourceDigest = file.digest;
+                existing.trustState = existing.trustReceipt ? "changed-since-trust" : "untrusted";
+                existing.pendingVersion = observedPending(file, now(), ["content"]);
+                existing.enabled = false;
+                existing.nextRunAt = null;
+                existing.updatedAt = now();
+              }
             }
           }
           continue;
@@ -457,32 +599,65 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
             prompt: loop.prompt,
             kind: "cron",
             cadence: { kind: "cron", expression: loop.cron, timeZone: loop.timeZone },
-            enabled: loop.enabled,
+            enabled: false,
             createdAt: now(),
             updatedAt: now(),
             nextRunAt: null,
             runs: 0,
             source: "loop-file",
+            sourcePath: file.path,
+            sourceDigest: file.digest,
             loopId: loop.id,
+            trustState: "untrusted",
+            pendingVersion: observedPending(file, now(), ["initialVersion"]),
+            ...(loop.agentProfile ? { agentProfile: loop.agentProfile } : {}),
+            ...(loop.title ? { title: loop.title } : {}),
           };
+          mirrorCadence(t);
           tasks.push(t);
+          continue;
         }
-        if (t.sourceDigest !== file.digest) {
-          t.prompt = loop.prompt;
-          t.cadence = { kind: "cron", expression: loop.cron, timeZone: loop.timeZone };
-          t.title = loop.title;
-          t.sourceDigest = file.digest;
-          t.updatedAt = now();
-        }
+
+        const fields = changedLoopFields(t, loop, file.path);
+        const currentSubject: ContentTrustSubject = {
+          spaceId: t.trustReceipt?.spaceId ?? "__untrusted__",
+          projectId,
+          sourceKind: "agents-loop",
+          sourceIdentity: file.path,
+          contentDigest: file.digest,
+          semanticDigest: loopSemanticDigest(loop),
+        };
+        const trustedCurrent = !!t.trustReceipt
+          && contentTrustMatches(t.trustReceipt, currentSubject, "current-version");
+
         t.sourcePath = file.path;
-        if (loop.agentProfile) t.agentProfile = loop.agentProfile;
-        else delete t.agentProfile;
-        t.enabled = t.enabledOverride ?? loop.enabled;
+        t.sourceDigest = file.digest;
         delete t.parseError;
-        mirrorCadence(t);
-        t.nextRunAt = computeNextRun(t, now());
+
+        if (trustedCurrent) {
+          // Rehydrating from exact approved bytes is safe and repairs stale
+          // persisted projections without broadening authorization.
+          applyLoopExecutable(t, loop);
+          t.trustState = "trusted-current-version";
+          delete t.pendingVersion;
+          delete t.rejectedSourceDigest;
+          t.enabled = t.enabledOverride ?? loop.enabled;
+          t.nextRunAt = computeNextRun(t, now());
+        } else {
+          // Before the first approval there is no trusted snapshot to preserve,
+          // so current parsed content may be displayed. Once a receipt exists,
+          // repository changes NEVER replace that executable snapshot.
+          if (!t.trustReceipt) applyLoopExecutable(t, loop);
+          t.trustState = t.trustReceipt ? "changed-since-trust" : "untrusted";
+          t.pendingVersion = observedPending(file, now(), fields);
+          if (t.rejectedSourceDigest !== file.digest) delete t.rejectedSourceDigest;
+          t.enabled = false;
+          t.nextRunAt = null;
+        }
+        t.updatedAt = now();
       }
-      // Managed tasks whose file/id vanished: explicit remove policy.
+      // Managed tasks whose file/id vanished: preserve the existing explicit
+      // remove policy. Changed files above retain the last approved history.
       tasks = tasks.filter((t) =>
         !(t.projectId === projectId && t.source === "loop-file" && t.loopId && !seenIds.has(t.loopId)));
       // Persist diagnostics: a clean scan clears them, an identical error
@@ -503,6 +678,69 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
         tasks: tasks.filter((t) => t.projectId === projectId && t.source === "loop-file"),
         errors,
       };
+    },
+    trustLoopVersion(id, spaceId, file) {
+      const t = mustGet(id);
+      if (t.source !== "loop-file" || !t.loopId || !t.sourcePath || !file.loop) {
+        throw err("task is not a valid repository-managed loop", "invalid-input");
+      }
+      if (file.path !== t.sourcePath || file.loop.id !== t.loopId
+        || !file.digest || file.digest !== t.sourceDigest) {
+        throw err("loop changed again; refresh and review the current version", "content-trust-changed");
+      }
+      t.trustReceipt = issueContentTrustReceipt(trustSubject(t, file, spaceId), "current-version", now());
+      applyLoopExecutable(t, file.loop);
+      t.trustState = "trusted-current-version";
+      delete t.pendingVersion;
+      delete t.rejectedSourceDigest;
+      delete t.parseError;
+      t.enabled = t.enabledOverride ?? file.loop.enabled;
+      t.updatedAt = now();
+      t.nextRunAt = computeNextRun(t, now());
+      save();
+      return t;
+    },
+    async runLoopVersionOnce(id, spaceId, file) {
+      const t = mustGet(id);
+      if (t.source !== "loop-file" || !t.loopId || !t.sourcePath || !file.loop) {
+        throw err("task is not a valid repository-managed loop", "invalid-input");
+      }
+      if (file.path !== t.sourcePath || file.loop.id !== t.loopId
+        || !file.digest || file.digest !== t.sourceDigest) {
+        throw err("loop changed again; refresh and review the current version", "content-trust-changed");
+      }
+      const executable: ScheduleTask = {
+        ...t,
+        prompt: file.loop.prompt,
+        title: file.loop.title,
+        cadence: { kind: "cron", expression: file.loop.cron, timeZone: file.loop.timeZone },
+        kind: "cron",
+        enabled: true,
+        sourceDigest: file.digest,
+        trustReceipt: issueContentTrustReceipt(trustSubject(t, file, spaceId), "once", now()),
+        trustState: "trusted-current-version",
+        ...(file.loop.agentProfile ? { agentProfile: file.loop.agentProfile } : {}),
+      };
+      if (!file.loop.agentProfile) delete executable.agentProfile;
+      await fire(t, executable);
+      // Persistent authorization and executable fields remain exactly as they
+      // were before this one-shot execution.
+      t.enabled = false;
+      t.nextRunAt = null;
+      save();
+      return t;
+    },
+    rejectLoopVersion(id) {
+      const t = mustGet(id);
+      if (t.source !== "loop-file" || !t.sourceDigest) {
+        throw err("task is not a repository-managed loop", "invalid-input");
+      }
+      t.rejectedSourceDigest = t.sourceDigest;
+      t.enabled = false;
+      t.nextRunAt = null;
+      t.updatedAt = now();
+      save();
+      return t;
     },
     loopErrors(projectId) {
       const all = projectId

@@ -17,6 +17,7 @@ import type {
 } from "@polyth/contracts";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { createHarnessRegistry, type HarnessPreferences, harnessError } from "./index.ts";
+import { promptPrefixDiagnostics } from "./promptPrefixDiagnostics.ts";
 
 const MAX_HARNESS_SYSTEM_PROMPT = 64 * 1024;
 type StoredHarnessPreference = {
@@ -28,6 +29,9 @@ type StoredHarnessPreferences = Record<string, StoredHarnessPreference>;
 type HarnessSystemPromptDescriptor = AgentCapabilityDescriptor & { targetHarnessId: string };
 type ContextualCapabilityContribution = AgentCapabilityContribution & {
     resolveCapabilities(context: HarnessContext): readonly AgentCapabilityDescriptor[];
+};
+type HarnessProvisioningDiagnostics = HarnessProvisioningQuery & {
+    desired?(context: HarnessContext): Promise<AgentCapabilityDescriptor[]>;
 };
 
 export function readHarnessSelection(value: unknown): HarnessSelection {
@@ -124,10 +128,6 @@ export function harnessRoutes(host: ServerPackageHost): RouteHandler {
                 throw harnessError("not-found", "harness not found");
             const detail = request.url.searchParams.get("detail") === "1";
             const force = request.url.searchParams.get("force") === "1";
-            // Draft catalog callers used to perform a client-side waterfall:
-            // cheap snapshots -> choose Auto -> second detail request. Keep Auto
-            // selection server-side so there is one network round-trip and the
-            // second phase reuses the same snapshot cache/singleflight entry.
             if (!harnessId && request.url.searchParams.get("auto") === "1") {
                 const summaries = await registry.snapshots(context, { force });
                 harnessId = summaries
@@ -164,6 +164,42 @@ export function harnessRoutes(host: ServerPackageHost): RouteHandler {
             }
             const context = { space: request.space, spaceId: request.space.spaceId, projectId: project?.id ?? "__default__", cwd: project?.path ?? process.cwd(), remote: Boolean(project?.remote) };
             request.json(200, query.status(context));
+            return true;
+        }
+        if (request.path === "/api/harnesses/prompt-prefix-diagnostics" && request.method === "GET") {
+            const requestedProjectId = request.url.searchParams.get("projectId") ?? undefined;
+            const sessionId = request.url.searchParams.get("sessionId") ?? undefined;
+            const requestedHarnessId = request.url.searchParams.get("harnessId") ?? undefined;
+            const session = sessionId ? await scoped.sessions.snapshot(sessionId) : undefined;
+            if (requestedProjectId && session && session.projectId !== requestedProjectId)
+                throw harnessError("invalid-input", "session does not belong to the requested project");
+            const projectId = requestedProjectId ?? session?.projectId;
+            const project = projectId ? await scoped.projects.get(projectId) : (await scoped.projects.list())[0];
+            if (projectId && !project)
+                throw harnessError("not-found", "project not found");
+            if (session && project && session.projectId !== project.id)
+                throw harnessError("not-found", "session project not found in this Space");
+            const resolvedHarnessId = session?.resolvedHarnessId
+                ?? (session?.harness?.mode === "pinned" ? session.harness.harnessId : undefined);
+            if (requestedHarnessId && resolvedHarnessId && requestedHarnessId !== resolvedHarnessId)
+                throw harnessError("invalid-input", "requested harness does not match the session runtime");
+            const harnessId = requestedHarnessId ?? resolvedHarnessId;
+            if (harnessId && !registry.providers().some((provider) => provider.descriptor.id === harnessId))
+                throw harnessError("not-found", "harness not found");
+            const context: HarnessContext = {
+                space: request.space,
+                spaceId: request.space.spaceId,
+                projectId: project?.id ?? "__default__",
+                cwd: session?.worktreePath ?? project?.path ?? process.cwd(),
+                remote: Boolean(project?.remote),
+                ...(sessionId ? { sessionId } : {}),
+            };
+            const provisioning = host.services.get(
+                serverServiceKey<HarnessProvisioningDiagnostics>("harness.provisioning"),
+            );
+            if (!provisioning?.desired)
+                throw harnessError("unsupported", "prompt prefix diagnostics are unavailable");
+            request.json(200, promptPrefixDiagnostics(await provisioning.desired(context), harnessId));
             return true;
         }
         const systemPrompt = request.path.match(/^\/api\/harnesses\/([a-z][a-z0-9-]*)\/system-prompt$/);
