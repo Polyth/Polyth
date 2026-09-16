@@ -223,8 +223,8 @@ export default function ProjectAppearanceDialog({ project, onClose }: { project:
   };
 
   const libraryItems = [
-    { id: "all", label: "All styles", detail: "Hugeicons · MingCute · Phosphor · Myna · Tabler" },
-    ...PROJECT_ICON_LIBRARIES.map(({ id, label }) => ({ id, label })),
+    { id: "all", label: "All styles", group: "", detail: "Hugeicons · MingCute · Phosphor · Myna · Tabler" },
+    ...PROJECT_ICON_LIBRARIES.map(({ id, label }) => ({ id, label, group: "" })),
   ];
 
   return (
