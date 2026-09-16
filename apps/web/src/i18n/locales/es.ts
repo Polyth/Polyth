@@ -402,6 +402,8 @@ export const es: AppMessages = {
   "markdown.mermaid.zoomIn": "Acercar",
   "markdown.mermaid.zoomOut": "Alejar",
   "markdown.render.blockedImageSource": "Fuente de la imagen bloqueada",
+  "markdown.render.collapseCode": "Contraer código",
+  "markdown.render.expandCode": "Expandir código",
   "markdown.render.openValueValue": "Abrir {path} {value}",
   "markdown.render.raw": "Crudo",
   "markdown.render.tree": "Árbol",

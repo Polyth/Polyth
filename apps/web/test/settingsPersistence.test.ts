@@ -64,9 +64,10 @@ test("font size preferences are independent, bounded, and publish their roles", 
   assert.equal(ui.parseUiSettings(JSON.stringify({ headerFontSize: 100 })).headerFontSize, 24);
 
   const properties = new Map<string, string>();
+  const rootProperties = new Map<string, string>();
   const documentBefore = (globalThis as { document?: unknown }).document;
   (globalThis as { document?: unknown }).document = {
-    documentElement: { style: { setProperty() {} } },
+    documentElement: { style: { setProperty: (name: string, value: string) => rootProperties.set(name, value) } },
     body: { dataset: {}, style: { setProperty: (name: string, value: string) => properties.set(name, value) } },
   };
   try {
@@ -79,6 +80,7 @@ test("font size preferences are independent, bounded, and publish their roles", 
   assert.equal(properties.get("--subheader-font-size"), "12px");
   assert.equal(properties.get("--terminal-font-size"), "18px");
   assert.equal(properties.get("--editor-font-size"), "20px");
+  assert.equal(rootProperties.get("--editor-font-size"), "20px");
 });
 
 test("merge conflict agent settings default safely and accept supported targets", () => {

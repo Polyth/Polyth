@@ -196,3 +196,12 @@ test("messageJson and promptIndex", () => {
   const idx = promptIndex([user("u1", "first prompt\nmore"), asst("a1", "x", ""), user("u2", "second")]);
   assert.deepEqual(idx.map((p) => p.preview), ["first prompt", "second"]);
 });
+
+// ---------------------------------------------------------------- code-block overflow
+
+test("codeBlockOverflow: short content is not collapsible; taller than viewport collapses to a third", async () => {
+  const { codeBlockOverflow } = await import("../src/markdown/codeBlock.ts");
+  assert.deepEqual(codeBlockOverflow(200, 900), { collapsible: false, collapsedMax: 300 });
+  assert.deepEqual(codeBlockOverflow(900, 900), { collapsible: false, collapsedMax: 300 });
+  assert.deepEqual(codeBlockOverflow(901, 900), { collapsible: true, collapsedMax: 300 });
+});

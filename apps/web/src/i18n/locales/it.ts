@@ -402,6 +402,8 @@ export const it: AppMessages = {
   "markdown.mermaid.zoomIn": "Ingrandisci",
   "markdown.mermaid.zoomOut": "Riduci lo zoom",
   "markdown.render.blockedImageSource": "fonte dell'immagine bloccata",
+  "markdown.render.collapseCode": "Comprimi codice",
+  "markdown.render.expandCode": "Espandi codice",
   "markdown.render.openValueValue": "Apri {path} {value}",
   "markdown.render.raw": "Crudo",
   "markdown.render.tree": "Albero",

@@ -1,7 +1,7 @@
 // Shared sanitized Markdown renderer (WP4). One code path for chat bubbles,
 // multirun/fusion output and file preview: parse (pure AST) → sanitize URLs →
 // render. Rich leaves (mermaid/math/json tree/galleries) mount lazily.
-import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { parseMarkdown, parseInline, collectImages, type Block, type Inline } from "./parse.ts";
 import { sanitizeLinkHref, sanitizeImageSrc } from "./sanitize.ts";
 import { findFileRefs } from "./fileReference.ts";
@@ -13,7 +13,14 @@ import MathTex from "./MathTex.tsx";
 import JsonTree, { tryParseJson } from "./JsonTree.tsx";
 import GalleryLightbox, { type GalleryImage } from "./Gallery.tsx";
 import { tr } from "../i18n/index.ts";
-import { Button } from "../components/ui/index.ts";
+import {
+  Button,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  Icon,
+} from "../components/ui/index.ts";
+import { highlight } from "../highlight.ts";
+import { codeBlockOverflow } from "./codeBlock.ts";
 
 interface DocContextValue {
   images: GalleryImage[];
@@ -114,6 +121,99 @@ export function renderInline(nodes: Inline[], keyBase: string): ReactNode[] {
 
 // ---------------------------------------------------------------- blocks
 
+function readViewportHeight(): number {
+  if (typeof document !== "undefined" && typeof getComputedStyle === "function") {
+    const raw = getComputedStyle(document.documentElement).getPropertyValue("--visual-vh").trim();
+    if (raw.endsWith("px")) {
+      const parsed = Number.parseFloat(raw);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+  }
+  if (typeof window === "undefined") return 0;
+  const visual = window.visualViewport?.height;
+  if (typeof visual === "number" && visual > 0) return visual;
+  return window.innerHeight > 0 ? window.innerHeight : 0;
+}
+
+function HighlightedPre({ lang, text }: { lang: string; text: string }) {
+  const html = useMemo(() => highlight(text, lang), [lang, text]);
+  return (
+    <pre>
+      <code
+        className={lang ? `lang-${lang}` : undefined}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    </pre>
+  );
+}
+
+function MdCodeFrame({
+  text,
+  children,
+  className,
+}: {
+  text: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [collapsible, setCollapsible] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const collapsed = collapsible && !expanded;
+
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+
+    const measure = () => {
+      const viewportHeight = readViewportHeight();
+      if (viewportHeight <= 0) {
+        setCollapsible(false);
+        return;
+      }
+      const next = codeBlockOverflow(body.scrollHeight, viewportHeight);
+      setCollapsible(next.collapsible);
+    };
+
+    measure();
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+    observer?.observe(body);
+    window.addEventListener("resize", measure);
+    window.visualViewport?.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+      window.visualViewport?.removeEventListener("resize", measure);
+    };
+  }, [text]);
+
+  return (
+    <div
+      className={[
+        "md-code-block",
+        className,
+        collapsible ? "is-collapsible" : "",
+        collapsed ? "is-collapsed" : "",
+        collapsible && expanded ? "is-expanded" : "",
+      ].filter(Boolean).join(" ")}
+    >
+      <div className="md-code-block-body" ref={bodyRef}>{children}</div>
+      {collapsible && (
+        <button
+          type="button"
+          className="md-code-block-toggle"
+          aria-expanded={expanded}
+          aria-label={expanded ? tr("markdown.render.collapseCode") : tr("markdown.render.expandCode")}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          <Icon icon={expanded ? ChevronUpIcon : ChevronDownIcon} size="sm" />
+        </button>
+      )}
+      <CopyButton text={text} />
+    </div>
+  );
+}
+
 function CodeBlock({ lang, text }: { lang: string; text: string }) {
   const prefs = getUiSettings();
   const [asTree, setAsTree] = useState(prefs.jsonTreeDefault !== "raw");
@@ -121,24 +221,22 @@ function CodeBlock({ lang, text }: { lang: string; text: string }) {
   const parsed = lang === "json" ? tryParseJson(text) : undefined;
   if (parsed !== undefined) {
     return (
-      <div className="copy-wrap json-block">
+      <MdCodeFrame text={text} className="json-block">
         <div className="json-block-bar">
           <Button size="sm" aria-pressed={asTree} onClick={() => setAsTree((v) => !v)}>
             {asTree ? tr("markdown.render.raw") : tr("markdown.render.tree")}
           </Button>
-          <CopyButton text={text} />
         </div>
         {asTree
           ? <JsonTree value={parsed} defaultDepth={prefs.jsonTreeDepth ?? 2} />
-          : <pre><code>{text}</code></pre>}
-      </div>
+          : <HighlightedPre lang="json" text={text} />}
+      </MdCodeFrame>
     );
   }
   return (
-    <div className="copy-wrap">
-      <pre><code className={lang ? `lang-${lang}` : undefined}>{text}</code></pre>
-      <CopyButton text={text} />
-    </div>
+    <MdCodeFrame text={text}>
+      <HighlightedPre lang={lang} text={text} />
+    </MdCodeFrame>
   );
 }
 

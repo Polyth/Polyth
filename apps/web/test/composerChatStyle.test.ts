@@ -129,20 +129,29 @@ test("chat prompt type uses the same role as the assistant response", () => {
 test("conversation code surfaces follow the configured glass material", () => {
   const css = read("../src/styles.css");
 
-  assert.match(css, /\.msg \.bubble :is\(code, pre\)\s*\{[^}]*background:\s*var\(--material-glass-medium\)/s);
+  assert.match(css, /\.msg \.bubble :is\(code, pre\),\s*\.msg \.bubble \.md-code-block\s*\{[^}]*background:\s*var\(--material-glass-medium\)/s);
   // Only the block surface takes the glass pass. An inline code span is a word
   // in a sentence: it keeps a flat tint and clones its decoration across a
   // wrap, so a per-fragment backdrop blur never bands through the prose.
   assert.match(
     css,
-    /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\)[\s\S]*?\.msg \.bubble pre[\s\S]*?backdrop-filter:\s*blur\(var\(--material-glass-blur\)\)/s,
+    /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\) :is\([\s\S]*?\.msg \.bubble pre,\s*\.msg \.bubble \.md-code-block\s*\)[\s\S]*?backdrop-filter:\s*blur\(var\(--material-glass-blur\)\)/s,
   );
   assert.doesNotMatch(
     css,
     /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\)[\s\S]*?\.msg \.bubble :is\(code, pre\)[\s\S]*?backdrop-filter/s,
   );
+  assert.match(
+    css,
+    /body\[data-glass="off"\] :is\(\.msg \.bubble pre, \.msg \.bubble \.md-code-block\)\s*\{[^}]*background:\s*var\(--material-glass-medium\);[^}]*backdrop-filter:\s*none !important/s,
+  );
   assert.match(css, /\.msg \.bubble :not\(pre\) > code\s*\{[^}]*font-size:\s*var\(--font-code\);[^}]*box-decoration-break:\s*clone/s);
-  assert.match(css, /\.msg \.bubble pre code\s*\{[^}]*background:\s*transparent/s);
+  assert.match(
+    css,
+    /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\) \.msg \.bubble \.md-code-block pre\s*\{[^}]*backdrop-filter:\s*none !important/s,
+  );
+  assert.match(css, /\.msg \.bubble pre code,\s*\.msg \.bubble \.md-code-block pre\s*\{[^}]*background:\s*transparent/s);
+  assert.match(css, /\.msg \.bubble pre,\s*\.msg \.bubble pre code\s*\{[^}]*font-size:\s*var\(--font-code\)/s);
   assert.match(css, /\.msg\.assistant > \.bubble a\s*\{[^}]*color:\s*var\(--accent\)/s);
 });
 

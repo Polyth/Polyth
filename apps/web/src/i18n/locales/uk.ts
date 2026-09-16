@@ -402,6 +402,8 @@ export const uk: AppMessages = {
   "markdown.mermaid.zoomIn": "Збільшити",
   "markdown.mermaid.zoomOut": "Зменшити",
   "markdown.render.blockedImageSource": "заблоковане джерело зображення",
+  "markdown.render.collapseCode": "Згорнути код",
+  "markdown.render.expandCode": "Розгорнути код",
   "markdown.render.openValueValue": "Відкрити {path} {value}",
   "markdown.render.raw": "Сире",
   "markdown.render.tree": "Дерево",

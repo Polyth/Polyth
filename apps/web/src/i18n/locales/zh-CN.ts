@@ -402,6 +402,8 @@ export const zhCN: AppMessages = {
   "markdown.mermaid.zoomIn": "放大",
   "markdown.mermaid.zoomOut": "缩小",
   "markdown.render.blockedImageSource": "图片源被屏蔽",
+  "markdown.render.collapseCode": "收起代码",
+  "markdown.render.expandCode": "展开代码",
   "markdown.render.openValueValue": "打开{path} {value}",
   "markdown.render.raw": "生的",
   "markdown.render.tree": "树",
