@@ -184,7 +184,7 @@ test("feature module views no longer draw their own page header", async () => {
     "../../../packages/multirun/widgets/MultiRunView.tsx",
     "../../../packages/fusion/widgets/FusionView.tsx",
     "../../../packages/walkthrough/widgets/WalkthroughView.tsx",
-    "../../../packages/schedule/widgets/ScheduleView.tsx",
+    "../../../packages/schedule/widgets/PlannerView.tsx",
     "../../../packages/github/widgets/GithubView.tsx",
     "../../../packages/git/widgets/GitView.tsx",
     "../../../packages/files/widgets/EditorView.tsx",
@@ -215,12 +215,16 @@ test("each main-area surface registers a description for the shared header", asy
     ["../../../packages/multirun/widgets/index.tsx", /id: "multirun", title: "[^"]+", description:/],
     ["../../../packages/fusion/widgets/index.tsx", /id: "fusion", title: "[^"]+", description:/],
     ["../../../packages/walkthrough/widgets/index.tsx", /id: "walkthrough", title: "[^"]+", description:/],
-    ["../../../packages/schedule/widgets/index.tsx", /id: "schedule", title: "[^"]+", description:/],
     ["../../../packages/github/widgets/index.tsx", /id: "github", title: "[^"]+", description:/],
   ];
   for (const [rel, re] of pairs) {
     assert.match(await read(rel), re, `${rel} passes a description to its surface`);
   }
+  const schedule = await read("../../../packages/schedule/widgets/index.tsx");
+  const surface = schedule.match(/host\.surfaces\.register\(\{[\s\S]*?dock: "bottom"[\s\S]*?\}\s*\)/)?.[0] ?? "";
+  assert.match(surface, /id: "schedule"/);
+  assert.match(surface, /title: "Planner"/);
+  assert.doesNotMatch(surface, /description:/, "Planner omits a ModuleView subtitle");
 });
 
 test("each package rail surface registers a description for the shared header", async () => {

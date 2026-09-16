@@ -68,7 +68,7 @@ test("slot-backed feature panels share the responsive surface stylesheet", async
   for (const selector of [
     ".goals-head",
     ".permission-toast",
-    ".sched-form",
+    ".planner-toolbar",
     ".knowledge-panel",
     ".gh-list",
     ".usage-stat-grid",
@@ -89,7 +89,8 @@ test("slot-backed feature panels share the responsive surface stylesheet", async
 test("feature forms stack and dense lists scroll at narrow panel widths", async () => {
   const narrow = await packageStyles();
 
-  assert.match(narrow, /\.sched-form \.view-toolbar-row\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/);
+  assert.match(narrow, /@container schedule-page \(max-width: 480px\)[\s\S]*?\.planner-chrome[\s\S]*?width:\s*100%/);
+  assert.match(narrow, /\.schedule-page \.planner-chrome \{[\s\S]*flex-wrap:\s*nowrap/);
   assert.match(narrow, /@container knowledge-panel \(max-width: 700px\)[\s\S]*?\.knowledge-panel > \.knowledge-toolbar,[\s\S]*?flex-direction:\s*column/);
   assert.match(narrow, /\.settings-pane-body \.set-row\s*\{[\s\S]*flex-direction:\s*column/);
   assert.match(narrow, /\.provider-list\s*\{[\s\S]*min-height:\s*0/);

@@ -155,6 +155,7 @@ export function tr(key: TranslationKey, params: TranslationParams = {}): string 
   // The en catalog is always present; a still-loading locale degrades to en
   // until its chunk lands (callers re-render once setLocale resolves).
   const template = catalogs[currentLocale]?.[key] || catalogs.en![key];
+  if (!template) return String(key);
   return template.replace(/\{(\w+)\}/g, (match, name: string) => {
     const value = params[name];
     return value === undefined || value === null ? match : String(value);

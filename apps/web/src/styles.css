@@ -7598,6 +7598,10 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   touch-action: manipulation;
 }
 .sheet-head-action[aria-pressed="true"] { color: var(--accent); }
+.sheet-head-action:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 .sheet-head-action:active,
 .sheet-back:active,
 .sheet-close:active { background: var(--elevated); }

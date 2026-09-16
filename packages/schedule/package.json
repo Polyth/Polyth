@@ -12,8 +12,8 @@
     "serverEntry": "./src/serverEntry.ts",
     "webEntry": "./widgets/index.tsx",
     "descriptor": {
-      "name": "Schedule",
-      "description": "Schedule recurring and one-time agent tasks.",
+      "name": "Planner",
+      "description": "Plan prompts to run once or on a repeating cadence.",
       "core": false,
       "enabled": true,
       "settingsGroup": "Engineering",

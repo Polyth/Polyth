@@ -43,6 +43,7 @@ import {
   setLocale,
   tr,
   type Locale,
+  type TranslationKey,
 } from "../src/i18n/index.ts";
 
 const appLocales: LocaleBundle = {
@@ -387,9 +388,15 @@ test("runtime switches locale, resolves package keys, and marks only Arabic RTL"
     assert.equal(tr("terminalview.newTerminal", {}).trim().length > 0, true);
     assert.equal(tr("previewview.browserControls", {}).trim().length > 0, true);
     assert.equal(tr("usage.usagedashboard.dashboardDensity", {}).trim().length > 0, true);
+    assert.match(tr("scheduleview.summaryActivePaused", { active: 8, paused: 2 }), /8/);
     assert.equal(isRtl(), locale === "ar");
   }
   await setLocale("en");
+});
+
+test("tr degrades to the key instead of throwing when a catalog entry is missing", () => {
+  const missing = "planner.missingCatalogKey" as TranslationKey;
+  assert.equal(tr(missing), "planner.missingCatalogKey");
 });
 
 test("European and Brazilian Portuguese remain distinct catalogs", () => {

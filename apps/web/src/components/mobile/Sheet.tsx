@@ -37,6 +37,14 @@ export interface SheetSearch {
   onKeyDown?: (event: ReactKeyboardEvent<HTMLInputElement>) => void;
 }
 
+export interface SheetAction {
+  label: string;
+  onClick: () => void;
+  pressed?: boolean;
+  disabled?: boolean;
+  busy?: boolean;
+}
+
 export interface SheetProps {
   title: string;
   onClose: () => void;
@@ -44,7 +52,7 @@ export interface SheetProps {
   /** Sticky search row under the title. Rendered unfocused (§25). */
   search?: SheetSearch;
   /** Trailing control in the title row (e.g. Edit / Done for reordering). */
-  action?: { label: string; onClick: () => void; pressed?: boolean };
+  action?: SheetAction;
   /** Pinned footer (e.g. "Create a starter…"). */
   footer?: ReactNode;
   className?: string;
@@ -199,7 +207,12 @@ export default function Sheet({
               type="button"
               className="sheet-head-action"
               aria-pressed={action.pressed}
-              onClick={action.onClick}
+              aria-busy={action.busy || undefined}
+              disabled={Boolean(action.disabled || action.busy)}
+              onClick={() => {
+                if (action.disabled || action.busy) return;
+                action.onClick();
+              }}
             >
               {action.label}
             </button>

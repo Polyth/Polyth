@@ -7,7 +7,7 @@
 // primitive so features never fork business logic per breakpoint.
 import type { ReactNode, RefObject } from "react";
 import { useShellMode } from "../../responsiveShell.ts";
-import Sheet, { type SheetSearch } from "../mobile/Sheet.tsx";
+import Sheet, { type SheetAction, type SheetSearch } from "../mobile/Sheet.tsx";
 import Popover from "./Popover.tsx";
 import Dialog, { type DialogSize } from "./Dialog.tsx";
 import type { AnchoredAlign, AnchoredSide } from "./useAnchoredPosition.ts";
@@ -38,7 +38,7 @@ export interface ResponsiveOverlayProps {
   /** Sheet options (phone only). */
   sheetSize?: "auto" | "tall";
   sheetSearch?: SheetSearch;
-  sheetAction?: { label: string; onClick: () => void; pressed?: boolean };
+  sheetAction?: SheetAction;
   sheetFooter?: ReactNode;
   /** Dialog options (desktop modal only). */
   dialogSize?: DialogSize;

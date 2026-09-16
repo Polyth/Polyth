@@ -1,128 +1,599 @@
-/* Package-owned schedule web styles. */
+/* Package-owned planner styles. Root stays `.schedule-page` so existing
+   package CSS attachment and container queries keep working. */
 .schedule-page {
   container: schedule-page / inline-size;
-}
-
-.schedule-page .loop-error-row,
-.schedule-page .sched-card,
-.schedule-page .sched-meta,
-.schedule-page .sched-actions,
-.schedule-page .sched-run {
-  display: flex;
-  align-items: center;
-}
-
-.schedule-page .loop-error-row {
-  justify-content: space-between;
-  gap: var(--space-2);
-  padding-block: var(--space-1);
-}
-
-.schedule-page .sched-form {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  padding-block-end: var(--space-5);
-  border-bottom: 1px solid var(--surface-divider);
-}
-
-.schedule-page .sched-form .ui-textarea {
   width: 100%;
-  resize: vertical;
-}
-
-.schedule-page .sched-every {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--muted);
-  font-size: var(--font-meta);
-}
-
-.schedule-page .sched-card {
   min-width: 0;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding-block: var(--space-3);
-  border-bottom: 1px solid var(--border-soft);
+  min-height: 100%;
+  padding-inline: var(--space-3);
+  padding-block: var(--space-2) var(--space-5);
+  isolation: isolate;
+  overflow-x: clip;
+  background: transparent;
 }
 
-.schedule-page .sched-card.paused {
-  opacity: 0.6;
-}
-
-.schedule-page .sched-card-main {
+/* Inner canvas: host ancestry forces the package root to width/max-width 100%. */
+.schedule-page .planner-canvas {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
+  width: 100%;
+  max-width: 52rem;
+  margin-inline: auto;
   min-width: 0;
+  flex: 1;
+}
+
+.schedule-page .planner-toolbar {
+  display: flex;
+  min-width: 0;
+}
+
+.schedule-page .planner-chrome {
   display: flex;
   flex: 1;
-  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: var(--space-1);
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  min-height: var(--control-h);
+  padding: var(--space-1) var(--space-2);
+  box-sizing: border-box;
 }
 
-.schedule-page .sched-prompt {
-  font-size: var(--font-label);
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-
-.schedule-page .sched-meta {
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  color: var(--muted);
-  font-size: var(--font-meta);
-}
-
-.schedule-page .sched-actions {
-  flex-shrink: 0;
-  gap: var(--space-2);
-}
-
-.schedule-page .sched-preview {
-  display: flex;
-  flex-direction: column;
+.schedule-page .planner-filter-btn,
+.schedule-page .planner-status-btn {
+  display: inline-flex;
+  align-items: center;
   gap: var(--space-1);
-  padding: var(--space-3);
+  min-height: var(--control-h-sm);
+  padding: 0 var(--space-2);
+  overflow: hidden;
+  border: 0;
   border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-label);
+  font-weight: 500;
+  text-align: start;
+}
+
+.schedule-page .planner-filter-btn {
+  max-width: 16rem;
+  font-weight: 600;
+}
+
+.schedule-page .planner-filter-label,
+.schedule-page .planner-status-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-page .planner-status-btn {
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.schedule-page .planner-status-btn.is-default {
+  color: var(--text-dim);
+}
+
+.schedule-page .planner-filter-btn:hover,
+.schedule-page .planner-status-btn:hover,
+.schedule-page .planner-group-title.is-toggle:hover,
+.planner-editor .planner-summary-row:hover:not(:disabled),
+.planner-native-row:hover:not(.is-disabled) {
   background: var(--sunken);
-  font-size: var(--font-meta);
 }
 
-.schedule-page .sched-preview-desc { color: var(--text); }
-
-.schedule-page .sched-preview-runs {
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: var(--font-meta);
+.schedule-page .planner-toolbar-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  margin-inline-start: auto;
+  gap: var(--space-1);
 }
 
-.schedule-page .sched-loop-badge {
-  display: inline-block;
-  margin-inline-end: var(--space-2);
-  padding: 1px var(--space-2);
-  border: 1px solid var(--accent-line);
-  border-radius: var(--radius-round);
-  color: var(--accent);
-  font-size: var(--font-meta);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.schedule-page .sched-runs {
+.schedule-page .planner-notices {
   display: flex;
   flex-direction: column;
+  gap: var(--space-2);
+}
+
+.schedule-page .planner-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.schedule-page .planner-group + .planner-group {
+  margin-top: var(--space-4);
+}
+
+.schedule-page .planner-group.is-secondary {
+  margin-top: var(--space-5);
+}
+
+.schedule-page .planner-group-title {
+  margin: 0 0 var(--space-1);
+  color: var(--text);
+  font-size: var(--subheader-font-size);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-transform: none;
+}
+
+.schedule-page .planner-group:first-of-type .planner-group-title {
   margin-top: var(--space-2);
 }
 
-.schedule-page .sched-run {
+.schedule-page .planner-group-title.is-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--hit-min);
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--subheader-font-size);
+  font-weight: 600;
+  text-align: start;
+}
+
+.schedule-page .planner-group-trail {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-inline-start: auto;
+  color: var(--muted);
+}
+
+.schedule-page .planner-group-count {
+  color: var(--muted);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.schedule-page .planner-group.is-collapsed .planner-group-title.is-toggle .planner-group-trail .ui-icon {
+  transform: rotate(-90deg);
+}
+
+.schedule-page .planner-task {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  column-gap: var(--space-3);
+  align-items: start;
+  min-width: 0;
+  min-height: max(var(--control-h), var(--hit-min));
+  padding-block: var(--space-2);
+  border-bottom: 1px solid var(--hair);
+  background: transparent;
+}
+
+.schedule-page .planner-group .planner-task:last-child {
+  border-bottom-color: transparent;
+}
+
+.schedule-page .planner-task.is-paused,
+.schedule-page .planner-task.is-completed {
+  opacity: 0.72;
+}
+
+.schedule-page .planner-task-state,
+.planner-editor-overlay .planner-editor-status {
+  max-width: 6.5rem;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-page .planner-task-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--space-1) var(--space-1) var(--space-1) 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .schedule-page .planner-task-main:hover {
+    background: var(--surface-overlay-hover);
+  }
+}
+
+.schedule-page .planner-task-main:focus-visible {
+  background: var(--surface-overlay-hover);
+}
+
+.schedule-page .planner-task-time {
+  min-width: 3.5rem;
+  padding-top: 0.35em;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.schedule-page .planner-task-time:empty {
+  min-width: 0;
+  width: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.schedule-page .planner-task-title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.schedule-page .planner-task-title .ui-badge {
+  margin-inline-end: var(--space-2);
+  vertical-align: 0.1em;
+}
+
+.schedule-page .planner-task-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 400;
+}
+
+.schedule-page .planner-task-meta-copy {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-page .planner-task-meta .planner-project-mark {
+  width: 0.85em;
+  height: 0.85em;
+  color: inherit;
+}
+
+.schedule-page .planner-task-meta.is-unavailable {
+  color: var(--text-dim);
+}
+
+.schedule-page .planner-task-error {
+  color: var(--red);
+  font-size: var(--font-meta);
+}
+
+.schedule-page .planner-task-tools {
+  display: flex;
+  flex: none;
+  flex-wrap: nowrap;
+  align-items: center;
+  width: auto;
+  min-width: 0;
+  padding-top: 0.1em;
+  gap: var(--space-1);
+}
+
+.schedule-page .planner-editor,
+.planner-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.planner-editor-overlay .planner-editor-top,
+.schedule-page .planner-editor-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.planner-editor-overlay .planner-enabled,
+.schedule-page .planner-enabled {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 500;
+}
+
+.planner-editor .planner-field,
+.planner-sheet .planner-field {
+  display: grid;
+  gap: var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  font-weight: 500;
+}
+
+.planner-editor .planner-prompt-field {
+  gap: var(--space-2);
+}
+
+.planner-editor .planner-prompt.ui-textarea,
+.planner-editor .planner-prompt-field > .ui-textarea {
+  width: 100%;
+  padding: var(--space-3);
+  background: var(--sunken);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  box-shadow: none;
+  font-size: var(--font-label);
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.planner-editor .planner-prompt.ui-textarea:focus,
+.planner-editor .planner-prompt-field > .ui-textarea:focus {
+  outline: none;
+  border-color: var(--control-border);
+  box-shadow: 0 0 0 3px var(--focus-wash);
+}
+
+.planner-editor .planner-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.planner-editor .planner-schedule-tabs {
+  align-self: start;
+}
+
+.planner-editor .planner-section-label,
+.planner-choice-heading {
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  font-weight: 500;
+}
+
+.planner-editor .planner-summary-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: max(var(--control-h), var(--hit-min));
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 0 var(--space-1);
+  margin-inline: calc(var(--space-1) * -1);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+}
+
+.planner-editor .planner-summary-v {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planner-editor .planner-legacy-summary {
+  color: var(--text);
+  font-size: var(--font-label);
+}
+
+.planner-editor .planner-hint,
+.planner-sheet .planner-hint,
+.planner-editor .planner-loop-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 400;
+}
+
+.planner-editor .planner-inline {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.planner-editor .planner-interval-input {
+  width: 5.5rem;
+}
+
+.planner-sheet,
+.planner-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.planner-picker-search {
+  width: 100%;
+}
+
+.planner-native-row,
+.planner-picker-row,
+.planner-choice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: max(var(--control-h), var(--hit-min));
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+}
+
+.planner-native-row {
+  position: relative;
+  justify-content: space-between;
+  padding-inline: var(--space-1);
+}
+
+.planner-native-k {
+  flex: none;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  font-weight: 500;
+}
+
+.planner-native-v {
+  min-width: 0;
+  flex: 1;
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 500;
+  text-align: end;
+}
+
+.planner-native-row > .ui-icon {
+  flex: none;
+  color: var(--muted);
+}
+
+.planner-native-row > input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+}
+
+.planner-native-row.is-disabled {
+  opacity: 0.55;
+}
+
+.planner-picker-row.is-selected,
+.planner-choice.is-selected {
+  background: var(--sunken);
+  font-weight: 500;
+}
+
+.planner-choice-label,
+.planner-picker-copy {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planner-picker-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.planner-picker-path {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 400;
+}
+
+.planner-choice-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.planner-choice-heading {
+  padding-block: var(--space-1);
+  padding-inline: var(--space-2);
+}
+
+.planner-project-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--space-5);
+  height: var(--space-5);
+}
+
+.planner-project-mask {
+  width: 1em;
+  height: 1em;
+  background: currentColor;
+}
+
+.planner-project-img {
+  width: 1em;
+  height: 1em;
+  object-fit: cover;
+}
+
+.planner-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: var(--space-1);
+}
+
+.planner-weekday {
+  min-height: var(--tap);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 500;
+}
+
+.planner-weekday[aria-pressed="true"] {
+  background: var(--accent-wash);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.planner-runs {
+  display: flex;
+  flex-direction: column;
+}
+
+.planner-run {
+  display: flex;
+  align-items: center;
   gap: var(--space-2);
   min-height: var(--control-h-sm);
-  padding-block: var(--space-1);
+  padding-block: var(--space-2);
   border-top: 1px solid var(--hair);
   font-size: var(--font-meta);
 }
 
-.schedule-page .sched-run-dot {
+.planner-run-dot {
   width: var(--space-2);
   height: var(--space-2);
   flex: none;
@@ -130,39 +601,58 @@
   background: var(--muted);
 }
 
-.schedule-page .sched-run-dot.ok { background: var(--green); }
-.schedule-page .sched-run-dot.failed { background: var(--red); }
-.schedule-page .sched-run-dot.running { background: var(--amber); }
-.schedule-page .sched-run-dot.skipped { background: var(--muted); }
+.planner-run-dot.ok { background: var(--green); }
+.planner-run-dot.failed { background: var(--red); }
+.planner-run-dot.running { background: var(--amber); }
+.planner-run-dot.skipped { background: var(--muted); }
 
-.schedule-page .sched-run-error {
+.planner-run-when {
+  font-variant-numeric: tabular-nums;
+}
+
+.planner-run-error {
+  flex-basis: 100%;
   color: var(--red);
   font-size: var(--font-meta);
 }
 
-.schedule-page .sched-every-value { width: min(100%, 6rem); }
-.schedule-page .sched-cron-expression { width: min(100%, 15rem); }
-.schedule-page .sched-time-zone,
-.schedule-page .sched-project { max-width: min(100%, 18rem); }
-.schedule-page .sched-stat-label { margin: 0; }
-
-@container schedule-page (max-width: 700px) {
-  .schedule-page .sched-form .view-toolbar-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    align-items: stretch;
-  }
-
-  .schedule-page .sched-form .view-toolbar-row > :is(.ui-text-input, .picker-select, .ui-tabs, .ui-btn, .sched-every),
-  .schedule-page .sched-every { width: 100%; max-width: none; }
-  .schedule-page .sched-form .ui-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .schedule-page .sched-card { align-items: stretch; flex-direction: column; }
-  .schedule-page .sched-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .schedule-page .sched-actions > .ui-btn { width: 100%; }
-  .schedule-page .sched-run { align-items: flex-start; flex-wrap: wrap; }
-  .schedule-page .sched-run-error { flex-basis: 100%; padding-inline-start: var(--space-4); }
+.planner-editor-overlay .ui-dialog-body,
+.planner-sheet-overlay .ui-dialog-body,
+.planner-picker-overlay .ui-dialog-body {
+  min-width: min(28rem, 100%);
 }
 
-@container schedule-page (max-width: 420px) {
-  .schedule-page .sched-actions { grid-template-columns: minmax(0, 1fr); }
+@media (prefers-reduced-motion: reduce) {
+  .schedule-page *,
+  .planner-sheet *,
+  .planner-picker * {
+    transition: none;
+  }
+}
+
+@container schedule-page (max-width: 480px) {
+  .schedule-page {
+    padding-inline: var(--space-2);
+  }
+
+  .schedule-page .planner-chrome {
+    width: 100%;
+  }
+
+  .schedule-page .planner-filter-btn {
+    max-width: none;
+    flex: 1;
+  }
+
+  .schedule-page .planner-task {
+    column-gap: var(--space-2);
+  }
+
+  .schedule-page .planner-task-time {
+    min-width: 3.15rem;
+  }
+
+  .schedule-page .planner-task-tools {
+    width: auto;
+  }
 }

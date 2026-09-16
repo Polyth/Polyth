@@ -1303,7 +1303,7 @@ export const api = {
   schedulePreview: (cadence: ScheduleCadenceDto, count = 5) =>
     jfetch<{ runs: number[]; description: string }>(`/api/schedule/preview`, json("POST", { cadence, count })),
   scheduleRuns: (id: string, limit = 50) =>
-    jfetch<ScheduleRunDto[]>(`/api/schedule/${encodeURIComponent(id)}/runs?limit=${limit}`).catch((): ScheduleRunDto[] => []),
+    jfetch<ScheduleRunDto[]>(`/api/schedule/${encodeURIComponent(id)}/runs?limit=${limit}`),
   scheduleLoopsRescan: (projectId: string) =>
     jfetch<{ tasks: ScheduleTaskDto[]; errors: ScheduleLoopErrorDto[] }>(
       `/api/schedule/loops/rescan`, json("POST", { projectId }),

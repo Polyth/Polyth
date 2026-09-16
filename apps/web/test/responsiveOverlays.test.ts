@@ -54,6 +54,18 @@ test("New Chat keeps its composer within the reading measure and switches keep c
   assert.ok(geometry.canvasComposer > 700, "the Canvas composer must not shrink-wrap to the empty-state label");
 });
 
+test("sheet actions support disabled and busy semantics", async () => {
+  const sheet = await read("../src/components/mobile/Sheet.tsx");
+  const overlay = await read("../src/components/ui/ResponsiveOverlay.tsx");
+  assert.match(sheet, /export interface SheetAction/);
+  assert.match(sheet, /disabled\?: boolean;/);
+  assert.match(sheet, /busy\?: boolean;/);
+  assert.match(sheet, /disabled=\{Boolean\(action\.disabled \|\| action\.busy\)\}/);
+  assert.match(sheet, /aria-busy=\{action\.busy \|\| undefined\}/);
+  assert.match(sheet, /if \(action\.disabled \|\| action\.busy\) return;/);
+  assert.match(overlay, /sheetAction\?: SheetAction/);
+});
+
 test("modal primitives lock background scroll and retain touch dismissal", async () => {
   const dialog = await read("../src/components/a11y/Dialog.tsx");
   const settings = await read("../src/components/SettingsView.tsx");
