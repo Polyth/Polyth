@@ -19,9 +19,67 @@ const localLoopback: AuthResolution = {
   authenticated: true,
 };
 
+type IdentifiedPrincipal = AuthPrincipal & { userId?: string };
+
+function samePrincipalIdentity(left: AuthPrincipal, right: AuthPrincipal): boolean {
+  if (left.kind !== right.kind) return false;
+  const leftUser = (left as IdentifiedPrincipal).userId;
+  const rightUser = (right as IdentifiedPrincipal).userId;
+  if ((leftUser ?? null) !== (rightUser ?? null)) return false;
+  switch (left.kind) {
+    case "anonymous":
+      return true;
+    case "local-user":
+      return right.kind === "local-user" && (left.sessionId ?? null) === (right.sessionId ?? null);
+    case "ui-session":
+      return right.kind === "ui-session" && left.sessionId === right.sessionId;
+    case "paired-device":
+      return right.kind === "paired-device"
+        && left.deviceId === right.deviceId
+        && left.connectionId === right.connectionId
+        && left.transport === right.transport;
+    case "internal-service":
+      return right.kind === "internal-service" && left.serviceId === right.serviceId;
+  }
+}
+
+/**
+ * Normalize one server-owned attach contract. When an identity resolver exists,
+ * remember the immutable handshake request for each bound principal so later
+ * capability checks can re-resolve the original credential. A revoked browser
+ * session therefore cannot stay live merely because a caller supplied a stale
+ * pass-through refresh function.
+ */
 export function normalizeWsAttachAuth(auth?: WsAuthorize | WsAttachAuth): WsAttachAuth {
   if (typeof auth === "function") return { authorize: auth };
-  return auth ?? {};
+  const source = auth ?? {};
+  if (!source.identity) return source;
+
+  const requests = new WeakMap<object, IncomingMessage>();
+  const identity = source.identity;
+  const priorRefresh = source.refreshPrincipal;
+  return {
+    ...source,
+    identity(req) {
+      const resolution = identity(req);
+      if (resolution.authenticated) requests.set(resolution.principal as object, req);
+      return resolution;
+    },
+    refreshPrincipal(bound) {
+      const request = requests.get(bound as object);
+      if (!request) return priorRefresh ? priorRefresh(bound) : null;
+      const current = identity(request);
+      if (!current.authenticated || !samePrincipalIdentity(bound, current.principal)) return null;
+      let live = current.principal;
+      if (priorRefresh) {
+        const checked = priorRefresh(live);
+        if (!checked || !samePrincipalIdentity(live, checked)) return null;
+        live = checked;
+      }
+      requests.set(live as object, request);
+      return live;
+    },
+  };
 }
 
 export function defaultWsIdentity(auth: WsAttachAuth, req: IncomingMessage): AuthResolution {
