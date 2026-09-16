@@ -9,6 +9,7 @@ import {
 } from "@polyth/contracts/project-composition";
 import { api } from "@polyth/session/web-api";
 import { tr, type TranslationKey } from "../i18n/index.ts";
+import { missingProjectPackageOverrides } from "../projectCompositionOverrides.ts";
 import { Button } from "./ui/index.ts";
 import "./ProjectCompositionEditor.css";
 
@@ -75,6 +76,10 @@ export default function ProjectCompositionEditor({
     return packages.filter((pkg) => ids.has(pkg.id));
   }, [packages, resolution.recommendedPackageIds]);
   const configurable = useMemo(() => configurableProjectPackages(packages), [packages]);
+  const missingOverrides = useMemo(
+    () => missingProjectPackageOverrides(value, packages.map((pkg) => pkg.id)),
+    [packages, value],
+  );
 
   const commit = (next: ProjectComposition) => onChange(parseProjectComposition(next));
   const setGeneral = () => commit({ ...value, directions: [] });
@@ -144,7 +149,13 @@ export default function ProjectCompositionEditor({
                 </div> : <span className="project-package-disabled">{tr("projectcomposition.disabledGlobally")}</span>}
               </div>;
             })}
-            {configurable.length === 0 && !loading && <p className="project-package-empty">{tr("projectcomposition.noPackageChoices")}</p>}
+            {missingOverrides.map(({ id, preference }) => (
+              <div className="project-package-row is-missing" key={`missing:${id}`}>
+                <div><strong>{id}</strong><span>{preference === "include" ? tr("projectcomposition.show") : tr("projectcomposition.hide")}</span></div>
+                <Button size="sm" variant="ghost" aria-label={`${tr("common.remove")} ${id}`} onClick={() => setOverride(id, "auto")}>{tr("common.remove")}</Button>
+              </div>
+            ))}
+            {configurable.length === 0 && missingOverrides.length === 0 && !loading && <p className="project-package-empty">{tr("projectcomposition.noPackageChoices")}</p>}
           </div>
         )}
       </section>
