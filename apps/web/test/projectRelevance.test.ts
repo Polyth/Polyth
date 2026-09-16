@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   isProjectContributionRelevant,
+  projectPackageAffinity,
   replaceProjectPackageCatalog,
   resetProjectRelevanceForTest,
   setProjectCompositionContext,
@@ -40,4 +41,13 @@ test("legacy, host and unknown external contributions remain compatible", () => 
   assert.equal(isProjectContributionRelevant(), true);
   assert.equal(isProjectContributionRelevant("host"), true);
   assert.equal(isProjectContributionRelevant("third-party-not-catalogued"), true);
+});
+
+test("package affinity lookup is detached and suitable for one-time profile inheritance", () => {
+  replaceProjectPackageCatalog(packages as never);
+  const affinity = projectPackageAffinity("git");
+  assert.deepEqual(affinity, { directions: ["engineering"], recommended: true });
+  affinity!.directions = [];
+  assert.deepEqual(projectPackageAffinity("git"), { directions: ["engineering"], recommended: true });
+  assert.equal(projectPackageAffinity("missing"), undefined);
 });
