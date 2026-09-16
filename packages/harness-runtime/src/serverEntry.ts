@@ -6,6 +6,7 @@ import type {
     AgentCapabilityContribution,
     AgentCapabilityContributionRegistry,
     AgentCapabilityDescriptor,
+    Disposable,
     HarnessContext,
     HarnessProvisioningQuery,
     HarnessRegistry,
@@ -252,11 +253,12 @@ export function harnessRoutes(host: ServerPackageHost): RouteHandler {
         return false;
     };
 }
-export default function registerPackage(host: ServerPackageHost) {
-    const registry = host.services.require(serverServiceKey<ReturnType<typeof createHarnessRegistry>>("harnesses"));
-    registry.configurePolicy(async (context) => context.space ? readPreferences(host.spaceStorage(context.space).path("harnesses/preferences.json")) : {});
-    const capabilities = host.services.require(serverServiceKey<AgentCapabilityContributionRegistry>("harness.capabilities"));
-    capabilities.register("harness-runtime", {
+
+function harnessSystemPromptContribution(
+    host: ServerPackageHost,
+    registry: HarnessRegistry,
+): ContextualCapabilityContribution {
+    return {
         descriptor: {
             id: "harness-runtime.system-prompts",
             kind: "instruction",
@@ -287,6 +289,26 @@ export default function registerPackage(host: ServerPackageHost) {
                 } as HarnessSystemPromptDescriptor];
             });
         },
-    } as ContextualCapabilityContribution);
-    return { routes: harnessRoutes(host), remoteAccess: localOnlyRemoteAccess(["harnesses"]) };
+    };
+}
+
+export default function registerPackage(host: ServerPackageHost) {
+    const registry = host.services.require(serverServiceKey<ReturnType<typeof createHarnessRegistry>>("harnesses"));
+    registry.configurePolicy(async (context) => context.space ? readPreferences(host.spaceStorage(context.space).path("harnesses/preferences.json")) : {});
+    let promptContribution: Disposable | undefined;
+    return {
+        routes: harnessRoutes(host),
+        remoteAccess: localOnlyRemoteAccess(["harnesses"]),
+        onEnable() {
+            if (promptContribution)
+                return;
+            const capabilities = host.services.require(serverServiceKey<AgentCapabilityContributionRegistry>("harness.capabilities"));
+            promptContribution = capabilities.register("harness-runtime", harnessSystemPromptContribution(host, registry));
+        },
+        onDisable() {
+            const contribution = promptContribution;
+            promptContribution = undefined;
+            return contribution?.dispose();
+        },
+    };
 }
