@@ -5,7 +5,11 @@ import { fileURLToPath } from "node:url";
 import { createCanonicalSecurity } from "./canonicalSecurity.ts";
 import { bindCanonicalSecurity } from "./runtimeSecurity.ts";
 import { createSetupServer } from "./setupServer.ts";
-import { boot as bootCore, type BootOptions } from "./indexCore.ts";
+import {
+  acquireDataDirectoryLease,
+  boot as bootCore,
+  type BootOptions,
+} from "./indexCore.ts";
 
 export * from "./indexCore.ts";
 export type { BootOptions } from "./indexCore.ts";
@@ -57,32 +61,42 @@ export async function boot(opts: BootOptions = {}) {
       return {
         ...runtime,
         shutdown() {
-          if (!shutdown) {
-            shutdown = runtime.shutdown().finally(closeAuthority);
-          }
+          if (!shutdown) shutdown = runtime.shutdown().finally(closeAuthority);
           return shutdown;
         },
       };
     }
 
+    // Full runtime owns this same lease in ready mode. Setup has no core, so it
+    // must hold the lease itself to preserve the one-writer installation rule.
+    const writerLease = await acquireDataDirectoryLease(dataDir);
     const setup = createSetupServer({
       security,
       webDist: resolve(opts.webDist ?? resolve(fileURLToPath(new URL("../../../apps/web/dist/", import.meta.url)))),
       version: "0.1.0",
     });
-    await new Promise<void>((resolveListen, rejectListen) => {
-      const failed = (error: Error): void => rejectListen(error);
-      setup.server.once("error", failed);
-      setup.server.listen(port, hostname, () => {
-        setup.server.off("error", failed);
-        resolveListen();
+    try {
+      await new Promise<void>((resolveListen, rejectListen) => {
+        const failed = (error: Error): void => rejectListen(error);
+        setup.server.once("error", failed);
+        setup.server.listen(port, hostname, () => {
+          setup.server.off("error", failed);
+          resolveListen();
+        });
       });
-    });
+    } catch (cause) {
+      await writerLease.release();
+      throw cause;
+    }
     console.log(`[polyth] setup server on ${origin}  data=${dataDir}`);
 
     let shutdown: Promise<void> | undefined;
     const stop = (): Promise<void> => {
-      if (!shutdown) shutdown = setup.shutdown().finally(closeAuthority);
+      if (!shutdown) {
+        shutdown = setup.shutdown()
+          .then(() => writerLease.release())
+          .finally(closeAuthority);
+      }
       return shutdown;
     };
     const sigint = (): void => { void stop().then(() => process.exit(0)); };
