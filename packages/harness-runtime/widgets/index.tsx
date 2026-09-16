@@ -9,7 +9,10 @@ export default defineWebPackage((host) => () => {
   const disposeBase = base(host)();
   const disposeRecovery = host.slots.register({
     id: "harnesses.transition",
-    slot: "composer.execution",
+    // Recovery is a conversation-level notice, not a composer control: it
+    // renders above the composer next to RuntimeEpochBanner, never inside the
+    // execution rail.
+    slot: "session.composer.before",
     order: 10,
     render: (props) => <HarnessAuthRecovery
       host={host}

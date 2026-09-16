@@ -39,6 +39,22 @@ test("a live direct prompt cannot be surfaced as unknown by reconciliation", asy
   assert.match(sendFailure, /code === "outcome-unknown" && !shouldSurfaceLocalMutationRecovery\(sessionId\)/);
 });
 
+test("harness recovery registers above the composer, not inside execution", async () => {
+  const recoveryEntry = await readFile(
+    new URL("../../../packages/harness-runtime/widgets/index.tsx", import.meta.url),
+    "utf8",
+  );
+  const runtimeEntry = await readFile(
+    new URL("../../../packages/harness-runtime/widgets/runtime.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(recoveryEntry, /id:\s*"harnesses\.transition"[\s\S]*?slot:\s*"session\.composer\.before"/);
+  assert.match(runtimeEntry, /id:\s*"harnesses\.transition"[\s\S]*?slot:\s*"session\.composer\.before"/);
+  assert.doesNotMatch(recoveryEntry, /slot:\s*"composer\.execution"/);
+  assert.doesNotMatch(runtimeEntry, /slot:\s*"composer\.execution"/);
+});
+
 test("recovery surfaces preserve drafts and never auto-send a failed turn", async () => {
   const composer = await readFile(new URL("../src/components/Composer.tsx", import.meta.url), "utf8");
   const timeline = await readFile(new URL("../src/components/Timeline.tsx", import.meta.url), "utf8");

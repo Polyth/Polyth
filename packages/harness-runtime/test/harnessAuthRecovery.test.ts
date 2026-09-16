@@ -244,8 +244,10 @@ test("auth failure stays in chat, reviews the native sign-in command, then opens
     const signIn = button(view.container, "Sign in");
     assert.ok(signIn);
     await act(async () => { signIn.click(); });
-    assert.match(view.container.textContent ?? "", /codex login/);
-    const run = button(view.container, "Run sign-in");
+    // Command review lives in the a11y Dialog portal on document.body, not in
+    // the slot mount container.
+    assert.match(document.body.textContent ?? "", /codex login/);
+    const run = button(document.body, "Run sign-in");
     assert.ok(run);
     await act(async () => { run.click(); await Promise.resolve(); });
     const terminalRequest = requests.find((request) => request.method === "POST" && request.path === "/api/terminals");
@@ -336,6 +338,38 @@ test("live canonical turn events refresh and clear mid-turn auth recovery", asyn
     });
     await flush();
     assert.doesNotMatch(view.container.textContent ?? "", /retry safely/i);
+  } finally {
+    await view.unmount();
+  }
+});
+
+test("bridge reconnect retry failure stays in the same notice card", async () => {
+  resetRuntimeCatalogMemory(false);
+  fetchHandler = async (input, init) => {
+    const url = new URL(String(input), "http://test");
+    const method = init?.method ?? "GET";
+    if (url.pathname === "/api/harnesses/sessions/session-1" && method === "POST") {
+      return new Response("upstream unavailable", { status: 502 });
+    }
+    if (url.pathname.endsWith("/events")) return new Response(JSON.stringify([]));
+    return new Response(JSON.stringify([]));
+  };
+  const value = state();
+  const view = await mount({
+    host: host(value),
+    projectId: "project-1",
+    sessionId: "session-1",
+    transition: transition(undefined, "Polyth agent-tools bridge failed to connect (Codex status: authenticationRequired)"),
+  });
+  try {
+    const reconnect = button(view.container, "Reconnect");
+    assert.ok(reconnect);
+    await act(async () => { reconnect.click(); await Promise.resolve(); await Promise.resolve(); });
+    await flush();
+    assert.equal(view.container.querySelectorAll(".ui-notice").length, 1,
+      "retry failure must not spawn a second notice card");
+    assert.match(view.container.textContent ?? "", /Reconnect harness: upstream unavailable/);
+    assert.match(view.container.querySelector(".ui-notice--error")?.textContent ?? "", /agent tools need to reconnect/);
   } finally {
     await view.unmount();
   }

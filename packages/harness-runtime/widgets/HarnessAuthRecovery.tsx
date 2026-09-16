@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { HarnessSelection, HarnessSnapshot, HarnessTransition, SessionEvent, SessionProjection } from "@polyth/contracts";
 import { peekHarnessSnapshots, readHarnessSnapshots, useCatalogRevision } from "@polyth/models/runtime-catalog";
 import { createApiTransport, type WebPackageHost } from "@polyth/web-sdk";
@@ -127,6 +127,16 @@ export function harnessRecoveryKind(transition?: HarnessTransition): RecoveryKin
 
 const snapshotNeedsSignIn = (snapshot?: HarnessSnapshot): boolean =>
   snapshot?.availability.state === "auth-required";
+
+const recoveryNoticeBody = (
+  content: ReactNode,
+  status: string,
+  failure: string,
+) => <>
+  {content}
+  {status && <p role="status" aria-live="polite">{status}</p>}
+  {failure && <p role="alert">{failure}</p>}
+</>;
 
 export default function HarnessAuthRecovery({
   host,
@@ -405,7 +415,7 @@ export default function HarnessAuthRecovery({
   if (explicitKind === "bridge-reconnect" && transition?.phase === "failed" && sessionId) {
     return <div className="pkg-harnesses pkg-harnesses-transition-status">
       <Notice
-        tone="warning"
+        tone={failure ? "error" : "warning"}
         role="alert"
         heading={`${name} agent tools need to reconnect`}
         actions={<>
@@ -413,18 +423,22 @@ export default function HarnessAuthRecovery({
           <Button size="sm" variant="ghost" disabled={busy} onClick={openSettings}>Harness settings</Button>
         </>}
       >
-        Polyth will restart the private agent-tools connection and retry this harness without changing your conversation.
-        <details className="pkg-harnesses-diagnostics"><summary>Technical details</summary><p>{transition.error?.message}</p></details>
+        {recoveryNoticeBody(
+          <>
+            Polyth will restart the private agent-tools connection and retry this harness without changing your conversation.
+            <details className="pkg-harnesses-diagnostics"><summary>Technical details</summary><p>{transition.error?.message}</p></details>
+          </>,
+          status,
+          failure,
+        )}
       </Notice>
-      {status && <p role="status" aria-live="polite">{status}</p>}
-      {failure && <Notice tone="error" role="alert">{failure}</Notice>}
     </div>;
   }
 
   if (signInSource === "turn" && visibleTurnFailure && turnVerified) {
     return <div className="pkg-harnesses pkg-harnesses-transition-status">
       <Notice
-        tone="success"
+        tone={failure ? "error" : "success"}
         role="status"
         heading={`${name} sign-in restored`}
         actions={<>
@@ -432,12 +446,16 @@ export default function HarnessAuthRecovery({
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => setDismissedTurnId(visibleTurnFailure.turnId)}>Continue without retry</Button>
         </>}
       >
-        The failed turn was not replayed automatically because it may already have changed your project.
-        {visibleTurnFailure.attachmentCount > 0 && <p>The original message had {visibleTurnFailure.attachmentCount} attachment{visibleTurnFailure.attachmentCount === 1 ? "" : "s"}. Reattach them before sending again.</p>}
-        {!visibleTurnFailure.prompt && <p>Authentication is restored. Continue from the composer when you are ready.</p>}
+        {recoveryNoticeBody(
+          <>
+            The failed turn was not replayed automatically because it may already have changed your project.
+            {visibleTurnFailure.attachmentCount > 0 && <p>The original message had {visibleTurnFailure.attachmentCount} attachment{visibleTurnFailure.attachmentCount === 1 ? "" : "s"}. Reattach them before sending again.</p>}
+            {!visibleTurnFailure.prompt && <p>Authentication is restored. Continue from the composer when you are ready.</p>}
+          </>,
+          status,
+          failure,
+        )}
       </Notice>
-      {status && <p role="status" aria-live="polite">{status}</p>}
-      {failure && <Notice tone="error" role="alert">{failure}</Notice>}
     </div>;
   }
 
@@ -461,7 +479,7 @@ export default function HarnessAuthRecovery({
 
   return <div className="pkg-harnesses pkg-harnesses-transition-status" aria-busy={loading || busy}>
     <Notice
-      tone="warning"
+      tone={failure ? "error" : "warning"}
       role="alert"
       heading={heading}
       actions={<>
@@ -473,15 +491,19 @@ export default function HarnessAuthRecovery({
         <Button size="sm" variant="ghost" busy={loading || busy} disabled={loading || busy} onClick={() => void checkAndContinue()}>I’ve signed in</Button>
       </>}
     >
-      {signInSource === "turn"
-        ? <>This turn stopped because the harness needs authentication. Your conversation is safe, and Polyth will not replay the failed message automatically.</>
-        : <>Your conversation is safe. Sign in again, then Polyth will verify this harness and continue the recovery flow.</>}
-      {!command && !loading && <p>The native sign-in command is not available here. Open Harnesses to finish authentication.</p>}
-      {setupUrl && <p><a href={setupUrl} target="_blank" rel="noreferrer">Open setup guide ↗</a></p>}
-      {technicalMessage && <details className="pkg-harnesses-diagnostics"><summary>Technical details</summary><p>{technicalMessage}</p></details>}
+      {recoveryNoticeBody(
+        <>
+          {signInSource === "turn"
+            ? <>This turn stopped because the harness needs authentication. Your conversation is safe, and Polyth will not replay the failed message automatically.</>
+            : <>Your conversation is safe. Sign in again, then Polyth will verify this harness and continue the recovery flow.</>}
+          {!command && !loading && <p>The native sign-in command is not available here. Open Harnesses to finish authentication.</p>}
+          {setupUrl && <p><a className="pkg-harnesses-setup-link" href={setupUrl} target="_blank" rel="noreferrer">Open setup guide ↗</a></p>}
+          {technicalMessage && <details className="pkg-harnesses-diagnostics"><summary>Technical details</summary><p>{technicalMessage}</p></details>}
+        </>,
+        status,
+        failure,
+      )}
     </Notice>
-    {status && <p role="status" aria-live="polite">{status}</p>}
-    {failure && <Notice tone="error" role="alert">{failure}</Notice>}
     {dialogOpen && command && <Dialog title={`Sign in to ${name}`} onClose={() => setDialogOpen(false)}>
       <div className="pkg-harnesses pkg-harnesses-command-review">
         <p>Run this harness’s native sign-in command on the selected project target:</p>
