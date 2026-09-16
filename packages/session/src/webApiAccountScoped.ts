@@ -4,8 +4,11 @@
 // shared session service.
 import type { JsonObject } from "@polyth/contracts";
 import { api as baseApi } from "./webApi.ts";
+import { createLifecycleFence } from "./lifecycleFence.ts";
 
 export * from "./webApi.ts";
+
+const sessionLifecycleFence = createLifecycleFence();
 
 type SendBody = Parameters<typeof baseApi.sendMessage>[1];
 
@@ -41,5 +44,23 @@ async function resolvePreset(body: SendBody): Promise<SendBody> {
 
 export const api: typeof baseApi = {
   ...baseApi,
+  // A list response that overlapped create/archive/restore/delete is stale even
+  // when it arrives last. Retry behind the lifecycle idle barrier rather than
+  // letting an older response resurrect or temporarily erase a session.
+  listSessions: (projectId) => sessionLifecycleFence.readStable(
+    () => baseApi.listSessions(projectId),
+  ),
+  createSession: (input) => sessionLifecycleFence.mutate(
+    () => baseApi.createSession(input),
+  ),
+  archive: (id) => sessionLifecycleFence.mutate(
+    () => baseApi.archive(id),
+  ),
+  restore: (id) => sessionLifecycleFence.mutate(
+    () => baseApi.restore(id),
+  ),
+  deleteSession: (id) => sessionLifecycleFence.mutate(
+    () => baseApi.deleteSession(id),
+  ),
   sendMessage: async (id, body) => baseApi.sendMessage(id, await resolvePreset(body)),
 };
