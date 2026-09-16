@@ -1,0 +1,75 @@
+import type { PasswordService, WebAuthnConfig } from "@polyth/identity";
+import { createIdentityService, type IdentityService } from "@polyth/identity";
+import { createIdentityHttpAdapter } from "@polyth/identity/http";
+import { openControlPlane, type ControlPlane } from "@polyth/control-plane";
+import { createCanonicalAuthGateway, type CanonicalAuthGateway } from "./canonicalAuth.ts";
+
+export interface CanonicalSecurityOptions {
+  dataDir: string;
+  /** Canonical browser origin. Never derive this from Host/X-Forwarded-* input. */
+  origin: string;
+  /** Explicit local development/native exception for HTTP loopback. */
+  localOnly?: boolean;
+  now?: () => number;
+  idleMs?: number;
+  absoluteMs?: number;
+  passwords?: PasswordService;
+  webauthn?: Omit<WebAuthnConfig, "origin">;
+}
+
+export interface CanonicalSecurity {
+  control: ControlPlane;
+  identity: IdentityService;
+  auth: CanonicalAuthGateway;
+  http: ReturnType<typeof createIdentityHttpAdapter>;
+  /** Operator channel only. Do not expose this through public HTTP routes. */
+  issueSetupClaim(): ReturnType<IdentityService["setup"]["issueClaim"]>;
+  close(): void;
+}
+
+/**
+ * Open the one canonical security authority before any feature store writes to
+ * the data root. `openControlPlane()` deliberately refuses to initialize when
+ * legacy/application data already exists without its installation sentinel;
+ * callers must run the reviewed migration instead of bootstrapping a second
+ * owner over legacy state.
+ */
+export function createCanonicalSecurity(options: CanonicalSecurityOptions): CanonicalSecurity {
+  const control = openControlPlane({ directory: options.dataDir });
+  let identity: IdentityService | undefined;
+  try {
+    identity = createIdentityService(control, {
+      ...(options.now ? { now: options.now } : {}),
+      ...(options.idleMs !== undefined ? { idleMs: options.idleMs } : {}),
+      ...(options.absoluteMs !== undefined ? { absoluteMs: options.absoluteMs } : {}),
+      ...(options.passwords ? { passwords: options.passwords } : {}),
+      webauthn: { origin: options.origin, ...options.webauthn },
+    });
+    const http = createIdentityHttpAdapter(identity, {
+      origin: options.origin,
+      ...(options.localOnly !== undefined ? { localOnly: options.localOnly } : {}),
+    });
+    const auth = createCanonicalAuthGateway({
+      control,
+      identity,
+      cookieName: http.cookieName,
+    });
+    let closed = false;
+    return {
+      control,
+      identity,
+      auth,
+      http,
+      issueSetupClaim: () => identity!.setup.issueClaim(),
+      close() {
+        if (closed) return;
+        closed = true;
+        identity!.close();
+        control.close();
+      },
+    };
+  } catch (cause) {
+    try { identity?.close(); } finally { control.close(); }
+    throw cause;
+  }
+}
