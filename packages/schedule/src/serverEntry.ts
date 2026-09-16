@@ -7,6 +7,7 @@ import {
   type ServerPackageHost,
 } from "@polyth/plugins";
 import {
+  assertLoopExecutionTrusted,
   createScheduleService,
   scanLoopsDir,
   type ScheduleCadence,
@@ -77,7 +78,8 @@ export function scheduleRoutes(deps: {
     ...(input.enabled !== undefined ? { enabled: input.enabled === true } : {}),
   });
 
-  return async ({ path, method, url, body, json }) => {
+  return async (rc) => {
+    const { path, method, url, body, json } = rc;
     if (!path.startsWith("/api/schedule")) return false;
     if (path === "/api/schedule" && method === "GET") {
       const projectId = url.searchParams.get("projectId") ?? undefined;
@@ -135,6 +137,52 @@ export function scheduleRoutes(deps: {
       return true;
     }
 
+    const trustMatch = path.match(/^\/api\/schedule\/([^/]+)\/trust$/);
+    if (trustMatch && method === "POST") {
+      const id = trustMatch[1]!;
+      const task = deps.schedule.get(id);
+      if (!task || task.source !== "loop-file" || !task.sourcePath || !task.loopId) {
+        json(404, { error: "not-found", message: "managed loop task not found" });
+        return true;
+      }
+      const project = await deps.projects.get(task.projectId);
+      if (!project) {
+        json(404, { error: "not-found", message: "project not found" });
+        return true;
+      }
+      // Re-read at the authorization boundary. A stale UI cannot approve bytes
+      // it reviewed earlier if the repository changed again in the meantime.
+      const scan = scanLoopsDir(project.path);
+      const current = scan.find((file) => file.path === task.sourcePath && file.loop?.id === task.loopId);
+      if (!current?.loop || current.digest !== task.sourceDigest) {
+        deps.schedule.syncLoops(task.projectId, scan, { explicit: true });
+        json(409, {
+          error: "content-trust-changed",
+          message: "Loop changed again. Refresh and review the current version.",
+        });
+        return true;
+      }
+      const input = await body();
+      const action = String(input.action ?? "");
+      if (action === "trust-current") {
+        json(200, deps.schedule.trustLoopVersion(id, rc.space.spaceId, current));
+        return true;
+      }
+      if (action === "run-once") {
+        json(200, await deps.schedule.runLoopVersionOnce(id, rc.space.spaceId, current));
+        return true;
+      }
+      if (action === "reject") {
+        json(200, deps.schedule.rejectLoopVersion(id));
+        return true;
+      }
+      json(400, {
+        error: "invalid-input",
+        message: "action must be trust-current, run-once, or reject",
+      });
+      return true;
+    }
+
     const match = path.match(
       /^\/api\/schedule\/([^/]+)(?:\/(pause|resume|run|runs))?$/,
     );
@@ -176,6 +224,17 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     file: join(host.storageDir, "schedule.json"),
     runner: {
       run: async (task, runId) => {
+        if (task.source === "loop-file") {
+          const project = await host.projects.get(task.projectId);
+          if (!project || !task.sourcePath || !task.loopId) {
+            throw Object.assign(new Error("managed loop project/source is unavailable"), { code: "content-trust-changed" });
+          }
+          const current = scanLoopsDir(project.path)
+            .find((file) => file.path === task.sourcePath && file.loop?.id === task.loopId);
+          // This immediate re-read closes the scanner interval window for any
+          // external/manual/agent/Git mutation of repository-controlled input.
+          assertLoopExecutionTrusted(task, current, project.spaceId);
+        }
         const mode = task.target?.mode ?? (task.sessionId ? "existing-session" : "new-session-per-run");
         let sessionId: string | undefined;
         if (mode === "existing-session") {
