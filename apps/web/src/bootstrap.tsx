@@ -107,7 +107,7 @@ const bootOnce = (): void => {
   void init().then(openPendingNativePushAfterHydration).catch(() => undefined);
 };
 
-type BootstrapPhase = "checking" | "setup" | "locked" | "ready" | "unavailable";
+type BootstrapPhase = "checking" | "setup" | "restart" | "locked" | "ready" | "unavailable";
 
 function Root() {
   const [phase, setPhase] = useState<BootstrapPhase>("checking");
@@ -157,6 +157,7 @@ function Root() {
     </div>
   );
   if (phase === "setup") return <SetupScreen key={locale} />;
+  if (phase === "restart") return <SetupScreen key={locale} restartRequired />;
   if (phase === "locked") {
     return <LockScreen key={locale} onUnlocked={() => location.reload()} />;
   }
