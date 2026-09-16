@@ -54,3 +54,10 @@ export {
   type MigrationResult,
   type MigrationTargets,
 } from "./migrate.ts";
+export {
+  loadLegacyAuthState,
+  parseLegacyAuthState,
+  type LegacyCredential,
+  type LegacyAuthSession,
+  type LegacyAuthState,
+} from "./legacyAuth.ts";

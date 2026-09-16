@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
 import { isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { canonicalLegacyJson, digestLegacyFile, readLegacyFile, type LegacyFileDigest } from "./legacyFiles.ts";
+import { parseLegacyAuthState } from "./legacyAuth.ts";
 
 export const LEGACY_OWNER_ALIAS = "usr_owner";
 
@@ -29,6 +31,8 @@ export interface LegacySourceEvidence {
   sha256?: string;
   bytes?: number;
   counts: Record<string, number>;
+  /** WAL/journal bytes participate in the source fingerprint. SHM is not data. */
+  sidecars?: Record<string, LegacyFileDigest>;
 }
 
 export type LegacyOwnershipProofKind =
@@ -81,14 +85,6 @@ const nonEmpty = (value: unknown): value is string =>
 const sha256 = (value: string | Buffer): string =>
   createHash("sha256").update(value).digest("hex");
 
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (isRecord(value)) {
-    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
 function relativeEvidencePath(root: string, file: string): string {
   const rel = relative(root, file);
   return rel && !rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel) ? rel : file;
@@ -100,14 +96,12 @@ function sourceEvidence(kind: LegacySourceKind, root: string, file: string): Leg
     if (!stat.isFile() || stat.isSymbolicLink()) {
       return { kind, path: relativeEvidencePath(root, file), present: true, counts: {} };
     }
-    const bytes = readFileSync(file);
+    const digest = digestLegacyFile(file);
     return {
-      kind,
-      path: relativeEvidencePath(root, file),
-      present: true,
-      sha256: sha256(bytes),
-      bytes: stat.size,
-      counts: {},
+      kind, path: relativeEvidencePath(root, file), ...digest, counts: {},
+      ...(kind === "sessions" ? { sidecars: {
+        wal: digestLegacyFile(`${file}-wal`), journal: digestLegacyFile(`${file}-journal`),
+      } } : {}),
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -135,13 +129,18 @@ function parseJsonSource(
       });
       return undefined;
     }
-    return JSON.parse(readFileSync(file, "utf8")) as unknown;
+    const { digest, data } = readLegacyFile(file);
+    if (!data || digest.sha256 !== source.sha256) {
+      issues.push({ code: "source-changed", severity: "blocking", source: source.kind, detail: "Source changed during inventory" });
+      return undefined;
+    }
+    return JSON.parse(data.toString("utf8")) as unknown;
   } catch (error) {
     issues.push({
       code: "malformed-source",
       severity: "blocking",
       source: source.kind,
-      detail: `${relativeEvidencePath(root, file)} could not be parsed: ${(error as Error).message}`,
+      detail: "Source is unreadable or is not valid bounded JSON",
     });
     return undefined;
   }
@@ -170,7 +169,7 @@ function overlappingLocalPaths(a: ParsedProject, b: ParsedProject): boolean {
   if (ap === bp) return true;
   const ar = relative(ap, bp);
   const br = relative(bp, ap);
-  return (!!ar && !ar.startsWith("..") && !isAbsolute(ar)) || (!!br && !br.startsWith("..") && !isAbsolute(br));
+  return (!!ar && ar !== ".." && !ar.startsWith(`..${sep}`) && !isAbsolute(ar)) || (!!br && br !== ".." && !br.startsWith(`..${sep}`) && !isAbsolute(br));
 }
 
 function inspectSqlite(
@@ -187,8 +186,12 @@ function inspectSqlite(
   try {
     const stat = lstatSync(file);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("not a regular file");
+    for (const suffix of ["-wal", "-shm", "-journal"]) {
+      try { if (!lstatSync(`${file}${suffix}`).isFile()) throw new Error("unsafe-sidecar"); }
+      catch (cause) { if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause; }
+    }
     db = new DatabaseSync(file, { readOnly: true });
-    db.exec("PRAGMA query_only=ON");
+    db.exec("PRAGMA query_only=ON; PRAGMA trusted_schema=OFF; BEGIN");
     const integrity = db.prepare("PRAGMA quick_check").get() as { quick_check?: string } | undefined;
     if (integrity?.quick_check !== "ok") throw new Error("SQLite quick_check failed");
     const tables = new Set(
@@ -234,7 +237,7 @@ function inspectSqlite(
       code: "malformed-session-db",
       severity: "blocking",
       source: "sessions",
-      detail: `sessions database cannot be inventoried: ${(error as Error).message}`,
+      detail: "Sessions database cannot be safely inventoried",
     });
   } finally {
     try { db?.close(); } catch { /* read-only inventory */ }
@@ -243,7 +246,12 @@ function inspectSqlite(
 }
 
 export function inventoryLegacyMigration(opts: LegacyInventoryOptions): LegacyMigrationInventory {
-  const root = resolve(opts.dataDir);
+  let root = resolve(opts.dataDir);
+  let unsafeRoot = false;
+  try {
+    unsafeRoot = !lstatSync(root).isDirectory();
+    if (!unsafeRoot) root = realpathSync.native(root);
+  } catch { unsafeRoot = true; }
   const files = {
     auth: join(root, "auth.json"),
     tenancy: join(root, "tenancy.json"),
@@ -254,10 +262,11 @@ export function inventoryLegacyMigration(opts: LegacyInventoryOptions): LegacyMi
       : join(root, "agent-profile-owners.json"),
   } satisfies Record<LegacySourceKind, string>;
 
+  // Never follow a rejected data root merely to collect evidence.
   const sources = (Object.entries(files) as Array<[LegacySourceKind, string]>).map(([kind, file]) =>
-    sourceEvidence(kind, root, file));
+    unsafeRoot ? { kind, path: relativeEvidencePath(root, file), present: false, counts: {} } as LegacySourceEvidence : sourceEvidence(kind, root, file));
   const byKind = Object.fromEntries(sources.map((source) => [source.kind, source])) as Record<LegacySourceKind, LegacySourceEvidence>;
-  const issues: LegacyMigrationIssue[] = [];
+  const issues: LegacyMigrationIssue[] = unsafeRoot ? [{ code: "unsafe-data-root", severity: "blocking", source: "tenancy", detail: "Data root must be an existing canonical directory" }] : [];
   const ownership: LegacyOwnershipProof[] = [];
   const adoptions: LegacyPlannedAdoption[] = [];
   const addOwnership = (proof: LegacyOwnershipProof): void => {
@@ -294,38 +303,23 @@ export function inventoryLegacyMigration(opts: LegacyInventoryOptions): LegacyMi
 
   const auth = parseJsonSource(byKind.auth, root, files.auth, issues);
   if (auth !== undefined) {
-    if (!isRecord(auth) || !Array.isArray(auth.sessions) || (auth.credentials !== undefined && !Array.isArray(auth.credentials))) {
-      issues.push({ code: "invalid-auth-shape", severity: "blocking", source: "auth", detail: "auth.json does not match a known legacy shape" });
-    } else {
-      const credentials = Array.isArray(auth.credentials) ? auth.credentials : [];
-      byKind.auth.counts.credentials = credentials.length + (nonEmpty(auth.passwordHash) ? 1 : 0);
-      byKind.auth.counts.sessions = auth.sessions.length;
-      if (nonEmpty(auth.passwordHash)) {
+    try {
+      const { stored } = parseLegacyAuthState(auth, LEGACY_OWNER_ALIAS);
+      byKind.auth.counts.credentials = stored.credentials.length + (stored.passwordHash ? 1 : 0);
+      byKind.auth.counts.sessions = stored.sessions.length;
+      if (stored.passwordHash) {
         knownUsers.add(LEGACY_OWNER_ALIAS);
         verifiedLegacyOwner = true;
         addOwnership({ resourceKind: "user", resourceId: LEGACY_OWNER_ALIAS, ownerUserId: LEGACY_OWNER_ALIAS, source: "auth", proof: "verified-legacy-owner" });
       }
-      for (const credential of credentials) {
-        if (!isRecord(credential) || !nonEmpty(credential.userId)) {
-          issues.push({ code: "invalid-auth-credential", severity: "blocking", source: "auth", detail: "credential row is missing userId" });
-          continue;
-        }
+      for (const credential of stored.credentials) {
         knownUsers.add(credential.userId);
         if (credential.userId === LEGACY_OWNER_ALIAS) verifiedLegacyOwner = true;
       }
-      for (const session of auth.sessions) {
-        if (!isRecord(session)) {
-          issues.push({ code: "invalid-auth-session", severity: "blocking", source: "auth", detail: "session row is not an object" });
-          continue;
-        }
-        if (nonEmpty(session.userId)) knownUsers.add(session.userId);
-        else if (auth.version === undefined || auth.version === 1) {
-          knownUsers.add(LEGACY_OWNER_ALIAS);
-          verifiedLegacyOwner = true;
-        } else {
-          issues.push({ code: "ambiguous-auth-session", severity: "blocking", source: "auth", detail: "versioned session has no userId" });
-        }
-      }
+      // Sessions are revoked by migration, not used as evidence that a durable
+      // user exists or that every unowned resource belongs to that user.
+    } catch {
+      issues.push({ code: "invalid-auth-shape", severity: "blocking", source: "auth", detail: "Auth state does not match a supported legacy format" });
     }
   }
 
@@ -437,7 +431,7 @@ export function inventoryLegacyMigration(opts: LegacyInventoryOptions): LegacyMi
       }
       projectOwners.set(project.id, owner);
       addOwnership({ resourceKind: "project", resourceId: project.id, ownerUserId: owner, source: "projects", proof: "project-space-owner" });
-    } else if (verifiedLegacyOwner) {
+    } else if (verifiedLegacyOwner && knownUsers.size === 1) {
       projectOwners.set(project.id, LEGACY_OWNER_ALIAS);
       addOwnership({ resourceKind: "project", resourceId: project.id, ownerUserId: LEGACY_OWNER_ALIAS, source: "projects", proof: "verified-legacy-owner" });
       addAdoption({ kind: "project", resourceId: project.id, ownerUserId: LEGACY_OWNER_ALIAS, source: "projects", reason: "verified-legacy-owner" });
@@ -457,7 +451,7 @@ export function inventoryLegacyMigration(opts: LegacyInventoryOptions): LegacyMi
       issues.push({ code: "session-missing-project", severity: "blocking", source: "sessions", resourceId: session.id, detail: `unknown project ${session.projectId}` });
       continue;
     }
-    if (session.spaceId && project.spaceId && session.spaceId !== project.spaceId) {
+    if (session.spaceId && (!project.spaceId || session.spaceId !== project.spaceId)) {
       issues.push({ code: "session-space-conflict", severity: "blocking", source: "sessions", resourceId: session.id, detail: `session Space ${session.spaceId} disagrees with project Space ${project.spaceId}` });
       continue;
     }
@@ -503,11 +497,21 @@ export function inventoryLegacyMigration(opts: LegacyInventoryOptions): LegacyMi
   }
   for (const profileId of sqlite.profileIds) {
     if (explicitProfileOwners.has(profileId)) continue;
-    if (verifiedLegacyOwner) {
+    if (verifiedLegacyOwner && knownUsers.size === 1) {
       addOwnership({ resourceKind: "agent-profile", resourceId: profileId, ownerUserId: LEGACY_OWNER_ALIAS, source: "profile-owners", proof: "verified-legacy-owner" });
       addAdoption({ kind: "agent-profile", resourceId: profileId, ownerUserId: LEGACY_OWNER_ALIAS, source: "profile-owners", reason: "verified-legacy-owner" });
     } else {
       issues.push({ code: "profile-owner-unproven", severity: "blocking", source: "profile-owners", resourceId: profileId, detail: "unmapped legacy profile has no verified historical owner" });
+    }
+  }
+
+  if (!unsafeRoot) for (const source of sources) {
+    const again = sourceEvidence(source.kind, root, files[source.kind]);
+    const fingerprint = (entry: LegacySourceEvidence) => canonicalLegacyJson({
+      present: entry.present, sha256: entry.sha256, bytes: entry.bytes, sidecars: entry.sidecars,
+    });
+    if (fingerprint(source) !== fingerprint(again) || (source.present && !source.sha256)) {
+      issues.push({ code: "source-changed", severity: "blocking", source: source.kind, detail: "Source is unsafe, unreadable or changed during inventory" });
     }
   }
 
@@ -519,7 +523,7 @@ export function inventoryLegacyMigration(opts: LegacyInventoryOptions): LegacyMi
   const digestMaterial = {
     schemaVersion: 1,
     legacyOwnerAlias: LEGACY_OWNER_ALIAS,
-    sources: sources.map(({ kind, path, present, sha256: hash, bytes, counts }) => ({ kind, path, present, sha256: hash, bytes, counts })),
+    sources: sources.map(({ kind, path, present, sha256: hash, bytes, counts, sidecars }) => ({ kind, path, present, sha256: hash, bytes, counts, sidecars })),
     ownership,
     plannedAdoptions: adoptions,
     issues,
@@ -533,6 +537,6 @@ export function inventoryLegacyMigration(opts: LegacyInventoryOptions): LegacyMi
     plannedAdoptions: adoptions,
     issues,
     safeToStage: !issues.some((issue) => issue.severity === "blocking"),
-    inventoryDigest: sha256(canonicalJson(digestMaterial)),
+    inventoryDigest: sha256(canonicalLegacyJson(digestMaterial)),
   };
 }
