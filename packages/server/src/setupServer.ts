@@ -76,6 +76,7 @@ export function createSetupServer(options: SetupServerOptions): SetupServerHandl
         return;
       }
       if (path.startsWith("/api/auth/")) {
+        res.setHeader("X-Polyth-Bootstrap", "setup");
         if (await options.security.http.handle(req, res)) return;
         json(res, 404, { error: "not-found" });
         return;
