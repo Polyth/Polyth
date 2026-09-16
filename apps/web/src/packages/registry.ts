@@ -3,7 +3,8 @@ import { installIntegrationsPackage } from "./integrations.ts";
 import { installMcpPackage } from "./mcp.ts";
 import { configurePackageReconcile, reconcilePackage } from "./reconcile.ts";
 import { registerBuiltinPackageTours } from "./onboarding/builtinTours.ts";
-import { getState, openWorkspacePane, setActiveView, subscribeStore } from "../store.ts";
+import { getState, openWorkspacePane, setActiveView, setRailPlugin, subscribeStore } from "../store.ts";
+import { hasSurfaceRegistration, isSurfaceProjectRelevant } from "../surfaces.ts";
 import {
   activateWebPackage,
   loadWebPackageCatalog,
@@ -52,6 +53,16 @@ const syncProjectCompositionContext = (): void => {
   const state = getState();
   const project = state.projectRegistry.projects.find((candidate) => candidate.id === state.activeProjectId);
   setProjectCompositionContext(project?.id ?? null, project?.composition);
+
+  // Preserve unknown ids for late web-package registration, but close a
+  // surface we KNOW is registered when the newly active project's composition
+  // makes its owner irrelevant. Without the raw-registration probe the
+  // relevance-filtered catalog made this case indistinguishable from "not
+  // loaded yet", leaving railPlugin set and rendering an empty open pane.
+  const rail = state.railPlugin;
+  if (rail !== null && hasSurfaceRegistration(rail) && !isSurfaceProjectRelevant(rail)) {
+    setRailPlugin(null);
+  }
 };
 
 subscribeStore(syncProjectCompositionContext);
