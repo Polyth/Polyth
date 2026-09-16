@@ -5,6 +5,7 @@ import ProjectCompositionEditor, { emptyProjectComposition } from "./ProjectComp
 import Dialog from "./a11y/Dialog.tsx";
 import { Button } from "./ui/index.ts";
 import { updateProjectAppearance } from "../init.ts";
+import { tr } from "../i18n/index.ts";
 import "./ProjectSettingsDialog.css";
 
 type Page = "menu" | "appearance" | "workspace";
@@ -38,30 +39,30 @@ export default function ProjectAppearanceDialog({ project, onClose }: { project:
 
   if (page === "workspace") {
     return (
-      <Dialog title="Project settings" onClose={onClose} size="lg" className="project-settings-dialog">
+      <Dialog title={tr("projectcomposition.settingsTitle")} onClose={onClose} size="lg" className="project-settings-dialog">
         <div className="project-settings-head">
-          <Button size="sm" variant="ghost" onClick={() => setPage("menu")} disabled={saving}>Back</Button>
-          <div><strong>Workspace</strong><span>Directions and project-local tool visibility.</span></div>
+          <Button size="sm" variant="ghost" onClick={() => setPage("menu")} disabled={saving}>{tr("common.back")}</Button>
+          <div><strong>{tr("projectcomposition.workspace")}</strong><span>{tr("projectcomposition.settingsWorkspaceHint")}</span></div>
         </div>
         <ProjectCompositionEditor value={composition} onChange={setComposition} compact />
         {error && <div className="project-settings-error" role="alert">{error}</div>}
         <div className="project-settings-actions">
-          <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button variant="primary" busy={saving} onClick={() => void saveWorkspace()}>Save</Button>
+          <Button variant="ghost" onClick={onClose} disabled={saving}>{tr("common.cancel")}</Button>
+          <Button variant="primary" busy={saving} onClick={() => void saveWorkspace()}>{tr("common.save")}</Button>
         </div>
       </Dialog>
     );
   }
 
   return (
-    <Dialog title="Project settings" onClose={onClose} size="sm" className="project-settings-dialog">
+    <Dialog title={tr("projectcomposition.settingsTitle")} onClose={onClose} size="sm" className="project-settings-dialog">
       <div className="project-settings-project"><strong>{project.name}</strong><span>{project.path}</span></div>
       <div className="project-settings-menu">
         <button type="button" onClick={() => setPage("appearance")}>
-          <strong>Appearance</strong><span>Name, icon and project color.</span><b aria-hidden="true">›</b>
+          <strong>{tr("projectcomposition.appearance")}</strong><span>{tr("projectcomposition.appearanceHint")}</span><b aria-hidden="true">›</b>
         </button>
         <button type="button" onClick={() => setPage("workspace")}>
-          <strong>Workspace</strong><span>Directions, recommendations and tool visibility.</span><b aria-hidden="true">›</b>
+          <strong>{tr("projectcomposition.workspace")}</strong><span>{tr("projectcomposition.workspaceMenuHint")}</span><b aria-hidden="true">›</b>
         </button>
       </div>
     </Dialog>
