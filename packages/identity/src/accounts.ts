@@ -8,9 +8,13 @@ const expected = (revision: number): void => {
   if (!Number.isSafeInteger(revision) || revision < 1) throw controlError('invalid-input', 'Expected revision is required');
 };
 export function createAccounts(control: ControlPlane, passwords: PasswordService, sessions: SessionService, now: () => number) {
-  const owner = (token: string): string => {
-    const actor = sessions.require(token, true);
-    if (!control.get("SELECT 1 FROM instance_roles WHERE user_id=? AND role='owner'", actor.userId)) throw controlError('forbidden', 'Instance owner access required');
+  const hasOwnerRole = (userId: string): boolean => !!control.get(
+    "SELECT 1 FROM instance_roles WHERE user_id=? AND role='owner'",
+    userId,
+  );
+  const owner = (token: string, elevated = true): string => {
+    const actor = sessions.require(token, elevated);
+    if (!hasOwnerRole(actor.userId)) throw controlError('forbidden', 'Instance owner access required');
     return actor.userId;
   };
   const get = (id: string): IdentityUser => {
@@ -22,6 +26,14 @@ export function createAccounts(control: ControlPlane, passwords: PasswordService
   };
   return {
     current(token: string): IdentityUser { return get(sessions.require(token).userId); },
+    canManage(token: string): boolean { return hasOwnerRole(sessions.require(token).userId); },
+    list(token: string): IdentityUser[] {
+      const actor = sessions.require(token);
+      if (!hasOwnerRole(actor.userId)) return [get(actor.userId)];
+      return control.all<{ id: string }>(
+        'SELECT u.id FROM users u JOIN principals p ON p.id=u.id ORDER BY u.created_at_ms,u.id',
+      ).map(row => get(row.id));
+    },
     async createLocal(token: string, input: { login: string; name: string; password: string }) {
       owner(token);
       const login = loginName(input.login), name = displayName(input.name);
@@ -62,7 +74,7 @@ export function createAccounts(control: ControlPlane, passwords: PasswordService
         // Disabled/offboarding is not a reversible suspension. Provisioning and
         // offboarding workflows must perform the required cleanup explicitly.
         if (user.status === 'disabled' || (user.status === 'offboarding' && status !== 'disabled')) throw controlError('invalid-transition', 'Use the account restoration workflow');
-        if (status !== 'active' && control.get("SELECT 1 FROM instance_roles WHERE user_id=? AND role='owner'", userId)
+        if (status !== 'active' && hasOwnerRole(userId)
           && !control.get("SELECT 1 FROM instance_roles r JOIN principals p ON p.id=r.user_id WHERE r.role='owner' AND p.status='active' AND p.id<>?", userId)) {
           throw controlError('last-owner', 'The last active instance owner must be preserved');
         }
