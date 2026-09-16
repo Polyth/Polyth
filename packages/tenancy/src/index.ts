@@ -17,6 +17,7 @@ export {
   type TenancyFile,
   type TenancyStore,
 } from "./store.ts";
+export { createControlTenancyStore } from "./controlStore.ts";
 export {
   createIdentityResolver,
   createSpaceResolver,
