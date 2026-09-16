@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import {
   chmodSync,
   closeSync,
-  existsSync,
   fsyncSync,
   lstatSync,
   mkdirSync,
@@ -19,7 +18,7 @@ import { LEGACY_OWNER_ALIAS } from "./legacyMigration.ts";
 import { parseLegacyTenancyState, type TenancyFile } from "./legacyTenancy.ts";
 import { verifyMigrationStage, type MigrationStageManifest } from "./migrationStage.ts";
 
-const hash = (value: string): string => createHash("sha256").update(value).digest("hex");
+const hash = (value: string | Buffer): string => createHash("sha256").update(value).digest("hex");
 const fail = (code: string): never => {
   throw Object.assign(new Error("Legacy migration cannot be activated safely"), { code });
 };
@@ -64,11 +63,7 @@ function copiedJson(manifest: MigrationStageManifest, stageRoot: string, kind: "
   const stat = lstatSync(file);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) fail("stage-artifact-changed");
   const bytes = readFileSync(file);
-  if (hash(bytes.toString("binary")) !== artifact.sha256 || bytes.length !== artifact.bytes) {
-    // Hash the bytes directly as well; binary-string conversion above is kept
-    // out of the trust decision to avoid encoding-dependent equivalence.
-    if (createHash("sha256").update(bytes).digest("hex") !== artifact.sha256) fail("stage-artifact-changed");
-  }
+  if (bytes.length !== artifact.bytes || hash(bytes) !== artifact.sha256) fail("stage-artifact-changed");
   try { return JSON.parse(bytes.toString("utf8")) as unknown; }
   catch { fail("invalid-stage-artifact"); }
 }
@@ -103,6 +98,11 @@ function populate(control: ControlPlane, manifest: MigrationStageManifest, auth:
       && proof.ownerUserId === LEGACY_OWNER_ALIAS && proof.proof === "verified-legacy-owner");
   if (!ownerProven) fail("migration-owner-unproven");
 
+  // Canonical `ready` means the whole installation is governed. Publishing an
+  // identity authority while projects/sessions/profiles still require legacy
+  // ownership stamping would reopen ambient-owner semantics through resources.
+  if (manifest.inventory.plannedAdoptions.length > 0) fail("migration-resource-adoption-required");
+
   const credentials = effectiveCredentials(auth);
   const users = new Map(tenancy.users.map((user) => [user.id, user]));
   for (const userId of credentials.keys()) {
@@ -117,10 +117,13 @@ function populate(control: ControlPlane, manifest: MigrationStageManifest, auth:
   const memberships = tenancy.memberships.map((member) => ({ ...member }));
 
   if (!memberships.some((member) => member.userId === LEGACY_OWNER_ALIAS)) {
+    const usedSlugs = new Set(spaces.map((space) => space.slug));
+    let fallbackSlug = "personal";
+    if (usedSlugs.has(fallbackSlug)) fallbackSlug = `personal-${manifest.inventory.inventoryDigest.slice(0, 8)}`;
     spaces.push({
       id: fallbackSpaceId,
       name: "Personal",
-      slug: "personal",
+      slug: fallbackSlug,
       createdAt: now,
       updatedAt: now,
       isDefault: true,
@@ -135,7 +138,7 @@ function populate(control: ControlPlane, manifest: MigrationStageManifest, auth:
       control.run("INSERT INTO users(id,display_name,created_at_ms,updated_at_ms) VALUES(?,?,?,?)", user.id, user.name, user.createdAt, Math.max(user.createdAt, now));
     }
 
-    control.run("INSERT INTO organizations(id,name,slug) VALUES(?,? ,?)", organizationId, "Imported Polyth", `imported-${manifest.inventory.inventoryDigest.slice(0, 12)}`);
+    control.run("INSERT INTO organizations(id,name,slug) VALUES(?,?,?)", organizationId, "Imported Polyth", `imported-${manifest.inventory.inventoryDigest.slice(0, 12)}`);
     for (const userId of userIds) {
       control.run("INSERT INTO organization_memberships(org_id,user_id,role) VALUES(?,?,?)", organizationId, userId, userId === LEGACY_OWNER_ALIAS ? "owner" : "member");
     }
