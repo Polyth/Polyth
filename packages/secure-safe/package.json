@@ -18,7 +18,9 @@
       "enabled": true,
       "settingsGroup": "Engineering",
       "icon": "lock",
-      "hasSettings": true
+      "hasSettings": true,
+      "category": "workspace",
+      "projectAffinity": {}
     }
   },
   "dependencies": {

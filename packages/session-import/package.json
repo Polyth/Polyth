@@ -19,7 +19,9 @@
       "core": false,
       "enabled": true,
       "icon": "import",
-      "hasSettings": false
+      "hasSettings": false,
+      "category": "workspace",
+      "projectAffinity": {}
     },
     "webEntry": "./widgets/index.tsx"
   },

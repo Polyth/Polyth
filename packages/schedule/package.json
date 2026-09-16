@@ -18,7 +18,17 @@
       "enabled": true,
       "settingsGroup": "Engineering",
       "icon": "schedule",
-      "hasSettings": false
+      "hasSettings": false,
+      "category": "operations",
+      "projectAffinity": {
+        "directions": [
+          "operations",
+          "home",
+          "wellbeing",
+          "finance"
+        ],
+        "recommended": true
+      }
     }
   },
   "dependencies": {

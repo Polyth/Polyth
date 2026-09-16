@@ -16,7 +16,15 @@
       "enabled": true,
       "settingsGroup": "Engineering",
       "icon": "tasks",
-      "hasSettings": false
+      "hasSettings": false,
+      "category": "operations",
+      "projectAffinity": {
+        "directions": [
+          "operations",
+          "engineering"
+        ],
+        "recommended": true
+      }
     }
   },
   "dependencies": {
