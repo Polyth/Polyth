@@ -89,7 +89,7 @@ export default function ProjectSetupFlowDialog({ onClose }: { onClose: () => voi
       <Dialog title={tr("projectcomposition.preparingWorkspace")} onClose={() => {}} size="sm" className="project-setup-flow-dialog">
         <div className="project-setup-progress" role="status" aria-live="polite">
           <div className="project-setup-spinner" aria-hidden="true" />
-          <div><strong>{tr("projectcomposition.applyingSetup")}</strong><p>{tr("projectcomposition.applyingSetupHint")}</p></div>
+          <div><strong>{tr("projectcomposition.applyingSetup")}</strong><p>{tr("projectcomposition.settingsWorkspaceHint")}</p></div>
         </div>
       </Dialog>
     );
@@ -113,7 +113,7 @@ export default function ProjectSetupFlowDialog({ onClose }: { onClose: () => voi
       <div className="project-setup-intro">
         <span className="project-setup-step">{tr("projectcomposition.workspace")}</span>
         <h2>{tr("projectcomposition.setupHeadline")}</h2>
-        <p>{tr("projectcomposition.setupHint")}</p>
+        <p>{tr("projectcomposition.purposeHint")}</p>
       </div>
       <ProjectCompositionEditor value={composition} onChange={setComposition} />
       <div className="project-setup-actions">
