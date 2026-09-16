@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, symlink, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createSpaceStorage } from "@polyth/tenancy";
 import { createBrowserAgentTool } from "../src/agentTool.ts";
+import { writeBrowserAgentAutoApprove } from "../src/agentToolSettings.ts";
 import { createBrowserService, createFakeDriver } from "../src/index.ts";
 
 const HOME = "http://127.0.0.1:5173/";
@@ -107,6 +109,24 @@ test("agent works in background, keeps canonical sessions separate, and audits d
   } finally { await browser.closeAll(); }
 });
 
+
+test("browser contribution auto-approve follows the Space setting", async () => {
+  const storage = createSpaceStorage(await mkdtemp(join(tmpdir(), "browser-auto-approve-contrib-")));
+  const contribution = createBrowserAgentTool(createBrowserService({
+    driver: createFakeDriver({ pages: { [HOME]: { title: "Home", text: "Welcome" } } }),
+    allowedOrigins: () => ["http://127.0.0.1:5173"],
+  }));
+  const grant = {
+    spaceId: "space-a",
+    projectId: "project-a",
+    cwd: process.cwd(),
+    storage,
+  };
+  assert.equal(await contribution.autoApprove?.(grant), true);
+  await writeBrowserAgentAutoApprove(storage, false);
+  assert.equal(await contribution.autoApprove?.(grant), false);
+  assert.equal(await contribution.autoApprove?.({ ...grant, storage: undefined }), false);
+});
 
 test("browser captures cannot follow a project-controlled screenshot directory symlink", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "browser-capture-root-"));

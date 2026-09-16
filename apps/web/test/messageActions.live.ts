@@ -172,7 +172,18 @@ const composerValue = (page: Page): Promise<string> =>
   page.evaluate(() => document.querySelector<HTMLTextAreaElement>(".composer-input textarea")?.value ?? "");
 
 const liveText = (page: Page): Promise<string> =>
-  page.evaluate(() => document.querySelector(".msg-live")?.textContent ?? "");
+  page.evaluate(() =>
+    document.querySelector(".chat-action-status")?.textContent?.trim()
+    || document.querySelector(".msg-live")?.textContent?.trim()
+    || "");
+
+const waitForStatus = (page: Page, includes?: string) =>
+  page.waitForFunction((needle) => {
+    const text = document.querySelector(".chat-action-status")?.textContent?.trim()
+      || document.querySelector(".msg-live")?.textContent?.trim()
+      || "";
+    return needle ? text.includes(needle) : text !== "";
+  }, includes, { timeout: 5000 });
 
 /** Playwright locator for the user message container whose bubble holds
  *  `text` (":text()" is a Playwright engine, not a CSS pseudo-class — inside
@@ -446,7 +457,7 @@ test("names, copy announcements, focus retention, reasoning disclosure, stable t
   // Copy as Markdown: exact text, one announcement, focus retained.
   await page.hover(userMsgSel(TEXTS.u2));
   await page.click(`${userMsgSel(TEXTS.u2)} button[aria-label^="Copy user message as Markdown"]`);
-  await page.waitForFunction(() => (document.querySelector(".msg-live")?.textContent ?? "") !== "", undefined, { timeout: 5000 });
+  await waitForStatus(page);
   assert.equal(await liveText(page), "Message copied as Markdown", "wrong or missing copy announcement");
   assert.equal(
     await page.evaluate(() => navigator.clipboard.readText()),
@@ -465,7 +476,7 @@ test("names, copy announcements, focus retention, reasoning disclosure, stable t
     const metas = Array.from(document.querySelectorAll<HTMLButtonElement>('.msg.assistant button[aria-label="Copy assistant answer as JSON"]'));
     metas[metas.length - 1]!.click();
   });
-  await page.waitForFunction(() => (document.querySelector(".msg-live")?.textContent ?? "").includes("JSON"), undefined, { timeout: 5000 });
+  await waitForStatus(page, "JSON");
   assert.equal(await liveText(page), "Message copied as JSON");
   const payload = JSON.parse(await page.evaluate(() => navigator.clipboard.readText())) as Record<string, unknown>;
   assert.equal(payload.role, "assistant");
@@ -493,7 +504,7 @@ test("names, copy announcements, focus retention, reasoning disclosure, stable t
   // Leave it open, copy the reasoning.
   if ((await expanded()) !== "true") await summary.click();
   await page.click('button[aria-label="Copy reasoning for assistant answer"]');
-  await page.waitForFunction(() => (document.querySelector(".msg-live")?.textContent ?? "").includes("Reasoning"), undefined, { timeout: 5000 });
+  await waitForStatus(page, "Reasoning");
   assert.equal(await liveText(page), "Reasoning copied");
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), TEXTS.reasoning);
 
@@ -613,7 +624,7 @@ test("touch: 44px entries and menu rows, center taps hit the intended control, m
     await mdRow.scrollIntoViewIfNeeded();
     const mdBox = (await mdRow.boundingBox())!;
     await page.mouse.click(mdBox.x + mdBox.width / 2, mdBox.y + mdBox.height / 2);
-    await page.waitForFunction(() => (document.querySelector(".msg-live")?.textContent ?? "") !== "", undefined, { timeout: 5000 });
+    await waitForStatus(page);
     const announced = await liveText(page);
     assert.ok(
       announced === "Message copied as Markdown" || announced === "Couldn’t copy message",
@@ -658,7 +669,7 @@ test("revert flow: hide, reload, restore, revert again, edit, replacement send",
   await page.evaluate(() => {
     document.querySelector<HTMLButtonElement>('.timeline > .msg.assistant button[aria-label="Copy assistant answer as JSON"]')?.click();
   });
-  await page.waitForFunction(() => (document.querySelector(".msg-live")?.textContent ?? "").includes("JSON"), undefined, { timeout: 5000 });
+  await waitForStatus(page, "JSON");
   const copied = await page.evaluate(() => navigator.clipboard.readText());
   assert.ok(copied.includes(TEXTS.a1), "copy lost the visible answer");
   assert.ok(!copied.includes(TEXTS.u2) && !copied.includes(TEXTS.a2), "copy leaked the hidden reverted tail");
@@ -828,7 +839,12 @@ test("fork failure and backend mismatch keep the source selected with no canonic
 
     await page.hover(userMsgSel(TEXTS.u2));
     await page.click(`${userMsgSel(TEXTS.u2)} button[aria-label^="Fork and edit"]`);
-    await page.waitForFunction(() => (document.querySelector(".msg-live")?.textContent ?? "") !== "", undefined, { timeout: 15_000 });
+    await page.waitForFunction((needle) => {
+      const text = document.querySelector(".chat-action-status")?.textContent?.trim()
+        || document.querySelector(".msg-live")?.textContent?.trim()
+        || "";
+      return text !== "";
+    }, undefined, { timeout: 15_000 });
 
     const announced = await liveText(page);
     assert.match(announced, expectMessage, `${session}: unexpected error "${announced}"`);

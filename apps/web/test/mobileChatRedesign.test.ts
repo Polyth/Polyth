@@ -375,6 +375,21 @@ test("sheets escape their ancestors: portal, top-most Escape, contained focus", 
   );
 });
 
+test("session edited-file labels stay visible above the phone composer", async () => {
+  const pending = await read("../../../packages/git/widgets/PendingChangesBar.tsx");
+  assert.match(pending, /useShellMode\(\)/, "pending changes follow the shared phone shell seam");
+  assert.match(
+    pending,
+    /if \(!detailsOpen && !phone\)/,
+    "phones skip the collapsed count bubble so filename labels stay in the dock",
+  );
+  assert.match(
+    pending,
+    /!phone && \([\s\S]*?setDetailsOpen\(false\)/,
+    "collapse is desktop-only once the file list is open",
+  );
+});
+
 test("the composer is adaptive, with one primary action at a time", async () => {
   const composer = await read("../src/components/Composer.tsx");
   assert.ok(composer.includes("composer-collapsed"), "an idle phone composer is compact");
@@ -435,8 +450,8 @@ test("the composer is adaptive, with one primary action at a time", async () => 
   );
   assert.match(
     css,
-    /\.composer-mobile\.composer-collapsed \.composer-actions > :is\(\.composer-extensions, \.composer-next-action\)\s*\{\s*display:\s*none;/,
-    "trailing controls stay out of the collapsed phone composer",
+    /\.composer-mobile\.composer-collapsed \.composer-actions > \.composer-extensions\s*\{\s*order:\s*4;/,
+    "the prompt-improve control sits beside the model chip in the collapsed phone composer",
   );
 });
 

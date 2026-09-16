@@ -40,6 +40,8 @@ export const bg: BrowserMessages = {
   "previewview.browserUnavailable": "Браузърът не е на разположение",
   "previewview.browserVisibility": "Видимост на браузъра",
   "previewview.browserVisibilityDescription": "Изберете дали активността на агента да остава на заден план или браузърът да се отваря автоматично.",
+  "browser.settings.agentAutoApprove": "Автоматично одобрение на инструмента Browser",
+  "browser.settings.agentAutoApproveDescription": "Когато е включено, агентите могат да използват вградения инструмент Browser без заявка за разрешение. Политиката за произход и навигация остава в сила.",
   "previewview.background": "На заден план",
   "previewview.autoShow": "Автоматично показване",
   "previewview.browserIdle": "В покой",

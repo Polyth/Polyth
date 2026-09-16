@@ -65,9 +65,12 @@ test("Codex transport loss and partial histories remain uncertain, and unsupport
     assert.equal((await rt.startTurnOperation!({ sessionId: "canonical", text: "x", attachments: [{} as never] }, "turn")).kind, "rejected");
     assert.equal((await rt.releaseExecution!({ ...binding, generation: 2 }, "switch")).kind, "unknown");
 });
-test("Codex thread/start receives developerInstructions and config.mcp_servers from overlay", async () => {
+test("Codex thread/start receives developerInstructions and MCP config from overlay", async () => {
     const { codexOverlays } = await import("../src/provisioner.ts");
-    codexOverlays.set(context, { developerInstructions: "Be brief.", mcpServers: { ping: { command: "node", args: [] } } }, "codex");
+    codexOverlays.set(context, {
+        developerInstructions: "Be brief.",
+        mcpServers: { ping: { enabled: true, startup_timeout_sec: 15, command: "node", args: [] } },
+    }, "codex");
     const f = fakeRpc();
     let started: any;
     f.handle(async (method, params) => {
@@ -80,7 +83,10 @@ test("Codex thread/start receives developerInstructions and config.mcp_servers f
     const rt = await createCodexRuntime(context, f.rpc);
     assert.equal((await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create")).kind, "confirmed");
     assert.equal(started.developerInstructions, "Be brief.");
-    assert.deepEqual(started.config, { mcp_servers: { ping: { command: "node", args: [] } } });
+    assert.deepEqual(started.config, {
+        mcp_servers: { ping: { enabled: true, startup_timeout_sec: 15, command: "node", args: [] } },
+        mcp_optional_startup_grace_ms: 0,
+    });
     assert.equal(started.approvalPolicy, "on-request");
     assert.equal(started.sandbox, "workspace-write");
     await rt.dispose();
@@ -166,6 +172,7 @@ test("Codex verifies native skills and MCP with split evidence before claiming a
     await createCodexProvisioner().apply(nativeContext, plan, { mcpSecrets: () => ({}) });
     const overlay = codexOverlays.peek(nativeContext, "codex")!.value;
     const expectedSkill = overlay.nativeSkills!.skills[0]!;
+    let mcpChecks = 0;
     const f = fakeRpc();
     f.handle(async (method, params) => {
         if (method === "skills/extraRoots/set") return {};
@@ -173,14 +180,17 @@ test("Codex verifies native skills and MCP with split evidence before claiming a
             data: [{ cwd, skills: [{ name: "docs", path: expectedSkill.path, enabled: true }], errors: [] }],
         };
         if (method === "thread/start") return { thread: { id: "native" } };
-        if (method === "mcpServerStatus/list") return {
-            data: [{
-                name: "polyth-agent-tools",
-                runtimeStatus: "connected",
-                tools: { lookup: { name: "lookup" } },
-            }],
-            nextCursor: null,
-        };
+        if (method === "mcpServerStatus/list") {
+            mcpChecks++;
+            return {
+                data: [{
+                    name: "polyth-agent-tools",
+                    runtimeStatus: mcpChecks >= 2 ? "connected" : "starting",
+                    tools: mcpChecks >= 2 ? { lookup: { name: "lookup" } } : {},
+                }],
+                nextCursor: null,
+            };
+        }
         return {};
     });
     const receipts: Array<{
@@ -201,12 +211,14 @@ test("Codex verifies native skills and MCP with split evidence before claiming a
             title: "x",
             cwd,
         }, "create-native")).kind, "confirmed");
-        assert.deepEqual(f.calls.map((call) => call.method), [
+        assert.ok(mcpChecks >= 2);
+        const methods = f.calls.map((call) => call.method);
+        assert.deepEqual(methods.slice(0, 3), [
             "skills/extraRoots/set",
             "skills/list",
             "thread/start",
-            "mcpServerStatus/list",
         ]);
+        assert.ok(methods.slice(3).every((method) => method === "mcpServerStatus/list"));
         assert.deepEqual(f.calls[0]?.params, { extraRoots: [overlay.nativeSkills!.root] });
         assert.deepEqual(f.calls[1]?.params, { cwds: [cwd], forceReload: true });
         assert.deepEqual(receipts, [{
@@ -225,7 +237,91 @@ test("Codex verifies native skills and MCP with split evidence before claiming a
     }
 });
 
-test("Codex fails errored native skills and does not call MCP discovery connected", async () => {
+test("Codex rejects session create when required MCP fails", async () => {
+    const scopedContext = { ...context, sessionId: "mcp-gate-negative" };
+    codexOverlays.set(scopedContext, {
+        mcpServers: {
+            "polyth-agent-tools": {
+                enabled: true,
+                startup_timeout_sec: 15,
+                command: "node",
+                args: ["bridge.mjs"],
+            },
+        },
+        nativeMcp: [{
+            capabilityId: "polyth.agent-tools",
+            name: "polyth-agent-tools",
+            tools: [{ capabilityId: "browser.polyth-browser", name: "polyth_browser" }],
+        }],
+        stagedCapabilityIds: [],
+    }, "codex", { desiredRevision: "mcp-gate-r1", capabilityIds: ["polyth.agent-tools"] });
+    const f = fakeRpc();
+    f.handle(async (method) => {
+        if (method === "thread/start") return { thread: { id: "native-gated" } };
+        if (method === "mcpServerStatus/list") return {
+            data: [{ name: "polyth-agent-tools", runtimeStatus: "failed", tools: {} }],
+            nextCursor: null,
+        };
+        return {};
+    });
+    const rt = await createCodexRuntime(scopedContext, f.rpc);
+    try {
+        const outcome = await rt.createSessionOperation!({
+            projectId: "p",
+            sessionId: "mcp-gate-negative",
+            title: "x",
+            cwd: "/tmp",
+        }, "create-gated");
+        assert.equal(outcome.kind, "rejected");
+        assert.equal(outcome.kind === "rejected" && outcome.code, "native-failure");
+        assert.match(outcome.kind === "rejected" ? outcome.message : "", /failed to connect/i);
+        assert.equal((await rt.startTurnOperation!({ sessionId: "mcp-gate-negative", text: "task" }, "turn-gated")).kind, "rejected");
+    } finally {
+        codexOverlays.delete(scopedContext, "codex");
+        await rt.dispose();
+    }
+});
+
+test("Codex maps mcpToolCall items into canonical tool events", async () => {
+    const f = fakeRpc();
+    f.handle(async (method) => {
+        if (method === "thread/start") return { thread: { id: "native" } };
+        if (method === "thread/read") {
+            return {
+                thread: {
+                    id: "native",
+                    status: { type: "idle" },
+                    historyMode: "legacy",
+                    turns: [{
+                        id: "t",
+                        status: "completed",
+                        itemsView: "full",
+                        items: [{
+                            type: "mcpToolCall",
+                            id: "browser-call",
+                            server: "polyth-agent-tools",
+                            tool: "polyth_browser",
+                            status: "completed",
+                            arguments: { action: "browser.open", parameters: { url: "http://127.0.0.1:4400/" } },
+                            result: { content: [{ type: "text", text: "opened" }] },
+                        }],
+                    }],
+                },
+            };
+        }
+        return {};
+    });
+    const rt = await createCodexRuntime(context, f.rpc);
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    const snapshot = await rt.reconcile!({ ...binding, backendSessionId: "native", reconciliationOrdinal: 3 });
+    const toolEvent = snapshot.events?.find((entry) => entry.event.type === "tool/result");
+    assert.equal(toolEvent?.event.type, "tool/result");
+    assert.equal(toolEvent && "tool" in toolEvent.event ? toolEvent.event.tool : "", "polyth_browser");
+    assert.match(toolEvent && "output" in toolEvent.event ? toolEvent.event.output : "", /opened/);
+    await rt.dispose();
+});
+
+test("Codex fails errored native skills while still verifying connected MCP", async () => {
     const scopedContext = { ...context, sessionId: "negative-native" };
     codexOverlays.set(scopedContext, {
         nativeSkills: {
@@ -247,7 +343,7 @@ test("Codex fails errored native skills and does not call MCP discovery connecte
         };
         if (method === "thread/start") return { thread: { id: "native" } };
         if (method === "mcpServerStatus/list") return {
-            data: [{ name: "example", runtimeStatus: "starting", tools: {} }],
+            data: [{ name: "example", runtimeStatus: "connected", tools: {} }],
             nextCursor: null,
         };
         return {};
@@ -261,7 +357,7 @@ test("Codex fails errored native skills and does not call MCP discovery connecte
         assert.equal((await rt.createSessionOperation!({ projectId: "p", sessionId: "negative-native", title: "x", cwd: "/tmp" }, "create-negative")).kind, "confirmed");
         assert.deepEqual(receipts, [
             { id: "example.docs", outcome: "failed", stage: "discovered" },
-            { id: "example.mcp", outcome: "unverifiable", stage: "discovered" },
+            { id: "example.mcp", outcome: "applied", stage: "connected" },
         ]);
     } finally {
         disposeReceipt();

@@ -1572,6 +1572,10 @@ export const api = {
     ),
   browserApprove: (origin: string, browserSessionId: string) =>
     jfetch<{ origins: string[] }>(`/api/browser/approvals`, json("POST", { origin, browserSessionId })),
+  browserAgentAutoApproveGet: () =>
+    jfetch<{ enabled: boolean }>(`/api/browser/agent-auto-approve`),
+  browserAgentAutoApproveSet: (enabled: boolean) =>
+    jfetch<{ enabled: boolean }>(`/api/browser/agent-auto-approve`, json("PATCH", { enabled })),
 
   // ---- streaming dictation (WP15; audio itself travels over /ws) ---------------
   dictationCapability: () =>

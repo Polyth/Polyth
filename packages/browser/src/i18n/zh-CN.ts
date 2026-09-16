@@ -40,6 +40,8 @@ export const zhCN: BrowserMessages = {
   "previewview.browserUnavailable": "浏览器无法使用",
   "previewview.browserVisibility": "浏览器可见性",
   "previewview.browserVisibilityDescription": "选择代理的浏览器活动是在后台运行，还是自动打开浏览器。",
+  "browser.settings.agentAutoApprove": "自动批准代理浏览器工具",
+  "browser.settings.agentAutoApproveDescription": "启用后，代理可在无需权限提示的情况下使用内置 Browser 工具。来源和导航策略仍然适用。",
   "previewview.background": "后台",
   "previewview.autoShow": "自动显示",
   "previewview.browserIdle": "空闲",

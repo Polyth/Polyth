@@ -18,7 +18,11 @@ test("mobile session overview removes duplicated chrome and keeps useful state s
   const source = read("../src/components/mobile/MobileSessionHeader.tsx");
   assert.match(source, /formatNumber\(currentStep\).*formatNumber\(tasks\.length\)/s);
   assert.match(source, /tasksForIsland\(model\.tasks, model\.messages\)/);
-  assert.doesNotMatch(source, /mobile-island-session|mobile-island-meta/);
+  assert.match(source, /mobile-island-session/);
+  assert.doesNotMatch(source, /mobile-island-meta/);
+  assert.match(source, /sessionTitle=\{title\}/);
+  assert.match(source, /prompt=\{prompt\}/);
+  assert.doesNotMatch(source, /promptVisible \? undefined : prompt/);
   assert.doesNotMatch(source, /mobile\.island\.showFullPrompt|mobile\.island\.hideFullPrompt/);
   assert.doesNotMatch(source, /meta=\{itemStatus|trailing=\{/);
   assert.match(source, /eventsHaveCodeChanges\(events\[item\.id\]\).*mobile\.island\.codeChanged/s);

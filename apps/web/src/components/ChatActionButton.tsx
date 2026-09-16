@@ -12,7 +12,7 @@ export default function ChatActionButton({ className, label, ...props }: ChatAct
       <IconButton
         {...props}
         label={label}
-        size="md"
+        size="sm"
         variant="ghost"
         title=""
         className={["chat-action-button", className ?? ""].filter(Boolean).join(" ")}

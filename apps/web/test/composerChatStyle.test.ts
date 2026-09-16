@@ -116,6 +116,16 @@ test("conversation rows omit role chrome, keep assistant prose flat, and accent 
   assert.match(css, /\.msg\.assistant > \.bubble\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent/s);
 });
 
+test("chat prompt type uses the same role as the assistant response", () => {
+  const css = read("../src/styles.css");
+
+  assert.match(css, /\.msg\.user \.bubble\s*\{[^}]*font-size:\s*var\(--font-response\);[^}]*line-height:\s*var\(--font-response-lh\)/s);
+  assert.match(css, /\.msg\.assistant > \.bubble\s*\{[^}]*font-size:\s*var\(--font-response\);[^}]*line-height:\s*var\(--font-response-lh\)/s);
+  assert.match(css, /\.composer-card textarea\s*\{[^}]*font-size:\s*var\(--font-response\);[^}]*line-height:\s*var\(--font-response-lh\)/s);
+  assert.match(css, /\.composer-editor\s*\{[^}]*font-size:\s*var\(--font-response\);[^}]*line-height:\s*var\(--font-response-lh\)/);
+  assert.doesNotMatch(css, /\.composer-simple \.composer-card textarea\s*\{[^}]*font-size:\s*14px/);
+});
+
 test("conversation code surfaces follow the configured glass material", () => {
   const css = read("../src/styles.css");
 

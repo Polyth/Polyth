@@ -40,6 +40,8 @@ export const ptBR: BrowserMessages = {
   "previewview.browserUnavailable": "Navegador indisponível",
   "previewview.browserVisibility": "Visibilidade do navegador",
   "previewview.browserVisibilityDescription": "Escolha se a atividade do navegador do agente fica em segundo plano ou abre o navegador automaticamente.",
+  "browser.settings.agentAutoApprove": "Aprovar automaticamente a ferramenta Browser",
+  "browser.settings.agentAutoApproveDescription": "Quando ativado, os agentes podem usar a ferramenta Browser integrada sem solicitação de permissão. A política de origem e navegação continua valendo.",
   "previewview.background": "Segundo plano",
   "previewview.autoShow": "Mostrar automaticamente",
   "previewview.browserIdle": "Inativo",

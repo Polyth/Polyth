@@ -102,7 +102,7 @@ import { createBehaviorService } from "./behavior.ts";
 import { createClientSettings } from "./clientSettings.ts";
 import { createMcpConfigService, mcpEntriesFromBackendConfig } from "./mcp.ts";
 import { createCapabilityProvisioningController, reconcilePinnedHarness } from "./capabilityProvisioning.ts";
-import { AGENT_TOOLS_PATH, createAgentToolBridge, redactToolInput } from "./agentTools.ts";
+import { AGENT_TOOLS_PATH, authorizePackageToolAfterPermissions, createAgentToolBridge, redactToolInput } from "./agentTools.ts";
 import { createSecureSafeService, secureSafeBehaviorSection } from "./secureSafe.ts";
 import { createModelVisibilityService } from "./modelVisibility.ts";
 import { createVoiceSettings } from "./voice.ts";
@@ -1747,24 +1747,29 @@ export async function boot(opts: BootOptions = {}) {
           : "allow";
       }
       const verdict = permissions?.evaluate("package-tool", [tool.id], grant.projectId, grant.sessionId) ?? "ask";
-      if (verdict === "allow") return "allow";
-      if (verdict === "deny") return "deny";
-      if (!requestAgentToolPermission) return "permission-required";
+      let storage: ReturnType<typeof createSpaceStorage> | undefined;
       try {
-        return await requestAgentToolPermission({
+        storage = createSpaceStorage(spaceGateway.resolveInternal(grant.spaceId).storageDir);
+      } catch {
+        storage = undefined;
+      }
+      return authorizePackageToolAfterPermissions({
+        tool,
+        grant: {
           spaceId: grant.spaceId,
           projectId: grant.projectId,
           cwd: grant.cwd,
           ...(grant.harnessId ? { harnessId: grant.harnessId } : {}),
           ...(grant.sessionId ? { sessionId: grant.sessionId } : {}),
-          signal,
-          toolId: tool.id,
-          toolName: tool.name,
-          owner: tool.owner,
-        });
-      } catch {
-        return "deny";
-      }
+        },
+        contribution: capabilityContributions.contribution(tool.id),
+        permissionVerdict: verdict,
+        storage,
+        signal,
+        requestPermission: requestAgentToolPermission
+          ? (input) => requestAgentToolPermission(input)
+          : undefined,
+      });
     },
   });
   capabilityController = createCapabilityProvisioningController({

@@ -589,8 +589,7 @@ test("steer applies its selected model instead of retaining the active model", a
   await store.close();
 });
 
-test("unsupported/rejected steer falls back to queue", async () => {
-  // runtime without steering capability
+test("steer on a runtime without steering support falls back to stop+send", async () => {
   const noCap = fakeRuntime({ steering: false });
   const a = makeService(noCap);
   const s1 = await a.sessions.create({ projectId: "p1", title: "T" });
@@ -598,13 +597,15 @@ test("unsupported/rejected steer falls back to queue", async () => {
   await flush();
   const r1 = await a.sessions.send(s1.id, { text: "steer me", delivery: "steer" });
   assert.ok(r1.queued);
-  let evs = await a.store.events(s1.id);
-  assert.equal(
-    (evs.find((e) => e.type === "delivery/fallback-queued")?.data as { reason?: string }).reason,
-    "steer-unsupported",
-  );
+  await flush();
+  // no native steer/queue-and-wait: the active turn is aborted and the text
+  // dispatches next, same as an explicit interrupt send
+  assert.equal(noCap.aborted, 1);
+  assert.deepEqual(noCap.startedTexts, ["start", "steer me"]);
   await a.store.close();
+});
 
+test("rejected steer falls back to queue", async () => {
   // runtime that claims steering but rejects the call
   const rejects = fakeRuntime({ steering: true, steerResult: false });
   const b = makeService(rejects);
@@ -613,7 +614,7 @@ test("unsupported/rejected steer falls back to queue", async () => {
   await flush();
   const r2 = await b.sessions.send(s2.id, { text: "steer me", delivery: "steer" });
   assert.ok(r2.queued);
-  evs = await b.store.events(s2.id);
+  const evs = await b.store.events(s2.id);
   assert.equal(
     (evs.find((e) => e.type === "delivery/fallback-queued")?.data as { reason?: string }).reason,
     "steer-rejected",

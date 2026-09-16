@@ -11,6 +11,7 @@ import {
   timeIso,
   timeShort,
   turnDurationMs,
+  type ActionAnnounceAnchor,
 } from "../messageActions.ts";
 import type { AssistantMsg, RenderModel } from "../reduce.ts";
 import { applyEvent, openWorkspacePane, setUiError, startNewSession, useStore } from "../store.ts";
@@ -108,12 +109,14 @@ function pinnedState(events: readonly SessionEvent[] | undefined, seq: number): 
 export default function ChatResponseFooter({
   m,
   announce,
+  statusText,
   turn,
   segmentStartedAt,
   regeneratePrompt,
 }: {
   m: AssistantMsg;
-  announce?: (text: string) => void;
+  announce?: (text: string, anchor?: ActionAnnounceAnchor) => void;
+  statusText?: string;
   turn?: RenderModel["turn"];
   segmentStartedAt?: number;
   regeneratePrompt?: string;
@@ -146,17 +149,22 @@ export default function ChatResponseFooter({
   const cost = turn?.usage?.cost ?? m.cost;
   const hasUsage = usage !== undefined && (usage.input > 0 || usage.output > 0);
 
+  const actionAnchor = { role: "assistant" as const, eventSeq: m.eventSeq };
   const actionLabel = (id: (typeof prefs.responseActions)[number]) =>
     id === "pin" && pinned ? tr("timeline.unpinFromContext") : RESPONSE_ACTION_LABEL[id];
   const actionDisabled = (id: (typeof prefs.responseActions)[number]) =>
     (id === "pin" && pinBusy) || ((id === "plan" || id === "session") && !projectId);
   const runAction = (id: (typeof prefs.responseActions)[number]) => {
     if (id === "copy") {
-      void copyText(m.text).then((ok) => announce?.(ok ? tr("timeline.answerCopied") : tr("timeline.couldnTCopyAnswer")));
+      void copyText(m.text).then((ok) =>
+        announce?.(ok ? tr("timeline.answerCopied") : tr("timeline.couldnTCopyAnswer"), actionAnchor));
       return;
     }
     if (id === "image") {
-      announce?.(downloadAnswerImage(m.text, modelName) ? tr("timeline.answerImageSaved") : tr("timeline.couldnTSaveAnswerImage"));
+      announce?.(
+        downloadAnswerImage(m.text, modelName) ? tr("timeline.answerImageSaved") : tr("timeline.couldnTSaveAnswerImage"),
+        actionAnchor,
+      );
       return;
     }
     if (id === "plan") {
@@ -167,7 +175,7 @@ export default function ChatResponseFooter({
         title: tr("timeline.valuePlanValue", { modelName, value: timeShort(assistantTime(m)) }),
         body: m.text,
         ...(session ? { sourceSessionId: session.id } : {}),
-      }).then(() => announce?.(tr("timeline.answerSavedAsAPlan")))
+      }).then(() => announce?.(tr("timeline.answerSavedAsAPlan"), actionAnchor))
         .catch((error) => setUiError(error instanceof Error ? error.message : String(error)));
       return;
     }
@@ -237,16 +245,33 @@ export default function ChatResponseFooter({
 
       <div className="chat-response-actions" role="group" aria-label={tr("timeline.answerActions")}>
         {prefs.responseActions.map((id) => (
-          <ChatActionButton
-            key={id}
-            icon={RESPONSE_ACTION_ICON[id]}
-            label={actionLabel(id)}
-            pressed={id === "pin" ? pinned : undefined}
-            busy={id === "pin" && pinBusy}
-            disabled={actionDisabled(id)}
-            onClick={() => runAction(id)}
-          />
+          id === "copy" ? (
+            <span key={id} className="chat-response-action-item">
+              <ChatActionButton
+                icon={RESPONSE_ACTION_ICON[id]}
+                label={actionLabel(id)}
+                disabled={actionDisabled(id)}
+                onClick={() => runAction(id)}
+              />
+              {statusText && (
+                <span className="chat-action-status" role="status" aria-live="polite">{statusText}</span>
+              )}
+            </span>
+          ) : (
+            <ChatActionButton
+              key={id}
+              icon={RESPONSE_ACTION_ICON[id]}
+              label={actionLabel(id)}
+              pressed={id === "pin" ? pinned : undefined}
+              busy={id === "pin" && pinBusy}
+              disabled={actionDisabled(id)}
+              onClick={() => runAction(id)}
+            />
+          )
         ))}
+        {statusText && !prefs.responseActions.includes("copy") && (
+          <span className="chat-action-status" role="status" aria-live="polite">{statusText}</span>
+        )}
         {regeneratePrompt && (
           <ChatActionButton
             icon={RefreshIcon}

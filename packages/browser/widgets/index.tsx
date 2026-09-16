@@ -35,6 +35,7 @@ export default defineWebPackage((host) => () => {
       order: 35,
       component: () => createElement(BrowserSettingsPage, { host }),
       settingsItems: [
+        { id: "browser.agent-auto-approve", pageId: "browser", label: translate("browser.settings.agentAutoApprove"), keywords: ["browser", "auto-approve", "permission", "agent", "tool"], focusTarget: "browser.agent-auto-approve" },
         { id: "browser.visibility", pageId: "browser", label: translate("previewview.browserVisibility"), keywords: ["browser", "background", "auto-show", "visibility"], focusTarget: "browser.visibility" },
       ],
     }),

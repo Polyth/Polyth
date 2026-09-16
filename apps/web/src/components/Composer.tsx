@@ -1314,7 +1314,7 @@ export default function Composer({
     override?: string,
     deliveryOverride?: "steer" | "queue" | "interrupt",
   ) => {
-    if (creatingSession || sendPending || failedSend?.kind === "unknown") return;
+    if (creatingSession || sendPending) return;
     if (session?.status === "epoch-pending" && session.runtimeControl === "borrowed") return;
     const t = (override ?? inputRef.current?.getText() ?? text).trim();
     const target = sessionIdRef.current;
@@ -2171,7 +2171,6 @@ export default function Composer({
     && attachments.length === 0;
   const sendDisabled = creatingSession
     || sendPending
-    || failedSend?.kind === "unknown"
     || queueEditSaving
     || borrowedEpochPending
     || (queueEdit ? !text.trim() : (!text.trim() && attachments.length === 0))

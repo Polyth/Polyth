@@ -1106,7 +1106,12 @@ test("event purity: hover, jumps, dialog, reveal, menu, copy, and reasoning appe
     const firstUser = ".timeline > .msg.user";
     await page.hover(firstUser);
     await page.click(`${firstUser} button[aria-label^="Copy user message as Markdown"]`);
-    await page.waitForFunction(() => (document.querySelector(".msg-live")?.textContent ?? "") !== "", undefined, { timeout: 5000 });
+    await page.waitForFunction(() => {
+      const text = document.querySelector(".chat-action-status")?.textContent
+        || document.querySelector(".msg-live")?.textContent
+        || "";
+      return text !== "";
+    }, undefined, { timeout: 5000 });
     await closePage(lp);
   }
 
@@ -1133,7 +1138,12 @@ test("event purity: hover, jumps, dialog, reveal, menu, copy, and reasoning appe
     await mdRow.scrollIntoViewIfNeeded();
     const mdBox = (await mdRow.boundingBox())!;
     await page.mouse.click(mdBox.x + mdBox.width / 2, mdBox.y + mdBox.height / 2);
-    await page.waitForFunction(() => (document.querySelector(".msg-live")?.textContent ?? "") !== "", undefined, { timeout: 5000 });
+    await page.waitForFunction(() => {
+      const text = document.querySelector(".chat-action-status")?.textContent
+        || document.querySelector(".msg-live")?.textContent
+        || "";
+      return text !== "";
+    }, undefined, { timeout: 5000 });
     await closePage(lp);
   }
 

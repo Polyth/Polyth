@@ -136,7 +136,7 @@ test("phone chats are pinned-first, date-filtered, and grouped without row ages"
   assert.match(css, /\.mobile-nav-date-divider::after\s*\{[\s\S]*?background:\s*var\(--border-soft\)/);
 });
 
-test("phone navigator shares project sorting and exposes touch-safe manual reordering", async () => {
+test("phone navigator shares project sorting and reorders from the project row", async () => {
   const [source, css] = await Promise.all([
     read("../src/components/mobile/MobileNavigator.tsx"),
     read("../src/components/mobile/MobileNavigator.css"),
@@ -147,12 +147,16 @@ test("phone navigator shares project sorting and exposes touch-safe manual reord
   assert.match(source, /sort === "manual"\) return applyManualProjectOrder\(filtered, projectOrder\)/);
   assert.match(source, /id: "manual"[\s\S]*?label: tr\("sidebar\.manualOrder"\)/);
   assert.match(source, /setProjectOrder\(reorderManualProjects\(fullProjectOrder\(\), draggedId, targetId\)\)/);
-  // The handle sits in the trailing action group, so it inherits that group's
-  // --tap box instead of declaring its own.
-  assert.match(source, /className="mobile-nav-project-action mobile-nav-project-drag-handle"/);
+  assert.doesNotMatch(source, /mobile-nav-project-drag-handle/);
+  assert.doesNotMatch(source, /mobile-nav-disclosure/);
+  assert.match(source, /className="mobile-nav-project-head"/);
   assert.match(source, /onPointerMove=\{moveProjectDrag\}/);
   assert.match(source, /onPointerUp=\{finishProjectDrag\}/);
   assert.match(source, /data-project-id=\{project\.id\}/);
-  assert.match(css, /\.mobile-nav-project-drag-handle\s*\{[^}]*touch-action:\s*none;/s);
+  assert.match(source, /aria-expanded=\{expanded\}/);
+  assert.match(css, /\.mobile-nav-project\.is-dragging > \.mobile-nav-project-head\s*\{[^}]*touch-action:\s*none;/s);
   assert.match(css, /\.mobile-nav-project\.is-drag-over\s*> \.mobile-nav-project-head/);
+  assert.match(css, /\.mobile-nav-project\s*\{[^}]*background:\s*color-mix/s);
+  assert.doesNotMatch(css, /\.mobile-nav-disclosure/);
+  assert.doesNotMatch(css, /\.mobile-nav-project-drag-handle/);
 });

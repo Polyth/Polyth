@@ -4,6 +4,7 @@ import { registerAcpProfile } from "@polyth/backend-acp";
 import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/backend-acp/executable-discovery";
 import type { RegisteredAcpProfile } from "@polyth/backend-acp/profile";
 import type { ServerPackageHost } from "@polyth/plugins";
+import { createCursorClientTranslator } from "./todos.ts";
 import { cursorModelDiscoverySupport } from "./version.ts";
 const exec = promisify(execFile);
 
@@ -100,6 +101,7 @@ export default function registerPackage(host: ServerPackageHost) {
         command: process.env.POLYTH_CURSOR_BIN?.trim() || "agent", args: ["acp"],
         initializeClientMeta: { parameterizedModelPicker: true },
         clientRequest: cursorClientRequest,
+        createClientTranslator: createCursorClientTranslator,
         async discoverModels(connection) {
             try {
                 return cursorModels(await connection.rpc.request("cursor/list_available_models", {}, 10_000));

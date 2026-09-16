@@ -52,6 +52,8 @@ export const en = {
   "previewview.browserUnavailable": "Browser unavailable",
   "previewview.browserVisibility": "Browser visibility",
   "previewview.browserVisibilityDescription": "Choose whether agent browser activity stays in the background or opens Browser automatically.",
+  "browser.settings.agentAutoApprove": "Auto-approve agent browser tool",
+  "browser.settings.agentAutoApproveDescription": "When enabled, agents can use the in-app Browser tool without a permission prompt. Origin and navigation policy still apply.",
   "previewview.background": "Background",
   "previewview.autoShow": "Auto-show",
   "previewview.browserIdle": "Idle",

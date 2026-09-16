@@ -11,8 +11,10 @@ test("visible chat actions use direct canonical controls", () => {
   const responseFooter = read("../src/components/ChatResponseFooter.tsx");
   const pin = read("../src/components/messagePinAction.tsx");
 
-  assert.match(timeline, /<MessageQuickActions/);
-  assert.match(timeline, /<ChatResponseFooter/);
+  assert.match(timeline, /rewound-tail-body/);
+  assert.match(timeline, /statusFor\("user", row\.eventSeq\)/);
+  assert.match(timeline, /statusFor\("assistant", row\.eventSeq\)/);
+  assert.match(actionButton, /size="sm"/);
   assert.match(actionButton, /IconButton/);
   assert.match(actionButton, /Tooltip/);
   assert.match(actionButton, /import "\.\/ChatChrome\.css"/);
@@ -50,12 +52,14 @@ test("generic Menu contains no response-footer special case", () => {
 test("chat chrome is component-owned, compact and readable", () => {
   const css = read("../src/components/ChatChrome.css");
   const footer = read("../src/components/ChatResponseFooter.tsx");
+  const messageActions = read("../src/components/MessageQuickActions.tsx");
   assert.match(css, /\.chat-response-footer\s*\{[^}]*display:\s*grid;/s);
   assert.match(css, /grid-template-areas:\s*"identity info actions"/);
   assert.match(css, /@media \(max-width:\s*600px\)[\s\S]*grid-template-areas:\s*"identity info actions"/s);
-  assert.match(css, /@media \(max-width:\s*340px\) and \(pointer:\s*coarse\)[\s\S]*grid-template-columns:\s*repeat\(4, var\(--control-h-sm\)\)/s);
+  assert.match(css, /@media \(max-width:\s*340px\) and \(pointer:\s*coarse\)[\s\S]*grid-template-columns:\s*repeat\(4, var\(--control-h-sm\)\)[\s\S]*\.chat-response-action-item\s*\{\s*display:\s*contents;/s);
   assert.match(css, /@media \(hover:\s*none\), \(pointer:\s*coarse\)[\s\S]*\.ui-tooltip\.chat-action-tooltip\s*\{\s*display:\s*none;/s);
-  assert.match(css, /\.ui-popover\.chat-response-metadata\s*\{[^}]*background:\s*var\(--elevated\);/s);
+  assert.match(css, /\.chat-action-status\s*\{[^}]*max-width:\s*min\(24ch, 100%\)/s);
+  assert.match(messageActions, /chat-action-status/);
   assert.match(css, /\.ui-tooltip\.chat-action-tooltip\s*\{[^}]*background:\s*var\(--elevated\);/s);
   assert.match(footer, /<Popover/);
   assert.doesNotMatch(css, /!important/);

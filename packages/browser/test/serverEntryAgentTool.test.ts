@@ -64,6 +64,7 @@ test("production Browser contribution follows the live exact login-origin seam o
     await pkg.onEnable?.();
     assert.equal(contribution?.descriptor.id, "browser.polyth-browser");
     assert.ok(contribution?.execute);
+    assert.equal(typeof contribution?.autoApprove, "function");
     assert.equal(contribution.descriptor.kind, "tool");
     if (contribution.descriptor.kind !== "tool") throw new Error("Browser contribution must be a tool");
     assert.match(contribution.descriptor.description, /Take control/);

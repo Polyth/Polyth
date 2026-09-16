@@ -66,6 +66,16 @@ const QUIET_DISPATCH_ERRORS = new Set([
   "epoch-pending",
 ]);
 
+/** Runtime-identity failures the user must resolve: the web composer turns
+ *  these into the runtime recovery affordance, so a send carrying one must
+ *  surface it instead of silently waiting in the queue. */
+const EPOCH_IDENTITY_ERRORS = new Set([
+  "epoch-pending",
+  "confirmation-required",
+  "binding-mismatch",
+  "epoch-proof-required",
+]);
+
 const canonicalClientValue = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(canonicalClientValue);
   if (value && typeof value === "object") {
@@ -6768,62 +6778,74 @@ export function createSessionService(deps: {
         replaceUnknown = true;
       }
       const admissionBarrier = await durable.reconciliation(sessionId);
-      // A blocked barrier means the old runtime outcome is still uncertain. Do
-      // not resend that turn, but never make the user's new message disappear:
-      // durable queueing is the safe send path until reconciliation recovers.
+      // Send admission is never a dead end. A blocked/reconciling/uncertain
+      // barrier, a `reconciling` session and a crash-orphaned `unknown` turn
+      // all mean the previous runtime outcome is still uncertain, so that turn
+      // must not be resent — but they must never make the user's new message
+      // disappear either, which is exactly what throwing here used to do. The
+      // text goes to the durable queue instead, and `dispatchQueue` delivers
+      // it once the session is idle and the barrier releases, so a steer, an
+      // interrupt or a plain nudge can always reach a session from any state.
       // The web composer may label the same follow-up as steer or interrupt
-      // while its last projection still says working, so this fallback must be
-      // based on the authoritative barrier rather than the requested delivery
-      // mode.
-      if (
-        deps.queue
-        && !recoverEpoch
-        && !replaceUnknown
-        && admissionBarrier?.state === "blocked"
-      ) {
-        if (input.clientOperationId) {
-          const prior = await durable.operation(input.clientOperationId);
-          if (prior?.state === "unknown") throw outcomeError({
-            kind: "unknown", operationId: prior.operationId, message: prior.message ?? "admission outcome is unknown",
-          });
-          throw Object.assign(new Error("direct admission is blocked by reconciliation"), { code: "conflict" });
-        }
-        return enqueueMessage(
-          sessionId,
-          input.text,
-          delivery === "normal" ? "queue" : delivery,
-          "reconciliation-blocked",
-          input.attachments,
-          input.command,
-        );
-      }
-      if (
-        proj.status === "reconciling"
-        || (proj.status === "unknown" && !recoverEpoch && !stoppedTurnRecorded && !replaceUnknown)
-      ) {
+      // while its last projection still says working, so the decision is based
+      // on the authoritative barrier, not on the requested delivery mode. Only
+      // a deployment without a queue still reports the conflict.
+      const admissionBlock = (
+        projection: SessionProjection,
+        barrier: Awaited<ReturnType<typeof durable.reconciliation>>,
+      ): string | undefined => {
+        if (barrier?.state === "blocked") return "reconciliation-blocked";
+        if (barrier?.state === "reconciling") return "reconciliation-active";
+        if (barrier?.state === "unknown" && !stoppedTurnRecorded) return "reconciliation-unknown";
+        if (projection.status === "reconciling") return "session-reconciling";
+        if (projection.status === "epoch-pending") return "session-epoch-pending";
+        if (projection.status === "unknown" && !stoppedTurnRecorded) return "session-unknown";
+        return undefined;
+      };
+      const queueUntilAdmissible = (reason: string): Promise<SendResult> => enqueueMessage(
+        sessionId,
+        input.text,
+        delivery === "normal" ? "queue" : delivery,
+        reason,
+        input.attachments,
+        input.command,
+        undefined,
+        input.clientOperationId,
+        clientRequestFingerprint,
+      );
+      const blockedReason = recoverEpoch || replaceUnknown
+        ? undefined
+        : admissionBlock(proj, admissionBarrier);
+      if (blockedReason) {
+        if (deps.queue) return queueUntilAdmissible(blockedReason);
         throw Object.assign(new Error(`cannot send while the session is ${proj.status}`), {
           code: "conflict",
         });
       }
       let rt: AgentRuntime;
       if (recoverEpoch || replaceUnknown) {
-        ({ projection: proj, runtime: rt } = await withSessionLock(
-          sessionId,
-          () => recoverFreshRuntimeEpochUnderLock(
+        try {
+          ({ projection: proj, runtime: rt } = await withSessionLock(
             sessionId,
-            replaceUnknown ? "unknown" : "epoch",
-          ),
-        ));
-      } else {
-        const existingReconciliation = admissionBarrier;
-        if (existingReconciliation?.state === "reconciling"
-          || existingReconciliation?.state === "blocked"
-          || (existingReconciliation?.state === "unknown" && !stoppedTurnRecorded)) {
-          throw Object.assign(
-            new Error(`cannot send while reconciliation is ${existingReconciliation.state}`),
-            { code: "conflict" },
-          );
+            () => recoverFreshRuntimeEpochUnderLock(
+              sessionId,
+              replaceUnknown ? "unknown" : "epoch",
+            ),
+          ));
+        } catch (error) {
+          // Recovery can refuse: the runtime cannot reset, a turn is still
+          // active, the fresh epoch did not settle. That is "not admissible
+          // yet", not a reason to drop the text — queue it like any other
+          // barrier. Identity failures still throw, because the user has to
+          // approve replacing a runtime Polyth does not own.
+          if (!deps.queue || EPOCH_IDENTITY_ERRORS.has(String((error as { code?: unknown }).code))) {
+            throw error;
+          }
+          return queueUntilAdmissible("runtime-recovery-unavailable");
         }
+      } else {
+        // The barrier was already resolved above: blocked/reconciling/unknown
+        // never reaches this branch, it queues.
         const existingOperation = await sendAdmissionBlocking(sessionId);
         if (existingOperation) {
           return queueBehindBlockingOperation(existingOperation);
@@ -6840,36 +6862,16 @@ export function createSessionService(deps: {
       }
       proj = (await store.projection(sessionId)) ?? proj;
       stoppedTurnRecorded = hasPersistedStoppedTurn(await store.events(sessionId));
-      if (
-        proj.status === "reconciling"
-        || proj.status === "epoch-pending"
-        || (proj.status === "unknown" && !stoppedTurnRecorded)
-      ) {
+      const readyReconciliation = await durable.reconciliation(sessionId);
+      // Wiring or epoch recovery can re-block admission before the turn is
+      // admitted. Nothing has reached the runtime yet, so preserve the message
+      // the same way instead of rejecting it at this second gate.
+      const readyBlock = admissionBlock(proj, readyReconciliation);
+      if (readyBlock) {
+        if (deps.queue) return queueUntilAdmissible(readyBlock);
         throw Object.assign(new Error(`cannot send while the session is ${proj.status}`), {
           code: proj.status === "epoch-pending" ? "epoch-pending" : "conflict",
         });
-      }
-      const readyReconciliation = await durable.reconciliation(sessionId);
-      // Reconciliation can become blocked after runtime wiring/recovery but
-      // before final admission. Preserve the new message at this second gate
-      // as well; it has not been delivered to the runtime yet.
-      if (deps.queue && readyReconciliation?.state === "blocked") {
-        return enqueueMessage(
-          sessionId,
-          input.text,
-          delivery === "normal" ? "queue" : delivery,
-          "reconciliation-blocked",
-          input.attachments,
-          input.command,
-        );
-      }
-      if (readyReconciliation?.state === "reconciling"
-        || readyReconciliation?.state === "blocked"
-        || (readyReconciliation?.state === "unknown" && !stoppedTurnRecorded)) {
-        throw Object.assign(
-          new Error(`cannot send while reconciliation is ${readyReconciliation.state}`),
-          { code: "conflict" },
-        );
       }
       const readyOperation = await sendAdmissionBlocking(sessionId);
       if (readyOperation) {
@@ -7001,66 +7003,71 @@ export function createSessionService(deps: {
           }
           const caps = await rt.capabilities().catch(() => null);
           if (!caps?.steering || !rt.steer) {
-            return enqueueMessage(sessionId, input.text, "steer", "steer-unsupported", input.attachments, input.command);
-          }
-          // Steering is text-only in the runtime seam; attachments would be
-          // silently dropped mid-turn, so they queue for the next turn instead.
-          if (input.attachments?.length) {
-            return enqueueMessage(sessionId, input.text, "steer", "steer-attachments", input.attachments, input.command);
-          }
-          const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
-            sessionId,
-            mutationKind: "turn-steer",
-            intentEvent: {
-              type: "user/message",
-              data: { text: input.text, delivery: "steer" },
-            },
-          }));
-          const outcome = await runPreparedOperation<Record<string, never>, boolean>(
-            prepared.operation,
-            async (operationId) => {
-              try {
-                const value = await (rt.steerOperation
-                  ? rt.steerOperation(sessionId, input.text, operationId, input.model, input.agent)
-                  : rt.steer!(sessionId, input.text, input.model, input.agent));
-                if (isMutationOutcome<Record<string, never>>(value)) return value;
-                return value
-                  ? { kind: "confirmed" as const, value: {} }
-                  : {
-                      kind: "rejected" as const,
-                      code: "steer-not-admitted",
-                      message: "runtime rejected live steering",
-                    };
-              } catch (error) {
-                throw error;
-              }
-            },
-            () => ({}),
-          );
-          if (outcome.kind === "rejected") {
-            return enqueueMessage(
+            // The runtime has no mid-turn injection primitive at all (e.g. ACP
+            // v1's session/prompt has no concurrent-request slot), so waiting
+            // for the active turn to finish would silently defeat "steer now".
+            // Stop the turn and admit this text as the next one instead.
+            delivery = "interrupt";
+          } else {
+            // Steering is text-only in the runtime seam; attachments would be
+            // silently dropped mid-turn, so they queue for the next turn instead.
+            if (input.attachments?.length) {
+              return enqueueMessage(sessionId, input.text, "steer", "steer-attachments", input.attachments, input.command);
+            }
+            const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
               sessionId,
-              input.text,
-              "steer",
-              "steer-rejected",
-              undefined,
-              input.command,
-              prepared.operation.operationId,
+              mutationKind: "turn-steer",
+              intentEvent: {
+                type: "user/message",
+                data: { text: input.text, delivery: "steer" },
+              },
+            }));
+            const outcome = await runPreparedOperation<Record<string, never>, boolean>(
+              prepared.operation,
+              async (operationId) => {
+                try {
+                  const value = await (rt.steerOperation
+                    ? rt.steerOperation(sessionId, input.text, operationId, input.model, input.agent)
+                    : rt.steer!(sessionId, input.text, input.model, input.agent));
+                  if (isMutationOutcome<Record<string, never>>(value)) return value;
+                  return value
+                    ? { kind: "confirmed" as const, value: {} }
+                    : {
+                        kind: "rejected" as const,
+                        code: "steer-not-admitted",
+                        message: "runtime rejected live steering",
+                      };
+                } catch (error) {
+                  throw error;
+                }
+              },
+              () => ({}),
             );
+            if (outcome.kind === "rejected") {
+              return enqueueMessage(
+                sessionId,
+                input.text,
+                "steer",
+                "steer-rejected",
+                undefined,
+                input.command,
+                prepared.operation.operationId,
+              );
+            }
+            if (outcome.kind === "unknown") {
+              await updateProjection(sessionId, { status: "unknown" });
+              scheduleReconciliation(sessionId, proj!, rt, "steer-outcome-unknown");
+              throw outcomeError(outcome);
+            }
+            if (input.model || input.agent) {
+              await updateProjection(sessionId, {
+                ...(input.model ? { model: input.model } : {}),
+                ...(input.agent ? { agent: input.agent } : {}),
+              });
+            }
+            await appendAndBroadcast(sessionId, "delivery/steered", { text: input.text }, { ignorable: true });
+            return { turnId: lastTurnId.get(sessionId) ?? randomUUID() };
           }
-          if (outcome.kind === "unknown") {
-            await updateProjection(sessionId, { status: "unknown" });
-            scheduleReconciliation(sessionId, proj!, rt, "steer-outcome-unknown");
-            throw outcomeError(outcome);
-          }
-          if (input.model || input.agent) {
-            await updateProjection(sessionId, {
-              ...(input.model ? { model: input.model } : {}),
-              ...(input.agent ? { agent: input.agent } : {}),
-            });
-          }
-          await appendAndBroadcast(sessionId, "delivery/steered", { text: input.text }, { ignorable: true });
-          return { turnId: lastTurnId.get(sessionId) ?? randomUUID() };
         }
         if (delivery === "interrupt") {
           // enqueue at the head, then abort; turn/stopped(aborted) dispatches it

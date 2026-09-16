@@ -5,7 +5,15 @@ import { existsSync } from "node:fs";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import type { AgentCapabilityDescriptor, JsonObject, RouteHandler, ToolExecutor } from "@polyth/contracts";
+import type {
+  AgentCapabilityContribution,
+  AgentCapabilityDescriptor,
+  AgentToolAuthorizationGrant,
+  JsonObject,
+  RouteHandler,
+  SpaceStorage,
+  ToolExecutor,
+} from "@polyth/contracts";
 import { semanticCapabilityRevision } from "@polyth/harness-runtime";
 
 export const AGENT_TOOLS_MCP_NAME = "polyth-agent-tools";
@@ -71,6 +79,53 @@ const defaultAuthorize = (
   tool: Extract<AgentCapabilityDescriptor, { kind: "tool" }>,
 ): AgentToolAuthz =>
   tool.trust === "pure" && tool.mutating === false ? "allow" : "permission-required";
+
+/** Permission-engine verdict plus optional contribution auto-approve and UI prompt. */
+export async function authorizePackageToolAfterPermissions(input: {
+  tool: Extract<AgentCapabilityDescriptor, { kind: "tool" }>;
+  grant: AgentToolAuthorizationGrant;
+  contribution?: Pick<AgentCapabilityContribution, "autoApprove">;
+  permissionVerdict: "allow" | "deny" | "ask";
+  storage?: SpaceStorage;
+  signal?: AbortSignal;
+  requestPermission?: (
+    grant: AgentToolAuthorizationGrant & {
+      toolId: string;
+      toolName: string;
+      owner: string;
+      signal?: AbortSignal;
+    },
+  ) => Promise<AgentToolAuthz>;
+}): Promise<AgentToolAuthz> {
+  if (input.permissionVerdict === "allow") return "allow";
+  if (input.permissionVerdict === "deny") return "deny";
+  const grant: AgentToolAuthorizationGrant = {
+    ...input.grant,
+    ...(input.storage ? { storage: input.storage } : {}),
+  };
+  if (input.contribution?.autoApprove) {
+    try {
+      if (await input.contribution.autoApprove(grant)) return "allow";
+    } catch {
+      // Fail closed to the permission prompt.
+    }
+  }
+  if (!input.requestPermission) return "permission-required";
+  try {
+    const decision = await input.requestPermission({
+      ...grant,
+      toolId: input.tool.id,
+      toolName: input.tool.name,
+      owner: input.tool.owner,
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+    return decision === "allow" || decision === "permission-required" || decision === "deny"
+      ? decision
+      : "deny";
+  } catch {
+    return "deny";
+  }
+}
 
 const bindingOf = (
   tool: Extract<AgentCapabilityDescriptor, { kind: "tool" }>,

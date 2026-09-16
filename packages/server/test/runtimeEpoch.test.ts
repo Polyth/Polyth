@@ -1164,10 +1164,9 @@ test("unrelated session-reset without epoch-replaced does not lift a prior unkno
     });
     await confirmReset(store, sessionId, "backend-unrelated");
 
-    await assert.rejects(
-      () => sessions.send(sessionId, { text: "should stay blocked" }),
-      (error: Error & { code?: string }) => error.code === "conflict",
-    );
+    // Blocked admission queues the message instead of losing it; nothing is
+    // submitted and the unrelated reset still does not lift the barrier.
+    assert.equal((await sessions.send(sessionId, { text: "should stay blocked" })).queued, true);
     assert.equal(submitted.length, 0);
     assert.equal((await store.operation(uncertain.operation.operationId))?.state, "unknown");
     assert.equal(
@@ -1234,9 +1233,9 @@ test("later unrelated session-reset does not become the epoch send barrier", asy
     });
     await confirmReset(store, sessionId, "backend-unrelated-later");
 
-    await assert.rejects(
-      () => sessions.send(sessionId, { text: "post-epoch unknown must still block" }),
-      (error: Error & { code?: string }) => error.code === "conflict",
+    assert.equal(
+      (await sessions.send(sessionId, { text: "post-epoch unknown must still block" })).queued,
+      true,
     );
     assert.equal(submitted.length, 0);
     assert.equal((await store.operation(prior.operation.operationId))?.state, "unknown");

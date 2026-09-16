@@ -1048,3 +1048,93 @@ test("package and plugin management rows measure as compact stacked rows", { ski
   }
   await page.setViewportSize({ width: 390, height: 720 });
 });
+
+test("folded activity summary stays above its fill plate", { skip: !CHROME }, async () => {
+  assert.ok(page);
+  const css = await read("../src/styles.css");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.setViewportSize({ width: 900, height: 720 });
+  await page.setContent(`<style>${css}</style>
+    <div class="app" style="min-height:100vh;padding:32px;background:
+      repeating-linear-gradient(135deg, #3a2a1c 0 18px, #1a4a5c 18px 36px, #4a1a3c 36px 54px)">
+      <div class="timeline" style="width:640px">
+        <div class="activity-group">
+          <button type="button" class="ui-run-summary" data-state="completed">
+            <span class="ui-run-summary-mark">●</span>
+            <span class="ui-run-summary-copy"><strong>Read styles.css</strong></span>
+          </button>
+        </div>
+        <div class="activity-group open">
+          <button type="button" class="ui-run-summary" data-state="completed">
+            <span class="ui-run-summary-mark">●</span>
+            <span class="ui-run-summary-copy"><strong>Activity</strong></span>
+          </button>
+          <div class="activity-group-expand-shell">
+            <div class="activity-group-items"><div class="execution-row">Read styles.css</div></div>
+          </div>
+        </div>
+      </div>
+    </div>`);
+  const folded = await page.evaluate(() => {
+    const group = document.querySelector<HTMLElement>(".activity-group:not(.open)")!;
+    const summary = group.querySelector<HTMLElement>(".ui-run-summary")!;
+    const label = group.querySelector<HTMLElement>(".ui-run-summary-copy strong")!;
+    const plate = getComputedStyle(group, "::before");
+    return {
+      isolation: getComputedStyle(group).isolation,
+      plateZ: plate.zIndex,
+      plateFilter: plate.backdropFilter || (plate as CSSStyleDeclaration & { webkitBackdropFilter?: string }).webkitBackdropFilter || "",
+      plateBg: plate.backgroundImage,
+      summaryZ: getComputedStyle(summary).zIndex,
+      copyWidth: label.getBoundingClientRect().width,
+    };
+  });
+  assert.equal(folded.isolation, "isolate");
+  assert.equal(folded.plateZ, "0", "the plate must not use a negative z-index that drops backdrop-filter");
+  assert.equal(folded.summaryZ, "1");
+  assert.match(folded.plateFilter, /blur\(/, "folded activity keeps live glass blur");
+  assert.match(folded.plateBg, /radial-gradient/, "folded fill follows glass translucency rather than a solid slab");
+  assert.ok(folded.copyWidth > 40);
+
+  const open = await page.evaluate(() => {
+    const group = document.querySelector<HTMLElement>(".activity-group.open")!;
+    const summary = group.querySelector<HTMLElement>(".ui-run-summary")!;
+    const items = group.querySelector<HTMLElement>(".activity-group-expand-shell")!;
+    const header = getComputedStyle(summary);
+    return {
+      summaryZ: header.zIndex,
+      itemsZ: getComputedStyle(items).zIndex,
+      headerFilter: header.backdropFilter || (header as CSSStyleDeclaration & { webkitBackdropFilter?: string }).webkitBackdropFilter || "",
+      headerBg: header.backgroundImage,
+      sticky: header.position,
+      inlineStart: header.insetInlineStart,
+    };
+  });
+  assert.equal(open.sticky, "sticky");
+  assert.equal(open.summaryZ, "2", "pinned header stays above scrolling items");
+  assert.ok(Number(open.summaryZ) > Number(open.itemsZ), "item rows cannot paint over the pinned header");
+  assert.match(open.headerFilter, /blur\(/, "pinned header keeps the same glass blur as the card");
+  assert.match(open.headerBg, /radial-gradient/, "pinned header fill follows the user's glass tokens");
+  assert.ok(open.inlineStart === "0px" || open.inlineStart === "0", "pinned header stays aligned to the card edges");
+
+  const matteFill = folded.plateBg;
+  await page.evaluate(() => { document.body.dataset.glass = "clear"; });
+  const clearFill = await page.evaluate(() => getComputedStyle(document.querySelector(".activity-group:not(.open)")!, "::before").backgroundImage);
+  assert.notEqual(clearFill, matteFill, "clear glass uses a lighter activity fill than the default");
+
+  await page.evaluate(() => { document.body.dataset.glass = "off"; });
+  const off = await page.evaluate(() => {
+    const group = document.querySelector<HTMLElement>(".activity-group:not(.open)")!;
+    const plate = getComputedStyle(group, "::before");
+    const header = getComputedStyle(document.querySelector<HTMLElement>(".activity-group.open .ui-run-summary")!);
+    return {
+      plateFilter: plate.backdropFilter || (plate as CSSStyleDeclaration & { webkitBackdropFilter?: string }).webkitBackdropFilter || "",
+      headerFilter: header.backdropFilter || (header as CSSStyleDeclaration & { webkitBackdropFilter?: string }).webkitBackdropFilter || "",
+    };
+  });
+  assert.match(off.plateFilter, /none/, "glass off drops folded blur");
+  assert.match(off.headerFilter, /none/, "glass off drops pinned-header blur");
+  await page.evaluate(() => { delete document.body.dataset.glass; });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 390, height: 720 });
+});

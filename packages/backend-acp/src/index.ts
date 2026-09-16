@@ -45,6 +45,7 @@ import {
     parseSessionConfig,
     type AcpSessionConfig,
 } from "./sessionConfig.ts";
+import { eventsFromAcpToolCallUpdate, type AcpToolCallState } from "./acpToolCall.ts";
 export interface AcpProfile {
     descriptor: HarnessDescriptor;
     command: string;
@@ -159,12 +160,22 @@ export interface AcpConnection {
     authMethods?: AcpAuthMethod[];
 }
 
+export type AcpClientMethodTranslation =
+    | { handled: false }
+    | { handled: true; events: RuntimeEvent[]; requestResult?: unknown };
+
+export type AcpClientMethodTranslator = {
+    translateClientMethod(method: string, params: unknown): AcpClientMethodTranslation;
+};
+
 export interface AcpRuntimeOptions {
     /** Maximum silence while a native prompt is active. Activity resets the
      * watchdog; zero disables it for protocol fixtures that own their clock. */
     promptIdleTimeoutMs?: number;
     /** Model-specific controls learned from capability-probed discovery. */
     models?: ModelDescriptor[];
+    /** Provider-specific client extension methods translated into RuntimeEvents. */
+    clientTranslator?: AcpClientMethodTranslator;
 }
 
 const parseAuthMethods = (value: unknown): AcpAuthMethod[] =>
@@ -257,6 +268,7 @@ export function createAcpRuntime(
         });
     };
     const nativeCommands: RuntimeCommandDescriptor[] = [];
+    const acpToolCalls = new Map<string, AcpToolCallState>();
     const listeners = new Set<(sid: string, event: RuntimeEvent) => void>();
     const lifecycle = new Set<Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0]>();
     const pending = new Map<string, {
@@ -362,9 +374,20 @@ export function createAcpRuntime(
     } };
     rpc.onClose(() => { connected = false; for (const cb of lifecycle)
         cb({ type: "stream-disconnected", authorityId: rpc.authorityId, generation: rpc.generation }); });
+    const applyClientTranslation = (method: string, params: unknown): boolean => {
+        const translated = options.clientTranslator?.translateClientMethod(method, params);
+        if (!translated?.handled) return false;
+        touchPromptWatchdog();
+        markAccepted();
+        for (const event of translated.events) emit(event);
+        return true;
+    };
     rpc.onNotification((method, params) => {
-        if (method !== "session/update" || params.sessionId !== nativeId)
+        if (method !== "session/update") {
+            applyClientTranslation(method, params);
             return;
+        }
+        if (params.sessionId !== nativeId) return;
         touchPromptWatchdog();
         const update = params.update;
         if (update.sessionUpdate === "config_option_update") {
@@ -451,14 +474,20 @@ export function createAcpRuntime(
             // answer. Finalize that part before publishing the tool so the
             // timeline can keep the eventual post-tool part as the answer.
             if (update.sessionUpdate === "tool_call") finishMessagePart();
-            if (update.status === "completed" || update.status === "failed")
-                emit(update.status === "failed" ? { type: "tool/error", callId: update.toolCallId, tool: update.kind ?? "tool", error: "Tool failed" } : { type: "tool/result", callId: update.toolCallId, tool: update.kind ?? "tool", output: (update.content ?? []).flatMap((c: any) => c.type === "content" && c.content?.type === "text" ? [c.content.text] : []).join("\n") });
-            else if (update.sessionUpdate === "tool_call")
-                emit({ type: "tool/started", callId: update.toolCallId, tool: update.kind ?? "tool", input: { title: update.title ?? "" } });
+            for (const event of eventsFromAcpToolCallUpdate(acpToolCalls, update as Record<string, unknown>)) {
+                emit(event);
+            }
         }
         // agent_thought_chunk and vendor-private extensions never enter continuity.
     });
     rpc.onRequest(async (method, params) => {
+        const translated = options.clientTranslator?.translateClientMethod(method, params);
+        if (translated?.handled) {
+            touchPromptWatchdog();
+            markAccepted();
+            for (const event of translated.events) emit(event);
+            return translated.requestResult;
+        }
         if (method !== "session/request_permission" || params.sessionId !== nativeId)
             throw new Error("unsupported request");
         markAccepted();

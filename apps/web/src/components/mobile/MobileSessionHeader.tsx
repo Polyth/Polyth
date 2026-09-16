@@ -38,7 +38,6 @@ import { firstUserTextCached, lastUserTextCached } from "../../utils.ts";
 import { ComposeIcon, GlassIsland, IconButton, LayersIcon, MenuIcon } from "../ui/index.ts";
 import Sheet, { SheetRow, SheetSection } from "./Sheet.tsx";
 import WorkspacePanel from "./WorkspacePanel.tsx";
-import { PROMPT_VISIBILITY_EVENT, promptIsVisible } from "../../promptVisibility.ts";
 import {
   contextGaugeForTelemetry,
   contextTelemetryStatus,
@@ -165,6 +164,7 @@ function progressStep(tasks: IslandTask[]): number {
 }
 
 function IslandOverview({
+  sessionTitle,
   prompt,
   tasks,
   requests,
@@ -172,6 +172,7 @@ function IslandOverview({
   events,
   onClose,
 }: {
+  sessionTitle: string;
   prompt: string | undefined;
   tasks: IslandTask[];
   requests: IslandItem[];
@@ -192,9 +193,10 @@ function IslandOverview({
       className="mobile-island-sheet"
       onClose={onClose}
     >
-      {prompt && (
+      {(sessionTitle || prompt) && (
         <div className="mobile-island-now">
-          <PromptExcerpt text={prompt} />
+          {sessionTitle && <div className="mobile-island-session">{sessionTitle}</div>}
+          {prompt && <PromptExcerpt text={prompt} />}
         </div>
       )}
 
@@ -270,17 +272,10 @@ export default function MobileSessionHeader() {
   const capabilities = useResolvedCapabilities();
   const workspaceNav = useMobileWorkspaceNavigation();
   const [surface, setSurface] = useState<"island" | null>(null);
-  const [promptVisible, setPromptVisible] = useState(promptIsVisible);
   const title = session
     ? displaySessionTitle(session.title, session.id, firstUserTextCached(events[session.id]))
     : tr("mobile.island.newChat");
   const prompt = lastUserTextCached(session ? events[session.id] : undefined);
-
-  useEffect(() => {
-    const update = (event: Event) => setPromptVisible((event as CustomEvent<boolean>).detail);
-    window.addEventListener(PROMPT_VISIBILITY_EVENT, update);
-    return () => window.removeEventListener(PROMPT_VISIBILITY_EVENT, update);
-  }, []);
 
   const recent = useMemo(
     () => recentSessionsForIsland(sessions, session?.id),
@@ -412,7 +407,8 @@ export default function MobileSessionHeader() {
     </div>
     {surface === "island" && (
       <IslandOverview
-        prompt={promptVisible ? undefined : prompt}
+        sessionTitle={title}
+        prompt={prompt}
         tasks={overviewTasks}
         requests={requests}
         recent={recent}

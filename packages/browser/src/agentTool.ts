@@ -2,11 +2,13 @@ import { lstat, mkdir, realpath, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import type {
   AgentCapabilityContribution,
+  AgentToolAuthorizationGrant,
   BrowserAction,
   BrowserSessionDto,
   JsonObject,
   ToolExecutionContext,
 } from "@polyth/contracts";
+import { readBrowserAgentAutoApprove } from "./agentToolSettings.ts";
 import type { BrowserService } from "./index.ts";
 
 const ACTIONS = [
@@ -276,5 +278,9 @@ export function createBrowserAgentTool(
       mutating: true,
     },
     execute,
+    autoApprove: async (grant: AgentToolAuthorizationGrant) => {
+      if (!grant.storage) return false;
+      return readBrowserAgentAutoApprove(grant.storage);
+    },
   };
 }

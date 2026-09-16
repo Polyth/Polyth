@@ -17,6 +17,7 @@ import type {
   HarnessProvisioningPlan,
 } from "@polyth/contracts";
 import { createLaunchOverlayStore, mcpNativeNameCollision, type LaunchOverlayStore } from "@polyth/harness-runtime";
+import { CODEX_MCP_STARTUP_TIMEOUT_SEC } from "./mcpReadiness.ts";
 import { renderCapabilityText } from "@polyth/harness-runtime/capability-text";
 import { atomicWriteSync } from "@polyth/plugins";
 
@@ -242,18 +243,21 @@ export function createCodexProvisioner(): HarnessProvisioner {
         if (item.capability.kind !== "mcp-server" || item.mode === "unsupported" || !item.capability.enabled) continue;
         if (mcpNativeNameCollision(plan.items, item.capability.id)) continue;
         const values = secrets.mcpSecrets(item.capability.id);
-        if (item.capability.transport.kind === "stdio") {
-          overlay.mcpServers[item.capability.name] = {
+        const transport = item.capability.transport.kind === "stdio"
+          ? {
+            enabled: true,
+            startup_timeout_sec: CODEX_MCP_STARTUP_TIMEOUT_SEC,
             command: item.capability.transport.command,
             args: item.capability.transport.args,
             env: Object.fromEntries(item.capability.transport.envKeys.map((key) => [key, values[key] ?? ""])),
-          };
-        } else {
-          overlay.mcpServers[item.capability.name] = {
+          }
+          : {
+            enabled: true,
+            startup_timeout_sec: CODEX_MCP_STARTUP_TIMEOUT_SEC,
             url: item.capability.transport.url,
             http_headers: Object.fromEntries(item.capability.transport.headersSecretRefs.map((key) => [key, values[key] ?? ""])),
           };
-        }
+        overlay.mcpServers[item.capability.name] = transport;
         nativeMcp.push({
           name: item.capability.name,
           capabilityId: item.capability.id,

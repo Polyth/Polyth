@@ -10,6 +10,7 @@ import {
   sentName,
   timeIso,
   timeShort,
+  type ActionAnnounceAnchor,
   type ActionAvailability,
 } from "../messageActions.ts";
 import { useUiSettings } from "../uiPrefs.ts";
@@ -25,13 +26,15 @@ const actionLabel = (name: string, availability?: ActionAvailability): string =>
 export default function MessageQuickActions({
   message,
   announce,
+  statusText,
   onRevert,
   onFork,
   revert,
   fork,
 }: {
   message: UserMsg;
-  announce: (text: string) => void;
+  announce: (text: string, anchor?: ActionAnnounceAnchor) => void;
+  statusText?: string;
   onRevert?: (message: UserMsg) => void;
   onFork?: (message: UserMsg) => void;
   revert?: ActionAvailability;
@@ -43,7 +46,7 @@ export default function MessageQuickActions({
   const copyFormat = prefs.messageCopyFormat;
   const doCopy = () => {
     void copyText(copyFormat === "markdown" ? copyMarkdown(message) : copyJson(message)).then((ok) => {
-      announce(copyAnnouncement(ok ? copyFormat : "failed"));
+      announce(copyAnnouncement(ok ? copyFormat : "failed"), { role: "user", eventSeq: message.eventSeq });
     });
   };
 
@@ -64,6 +67,9 @@ export default function MessageQuickActions({
             label={copyActionName("user", copyFormat)}
             onClick={doCopy}
           />
+          {statusText && (
+            <span className="chat-action-status" role="status" aria-live="polite">{statusText}</span>
+          )}
           {onRevert && (
             <ChatActionButton
               icon={UndoIcon}

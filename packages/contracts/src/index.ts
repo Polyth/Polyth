@@ -3077,10 +3077,24 @@ export type AgentCapabilityDescriptor =
       value: JsonValue;
     });
 
+/** Grant passed to package-owned package-tool authorization hooks. */
+export interface AgentToolAuthorizationGrant {
+  spaceId: string;
+  projectId: string;
+  cwd: string;
+  harnessId?: string;
+  sessionId?: string;
+  /** Host-resolved Space storage when the grant Space is known. Never client-derived. */
+  storage?: SpaceStorage;
+}
+
 export interface AgentCapabilityContribution {
   descriptor: AgentCapabilityDescriptor;
   /** Trusted in-process handler. Never serialized; never sent to a model. */
   execute?: ToolExecutor;
+  /** Optional package-owned auto-approval for package-tool authorization.
+   *  Never serialized; must not override permission deny rules. */
+  autoApprove?: (grant: AgentToolAuthorizationGrant) => boolean | Promise<boolean>;
 }
 
 export interface HarnessCapabilityRecord {

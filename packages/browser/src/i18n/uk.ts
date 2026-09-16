@@ -40,6 +40,8 @@ export const uk: BrowserMessages = {
   "previewview.browserUnavailable": "English, Українська, Français...",
   "previewview.browserVisibility": "Видимість браузера",
   "previewview.browserVisibilityDescription": "Виберіть, чи залишати активність агента в браузері у фоні, чи відкривати браузер автоматично.",
+  "browser.settings.agentAutoApprove": "Автодозвіл на браузер для агента",
+  "browser.settings.agentAutoApproveDescription": "Коли увімкнено, агенти можуть використовувати вбудований інструмент Browser без запиту дозволу. Політика походження та навігації все одно застосовується.",
   "previewview.background": "У фоні",
   "previewview.autoShow": "Показувати автоматично",
   "previewview.browserIdle": "Бездіяльний",

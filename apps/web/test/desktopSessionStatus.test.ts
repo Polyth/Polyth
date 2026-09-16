@@ -39,7 +39,8 @@ test("desktop and phone titles present normalized task transitions without movin
   assert.match(desktop, /className="desktop-session-status-popover"/);
   assert.match(desktop, /side=\{fromDock \? "up" : "down"\}/);
 
-  assert.match(mobile, /promptVisible \? undefined : prompt/);
+  assert.match(mobile, /prompt=\{prompt\}/);
+  assert.doesNotMatch(mobile, /promptVisible \? undefined : prompt/);
   assert.match(mobile, /const overviewTasks = tasksForIsland\(model\.tasks, model\.messages\)/);
   assert.match(mobile, /const taskProgressTitle = useTaskProgressTitle\(session\?\.id, overviewTasks\)/);
   assert.match(mobile, /const displayedTitle = taskProgressTitle\?\.text \?\? title/);

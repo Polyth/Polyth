@@ -1,6 +1,5 @@
 import {
   useEffect, useMemo, useRef, useState,
-  type DragEvent as ReactDragEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { SessionProjection } from "@polyth/contracts";
@@ -75,8 +74,15 @@ import "./MobileNavigator.css";
 const EXPANDED_PROJECTS_KEY = "polyth.sidebar.expandedProjects";
 const INITIAL_VISIBLE_SESSIONS = 8;
 const LONG_PRESS_MS = 550;
+const PROJECT_DRAG_SLOP = 12;
 const SWIPE_WIDTH = 82;
 const SWIPE_THRESHOLD = 38;
+
+function isProjectDragIgnoredTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(
+    target.closest(".mobile-nav-project-action, .mobile-nav-project-rename"),
+  );
+}
 
 function loadExpanded(activeProjectId: string | null): ReadonlySet<string> {
   try {
@@ -448,7 +454,12 @@ export default function MobileNavigator() {
     id: string;
     pointerId: number;
     targetId: string;
+    originX: number;
+    originY: number;
+    armed: boolean;
   } | null>(null);
+  const projectDragPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressProjectClickRef = useRef(false);
 
   useModalSurface({
     enabled: true,
@@ -547,9 +558,22 @@ export default function MobileNavigator() {
     announce(tr("sidebar.projectsReordered"));
   };
   const clearProjectDrag = () => {
+    if (projectDragPressRef.current !== null) {
+      clearTimeout(projectDragPressRef.current);
+      projectDragPressRef.current = null;
+    }
     projectDragRef.current = null;
     setDraggedProject(null);
     setDragOverProject(null);
+  };
+  const armProjectDrag = (target: HTMLElement, drag: NonNullable<typeof projectDragRef.current>) => {
+    if (drag.armed) return;
+    drag.armed = true;
+    suppressProjectClickRef.current = true;
+    target.setPointerCapture(drag.pointerId);
+    setDraggedProject(drag.id);
+    setDragOverProject(drag.id);
+    tapFeedback();
   };
   const projectAtPoint = (clientX: number, clientY: number): string | null => {
     if (typeof document === "undefined") return null;
@@ -557,27 +581,43 @@ export default function MobileNavigator() {
     const id = projectNode?.dataset.projectId;
     return id && visibleProjects.some((project) => project.id === id) ? id : null;
   };
-  const startProjectDrag = (event: ReactPointerEvent<HTMLButtonElement>, id: string) => {
-    // Mouse uses the browser's native drag feedback; touch and pen use
-    // pointer capture because mobile browsers do not consistently dispatch
-    // HTML drag events for a draggable button.
-    if (!manualReorder || event.pointerType === "mouse" || projectDragRef.current) return;
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    projectDragRef.current = { id, pointerId: event.pointerId, targetId: id };
-    setDraggedProject(id);
-    setDragOverProject(id);
+  const startProjectDrag = (event: ReactPointerEvent<HTMLElement>, id: string) => {
+    // The project row itself is the drag surface. Mouse arms after a short
+    // move; touch/pen wait for a long-press so a vertical pan still scrolls.
+    if (!manualReorder || projectDragRef.current || isProjectDragIgnoredTarget(event.target)) return;
+    const drag = {
+      id,
+      pointerId: event.pointerId,
+      targetId: id,
+      originX: event.clientX,
+      originY: event.clientY,
+      armed: false,
+    };
+    projectDragRef.current = drag;
+    if (event.pointerType === "mouse") return;
+    const target = event.currentTarget;
+    projectDragPressRef.current = setTimeout(() => {
+      projectDragPressRef.current = null;
+      const current = projectDragRef.current;
+      if (!current || current.pointerId !== drag.pointerId || current.armed) return;
+      armProjectDrag(target, current);
+    }, LONG_PRESS_MS);
   };
-  const startProjectNativeDrag = (event: ReactDragEvent<HTMLButtonElement>, id: string) => {
-    if (!manualReorder) return;
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", id);
-    setDraggedProject(id);
-    setDragOverProject(id);
-  };
-  const moveProjectDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+  const moveProjectDrag = (event: ReactPointerEvent<HTMLElement>) => {
     const drag = projectDragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
+    const distance = Math.hypot(event.clientX - drag.originX, event.clientY - drag.originY);
+    if (!drag.armed) {
+      if (event.pointerType === "mouse") {
+        if (distance < PROJECT_DRAG_SLOP) return;
+        armProjectDrag(event.currentTarget, drag);
+      } else if (distance >= PROJECT_DRAG_SLOP) {
+        clearProjectDrag();
+        return;
+      } else {
+        return;
+      }
+    }
     event.preventDefault();
     const targetId = projectAtPoint(event.clientX, event.clientY);
     if (targetId) {
@@ -591,27 +631,46 @@ export default function MobileNavigator() {
     if (event.clientY < bounds.top + edge) scroll.scrollTop -= 12;
     else if (event.clientY > bounds.bottom - edge) scroll.scrollTop += 12;
   };
-  const finishProjectDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+  const finishProjectDrag = (event: ReactPointerEvent<HTMLElement>) => {
     const drag = projectDragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
-    event.preventDefault();
-    commitReorder(drag.id, projectAtPoint(event.clientX, event.clientY) ?? drag.targetId);
+    const armed = drag.armed;
+    if (armed) {
+      event.preventDefault();
+      commitReorder(drag.id, projectAtPoint(event.clientX, event.clientY) ?? drag.targetId);
+    }
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
     clearProjectDrag();
+    if (!armed) suppressProjectClickRef.current = false;
   };
-  const cancelProjectDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+  const cancelProjectDrag = (event: ReactPointerEvent<HTMLElement>) => {
     if (projectDragRef.current?.pointerId !== event.pointerId) return;
     clearProjectDrag();
   };
 
   useEffect(() => {
     if (manualReorder) return;
+    if (projectDragPressRef.current !== null) {
+      clearTimeout(projectDragPressRef.current);
+      projectDragPressRef.current = null;
+    }
     projectDragRef.current = null;
     setDraggedProject(null);
     setDragOverProject(null);
   }, [manualReorder]);
+
+  useEffect(() => {
+    if (!manualReorder || !drawerOpen) return;
+    const scroll = navScrollRef.current;
+    if (!scroll) return;
+    const cancelUnarmed = () => {
+      if (projectDragRef.current && !projectDragRef.current.armed) clearProjectDrag();
+    };
+    scroll.addEventListener("scroll", cancelUnarmed, { passive: true });
+    return () => scroll.removeEventListener("scroll", cancelUnarmed);
+  }, [manualReorder, drawerOpen]);
 
   if (!drawerOpen) return null;
 
@@ -852,29 +911,18 @@ export default function MobileNavigator() {
 
             return (
               <section
-                className={`mobile-nav-project${project.id === activeProjectId ? " is-current" : ""}${manualReorder ? " is-reorderable" : ""}${draggedProject === project.id ? " is-dragging" : ""}${dragOverProject === project.id ? " is-drag-over" : ""}`}
+                className={`mobile-nav-project${project.id === activeProjectId ? " is-current" : ""}${expanded ? " is-expanded" : ""}${manualReorder ? " is-reorderable" : ""}${draggedProject === project.id ? " is-dragging" : ""}${dragOverProject === project.id ? " is-drag-over" : ""}`}
                 data-project-id={project.id}
                 key={project.id}
-                onDragOver={(event) => {
-                  if (!draggedProject) return;
-                  event.preventDefault();
-                  setDragOverProject(project.id);
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  if (draggedProject) commitReorder(draggedProject, project.id);
-                  clearProjectDrag();
-                }}
               >
-                <div className="mobile-nav-project-head">
-                  <button
-                    className="mobile-nav-disclosure"
-                    aria-label={expanded ? tr("sidebar.sessionlist.collapse") : tr("sidebar.sessionlist.expand")}
-                    aria-expanded={expanded}
-                    onClick={() => toggleProject(project.id)}
-                  >
-                    {expanded ? <Icon.chevronDown /> : <Icon.chevronRight />}
-                  </button>
+                <div
+                  className="mobile-nav-project-head"
+                  onPointerDown={(event) => startProjectDrag(event, project.id)}
+                  onPointerMove={moveProjectDrag}
+                  onPointerUp={finishProjectDrag}
+                  onPointerCancel={cancelProjectDrag}
+                  onLostPointerCapture={clearProjectDrag}
+                >
                   {/* Same project mark as the desktop navigator: the chosen
                       icon and colour are project identity, not decoration. */}
                   <span className="project-glyph" style={project.color ? { color: project.color } : undefined}>
@@ -901,7 +949,26 @@ export default function MobileNavigator() {
                   ) : (
                     <button
                       className="mobile-nav-project-main"
-                      onClick={() => { activateProject(project.id); setSidebarOpen(false); }}
+                      aria-expanded={expanded}
+                      aria-keyshortcuts={manualReorder ? "Alt+Shift+ArrowUp Alt+Shift+ArrowDown" : undefined}
+                      onClick={() => {
+                        if (suppressProjectClickRef.current) {
+                          suppressProjectClickRef.current = false;
+                          return;
+                        }
+                        activateProject(project.id);
+                        toggleProject(project.id);
+                      }}
+                      onKeyDown={(event) => {
+                        if (!manualReorder || !event.altKey || !event.shiftKey) return;
+                        if (event.key === "ArrowUp") {
+                          event.preventDefault();
+                          moveProjectBy(project.id, -1);
+                        } else if (event.key === "ArrowDown") {
+                          event.preventDefault();
+                          moveProjectBy(project.id, 1);
+                        }
+                      }}
                     >
                       <span className="mobile-nav-project-name">{project.name || project.path}</span>
                       <span className="mobile-nav-project-meta">
@@ -940,36 +1007,6 @@ export default function MobileNavigator() {
                     </button>
                   )}
                   <div className="mobile-nav-project-actions">
-                    {/* Reordering lives on the trailing edge with the other row
-                        actions, so the leading edge stays project identity. */}
-                    {manualReorder && (
-                      <button
-                        type="button"
-                        className="mobile-nav-project-action mobile-nav-project-drag-handle"
-                        aria-label={tr("sidebar.reorderValue", { value: project.name || project.path })}
-                        aria-keyshortcuts="Alt+Shift+ArrowUp Alt+Shift+ArrowDown"
-                        draggable={manualReorder}
-                        onPointerDown={(event) => startProjectDrag(event, project.id)}
-                        onPointerMove={moveProjectDrag}
-                        onPointerUp={finishProjectDrag}
-                        onPointerCancel={cancelProjectDrag}
-                        onLostPointerCapture={clearProjectDrag}
-                        onDragStart={(event) => startProjectNativeDrag(event, project.id)}
-                        onDragEnd={clearProjectDrag}
-                        onKeyDown={(event) => {
-                          if (!event.altKey || !event.shiftKey) return;
-                          if (event.key === "ArrowUp") {
-                            event.preventDefault();
-                            moveProjectBy(project.id, -1);
-                          } else if (event.key === "ArrowDown") {
-                            event.preventDefault();
-                            moveProjectBy(project.id, 1);
-                          }
-                        }}
-                      >
-                        <Icon.pull />
-                      </button>
-                    )}
                     <button
                       className="mobile-nav-project-action"
                       aria-label={tr("sidebar.newChatInValue", { value: project.name || project.path })}

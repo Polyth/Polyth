@@ -164,10 +164,9 @@ test("lost prompt response records one durable unknown and never redispatches", 
   assert.equal(events.filter((event) => event.type === "mutation/uncertainty-recorded"
     && (event.data as { operationId?: string }).operationId === operations[0]!.operationId).length, 1);
 
-  await assert.rejects(
-    () => sessions.send(created.id, { text: "run once" }),
-    (error: Error & { code?: string }) => error.code === "conflict",
-  );
+  // The uncertain turn is never resent, but the retry is preserved in the
+  // durable queue rather than rejected.
+  assert.equal((await sessions.send(created.id, { text: "run once" })).queued, true);
   assert.equal(submissions, 1);
   await waitFor(async () => (await store.reconciliation(created.id))?.state === "blocked");
   await store.close();

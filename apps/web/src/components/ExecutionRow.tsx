@@ -911,10 +911,12 @@ export function ExecutionRow({
   }, [message, message.rev]);
   const inputEntries = useMemo(() => {
     const shown = Boolean(presentation.path) || Boolean(presentation.files?.length);
+    const label = presentation.label.toLowerCase();
     return normalizedInputEntries(message.input).filter((entry) =>
       !(shown && isPathDetailKey(entry.key))
-      && !(presentation.kind === "read" && /^(?:offset|limit)$/i.test(entry.key)));
-  }, [message, message.rev, presentation.files, presentation.path, presentation.kind]);
+      && !(presentation.kind === "read" && /^(?:offset|limit)$/i.test(entry.key))
+      && !(/^(?:title|description)$/i.test(entry.key) && entry.value.toLowerCase() === label));
+  }, [message, message.rev, presentation.files, presentation.path, presentation.kind, presentation.label]);
   const inputJson = useMemo(() => JSON.stringify(message.input, null, 2), [message, message.rev]);
   const raw = useMemo(() => JSON.stringify({
     tool: message.tool,
@@ -935,6 +937,7 @@ export function ExecutionRow({
     ? [presentation.label, pathParts.directory].filter(Boolean).join(" · ")
     : presentation.preview;
   const typedPreview = usePrintText(summaryPreview, entering);
+  const hasOutput = Boolean(message.output?.trim());
 
   const openFile = () => {
     if (presentation.path) openEditorFile(presentation.path);
@@ -1044,7 +1047,7 @@ export function ExecutionRow({
               {message.error !== undefined && (
                 <OutputPreview text={message.error} error animate={entering} onOpenFull={() => openViewer(`${presentation.label} error`, message.error ?? "")} />
               )}
-              {message.output !== undefined && !image && !isTrivialFileEditOutput(message.output, Boolean(presentation.files?.length)) && (
+              {message.output !== undefined && hasOutput && !image && !isTrivialFileEditOutput(message.output, Boolean(presentation.files?.length)) && (
                 presentation.kind === "search"
                   ? <SearchResults text={message.output} onOpenFull={() => openViewer(`${presentation.label} results`, message.output ?? "")} />
                   : presentation.kind === "mcp"

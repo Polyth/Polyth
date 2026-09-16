@@ -22,12 +22,10 @@
 .mobile-navigator {
   --nav-gutter: var(--space-2);
   --nav-project-size: var(--subheader-font-size, 16px);
-  --nav-session-size: var(--font-session-title);
-  --nav-session-lh: var(--font-session-title-lh);
+  --nav-session-size: var(--font-activity-title);
+  --nav-session-lh: var(--font-activity-title-lh);
   --nav-meta-size: var(--font-meta);
-  /* Sessions sit just inside their project instead of under its icon column:
-     a phone title needs the width more than it needs a deep indent. */
-  --nav-session-indent: var(--space-3);
+  /* Sessions share the project wash and sit a short step in from the name. */
   /* Default keeps the phone tap floor. A denser list is the user's explicit
      Interface density choice, never a silently shrunk touch target. */
   --nav-row-session: var(--tap);
@@ -144,7 +142,6 @@
 .mobile-nav-filter,
 .mobile-nav-tool,
 .mobile-nav-project-action,
-.mobile-nav-disclosure,
 .mobile-nav-more,
 .mobile-nav-isolated-add {
   display: inline-grid;
@@ -191,7 +188,6 @@
 .mobile-nav-search-clear:active,
 .mobile-nav-project-action:active,
 .mobile-nav-more:active,
-.mobile-nav-disclosure:active,
 .mobile-nav-isolated-add:active {
   background: color-mix(in srgb, var(--text) 7%, transparent);
 }
@@ -233,15 +229,15 @@
 .mobile-nav-project {
   position: relative;
   margin: 0 0 var(--space-1);
-  border-radius: var(--radius-surface);
-  background: transparent;
+  padding: 1px var(--space-1) var(--space-1);
+  border-radius: var(--radius-card);
+  /* Luminance group, not a nested card: the wash starts on the name and
+     continues through that project's sessions while they are open. */
+  background: color-mix(in srgb, var(--text) 4.5%, transparent);
 }
 
-/* The current project is not a card. Only its header gets a barely perceptible
-   material lift; its sessions continue into the shared navigator surface. */
-.mobile-nav-project.is-current > .mobile-nav-project-head {
-  border-radius: var(--radius-surface);
-  background: color-mix(in srgb, var(--panel) 15%, transparent);
+.mobile-nav-project.is-current {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
 }
 
 .mobile-nav-project-head {
@@ -251,51 +247,38 @@
   padding: 0;
 }
 
-.mobile-nav-disclosure {
-  position: relative;
-  width: 30px;
-  height: var(--tap);
-  border-radius: var(--radius-control);
-  color: color-mix(in srgb, var(--muted) 80%, transparent);
-}
-
-.mobile-nav-disclosure svg {
-  width: var(--icon-sm);
-  height: var(--icon-sm);
-  stroke-width: 2;
+.mobile-nav-project.is-reorderable > .mobile-nav-project-head {
+  cursor: grab;
 }
 
 /* Project identity reuses the shared mark (custom icon, colour, emoji). A
    project that has not chosen a colour stays quiet instead of painting the
    whole list accent; an explicit project colour still wins (inline style). */
 .mobile-navigator .project-glyph {
-  margin-right: var(--space-1);
-  color: color-mix(in srgb, var(--muted) 90%, transparent);
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  margin: 0 var(--space-2) 0 0;
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  color: var(--text-dim);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 16%, transparent);
 }
 
-/* Transparent hit-area extension on coarse pointers (--hit-min is 0px on
-   fine): the chevron stays visually small without dropping below the tap
-   floor. It only overlaps the decorative project mark, never a control. */
-.mobile-nav-disclosure::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: max(100%, var(--hit-min));
-  height: max(100%, var(--hit-min));
-  transform: translate(-50%, -50%);
+.mobile-navigator .project-glyph svg {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
 }
 
-.mobile-nav-project-drag-handle {
-  cursor: grab;
+.mobile-navigator .project-glyph img,
+.mobile-navigator .project-glyph-mask {
+  width: var(--icon-xl);
+  height: var(--icon-xl);
+}
+
+.mobile-nav-project.is-dragging > .mobile-nav-project-head {
+  cursor: grabbing;
   touch-action: none;
   user-select: none;
-}
-
-.mobile-nav-project-drag-handle:active {
-  cursor: grabbing;
-  color: var(--accent);
-  background: var(--accent-wash);
 }
 
 .mobile-nav-project.is-dragging {
@@ -445,7 +428,7 @@
 }
 
 .mobile-nav-project-body {
-  padding: 0 0 0 var(--nav-session-indent);
+  padding: 0 0 2px var(--space-2);
 }
 
 /* ---- session rows ------------------------------------------------------- */
@@ -531,7 +514,7 @@
   flex: 1 1 auto;
   min-width: 0;
   min-height: var(--nav-row-session);
-  padding: var(--space-1) 0 var(--space-1) var(--space-2);
+  padding: 0 0 0 var(--space-1);
   color: inherit;
   text-align: left;
   background: transparent;
@@ -560,7 +543,7 @@
   overflow: hidden;
   color: color-mix(in srgb, var(--text) 92%, transparent);
   font-size: var(--nav-session-size);
-  font-weight: 450;
+  font-weight: 500;
   line-height: var(--nav-session-lh);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -603,8 +586,8 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: 24px;
-  padding: var(--space-2) var(--space-2) var(--space-1);
+  min-height: 18px;
+  padding: 2px var(--space-1) 0;
   color: color-mix(in srgb, var(--muted) 85%, transparent);
   font-size: var(--font-meta);
   font-weight: 600;
@@ -786,10 +769,7 @@
 
 /* Interface density: the same preference the desktop navigator honours. */
 :is(html, body)[data-density="balanced"] .mobile-navigator { --nav-row-session: 42px; }
-:is(html, body)[data-density="compact"] .mobile-navigator {
-  --nav-row-session: 40px;
-  --nav-session-indent: var(--space-2);
-}
+:is(html, body)[data-density="compact"] .mobile-navigator { --nav-row-session: 40px; }
 
 @media (prefers-reduced-motion: reduce) {
   .mobile-nav-running-ring,
@@ -798,8 +778,5 @@
 }
 
 @media (max-width: 380px) {
-  .mobile-navigator {
-    --nav-gutter: var(--space-1);
-    --nav-session-indent: var(--space-2);
-  }
+  .mobile-navigator { --nav-gutter: var(--space-1); }
 }

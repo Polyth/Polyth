@@ -40,6 +40,8 @@ export const pl: BrowserMessages = {
   "previewview.browserUnavailable": "Przeglądarka niedostępna",
   "previewview.browserVisibility": "Widoczność przeglądarki",
   "previewview.browserVisibilityDescription": "Wybierz, czy aktywność agenta w przeglądarce pozostaje w tle, czy przeglądarka otwiera się automatycznie.",
+  "browser.settings.agentAutoApprove": "Automatycznie zatwierdzaj narzędzie Browser",
+  "browser.settings.agentAutoApproveDescription": "Po włączeniu agenci mogą używać wbudowanego narzędzia Browser bez monitu o uprawnienia. Polityka pochodzenia i nawigacji nadal obowiązuje.",
   "previewview.background": "W tle",
   "previewview.autoShow": "Pokaż automatycznie",
   "previewview.browserIdle": "Bezczynna",

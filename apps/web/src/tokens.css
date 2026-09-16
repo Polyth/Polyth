@@ -108,7 +108,7 @@
   --agent-dock-height: calc(68px * var(--density-scale));
   --composer-height: calc(56px * var(--density-scale));
   --composer-action-size: calc(42px * var(--density-scale));
-  --composer-max-input-height: calc((var(--font-input) * 7.25) + var(--space-4));
+  --composer-max-input-height: calc((max(var(--font-input), var(--font-response)) * 7.25) + var(--space-4));
   /* Host-owned package-window seam. Packages consume these values and never
      redefine them; themes may provide a controlled system-wide override. */
   --package-window-header-h: 42px;

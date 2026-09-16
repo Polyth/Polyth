@@ -9,6 +9,7 @@ import type {
   RemoteAccessPolicy,
   RouteHandler,
   SessionEvent,
+  SpaceStorage,
 } from "@polyth/contracts";
 import { REMOTE_CAPABILITY } from "@polyth/contracts";
 import {
@@ -32,6 +33,7 @@ import {
   type ProfileRegistry,
 } from "./index.ts";
 import { createBrowserAgentTool } from "./agentTool.ts";
+import { readBrowserAgentAutoApprove, writeBrowserAgentAutoApprove } from "./agentToolSettings.ts";
 import { originOf } from "./policy.ts";
 import { isBrowserArtifactId } from "./artifacts.ts";
 
@@ -63,6 +65,7 @@ export function browserRoutes(deps: {
   append: (sessionId: string, type: string, data: JsonObject) => Promise<SessionEvent>;
   shotsDir: string;
   artifacts: BrowserArtifactStore;
+  storage?: SpaceStorage;
   canAccess?: (projectId: string, sessionId?: string) => Promise<boolean>;
 }): RouteHandler {
   const { browser, profiles, append, artifacts } = deps;
@@ -164,6 +167,28 @@ export function browserRoutes(deps: {
       }
       if (path === "/api/browser/capability" && method === "GET") {
         json(200, browser.capability());
+        return true;
+      }
+      if (path === "/api/browser/agent-auto-approve" && method === "GET") {
+        if (!deps.storage) {
+          json(503, { error: "unavailable" });
+          return true;
+        }
+        json(200, { enabled: await readBrowserAgentAutoApprove(deps.storage) });
+        return true;
+      }
+      if (path === "/api/browser/agent-auto-approve" && (method === "PATCH" || method === "POST")) {
+        if (!deps.storage) {
+          json(503, { error: "unavailable" });
+          return true;
+        }
+        const input = await body();
+        if (typeof input.enabled !== "boolean") {
+          json(400, { error: "invalid-input", message: "enabled boolean required" });
+          return true;
+        }
+        const saved = await writeBrowserAgentAutoApprove(deps.storage, input.enabled);
+        json(200, saved);
         return true;
       }
       if (path === "/api/browser/artifacts" && method === "GET") {
@@ -448,6 +473,8 @@ export const BROWSER_REMOTE_ACCESS: RemoteAccessPolicy = {
   routeScopes: ["browser"],
   http: [
     { methods: ["GET"], path: "/api/browser/capability", capability: REMOTE_CAPABILITY.browserUse, mutation: false },
+    { methods: ["GET"], path: "/api/browser/agent-auto-approve", capability: REMOTE_CAPABILITY.browserUse, mutation: false },
+    { methods: ["PATCH", "POST"], path: "/api/browser/agent-auto-approve", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
     { methods: ["GET"], path: "/api/browser/approvals", capability: REMOTE_CAPABILITY.browserUse, mutation: false },
     { methods: ["POST"], path: "/api/browser/approvals", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
     { methods: ["GET"], path: "/api/browser/sessions", capability: REMOTE_CAPABILITY.browserUse, mutation: false },
@@ -510,6 +537,7 @@ export default async function registerPackage(host: ServerPackageHost): Promise<
         const storage = host.spaceStorage(request.space);
         return browserRoutes({
           browser, profiles,
+          storage,
           canAccess: async (projectId, sessionId) => {
             try {
               if (!await scoped.projects.get(projectId)) return false;

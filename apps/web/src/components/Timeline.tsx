@@ -30,6 +30,7 @@ import {
   revertAvailability,
   rewindSeedKey,
   userArticleName,
+  type ActionAnnounceAnchor,
   type ActionAvailability,
   type MutationGuards,
 } from "../messageActions.ts";
@@ -92,8 +93,9 @@ const EMPTY_SESSION_EVENTS: SessionEvent[] = [];
 
 /** One announcement per copy/mutation outcome; text is the accessible record,
  *  checkmarks only supplement it. Screen readers ignore repeats, so identical
- *  text gets an invisible nudge (same trick as a11y/live.tsx). */
-type Announce = (text: string) => void;
+ *  text gets an invisible nudge (same trick as a11y/live.tsx). Optional anchor
+ *  keeps the visible chip beside the invoking action row. */
+type Announce = (text: string, anchor?: ActionAnnounceAnchor) => void;
 
 /** True when streamed text must not be smoothed: accessibility settings and
  *  the desktop low-resource mode both get the raw target directly. */
@@ -360,6 +362,7 @@ function VisuallyHiddenStatus({ status }: { status: "done" | "active" | "failed"
 function AssistantView({
   m,
   announce,
+  statusText,
   plan,
   regeneratePrompt,
   turn,
@@ -370,6 +373,7 @@ function AssistantView({
 }: {
   m: AssistantMsg;
   announce?: Announce;
+  statusText?: string;
   plan?: NonNullable<RenderModel["tasks"]>;
   regeneratePrompt?: string;
   turn?: RenderModel["turn"];
@@ -403,7 +407,14 @@ function AssistantView({
         </div>
       )}
       {m.finalized && hasAnswer && terminal && (
-        <ChatResponseFooter m={m} announce={announce} turn={turn} segmentStartedAt={segmentStartedAt} regeneratePrompt={regeneratePrompt} />
+        <ChatResponseFooter
+          m={m}
+          announce={announce}
+          statusText={statusText}
+          turn={turn}
+          segmentStartedAt={segmentStartedAt}
+          regeneratePrompt={regeneratePrompt}
+        />
       )}
       {m.finalized && m.text !== "" && announce && galleryAvailable && (
         <button className="assistant-gallery-shortcut" onClick={openGallery}><Icon.image /> {tr("timeline.openAnswerImages")}</button>
@@ -836,9 +847,10 @@ function PendingPrompt({ send }: { send: PendingSend }) {
   );
 }
 
-function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segmentStartedAt, live, entering, onRevert, onFork, revert, fork }: {
+function MessageView({ m, announce, statusText, plan, regeneratePrompt, turn, terminal, segmentStartedAt, live, entering, onRevert, onFork, revert, fork }: {
   m: RenderMessage;
   announce?: Announce;
+  statusText?: string;
   plan?: NonNullable<RenderModel["tasks"]>;
   regeneratePrompt?: string;
   turn?: RenderModel["turn"];
@@ -869,13 +881,34 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segm
           <AttachmentPills attachments={m.attachments} />
         )}
         {announce && (
-          <MessageQuickActions message={m} announce={announce} onRevert={onRevert} onFork={onFork} revert={revert} fork={fork} />
+          <MessageQuickActions
+            message={m}
+            announce={announce}
+            statusText={statusText}
+            onRevert={onRevert}
+            onFork={onFork}
+            revert={revert}
+            fork={fork}
+          />
         )}
       </div>
     );
   }
   if (m.kind === "assistant") {
-    return <AssistantView m={m} announce={announce} plan={plan} regeneratePrompt={regeneratePrompt} turn={turn} terminal={terminal} segmentStartedAt={segmentStartedAt} live={live} entering={entering} />;
+    return (
+      <AssistantView
+        m={m}
+        announce={announce}
+        statusText={statusText}
+        plan={plan}
+        regeneratePrompt={regeneratePrompt}
+        turn={turn}
+        terminal={terminal}
+        segmentStartedAt={segmentStartedAt}
+        live={live}
+        entering={entering}
+      />
+    );
   }
   if (m.kind === "github-conflict") return <GithubConflictCard message={m} entering={entering} />;
   if (m.kind === "notice") return <NoticeRow notice={m} entering={entering} />;
@@ -939,6 +972,7 @@ const MessageRow = memo(function MessageRow(props: Parameters<typeof MessageView
   && prev.entering === next.entering
   && prev.segmentStartedAt === next.segmentStartedAt
   && prev.regeneratePrompt === next.regeneratePrompt
+  && prev.statusText === next.statusText
   && prev.announce === next.announce
   && prev.onRevert === next.onRevert
   && prev.onFork === next.onFork
@@ -1756,18 +1790,26 @@ export default function Timeline({
 
   // One timeline live region: copy results and mutation outcomes are announced
   // as text (visual checkmarks only supplement). Identical repeats get an
-  // invisible nudge so assistive tech re-announces them.
+  // invisible nudge so assistive tech re-announces them. Anchored outcomes
+  // render beside the invoking action row; unanchored ones keep the legacy chip.
   const [liveText, setLiveText] = useState("");
+  const [liveAnchor, setLiveAnchor] = useState<ActionAnnounceAnchor | null>(null);
   const liveRef = useRef("");
   const liveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const announce = useCallback((text: string) => {
+  const announce = useCallback((text: string, anchor?: ActionAnnounceAnchor) => {
     liveRef.current = text === liveRef.current ? `${text}\u00a0` : text;
     setLiveText(liveRef.current);
+    setLiveAnchor(anchor ?? null);
     clearTimeout(liveTimer.current);
     // The visible chip fades after the announcement has been delivered; the
     // region itself stays mounted so the next announcement still fires.
-    liveTimer.current = setTimeout(() => setLiveText(""), 4000);
+    liveTimer.current = setTimeout(() => {
+      setLiveText("");
+      setLiveAnchor(null);
+    }, 4000);
   }, []);
+  const statusFor = useCallback((role: ActionAnnounceAnchor["role"], eventSeq: number) =>
+    liveAnchor?.role === role && liveAnchor.eventSeq === eventSeq ? liveText : "", [liveAnchor, liveText]);
   useEffect(() => () => clearTimeout(liveTimer.current), []);
 
   // Truthful eligibility (UX-MSG-ACTIONS): guards derive from the live render
@@ -2114,7 +2156,7 @@ export default function Timeline({
       requestComposerReplace(draft.text);
     }).catch((err) => {
       const text = mutationErrorMessage("revert", err);
-      announce(text);
+      announce(text, { role: "user", eventSeq: message.eventSeq });
       setUiError(text);
     }).finally(() => {
       if (revertPendingRef.current === sessionId) {
@@ -2129,7 +2171,7 @@ export default function Timeline({
     if (!sessionId) return;
     void forkSession(sessionId, message.eventSeq).catch((err) => {
       const text = mutationErrorMessage("fork", err);
-      announce(text);
+      announce(text, { role: "user", eventSeq: message.eventSeq });
       setUiError(text);
     });
   }, [sessionId, announce]);
@@ -2306,6 +2348,13 @@ export default function Timeline({
                 terminal={r.kind === "assistant" && !sessionActive && terminalAnswers.has(r.eventSeq)}
                 segmentStartedAt={r.kind === "assistant" ? terminalAnswers.get(r.eventSeq) : undefined}
                 announce={announce}
+                statusText={
+                  r.kind === "user"
+                    ? statusFor("user", r.eventSeq)
+                    : r.kind === "assistant"
+                      ? statusFor("assistant", r.eventSeq)
+                      : undefined
+                }
                 onRevert={revert}
                 onFork={fork}
                 revert={revertOk}
@@ -2359,7 +2408,21 @@ export default function Timeline({
               {undoneRows.map((row) => (
                 row.kind === "activity"
                   ? <ActivityRow key={row.id} rev={activityRev(row)} g={row} subagents={model.subagents} liveFlight={false} />
-                  : <MessageRow key={row.id} rev={row.rev ?? 0} m={row} announce={announce} />
+                  : (
+                    <MessageRow
+                      key={row.id}
+                      rev={row.rev ?? 0}
+                      m={row}
+                      announce={announce}
+                      statusText={
+                        row.kind === "user"
+                          ? statusFor("user", row.eventSeq)
+                          : row.kind === "assistant"
+                            ? statusFor("assistant", row.eventSeq)
+                            : undefined
+                      }
+                    />
+                  )
               ))}
             </div>
           </details>
@@ -2367,7 +2430,7 @@ export default function Timeline({
         {turnBroken && turn.status === "failed" && turn.limit && sessionId && (
           <RateLimitNotice sessionId={sessionId} limit={turn.limit} />
         )}
-        <div className="msg-live" role="status" aria-live="polite">{liveText}</div>
+        <div className="msg-live" role="status" aria-live="polite">{liveAnchor ? "" : liveText}</div>
         <SlotHost slot="session.timeline.after" context={slotSummary} customizable />
       </div>
       <div className="activity-live-layer" />

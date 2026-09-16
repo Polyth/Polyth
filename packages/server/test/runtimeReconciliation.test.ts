@@ -696,10 +696,8 @@ test("idle snapshot without a comparable watermark remains unknown and blocks ad
 
   assert.equal((await store.projection("session-unversioned-idle"))?.status, "unknown");
   assert.equal((await store.reconciliation("session-unversioned-idle"))?.state, "unknown");
-  await assert.rejects(
-    () => sessions.send("session-unversioned-idle", { text: "must not run" }),
-    (error: Error & { code?: string }) => error.code === "conflict",
-  );
+  // Admission stays closed, but the message is preserved instead of rejected.
+  assert.equal((await sessions.send("session-unversioned-idle", { text: "must not run" })).queued, true);
   assert.equal(submissions, 0);
   await store.close();
 });
@@ -741,6 +739,45 @@ test("a blocked reconciliation queues a new message instead of rejecting it", as
   assert.equal(result.queued, true);
   assert.equal(submissions, 0);
   assert.deepEqual((await store.queueList(sessionId)).map((item) => item.text), ["do not lose this"]);
+  await store.close();
+});
+
+test("an in-flight reconciliation queues a new message instead of rejecting it", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-queue-active-"));
+  const endpoint = endpointFor(dir);
+  let submissions = 0;
+  const runtime = runtimeWithSnapshot(endpoint, (binding) => ({
+    authorityId: binding.authorityId,
+    generation: binding.generation,
+    location: binding.location,
+    backendSessionId: binding.backendSessionId!,
+    reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+    state: { value: "idle", watermark: "1", comparison: { domain: "test", order: 1 } },
+    completeness: { events: "partial", permissions: "partial", questions: "partial" },
+    permissions: [],
+    questions: [],
+    events: [],
+  }));
+  runtime.startTurn = async () => { submissions += 1; };
+  const { sessions, store, project } = makeHarness(runtime, dir);
+  const sessionId = "session-queue-active";
+  await store.upsertProjection({
+    id: sessionId,
+    projectId: project.id,
+    backendSessionId: "backend-queue-active",
+    runtimeBinding: persistedBindingFor(endpoint, "backend-queue-active"),
+    title: "Active reconciliation",
+    status: "reconciling",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+  await store.startReconciliation(sessionId);
+
+  const result = await sessions.send(sessionId, { text: "nudge while reconciling" });
+
+  assert.equal(result.queued, true);
+  assert.equal(submissions, 0);
+  assert.deepEqual((await store.queueList(sessionId)).map((item) => item.text), ["nudge while reconciling"]);
   await store.close();
 });
 
@@ -883,7 +920,7 @@ test("a stopped turn can send again when reconciliation status is unknown", asyn
   await store.close();
 });
 
-test("send leaves an unknown turn untouched when replacement is unavailable", async () => {
+test("send queues behind an unknown turn when replacement is unavailable", async () => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-orphaned-turn-"));
   const endpoint = endpointFor(dir);
   let submissions = 0;
@@ -914,10 +951,11 @@ test("send leaves an unknown turn untouched when replacement is unavailable", as
   });
   await store.append(sessionId, "turn/started", { turnId: "orphaned-1" });
 
-  await assert.rejects(
-    sessions.send(sessionId, { text: "continue after restart" }),
-    { code: "conflict", message: "cannot send while the session is unknown" },
-  );
+  // The orphaned turn must not be resent, but the new message must survive:
+  // it waits in the durable queue until the session is admissible again.
+  const result = await sessions.send(sessionId, { text: "continue after restart" });
+  assert.equal(result.queued, true);
+  assert.equal((await sessions.queueList(sessionId))[0]?.text, "continue after restart");
 
   assert.deepEqual(
     (await store.events(sessionId)).filter((event) => event.type.startsWith("turn/")).map((event) => event.type),
@@ -1185,10 +1223,8 @@ test("equal status evidence is idempotent but a stale terminal revision cannot r
     },
     "rejected stale evidence must not erase the newer checkpoint",
   );
-  await assert.rejects(
-    () => sessions.send(sessionId, { text: "must stay blocked" }),
-    (error: Error & { code?: string }) => error.code === "conflict",
-  );
+  // Blocked admission queues the message; it must not reach the runtime.
+  assert.equal((await sessions.send(sessionId, { text: "must stay blocked" })).queued, true);
   assert.equal(submissions, 0);
   await store.close();
 });

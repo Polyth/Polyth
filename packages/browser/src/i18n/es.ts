@@ -40,6 +40,8 @@ export const es: BrowserMessages = {
   "previewview.browserUnavailable": "Navegador no disponible",
   "previewview.browserVisibility": "Visibilidad del navegador",
   "previewview.browserVisibilityDescription": "Elige si la actividad del navegador del agente queda en segundo plano o abre el navegador automáticamente.",
+  "browser.settings.agentAutoApprove": "Aprobar automáticamente la herramienta Browser",
+  "browser.settings.agentAutoApproveDescription": "Cuando está activado, los agentes pueden usar la herramienta Browser integrada sin un aviso de permiso. La política de origen y navegación sigue aplicándose.",
   "previewview.background": "En segundo plano",
   "previewview.autoShow": "Mostrar automáticamente",
   "previewview.browserIdle": "Inactivo",

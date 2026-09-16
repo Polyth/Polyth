@@ -193,7 +193,7 @@ dedicated semantic roles. Every scalable radius follows the user multiplier.
 | `--font-label` | Control and emphasized label role. |
 | `--font-meta` | Readable metadata role. |
 | `--font-meta-lh` | Metadata line height. |
-| `--font-response` | Final assistant response body role. |
+| `--font-response` | Conversation body role for chat prompts and assistant answers. |
 | `--font-response-lh` | Final assistant response line height. |
 | `--font-response-heading` | Mobile conversation heading role. |
 | `--font-response-heading-lh` | Mobile conversation heading line height. |
@@ -209,7 +209,7 @@ dedicated semantic roles. Every scalable radius follows the user multiplier.
 | `--font-response-meta-lh` | Response metadata line height. |
 | `--font-code` | Inline code / code-surface role (follows the editor size and pairs with `--mono`). |
 | `--terminal-font-size` | User-selected terminal input/output size. |
-| `--editor-font-size` | User-selected editor/composer/code-surface size. |
+| `--editor-font-size` | User-selected editor and code-surface size. |
 | `--mono` | Monospace stack. |
 | `--ui-font-family` | Active application font stack. |
 

@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { writeFile, rm } from "node:fs/promises";
 import type { RuntimeEvent } from "@polyth/contracts";
 import { createAcpRuntime } from "../src/index.ts";
+import { configureAcpClientRequestHandling } from "../src/profile.ts";
 import { fakeRpc } from "../../harness-runtime/test/rpcPeer.ts";
 import { setCapabilityLaunchSink, setCapabilityReceiptSink } from "@polyth/harness-runtime";
 const context = { spaceId: "s", projectId: "p", cwd: "/tmp", sessionId: "canonical" };
@@ -534,6 +535,266 @@ test("ACP session/load still used for loadSession without resume and forwards ov
         env: [],
     }]);
     assert.equal(acpOverlays.peek(context, "acp"), undefined);
+    await rt.dispose();
+});
+
+test("ACP client translator turns handled extension notifications into RuntimeEvents", async () => {
+    const f = fakeRpc();
+    f.handle(async (method) => method === "session/new" ? { sessionId: "native" } : {});
+    const rt = createAcpRuntime(context, f.rpc, "acp", undefined, "Test Agent", {
+        clientTranslator: {
+            translateClientMethod(method, params) {
+                if (method !== "vendor/extension/update") return { handled: false };
+                const row = params && typeof params === "object" ? params as Record<string, unknown> : {};
+                const label = typeof row.label === "string" ? row.label : "";
+                if (!label) return { handled: true, events: [] };
+                return {
+                    handled: true,
+                    events: [{
+                        type: "task/snapshot",
+                        listId: "todo",
+                        revision: 1,
+                        items: [{ id: "ext", text: label, status: "pending" }],
+                    }],
+                };
+            },
+        },
+    });
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    f.emit("vendor/extension/update", { label: "Checklist item" });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(events.filter((event) => event.type === "task/snapshot"), [{
+        type: "task/snapshot",
+        listId: "todo",
+        revision: 1,
+        items: [{ id: "ext", text: "Checklist item", status: "pending" }],
+    }]);
+    await rt.dispose();
+});
+
+test("ACP runtime client handling wins before profile clientRequest fallback", async () => {
+    const f = fakeRpc();
+    configureAcpClientRequestHandling(f.rpc, (method) => method === "vendor/extension/request"
+        ? { handled: true, result: { outcome: { outcome: "cancelled" } } }
+        : { handled: false });
+    f.handle(async (method) => method === "session/new" ? { sessionId: "native" } : {});
+    const rt = createAcpRuntime(context, f.rpc, "acp", undefined, "Test Agent", {
+        clientTranslator: {
+            translateClientMethod(method, params) {
+                if (method !== "vendor/extension/request") return { handled: false };
+                const row = params && typeof params === "object" ? params as Record<string, unknown> : {};
+                const label = typeof row.label === "string" ? row.label : "";
+                return {
+                    handled: true,
+                    events: label ? [{
+                        type: "task/snapshot",
+                        listId: "todo",
+                        revision: 1,
+                        items: [{ id: "ext", text: label, status: "pending" }],
+                    }] : [],
+                    requestResult: { outcome: { outcome: "accepted" } },
+                };
+            },
+        },
+    });
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    assert.deepEqual(await f.request("vendor/extension/request", { label: "Handled by runtime" }), {
+        outcome: { outcome: "accepted" },
+    });
+    assert.deepEqual(events.filter((event) => event.type === "task/snapshot"), [{
+        type: "task/snapshot",
+        listId: "todo",
+        revision: 1,
+        items: [{ id: "ext", text: "Handled by runtime", status: "pending" }],
+    }]);
+    await rt.dispose();
+});
+
+test("ACP profile clientRequest answers when runtime rejects unsupported requests", async () => {
+    const f = fakeRpc();
+    configureAcpClientRequestHandling(f.rpc, (method) => method === "vendor/extension/request"
+        ? { handled: true, result: { outcome: { outcome: "cancelled" } } }
+        : { handled: false });
+    f.handle(async (method) => method === "session/new" ? { sessionId: "native" } : {});
+    const rt = createAcpRuntime(context, f.rpc);
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    assert.deepEqual(await f.request("vendor/extension/request", { toolCallId: "x" }), {
+        outcome: { outcome: "cancelled" },
+    });
+    await rt.dispose();
+});
+
+test("ACP ignores unknown client notifications when no translator handles them", async () => {
+    const f = fakeRpc();
+    f.handle(async (method) => method === "session/new" ? { sessionId: "native" } : {});
+    const rt = createAcpRuntime(context, f.rpc);
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    f.emit("vendor/unknown/notification", { value: 1 });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(events.length, 0);
+    await rt.dispose();
+});
+
+test("ACP cursor-like search tool calls emit readable input and path:line results", async () => {
+    const f = fakeRpc();
+    let finish!: (value: unknown) => void;
+    f.handle(async (method) => {
+        if (method === "session/new") return { sessionId: "native" };
+        if (method === "session/prompt") return new Promise((resolve) => { finish = resolve; });
+        return {};
+    });
+    const rt = createAcpRuntime(context, f.rpc, "cursor");
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    const admission = rt.startTurnOperation!({ sessionId: "canonical", text: "find it" }, "search-turn");
+    f.emit("session/update", {
+        sessionId: "native",
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Searching." } },
+    });
+    assert.equal((await admission).kind, "confirmed");
+    f.emit("session/update", {
+        sessionId: "native",
+        update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "grep-1",
+            kind: "search",
+            title: "grep",
+        },
+    });
+    f.emit("session/update", {
+        sessionId: "native",
+        update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "grep-1",
+            kind: "search",
+            rawInput: { pattern: "ExecutionRow", path: "apps/web/src" },
+            status: "completed",
+            rawOutput: {
+                matches: [{ path: "apps/web/src/components/ExecutionRow.tsx", line: 42, context: "export default ExecutionRow;" }],
+            },
+        },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(events.filter((event) => event.type === "tool/started"), [
+        { type: "tool/started", callId: "grep-1", tool: "search", input: {} },
+        {
+            type: "tool/started",
+            callId: "grep-1",
+            tool: "search",
+            input: { pattern: "ExecutionRow", path: "apps/web/src" },
+        },
+    ]);
+    assert.deepEqual(events.filter((event) => event.type === "tool/result"), [{
+        type: "tool/result",
+        callId: "grep-1",
+        tool: "search",
+        output: "apps/web/src/components/ExecutionRow.tsx:42:export default ExecutionRow;",
+        input: { pattern: "ExecutionRow", path: "apps/web/src" },
+    }]);
+    finish({ stopReason: "end_turn" });
+    await rt.dispose();
+});
+
+test("ACP cursor-like read tool calls preserve file text and path", async () => {
+    const f = fakeRpc();
+    let finish!: (value: unknown) => void;
+    f.handle(async (method) => {
+        if (method === "session/new") return { sessionId: "native" };
+        if (method === "session/prompt") return new Promise((resolve) => { finish = resolve; });
+        return {};
+    });
+    const rt = createAcpRuntime(context, f.rpc, "cursor");
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    const admission = rt.startTurnOperation!({ sessionId: "canonical", text: "read it" }, "read-turn");
+    f.emit("session/update", {
+        sessionId: "native",
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Reading." } },
+    });
+    assert.equal((await admission).kind, "confirmed");
+    f.emit("session/update", {
+        sessionId: "native",
+        update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "read-1",
+            kind: "read",
+            title: "Read File",
+            locations: [{ path: "apps/web/src/execution.ts" }],
+            status: "completed",
+            content: [{ type: "content", content: { type: "text", text: "export function executionPresentation() {}" } }],
+        },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(events.filter((event) => event.type === "tool/started"), [{
+        type: "tool/started",
+        callId: "read-1",
+        tool: "read",
+        input: { path: "apps/web/src/execution.ts" },
+    }]);
+    assert.deepEqual(events.filter((event) => event.type === "tool/result"), [{
+        type: "tool/result",
+        callId: "read-1",
+        tool: "read",
+        output: "export function executionPresentation() {}",
+        input: { path: "apps/web/src/execution.ts" },
+    }]);
+    finish({ stopReason: "end_turn" });
+    await rt.dispose();
+});
+
+test("ACP edit diff content becomes file-change input on result", async () => {
+    const f = fakeRpc();
+    let finish!: (value: unknown) => void;
+    f.handle(async (method) => {
+        if (method === "session/new") return { sessionId: "native" };
+        if (method === "session/prompt") return new Promise((resolve) => { finish = resolve; });
+        return {};
+    });
+    const rt = createAcpRuntime(context, f.rpc, "cursor");
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    const admission = rt.startTurnOperation!({ sessionId: "canonical", text: "edit it" }, "edit-turn");
+    f.emit("session/update", {
+        sessionId: "native",
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Editing." } },
+    });
+    assert.equal((await admission).kind, "confirmed");
+    f.emit("session/update", {
+        sessionId: "native",
+        update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "edit-1",
+            kind: "edit",
+            title: "Edit",
+            status: "completed",
+            content: [{
+                type: "content",
+                content: { type: "diff", path: "src/a.ts", oldText: "const a = 1;", newText: "const a = 2;" },
+            }],
+        },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(events.filter((event) => event.type === "tool/result"), [{
+        type: "tool/result",
+        callId: "edit-1",
+        tool: "edit",
+        output: "",
+        input: {
+            filePath: "src/a.ts",
+            oldString: "const a = 1;",
+            newString: "const a = 2;",
+        },
+    }]);
+    finish({ stopReason: "end_turn" });
     await rt.dispose();
 });
 

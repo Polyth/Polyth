@@ -15,7 +15,8 @@ import {
     unsupportedAttachmentMessage,
     type RpcPeer,
 } from "@polyth/harness-runtime";
-import { codexOverlays, type CodexNativeMcp, type CodexNativeSkill } from "./provisioner.ts";
+import { listCodexMcpStatusRows, waitForCodexNativeMcp } from "./mcpReadiness.ts";
+import { codexOverlays, type CodexLaunchOverlay, type CodexNativeMcp, type CodexNativeSkill } from "./provisioner.ts";
 // These are the small provider-local fields used from App Server v2. The
 // installed CLI can generate its full schema; it is not a core Polyth contract.
 type Item = {
@@ -31,6 +32,16 @@ type Item = {
     aggregatedOutput?: string;
     status?: string;
     changes?: unknown[];
+    server?: string;
+    tool?: string;
+    arguments?: unknown;
+    result?: {
+        content?: unknown[];
+        structuredContent?: unknown;
+    };
+    error?: {
+        message?: string;
+    };
 };
 type Turn = {
     id: string;
@@ -143,35 +154,38 @@ const verifyNativeSkills = async (
     }
 };
 
+const buildThreadConfig = (overlay: CodexLaunchOverlay | undefined): JsonObject | undefined => {
+    if (!overlay?.mcpServers) return undefined;
+    return {
+        mcp_servers: overlay.mcpServers,
+        // Optional MCP omitted from the first model tool catalog after 1s by default;
+        // wait the full startup_timeout_sec instead so package tools are present.
+        mcp_optional_startup_grace_ms: 0,
+    };
+};
+
+const formatMcpToolOutput = (result: Item["result"]): string => {
+    if (!result) return "";
+    if (Array.isArray(result.content)) {
+        return result.content.flatMap((entry) => {
+            if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+                const row = entry as { type?: string; text?: string };
+                if (row.type === "text" && typeof row.text === "string") return [row.text];
+            }
+            return [JSON.stringify(entry)];
+        }).join("\n");
+    }
+    if (result.structuredContent !== undefined) return JSON.stringify(result.structuredContent);
+    return "";
+};
+
 const verifyNativeMcp = async (
     rpc: RpcPeer,
     threadId: string,
     expected: readonly CodexNativeMcp[],
 ): Promise<CapabilityVerification[]> => {
-    type NativeMcpStatus = {
-        name?: string;
-        runtimeStatus?: "notStarted" | "starting" | "connected" | "authenticationRequired" | "failed" | "cancelled" | "disabled" | null;
-        tools?: Record<string, { name?: string }>;
-    };
     try {
-        const rows: NativeMcpStatus[] = [];
-        const cursors = new Set<string>();
-        let cursor: string | undefined;
-        for (let page = 0; page < 100; page++) {
-            const response = await rpc.request<{ data?: NativeMcpStatus[]; nextCursor?: string | null }>(
-                "mcpServerStatus/list",
-                { threadId, detail: "toolsAndAuthOnly", ...(cursor ? { cursor } : {}) },
-            );
-            if (!Array.isArray(response.data)) throw new Error("Malformed MCP status response");
-            rows.push(...response.data);
-            const next = typeof response.nextCursor === "string" && response.nextCursor
-                ? response.nextCursor
-                : undefined;
-            if (!next) break;
-            if (cursors.has(next) || page === 99) throw new Error("Invalid MCP status pagination");
-            cursors.add(next);
-            cursor = next;
-        }
+        const rows = await listCodexMcpStatusRows(rpc, threadId);
         return expected.map((server) => {
             const found = rows.find((row) => row.name === server.name);
             if (!found) {
@@ -233,6 +247,34 @@ const verifyNativeMcp = async (
 };
 const eventFor = (item: Item): RuntimeEvent | undefined => {
     if (item.type === "agentMessage" && typeof item.text === "string") return { type: "assistant/message", partId: item.id, text: item.text };
+    if (item.type === "mcpToolCall" && typeof item.tool === "string") {
+        const input = {
+            ...(item.arguments && typeof item.arguments === "object" && !Array.isArray(item.arguments)
+                ? item.arguments as JsonObject
+                : {}),
+            ...(item.server ? { server: item.server } : {}),
+        };
+        if (item.status === "inProgress") return { type: "tool/started", callId: item.id, tool: item.tool, input };
+        if (item.status === "failed") {
+            return {
+                type: "tool/error",
+                callId: item.id,
+                tool: item.tool,
+                error: item.error?.message?.trim() || "MCP tool call failed",
+                input,
+            };
+        }
+        if (item.status === "completed") {
+            return {
+                type: "tool/result",
+                callId: item.id,
+                tool: item.tool,
+                output: formatMcpToolOutput(item.result),
+                input,
+            };
+        }
+        return undefined;
+    }
     if (item.type === "commandExecution") {
         const input = { command: item.command ?? "" };
         if (item.status === "inProgress") return { type: "tool/started", callId: item.id, tool: "shell", input };
@@ -365,6 +407,8 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
     let lastUsageDigest = "";
     let lastUsageTurnId = "";
     let sessionTitle = "Codex session";
+    let nativeMcpReady = false;
+    let requiredNativeMcp: readonly CodexNativeMcp[] = [];
     const listeners = new Set<(id: string, event: RuntimeEvent) => void>();
     const observations = new Set<(id: string, event: RuntimeObservation) => void>();
     const lifecycle = new Set<Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0]>();
@@ -491,14 +535,25 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
             return { kind: "confirmed", value: await action() };
         }
         catch (error) {
-            return (error as {
-                code?: string;
-            }).code === "runtime-rejected" ? { kind: "rejected", code: "runtime-rejected", message: "Codex rejected the request" } : { kind: "unknown", operationId, message: "Codex did not confirm the request" };
+            const code = (error as { code?: string }).code;
+            if (code === "runtime-rejected") {
+                return { kind: "rejected", code: "runtime-rejected", message: "Codex rejected the request" };
+            }
+            if (code === "native-failure") {
+                return {
+                    kind: "rejected",
+                    code: "native-failure",
+                    message: error instanceof Error ? error.message : "Codex native bridge failed",
+                };
+            }
+            return { kind: "unknown", operationId, message: "Codex did not confirm the request" };
         }
     };
     const create: NonNullable<AgentRuntime["createSessionOperation"]> = async (input, operationId) => {
         if (rpc.receipts[operationId]) {
             nativeId = rpc.receipts[operationId]!;
+            nativeMcpReady = true;
+            requiredNativeMcp = [];
             return {
                 kind: "confirmed",
                 value: { backendSessionId: nativeId },
@@ -524,7 +579,9 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
         const outcome = await mutate(operationId, async () => {
             const staged = codexOverlays.peek(context, "codex");
             const overlay = staged?.value;
-            const config = overlay?.mcpServers ? { mcp_servers: overlay.mcpServers } : undefined;
+            const config = buildThreadConfig(overlay);
+            requiredNativeMcp = overlay?.nativeMcp ?? [];
+            nativeMcpReady = requiredNativeMcp.length === 0;
             const launchTarget = provisioningTarget(context, "codex");
             if (staged) {
                 captureCapabilityLaunch({
@@ -566,6 +623,20 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
             if (result.model && result.modelProvider) nativeModel = { modelID: result.model, providerID: result.modelProvider };
             else if (input.model) nativeModel = input.model;
             nativeId = thread.id;
+            try {
+                if (requiredNativeMcp.length) {
+                    await waitForCodexNativeMcp(rpc, nativeId, requiredNativeMcp);
+                    nativeMcpReady = true;
+                }
+            } catch (error) {
+                if (staged) {
+                    releaseCapabilityLaunch({
+                        target: launchTarget,
+                        desiredRevision: staged.desiredRevision,
+                    });
+                }
+                throw error;
+            }
             await rpc.receipt(operationId, nativeId);
             if (staged) {
                 codexOverlays.consumeIfRevision(context, "codex", staged.desiredRevision);
@@ -726,6 +797,13 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
                 kind: "rejected",
                 code: "unsupported",
                 message: unsupportedAttachmentMessage(attachmentModality(ref), "Codex"),
+            };
+        }
+        if (requiredNativeMcp.length && !nativeMcpReady) {
+            return {
+                kind: "rejected",
+                code: "native-failure",
+                message: "Codex cannot admit a turn before the Polyth agent-tools bridge is ready.",
             };
         }
         return mutate(operationId, async () => {

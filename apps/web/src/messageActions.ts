@@ -96,6 +96,9 @@ export function actionsMenuName(m: UserMsg | AssistantMsg, locale?: string): str
     : tr("messageActions.actionsForAssistantAt", { date: timeFull(assistantTime(m), locale) });
 }
 
+/** Anchor a timeline action status chip to the row that invoked it. */
+export type ActionAnnounceAnchor = { role: "user" | "assistant"; eventSeq: number };
+
 /** The single live-region announcement after a copy attempt. */
 export function copyAnnouncement(kind: "markdown" | "json" | "reasoning" | "failed"): string {
   if (kind === "failed") return tr("messageActions.copyFailed");

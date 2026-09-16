@@ -1601,8 +1601,8 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   border-radius: var(--radius-card);
   background: var(--bubble-user-bg);
   color: var(--text);
-  font-size: var(--font-body);
-  line-height: 1.5;
+  font-size: var(--font-response);
+  line-height: var(--font-response-lh);
   box-shadow: var(--material-glass-highlight), var(--shadow-sm);
 }
 /* A prompt still crossing the wire. It must share the canonical row's exact
@@ -1988,7 +1988,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .composer-card textarea {
   display: block; width: 100%; min-height: 86px; max-height: 40vh; resize: none;
   background: none; border: 0; outline: none; padding: 15px 17px 6px;
-  font-size: var(--font-body); line-height: 1.6; letter-spacing: -0.005em; color: var(--text);
+  font-size: var(--font-response); line-height: var(--font-response-lh); letter-spacing: -0.005em; color: var(--text);
 }
 .composer-card textarea::placeholder { color: var(--faint); }
 .composer-card textarea:focus-visible { outline: none; box-shadow: none; }
@@ -3359,11 +3359,12 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 /* Clone keeps the shared browser as its destination — trim it so the revealed
    fields stay in view without the dialog outgrowing the viewport. */
 .folder-dialog-body[data-source-armed="git-clone-project"] .folder-list { height: min(28vh, 200px); }
-.composer-editor { font-size: var(--editor-font-size, 14px); }
+.composer-editor { font-size: var(--font-response); line-height: var(--font-response-lh); }
 .composer-editor.is-composing { /* test/debug hook only — must not animate */ }
 .composer-focus-editor {
   width: 100%; min-height: 40vh; resize: vertical;
-  font-size: var(--editor-font-size, 14px);
+  font-size: var(--font-response);
+  line-height: var(--font-response-lh);
   background: var(--sunken); color: inherit;
   border: 1px solid var(--control-border); border-radius: var(--radius-control); padding: var(--space-3); margin: 0;
 }
@@ -6766,7 +6767,6 @@ min-height: var(--tap);
 .composer-simple .composer-card textarea {
   min-height: 74px;
   padding: 16px 16px 6px;
-  font-size: 14px;
 }
 .composer-simple .composer-primary { margin-left: 2px; }
 .composer-simple .composer-actions { gap: var(--space-3); }
@@ -8180,12 +8180,14 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   .composer-mobile.composer-collapsed .composer-leading-zone { display: contents; }
   .composer-mobile.composer-collapsed .composer-config { display: none; }
   .composer-mobile.composer-collapsed .composer-actions { display: contents; }
-  .composer-mobile.composer-collapsed .composer-actions > :is(.composer-extensions, .composer-next-action) { display: none; }
   .composer-mobile.composer-collapsed .composer-add { order: 1; }
   .composer-mobile.composer-collapsed .composer-input { order: 2; flex: 1 1 auto; min-width: 0; }
   .composer-mobile.composer-collapsed .composer-execution { order: 3; flex: 0 1 40vw; max-width: 40vw; }
-  .composer-mobile.composer-collapsed .composer-mobile-extensions { order: 4; }
-  .composer-mobile.composer-collapsed .composer-primary { order: 5; }
+  /* The prompt-improve control rides beside the model chip even at rest — it
+     is the one trailing action worth a tap without opening the full rail. */
+  .composer-mobile.composer-collapsed .composer-actions > .composer-extensions { order: 4; flex: none; }
+  .composer-mobile.composer-collapsed .composer-mobile-extensions { order: 5; }
+  .composer-mobile.composer-collapsed .composer-primary { order: 6; }
   .composer-mobile.composer-collapsed .composer-card textarea {
     min-height: 44px;
     max-height: 44px;
@@ -8247,8 +8249,8 @@ display: none;
        keyboard-squeezed band from handing the input the whole screen. */
     max-height: min(var(--composer-max-input-height), 18dvh);
     padding: var(--space-2) var(--space-3) 0;
-    font-size: var(--font-input);
-    line-height: 1.45;
+    font-size: max(var(--font-input), var(--font-response));
+    line-height: var(--font-response-lh);
   }
   /* Actions live inside the rail now; the rail owns row padding. */
   .composer-mobile .composer-actions {
@@ -9048,7 +9050,9 @@ grid-template-columns: 1fr;
 
 @media (max-width: 480px), (pointer: coarse) {
 .composer-card textarea,
-.composer-simple .composer-card textarea,
+.composer-simple .composer-card textarea {
+font-size: max(16px, var(--font-response));
+}
 .sidebar-search input,
 .lock-input {
 font-size: 16px;
@@ -12434,7 +12438,8 @@ html[data-font] body :is(
   }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .app > .header, .sidebar, .sidebar-project-rail, .railbar) { background: var(--material-glass); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.dialog-panel, .sheet, .composer-card, .response-footer-metadata-grid, .workspace-customize-panel, .error-banner) { background: var(--material-glass-strong); }
-  :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.activity-group, .activity-group::before, .task-list) { background: var(--surface-activity); }
+  :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.activity-group, .activity-group.open > .ui-run-summary, .task-list),
+  :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) .activity-group::before { background: var(--surface-activity); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.ui-glass-island, .ui-glass-dock) { background: var(--material-glass); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) .msg.user .bubble { background: var(--bubble-user-bg); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) .mobile-island-sheet.sheet { background: var(--panel); }
@@ -12451,7 +12456,8 @@ html[data-font] body :is(
   :is(.app > .header, .sidebar, .sidebar-project-rail, .railbar) { background: var(--material-glass); }
   .composer-card,
   .composer-mobile .composer-card { background: var(--material-glass-strong); }
-  :is(.activity-group, .activity-group::before, .task-list) { background: var(--surface-activity); }
+  :is(.activity-group, .activity-group.open > .ui-run-summary, .task-list),
+  .activity-group::before { background: var(--surface-activity); }
   :is(.ui-glass-island, .ui-glass-dock) { background: var(--material-glass); }
   .msg.user .bubble { background: var(--bubble-user-bg); }
   .mobile-island-sheet.sheet { background: var(--panel); }
@@ -12735,18 +12741,28 @@ html[data-font] body :is(
   position: relative;
   overflow: visible;
   isolation: isolate;
-  /* The plate below owns the fill so overflow:visible can keep sticky while
-     backdrop-filter still has a bounded, rounded box. */
+  /* The plate owns the fill so overflow:visible can keep sticky while
+     backdrop-filter still has a bounded, rounded box. z-index:0 (not -1)
+     keeps the filter sampling the canvas, so --material-glass-fill still
+     shows through. */
   background: transparent;
 }
 .activity-group::before {
   content: "";
   position: absolute;
   inset: 0;
+  z-index: 0;
   overflow: hidden;
   border-radius: inherit;
   background: var(--surface-activity);
   pointer-events: none;
+}
+/* Positioned ::before paints over in-flow copy unless children stack above
+   it. Keep this at 1; the sticky header raises further so item rows cannot
+   slide over it. */
+.activity-group > * {
+  position: relative;
+  z-index: 1;
 }
 .activity-group.current { border-color: color-mix(in srgb, var(--accent-line) 58%, var(--border-soft)); }
 /* Nested summaries inherit the container's chrome. The surface is handed over
@@ -12769,14 +12785,19 @@ html[data-font] body :is(
 .activity-group.open > .ui-run-summary {
   position: sticky;
   inset-block-start: 0;
-  z-index: 1;
-  /* The group owns the material. Keeping this transparent prevents the sticky
-     header from becoming an opaque rectangle over the rounded glass surface. */
-  background: transparent;
+  inset-inline: 0;
+  z-index: 2;
+  width: 100%;
+  overflow: hidden;
+  /* The plate does not travel with sticky. This row carries the same fill so
+     pinned chrome stays readable over the scrolling items. */
+  background: var(--surface-activity);
   border-radius: var(--radius-activity) var(--radius-activity) 0 0;
   box-shadow: 0 1px 0 var(--border-soft);
 }
-.activity-group.open > .ui-run-summary:hover { background: var(--surface-overlay-hover); }
+.activity-group.open > .ui-run-summary:hover {
+  box-shadow: 0 1px 0 var(--border-soft), inset 0 0 0 999px var(--surface-overlay-hover);
+}
 .activity-group-expand-shell,
 .task-list-expand-shell {
   width: 100%;
@@ -13379,7 +13400,8 @@ body:not([data-glass="off"]) .header-profile { border: 0; background: transparen
       border-color: var(--material-glass-border);
       box-shadow: var(--material-glass-highlight), var(--shadow-sm);
     }
-    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) :is(.activity-group::before, .task-list) {
+    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .activity-group::before,
+    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .task-list {
       background: radial-gradient(140% 140% at 50% 50%,
         color-mix(in srgb, var(--surface-activity) var(--material-glass-fill), transparent) 0%,
         color-mix(in srgb, var(--surface-activity) var(--material-glass-edge), transparent) 100%);
@@ -13392,7 +13414,8 @@ body:not([data-glass="off"]) .header-profile { border: 0; background: transparen
     body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .activity-group.open {
       box-shadow: var(--material-glass-highlight), var(--material-glass-shadow);
     }
-    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .activity-group.open::before {
+    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .activity-group.open::before,
+    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .activity-group.open > .ui-run-summary {
       background: radial-gradient(140% 140% at 50% 50%,
         color-mix(in srgb, var(--material-glass) var(--material-glass-fill), transparent) 0%,
         color-mix(in srgb, var(--material-glass) var(--material-glass-edge), transparent) 100%);
@@ -13450,7 +13473,8 @@ body[data-glass="off"] :is(
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
-body[data-glass="off"] :is(.activity-group, .activity-group::before, .task-list) {
+body[data-glass="off"] :is(.activity-group, .activity-group.open > .ui-run-summary, .task-list),
+body[data-glass="off"] .activity-group::before {
   background: var(--surface-activity);
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;

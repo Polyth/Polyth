@@ -112,6 +112,24 @@ test("shell-backed repository inspection is presented by semantic action", () =>
   assert.equal(inventory.label, "Search");
   assert.equal(inventory.preview, "Workspace items · ../polyth");
   assert.equal(executionPresentation(tool({ input: { command: "find . -exec rm {} \\;" } })).kind, "shell");
+
+  const acpSearch = executionPresentation(tool({
+    tool: "search",
+    input: { pattern: "ExecutionRow", path: "apps/web/src" },
+    output: "apps/web/src/components/ExecutionRow.tsx:42:export default ExecutionRow;",
+  }));
+  assert.equal(acpSearch.kind, "search");
+  assert.match(acpSearch.preview, /ExecutionRow/);
+  assert.match(acpSearch.preview, /1 match/);
+
+  const acpRead = executionPresentation(tool({
+    tool: "read",
+    input: { path: "apps/web/src/execution.ts", offset: 12 },
+    output: "export function executionPresentation() {}",
+  }));
+  assert.equal(acpRead.kind, "read");
+  assert.equal(acpRead.path, "apps/web/src/execution.ts");
+  assert.match(acpRead.preview, /execution\.ts/);
 });
 
 test("shell-backed tests use human summaries across harness command shapes", () => {
@@ -752,19 +770,21 @@ test("expanded activity keeps its collapse control visible while scrolling", asy
   const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(css, /\.activity-group\s*\{[\s\S]*?overflow:\s*visible;/,
     "the activity container must not trap its sticky header");
-  assert.match(css, /\.activity-group::before\s*\{[\s\S]*?overflow:\s*hidden;[\s\S]*?background:\s*var\(--surface-activity\);/,
-    "glass paints on a bounded plate so overflow:visible still allows sticky");
+  assert.match(css, /\.activity-group::before\s*\{[\s\S]*?z-index:\s*0;[\s\S]*?overflow:\s*hidden;[\s\S]*?background:\s*var\(--surface-activity\);/,
+    "the plate stays behind summary copy without a negative z-index that kills backdrop-filter");
+  assert.match(css, /\.activity-group\s*>\s*\*\s*\{[\s\S]*?position:\s*relative;[\s\S]*?z-index:\s*1;/,
+    "summary and item rows stack above the glass plate");
   assert.match(css, /\.activity-group\.open\s*\{[\s\S]*?z-index:\s*calc\(var\(--z-shell\) \+ 1\);/,
     "expanded activity sits above conversation chrome rather than under the composer");
-  assert.match(css, /\.activity-group\.open\s*>\s*\.ui-run-summary\s*\{[\s\S]*?position:\s*sticky;[\s\S]*?inset-block-start:\s*0;[\s\S]*?background:\s*transparent;[\s\S]*?border-radius:\s*var\(--radius-activity\)\s+var\(--radius-activity\)\s+0\s+0;/,
-    "the expanded activity header stays sticky, transparent, and rounded at the outer corners");
+  assert.match(css, /\.activity-group\.open\s*>\s*\.ui-run-summary\s*\{[\s\S]*?position:\s*sticky;[\s\S]*?inset-block-start:\s*0;[\s\S]*?z-index:\s*2;[\s\S]*?background:\s*var\(--surface-activity\);[\s\S]*?border-radius:\s*var\(--radius-activity\)\s+var\(--radius-activity\)\s+0\s+0;/,
+    "the pinned header keeps a fill and stacks above scrolling activity items");
   assert.match(css, /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\)\s+:is\(\.activity-group,\s*\.task-list\)/,
     "activity keeps the shared translucent glass treatment when enabled");
-  assert.match(css, /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\)\s+:is\(\.activity-group::before,\s*\.task-list\)[\s\S]*?var\(--material-glass-fill\)/,
+  assert.match(css, /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\)\s+\.activity-group::before,[\s\S]*?\.task-list[\s\S]*?var\(--material-glass-fill\)/,
     "activity translucency follows the user's glass fill token");
-  assert.match(css, /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\)\s+\.activity-group\.open::before[\s\S]*?var\(--material-glass\) var\(--material-glass-fill\)[\s\S]*?blur\(var\(--material-glass-blur\)\) saturate\(var\(--material-glass-saturation\)\)/,
-    "expanded activity uses the same glass material as other floating chrome");
-  assert.match(css, /body\[data-glass="off"\]\s+:is\(\.activity-group,\s*\.activity-group::before,\s*\.task-list\)[\s\S]*?backdrop-filter:\s*none !important/,
+  assert.match(css, /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\)\s+\.activity-group\.open::before,[\s\S]*?\.activity-group\.open\s*>\s*\.ui-run-summary[\s\S]*?var\(--material-glass\) var\(--material-glass-fill\)[\s\S]*?blur\(var\(--material-glass-blur\)\) saturate\(var\(--material-glass-saturation\)\)/,
+    "expanded activity and its pinned header use the same glass material as other floating chrome");
+  assert.match(css, /body\[data-glass="off"\]\s+\.activity-group::before[\s\S]*?backdrop-filter:\s*none !important/,
     "activity keeps an opaque fallback when transparency is disabled");
   assert.match(css, /\.activity-live-layer \{[^}]*z-index:\s*calc\(var\(--z-shell\) \+ 2\)/s,
     "live flight stays above the raised expanded activity card");
