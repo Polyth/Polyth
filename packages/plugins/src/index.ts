@@ -9,10 +9,10 @@ export {
   type ServerPluginFactory,
   type TrustedServerPluginHost,
 } from "./trustedServerEntry.ts";
+export { discoverServerPackages } from "./projectCompositionDiscovery.ts";
 export {
   createServerServiceRegistry,
   bindPackageServices,
-  discoverServerPackages,
   INFRASTRUCTURE_PACKAGE_DIRS,
   loadServerPackage,
   localOnlyRemoteAccess,
