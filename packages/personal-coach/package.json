@@ -7,7 +7,7 @@
   },
   "polyth": {
     "serverEntry": "./src/serverEntry.ts",
-    "webEntry": "./widgets/entry.ts",
+    "webEntry": "./widgets/index.tsx",
     "descriptor": {
       "name": "Personal Coach",
       "description": "Durable goals, commitments, routines, and lightweight coaching state.",

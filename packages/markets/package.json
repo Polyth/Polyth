@@ -8,7 +8,7 @@
   },
   "polyth": {
     "serverEntry": "./src/serverEntry.ts",
-    "webEntry": "./widgets/entry.ts",
+    "webEntry": "./widgets/index.tsx",
     "descriptor": {
       "name": "Markets",
       "description": "Fast market research, watchlists, and agent-ready financial context.",
