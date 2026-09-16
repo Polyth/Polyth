@@ -9,7 +9,14 @@ const rememberCsrf = (value: unknown): void => {
 export async function fetchAuthStatus(): Promise<BrowserAuthStatus> {
   const response = await fetch("/api/auth/status", { cache: "no-store" });
   if (!response.ok) throw Object.assign(new Error(`auth status: HTTP ${response.status}`), { status: response.status });
-  const status = validateAuthStatus(await response.json());
+  const raw = await response.json() as unknown;
+  const marked = raw && typeof raw === "object" && !Array.isArray(raw)
+    ? {
+        ...(raw as Record<string, unknown>),
+        ...(response.headers.get("x-polyth-bootstrap") === "setup" ? { bootstrapMode: "setup" } : {}),
+      }
+    : raw;
+  const status = validateAuthStatus(marked);
   rememberCsrf(status.csrfToken);
   return status;
 }
