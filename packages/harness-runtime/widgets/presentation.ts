@@ -99,7 +99,7 @@ export function summaryFacts(row: HarnessSnapshot): CapabilityFact[] {
 }
 
 export function configurationSections(items: Array<{ id: string; order: number; meta?: Readonly<Record<string, unknown>> }>, harnessId: string) {
-  return items.filter((item) => item.meta?.harnessId === harnessId)
+  return items.filter((item) => item.meta?.harnessId === harnessId || item.meta?.harnessId === "*")
     .map((item) => ({ id: String(item.meta?.sectionId ?? item.id), label: String(item.meta?.label ?? item.id), order: item.order, ...(item.meta?.handlesPendingChanges === true ? { handlesPendingChanges: true } : {}) }))
     .toSorted((a, b) => a.order - b.order || a.id.localeCompare(b.id));
 }
