@@ -1,11 +1,11 @@
 // Cold-boot waterfall fix: auth status and locale loading start in parallel,
 // while the authenticated account namespace is restored before the app graph
 // evaluates account-scoped browser preferences.
-import type { AuthStatusDto } from "@polyth/session/web-api";
-import { validateAuthStatus } from "./authBootstrap.ts";
+import type { BrowserAuthStatus } from "./authBootstrap.ts";
+import { fetchAuthStatus } from "./authClient.ts";
 import { setActiveBrowserAccount } from "./accountStorage.ts";
 
-let inflight: Promise<AuthStatusDto> | null = null;
+let inflight: Promise<BrowserAuthStatus> | null = null;
 let accountScopeResolved = false;
 
 export function isBrowserAccountScopeResolved(): boolean {
@@ -19,11 +19,9 @@ export function acceptAuthenticatedBrowserAccount(accountId: string): void {
   accountScopeResolved = true;
 }
 
-export function prefetchAuthStatus(): Promise<AuthStatusDto> {
+export function prefetchAuthStatus(): Promise<BrowserAuthStatus> {
   if (inflight) return inflight;
-  inflight = fetch("/api/auth/status").then(async (res) => {
-    if (!res.ok) throw new Error(`auth status: HTTP ${res.status}`);
-    const status = validateAuthStatus(await res.json());
+  inflight = fetchAuthStatus().then(async (status) => {
     if (status.authorized) {
       // Account listing is protected; anonymous auth status never reveals
       // which users exist on the server. A remembered cookie can safely use
@@ -44,8 +42,8 @@ export function prefetchAuthStatus(): Promise<AuthStatusDto> {
   return inflight;
 }
 
-/** One-shot: mid-session re-checks go through api.authStatus() as before. */
-export function consumeAuthPrefetch(): Promise<AuthStatusDto> | null {
+/** One-shot: mid-session re-checks go through the shared client. */
+export function consumeAuthPrefetch(): Promise<BrowserAuthStatus> | null {
   const p = inflight;
   inflight = null;
   return p;
