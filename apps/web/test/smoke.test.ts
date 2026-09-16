@@ -1108,8 +1108,23 @@ test("groupActivity keeps technical work together and the terminal answer separa
   assert.equal(grouped[1], answer);
 
   const stillWorking = groupActivity([{ ...answer, id: "progress", text: "Checking" }, tool]);
-  assert.equal(stillWorking.length, 1);
-  assert.equal(stillWorking[0]?.kind, "activity", "assistant prose before a trailing tool is activity, not a final answer");
+  assert.equal(stillWorking.length, 2);
+  assert.equal(stillWorking[0]?.kind, "assistant", "visible assistant prose stays in timeline order before later activity");
+  assert.equal(stillWorking[1]?.kind, "activity");
+
+  const streamingAnswer = {
+    ...answer,
+    id: "streaming-answer",
+    partId: "streaming-answer",
+    eventSeq: 4,
+    text: "Still working",
+    finalized: false,
+    completedAt: undefined,
+  };
+  const streamingGrouped = groupActivity([streamingAnswer, tool]);
+  assert.equal(streamingGrouped.length, 2, "a visible streaming answer also anchors following actions");
+  assert.equal(streamingGrouped[0]?.kind, "assistant");
+  assert.equal(streamingGrouped[1]?.kind, "activity");
 
   const legacyAcpAnswer = {
     ...answer,
