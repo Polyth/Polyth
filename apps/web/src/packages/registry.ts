@@ -13,8 +13,10 @@ import {
 import { createPackageActivation } from "./activation.ts";
 import { webPackageHost } from "./webHost.ts";
 import { replaceProjectPackageCatalog, setProjectCompositionContext } from "./projectRelevance.ts";
+import { installProjectWidgetReconciler } from "./projectWidgetReconcile.ts";
 
 registerBuiltinPackageTours();
+installProjectWidgetReconciler();
 
 type PackageInstaller = () => () => void;
 
