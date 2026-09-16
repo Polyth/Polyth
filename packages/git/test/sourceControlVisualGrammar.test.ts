@@ -35,3 +35,10 @@ test("Source Control polish stays package-owned", () => {
   assert.match(packageEntry, /import "\.\/source-control-polish\.css";/);
   assert.match(polish, /^\/\* Source control interaction grammar\./);
 });
+
+test("Source Control refreshes on project change, not on every store notification", () => {
+  assert.match(packageEntry, /projectId === scope && !force/);
+  assert.match(packageEntry, /host\.store\.subscribe\(\(\) => refreshActive\(\)\)/);
+  assert.match(packageEntry, /subscribeSourceControlProfiles\(\(\) => refreshActive\(true\)\)/);
+  assert.doesNotMatch(packageEntry, /host\.store\.subscribe\(refreshActive\)/);
+});

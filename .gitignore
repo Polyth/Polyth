@@ -27,6 +27,7 @@ logs/
 _inbox/
 /.polyth/screenshots/
 *.polyth-tmp.*
+/scripts/backup.sh
 # Data-dir runtime state that has historically been written at the repo root
 # when POLYTH_DATA_DIR was unset or pointed at cwd. Canonical location is ./data.
 /mcp.json

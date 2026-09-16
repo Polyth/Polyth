@@ -60,6 +60,7 @@ export default function BrowserSettingsPage({ host }: { host: WebPackageHost }) 
           <p>{translate("previewview.browserVisibilityDescription")}</p>
         </div>
         <Select
+          label={translate("previewview.browserVisibility")}
           ariaLabel={translate("previewview.browserVisibility")}
           value={mode}
           options={[

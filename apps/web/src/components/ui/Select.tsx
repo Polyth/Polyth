@@ -1,5 +1,5 @@
 // Simple single-value select on top of the canonical searchable Picker
-// (desktop popover, phone bottom sheet). Use Picker directly for
+// (compact anchored popover on every form factor). Use Picker directly for
 // multi-select, trailing actions, or footer actions.
 import Picker from "../Picker.tsx";
 import type { PickerItem } from "../../picker.ts";
@@ -21,7 +21,7 @@ export interface SelectProps {
   disabled?: boolean;
   className?: string;
   ariaLabel?: string;
-  /** Bottom sheet on phones (default true — the touch-first behavior). */
+  /** Rare opt-in: bottom sheet on phones instead of the default compact popover. */
   mobileSheet?: boolean;
 }
 
@@ -34,7 +34,7 @@ export default function Select({
   disabled,
   className,
   ariaLabel,
-  mobileSheet = true,
+  mobileSheet,
 }: SelectProps) {
   const items: PickerItem[] = options.map((option) => ({
     id: option.value,
@@ -49,7 +49,7 @@ export default function Select({
       items={items}
       onPick={onChange}
       disabled={disabled}
-      mobileSheet={mobileSheet}
+      {...(mobileSheet !== undefined ? { mobileSheet } : {})}
       {...(value !== undefined ? { value } : {})}
       {...(placeholder !== undefined ? { placeholder } : {})}
       {...(ariaLabel !== undefined ? { ariaLabel } : {})}

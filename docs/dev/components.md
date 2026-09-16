@@ -122,6 +122,13 @@ viewport**:
   interactive box, never fake it with tiny glyphs), long labels (wrap, ellipsis
   where truncation is intended), and overflow (scroll containers inside
   bounded panes, never page growth).
+- Phone **pickers** (Select, Picker, Menu pick lists, model/mode pickers,
+  composer Add menu, and other anchored choosers) use a **compact Quiet Glass
+  popover** adjacent to the trigger in the finger zone via
+  `ResponsiveOverlay` / `Popover`. Do not default pickers to bottom sheets.
+  Pass `phone="sheet"` or `mobileSheet` only for destination-like surfaces.
+  Do **not** autofocus filter/search inputs when opening a phone picker (avoid
+  summoning the keyboard on open).
 - Inputs keep the 16px font floor (`--font-input`) to prevent mobile zoom.
 
 ## 6. Accessibility basics

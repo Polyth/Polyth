@@ -443,7 +443,7 @@ test("Menu controlled open: external state opens it and focus returns to returnF
   } finally { await view.unmount(); }
 });
 
-test("ResponsiveOverlay: desktop dialog vs anchored popover vs phone sheet", async () => {
+test("ResponsiveOverlay: desktop dialog vs anchored popover vs phone sheet and compact popover", async () => {
   media.compact = false;
   media.phone = false;
 
@@ -479,7 +479,7 @@ test("ResponsiveOverlay: desktop dialog vs anchored popover vs phone sheet", asy
     await anchorHost.unmount();
   }
 
-  // Phone → the canonical bottom sheet.
+  // Phone without an anchor → the canonical bottom sheet.
   media.phone = true;
   const sheet = await mount(createElement(ui.ResponsiveOverlay, {
     open: true,
@@ -489,10 +489,29 @@ test("ResponsiveOverlay: desktop dialog vs anchored popover vs phone sheet", asy
   }));
   try {
     const backdrop = document.body.querySelector(".sheet-backdrop");
-    assert.ok(backdrop, "phone mode renders the shared Sheet");
+    assert.ok(backdrop, "phone mode without an anchor renders the shared Sheet");
     assert.equal(backdrop!.querySelector(".sheet-title")?.textContent, "Filter");
   } finally {
     await sheet.unmount();
+  }
+
+  // Phone with an anchor → compact popover beside the trigger.
+  const phoneAnchorRef = createRef<HTMLElement>();
+  const phoneAnchorHost = await mount(createElement("button", { ref: phoneAnchorRef }, "anchor"));
+  const phonePopover = await mount(createElement(ui.ResponsiveOverlay, {
+    open: true,
+    onClose: () => {},
+    title: "Filter",
+    anchorRef: phoneAnchorRef,
+    children: createElement("p", null, "phone popover content"),
+  }));
+  try {
+    const surface = document.body.querySelector<HTMLElement>(".ui-popover")!;
+    assert.equal(surface.getAttribute("aria-label"), "Filter");
+    assert.equal(document.body.querySelector(".sheet-backdrop"), null, "anchored phone pickers skip the sheet");
+  } finally {
+    await phonePopover.unmount();
+    await phoneAnchorHost.unmount();
     media.phone = false;
   }
 });

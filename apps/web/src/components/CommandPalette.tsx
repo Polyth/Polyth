@@ -285,6 +285,7 @@ export default function CommandPalette() {
       onClose={() => setOverlay(null)}
       title={tr("commandpalette.searchWorkspace")}
       desktop="dialog"
+      phone="sheet"
       dialogSize="md"
       className="palette"
       initialFocus=".palette-input"

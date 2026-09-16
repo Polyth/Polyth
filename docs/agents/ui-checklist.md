@@ -12,6 +12,8 @@ Check empty/loading/ready/error/disabled, pending/cancelled/completed actions, l
 
 For inputs/composer: focus, selection, paste, file picker, Enter versus multiline behavior, keyboard open/close, queued-message affordances and send/stop transitions. Input methods must not accidentally submit while composing text. For menus/sheets: keyboard traversal, escape/back, focus return, pointer dismissal and nested overlay behavior. A tooltip is not the only accessible label.
 
+For phone pickers: confirm the surface opens as a compact anchored Quiet Glass popover beside the trigger (finger-travel zone), not a full-bleed bottom sheet; verify safe-area/visual-viewport placement, transparency/low-resource opaque fallback, and that search/filter inputs do not autofocus on open. Destination browse surfaces (CommandPalette, SessionSearch, StarterPicker, tall forms) should still use sheets.
+
 For widgets/package windows: small container, resizes, two instances, pinned/dynamic/fullscreen state as supported by current host, package disable/re-enable and persisted layout. Features must not own duplicate global window shells. For long timelines: scrolling, selection/copy and asynchronous streaming without forced jumps.
 
 ## Visual and preference states

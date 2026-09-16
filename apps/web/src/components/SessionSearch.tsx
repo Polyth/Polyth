@@ -102,6 +102,7 @@ export default function SessionSearch() {
       title={tr("sessionsearch.searchSessions")}
       onClose={() => setOverlay(null)}
       desktop="dialog"
+      phone="sheet"
       dialogSize="md"
       className="palette"
       initialFocus=".palette-input"

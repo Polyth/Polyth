@@ -338,6 +338,15 @@ opaque material for reduced motion or
 `body[data-desktop-low-resource="true"]`; packages must not apply blur or
 recreate this fallback locally.
 
+On phones, selection pickers (Picker, Select, Menu pick lists, model/agent/mode
+pickers, composer Add menu, and other anchored choosers) open as a **compact
+anchored popover** beside the trigger in the finger-travel zone — not a
+full-bleed bottom sheet. Bottom sheets remain for **destinations** only
+(CommandPalette, SessionSearch, StarterPicker browse/create, settings/nav
+sheets, tall contribution forms, SendSheet, and other modal browse surfaces
+without a nearby trigger). Compact popovers honor safe areas, the visual
+viewport, and `--screen-gutter`; they do not stretch full viewport width.
+
 ## Shared empty states
 
 Core exposes one primitive with three size variants:

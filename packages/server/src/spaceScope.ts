@@ -52,6 +52,50 @@ export function createSpaceGuard(source: SpaceOwnershipSource): SpaceGuard {
 }
 
 /**
+ * Return one session subtree in deepest-first lifecycle order.
+ *
+ * The input intentionally includes archived projections. A delegated child can
+ * itself be archived while still owning live descendants, so pruning archived
+ * intermediates would strand grandchildren during parent archive/delete.
+ * `visited` also makes corrupted/cyclic ancestry fail closed instead of looping.
+ */
+export function sessionTreePostOrder(
+  rootId: string,
+  projections: readonly SessionProjection[],
+): string[] {
+  const children = new Map<string, string[]>();
+  for (const projection of projections) {
+    if (!projection.parentId) continue;
+    const siblings = children.get(projection.parentId);
+    if (siblings) siblings.push(projection.id);
+    else children.set(projection.parentId, [projection.id]);
+  }
+
+  const order: string[] = [];
+  const visited = new Set<string>();
+  const stack: Array<{ id: string; expanded: boolean }> = [
+    { id: rootId, expanded: false },
+  ];
+
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (current.expanded) {
+      order.push(current.id);
+      continue;
+    }
+    if (visited.has(current.id)) continue;
+    visited.add(current.id);
+    stack.push({ id: current.id, expanded: true });
+    const descendants = children.get(current.id) ?? [];
+    for (let index = descendants.length - 1; index >= 0; index -= 1) {
+      stack.push({ id: descendants[index]!, expanded: false });
+    }
+  }
+
+  return order;
+}
+
+/**
  * A SessionService that can only see one Space.
  *
  * Every method that names a session asserts ownership before delegating, and
@@ -110,6 +154,15 @@ function scopeSessions(
     }) as R,
   );
 
+  const lifecycleOrder = async (sessionId: string): Promise<string[]> => {
+    const root = await base.snapshot(g(sessionId));
+    const rows = await base.list(root.projectId);
+    return sessionTreePostOrder(
+      sessionId,
+      rows.filter((projection) => guard.owns(ctx, projection)),
+    );
+  };
+
   const scoped: SessionService = {
     async create(input) {
       // Creating in another Space's project is refused before the session
@@ -123,7 +176,9 @@ function scopeSessions(
     send: (sessionId, input) => guarded(() => base.send(g(sessionId), withoutPrivatePreset(input))),
     abort: (sessionId) => guarded(() => base.abort(g(sessionId))),
     fork: (sessionId, atSeq) => guarded(() => base.fork(g(sessionId), atSeq)),
-    archive: (sessionId) => guarded(() => base.archive(g(sessionId))),
+    archive: (sessionId) => guarded(async () => {
+      for (const id of await lifecycleOrder(sessionId)) await base.archive(id);
+    }),
     restore: (sessionId) => guarded(() => base.restore(g(sessionId))),
     async list(projectId) {
       if (projectId !== undefined) guard.assertProject(ctx, projectId);
@@ -152,7 +207,12 @@ function scopeSessions(
   assign("rewind", bySession(base.rewind));
   assign("clearRewind", bySession(base.clearRewind));
   assign("runShell", bySession(base.runShell));
-  assign("delete", bySession(base.delete));
+  if (base.delete) {
+    const remove = base.delete.bind(base);
+    assign("delete", (sessionId) => guarded(async () => {
+      for (const id of await lifecycleOrder(sessionId)) await remove(id);
+    }));
+  }
   assign("debug", bySession(base.debug));
   assign("runtimeFeatures", bySession(base.runtimeFeatures));
   assign("compact", bySession(base.compact));

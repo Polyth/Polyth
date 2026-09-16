@@ -72,14 +72,13 @@ export interface PickerProps {
     label: string;
     run: () => void;
   };
-  /** UX-MOBILE-01 §46: open as the shared bottom sheet on phones instead of a
-   *  desktop popover. Opt-in, so only the surfaces redesigned for touch (the
-   *  composer's mode selector) change behavior. */
+  /** Rare opt-in: open as a bottom sheet on phones instead of the default
+   *  compact anchored popover near the trigger. */
   mobileSheet?: boolean;
 }
 
 export default function Picker({
-  label,
+  label = "",
   items,
   value,
   values,
@@ -101,7 +100,8 @@ export default function Picker({
   emptyAction,
 }: PickerProps) {
   const multi = values !== undefined;
-  const asSheet = useShellMode() === "phone" && mobileSheet === true;
+  const phone = useShellMode() === "phone";
+  const asSheet = phone && mobileSheet === true;
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
@@ -122,13 +122,8 @@ export default function Picker({
     }
     setQ("");
     onOpen?.();
-    if (asSheet) {
-      // Open first, dismiss the keyboard after: see sheetTrigger.ts.
-      setOpen(true);
-      void dismissKeyboard();
-    } else {
-      setOpen(true);
-    }
+    setOpen(true);
+    if (phone) void dismissKeyboard();
   };
   const triggerHandlers = useSheetTrigger(asSheet, toggleOpen);
 
@@ -261,10 +256,11 @@ export default function Picker({
           open
           onClose={close}
           anchorRef={triggerRef}
-          side={_direction}
+          side={_direction === "up" ? "up" : "down"}
+          compact={phone}
           ariaLabel={label}
           className="picker-pop"
-          {...(!searchable ? { initialFocus: ".picker-list" } : {})}
+          {...(!searchable && !phone ? { initialFocus: ".picker-list" } : {})}
         >
             {popoverToggle && (
               <Checkbox
@@ -277,7 +273,7 @@ export default function Picker({
             )}
             {searchable && (
             <input
-              autoFocus
+              autoFocus={!phone}
               value={q}
               placeholder={searchPlaceholder ?? tr("picker.filterValue", { value: label.toLowerCase() })}
               onChange={(e) => setQ(e.target.value)}

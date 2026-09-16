@@ -528,7 +528,11 @@ export default function ChatWorkspaceRuntimeShell(props: {
             ) : null}
           </div>
           {runtime?.selection.waitingForDevice ? (
-            <span className="chat-workspace-runtime-status">Open or connect the selected Desktop to continue</span>
+            <span className="chat-workspace-runtime-status">
+              {remoteCandidate?.available
+                ? "Open or connect the selected Desktop — or pick Remote server here to stream it"
+                : "Open or connect the selected Desktop to continue"}
+            </span>
           ) : null}
         </div>
       ) : null}

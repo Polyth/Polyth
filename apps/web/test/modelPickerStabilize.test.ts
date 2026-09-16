@@ -389,11 +389,11 @@ test("phone model rows place thinking effort in the former info slot", async () 
       { harnessId: "codex", providerID: "openai", modelID: "gpt-test", name: "GPT Test", variants: ["high"] },
     ], "codex");
     await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
-    const sheet = document.body.querySelector<HTMLElement>(".model-sheet");
-    assert.ok(sheet, "phone picker uses the shared modal sheet");
-    assert.ok(sheet!.classList.contains("sheet-tall"), "small harness catalogs use the stable tall sheet");
-    assert.equal(sheet!.querySelector(".sheet-row-info"), null, "the sheet row does not expose an info control");
-    assert.ok(sheet!.querySelector(".model-thinking-trigger"), "the sheet row exposes thinking effort in the former info slot");
+    const pop = document.body.querySelector<HTMLElement>(".model-pop");
+    assert.ok(pop, "phone picker uses the compact anchored popover");
+    assert.equal(document.body.querySelector(".model-sheet"), null, "phone picker does not open a bottom sheet");
+    assert.equal(pop!.querySelector(".model-picker-row .model-row-info"), null, "rows do not expose an info control");
+    assert.ok(pop!.querySelector(".model-thinking-trigger"), "rows expose thinking effort in the former info slot");
 
     await render(Array.from({ length: 10 }, (_, index) => ({
       harnessId: "claude",
@@ -401,13 +401,11 @@ test("phone model rows place thinking effort in the former info slot", async () 
       modelID: `claude-${index}`,
       name: `Claude ${index}`,
     })), "claude");
-    assert.equal(document.body.querySelector(".model-sheet"), sheet, "switching harnesses keeps the same open phone surface");
-    assert.ok(sheet!.classList.contains("sheet-tall"), "large harness catalogs keep the same tall sheet mode");
+    assert.equal(document.body.querySelector(".model-pop"), pop, "switching harnesses keeps the same open phone surface");
 
     await render([], "claude", true);
-    assert.equal(document.body.querySelector(".model-sheet"), sheet, "loading updates reuse the open phone surface");
-    assert.ok(sheet!.classList.contains("sheet-tall"), "loading and empty states keep the same tall sheet mode");
-    assert.match(sheet!.textContent ?? "", /loading/i);
+    assert.equal(document.body.querySelector(".model-pop"), pop, "loading updates reuse the open phone surface");
+    assert.match(pop!.textContent ?? "", /loading/i);
   } finally {
     phoneMode = false;
     await act(async () => { root.unmount(); });
@@ -544,12 +542,12 @@ test("explicit Auto affects only the selected row and omitted thinking preserves
   }
 });
 
-test("every harness catalog uses the same desktop and phone picker height modes", async () => {
+test("every harness catalog uses the same compact popover surface on desktop and phone", async () => {
   const source = await read("../../../packages/models/widgets/ModelPicker.tsx");
   const styles = await read("../../../packages/models/widgets/styles.css");
   assert.doesNotMatch(source, /compactCatalog|--model-pop-rows|model-pop--compact/);
-  assert.match(source, /className=\{phone \? "model-sheet" : "model-pop"\}/);
-  assert.match(source, /sheetSize="tall"/);
+  assert.match(source, /className="model-pop"/);
+  assert.doesNotMatch(source, /sheetSize="tall"/);
   assert.doesNotMatch(styles, /\.model-pop--compact/);
   assert.match(styles, /\.model-pop\s*\{[^}]*height:\s*min\(560px,\s*72vh\)/s);
 });

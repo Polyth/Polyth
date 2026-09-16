@@ -99,6 +99,13 @@ export function createChatWorkspaceLocalRuntimeRouter(deps: {
       return deviceId;
     }
     if (state.selection.selected?.kind === "server-remote") return null;
+    if (state.binding.preference.allowRemoteFallback || state.binding.preference.mode === "remote") {
+      const remote = state.candidates.find((candidate) => candidate.kind === "server-remote");
+      throw err(
+        "desktop-runtime-unavailable",
+        `No browser runtime is available: no Desktop runtime is connected and the remote browser is unavailable${remote?.reason ? ` (${remote.reason})` : ""}.`,
+      );
+    }
     throw err("desktop-runtime-unavailable", "Chat Workspace is waiting for the selected Desktop browser runtime. Remote fallback is disabled.");
   };
 
