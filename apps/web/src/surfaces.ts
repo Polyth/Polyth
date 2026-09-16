@@ -6,7 +6,7 @@
 // content-driven visibility are pure and tested.
 import { useSyncExternalStore } from "react";
 import type { JSX, ReactNode } from "react";
-import { listSlots } from "./slots.ts";
+import { hasSlotRegistration, listSlots } from "./slots.ts";
 import { assertOwnerCanReplace } from "./packages/ownership.ts";
 import type { ProjectAffinity } from "@polyth/contracts/project-composition";
 import { isProjectContributionRelevant, subscribeProjectRelevance } from "./packages/projectRelevance.ts";
@@ -142,6 +142,23 @@ export function registerSurface(surface: RailSurface): () => void {
       bump();
     }
   };
+}
+
+/** Raw registration probe used only by lifecycle cleanup. A project-irrelevant
+ * contribution is still registered; an unknown id may simply belong to a web
+ * package that has not loaded yet and must remain restorable. */
+export function hasSurfaceRegistration(id: string): boolean {
+  if (registry.has(id)) return true;
+  return id.startsWith("slot:") && hasSlotRegistration("workspace.right.tabs", id.slice("slot:".length));
+}
+
+/** Project relevance probe without content-driven visibility. */
+export function isSurfaceProjectRelevant(id: string): boolean {
+  const direct = registry.get(id);
+  if (direct) return isProjectContributionRelevant(direct.ownerPackageId, direct.projectAffinity);
+  if (!id.startsWith("slot:")) return false;
+  const slotId = id.slice("slot:".length);
+  return listSlots("workspace.right.tabs").some((item) => item.id === slotId);
 }
 
 export function listSurfaces(): RailSurface[] {
