@@ -1,8 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { composerLayoutState } from "../src/composerLayout.ts";
 
 const read = (rel: string) => readFile(new URL(rel, import.meta.url), "utf8");
+
+test("send glyph inherits the contrasting theme ink instead of forcing white", async () => {
+  const css = await read("../src/styles.css");
+  const plane = css.match(/\.send-plane\s*\{([^}]*)\}/)?.[1];
+  assert.ok(plane, "the send glyph wrapper is styled");
+  assert.doesNotMatch(plane, /(?:^|;)\s*color\s*:/,
+    "the glyph inherits the button ink in both dark and light themes");
+  assert.match(css, /\.composer-simple \.composer-rail \.send\s*\{[^}]*color:\s*var\(--accent-ink\);/s);
+});
 
 test("phone composer keeps one text origin and one semantic control order", async () => {
   const css = await read("../src/composerAdaptive.css");
@@ -46,8 +56,21 @@ test("the primary action is terminal and draft engagement survives blur", async 
   const menu = composer.indexOf('className="composer-send-options"');
   assert.ok(queue > menu, "the queue/send action follows active-run alternatives");
   assert.match(composer.slice(primary), /className="send"/, "idle compositions retain Send");
-  assert.match(composer, /const expanded = !phoneLayout \|\| inputFocused \|\| shellMode \|\| hasDraft;/,
-    "a typed draft stays expanded after the input blurs");
+  assert.equal(
+    composerLayoutState({ phoneLayout: true, inputFocused: false, shellMode: false, hasDraft: true }),
+    "phone-engaged",
+    "a typed draft stays engaged after the input blurs",
+  );
+  assert.equal(
+    composerLayoutState({ phoneLayout: true, inputFocused: false, shellMode: false, hasDraft: false }),
+    "phone-resting",
+    "an idle or working phone composer uses the compact resting row",
+  );
+  assert.equal(
+    composerLayoutState({ phoneLayout: false, inputFocused: false, shellMode: false, hasDraft: false }),
+    "desktop",
+    "desktop keeps its existing non-phone layout",
+  );
   assert.doesNotMatch(voice, /supportedSlots:\s*\[[\s\S]*?"composer\.trailing"/,
     "voice cannot be placed after the primary action");
 });

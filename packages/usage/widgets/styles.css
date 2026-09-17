@@ -1563,6 +1563,64 @@ width: 100%; justify-content: center;
   font-size: var(--font-meta);
 }
 
+/* ---- Edit mode: drag handles, eye toggles, hidden recovery strip ---- */
+.usage-edit-toggle[aria-pressed="true"] {
+  color: var(--accent);
+}
+
+.usage-block-edit-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-1) 0;
+}
+
+.usage-block-grip {
+  display: inline-flex;
+  width: max(var(--control-h-sm), var(--hit-min));
+  height: max(var(--control-h-sm), var(--hit-min));
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  cursor: grab;
+  touch-action: none;
+}
+
+.usage-block-grip svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+.usage-sortable-item.dragging .usage-block-grip {
+  color: var(--accent);
+}
+
+/* Hidden blocks keep their edit bar so the eye can bring them back. */
+.usage-sortable-item.usage-block-hidden {
+  opacity: .55;
+  border-style: dashed;
+}
+
+/* Recovery strip while editing: only appears when blocks are hidden. */
+.usage-hidden-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 var(--gutter) var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: var(--radius-card);
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.usage-hidden-strip svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  flex: none;
+}
+
 /* Compact turn telemetry cells, sharing the session-usage stat grid. */
 .usage-turn-stats {
   min-width: 0;

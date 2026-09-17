@@ -72,6 +72,7 @@ import {
   requestComposerReplace,
 } from "../composerInsert.ts";
 import { activeToken, completeToken, shellCommand, type PromptToken } from "../composer/language.ts";
+import { composerLayoutState } from "../composerLayout.ts";
 import {
   catalogFromResult,
   commandAutocomplete,
@@ -2181,10 +2182,11 @@ export default function Composer({
   // its minified resting state (same as the fresh-session composer) so a busy
   // agent never inflates the interaction dock — Stop stays reachable in the
   // collapsed row.
-  const expanded = !phoneLayout || inputFocused || shellMode || hasDraft;
-  const stateClass = phoneLayout
-    ? ` composer-mobile ${expanded ? "composer-expanded" : "composer-collapsed"}${inputFocused ? " composer-input-active" : ""}${hasDraft ? " composer-has-draft" : ""}`
-    : "";
+  const layoutState = composerLayoutState({ phoneLayout, inputFocused, shellMode, hasDraft });
+  const expanded = layoutState !== "phone-resting";
+  const stateClass = layoutState === "desktop"
+    ? ""
+    : ` composer-mobile ${expanded ? "composer-expanded" : "composer-collapsed"}${inputFocused ? " composer-input-active" : ""}${hasDraft ? " composer-has-draft" : ""}`;
   const attachmentStrip = attachments.length > 0 && (
     <AttachmentPills
       attachments={attachments}

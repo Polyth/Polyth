@@ -210,16 +210,51 @@ export default function ChatResponseFooter({
         {duration && <span className="chat-response-duration">{duration}</span>}
       </div>
 
-      <span ref={metadataAnchorRef} className="chat-response-info">
-        <ChatActionButton
-          icon={InfoIcon}
-          label={tr("timeline.showResponseMetadata")}
-          pressed={metadataOpen}
-          aria-expanded={metadataOpen}
-          aria-haspopup="dialog"
-          onClick={() => setMetadataOpen((open) => !open)}
+      <div className="chat-response-actions" role="group" aria-label={tr("timeline.answerActions")}>
+        <span ref={metadataAnchorRef} className="chat-response-info">
+          <ChatActionButton
+            icon={InfoIcon}
+            label={tr("timeline.showResponseMetadata")}
+            pressed={metadataOpen}
+            aria-expanded={metadataOpen}
+            aria-haspopup="dialog"
+            onClick={() => setMetadataOpen((open) => !open)}
+          />
+        </span>
+        {prefs.responseActions.map((id) => (
+          <ChatActionButton
+            key={id}
+            icon={RESPONSE_ACTION_ICON[id]}
+            label={actionLabel(id)}
+            pressed={id === "pin" ? pinned : undefined}
+            busy={id === "pin" && pinBusy}
+            disabled={actionDisabled(id)}
+            onClick={() => runAction(id)}
+          />
+        ))}
+        {regeneratePrompt && (
+          <ChatActionButton
+            icon={RefreshIcon}
+            label={tr("timeline.regenerateThisAssistantAnswer")}
+            onClick={() => requestComposerReplace(regeneratePrompt)}
+          />
+        )}
+        <SlotHost
+          slot="session.message.actions"
+          context={{
+            sessionId: session?.id,
+            projectId,
+            messageId: String(m.eventSeq),
+            messageRole: "assistant",
+            messageText: m.text,
+            eventSeq: m.eventSeq,
+          }}
         />
-      </span>
+        {statusText && (
+          <span className="chat-action-status" role="status" aria-live="polite">{statusText}</span>
+        )}
+      </div>
+
       <Popover
         open={metadataOpen}
         onClose={() => setMetadataOpen(false)}
@@ -242,56 +277,6 @@ export default function ChatResponseFooter({
           {turn?.turnId ? <><dt>Run</dt><dd><code>{turn.turnId}</code></dd></> : null}
         </dl>
       </Popover>
-
-      <div className="chat-response-actions" role="group" aria-label={tr("timeline.answerActions")}>
-        {prefs.responseActions.map((id) => (
-          id === "copy" ? (
-            <span key={id} className="chat-response-action-item">
-              <ChatActionButton
-                icon={RESPONSE_ACTION_ICON[id]}
-                label={actionLabel(id)}
-                disabled={actionDisabled(id)}
-                onClick={() => runAction(id)}
-              />
-              {statusText && (
-                <span className="chat-action-status" role="status" aria-live="polite">{statusText}</span>
-              )}
-            </span>
-          ) : (
-            <ChatActionButton
-              key={id}
-              icon={RESPONSE_ACTION_ICON[id]}
-              label={actionLabel(id)}
-              pressed={id === "pin" ? pinned : undefined}
-              busy={id === "pin" && pinBusy}
-              disabled={actionDisabled(id)}
-              onClick={() => runAction(id)}
-            />
-          )
-        ))}
-        {statusText && !prefs.responseActions.includes("copy") && (
-          <span className="chat-action-status" role="status" aria-live="polite">{statusText}</span>
-        )}
-        {regeneratePrompt && (
-          <ChatActionButton
-            icon={RefreshIcon}
-            label={tr("timeline.regenerateThisAssistantAnswer")}
-            onClick={() => requestComposerReplace(regeneratePrompt)}
-          />
-        )}
-        <SlotHost
-          slot="session.message.actions"
-          context={{
-            sessionId: session?.id,
-            projectId,
-            messageId: String(m.eventSeq),
-            messageRole: "assistant",
-            messageText: m.text,
-            eventSeq: m.eventSeq,
-          }}
-          className="slot-host-inline"
-        />
-      </div>
     </footer>
   );
 }

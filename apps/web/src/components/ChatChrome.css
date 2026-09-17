@@ -1,10 +1,12 @@
 /* Chat-owned response/message chrome. Generic UI primitives remain generic. */
 .chat-message-actions,
 .chat-response-actions {
-  display: flex;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
   align-items: center;
-  flex-wrap: nowrap;
-  gap: var(--space-1);
+  justify-items: center;
+  gap: var(--space-2);
 }
 
 .chat-message-actions {
@@ -12,20 +14,25 @@
 }
 
 .msg.user .chat-message-actions {
-  justify-content: flex-end;
+  justify-content: end;
 }
 
-.chat-message-actions > .placed-mini-widget {
+.chat-message-actions > .placed-mini-widget,
+.chat-response-actions > .placed-mini-widget {
   display: contents;
 }
 
+/* One box per action: the sm icon button. Wrappers must not add a strut or a
+   second gap, or the icon track reads as uneven. */
 .chat-message-actions > .ui-tooltip-host,
 .chat-response-actions > .ui-tooltip-host,
+.chat-response-info,
 .chat-response-info > .ui-tooltip-host {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  line-height: 1;
+  flex: none;
+  line-height: 0;
 }
 
 .chat-action-button.ui-icon-btn {
@@ -82,13 +89,15 @@
   backdrop-filter: none;
 }
 
+/* Identity + one icon track. Metadata lives in the same action row so every
+   glyph shares a single gap instead of a separate grid column. */
 .chat-response-footer {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  grid-template-areas: "identity info actions";
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  column-gap: var(--space-2);
+  gap: var(--space-2);
   min-width: 0;
+  max-width: 100%;
   margin-block-start: var(--space-3);
   color: var(--muted);
   font-size: var(--font-response-meta);
@@ -96,10 +105,10 @@
 }
 
 .chat-response-identity {
-  grid-area: identity;
   display: flex;
   align-items: center;
   min-width: 0;
+  flex: 0 1 auto;
   gap: var(--space-2);
 }
 
@@ -132,23 +141,13 @@
   color: var(--faint);
 }
 
-.chat-response-info {
-  grid-area: info;
-  display: inline-flex;
-  align-items: center;
-  justify-self: end;
-}
-
 .chat-response-actions {
-  grid-area: actions;
-  justify-self: end;
+  flex: none;
+  min-width: 0;
 }
 
-.chat-response-action-item {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  min-width: 0;
+.chat-response-actions > .chat-action-status {
+  justify-self: start;
 }
 
 .ui-popover.chat-response-metadata {
@@ -202,19 +201,8 @@
 }
 
 @media (max-width: 600px) {
-  .chat-response-footer {
-    grid-template-columns: minmax(0, 1fr) auto auto;
-    grid-template-areas: "identity info actions";
-    column-gap: var(--space-1);
-    margin-block-start: var(--space-3);
-  }
-
   .chat-response-duration {
     display: none;
-  }
-
-  .chat-response-actions {
-    margin-block-start: 0;
   }
 
   .msg.user .msg-meta {
@@ -223,19 +211,10 @@
 }
 
 @media (hover: none), (pointer: coarse) {
-  /* 24px visual controls retain the canonical 44px transparent hit box.
-     12px centre spacing prevents neighbouring hit areas from overlapping. */
-  .chat-message-actions,
-  .chat-response-actions {
-    gap: var(--space-3);
-  }
-
+  /* Visual spacing stays on the shared --space-2 track. Hit size remains the
+     transparent ::after seam on .ui-icon-btn, not a second, looser gap. */
   .msg.user .msg-meta {
     min-height: var(--tap);
-  }
-
-  .chat-response-footer {
-    row-gap: 0;
   }
 
   .ui-tooltip.chat-action-tooltip {
@@ -243,28 +222,16 @@
   }
 }
 
-/* Seven configured response actions cannot all retain independent 44px hit
-   regions inside a 320px phone reading column. Make that one edge case an
-   explicit, right-aligned 4-column grid rather than allowing accidental flex
-   wrapping or overlapping tap targets. */
+/* Very narrow phones: keep the icon track together on the next line rather
+   than splitting glyphs across uneven columns. Status, if present, can wrap. */
 @media (max-width: 340px) and (pointer: coarse) {
   .chat-response-actions {
-    display: grid;
-    grid-template-columns: repeat(4, var(--control-h-sm));
-    gap: var(--space-3);
+    display: flex;
+    flex-wrap: wrap;
   }
 
-  /* Copy+status must not share one 32px cell. Buttons stay on the grid;
-     the chip drops to a full-width row after the actions. */
-  .chat-response-action-item {
-    display: contents;
-  }
-
-  .chat-response-actions > .chat-action-status,
-  .chat-response-action-item > .chat-action-status {
-    grid-column: 1 / -1;
-    order: 1;
+  .chat-response-actions > .chat-action-status {
+    flex: 1 0 100%;
     max-width: 100%;
-    justify-self: end;
   }
 }

@@ -29,9 +29,10 @@ const canExecute = (row: HarnessSnapshot): boolean => row.policy.enabled
 
 function useHarnesses(projectId?: string | null, spaceId?: string, harnessId?: string) {
   const revision = useCatalogRevision();
-  const key = JSON.stringify([activeBrowserAccountId(), spaceId ?? "page", projectId ?? "", revision]);
-  const [result, setResult] = useState<{ key: string; rows: HarnessSnapshot[] }>();
-  const [rosterResult, setRosterResult] = useState<{ key: string; rows: HarnessRosterItem[] }>();
+  const scope = JSON.stringify([activeBrowserAccountId(), spaceId ?? "page", projectId ?? ""]);
+  const key = JSON.stringify([scope, revision]);
+  const [result, setResult] = useState<{ key: string; scope: string; rows: HarnessSnapshot[] }>();
+  const [rosterResult, setRosterResult] = useState<{ key: string; scope: string; rows: HarnessRosterItem[] }>();
   const requestSeq = useRef(0);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -45,7 +46,7 @@ function useHarnesses(projectId?: string | null, spaceId?: string, harnessId?: s
         rows = rows.map((row) => selected.find((item) => item.identity.id === row.identity.id) ?? row);
       }
       if (seq !== requestSeq.current) return;
-      setResult({ key, rows });
+      setResult({ key, scope, rows });
       setError("");
     } catch (cause) {
       if (seq !== requestSeq.current) return;
@@ -53,17 +54,25 @@ function useHarnesses(projectId?: string | null, spaceId?: string, harnessId?: s
     } finally {
       if (seq === requestSeq.current) setLoading(false);
     }
-  }, [key, projectId, spaceId, harnessId]);
+  }, [key, scope, projectId, spaceId, harnessId]);
   useEffect(() => {
     let active = true;
     void readHarnessRoster({ projectId, spaceId }).then((rows) => {
-      if (active) setRosterResult({ key, rows });
+      if (active) setRosterResult({ key, scope, rows });
     }).catch(() => {});
     void refresh();
     return () => { active = false; requestSeq.current++; };
-  }, [refresh, key, projectId, spaceId]);
-  const rows = result?.key === key ? result.rows : peekHarnessSnapshots({ projectId, spaceId }) ?? [];
-  const roster = rosterResult?.key === key ? rosterResult.rows : peekHarnessRoster({ projectId, spaceId }) ?? [];
+  }, [refresh, key, scope, projectId, spaceId]);
+  // An invalidation empties the caches while the replacement request is still
+  // in flight. Same account/Space/project means the rows this instance already
+  // painted stay true enough to keep the selected harness visible and marked;
+  // a different scope falls back to nothing rather than showing foreign rows.
+  const rows = result?.key === key
+    ? result.rows
+    : peekHarnessSnapshots({ projectId, spaceId }) ?? (result?.scope === scope ? result.rows : []);
+  const roster = rosterResult?.key === key
+    ? rosterResult.rows
+    : peekHarnessRoster({ projectId, spaceId }) ?? (rosterResult?.scope === scope ? rosterResult.rows : []);
   return { rows, roster, error, loading, refresh };
 }
 

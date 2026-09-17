@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { composerLayoutState } from "../src/composerLayout.ts";
+import { readWebStyles } from "./webStyles.ts";
 
 const read = (rel: string) => readFile(new URL(rel, import.meta.url), "utf8");
 
@@ -61,6 +63,54 @@ test("expanded phone composer uses one compact spacing and control rhythm", asyn
     css,
     /\.composer-mobile \.composer-actions > \.composer-extensions\s*\{[^}]*display:\s*none;[^}]*width:\s*0;/s,
     "trailing widgets stay out of the phone primary row",
+  );
+});
+
+test("the runtime cascade leaves the compact resting row to its canonical rules", async () => {
+  const adaptive = await read("../src/composerAdaptive.css");
+  const effective = await readWebStyles();
+  const mobileLayer = adaptive.slice(
+    adaptive.indexOf("/* Mobile"),
+    adaptive.indexOf("/* Tight phones"),
+  );
+
+  assert.doesNotMatch(mobileLayer, /composer-mobile\.composer-collapsed\s+\.composer-card/);
+  assert.doesNotMatch(mobileLayer, /composer-mobile\.composer-collapsed\s+\.composer-card textarea/);
+  assert.ok(
+    effective.indexOf("/* Adaptive composer polish")
+      > effective.indexOf("UX-MOBILE-01 — mobile-first new chat"),
+    "tests include the adaptive shell layer after core mobile rules",
+  );
+});
+
+test("every phone state routes through one canonical layout helper", async () => {
+  // Composition decisions live in one place: any new state must be added
+  // there, not re-derived ad hoc in the component.
+  assert.equal(
+    composerLayoutState({ phoneLayout: true, inputFocused: true, shellMode: false, hasDraft: false }),
+    "phone-engaged",
+  );
+  assert.equal(
+    composerLayoutState({ phoneLayout: true, inputFocused: false, shellMode: true, hasDraft: false }),
+    "phone-engaged",
+  );
+  assert.equal(
+    composerLayoutState({ phoneLayout: true, inputFocused: false, shellMode: false, hasDraft: true }),
+    "phone-engaged",
+  );
+  assert.equal(
+    composerLayoutState({ phoneLayout: true, inputFocused: false, shellMode: false, hasDraft: false }),
+    "phone-resting",
+  );
+  const composer = await read("../src/components/Composer.tsx");
+  assert.ok(
+    composer.includes("const layoutState = composerLayoutState("),
+    "the component no longer re-derives its own phone layout branches",
+  );
+  assert.doesNotMatch(
+    composer,
+    /phoneLayout\s*&&\s*\(.*(expanded|collapsed)/i,
+    "no parallel expanded/collapsed derivation may bypass the helper",
   );
 });
 
