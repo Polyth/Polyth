@@ -105,6 +105,10 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
     if (!identity.providers) throw controlError('unavailable', 'External identity providers are unavailable');
     return identity.providers;
   };
+  const providerLoginService = () => {
+    if (!identity.providerLogin) throw controlError('unavailable', 'External identity login is unavailable');
+    return identity.providerLogin;
+  };
   const linkService = () => {
     if (!identity.links) throw controlError('unavailable', 'External identity linking is unavailable');
     return identity.links;
@@ -184,22 +188,16 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
           issued(await identity.credentials.login({ login: text(body, 'login'), password: text(body, 'password'), address: req.socket.remoteAddress, label: req.headers['user-agent'] }));
         } else if (req.method === 'POST' && path === '/api/auth/providers/login/begin') {
           if (!secure) throw controlError('unavailable', 'External browser identity requires an HTTPS Polyth origin');
-          send(200, await providerService().begin({
-            providerId: text(body, 'providerId'), purpose: 'login', browserBinding: nonce,
+          send(200, await providerLoginService().begin({
+            providerId: text(body, 'providerId'), browserBinding: nonce,
             callbackUrl: providerCallbackUrl, returnTo: returnTo(body),
           }));
         } else if (req.method === 'POST' && path === '/api/auth/providers/login/complete') {
-          let session: ReturnType<IdentityService['sessions']['issue']> | undefined;
-          const providerId = text(body, 'providerId');
-          const completed = await providerService().complete({
-            providerId, purpose: 'login', state: text(body, 'state'), browserBinding: nonce, code: text(body, 'code'),
-          }, (external) => {
-            const userId = providerService().resolveLinkedUser(providerId, external);
-            if (!userId) throw controlError('invalid-credentials', 'External identity is not linked to an active account');
-            session = identity.sessions.issue(userId, req.headers['user-agent']);
+          const completed = await providerLoginService().complete({
+            providerId: text(body, 'providerId'), state: text(body, 'state'), browserBinding: nonce,
+            code: text(body, 'code'), label: req.headers['user-agent'],
           });
-          if (!session) throw controlError('invalid-credentials', 'External identity could not establish a session');
-          issued(session, { returnTo: completed.returnTo });
+          issued(completed, { returnTo: completed.returnTo });
         } else if (req.method === 'POST' && path === '/api/auth/passkeys/authenticate/options') {
           send(200, identity.passkeys.beginAuthentication());
         } else if (req.method === 'POST' && path === '/api/auth/passkeys/authenticate/complete') {
