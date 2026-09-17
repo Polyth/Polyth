@@ -3,6 +3,10 @@ import { createIdentityService, type IdentityService } from "@polyth/identity";
 import { createIdentityHttpAdapter } from "@polyth/identity/http";
 import { openControlPlane, type ControlPlane } from "@polyth/control-plane";
 import { createResourceRegistry, type ResourceRegistry } from "@polyth/control-plane/resources";
+import {
+  createResourceLifecycleAuthority,
+  type ResourceLifecycleAuthority,
+} from "@polyth/control-plane/resource-lifecycle";
 import { createCanonicalAuthGateway, type CanonicalAuthGateway } from "./canonicalAuth.ts";
 
 export interface CanonicalSecurityOptions {
@@ -23,6 +27,7 @@ export interface CanonicalSecurity {
   identity: IdentityService;
   auth: CanonicalAuthGateway;
   resources: ResourceRegistry;
+  resourceLifecycle: ResourceLifecycleAuthority;
   http: ReturnType<typeof createIdentityHttpAdapter>;
   /** Operator channel only. Do not expose this through public HTTP routes. */
   issueSetupClaim(): ReturnType<IdentityService["setup"]["issueClaim"]>;
@@ -48,6 +53,11 @@ export function createCanonicalSecurity(options: CanonicalSecurityOptions): Cano
       webauthn: { origin: options.origin, ...options.webauthn },
     });
     const resources = createResourceRegistry(control, options.now ? { now: options.now } : {});
+    const resourceLifecycle = createResourceLifecycleAuthority(
+      control,
+      resources,
+      options.now ? { now: options.now } : {},
+    );
     const http = createIdentityHttpAdapter(identity, {
       origin: options.origin,
       ...(options.localOnly !== undefined ? { localOnly: options.localOnly } : {}),
@@ -63,6 +73,7 @@ export function createCanonicalSecurity(options: CanonicalSecurityOptions): Cano
       identity,
       auth,
       resources,
+      resourceLifecycle,
       http,
       issueSetupClaim: () => identity!.setup.issueClaim(),
       close() {
