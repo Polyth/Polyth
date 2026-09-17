@@ -14,6 +14,12 @@ test("release quality contract covers stable and Polyth Link tests", () => {
     "packages/server",
     "packages/control-plane",
     "packages/identity",
+    "packages/tenancy",
+    "packages/secure-safe",
+    "packages/pairing-qr",
+    "packages/tunnel",
+    "packages/terminal",
+    "packages/markets",
     "apps/mobile",
     "apps/desktop",
   ]) {
