@@ -32,6 +32,7 @@ jobs:
             packages/control-plane/test/*.test.ts \
             packages/identity/test/*.test.ts \
             packages/plugins/test/authSocketRevocation.test.ts \
+            packages/plugins/test/grantRevocationRpc.test.ts \
             packages/plugins/test/lifecycleAuth.test.ts \
             packages/plugins/test/spaceSecretVault.test.ts \
             packages/secure-safe/test/spaceContextRouting.test.ts \
