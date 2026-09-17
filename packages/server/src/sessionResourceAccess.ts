@@ -3,12 +3,13 @@ import type { ResourceLifecycle } from "@polyth/control-plane/resources";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
 
 const SESSION_METHODS = new Set<PropertyKey>([
-  "snapshot", "events", "send", "abort", "fork", "archive", "restore", "delete",
+  "snapshot", "events", "send", "clientMutationStatus", "abort", "fork", "archive", "restore", "delete",
   "replyPermission", "replyQuestion", "cancelResume", "resumeNow", "rewind", "clearRewind",
   "runShell", "compact", "replySecret", "rename", "organize", "queueList", "queueEditStart",
   "queueEdit", "queueSendNow", "queueEditCancel", "queueReorder", "queueRemove", "pinContext",
   "unpinContext", "autoAcceptGet", "autoAcceptSet", "confirmBorrowedRuntimeEpoch", "saveDraft",
-  "markRead", "runtimeFeatures", "switchHarness", "cancelHarnessSwitch", "debug",
+  "markRead", "runtimeFeatures", "renameWorktreeBranch", "patchIsolation", "rebindWorkspace",
+  "switchHarness", "cancelHarnessSwitch", "debug",
 ]);
 const RECOVERY_METHODS = new Set<PropertyKey>(["archive", "restore", "delete"]);
 const RECOVERY_LIFECYCLES: readonly ResourceLifecycle[] = ["active", "archived", "archiving", "deleting"];

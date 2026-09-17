@@ -11,15 +11,17 @@ const PROJECT_METHODS = new Set<PropertyKey>([
   "sync", "backendSessions", "importBackendSessions", "markWorktreeMissing",
 ]);
 const SESSION_METHODS = new Set<PropertyKey>([
-  "snapshot", "events", "send", "abort", "fork", "archive", "restore", "delete",
+  "snapshot", "events", "send", "clientMutationStatus", "abort", "fork", "archive", "restore", "delete",
   "replyPermission", "replyQuestion", "cancelResume", "resumeNow", "rewind", "clearRewind",
   "runShell", "compact", "replySecret", "rename", "organize", "queueList", "queueEditStart",
   "queueEdit", "queueSendNow", "queueEditCancel", "queueReorder", "queueRemove", "pinContext",
   "unpinContext", "autoAcceptGet", "autoAcceptSet", "confirmBorrowedRuntimeEpoch", "saveDraft",
-  "markRead", "runtimeFeatures", "switchHarness", "cancelHarnessSwitch", "debug",
+  "markRead", "runtimeFeatures", "renameWorktreeBranch", "patchIsolation", "rebindWorkspace",
+  "switchHarness", "cancelHarnessSwitch", "debug",
 ]);
 const BLOCKED_STORE_MUTATIONS = new Set<PropertyKey>([
-  "appendBatch", "copyTo", "upsertProjection", "publishChildSession",
+  "appendBatch", "copyTo", "upsertProjection", "publishChildSession", "deleteSession",
+  "setReadCursor", "close", "prepareOperation", "operations", "claimOperation", "settleOperation",
 ]);
 
 const unavailable = (message: string): Error => Object.assign(new Error(message), { code: "unavailable" });
@@ -78,10 +80,24 @@ function packageProjects(host: ServerPackageHost): ProjectService {
           return method.call(scoped, projectId, ...rest);
         };
       }
-      if (property === "add" || property === "create" || property === "addRemote") {
+      if (property === "add" || property === "create" || property === "clone" || property === "addRemote") {
         return () => { throw unavailable("package project creation requires an explicit Space context"); };
       }
-      return Reflect.get(target, property, receiver);
+      if (property === "ensurePackageWorkspace") {
+        const value = Reflect.get(target, property, receiver);
+        if (typeof value !== "function") return value;
+        return async (input: { spaceId: string; packageId: string; path: string }) => {
+          if (!input?.spaceId) throw unavailable("package workspace creation requires an explicit Space context");
+          if (input.packageId !== host.pluginId) {
+            throw unavailable("package workspace creation is bound to the calling package");
+          }
+          return value.call(target, input);
+        };
+      }
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === "function"
+        ? () => { throw unavailable(`raw package project method is unavailable: ${String(property)}`); }
+        : value;
     },
   }) as ProjectService;
 }
@@ -120,7 +136,10 @@ function packageSessions(host: ServerPackageHost): SessionService {
           return method.call(scoped, sessionId, ...rest);
         };
       }
-      return Reflect.get(target, property, receiver);
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === "function"
+        ? () => { throw unavailable(`raw package session method is unavailable: ${String(property)}`); }
+        : value;
     },
   }) as SessionService;
 }
@@ -178,7 +197,10 @@ function packageStore(host: ServerPackageHost): ServerPackageHost["store"] {
           ? () => { throw unavailable(`raw package persistence mutation is unavailable: ${String(property)}`); }
           : value;
       }
-      return Reflect.get(target, property, receiver);
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === "function"
+        ? () => { throw unavailable(`raw package persistence method is unavailable: ${String(property)}`); }
+        : value;
     },
   }) as ServerPackageHost["store"];
 }

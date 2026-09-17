@@ -331,9 +331,10 @@ export function canonicalSessionService(
     "rewind", "clearRewind", "runShell", "compact", "replySecret", "rename", "organize",
     "queueList", "queueEditStart", "queueEdit", "queueSendNow", "queueEditCancel", "queueReorder", "queueRemove",
     "pinContext", "unpinContext", "autoAcceptGet", "autoAcceptSet", "confirmBorrowedRuntimeEpoch",
-    "saveDraft", "markRead", "runtimeFeatures", "switchHarness", "cancelHarnessSwitch",
+    "saveDraft", "markRead", "runtimeFeatures", "renameWorktreeBranch", "patchIsolation", "rebindWorkspace",
+    "switchHarness", "cancelHarnessSwitch",
   ]);
-  const readableMethodNames = new Set<PropertyKey>(["debug"]);
+  const readableMethodNames = new Set<PropertyKey>(["debug", "clientMutationStatus"]);
 
   const reconciledList = async (projectId?: string): Promise<SessionProjection[]> => {
     await reconcileMissingDeletes();

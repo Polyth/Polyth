@@ -87,3 +87,98 @@ test("shared deployments reject package-global project and session authority", a
   await assert.rejects(governed.sessions.create({ projectId: "foreign" }), { code: "unavailable" });
   assert.equal(rawProjectReads, 0);
 });
+
+test("package host authority fails closed instead of exposing new raw methods", async () => {
+  const rawCalls: string[] = [];
+  const scopedCalls: string[] = [];
+  const project: Project = { id: "prj_one", path: "/tmp/project", name: "One", createdAt: 1, spaceId: "spc_home" };
+  const scoped = {
+    async clientMutationStatus() { scopedCalls.push("clientMutationStatus"); return {} as never; },
+    async renameWorktreeBranch() { scopedCalls.push("renameWorktreeBranch"); return projection; },
+    async patchIsolation() { scopedCalls.push("patchIsolation"); return projection; },
+    async rebindWorkspace() { scopedCalls.push("rebindWorkspace"); return projection; },
+  } as unknown as SessionService;
+  const rawSessions = {
+    async clientMutationStatus() { rawCalls.push("session.clientMutationStatus"); return {} as never; },
+    async renameWorktreeBranch() { rawCalls.push("session.renameWorktreeBranch"); return projection; },
+    async patchIsolation() { rawCalls.push("session.patchIsolation"); return projection; },
+    async rebindWorkspace() { rawCalls.push("session.rebindWorkspace"); return projection; },
+    rawEscape() { rawCalls.push("session.rawEscape"); },
+  } as unknown as SessionService;
+  const host = {
+    pluginId: "test-package",
+    deployment: "local-trusted",
+    projects: {
+      async get(id: string) { return id === project.id ? project : undefined; },
+      clone() { rawCalls.push("project.clone"); return project; },
+      async ensurePackageWorkspace(input: { spaceId: string; packageId: string; path: string }) {
+        rawCalls.push(`project.ensurePackageWorkspace:${input.packageId}`);
+        return project;
+      },
+      rawEscape() { rawCalls.push("project.rawEscape"); },
+    },
+    sessions: rawSessions,
+    store: {
+      async projection(id: string) { return id === projection.id ? projection : undefined; },
+      deleteSession() { rawCalls.push("store.deleteSession"); },
+      setReadCursor() { rawCalls.push("store.setReadCursor"); },
+      close() { rawCalls.push("store.close"); },
+      prepareOperation() { rawCalls.push("store.prepareOperation"); },
+      operations() { rawCalls.push("store.operations"); },
+      claimOperation() { rawCalls.push("store.claimOperation"); },
+      settleOperation() { rawCalls.push("store.settleOperation"); },
+      rawEscape() { rawCalls.push("store.rawEscape"); },
+    },
+    forSpace(ctx: SpaceContext) {
+      assert.equal(ctx.spaceId, "spc_home");
+      assert.equal(ctx.userId, RUNTIME_SYSTEM_PRINCIPAL_ID);
+      return { projects: {} as never, sessions: scoped };
+    },
+    events: { async append() { assert.fail("unexpected append"); } },
+  } as unknown as ServerPackageHost;
+
+  const governed = governPackageHost(host);
+  await governed.sessions.clientMutationStatus?.(projection.id, "op_1");
+  await governed.sessions.renameWorktreeBranch?.(projection.id, { worktreePath: "/tmp/project", from: "old", to: "new" });
+  await governed.sessions.patchIsolation?.(projection.id, null);
+  await governed.sessions.rebindWorkspace?.(projection.id, { worktreePath: "/tmp/project" });
+
+  const sessionsWithEscape = governed.sessions as SessionService & { rawEscape(): void };
+  const projectsWithEscape = governed.projects as typeof governed.projects & { rawEscape(): void };
+  const storeWithEscape = governed.store as typeof governed.store & { rawEscape(): void };
+  const projectsWithWorkspace = governed.projects as typeof governed.projects & {
+    ensurePackageWorkspace(input: { spaceId: string; packageId: string; path: string }): Promise<Project>;
+  };
+  await assert.rejects(
+    () => projectsWithWorkspace.ensurePackageWorkspace({
+      spaceId: project.spaceId!, packageId: "other-package", path: "/tmp/other",
+    }),
+    { code: "unavailable" },
+  );
+  assert.equal(
+    (await projectsWithWorkspace.ensurePackageWorkspace({
+      spaceId: project.spaceId!, packageId: "test-package", path: "/tmp/project",
+    })).id,
+    project.id,
+  );
+
+  assert.throws(() => sessionsWithEscape.rawEscape(), { code: "unavailable" });
+  assert.throws(() => projectsWithEscape.rawEscape(), { code: "unavailable" });
+  assert.throws(() => governed.projects.clone?.("https://example.test/repo.git", "/tmp"), { code: "unavailable" });
+  assert.throws(() => governed.store.deleteSession?.(projection.id), { code: "unavailable" });
+  assert.throws(() => governed.store.setReadCursor?.(projection.id, 1), { code: "unavailable" });
+  assert.throws(() => governed.store.close(), { code: "unavailable" });
+  assert.throws(() => storeWithEscape.rawEscape(), { code: "unavailable" });
+
+  for (const method of ["prepareOperation", "operations", "claimOperation", "settleOperation"] as const) {
+    assert.throws(() => (governed.store[method] as (...args: unknown[]) => unknown)(), { code: "unavailable" });
+  }
+
+  assert.deepEqual(scopedCalls, [
+    "clientMutationStatus",
+    "renameWorktreeBranch",
+    "patchIsolation",
+    "rebindWorkspace",
+  ]);
+  assert.deepEqual(rawCalls, ["project.ensurePackageWorkspace:test-package"]);
+});
