@@ -23,12 +23,14 @@ import {
 import type {
   AuthPrincipal,
   DeploymentProfile,
+  SessionProjection,
   SessionService,
   SpaceContext,
 } from "@polyth/contracts";
 import type { ProjectRegistry } from "./projects.ts";
 import { createCanonicalSpaceGateway } from "./canonicalSpaces.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
+import { reconcileCanonicalResourcesAtBoot } from "./resourceStartupReconciliation.ts";
 import {
   createSpaceGuard,
   createSpaceServices,
@@ -40,6 +42,8 @@ import {
 export interface SpaceSessionStore {
   spaceOfSession(sessionId: string): string | undefined;
   adoptSessionsIntoSpace(spaceId: string): Promise<number>;
+  /** Canonical startup uses this only when canonical session resources exist. */
+  projection?(sessionId: string): Promise<SessionProjection | undefined>;
   /** Optional so lightweight test doubles stay valid. */
   adoptLabelsIntoSpace?(spaceId: string): Promise<number>;
 }
@@ -169,7 +173,22 @@ export async function createSpaceGateway(
   opts: SpaceGatewayOptions,
 ): Promise<SpaceGatewayHandle> {
   const canonical = canonicalSpaceGateway(opts);
-  if (canonical) return canonical;
+  if (canonical) {
+    const security = canonicalSecurity();
+    if (!security) {
+      throw Object.assign(new Error("Canonical authority disappeared during boot"), { code: "recovery-required" });
+    }
+    const reconciled = await reconcileCanonicalResourcesAtBoot({
+      security,
+      projects: opts.registry,
+      sessions: opts.store,
+    });
+    const changed = Object.values(reconciled).reduce((sum, value) => sum + value, 0);
+    if (changed > 0) {
+      console.log(`[polyth] canonical resources reconciled at boot (${changed} lifecycle repairs)`);
+    }
+    return canonical;
+  }
 
   const deployment = opts.deployment ?? deploymentProfileFromEnv();
   const store = createTenancyStore({ file: `${opts.dataDir}/tenancy.json` });
