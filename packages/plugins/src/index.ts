@@ -32,6 +32,10 @@ export {
   type ServerServiceRegistry,
   type SessionRuntimeBinding,
 } from "./serverPackage.ts";
+export {
+  SPACE_SECURE_SAFE,
+  type SpaceSecureSafeRegistry,
+} from "./pluginRouteShared.ts";
 export { packageWorkspace, type PackageWorkspace } from "./packageWorkspace.ts";
 export {
   RUNTIME_SYSTEM_PRINCIPAL_ID,
