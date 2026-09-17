@@ -115,7 +115,6 @@ export function canonicalSessionService(
         ? transition(row.id, ["archiving"], "archived", row.revision, "resource.archived", true)
         : transition(row.id, ["archiving"], "active", row.revision, "resource.archive-rolled-back", true);
     } else if (row.lifecycle === "archived" && projection.status !== "archived") {
-      // Domain restore committed but control finalization was interrupted.
       row = transition(row.id, ["archived"], "active", row.revision, "resource.restored", true);
     } else if (row.lifecycle === "deleting") {
       // A still-readable projection proves hard deletion did not commit.
@@ -132,20 +131,13 @@ export function canonicalSessionService(
     return row;
   };
 
-  const requireActive = async (id: string): Promise<SessionProjection> => {
-    const projection = await base.snapshot(id);
-    const row = reconcileReadable(projection);
-    if (row.lifecycle !== "active" || projection.status === "archived") throw archived();
-    return projection;
-  };
-
   const adoptCreated = (projection: SessionProjection, actor = ctx.userId): CanonicalResource => {
     const project = security.resources.active(projection.projectId, scope);
     if (!project || project.kind !== "project") throw recovery();
     const existing = resource(projection.id);
     if (existing) return reconcileReadable(projection);
     const operationId = randomUUID();
-    const begun = security.resources.begin({
+    security.resources.begin({
       operationId,
       resourceId: projection.id,
       kind: "session",
@@ -159,7 +151,36 @@ export function canonicalSessionService(
     security.resources.recordDomainReady(operationId, receipt(projection));
     const current = resource(projection.id);
     if (!current) throw recovery();
-    return security.resources.activate(operationId, current.revision || begun.resource.revision);
+    return security.resources.activate(operationId, current.revision);
+  };
+
+  /** Delegated subagents are durably recorded as session/imported children.
+   * They execute on behalf of the parent session, so inheriting the parent's
+   * owner is explicit provenance. A forked child is deliberately excluded:
+   * only its request actor can truthfully populate createdBy. */
+  const adoptDerivedImportedChild = async (projection: SessionProjection): Promise<void> => {
+    if (resource(projection.id)) return;
+    if (!projection.parentId) throw recovery();
+    const parent = resource(projection.parentId);
+    if (!parent || parent.kind !== "session" || parent.orgId !== org.id || parent.spaceId !== ctx.spaceId
+      || (parent.lifecycle !== "active" && parent.lifecycle !== "archived")) throw recovery();
+    const events = await base.events(projection.id);
+    if (!events.some((event) => event.type === "session/imported")) throw recovery();
+    adoptCreated(projection, parent.ownerPrincipalId);
+  };
+
+  const readProjection = async (id: string): Promise<SessionProjection> => {
+    const projection = await base.snapshot(id);
+    await adoptDerivedImportedChild(projection);
+    reconcileReadable(projection);
+    return projection;
+  };
+
+  const requireActive = async (id: string): Promise<SessionProjection> => {
+    const projection = await readProjection(id);
+    const row = reconcileReadable(projection);
+    if (row.lifecycle !== "active" || projection.status === "archived") throw archived();
+    return projection;
   };
 
   const create: SessionService["create"] = async (input): Promise<SessionRef> => {
@@ -168,7 +189,7 @@ export function canonicalSessionService(
     if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
     const sessionId = randomUUID();
     const operationId = randomUUID();
-    const begun = security.resources.begin({
+    security.resources.begin({
       operationId,
       resourceId: sessionId,
       kind: "session",
@@ -240,7 +261,7 @@ export function canonicalSessionService(
 
   const restore: SessionService["restore"] = async (sessionId): Promise<void> => {
     requireMutation();
-    const before = await base.snapshot(sessionId);
+    const before = await readProjection(sessionId);
     const row = reconcileReadable(before);
     if (row.lifecycle !== "archived" || before.status !== "archived") throw recovery();
     await base.restore(sessionId);
@@ -252,7 +273,7 @@ export function canonicalSessionService(
   const remove: NonNullable<SessionService["delete"]> | undefined = base.delete
     ? async (sessionId): Promise<void> => {
         requireMutation();
-        const projection = await base.snapshot(sessionId);
+        const projection = await readProjection(sessionId);
         let row = reconcileReadable(projection);
         if (row.lifecycle !== "active" && row.lifecycle !== "archived") throw recovery();
         row = transition(sessionId, [row.lifecycle], "deleting", row.revision, "resource.deleting", true);
@@ -280,19 +301,14 @@ export function canonicalSessionService(
       }
     : undefined;
 
-  const readProjection = async (id: string): Promise<SessionProjection> => {
-    const projection = await base.snapshot(id);
-    reconcileReadable(projection);
-    return projection;
-  };
-
   const activeMethodNames = new Set<PropertyKey>([
     "send", "abort", "replyPermission", "replyQuestion", "cancelResume", "resumeNow",
     "rewind", "clearRewind", "runShell", "compact", "replySecret", "rename", "organize",
-    "queueEditStart", "queueEdit", "queueSendNow", "queueEditCancel", "queueReorder", "queueRemove",
-    "pinContext", "unpinContext", "autoAcceptSet", "confirmBorrowedRuntimeEpoch", "saveDraft", "markRead",
-    "switchHarness", "cancelHarnessSwitch",
+    "queueList", "queueEditStart", "queueEdit", "queueSendNow", "queueEditCancel", "queueReorder", "queueRemove",
+    "pinContext", "unpinContext", "autoAcceptGet", "autoAcceptSet", "confirmBorrowedRuntimeEpoch",
+    "saveDraft", "markRead", "runtimeFeatures", "switchHarness", "cancelHarnessSwitch",
   ]);
+  const readableMethodNames = new Set<PropertyKey>(["debug"]);
 
   return new Proxy(base, {
     get(target, property, receiver) {
@@ -311,10 +327,19 @@ export function canonicalSessionService(
       if (property === "list") {
         return async (projectId?: string) => {
           const rows = await target.list(projectId);
-          return rows.filter((projection) => {
-            try { reconcileReadable(projection); return true; }
-            catch { return false; }
-          });
+          for (const projection of rows) {
+            await adoptDerivedImportedChild(projection);
+            reconcileReadable(projection);
+          }
+          return rows;
+        };
+      }
+      if (property === "importBackendSessions" && target.importBackendSessions) {
+        return async (projectId: string, backendIds: string[]) => {
+          requireMutation();
+          const rows = await target.importBackendSessions!(projectId, backendIds);
+          for (const projection of rows) adoptCreated(projection);
+          return rows;
         };
       }
       if (activeMethodNames.has(property)) {
@@ -323,6 +348,14 @@ export function canonicalSessionService(
         return async (sessionId: string, ...rest: unknown[]) => {
           requireMutation();
           await requireActive(sessionId);
+          return value.call(target, sessionId, ...rest);
+        };
+      }
+      if (readableMethodNames.has(property)) {
+        const value = Reflect.get(target, property, receiver);
+        if (typeof value !== "function") return value;
+        return async (sessionId: string, ...rest: unknown[]) => {
+          await readProjection(sessionId);
           return value.call(target, sessionId, ...rest);
         };
       }
