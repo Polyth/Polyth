@@ -2,6 +2,7 @@
 // and is admitted only after the account/tenancy authority is already ready.
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createAuthorityOutboxWorker } from "./authorityOutbox.ts";
 import { createCanonicalSecurity } from "./canonicalSecurity.ts";
 import { bindCanonicalSecurity } from "./runtimeSecurity.ts";
 import { createSetupServer } from "./setupServer.ts";
@@ -57,11 +58,17 @@ export async function boot(opts: BootOptions = {}) {
     }
     if (state === "ready") {
       const runtime = await bootCore({ ...opts, port, hostname, dataDir });
+      const authorityOutbox = createAuthorityOutboxWorker(security.control);
+      authorityOutbox.start();
       let shutdown: Promise<void> | undefined;
       return {
         ...runtime,
         shutdown() {
-          if (!shutdown) shutdown = runtime.shutdown().finally(closeAuthority);
+          if (!shutdown) {
+            shutdown = authorityOutbox.stop()
+              .then(() => runtime.shutdown())
+              .finally(closeAuthority);
+          }
           return shutdown;
         },
       };
