@@ -37,6 +37,7 @@ jobs:
             packages/server/test/canonicalIdentityHttp.test.ts \
             packages/server/test/canonicalSecurity.test.ts \
             packages/server/test/runtimeSecurityBinding.test.ts \
+            apps/web/test/accountProfile.test.ts \
             apps/web/test/authBootstrap.test.ts \
             apps/web/test/multiUserAccountScope.test.ts \
             apps/web/test/passkeys.test.ts \
