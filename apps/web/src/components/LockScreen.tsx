@@ -3,13 +3,17 @@
 // public; every protected /api call stays 401 until login mints the httpOnly
 // account-bound session cookie.
 import { useEffect, useRef, useState } from "react";
-import { currentBrowserLogin, loginAccount } from "../accounts.ts";
+import { currentBrowserLogin, loginAccount, recoverAccount, type AccountLoginResult } from "../accounts.ts";
 import { tr } from "../i18n/index.ts";
 import { Button, TextInput } from "./ui/index.ts";
 
+type LockMode = "password" | "recovery";
+
 export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
+  const [mode, setMode] = useState<LockMode>("password");
   const [login, setLogin] = useState(currentBrowserLogin);
   const [password, setPassword] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [retryAt, setRetryAt] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -18,7 +22,7 @@ export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
 
   useEffect(() => {
     requestAnimationFrame(() => inputRef.current?.focus());
-  }, []);
+  }, [mode]);
 
   useEffect(() => {
     if (retryAt === null) return;
@@ -29,41 +33,102 @@ export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
   void tick;
   const secondsLeft = retryAt === null ? 0 : Math.max(0, Math.ceil((retryAt - Date.now()) / 1000));
   const locked = secondsLeft > 0;
+  const complete = mode === "password"
+    ? !!login.trim() && !!password
+    : !!login.trim() && !!recoveryCode.trim() && !!password;
+
+  const unlock = (): void => {
+    if (typeof window !== "undefined") window.location.reload();
+    else onUnlocked();
+  };
+
+  const showFailure = (result: AccountLoginResult, fallback: string): void => {
+    if (result.error === "rate-limited" && result.retryAfterSec) {
+      setRetryAt(Date.now() + result.retryAfterSec * 1000);
+      setError(tr("lockscreen.tooManyAttempts"));
+      return;
+    }
+    if (result.error === "invalid-password" || result.error === "invalid-credentials") {
+      setError(fallback);
+      return;
+    }
+    setError(result.message ?? fallback);
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (busy || locked || !login.trim() || !password) return;
+    if (busy || locked || !complete) return;
     setBusy(true);
     setError(null);
+    let passwordWasRecovered = false;
     try {
-      const r = await loginAccount(login, password);
-      if (r.ok) {
-        if (typeof window !== "undefined") window.location.reload();
-        else onUnlocked();
+      if (mode === "password") {
+        const result = await loginAccount(login, password);
+        if (result.ok) {
+          unlock();
+          return;
+        }
+        showFailure(result, tr("lockscreen.wrongPassword"));
+        setPassword("");
         return;
       }
-      if (r.error === "rate-limited" && r.retryAfterSec) {
-        setRetryAt(Date.now() + r.retryAfterSec * 1000);
-        setError(tr("lockscreen.tooManyAttempts"));
-      } else if (r.error === "invalid-password" || r.error === "invalid-credentials") {
-        setError(tr("lockscreen.wrongPassword"));
-      } else {
-        setError(r.message ?? tr("lockscreen.wrongPassword"));
+
+      const recovered = await recoverAccount(login, recoveryCode, password);
+      if (!recovered.ok) {
+        showFailure(
+          recovered,
+          recovered.error === "invalid-input"
+            ? "Choose a stronger new password."
+            : "Login or recovery code is invalid.",
+        );
+        setRecoveryCode("");
+        setPassword("");
+        return;
       }
-      setPassword("");
+      passwordWasRecovered = true;
+
+      // Recovery intentionally revokes every old session. Mint the replacement
+      // session through the normal login path rather than treating recovery as
+      // authentication or reusing stale browser account authority.
+      const signedIn = await loginAccount(login, password);
+      if (signedIn.ok) {
+        unlock();
+        return;
+      }
+      setMode("password");
+      setRecoveryCode("");
+      showFailure(signedIn, "Password was reset. Sign in with your new password.");
     } catch {
-      setError(tr("lockscreen.couldnTReachTheServer"));
+      if (passwordWasRecovered) {
+        setMode("password");
+        setRecoveryCode("");
+        setError("Password was reset. Sign in with your new password.");
+      } else {
+        setError(tr("lockscreen.couldnTReachTheServer"));
+      }
     } finally {
       setBusy(false);
     }
+  };
+
+  const switchMode = (): void => {
+    setMode((current) => current === "password" ? "recovery" : "password");
+    setPassword("");
+    setRecoveryCode("");
+    setError(null);
+    setRetryAt(null);
   };
 
   return (
     <div className="lock-screen">
       <form className="lock-card" onSubmit={submit}>
         <img className="welcome-mark" src="/icon-192.png" alt="" aria-hidden="true" />
-        <h1>{tr("lockscreen.polythIsLocked")}</h1>
-        <p className="lock-hint">Sign in to this Polyth server.</p>
+        <h1>{mode === "password" ? tr("lockscreen.polythIsLocked") : "Recover account"}</h1>
+        <p className="lock-hint">
+          {mode === "password"
+            ? "Sign in to this Polyth server."
+            : "Use one of the recovery codes saved during setup and choose a new password."}
+        </p>
         <TextInput
           value={login}
           placeholder="Login"
@@ -75,24 +140,49 @@ export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
             setError(null);
           }}
         />
+        {mode === "recovery" && (
+          <TextInput
+            ref={inputRef}
+            className="lock-input"
+            value={recoveryCode}
+            placeholder="Recovery code"
+            autoComplete="one-time-code"
+            aria-label="Recovery code"
+            disabled={locked || busy}
+            onChange={(e) => {
+              setRecoveryCode(e.target.value);
+              setError(null);
+            }}
+          />
+        )}
         <TextInput
-          ref={inputRef}
+          ref={mode === "password" ? inputRef : undefined}
           type="password"
           className="lock-input"
           value={password}
-          placeholder={tr("lockscreen.password")}
-          autoComplete="current-password"
-          aria-label={tr("lockscreen.uiPassword")}
+          placeholder={mode === "password" ? tr("lockscreen.password") : "New password"}
+          autoComplete={mode === "password" ? "current-password" : "new-password"}
+          aria-label={mode === "password" ? tr("lockscreen.uiPassword") : "New password"}
           disabled={locked || busy}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(e) => {
+            setPassword(e.target.value);
+            setError(null);
+          }}
         />
         {error && (
           <p className="lock-error" role="alert">
             {error}{locked && ` Try again in ${secondsLeft}s.`}
           </p>
         )}
-        <Button variant="primary" className="lock-submit" type="submit" busy={busy} disabled={locked || !login.trim() || !password}>
-          {busy ? tr("lockscreen.checking") : locked ? tr("lockscreen.lockedValueS", { secondsLeft: secondsLeft }) : tr("lockscreen.unlock")}
+        <Button variant="primary" className="lock-submit" type="submit" busy={busy} disabled={locked || !complete}>
+          {busy
+            ? tr("lockscreen.checking")
+            : locked
+              ? tr("lockscreen.lockedValueS", { secondsLeft })
+              : mode === "password" ? tr("lockscreen.unlock") : "Recover and sign in"}
+        </Button>
+        <Button variant="ghost" size="sm" type="button" disabled={busy} onClick={switchMode}>
+          {mode === "password" ? "Use a recovery code" : "Use password instead"}
         </Button>
       </form>
     </div>
