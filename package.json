@@ -32,6 +32,7 @@
     "watch:public": "HOST=0.0.0.0 PORT=4400 npm run watch",
     "migration:legacy": "node --experimental-strip-types scripts/legacy-migration.ts",
     "setup:claim": "node --experimental-strip-types scripts/setup-claim.ts",
+    "auth:break-glass": "node --experimental-strip-types scripts/break-glass-password.ts",
     "build:link": "cargo build -p polyth-link-host -p polyth-link-client -p polyth-link-relay",
     "desktop:download-opencode": "npm --workspace @polyth/desktop run download:opencode",
     "desktop:dev": "npm run build:desktop && npm run desktop:download-opencode && npm --workspace @polyth/desktop start",
