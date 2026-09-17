@@ -58,6 +58,10 @@ export function createResourceAccessAuthority(
     principalId,
     now(),
   );
+  const principalKind = (principalId: string): string | undefined => control.get<{ kind: string }>(
+    "SELECT kind FROM principals WHERE id=? AND status='active'",
+    principalId,
+  )?.kind;
 
   const visible = (
     row: CanonicalResource,
@@ -69,7 +73,12 @@ export function createResourceAccessAuthority(
   ): boolean => {
     if (row.orgId !== orgId || row.spaceId !== spaceId) return false;
     if (!lifecycles.has(row.lifecycle)) return false;
-    if (row.ownerPrincipalId === principalId) return true;
+    if (row.ownerPrincipalId === principalId) {
+      // Human ownership never outlives tenant membership. Durable system
+      // principals intentionally have no Space membership and may own hidden
+      // runtime resources, so they are the only owner-only exception.
+      return principalKind(principalId) === "system" || member(principalId, spaceId);
+    }
     if (row.visibility === "private" || row.visibility === "restricted") return false;
     if (row.visibility === "space") return member(principalId, spaceId);
     if (!row.parentId || seen.has(row.id) || seen.size >= 32) {
