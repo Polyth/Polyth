@@ -41,6 +41,13 @@ test("resource access enforces space, owner-only and inherited visibility with m
   activate("op_private", "prj_private", "private");
   activate("op_restricted", "prj_restricted", "restricted");
   activate("op_child", "ses_child", "inherit", "prj_space");
+  const systemBegun = resources.begin({
+    operationId: "op_system", resourceId: "prj_system", kind: "project",
+    orgId: "org_home", spaceId: "spc_home",
+    ownerPrincipalId: "system:polyth-runtime", createdBy: "system:polyth-runtime", visibility: "private",
+  });
+  resources.recordDomainReady("op_system", "prj_system");
+  resources.activate("op_system", systemBegun.resource.revision);
 
   const input = (resourceId: string, principalId: string) => ({ resourceId, principalId, orgId: "org_home", spaceId: "spc_home" });
   assert.equal(access.requireReadable(input("prj_space", "usr_member")).id, "prj_space");
@@ -50,6 +57,7 @@ test("resource access enforces space, owner-only and inherited visibility with m
   assert.equal(access.readable(input("prj_restricted", "usr_member")), undefined);
   assert.equal(access.readable(input("prj_space", "usr_outside")), undefined);
   assert.equal(access.requireReadable(input("prj_space", "usr_expiring")).id, "prj_space");
+  assert.equal(access.requireReadable(input("prj_system", "system:polyth-runtime")).id, "prj_system");
 
   control.transaction(() => control.run("UPDATE resources SET lifecycle='deleting',revision=revision+1 WHERE id='ses_child'"));
   assert.equal(access.readable(input("ses_child", "usr_member")), undefined);
@@ -61,6 +69,10 @@ test("resource access enforces space, owner-only and inherited visibility with m
     ...input("ses_child", "usr_outside"),
     lifecycles: ["active", "archived", "archiving", "deleting"],
   }), undefined);
+
+  control.transaction(() => control.run("UPDATE space_memberships SET state='revoked' WHERE space_id='spc_home' AND principal_id='usr_owner'"));
+  assert.equal(access.readable(input("prj_private", "usr_owner")), undefined);
+  assert.equal(access.requireReadable(input("prj_system", "system:polyth-runtime")).id, "prj_system");
 
   now = 2_000;
   assert.equal(access.readable(input("prj_space", "usr_expiring")), undefined);
