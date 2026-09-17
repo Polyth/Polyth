@@ -36,6 +36,7 @@ jobs:
             packages/plugins/test/lifecycleAuth.test.ts \
             packages/plugins/test/plugins.test.ts \
             packages/plugins/test/spaceSecretVault.test.ts \
+            packages/plugins/test/trustedServerLifecycle.test.ts \
             packages/plugins/test/trustedServerSpaceGate.test.ts \
             packages/secure-safe/test/spaceContextRouting.test.ts \
             packages/secure-safe/test/spaceOwnership.test.ts \
