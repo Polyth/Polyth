@@ -7,6 +7,7 @@ import {
 } from "@polyth/control-plane/outbox";
 import {
   closeAuthSessionSockets,
+  closeAuthUserSessionSockets,
   closeAuthUserSockets,
 } from "@polyth/plugins";
 
@@ -17,19 +18,20 @@ const SESSION_REVOCATION_ACTIONS = new Set([
   "auth.logout",
   "auth.session-revoked",
 ]);
-const USER_REVOCATION_RESOURCE_ACTIONS = new Set([
+const USER_SESSION_REVOCATION_RESOURCE_ACTIONS = new Set([
   "auth.logout-all",
   "auth.password-changed",
   "auth.recovery-used",
   "auth.break-glass-password-reset",
+]);
+const USER_SESSION_REVOCATION_ACTOR_ACTIONS = new Set([
+  "auth.passkey-removed",
+  "identity.unlinked",
+]);
+const USER_AUTHORITY_REVOCATION_ACTIONS = new Set([
   "identity.suspended",
   "identity.offboarding",
   "identity.disabled",
-  "identity.active",
-]);
-const USER_REVOCATION_ACTOR_ACTIONS = new Set([
-  "auth.passkey-removed",
-  "identity.unlinked",
 ]);
 
 export interface AuthorityOutboxStatus {
@@ -63,19 +65,22 @@ export interface AuthorityOutboxOptions {
 
 /**
  * Apply only revocation semantics encoded by canonical identity mutations.
- * Ordinary audit/resource events never disconnect clients. The durable event
- * may be delivered more than once; closing an already-closed socket is safely
- * idempotent because the process-local socket index removes it first.
+ * Session-credential changes close browser sessions but deliberately preserve
+ * paired-device grants. Account lifecycle revocation closes both. Ordinary
+ * audit/resource events never disconnect clients.
  */
 export function invalidateAuthoritySockets(event: Readonly<OutboxEvent>): number {
   if (SESSION_REVOCATION_ACTIONS.has(event.action)) {
     return event.resourceId ? closeAuthSessionSockets(event.resourceId) : 0;
   }
-  if (USER_REVOCATION_RESOURCE_ACTIONS.has(event.action)) {
-    return event.resourceId ? closeAuthUserSockets(event.resourceId) : 0;
+  if (USER_SESSION_REVOCATION_RESOURCE_ACTIONS.has(event.action)) {
+    return event.resourceId ? closeAuthUserSessionSockets(event.resourceId) : 0;
   }
-  if (USER_REVOCATION_ACTOR_ACTIONS.has(event.action)) {
-    return closeAuthUserSockets(event.actorId);
+  if (USER_SESSION_REVOCATION_ACTOR_ACTIONS.has(event.action)) {
+    return closeAuthUserSessionSockets(event.actorId);
+  }
+  if (USER_AUTHORITY_REVOCATION_ACTIONS.has(event.action)) {
+    return event.resourceId ? closeAuthUserSockets(event.resourceId) : 0;
   }
   return 0;
 }
