@@ -1,4 +1,3 @@
-import { acceptAuthenticatedBrowserAccount } from "./authPrefetch.ts";
 import { authJson } from "./authClient.ts";
 
 export interface LoginProvider {
@@ -117,11 +116,6 @@ export async function completePendingProviderCallback(): Promise<{ returnTo: str
   if (!response.ok) {
     clearPending();
     throw fail(response, body);
-  }
-  if (pending.purpose === "login") {
-    const me = await getJson<{ id?: unknown }>("/api/auth/me");
-    if (typeof me.id !== "string" || !me.id) throw new Error("Authenticated account identity is missing");
-    acceptAuthenticatedBrowserAccount(me.id);
   }
   clearPending();
   const serverReturnTo = typeof body.returnTo === "string" ? body.returnTo : pending.returnTo;
