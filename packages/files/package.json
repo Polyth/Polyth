@@ -17,11 +17,7 @@
       "core": true,
       "enabled": true,
       "icon": "files",
-      "hasSettings": true,
-      "category": "workspace",
-      "projectAffinity": {
-        "recommended": true
-      }
+      "hasSettings": false
     }
   },
   "dependencies": {

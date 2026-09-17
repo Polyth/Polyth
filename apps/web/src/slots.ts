@@ -5,9 +5,7 @@
 // React mount, replacement, and disposal all re-render without editing hosts.
 import type { ReactNode } from "react";
 import type { UiSlot } from "@polyth/contracts";
-import type { ProjectAffinity } from "@polyth/contracts/project-composition";
 import { assertOwnerCanReplace } from "./packages/ownership.ts";
-import { isProjectContributionRelevant, subscribeProjectRelevance } from "./packages/projectRelevance.ts";
 
 export type SlotRender = (props: Record<string, unknown>) => ReactNode;
 
@@ -18,7 +16,6 @@ export interface SlotItem {
   /** Optional descriptor payload (e.g. settingsItems for item-level search). */
   meta?: Record<string, unknown>;
   ownerPackageId?: string;
-  projectAffinity?: ProjectAffinity;
 }
 
 const registry = new Map<UiSlot, Map<string, SlotItem>>();
@@ -30,15 +27,12 @@ function bump(): void {
   for (const l of [...listeners]) l();
 }
 
-subscribeProjectRelevance(bump);
-
 /** Register (or same-owner replace by id within the slot). Cross-owner
  *  collisions throw. Returns an unregister that removes only its own
  *  registration — a superseded off() is a no-op. */
 export function registerSlot(
   slot: UiSlot, id: string, render: SlotRender, order = 0, meta?: Record<string, unknown>,
   ownerPackageId?: string,
-  projectAffinity?: ProjectAffinity,
 ): () => void {
   const items = registry.get(slot) ?? new Map<string, SlotItem>();
   const existing = items.get(id);
@@ -50,17 +44,12 @@ export function registerSlot(
       nextOwner: ownerPackageId,
     });
   }
-  const resolvedAffinity = projectAffinity
-    ?? (meta?.projectAffinity && typeof meta.projectAffinity === "object"
-      ? meta.projectAffinity as ProjectAffinity
-      : undefined);
   const item: SlotItem = {
     id,
     order,
     render,
     ...(meta ? { meta } : {}),
     ...(ownerPackageId ? { ownerPackageId } : {}),
-    ...(resolvedAffinity ? { projectAffinity: resolvedAffinity } : {}),
   };
   items.set(id, item);
   registry.set(slot, items);
@@ -74,17 +63,9 @@ export function registerSlot(
   };
 }
 
-/** Raw registration probe. Unlike listSlots(), this intentionally ignores
- * project relevance so lifecycle code can distinguish an irrelevant mounted
- * contribution from a package that simply has not registered yet. */
-export function hasSlotRegistration(slot: UiSlot, id: string): boolean {
-  return registry.get(slot)?.has(id) === true;
-}
-
 /** Deterministic listing: `order` then `id`, independent of registration time. */
 export function listSlots(slot: UiSlot): SlotItem[] {
   return [...(registry.get(slot)?.values() ?? [])]
-    .filter((item) => isProjectContributionRelevant(item.ownerPackageId, item.projectAffinity))
     .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
 }
 

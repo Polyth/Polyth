@@ -103,12 +103,6 @@ export function getViewportMetrics(): ViewportMetrics {
   return metrics;
 }
 
-/** Subscribe to viewport geometry changes without requiring a React render. */
-export function subscribeViewport(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => { listeners.delete(listener); };
-}
-
 function publish(next: ViewportMetrics): void {
   if (
     next.height === metrics.height
@@ -196,7 +190,10 @@ export function setNativeKeyboardInset(height: number): void {
 
 export function useViewportMetrics(): ViewportMetrics {
   return useSyncExternalStore(
-    subscribeViewport,
+    (listener) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
     getViewportMetrics,
     () => INITIAL,
   );
@@ -216,8 +213,7 @@ export function dismissKeyboard(): Promise<void> {
   if (typeof document === "undefined") return Promise.resolve();
   const active = document.activeElement as HTMLElement | null;
   if (active && active.matches?.(TEXT_ENTRY)) active.blur();
-  const current = getViewportMetrics();
-  if (current.keyboardInset === 0 && !current.covering) return Promise.resolve();
+  if (getViewportMetrics().keyboardInset === 0) return Promise.resolve();
   return new Promise((resolve) => {
     const raf = typeof requestAnimationFrame === "function"
       ? requestAnimationFrame

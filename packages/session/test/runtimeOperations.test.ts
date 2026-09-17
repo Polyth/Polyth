@@ -306,56 +306,6 @@ test("observation claim, canonical events, checkpoint, and cursor are one durabl
     store = createStore(path);
     assert.deepEqual((await store.observationCheckpoint(entityKey))?.value, { text: "hello" });
     assert.equal(await store.observationCursor(cursorKey), "cursor-2");
-
-    const toolIdentity: ObservationIdentity = {
-      ...identity,
-      generation: 2,
-      artifactKind: "tool",
-      entityId: "call-a",
-      revision: "state:completed",
-    };
-    const toolKey: ObservationEntityKey = {
-      authorityId: toolIdentity.authorityId,
-      location: toolIdentity.location,
-      backendSessionId: toolIdentity.backendSessionId,
-      artifactKind: "tool",
-      entityId: "call-a",
-    };
-    const batch = await store.ingestObservation({
-      sessionId: "session-a",
-      identity: toolIdentity,
-      reconciliationOrdinal: secondReconciliation.ordinal,
-      events: [
-        { type: "tool/call", data: { callId: "call-a", tool: "write", input: { path: "a.txt" } } },
-        { type: "tool/result", data: { callId: "call-a", tool: "write", output: "ok" } },
-      ],
-      checkpoint: { stateRank: 2, value: { status: "completed", tool: "write" } },
-    });
-    assert.equal(batch.kind, "applied");
-    assert.equal(batch.events.length, 2);
-    assert.equal((await store.observationCheckpoint(toolKey))?.stateRank, 2);
-    assert.equal(
-      (await store.events("session-a")).filter((event) => event.type === "tool/call").length,
-      1,
-    );
-
-    const stale = await store.ingestObservation({
-      sessionId: "session-a",
-      identity: { ...toolIdentity, revision: "state:pending" },
-      reconciliationOrdinal: secondReconciliation.ordinal,
-      events: [{ type: "tool/call", data: { callId: "call-a", tool: "write", input: {} } }],
-      checkpoint: { stateRank: 0, value: { status: "pending", tool: "write" } },
-    });
-    assert.equal(stale.kind, "duplicate");
-    assert.equal((await store.observationCheckpoint(toolKey))?.stateRank, 2);
-    assert.equal(
-      (await store.events("session-a")).filter((event) => event.type === "tool/call").length,
-      1,
-    );
-    assert.equal(
-      (await store.events("session-a")).filter((event) => event.type === "tool/result").length,
-      1,
-    );
   } finally {
     await store.close();
     rmSync(dir, { recursive: true, force: true });

@@ -12,7 +12,7 @@ import type {
   TokenUsage,
 } from "@polyth/contracts";
 import type { Store as SessionStore } from "@polyth/session";
-import { classifyProviderLimit, isModelUnavailableError } from "./providerLimit.ts";
+import { classifyProviderLimit } from "./providerLimit.ts";
 import { v2FormQuestionOf } from "./v2Forms.ts";
 
 export interface OcEvent {
@@ -679,12 +679,7 @@ export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEve
         state.toolCalls.set(callId, "pending");
         out.push({ type: "tool/call", callId, tool, input, status: "pending" });
       }
-      if (
-        status === "running"
-        && previousToolStatus !== "running"
-        && previousToolStatus !== "completed"
-        && previousToolStatus !== "error"
-      ) {
+      if (status === "running" && previousToolStatus !== "running") {
         state.toolCalls.set(callId, "running");
         if (previousToolStatus === "pending") {
           out.push({ type: "tool/started", callId, tool, input });
@@ -883,11 +878,6 @@ export const providerLimitOf = (ev: OcEvent): RateLimitRetryHint | undefined => 
   return classifyProviderLimit(ev.properties?.error) ?? undefined;
 };
 
-/** True when the failure is the provider refusing the selected model for this
- *  account/plan. Waiting cannot clear it; only choosing another model can. */
-export const modelUnavailableOf = (ev: OcEvent): boolean =>
-  ev.type === "session.error" && isModelUnavailableError(ev.properties?.error);
-
 // ------------------------------------------------ semantic observation ingestion
 
 export type ObservationChannel = "sse" | "pull";
@@ -906,25 +896,9 @@ export interface NormalizeOcObservationInput {
   observed: ObservationBinding;
   current: ObservationBinding;
   state?: TranslateState;
-  /** Durable checkpoint of the observed entity, when the caller already
-   * resolved it. Otherwise `checkpoints` is indexed by semantic identity. */
   checkpoint?: ObservationCheckpoint;
-  checkpoints?: ReadonlyMap<string, ObservationCheckpoint>;
   cursorAfter?: string;
 }
-
-export const observationCheckpointKey = (
-  artifactKind: ObservationArtifactKind,
-  entityId: string,
-): string => `${artifactKind}:${entityId}`;
-
-export const indexObservationCheckpoints = (
-  checkpoints: readonly ObservationCheckpoint[] | undefined,
-): ReadonlyMap<string, ObservationCheckpoint> =>
-  new Map((checkpoints ?? []).map((checkpoint) => [
-    observationCheckpointKey(checkpoint.key.artifactKind, checkpoint.key.entityId),
-    checkpoint,
-  ]));
 
 export interface NormalizedOcObservation {
   channel: ObservationChannel;
@@ -942,6 +916,36 @@ export interface NormalizedOcObservation {
     message: string;
   };
 }
+
+/** Multi-event translations use stable per-event revisions so live SSE and
+ * pull reconstruction can claim the same canonical facts independently. The
+ * checkpoint/cursor belongs to the final member, after the whole batch. */
+export const splitNormalizedObservation = (
+  observation: NormalizedOcObservation,
+): NormalizedOcObservation[] => {
+  if (observation.events.length <= 1) return [observation];
+  const {
+    events,
+    checkpoint,
+    cursorAfter,
+    uncertainty,
+    ...shared
+  } = observation;
+  return events.map((event, index) => {
+    const final = index === events.length - 1;
+    return {
+      ...shared,
+      identity: {
+        ...observation.identity,
+        revision: `${observation.identity.revision}#${index}`,
+      },
+      events: [event],
+      ...(final && checkpoint ? { checkpoint } : {}),
+      ...(final && cursorAfter ? { cursorAfter } : {}),
+      ...(final && uncertainty ? { uncertainty } : {}),
+    };
+  });
+};
 
 export type OcObservationNormalization =
   | { kind: "accepted"; observation: NormalizedOcObservation }
@@ -1307,12 +1311,6 @@ const checkpointText = (
   };
 };
 
-const TOOL_STATUSES = new Set(["pending", "running", "completed", "error"]);
-
-/** Re-observing a native artifact must derive only the canonical facts Polyth
- * does not already hold. The durable checkpoint is that memory: a restarted
- * pull sees the final tool state, so without priming it would re-derive the
- * call that live translation already canonicalized. */
 const prepareStateFromCheckpoint = (
   state: TranslateState,
   ev: OcEvent,
@@ -1320,17 +1318,6 @@ const prepareStateFromCheckpoint = (
 ): OcObservationNormalization | undefined => {
   const part = asRecord(ev.properties?.part);
   if (ev.type !== "message.part.updated" || typeof part?.id !== "string") return undefined;
-  if (part.type === "tool") {
-    const value = checkpoint?.value;
-    const status = typeof value?.status === "string" ? value.status : "";
-    const callId = typeof part.callID === "string" && part.callID ? part.callID : part.id;
-    if (value && TOOL_STATUSES.has(status) && !state.toolCalls.has(callId)) {
-      state.toolCalls.set(callId, status as "pending" | "running" | "completed" | "error");
-      if (typeof value.tool === "string") state.toolNames.set(callId, value.tool);
-      if (value.input) state.toolInputs.set(callId, asJsonObject(value.input));
-    }
-    return undefined;
-  }
   const prior = checkpointText(checkpoint);
   if (!prior) return undefined;
   const nextText = typeof part.text === "string" ? part.text : "";
@@ -1348,21 +1335,14 @@ const prepareStateFromCheckpoint = (
   return undefined;
 };
 
-/** Compare a re-observed artifact against its durable checkpoint once, for the
- * whole source observation. An already-passed state rank is not new evidence;
- * an equal rank carrying the same payload is already fully derived; an equal
- * rank carrying different content cannot be merged without guessing. */
-const rankVerdict = (
+const terminalPayloadChanged = (
   identity: SemanticIdentity,
   checkpoint: ObservationCheckpoint | undefined,
-): "fresh" | "stale" | "seen" | "changed" => {
-  if (identity.stateRank === undefined || checkpoint?.stateRank === undefined) return "fresh";
-  if (identity.stateRank < checkpoint.stateRank) return "stale";
-  if (identity.stateRank > checkpoint.stateRank) return "fresh";
-  return JSON.stringify(identity.checkpoint ?? {}) === JSON.stringify(checkpoint.value)
-    ? "seen"
-    : "changed";
-};
+): boolean =>
+  identity.artifactKind === "tool"
+  && identity.stateRank === 2
+  && checkpoint?.stateRank === 2
+  && JSON.stringify(identity.checkpoint ?? {}) !== JSON.stringify(checkpoint.value);
 
 /**
  * Normalize either an SSE envelope or a pull/history reconstruction. Channel
@@ -1399,15 +1379,11 @@ export const normalizeOcObservation = (
     };
   }
 
-  const checkpoint = input.checkpoint
-    ?? input.checkpoints?.get(observationCheckpointKey(semantic.artifactKind, semantic.entityId));
-  const verdict = rankVerdict(semantic, checkpoint);
-  if (verdict === "stale") return { kind: "stale" };
-  const prepared = verdict === "seen" ? undefined : prepareStateFromCheckpoint(state, ev, checkpoint);
+  const prepared = prepareStateFromCheckpoint(state, ev, input.checkpoint);
   const divergent = prepared?.kind === "suppressed";
-  const terminalChanged = verdict === "changed";
+  const terminalChanged = terminalPayloadChanged(semantic, input.checkpoint);
   let events: RuntimeEvent[] = [];
-  if (!divergent && !terminalChanged && verdict !== "seen") {
+  if (!divergent && !terminalChanged) {
     const part = asRecord(ev.properties?.part);
     const messageId = typeof part?.messageID === "string" ? part.messageID : "";
     const explicitlyUser = ev.properties?.role === "user";
@@ -1457,7 +1433,7 @@ export const normalizeOcObservation = (
           ? {
               uncertainty: {
                 code: "terminal-payload-changed" as const,
-                message: "payload changed at an already observed state rank",
+                message: "tool payload changed at an already observed terminal rank",
               },
             }
           : {}),

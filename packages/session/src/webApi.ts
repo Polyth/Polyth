@@ -44,7 +44,6 @@ import type {
   Project,
   ProjectCloneInput,
   ProjectPatch,
-  ProjectPresentationSettingsDto,
   QueueItemDto,
   ResumeTurnOptions,
   RuntimeDiagnosticsDto,
@@ -664,16 +663,6 @@ export const api = {
   deleteProject: (id: string) => jfetch<void>(`/api/projects/${id}`, { method: "DELETE" }),
   patchProject: (id: string, patch: ProjectPatch) =>
     jfetch<Project>(`/api/projects/${id}`, json("PATCH", patch)),
-  projectPresentationSettings: (projectId: string) =>
-    jfetch<ProjectPresentationSettingsDto>(`/api/projects/${encodeURIComponent(projectId)}/settings`),
-  projectPresentationSettingsSave: (
-    projectId: string,
-    settings: Record<string, unknown>,
-    opts?: { keepalive?: boolean },
-  ) => jfetch<ProjectPresentationSettingsDto>(`/api/projects/${encodeURIComponent(projectId)}/settings`, {
-    ...json("PUT", { settings }),
-    ...(opts?.keepalive ? { keepalive: true } : {}),
-  }),
 
   listSessions: (projectId: string) => jfetch<SessionProjection[]>(`/api/sessions?projectId=${encodeURIComponent(projectId)}`),
   createSession: (input: { projectId: string; harness?: HarnessSelection; title?: string; model?: ModelRef; agent?: string; worktreePath?: string }) =>
@@ -698,10 +687,7 @@ export const api = {
     jfetch<SendResult>(`/api/sessions/${id}/message`, json("POST", body)),
   runtimeFeatures: (id: string) =>
     jfetch<RuntimeFeaturesDto>(`/api/harnesses/sessions/${encodeURIComponent(id)}/features`),
-  abort: (id: string, source?: string) => jfetch<void>(
-    `/api/sessions/${id}/abort`,
-    json("POST", source ? { source } : { source: "http" }),
-  ),
+  abort: (id: string) => jfetch<void>(`/api/sessions/${id}/abort`, { method: "POST" }),
   compact: (id: string) => jfetch<{ ok: true }>(`/api/sessions/${id}/compact`, { method: "POST" }),
   /** Drop a pending rate-limit auto-resume; the session stays failed. */
   cancelResume: (id: string) =>
@@ -1178,25 +1164,6 @@ export const api = {
         rows.map((r) => (typeof r === "string" ? { path: r, kind: "file", score: 0, matches: [] } : r)),
       )
       .catch((): FileSearchHitDto[] => []),
-  filesInlineAiSettingsGet: () =>
-    jfetch<{ explainPrompt: string; fixPrompt: string; modelOverride?: string }>("/api/files/inline-ai/settings"),
-  filesInlineAiSettingsPut: (settings: {
-    explainPrompt?: string;
-    fixPrompt?: string;
-    modelOverride?: string;
-  }) => jfetch<{ explainPrompt: string; fixPrompt: string; modelOverride?: string }>(
-    "/api/files/inline-ai/settings",
-    json("PUT", settings),
-  ),
-  filesInlineAi: (input: {
-    action: "explain" | "fix";
-    projectId: string;
-    path: string;
-    selection: string;
-    language?: string;
-    sessionId?: string;
-  }) => jfetch<{ text: string }>("/api/files/inline-ai", json("POST", input)),
-
   /** Palette project/session search (WP13); metadata only. */
   searchWorkspaces: (q: string, limit = 10, archived = false) =>
     jfetch<{ items: WorkspaceSearchItemDto[] }>(
@@ -1533,7 +1500,7 @@ export const api = {
   controlFork: (sessionId: string, atSeq?: number) =>
     jfetch<SessionRef>(`/api/sessions/${encodeURIComponent(sessionId)}/fork`, json("POST", atSeq === undefined ? {} : { atSeq })),
   controlAbort: (sessionId: string) =>
-    jfetch<{ ok: true }>(`/api/sessions/${encodeURIComponent(sessionId)}/abort`, json("POST", { source: "control" })),
+    jfetch<{ ok: true }>(`/api/sessions/${encodeURIComponent(sessionId)}/abort`, { method: "POST" }),
 
   // ---- commands + snippets CRUD ------------------------------------------------
   saveCommand: (projectId: string, scope: "user" | "project", cmd: { name: string; prompt: string; description?: string; agent?: string; model?: string }) =>

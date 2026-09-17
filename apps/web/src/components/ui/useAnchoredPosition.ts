@@ -8,7 +8,6 @@
 //   * returns a maxHeight so long surfaces scroll internally instead of
 //     overflowing the screen.
 import { useLayoutEffect, useState, type RefObject } from "react";
-import { getViewportMetrics, subscribeViewport } from "../../mobileViewport.ts";
 
 export type AnchoredAlign = "start" | "center" | "end";
 export type AnchoredSide = "down" | "up" | "left" | "right";
@@ -22,8 +21,7 @@ export interface AnchoredPositionOptions {
   margin?: number;
   /** Preferred side (default down). */
   side?: AnchoredSide;
-  /** Keep the opening anchor during content-driven changes; compact surfaces
-   * re-anchor when the keyboard inset or layout size changes. */
+  /** Keep the opening anchor rectangle during content-driven layout changes. */
   stableAnchor?: boolean;
   /** Compact phone picker caps: ~360px width, ~52% visual viewport height. */
   compact?: boolean;
@@ -50,10 +48,10 @@ function readPx(value: string): number {
 }
 
 function safeInsets(): { top: number; right: number; bottom: number; left: number } {
-  if (typeof document === "undefined" || typeof window === "undefined") {
+  if (typeof document === "undefined") {
     return { top: 0, right: 0, bottom: 0, left: 0 };
   }
-  const styles = window.getComputedStyle(document.documentElement);
+  const styles = getComputedStyle(document.documentElement);
   return {
     top: readPx(styles.getPropertyValue("--safe-top")),
     right: readPx(styles.getPropertyValue("--safe-right")),
@@ -63,14 +61,14 @@ function safeInsets(): { top: number; right: number; bottom: number; left: numbe
 }
 
 function screenGutter(): number {
-  if (typeof document === "undefined" || typeof window === "undefined") return 8;
-  const styles = window.getComputedStyle(document.documentElement);
+  if (typeof document === "undefined") return 8;
+  const styles = getComputedStyle(document.documentElement);
   return readPx(styles.getPropertyValue("--screen-gutter")) || 8;
 }
 
 function visualViewportHeight(): number {
-  if (typeof window === "undefined") return 0;
-  return window.visualViewport?.height ?? window.innerHeight;
+  const vv = typeof window !== "undefined" ? window.visualViewport : null;
+  return vv?.height ?? window.innerHeight;
 }
 
 /** The band the user can actually see: honors the software keyboard. */
@@ -122,25 +120,12 @@ export function useAnchoredPosition(
     }
 
     let openingAnchor: DOMRect | undefined;
-    const reanchorOnViewportChange = stableAnchor && compact;
-    let pointerActive = false;
-    let pendingReanchor = false;
-    let lastMetrics = { ...getViewportMetrics() };
-    const update = (viewportChanged = false) => {
-      // Keep the surface still while a finger is down so harness tabs cannot
-      // slide out from under the press. Flush the keyboard re-anchor after.
-      if (pointerActive && reanchorOnViewportChange) {
-        if (viewportChanged) pendingReanchor = true;
-        return;
-      }
+    const update = () => {
       const anchor = anchorRef.current;
       const surface = surfaceRef.current;
       if (!anchor || !surface) return;
       const band = visibleBand();
       const edgeMargin = compact ? Math.max(margin, screenGutter()) : margin;
-      // Ignore catalog reflow and Safari visual-viewport pans. Re-anchor only
-      // when the keyboard inset/covering or the layout size actually changes.
-      if (stableAnchor && viewportChanged && compact) openingAnchor = undefined;
       const anchorRect = stableAnchor
         ? (openingAnchor ??= anchor.getBoundingClientRect())
         : anchor.getBoundingClientRect();
@@ -225,53 +210,21 @@ export function useAnchoredPosition(
       });
     };
 
-    const onSizeChange = () => update(reanchorOnViewportChange);
-    const onPageScroll = () => update();
-    const onVisualScroll = () => update();
-    const onFrame = () => update();
-    const onObservedResize = () => update();
-    const onPointerDown = (event: PointerEvent) => {
-      if (event.isPrimary === false) return;
-      pointerActive = true;
-    };
-    const onPointerUp = (event: PointerEvent) => {
-      if (event.isPrimary === false) return;
-      pointerActive = false;
-      if (!pendingReanchor) return;
-      pendingReanchor = false;
-      update(true);
-    };
-    const onViewportSubscription = () => {
-      const next = getViewportMetrics();
-      const keyboardOrSizeChanged = next.height !== lastMetrics.height
-        || next.keyboardInset !== lastMetrics.keyboardInset
-        || next.covering !== lastMetrics.covering;
-      lastMetrics = next;
-      update(reanchorOnViewportChange && keyboardOrSizeChanged);
-    };
     update();
-    const frame = requestAnimationFrame(onFrame);
-    window.addEventListener("resize", onSizeChange);
-    window.addEventListener("scroll", onPageScroll, true);
-    window.addEventListener("pointerdown", onPointerDown, true);
-    window.addEventListener("pointerup", onPointerUp, true);
-    window.addEventListener("pointercancel", onPointerUp, true);
-    window.visualViewport?.addEventListener("resize", onSizeChange);
-    window.visualViewport?.addEventListener("scroll", onVisualScroll);
-    const unsubscribeViewport = compact ? subscribeViewport(onViewportSubscription) : undefined;
-    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(onObservedResize);
+    const frame = requestAnimationFrame(update);
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    window.visualViewport?.addEventListener("resize", update);
+    window.visualViewport?.addEventListener("scroll", update);
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(update);
     if (anchorRef.current) observer?.observe(anchorRef.current);
     if (surfaceRef.current) observer?.observe(surfaceRef.current);
     return () => {
       cancelAnimationFrame(frame);
-      window.removeEventListener("resize", onSizeChange);
-      window.removeEventListener("scroll", onPageScroll, true);
-      window.removeEventListener("pointerdown", onPointerDown, true);
-      window.removeEventListener("pointerup", onPointerUp, true);
-      window.removeEventListener("pointercancel", onPointerUp, true);
-      window.visualViewport?.removeEventListener("resize", onSizeChange);
-      window.visualViewport?.removeEventListener("scroll", onVisualScroll);
-      unsubscribeViewport?.();
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+      window.visualViewport?.removeEventListener("resize", update);
+      window.visualViewport?.removeEventListener("scroll", update);
       observer?.disconnect();
     };
   }, [open, anchorRef, surfaceRef, align, gap, margin, side, stableAnchor, compact]);

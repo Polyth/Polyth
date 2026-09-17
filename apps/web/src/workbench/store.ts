@@ -53,15 +53,10 @@ import {
   emptyWorkbenchPrefs,
   profileRecord,
   readWorkbenchPrefs,
-  reloadWorkbenchPrefs,
   writeWorkbenchPrefs,
   type WorkbenchPrefs,
   type WorkbenchProfileRecord,
 } from "./prefs.ts";
-import {
-  PROJECT_PRESENTATION_HYDRATED_EVENT,
-  projectPresentationEventProjectId,
-} from "../projectPresentationSync.ts";
 
 interface WorkbenchRuntime {
   projectId: string | null;
@@ -233,21 +228,6 @@ subscribeWorkbenchProfiles(() => {
   reconcileActiveProfile();
   notify();
 });
-
-if (typeof window !== "undefined") {
-  window.addEventListener(PROJECT_PRESENTATION_HYDRATED_EVENT, (event) => {
-    const projectId = projectPresentationEventProjectId(event);
-    if (projectId === null || projectId !== runtime.projectId) return;
-    const prefs = reloadWorkbenchPrefs(projectId);
-    const activeProfile = resolveProfile(prefs.activeProfile);
-    runtime = {
-      ...runtime,
-      prefs: withProfile({ ...prefs, activeProfile }, activeProfile),
-      phoneFocus: null,
-    };
-    notify();
-  });
-}
 
 /** Reset one profile (default: the active one) to its package-defined layout.
  *  Other profiles are untouched. */

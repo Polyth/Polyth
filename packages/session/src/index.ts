@@ -269,10 +269,6 @@ export interface Store extends SessionPersistence {
   ingestObservation(input: ObservationIngestionInput): Promise<ObservationIngestionResult>;
   ingestSnapshot(input: SnapshotIngestionInput): Promise<SnapshotIngestionResult>;
   observationCheckpoint(key: ObservationEntityKey): Promise<ObservationCheckpoint | undefined>;
-  /** Every entity checkpoint durably recorded for one backend session. */
-  observationCheckpoints(
-    key: Omit<ObservationEntityKey, "artifactKind" | "entityId">,
-  ): Promise<ObservationCheckpoint[]>;
   observationCursor(key: ObservationCursorKey): Promise<string | undefined>;
   // -- durable admission barrier --
   startReconciliation(sessionId: string): Promise<DurableReconciliation>;
@@ -1654,7 +1650,6 @@ export function createStore(dbPath: string): Store {
         ...(projection.runtimeLeg ? { closedLeg: { ...projection.runtimeLeg, endedAt: Date.now() } } : {}),
         leg: { ...input.harness.leg },
       }, { ignorable: true });
-      const sameHarnessFreshLeg = input.harness?.leg.harnessId === projection.resolvedHarnessId;
       const nextProjection: SessionProjection = {
         ...projection,
         ...(input.harness ? {
@@ -1662,12 +1657,10 @@ export function createStore(dbPath: string): Store {
           resolvedHarnessId: input.harness.leg.harnessId,
           runtimeLeg: input.harness.leg,
           harnessTransition: undefined,
-          ...(sameHarnessFreshLeg ? { contextWindow: undefined } : {
-            model: undefined,
-            agent: undefined,
-            agentProfileId: undefined,
-            contextWindow: undefined,
-          }),
+          model: undefined,
+          agent: undefined,
+          agentProfileId: undefined,
+          contextWindow: undefined,
         } : projection.runtimeLeg ? { runtimeLeg: { ...projection.runtimeLeg, id: randomUUID(), nativeSessionId: replacement.backendSessionId, startedAt: Date.now(), canonicalThroughSeq: 0, bootstrap: "continuity" as const } } : {}),
         backendSessionId: replacement.backendSessionId,
         runtimeBinding: replacement,
@@ -2657,21 +2650,6 @@ export function createStore(dbPath: string): Store {
     return Promise.resolve(row ? rowToCheckpoint(row) : undefined);
   }
 
-  function observationCheckpoints(
-    key: Omit<ObservationEntityKey, "artifactKind" | "entityId">,
-  ): Promise<ObservationCheckpoint[]> {
-    const rows = prep(
-      `SELECT * FROM observation_checkpoints
-       WHERE authority_id = ? AND directory = ? AND workspace = ? AND backend_session_id = ?`,
-    ).all(
-      key.authorityId,
-      key.location.directory,
-      key.location.workspace ?? "",
-      key.backendSessionId,
-    ) as unknown as CheckpointRow[];
-    return Promise.resolve(rows.map(rowToCheckpoint));
-  }
-
   const cursorKeyArgs = (key: ObservationCursorKey): [
     string,
     string,
@@ -2814,7 +2792,19 @@ export function createStore(dbPath: string): Store {
         && priorCheckpoint?.state_rank !== null
         && priorCheckpoint !== undefined
       ) {
-        const claimExisting = (): ObservationIngestionResult => {
+        if (input.checkpoint.stateRank < Number(priorCheckpoint.state_rank)) {
+          throw Object.assign(new Error("observation state rank regressed"), {
+            code: "observation-regressive",
+          });
+        }
+        if (input.checkpoint.stateRank === Number(priorCheckpoint.state_rank)) {
+          const same = JSON.stringify(input.checkpoint.value) === priorCheckpoint.value;
+          if (!same) {
+            throw Object.assign(
+              new Error("observation payload changed at an already-emitted state rank"),
+              { code: "observation-uncertain" },
+            );
+          }
           const latest = prep(
             `SELECT session_id, canonical_seqs FROM observations
              WHERE authority_id = ? AND directory = ? AND workspace = ?
@@ -2845,23 +2835,6 @@ export function createStore(dbPath: string): Store {
             events: latest ? eventsAtSeqs(latest.session_id, seqs) : [],
             checkpoint: rowToCheckpoint(priorCheckpoint),
           };
-        };
-        if (input.checkpoint.stateRank < Number(priorCheckpoint.state_rank)) {
-          // Older pending/running after a completed source is not new evidence.
-          // Channel/ordinal must not force a history append or a thrown fence:
-          // live SSE can replay an earlier native state after pull already
-          // canonicalized the terminal one.
-          return claimExisting();
-        }
-        if (input.checkpoint.stateRank === Number(priorCheckpoint.state_rank)) {
-          const same = JSON.stringify(input.checkpoint.value) === priorCheckpoint.value;
-          if (!same) {
-            throw Object.assign(
-              new Error("observation payload changed at an already-emitted state rank"),
-              { code: "observation-uncertain" },
-            );
-          }
-          return claimExisting();
         }
       }
 
@@ -3728,7 +3701,6 @@ export function createStore(dbPath: string): Store {
     ingestObservation,
     ingestSnapshot,
     observationCheckpoint,
-    observationCheckpoints,
     observationCursor,
     startReconciliation,
     reconciliation,

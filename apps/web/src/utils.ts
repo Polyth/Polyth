@@ -312,19 +312,23 @@ function activityEnd(item: ActivityItem): number {
       : item.time;
 }
 
-/** Any textual assistant part that is already visible is a reading surface.
- * The runtime can emit assistant chunks before the final assistant/message
- * event, so waiting for `finalized` would leave a later tool in the same
- * activity block and render its live copy above the visible prose. */
-function isVisibleTextAnswer(item: ActivityItem): item is AssistantMsg {
-  return item.kind === "assistant" && item.text.trim() !== "";
+/** A finalized assistant part can be a visible progress answer even though
+ *  the same turn later resumes with more tools. The reducer's completion time
+ *  distinguishes that shape from the legacy case where one assistant part
+ *  started before a tool and was finalized after it. */
+function isCompletedTextAnswer(item: ActivityItem): item is AssistantMsg {
+  return item.kind === "assistant"
+    && item.finalized
+    && item.text.trim() !== ""
+    && item.completedAt !== undefined;
 }
 
 /** Project one turn into alternating activity groups and reading surfaces.
- * Reasoning, tools, and task deltas become an expandable group. Visible text
- * followed by later activity is a reading surface in its own right, so the
- * resumed work gets a new group below it instead of overlaying that text.
- * This is display-only derivation over already-recorded events. */
+ * Interim assistant prose, reasoning, tools, and task deltas become an
+ * expandable group. A finalized textual part followed by later activity is a
+ * reading surface in its own right, so the resumed work gets a new group
+ * below it instead of overlaying that text. This is display-only derivation
+ * over already-recorded events. */
 export function groupActivity(messages: RenderMessage[]): Array<RenderMessage | ActivityGroup> {
   const out: Array<RenderMessage | ActivityGroup> = [];
   let segment: ActivityItem[] = [];
@@ -373,12 +377,10 @@ export function groupActivity(messages: RenderMessage[]): Array<RenderMessage | 
     const answerIndexes = new Set<number>();
     for (let index = 0; index < segment.length; index += 1) {
       const item = segment[index]!;
-      if (index === finalIndex || !isVisibleTextAnswer(item)) continue;
-      // Text that is already visible before a later item is a real reading
-      // surface in the middle of the turn, even while it is still streaming.
-      // The reducer preserves event order in this segment; timestamps and
-      // eventSeq can differ for copied/reconciled provider history.
-      if (index < segment.length - 1) {
+      if (index === finalIndex || !isCompletedTextAnswer(item)) continue;
+      // This part completed before a later item started. It is a real reading
+      // surface in the middle of the turn, not activity to hide in a fold.
+      if (segment.slice(index + 1).some((later) => later.time >= item.completedAt!)) {
         answerIndexes.add(index);
       }
     }

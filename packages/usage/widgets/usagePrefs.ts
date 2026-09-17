@@ -83,8 +83,6 @@ export function groupQuotaWindows<W extends QuotaWindowLike>(windows: readonly W
 export interface UsagePrefs {
   /** Provider ids unchecked in Settings → Usage; stay hidden after reload. */
   hiddenProviders: string[];
-  /** Dashboard block ids hidden from the overview via the edit-mode eye. */
-  hiddenBlocks: string[];
   /** Provider cards explicitly kept ahead of the regular provider order. */
   pinnedProviders: string[];
   /** Collapsed quota groups as "providerId/family" keys. */
@@ -123,7 +121,6 @@ export function parseUsagePrefs(raw: string | null): UsagePrefs {
     const dashboard = data.dashboard as Partial<UsageDashboardPrefs> | undefined;
     return {
       hiddenProviders: stringList(data.hiddenProviders),
-      hiddenBlocks: stringList(data.hiddenBlocks),
       pinnedProviders: stringList(data.pinnedProviders),
       collapsedGroups: stringList(data.collapsedGroups),
       dashboard: {
@@ -139,7 +136,6 @@ export function parseUsagePrefs(raw: string | null): UsagePrefs {
   } catch {
     return {
       hiddenProviders: [],
-      hiddenBlocks: [],
       pinnedProviders: [],
       collapsedGroups: [],
       dashboard: { ...DEFAULT_DASHBOARD_PREFS },
@@ -169,10 +165,6 @@ const toggled = (list: string[], entry: string, on: boolean): string[] =>
 
 export function setProviderHidden(providerId: string, hidden: boolean): void {
   save({ ...prefs, hiddenProviders: toggled(prefs.hiddenProviders, providerId, hidden) });
-}
-
-export function setBlockHidden(blockId: string, hidden: boolean): void {
-  save({ ...prefs, hiddenBlocks: toggled(prefs.hiddenBlocks, blockId, hidden) });
 }
 
 export function setProviderPinned(providerId: string, pinned: boolean): void {

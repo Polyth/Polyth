@@ -3,6 +3,7 @@ import type {
   ProviderConfigPort,
   RouteHandler,
 } from "@polyth/contracts";
+import { requireInstanceOwnerAuthority } from "@polyth/contracts/instance-authority";
 import { serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import {
   validateAuthMode,
@@ -74,8 +75,10 @@ export function customProviderRoutes(host: ServerPackageHost, listModels: () => 
     });
   };
 
-  return async ({ path, method, body, json }) => {
+  return async (request) => {
+    const { path, method, body, json } = request;
     if (!path.startsWith("/api/providers/custom")) return false;
+    requireInstanceOwnerAuthority(request, "custom provider changes require the instance owner");
     try {
       if (path === "/api/providers/custom" && method === "POST") {
         const input = parseInput(await body());

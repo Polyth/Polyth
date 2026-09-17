@@ -2,12 +2,16 @@
 // directly above the composer as compact selectors — no permanent Project /
 // Branch labels, no full-width fields in the middle of the screen. The whole
 // name is the touch target (never a 12px chevron), long names truncate with an
-// ellipsis instead of widening the viewport, and both use the shared picker.
-import { useId } from "react";
+// ellipsis instead of widening the viewport, and both open the shared sheet.
+import { useId, useState } from "react";
+import Sheet, { SheetRow } from "./Sheet.tsx";
 import Picker from "../Picker.tsx";
 import Switch from "../ui/Switch.tsx";
 import { Icon } from "../../icons.tsx";
+import { dismissKeyboard } from "../../mobileViewport.ts";
+import { useSheetTrigger } from "./sheetTrigger.ts";
 import { tr } from "../../i18n/index.ts";
+import { useShellMode } from "../../responsiveShell.ts";
 
 export interface ContextChoice {
   id: string;
@@ -21,6 +25,7 @@ function ContextSelector({
   selectedId,
   choices,
   disabled,
+  sheetTitle,
   ariaLabel,
   onPick,
   onOpen,
@@ -32,41 +37,107 @@ function ContextSelector({
   selectedId?: string;
   choices: ContextChoice[];
   disabled?: boolean;
+  sheetTitle: string;
   ariaLabel: string;
   onPick: (id: string) => void;
   onOpen?: () => void;
   onRefresh?: () => void;
   refreshing?: boolean;
 }) {
+  const phone = useShellMode() === "phone";
+  const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState("");
   const current = selectedId ?? choices.find((choice) => choice.label === value)?.id;
-  const label = kind === "project"
-    ? tr("mobile.sessioncontextbar.project")
-    : tr("mobile.sessioncontextbar.worktree");
+  const query = filter.trim().toLocaleLowerCase();
+  const shown = query
+    ? choices.filter((choice) => `${choice.label} ${choice.detail ?? ""}`.toLocaleLowerCase().includes(query))
+    : choices;
+  // §22: open on pointer-down, then dismiss the keyboard — a click can be
+  // swallowed by the reflow the dismissal causes (see sheetTrigger.ts).
+  const triggerHandlers = useSheetTrigger(phone, () => {
+    setFilter("");
+    onOpen?.();
+    setOpen(true);
+    void dismissKeyboard();
+  });
+  if (!phone) {
+    return (
+      <Picker
+        className={`context-selector context-selector-${kind}`}
+        label={kind === "project"
+          ? tr("mobile.sessioncontextbar.project")
+          : tr("mobile.sessioncontextbar.worktree")}
+        items={choices.map((choice) => ({ ...choice, group: "" }))}
+        value={current}
+        onPick={onPick}
+        {...(onOpen ? { onOpen } : {})}
+        placeholder={value}
+        ariaLabel={ariaLabel}
+        disabled={disabled}
+        triggerIcon={kind === "project" ? <Icon.files /> : <Icon.branch />}
+      />
+    );
+  }
   return (
-    <Picker
-      className={`context-selector context-selector-${kind}`}
-      label={label}
-      items={choices.map((choice) => ({ ...choice, group: "" }))}
-      popoverClassName="context-picker-pop"
-      value={current}
-      onPick={onPick}
-      {...(onOpen ? { onOpen } : {})}
-      placeholder={value}
-      {...(kind === "branch" ? {
-        searchPlaceholder: tr("worktreesessiondialog.filterByBranchOrPath"),
-      } : {})}
-      {...(onRefresh ? {
-        footerAction: {
-          label: refreshing ? tr("common.loading") : tr("common.refresh"),
-          run: onRefresh,
-          stayOpen: true,
-        },
-      } : {})}
-      ariaLabel={ariaLabel}
-      disabled={disabled}
-      emptyMessage={tr("mobile.sessioncontextbar.nothingToChooseHereYet")}
-      triggerIcon={kind === "project" ? <Icon.files /> : <Icon.branch />}
-    />
+    <div className={`context-selector context-selector-${kind}`}>
+      <button
+        type="button"
+        className="context-trigger"
+        aria-label={ariaLabel}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title={value}
+        disabled={disabled}
+        {...triggerHandlers}
+      >
+        <span className="context-trigger-icon" aria-hidden="true">
+          {kind === "project" ? <Icon.files /> : <Icon.branch />}
+        </span>
+        <span className="context-trigger-name">{value}</span>
+        <span className="context-trigger-caret" aria-hidden="true"><Icon.chevronDown /></span>
+      </button>
+      {open && (
+        <Sheet
+          title={sheetTitle}
+          className="context-sheet"
+          size={kind === "branch" ? "tall" : "auto"}
+          onClose={() => setOpen(false)}
+          {...(kind === "branch" ? {
+            search: {
+              value: filter,
+              onChange: setFilter,
+              placeholder: tr("worktreesessiondialog.filterByBranchOrPath"),
+              ariaLabel: tr("worktreesessiondialog.filterByBranchOrPath"),
+            },
+          } : {})}
+          {...(kind === "branch" && onRefresh ? {
+            action: {
+              label: refreshing ? tr("common.loading") : tr("common.refresh"),
+              onClick: onRefresh,
+            },
+          } : {})}
+        >
+          <div role="listbox" aria-label={sheetTitle}>
+            {shown.map((choice) => (
+              <SheetRow
+                key={choice.id}
+                title={choice.label}
+                {...(choice.detail ? { meta: choice.detail } : {})}
+                icon={kind === "project"
+                  ? <Icon.files />
+                  : choice.id === "new-worktree" ? <Icon.plus /> : <Icon.branch />}
+                selected={choice.id === current}
+                onClick={() => {
+                  onPick(choice.id);
+                  setOpen(false);
+                }}
+              />
+            ))}
+            {shown.length === 0 && <p className="sheet-empty">{tr("mobile.sessioncontextbar.nothingToChooseHereYet")}</p>}
+          </div>
+        </Sheet>
+      )}
+    </div>
   );
 }
 
@@ -83,7 +154,7 @@ export interface SessionContextBarProps {
   /** Fired the first time the branch picker opens — used to fetch the remote
    *  so server-only branches appear in the list. */
   onBranchPickerOpen?: () => void;
-  /** Explicit remote refresh shown in the picker footer. */
+  /** Explicit remote refresh shown in the phone sheet title row. */
   onRefreshBranches?: () => void;
   branchRefreshing?: boolean;
   /** Start the new session in a managed checkout based on the selected live
@@ -118,6 +189,7 @@ export default function SessionContextBar({
         value={projectName}
         selectedId={projectId}
         choices={projects}
+        sheetTitle={tr("mobile.sessioncontextbar.project")}
         ariaLabel={tr("mobile.sessioncontextbar.projectCurrentValue", { projectName })}
         onPick={onPickProject}
       />
@@ -128,6 +200,7 @@ export default function SessionContextBar({
         selectedId={branchId}
         choices={branches}
         {...(branchLoading ? { disabled: true } : {})}
+        sheetTitle={tr("mobile.sessioncontextbar.branchOrWorktree")}
         ariaLabel={tr("mobile.sessioncontextbar.worktreeCurrentValue", { branchName })}
         onPick={onPickBranch}
         {...(onBranchPickerOpen ? { onOpen: onBranchPickerOpen } : {})}

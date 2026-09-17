@@ -1,8 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { composerLayoutState } from "../src/composerLayout.ts";
-import { readWebStyles } from "./webStyles.ts";
 
 const read = (rel: string) => readFile(new URL(rel, import.meta.url), "utf8");
 
@@ -43,87 +41,33 @@ test("expanded phone composer uses one compact spacing and control rhythm", asyn
 
   assert.match(
     css,
-    /\.composer-mobile \.composer-card textarea,[\s\S]*?min-height:\s*var\(--control-h-sm\);[\s\S]*?padding:\s*var\(--space-3\) var\(--space-4\) var\(--space-1\);/s,
+    /\.composer-mobile\.composer-expanded \.composer-card textarea\s*\{[^}]*min-height:\s*calc\(var\(--control-h-lg\) \+ var\(--space-3\)\);[^}]*padding:\s*var\(--space-2\) var\(--space-3\) var\(--space-1\);/s,
   );
   assert.match(
     css,
-    /\.composer-mobile \.composer-rail,[\s\S]*?min-height:\s*var\(--tap\);[\s\S]*?gap:\s*calc\(var\(--space-1\) \/ 2\);[\s\S]*?padding:\s*0 var\(--space-4\) var\(--space-2\);/s,
+    /\.composer-mobile\.composer-expanded \.composer-rail\s*\{[^}]*min-height:\s*calc\(var\(--tap\) \+ var\(--space-3\)\);[^}]*gap:\s*var\(--space-1\);[^}]*padding:\s*var\(--space-1\) var\(--space-2\) var\(--space-2\);/s,
   );
   assert.match(
     css,
-    /\.composer-mobile \.composer-mobile-extensions \.mic-btn,[\s\S]*?width:\s*var\(--tap\);[\s\S]*?min-height:\s*var\(--tap\);/s,
-    "the microphone occupies the same mobile layout box as the primary action",
+    /\.composer-mobile \.composer-extensions \.ui-icon-btn\s*\{[^}]*width:\s*var\(--tap\);[^}]*min-width:\s*var\(--tap\);[^}]*height:\s*var\(--tap\);[^}]*min-height:\s*var\(--tap\);/s,
+    "contributed icon controls should occupy the same mobile layout box as built-in actions",
   );
   assert.match(
     css,
-    /\.composer-mobile \.composer-execution \.model-picker-trigger\s*\{[^}]*max-width:\s*32vw;[^}]*height:\s*var\(--tap\);/s,
+    /\.composer-mobile \.composer-execution \.model-picker-trigger\s*\{[^}]*height:\s*var\(--tap\);[^}]*max-width:\s*100%;/s,
     "the model control should align to the action row and yield width before overflowing",
   );
   assert.match(
     css,
-    /\.composer-mobile \.composer-actions > \.composer-extensions\s*\{[^}]*display:\s*none;[^}]*width:\s*0;/s,
-    "trailing widgets stay out of the phone primary row",
+    /@media \(max-width: 340px\)[\s\S]*?\.composer-mobile \.composer-actions > \.composer-extensions\s*\{[^}]*width:\s*var\(--tap\);[^}]*flex:\s*0 0 var\(--tap\);[^}]*overflow-x:\s*auto;/s,
+    "the narrowest phone should give extra trailing actions one scrollable touch-width lane",
   );
 });
 
-test("the runtime cascade leaves the compact resting row to its canonical rules", async () => {
-  const adaptive = await read("../src/composerAdaptive.css");
-  const effective = await readWebStyles();
-  const mobileLayer = adaptive.slice(
-    adaptive.indexOf("/* Mobile"),
-    adaptive.indexOf("/* Tight phones"),
-  );
-
-  assert.doesNotMatch(mobileLayer, /composer-mobile\.composer-collapsed\s+\.composer-card/);
-  assert.doesNotMatch(mobileLayer, /composer-mobile\.composer-collapsed\s+\.composer-card textarea/);
-  assert.ok(
-    effective.indexOf("/* Adaptive composer polish")
-      > effective.indexOf("UX-MOBILE-01 — mobile-first new chat"),
-    "tests include the adaptive shell layer after core mobile rules",
-  );
-});
-
-test("every phone state routes through one canonical layout helper", async () => {
-  // Composition decisions live in one place: any new state must be added
-  // there, not re-derived ad hoc in the component.
-  assert.equal(
-    composerLayoutState({ phoneLayout: true, inputFocused: true, shellMode: false, hasDraft: false }),
-    "phone-engaged",
-  );
-  assert.equal(
-    composerLayoutState({ phoneLayout: true, inputFocused: false, shellMode: true, hasDraft: false }),
-    "phone-engaged",
-  );
-  assert.equal(
-    composerLayoutState({ phoneLayout: true, inputFocused: false, shellMode: false, hasDraft: true }),
-    "phone-engaged",
-  );
-  assert.equal(
-    composerLayoutState({ phoneLayout: true, inputFocused: false, shellMode: false, hasDraft: false }),
-    "phone-resting",
-  );
-  const composer = await read("../src/components/Composer.tsx");
-  assert.ok(
-    composer.includes("const layoutState = composerLayoutState("),
-    "the component no longer re-derives its own phone layout branches",
-  );
-  assert.doesNotMatch(
-    composer,
-    /phoneLayout\s*&&\s*\(.*(expanded|collapsed)/i,
-    "no parallel expanded/collapsed derivation may bypass the helper",
-  );
-});
-
-test("desktop keeps extension actions bounded and primary action terminal", async () => {
+test("desktop keeps extension actions bounded and model next to send", async () => {
   const css = await read("../src/composerAdaptive.css");
-  const composer = await read("../src/components/Composer.tsx");
 
   assert.match(css, /\.composer-simple \.composer-actions > \.composer-extensions\s*\{[\s\S]*?max-width:\s*min\(30vw, 260px\)/);
   assert.match(css, /\.composer-simple \.composer-config\s*\{[\s\S]*?flex:\s*0 0 auto;/);
-  assert.match(css, /\.composer-simple \.composer-config\s*\{[\s\S]*?flex:\s*0 0 auto;/);
-  assert.ok(
-    composer.indexOf('<CustomizeZoneButton slot="composer.trailing" />')
-      < composer.indexOf('<span className="composer-primary">'),
-    "desktop customization stays before the terminal primary action",
-  );
+  assert.match(css, /\.composer-simple \.composer-config \+ \.composer-primary\s*\{\s*margin-inline-start:\s*2px;/);
 });

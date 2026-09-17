@@ -314,12 +314,10 @@ test("Codex maps mcpToolCall items into canonical tool events", async () => {
     const rt = await createCodexRuntime(context, f.rpc);
     await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
     const snapshot = await rt.reconcile!({ ...binding, backendSessionId: "native", reconciliationOrdinal: 3 });
-    const toolEvent = snapshot.events
-        ?.flatMap((entry) => entry.events)
-        .find((event) => event.type === "tool/result");
-    assert.equal(toolEvent?.type, "tool/result");
-    assert.equal(toolEvent && "tool" in toolEvent ? toolEvent.tool : "", "polyth_browser");
-    assert.match(toolEvent && "output" in toolEvent ? toolEvent.output : "", /opened/);
+    const toolEvent = snapshot.events?.find((entry) => entry.event.type === "tool/result");
+    assert.equal(toolEvent?.event.type, "tool/result");
+    assert.equal(toolEvent && "tool" in toolEvent.event ? toolEvent.event.tool : "", "polyth_browser");
+    assert.match(toolEvent && "output" in toolEvent.event ? toolEvent.event.output : "", /opened/);
     await rt.dispose();
 });
 

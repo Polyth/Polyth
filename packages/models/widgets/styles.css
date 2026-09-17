@@ -103,9 +103,8 @@ flex: none; color: var(--text-dim);
   .model-pop {
     width: min(360px, calc(100vw - 2 * var(--screen-gutter) - var(--safe-left) - var(--safe-right)));
     min-width: 0;
-    height: min(560px, calc(var(--visual-vh, 100dvh) * 0.52));
+    height: auto;
     max-height: min(560px, calc(var(--visual-vh, 100dvh) * 0.52));
-    border-radius: var(--radius-surface);
   }
   .model-picker-header {
     display: flex;
@@ -128,9 +127,6 @@ flex: none; color: var(--text-dim);
   }
   .model-picker-row { min-height: var(--tap); }
 }
-/* ProviderLogo defaults to the strong text color; inherit the tab color so
-   selected and unselected harness marks remain visually distinguishable. */
-.model-pop .pkg-harnesses-tablist .provider-logo { color: currentColor; }
 .model-picker-shell {
   display: flex;
   flex-direction: column;

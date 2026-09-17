@@ -54,10 +54,6 @@ import { setWorkspaceMode, setWorkspaceModeProject } from "./widgets/workspaceMo
 import { clientAccountPersistenceScope, clientPersistenceScope, setClientReliabilityProject, setClientReliabilitySpace } from "./reliabilityContext.ts";
 import { hydrateClientRecord, readClientRecord, removeClientRecord, writeClientRecord, type PersistenceScope } from "./clientPersistence.ts";
 import { hydrateScopedDraftRecord, loadScopedDraftRecord, scopedDraftCacheKey, updateScopedDraftRecord } from "./draftRecord.ts";
-import {
-  PROJECT_PRESENTATION_HYDRATED_EVENT,
-  projectPresentationEventProjectId,
-} from "./projectPresentationSync.ts";
 
 // UX-PANE-MODEL: Files, Git, Terminal, and Preview are workspace PANE
 // surfaces, not primary views — they open beside (or over) a still-mounted
@@ -598,50 +594,6 @@ function paneSurfaceOf(id: string | null) {
   return surface;
 }
 
-function projectPanePresentation(projectId: string | null): Pick<
-  AppState,
-  "railPlugin" | "paneMode" | "panePreviousMode" | "paneFullscreen" | "editorFile" | "editorLocation" | "gitDiffPath"
-> {
-  const pane = projectId !== null ? getWorkspacePanePrefs(projectId) : null;
-  const restored = pane?.mode === "pinned" && pane.openSurface !== null
-    // Keep an as-yet-unregistered package id so late web-package loading can
-    // make the pinned window visible without another project activation.
-    ? paneSurfaceOf(pane.openSurface)?.id ?? pane.openSurface
-    : null;
-  // Older records (and a crash during a dynamic/fullscreen window) may still
-  // contain a non-pinned open surface. Scrub it so it cannot be restored by a
-  // later project activation.
-  if (projectId !== null && pane !== null && pane.openSurface !== null && pane.mode !== "pinned") {
-    setPaneOpenSurface(projectId, null);
-  }
-  const restoredResource = restored !== null ? pane?.lastResource[restored] : undefined;
-  const resourceState = restored !== null && restoredResource !== undefined
-    ? applyPaneResource(restored, restoredResource)
-    : {};
-  const priorRail = state.railPlugin !== null
-    ? listSurfaces().find((surface) => surface.id === state.railPlugin)
-    : undefined;
-  const railPlugin = restored
-    ?? (priorRail !== undefined && !isWorkspaceSurface(priorRail) ? state.railPlugin : null);
-  return {
-    railPlugin,
-    paneMode: restored !== null ? pane!.mode : "dynamic",
-    panePreviousMode: restored !== null ? pane!.previousMode : "dynamic",
-    paneFullscreen: false,
-    editorFile: resourceState.editorFile ?? null,
-    editorLocation: resourceState.editorLocation ?? null,
-    gitDiffPath: resourceState.gitDiffPath ?? null,
-  };
-}
-
-if (typeof window !== "undefined") {
-  window.addEventListener(PROJECT_PRESENTATION_HYDRATED_EVENT, (event) => {
-    const projectId = projectPresentationEventProjectId(event);
-    if (projectId === null || projectId !== state.activeProjectId) return;
-    set(projectPanePresentation(projectId));
-  });
-}
-
 export function activateProject(id: string | null): void {
   const project = state.projectRegistry.projects.find((candidate) => candidate.id === id);
   setClientReliabilitySpace(project?.spaceId ?? "default");
@@ -652,10 +604,36 @@ export function activateProject(id: string | null): void {
     persistClientNavigation(id, state.activeSessionId);
     return;
   }
+  // Workspace-pane state is project-scoped: only this project's pinned
+  // surface is restored. Dynamic/fullscreen windows are transient, and an
+  // unavailable persisted surface must not restore as visibly open.
+  const pane = id !== null ? getWorkspacePanePrefs(id) : null;
+  const restored = pane?.mode === "pinned" && pane.openSurface !== null
+    // Keep an as-yet-unregistered package id so late web-package loading can
+    // make the pinned window visible without another project activation.
+    ? paneSurfaceOf(pane.openSurface)?.id ?? pane.openSurface
+    : null;
+  // Older records (and a crash during a dynamic/fullscreen window) may still
+  // contain a non-pinned open surface. Scrub it so it cannot be restored by a
+  // later project activation.
+  if (id !== null && pane !== null && pane.openSurface !== null && pane.mode !== "pinned") {
+    setPaneOpenSurface(id, null);
+  }
+  const restoredResource = restored !== null ? pane?.lastResource[restored] : undefined;
+  const priorRail = state.railPlugin !== null
+    ? listSurfaces().find((surface) => surface.id === state.railPlugin)
+    : undefined;
+  const railPlugin = restored
+    ?? (priorRail !== undefined && !isWorkspaceSurface(priorRail) ? state.railPlugin : null);
   set({
     activeProjectId: id, activeSessionId: null, gitBranch: "",
     newSessionIntent: null,
-    ...projectPanePresentation(id),
+    editorFile: null, editorLocation: null, gitDiffPath: null,
+    railPlugin,
+    paneMode: restored !== null ? pane!.mode : "dynamic",
+    panePreviousMode: restored !== null ? pane!.previousMode : "dynamic",
+    paneFullscreen: false,
+    ...(restored !== null && restoredResource !== undefined ? applyPaneResource(restored, restoredResource) : {}),
   });
   persistClientNavigation(id, null);
   setWorkspaceModeProject(id);

@@ -645,7 +645,7 @@ export function agentSessionRoutes(deps: AgentSessionRouteDeps): RouteHandler {
     const lifecycle = suffix.match(/^\/(cancel|archive|unarchive)$/);
     if (lifecycle && method === "POST") {
       if (lifecycle[1] === "cancel") {
-        await sessions.abort(sessionId, { source: "agent" });
+        await sessions.abort(sessionId);
         json(200, { ok: true, sessionId });
       } else {
         await (lifecycle[1] === "archive"

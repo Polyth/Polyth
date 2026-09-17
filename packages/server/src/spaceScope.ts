@@ -15,7 +15,12 @@ import type {
   SessionService,
   SpaceContext,
 } from "@polyth/contracts";
+import { runWithSecureSafeSpace } from "@polyth/secure-safe";
 import type { ProjectRegistry } from "./projects.ts";
+import { canonicalProjectService } from "./projectResourceAuthority.ts";
+import { accessControlledSessionService } from "./sessionResourceAccess.ts";
+import { canonicalSessionService } from "./sessionResourceAuthority.ts";
+import { canonicalSecurity } from "./runtimeSecurity.ts";
 
 const notFound = (): Error =>
   Object.assign(new Error("session not found"), { code: "not-found" });
@@ -38,14 +43,22 @@ export interface SpaceGuard {
 
 export function createSpaceGuard(source: SpaceOwnershipSource): SpaceGuard {
   const check = (owner: string | undefined, spaceId: string): void => {
-    // An un-owned row predates tenancy and has not been adopted yet. Refusing
-    // it is the safe answer: the boot migration adopts every existing row
-    // before the gateway starts serving, so in practice this only fires for
-    // rows written by an older process against a live database.
     if (owner !== spaceId) throw notFound();
   };
+  const assertSession = (ctx: Pick<SpaceContext, "spaceId">, sessionId: string): void => {
+    const owner = source.spaceOfSession(sessionId);
+    if (owner === ctx.spaceId) return;
+    // A committed hard delete can remove the projection before the resource
+    // tombstone advances deleting -> deleted. Admit only that exact canonical
+    // lifecycle in the same Space so retry/reconciliation can finish; every
+    // other missing row remains indistinguishable from a foreign id.
+    const row = canonicalSecurity()?.resources.resource(sessionId);
+    if (row?.kind === "session" && row.spaceId === ctx.spaceId
+      && (row.lifecycle === "deleting" || row.lifecycle === "deleted")) return;
+    throw notFound();
+  };
   return {
-    assertSession: (ctx, sessionId) => check(source.spaceOfSession(sessionId), ctx.spaceId),
+    assertSession,
     assertProject: (ctx, projectId) => check(source.spaceOfProject(projectId), ctx.spaceId),
     owns: (ctx, projection) => projection.spaceId === ctx.spaceId,
   };
@@ -113,25 +126,18 @@ function scopeSessions(
     guard.assertSession(ctx, sessionId);
     return sessionId;
   };
-  // Agent presets are account-owned composer configuration, not a shared
-  // session fact. The composer already resolves a preset into model/agent/
-  // thinking state before send, so the private preset id must stop here.
   const withoutPrivatePreset = <T extends { agentProfileId?: string | null }>(input: T): T => {
     if (input.agentProfileId === undefined) return input;
     const { agentProfileId: _privatePresetId, ...rest } = input;
     return rest as T;
   };
-  // Every SessionService method returns a promise, so a denial must REJECT
-  // rather than throw synchronously — otherwise a caller's `.catch()` misses
-  // it and an ordinary `await` still works only by accident.
   const guarded = <T,>(run: () => Promise<T>): Promise<T> => {
     try {
-      return run();
+      return runWithSecureSafeSpace(ctx, run);
     } catch (error) {
       return Promise.reject(error);
     }
   };
-  // Wrap an optional method only when the underlying service has it.
   const opt = <A extends unknown[], R>(
     fn: ((...args: A) => R) | undefined,
     wrap: (fn: (...args: A) => R) => (...args: A) => R,
@@ -148,8 +154,9 @@ function scopeSessions(
     fn: ((projectId: string, ...rest: A) => R) | undefined,
   ) => opt<[string, ...A], R>(
     fn as ((...args: [string, ...A]) => R) | undefined,
-    (inner) => (projectId, ...rest) => guarded(() => {
+    (inner) => (projectId, ...rest) => guarded(async () => {
       guard.assertProject(ctx, projectId);
+      if (!await projects.get(projectId)) throw Object.assign(new Error("project not found"), { code: "not-found" });
       return inner(projectId, ...rest) as Promise<unknown>;
     }) as R,
   );
@@ -165,30 +172,36 @@ function scopeSessions(
 
   const scoped: SessionService = {
     async create(input) {
-      // Creating in another Space's project is refused before the session
-      // service ever runs, so no half-created row can leak across.
       const project = await projects.get(input.projectId);
       if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
-      return base.create(input);
+      return runWithSecureSafeSpace(ctx, () => base.create(input));
     },
     switchHarness: base.switchHarness ? (sessionId, selection, timing) => guarded(() => base.switchHarness!(g(sessionId), selection, timing)) : undefined,
     cancelHarnessSwitch: base.cancelHarnessSwitch ? (sessionId) => guarded(() => base.cancelHarnessSwitch!(g(sessionId))) : undefined,
     send: (sessionId, input) => guarded(() => base.send(g(sessionId), withoutPrivatePreset(input))),
-    abort: (sessionId, options) => guarded(() => base.abort(g(sessionId), options)),
+    abort: (sessionId) => guarded(() => base.abort(g(sessionId))),
     fork: (sessionId, atSeq) => guarded(() => base.fork(g(sessionId), atSeq)),
     archive: (sessionId) => guarded(async () => {
       for (const id of await lifecycleOrder(sessionId)) await base.archive(id);
     }),
     restore: (sessionId) => guarded(() => base.restore(g(sessionId))),
     async list(projectId) {
-      if (projectId !== undefined) guard.assertProject(ctx, projectId);
-      const rows = await base.list(projectId);
-      return rows.filter((p) => guard.owns(ctx, p));
+      return runWithSecureSafeSpace(ctx, async () => {
+        if (projectId !== undefined) {
+          guard.assertProject(ctx, projectId);
+          if (!await projects.get(projectId)) throw Object.assign(new Error("project not found"), { code: "not-found" });
+        }
+        const rows = await base.list(projectId);
+        return rows.filter((p) => guard.owns(ctx, p));
+      });
     },
     async sync(projectId) {
-      guard.assertProject(ctx, projectId);
-      const rows = await base.sync(projectId);
-      return rows.filter((p) => guard.owns(ctx, p));
+      return runWithSecureSafeSpace(ctx, async () => {
+        guard.assertProject(ctx, projectId);
+        if (!await projects.get(projectId)) throw Object.assign(new Error("project not found"), { code: "not-found" });
+        const rows = await base.sync(projectId);
+        return rows.filter((p) => guard.owns(ctx, p));
+      });
     },
     snapshot: (sessionId) => guarded(() => base.snapshot(g(sessionId))),
     events: (sessionId, afterSeq, page) => guarded(() => base.events(g(sessionId), afterSeq, page)),
@@ -210,7 +223,17 @@ function scopeSessions(
   if (base.delete) {
     const remove = base.delete.bind(base);
     assign("delete", (sessionId) => guarded(async () => {
-      for (const id of await lifecycleOrder(sessionId)) await remove(id);
+      let order: string[];
+      try {
+        order = await lifecycleOrder(sessionId);
+      } catch (cause) {
+        if ((cause as { code?: unknown } | null)?.code !== "not-found") throw cause;
+        // The canonical delete facade can finish a deleting tombstone even
+        // after its domain projection is already gone.
+        await remove(g(sessionId));
+        return;
+      }
+      for (const id of order) await remove(id);
     }));
   }
   assign("debug", bySession(base.debug));
@@ -240,8 +263,6 @@ function scopeSessions(
   return scoped;
 }
 
-/** Both scoped services for one request, built together so a handler cannot
- *  accidentally pair a scoped session service with the unscoped registry. */
 export interface SpaceServices {
   ctx: SpaceContext;
   projects: ProjectService;
@@ -251,23 +272,20 @@ export interface SpaceServices {
 
 export function createSpaceServices(deps: {
   registry: ProjectRegistry;
-  /** A thunk: the session service is composed after packages load, while the
-   *  factory is needed while wiring them. */
   sessions: () => SessionService;
   guard: SpaceGuard;
 }): (ctx: SpaceContext) => SpaceServices {
   return (ctx) => {
-    const projects = deps.registry.forSpace(ctx);
+    const projects = canonicalProjectService(ctx, deps.registry);
+    const canonicalSessions = canonicalSessionService(ctx, deps.sessions(), projects);
+    const sessions = accessControlledSessionService(ctx, canonicalSessions);
     return {
       ctx,
       projects,
-      sessions: scopeSessions(deps.sessions(), ctx, deps.guard, projects),
+      sessions: scopeSessions(sessions, ctx, deps.guard, projects),
       guard: deps.guard,
     };
   };
 }
 
-/** How every route factory receives tenant-scoped services: it is handed the
- *  resolver, not the services, so it MUST pass a SpaceContext to get anything
- *  at all. Route handlers call `spaces(rc.space)`. */
 export type SpaceServicesFor = (ctx: SpaceContext) => SpaceServices;

@@ -43,8 +43,7 @@ test("new-session branch picker fetches the remote on open and lists remote bran
   assert.match(contextBar, /onBranchPickerOpen\?: \(\) => void;/);
   assert.match(contextBar, /onRefreshBranches\?: \(\) => void;/);
   assert.match(contextBar, /worktreesessiondialog\.filterByBranchOrPath/);
-  assert.match(contextBar, /footerAction: \{/);
-  assert.match(contextBar, /stayOpen: true/);
+  assert.match(contextBar, /action: \{/);
   assert.match(contextBar, /\{\.\.\.\(onBranchPickerOpen \? \{ onOpen: onBranchPickerOpen \} : \{\}\)\}/);
   assert.match(contextBar, /\{\.\.\.\(onOpen \? \{ onOpen \} : \{\}\)\}/);
   assert.match(contextBar, /className="context-isolation-control"/);

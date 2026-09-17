@@ -22,7 +22,7 @@ const LIVE_ROW_SELECTOR = [
   ".task-activity",
   ".github-conflict-card",
 ].join(",");
-const TOP_LEVEL_TIMELINE_ROW_SELECTOR = ".msg, .activity-group, .activity-live-stage, .task-activity, .github-conflict-card";
+const TOP_LEVEL_TIMELINE_ROW_SELECTOR = ".msg, .activity-group, .activity-live, .task-activity, .github-conflict-card";
 
 interface RectSnapshot {
   top: number;
@@ -191,7 +191,7 @@ function nearTimelineTail(element: HTMLElement): boolean {
   let meaningfulFollowers = 0;
   for (let sibling = row.nextElementSibling; sibling; sibling = sibling.nextElementSibling) {
     if (!(sibling instanceof HTMLElement)) continue;
-    if (sibling.matches(TOP_LEVEL_TIMELINE_ROW_SELECTOR)) meaningfulFollowers += 1;
+    if (sibling.matches(".msg, .activity-group, .activity-live, .task-activity, .github-conflict-card")) meaningfulFollowers += 1;
     if (meaningfulFollowers > 2) return false;
   }
   return true;
@@ -232,6 +232,45 @@ function playTransform(
     if (animation.playState === "finished") animation.cancel();
   });
   return true;
+}
+
+/** Vertical origin of a row that should appear to come out of the composer.
+ *  The composer sits immediately below the timeline on phones, so the seam is
+ *  the floor: start there rather than beyond the overflow clip. */
+function composerOrigin(element: HTMLElement, timeline: HTMLElement): number {
+  const rect = element.getBoundingClientRect();
+  const floor = timeline.getBoundingClientRect().bottom - Math.min(12, rect.height);
+  const anchor = composerAnchor();
+  return (anchor ? Math.min(anchor.top, floor) : floor) - rect.top;
+}
+
+/** The flying row lives in `.activity-live-layer`, a sibling of the scroller.
+ *  `closest(".timeline")` therefore misses after portal; the viewport still
+ *  owns the composer seam used as the rise origin. */
+function actionRiseTimeline(element: HTMLElement): HTMLElement | null {
+  return element.closest<HTMLElement>(".timeline")
+    ?? element.closest(".timeline-viewport")?.querySelector<HTMLElement>(":scope > .timeline")
+    ?? null;
+}
+
+/** Every agent action enters the way a prompt does: it rises out of the
+ *  composer, then folds into the activity block when it settles. */
+function playActionRise(element: HTMLElement): void {
+  if (animated.has(element) || motionDisabled()) return;
+  // A transient in-flow mount would inflate scroller overflow; only rise once
+  // the row lives in the clipped viewport overlay beside the scroller.
+  if (element.closest(".timeline") && !element.closest(".activity-live-layer")) return;
+  const timeline = actionRiseTimeline(element);
+  const delta = timeline ? composerOrigin(element, timeline) : 0;
+  // A long travel needs longer. Held at the short duration, a row crossing the
+  // whole timeline reads as a teleport instead of a lift.
+  const base = touchProfile() ? SEND_LIFT_TOUCH_MS : SEND_LIFT_DESKTOP_MS;
+  const duration = Math.round(base * (1 + Math.min(Math.abs(delta) / 1200, 0.45)));
+  if (timeline && playTransform(element, delta, duration, 0)) {
+    animated.add(element);
+    return;
+  }
+  playEntrance(element);
 }
 
 /**
@@ -348,11 +387,11 @@ function animateAddedNode(node: Node, suppressChat = false, handover = { remaini
   const set = new Set(all);
 
   for (const element of all) {
-    // Live actions already occupy their canonical in-flow slot. Animate only
-    // a quiet local entrance: travelling from the composer would cross and
-    // temporarily cover intervening transcript content.
+    // Live actions fly in the viewport overlay, not as scroller descendants.
+    // They still need their own rise; handle them before nested-subtree
+    // de-duplication below.
     if (element.matches(".activity-live")) {
-      if (!suppressChat && now() >= quietUntil) playEntrance(element);
+      if (!suppressChat && now() >= quietUntil) playActionRise(element);
       continue;
     }
 

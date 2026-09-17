@@ -39,7 +39,10 @@ const harness = (dir: string) => {
       url,
       path: url.pathname,
       method,
+      ingress: { kind: "public-http", listenerId: "test", loopback: true, secure: false },
+      principal: { kind: "local-user", trustedLoopback: true },
       space: spaceOf(dir),
+      requireCapability() {},
       body: async () => input,
       json: (code, value) => {
         status = code;

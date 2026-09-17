@@ -2,6 +2,8 @@ import type { RouteHandler } from "@polyth/contracts";
 import {
   localOnlyRemoteAccess,
   serverServiceKey,
+  systemAppendSessionEvent,
+  systemSessionsForSession,
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
@@ -49,12 +51,11 @@ export function goalRoutes(goals: GoalService): RouteHandler {
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
-  // Goal workflow service: listens on the turn seam (via the composition
-  // root's hooks), never touches the agent loop itself.
   const goals = createGoalService({
     append: (sessionId, type, data) =>
-      host.events.append(sessionId, type, data, { ignorable: true }),
-    send: (sessionId, text) => host.sessions.send(sessionId, { text }),
+      systemAppendSessionEvent(host, sessionId, type, data, { ignorable: true }),
+    send: async (sessionId, text) =>
+      (await systemSessionsForSession(host, sessionId)).send(sessionId, { text }),
     complete: async (sessionId, prompt, userId) => {
       const proj = await host.store.projection(sessionId);
       const project = proj ? await host.projects.get(proj.projectId) : null;
@@ -79,8 +80,15 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       const goalRoute = goalRoutes(goals);
       routes ??= async (request) => {
         const match = request.path.match(/^\/api\/sessions\/([^/]+)\/goal(?:\/|$)/);
-        if (match && !goals.get(match[1]!)) {
-          await goals.rehydrate(match[1]!, await host.store.events(match[1]!));
+        if (match) {
+          const sessionId = match[1]!;
+          const projection = await host.forSpace(request.space).sessions.snapshot(sessionId);
+          if (request.method !== "GET" && projection.status === "archived") {
+            throw Object.assign(new Error("archived sessions are read-only"), { code: "conflict" });
+          }
+          if (!goals.get(sessionId)) {
+            await goals.rehydrate(sessionId, await host.store.events(sessionId));
+          }
         }
         return goalRoute(request);
       };

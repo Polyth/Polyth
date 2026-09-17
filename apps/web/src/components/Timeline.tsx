@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { HarnessSelection, SessionEvent } from "@polyth/contracts";
 import { renderMarkdown } from "../markdown.tsx";
@@ -57,6 +57,7 @@ import {
   freshTurnContextOffset,
   requiredTurnSheetPadding,
   timelineFollowState,
+  timelineMutationAffectsFollow,
 } from "../timelineFollow.ts";
 import AttachmentPills from "./AttachmentPills.tsx";
 import CopyButton from "./CopyButton.tsx";
@@ -184,20 +185,9 @@ function reasoningSeen(text: string): boolean {
   return false;
 }
 
-function AssistantProse({ m, entering = false }: { m: AssistantMsg; entering?: boolean }) {
-  return (
-    <div className={`msg assistant${entering ? " timeline-row-enter" : ""}`} data-message-seq={m.eventSeq}>
-      <div className="bubble" dir="auto">
-        {renderMarkdown(m.text, m.id)}
-        {!m.finalized && <span className="caret" />}
-      </div>
-    </div>
-  );
-}
-
 function Thinking({ m, live, entering = false }: { m: AssistantMsg; live: boolean; entering?: boolean }) {
   const prefs = useUiSettings();
-  const source = m.reasoning;
+  const source = m.reasoning || m.text;
   // Fresh live thought: its row is the turn's live latest, the answer has not
   // started, and this reasoning never revealed before → type out from empty.
   const fresh = live && m.text === "" && !reasoningSeen(source);
@@ -398,6 +388,12 @@ function AssistantView({
 }) {
   const hasAnswer = m.text.trim() !== "" || !m.finalized;
   const answer = m.text;
+  const galleryAvailable = /!\[[^\]]*]\([^)]+\)/.test(m.text);
+  const openGallery = () => {
+    const message = Array.from(document.querySelectorAll<HTMLElement>(tr("timeline.msgAssistant")))
+      .find((candidate) => candidate.dataset.messageSeq === String(m.eventSeq));
+    message?.querySelector<HTMLButtonElement>(".md-img-btn")?.click();
+  };
   const articleProps = hasAnswer
     ? ({ role: "article", "aria-label": assistantArticleName(m.finalized, assistantTime(m)) } as const)
     : undefined;
@@ -406,9 +402,7 @@ function AssistantView({
       {m.reasoning !== "" && <Thinking m={m} live={live} />}
       {hasAnswer && (
         <div className="bubble" dir="auto">
-          {renderMarkdown(answer || "", m.id, {
-            showGalleryShortcut: Boolean(m.finalized && announce),
-          })}
+          {renderMarkdown(answer || "", m.id)}
           {!m.finalized && <span className="caret" />}
         </div>
       )}
@@ -421,6 +415,9 @@ function AssistantView({
           segmentStartedAt={segmentStartedAt}
           regeneratePrompt={regeneratePrompt}
         />
+      )}
+      {m.finalized && m.text !== "" && announce && galleryAvailable && (
+        <button className="assistant-gallery-shortcut" onClick={openGallery}><Icon.image /> {tr("timeline.openAnswerImages")}</button>
       )}
       {plan && plan.items.length > 0 && <TaskList plan={plan} />}
     </div>
@@ -506,7 +503,7 @@ function childForTool(tool: ToolMsg, subagents: SubagentState | null): SubagentS
     agent.label === description || agent.currentTask === tool.input.prompt);
 }
 
-/** Matches --activity-live-exit: the presented row must stay mounted for the
+/** Matches --activity-live-exit: the floating row must stay mounted for the
  *  whole fold-away before it is handed to the block. */
 const ACTIVITY_LIVE_EXIT_MS = 280;
 /** Minimum time an arriving action stays outside the block — long enough to
@@ -549,47 +546,27 @@ function actionIncomplete(item: ActivityItem): boolean {
  *  emphasised, not chaotic.
  *
  *  A group that already has history at first paint is a restore (reopen,
- *  cached tail, scroll-back), not a live arrival: replaying it would interrupt
- *  the answer below. Only a brand-new group whose single action is still open
- *  and recent takes the stage; later arrivals still queue while the turn is live.
+ *  cached tail, scroll-back), not a live arrival: flying it would overlay the
+ *  answer below. Only a brand-new group whose single action is still open and
+ *  recent takes the stage; later arrivals still queue while the turn is live.
  *  Status alone cannot decide this — interrupted `running` tools stay in
  *  history forever — and recency alone would replay a just-finished turn. */
 function useActionSchedule(items: ActivityItem[], allowLive = true): ActionSchedule {
   // id -> start of its turn outside the block; 0 means it never gets one.
   const turns = useRef(new Map<string, number>());
-  // Items observed while the document is hidden are already history when the
-  // reader returns. Keep their ids fenced so the visible transition cannot
-  // reinterpret them as fresh arrivals and replay a backlog over the chat.
-  const hiddenItems = useRef(new Set<string>());
   const cursor = useRef(0);
   const mounted = useRef(false);
-  const [visibilityVersion, redraw] = useState(0);
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    const onVisibility = () => redraw((value) => value + 1);
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, []);
+  const [, redraw] = useState(0);
   const at = Date.now();
-  const visible = typeof document === "undefined" || !document.hidden;
   const onlyFreshLive = items.length === 1
     && actionIncomplete(items[0]!)
     && at - Math.min(at, items[0]!.time) < ACTION_SHOW_MS;
   const restore = !mounted.current && !onlyFreshLive;
   for (const item of items) {
-    if (!visible) {
-      hiddenItems.current.add(item.id);
-      turns.current.set(item.id, 0);
-      continue;
-    }
     if (turns.current.has(item.id)) continue;
-    if (hiddenItems.current.has(item.id)) {
-      turns.current.set(item.id, 0);
-      continue;
-    }
     // An idle/historical group never takes the stage: revisited sessions paint
     // cached history first, then the reconcile suffix would otherwise look like
-    // a burst of live arrivals and replay after the answer.
+    // a burst of live arrivals and fly in over the answer.
     if (!allowLive || restore) {
       turns.current.set(item.id, 0);
       continue;
@@ -630,7 +607,7 @@ function useActionSchedule(items: ActivityItem[], allowLive = true): ActionSched
     if (!Number.isFinite(next)) return;
     const timer = window.setTimeout(() => redraw((value) => value + 1), Math.max(0, next - Date.now()));
     return () => window.clearTimeout(timer);
-  }, [next, visibilityVersion]);
+  }, [next]);
   return { showing, leaving, scheduled };
 }
 
@@ -641,31 +618,33 @@ function activityItemNode(
   entering: boolean,
 ) {
   // An arriving action shows what it is, not its whole output: it stays folded
-  // outside the block exactly as it will be inside it. Assistant text is the
-  // same reading surface as the timeline answer — never secondary thinking type.
-  if (item.kind === "tool") {
-    return <ExecutionRow key={item.id} message={item} subagent={childForTool(item, subagents)} entering={entering} />;
-  }
-  if (item.kind === "assistant") {
-    const thought = item.reasoning.trim() !== ""
-      ? <Thinking key={`${item.id}-reasoning`} m={{ ...item, text: "" }} live={live} entering={entering} />
-      : null;
-    const prose = item.text.trim() !== ""
-      ? <AssistantProse key={`${item.id}-text`} m={item} entering={entering} />
-      : null;
-    if (thought && prose) return <Fragment key={item.id}>{thought}{prose}</Fragment>;
-    return thought ?? prose;
-  }
-  return <TaskActivityRow key={item.id} activity={item} entering={entering} />;
+  // outside the block exactly as it will be inside it.
+  return item.kind === "tool"
+    ? <ExecutionRow key={item.id} message={item} subagent={childForTool(item, subagents)} entering={entering} />
+    : item.kind === "assistant"
+      ? <Thinking key={item.id} m={item} live={live} entering={entering} />
+      : <TaskActivityRow key={item.id} activity={item} entering={entering} />;
 }
 
-function derivedActivityState(g: ActivityGroup, live: boolean): RunSummaryState {
+function liveLayerFor(group: Element | null): HTMLElement | null {
+  const layer = group?.closest(".timeline-viewport")?.querySelector(":scope > .activity-live-layer");
+  return layer instanceof HTMLElement ? layer : null;
+}
+
+function syncLiveStage(stage: HTMLElement, group: HTMLElement): void {
+  const layer = stage.parentElement;
+  if (!layer?.classList.contains("activity-live-layer")) return;
+  const groupBox = group.getBoundingClientRect();
+  const layerBox = layer.getBoundingClientRect();
+  stage.style.left = `${groupBox.left - layerBox.left}px`;
+  stage.style.width = `${Math.max(0, groupBox.width)}px`;
+  stage.style.top = `${groupBox.bottom - layerBox.top}px`;
+}
+
+function derivedActivityState(g: ActivityGroup): RunSummaryState {
   const latestTasks = new Map(g.tasks.map((task) => [task.taskId, task]));
   if (g.tools.some((tool) => tool.status === "error" && /cancel(?:led|ed)|aborted|stopped|interrupted/i.test(tool.error ?? ""))) return "cancelled";
   if (g.tools.some((tool) => tool.status === "error") || [...latestTasks.values()].some((task) => task.action === "failed")) return "failed";
-  // Task starts and completions can live in separate blocks. Historical
-  // headers must not animate from an unmatched start, but retain failures.
-  if (!live) return "completed";
   if (g.tools.some((tool) => tool.status === "pending" || tool.status === "running") || [...latestTasks.values()].some((task) => task.action === "started")) return "active";
   return g.settled ? "completed" : "waiting";
 }
@@ -675,27 +654,27 @@ export function ActivityGroupView({
   subagents,
   state: stateOverride,
   entering = false,
-  livePresentation = true,
+  liveFlight = true,
 }: {
   g: ActivityGroup;
   subagents: SubagentState | null;
   state?: RunSummaryState;
   entering?: boolean;
   /** False for idle/historical groups so reopen and reconcile suffixes cannot
-   *  replay transient activity after the answer below. */
-  livePresentation?: boolean;
+   *  replay the composer→block flight over the answer below. */
+  liveFlight?: boolean;
 }) {
-  const state = stateOverride ?? derivedActivityState(g, livePresentation);
+  const state = stateOverride ?? derivedActivityState(g);
   const active = state === "active" || state === "waiting";
-  // The block never opens itself. Running work is shown by an in-flow live row
-  // below it; opening the block is a reader decision only.
+  // The block never opens itself. Running work is shown by the floating live
+  // rows below it; opening the block is a reader decision only.
   const [open, setOpen] = useState(false);
   const itemsPresent = useCollapsePresence(open);
-  const schedule = useActionSchedule(g.items, livePresentation);
+  const schedule = useActionSchedule(g.items, liveFlight);
   const liveIds = g.items.filter((item) => schedule.showing.has(item.id)).map((item) => item.id);
   const leavingIds = g.items.filter((item) => schedule.leaving.has(item.id)).map((item) => item.id);
-  const presentedIds = new Set([...liveIds, ...leavingIds]);
-  const presented = g.items.filter((item) => presentedIds.has(item.id));
+  const floatingIds = new Set([...liveIds, ...leavingIds]);
+  const floating = g.items.filter((item) => floatingIds.has(item.id));
   const folded = g.items.filter((item) => !schedule.scheduled.has(item.id));
   // Mount the summary with the first action. Later arrivals then only update
   // its text and enter the invisible queue; they cannot insert a new row above
@@ -721,12 +700,44 @@ export function ActivityGroupView({
     fmtDuration(g.ms),
   ].join(" · ");
   // A live action is its own visual timeline row, not part of the folded
-  // block. It stays in normal flow immediately after its summary, so every
-  // later message receives real layout space and can never be painted under
-  // the action. It folds away into the block when its presentation turn ends.
-  const stage = presented.length > 0 ? (
-    <div className="activity-live-stage">
-      {presented.map((item) => {
+  // block's layout. It is portaled into the clipped viewport overlay so
+  // flight cannot grow timeline overflow; then it folds away into the block.
+  const groupRef = useRef<HTMLElement | null>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [liveLayer, setLiveLayer] = useState<HTMLElement | null>(() => {
+    if (typeof document === "undefined") return null;
+    const layer = document.querySelector(".timeline-viewport > .activity-live-layer");
+    return layer instanceof HTMLElement ? layer : null;
+  });
+  const bindGroupRef = useCallback((node: HTMLElement | null) => {
+    groupRef.current = node;
+    if (!node) return;
+    const layer = liveLayerFor(node);
+    setLiveLayer((current) => (current === layer ? current : layer));
+  }, []);
+  useLayoutEffect(() => {
+    setLiveLayer(liveLayerFor(groupRef.current));
+  }, [showBlock, floating.length]);
+  useLayoutEffect(() => {
+    const group = groupRef.current;
+    const stage = stageRef.current;
+    if (!group || !stage || !liveLayer) return;
+    const sync = () => syncLiveStage(stage, group);
+    sync();
+    const timeline = group.closest(".timeline");
+    const resize = typeof ResizeObserver === "function" ? new ResizeObserver(sync) : null;
+    resize?.observe(group);
+    timeline?.addEventListener("scroll", sync, { passive: true });
+    window.addEventListener("resize", sync);
+    return () => {
+      resize?.disconnect();
+      timeline?.removeEventListener("scroll", sync);
+      window.removeEventListener("resize", sync);
+    };
+  }, [liveLayer, floating.length]);
+  const stage = floating.length > 0 ? (
+    <div className="activity-live-stage" ref={stageRef}>
+      {floating.map((item) => {
         const live = liveIds.includes(item.id);
         return <div
           key={item.id}
@@ -744,7 +755,7 @@ export function ActivityGroupView({
   return (
     <>
       {showBlock && (
-        <section className={`msg assistant activity-group${entering ? " timeline-row-enter" : ""}${open ? " open" : ""}${active ? " current" : ""}`} aria-label={tr("timeline.agentActivity")}>
+        <section ref={bindGroupRef} className={`msg assistant activity-group${entering ? " timeline-row-enter" : ""}${open ? " open" : ""}${active ? " current" : ""}`} aria-label={tr("timeline.agentActivity")}>
           <RunSummary
             title={tr("timeline.activity")}
             meta={meta}
@@ -770,7 +781,7 @@ export function ActivityGroupView({
           </div>
         </section>
       )}
-      {stage}
+      {liveLayer && stage ? createPortal(stage, liveLayer) : null}
     </>
   );
 }
@@ -988,19 +999,19 @@ const ActivityRow = memo(function ActivityRow({
   subagents,
   state,
   entering,
-  livePresentation,
+  liveFlight,
 }: {
   rev: number;
   g: ActivityGroup;
   subagents: SubagentState | null;
   state?: RunSummaryState;
   entering?: boolean;
-  livePresentation?: boolean;
+  liveFlight?: boolean;
 }) {
-  return <ActivityGroupView g={g} subagents={subagents} state={state} entering={entering} livePresentation={livePresentation} />;
+  return <ActivityGroupView g={g} subagents={subagents} state={state} entering={entering} liveFlight={liveFlight} />;
 }, (prev, next) => prev.rev === next.rev && sameActivity(prev.g, next.g)
   && prev.subagents === next.subagents && prev.state === next.state
-  && prev.entering === next.entering && prev.livePresentation === next.livePresentation);
+  && prev.entering === next.entering && prev.liveFlight === next.liveFlight);
 
 // Right-edge prompt rail (WP4, restyled after polyth PromptNavigatorRail):
 // a thin vertical tape of ticks in a 32.2px gutter hugging the right edge of the
@@ -1231,9 +1242,7 @@ function formatWait(totalSeconds: number): string {
 
 /** Provider capacity stop: countdown to the server's auto-resume, with
  *  cancel-wait and a full harness-qualified model recovery picker. Replaces
- *  the generic "Last turn failed" line while `turn.limit` is set.
- *  A refused model has no wait to run out: the same surface keeps the picker
- *  and drops the countdown, so recovery is one explicit user choice. */
+ *  the generic "Last turn failed" line while `turn.limit` is set. */
 function RateLimitNotice({ sessionId, limit }: { sessionId: string; limit: TurnLimitState }) {
   const session = useStore((s) => s.sessions.find((candidate) => candidate.id === sessionId) ?? null);
   const models = useStore((s) => s.models);
@@ -1264,8 +1273,7 @@ function RateLimitNotice({ sessionId, limit }: { sessionId: string; limit: TurnL
   const selectedModel = selectedHarnessId === currentHarnessId && session?.model
     ? { ...session.model, ...(currentHarnessId ? { harnessId: currentHarnessId } : {}) }
     : undefined;
-  const unavailable = limit.code === "model-unavailable";
-  const remaining = useRemainingSeconds(limit.resumeAt ?? 0);
+  const remaining = useRemainingSeconds(limit.resumeAt);
   const [busy, setBusy] = useState<null | "resume" | "cancel" | "switch">(null);
 
   const providerLabel = limit.provider
@@ -1277,13 +1285,9 @@ function RateLimitNotice({ sessionId, limit }: { sessionId: string; limit: TurnL
       : limit.scope === "overloaded"
         ? tr("timeline.rateLimit.scopeOverloaded")
         : tr("timeline.rateLimit.scopeRate");
-  const heading = unavailable
-    ? tr("timeline.modelUnavailable.heading", {
-        model: session?.model?.modelID ?? tr("timeline.modelUnavailable.thisModel"),
-      })
-    : providerLabel
-      ? tr("timeline.rateLimit.headingProvider", { provider: providerLabel, scope: scopeLabel })
-      : tr("timeline.rateLimit.heading", { scope: scopeLabel });
+  const heading = providerLabel
+    ? tr("timeline.rateLimit.headingProvider", { provider: providerLabel, scope: scopeLabel })
+    : tr("timeline.rateLimit.heading", { scope: scopeLabel });
 
   const run = (kind: "resume" | "cancel", op: Promise<unknown>) => {
     setBusy(kind);
@@ -1313,16 +1317,14 @@ function RateLimitNotice({ sessionId, limit }: { sessionId: string; limit: TurnL
       heading={heading}
       actions={
         <>
-          {!unavailable && (
-            <Button
-              size="sm"
-              variant="quiet"
-              className="turn-rate-limit-action"
-              busy={busy === "resume"}
-              disabled={busy !== null}
-              onClick={() => run("resume", resumeNow(sessionId))}
-            >{tr("timeline.rateLimit.resumeNow")}</Button>
-          )}
+          <Button
+            size="sm"
+            variant="quiet"
+            className="turn-rate-limit-action"
+            busy={busy === "resume"}
+            disabled={busy !== null}
+            onClick={() => run("resume", resumeNow(sessionId))}
+          >{tr("timeline.rateLimit.resumeNow")}</Button>
           <span className="turn-rate-limit-model">
             <ModelPicker
               models={routeCatalog.models}
@@ -1348,25 +1350,21 @@ function RateLimitNotice({ sessionId, limit }: { sessionId: string; limit: TurnL
               className="picker-chip"
             />
           </span>
-          {!unavailable && (
-            <Button
-              size="sm"
-              variant="quiet"
-              className="turn-rate-limit-action"
-              busy={busy === "cancel"}
-              disabled={busy !== null}
-              onClick={() => run("cancel", cancelResume(sessionId))}
-            >{tr("timeline.rateLimit.cancelWait")}</Button>
-          )}
+          <Button
+            size="sm"
+            variant="quiet"
+            className="turn-rate-limit-action"
+            busy={busy === "cancel"}
+            disabled={busy !== null}
+            onClick={() => run("cancel", cancelResume(sessionId))}
+          >{tr("timeline.rateLimit.cancelWait")}</Button>
         </>
       }
     >
-      {unavailable
-        ? tr("timeline.modelUnavailable.body")
-        : remaining > 0
-          ? tr("timeline.rateLimit.resumesIn", { time: formatWait(remaining) })
-          : tr("timeline.rateLimit.resuming")}
-      {!unavailable && limit.attempt > 1 ? ` · ${tr("timeline.rateLimit.attempt", { n: String(limit.attempt) })}` : ""}
+      {remaining > 0
+        ? tr("timeline.rateLimit.resumesIn", { time: formatWait(remaining) })
+        : tr("timeline.rateLimit.resuming")}
+      {limit.attempt > 1 ? ` · ${tr("timeline.rateLimit.attempt", { n: String(limit.attempt) })}` : ""}
     </Notice>
   );
 }
@@ -1700,9 +1698,9 @@ export default function Timeline({
     };
     observeRows();
     const mutations = typeof MutationObserver === "function"
-      ? new MutationObserver(() => {
+      ? new MutationObserver((records) => {
         observeRows();
-        refresh();
+        if (timelineMutationAffectsFollow(records)) refresh();
       })
       : null;
     mutations?.observe(el, {
@@ -1998,18 +1996,14 @@ export default function Timeline({
   );
   const latestRowId = shownRows[shownRows.length - 1]?.id;
   const latestAssistantId = [...shownRows].reverse().find((row) => row.kind === "assistant")?.id;
-  const latestActivity = shownRows.findLast((row) => row.kind === "activity");
-  const turnStart = sessionEvents.findLast((event) => event.type === "turn/started");
-  // A new turn must not reactivate the previous turn's last block. Use event
-  // order, not wall-clock timestamps, which can tie or move backwards.
-  const currentActivityId = latestActivity?.kind === "activity"
-    && latestActivity.items.some((item) => item.eventSeq > (turnStart?.seq ?? Infinity))
-      ? latestActivity.id : undefined;
-  const currentActivityState: RunSummaryState | undefined = turnWorking
-    ? pendingQuestion || pendingPermission || pendingSecret ? "waiting" : "active"
-    : turn?.status === "failed" ? "failed"
-      : turn?.status === "aborted" ? "cancelled"
-        : turn?.status === "stopped" ? "completed" : undefined;
+  const latestActivityId = [...shownRows].reverse().find((row) => row.kind === "activity")?.id;
+  const currentActivityState: RunSummaryState | undefined = pendingQuestion || pendingPermission || pendingSecret
+    ? "waiting"
+    : turn?.status === "working" ? "active"
+      : turn?.status === "failed" ? "failed"
+        : turn?.status === "aborted" ? "cancelled"
+          : turn?.status === "stopped" ? "completed"
+          : undefined;
   // A reveal activated from the keyboard can unmount its own control (the
   // final Show earlier chunk, or Show all): focus must then hand off to the
   // named timeline region — never fall to BODY (a11y criteria 6–7).
@@ -2335,9 +2329,9 @@ export default function Timeline({
                 rev={activityRev(r)}
                 g={r}
                 subagents={model.subagents}
-                state={r.id === currentActivityId ? currentActivityState : undefined}
+                state={r.id === latestActivityId ? currentActivityState : undefined}
                 entering={r.id === latestRowId}
-                livePresentation={turnWorking && r.id === currentActivityId}
+                liveFlight={turnWorking && r.id === latestActivityId}
               />
             : (
               <MessageRow
@@ -2376,7 +2370,7 @@ export default function Timeline({
             g={rewoundLiveActivity}
             subagents={model.subagents}
             state={currentActivityState}
-            livePresentation={turnWorking}
+            liveFlight={turnWorking}
           />
         )}
         {model.workflowRun && <WorkflowTimelineCard run={model.workflowRun} />}
@@ -2413,7 +2407,7 @@ export default function Timeline({
             <div className="rewound-tail-body">
               {undoneRows.map((row) => (
                 row.kind === "activity"
-                  ? <ActivityRow key={row.id} rev={activityRev(row)} g={row} subagents={model.subagents} livePresentation={false} />
+                  ? <ActivityRow key={row.id} rev={activityRev(row)} g={row} subagents={model.subagents} liveFlight={false} />
                   : (
                     <MessageRow
                       key={row.id}
@@ -2439,6 +2433,7 @@ export default function Timeline({
         <div className="msg-live" role="status" aria-live="polite">{liveAnchor ? "" : liveText}</div>
         <SlotHost slot="session.timeline.after" context={slotSummary} customizable />
       </div>
+      <div className="activity-live-layer" />
       {showNav && (
         <PromptNavigator
           prompts={prompts}

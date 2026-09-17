@@ -1,7 +1,6 @@
 import { useSyncExternalStore, type ReactNode } from "react";
 import { listSlots, slotVersion, subscribeSlots } from "../slots.ts";
 import { isUiSlot, type JsonObject, type PanelItemSize, type UiSlot, type WidgetKind } from "@polyth/contracts";
-import type { ProjectAffinity } from "@polyth/contracts/project-composition";
 import {
   ensureWidgets,
   widgetSlotFromZone,
@@ -12,7 +11,6 @@ import {
 } from "./widgetLayout.ts";
 import { tr } from "../i18n/index.ts";
 import { assertOwnerCanReplace } from "../packages/ownership.ts";
-import { isProjectContributionRelevant, subscribeProjectRelevance } from "../packages/projectRelevance.ts";
 
 export interface WidgetRenderContext extends Record<string, unknown> {
   projectId: string | null;
@@ -33,7 +31,6 @@ export interface WidgetDef {
   pluginId: string;
   /** Host-bound owner package. Missing means a host/core contribution. */
   ownerPackageId?: string;
-  projectAffinity?: ProjectAffinity;
   pluginName?: string;
   title: string;
   description: string;
@@ -78,8 +75,6 @@ function bump(): void {
   for (const listener of [...listeners]) listener();
 }
 
-subscribeProjectRelevance(bump);
-
 export function registerWidget(def: WidgetDef): () => void {
   const existing = registry.get(def.id);
   if (existing) {
@@ -109,7 +104,6 @@ export interface WidgetPlugin {
   name: string;
   widgets?: readonly PluginWidgetDef[];
   ownerPackageId?: string;
-  projectAffinity?: ProjectAffinity;
 }
 
 export function defineWidgetPlugin<T extends WidgetPlugin>(plugin: T): T {
@@ -144,17 +138,13 @@ export function registerWidgetPlugin(plugin: WidgetPlugin): () => void {
       ...(plugin.ownerPackageId || widget.ownerPackageId
         ? { ownerPackageId: widget.ownerPackageId ?? plugin.ownerPackageId }
         : {}),
-      ...((widget.projectAffinity ?? plugin.projectAffinity)
-        ? { projectAffinity: widget.projectAffinity ?? plugin.projectAffinity }
-        : {}),
       kind: widget.kind ?? "widget",
       defaultSlot,
       supportedSlots,
     };
   });
   const unregister = definitions.map(registerWidget);
-  ensureWidgets(definitions.filter((definition) =>
-    isProjectContributionRelevant(definition.ownerPackageId, definition.projectAffinity)));
+  ensureWidgets(definitions);
   return () => {
     for (let index = unregister.length - 1; index >= 0; index--) unregister[index]!();
   };
@@ -188,7 +178,6 @@ function slotWidgets(): WidgetDef[] {
       id: item.id,
       pluginId: typeof meta.pluginId === "string" ? meta.pluginId : item.id.split(".")[0] ?? "plugin",
       ...(typeof meta.ownerPackageId === "string" ? { ownerPackageId: meta.ownerPackageId } : {}),
-      ...(item.projectAffinity ? { projectAffinity: item.projectAffinity } : {}),
       ...(typeof meta.pluginName === "string" ? { pluginName: meta.pluginName } : {}),
       title: typeof meta.title === "string" ? meta.title : item.id.replace(/[._-]+/g, " "),
       description: typeof meta.description === "string" ? meta.description : tr("widgets.catalog.pluginProvidedWorkspaceWidget"),
@@ -253,10 +242,8 @@ export function listWidgets(): WidgetDef[] {
   if (cachedList === null || cachedVersion !== key) {
     const all = new Map<string, WidgetDef>(registry);
     for (const widget of slotWidgets()) all.set(widget.id, widget);
-    const visible = [...all.values()].filter((widget) =>
-      isProjectContributionRelevant(widget.ownerPackageId, widget.projectAffinity));
-    cachedList = visible.sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
-    cachedById = new Map(visible.map((widget) => [widget.id, widget]));
+    cachedList = [...all.values()].sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
+    cachedById = all;
     cachedVersion = key;
   }
   return cachedList;

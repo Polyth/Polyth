@@ -1,8 +1,8 @@
-// UX-MOBILE-01 §28/§46: ONE surface system for mobile overlays. Compact
-// anchored pickers use Popover; sheet-capable surfaces (starter picker,
-// navigation destinations, and explicit Picker sheet opt-ins) share this
-// grabber, focus, and keyboard-safe geometry. Navigation destinations exchange
-// the grabber for Back while retaining the same contract.
+// UX-MOBILE-01 §28/§46: ONE surface system for mobile overlays — model picker,
+// agent/mode picker, project picker, branch picker, starter picker, and
+// full-screen navigation destinations. Transient sheets share the grabber and
+// swipe-to-dismiss contract; navigation destinations exchange those affordances
+// for Back while retaining the same focus and keyboard-safe geometry.
 //
 // Geometry rules that make the sheet keyboard-safe:
 //   * height is capped against --visual-vh (mobileViewport.ts), never 100vh;

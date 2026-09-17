@@ -17,9 +17,7 @@
       "core": true,
       "enabled": true,
       "icon": "shield",
-      "hasSettings": false,
-      "category": "system",
-      "projectAffinity": {}
+      "hasSettings": false
     }
   },
   "dependencies": {

@@ -1,18 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { composerLayoutState } from "../src/composerLayout.ts";
 
 const read = (rel: string) => readFile(new URL(rel, import.meta.url), "utf8");
-
-test("send glyph inherits the contrasting theme ink instead of forcing white", async () => {
-  const css = await read("../src/styles.css");
-  const plane = css.match(/\.send-plane\s*\{([^}]*)\}/)?.[1];
-  assert.ok(plane, "the send glyph wrapper is styled");
-  assert.doesNotMatch(plane, /(?:^|;)\s*color\s*:/,
-    "the glyph inherits the button ink in both dark and light themes");
-  assert.match(css, /\.composer-simple \.composer-rail \.send\s*\{[^}]*color:\s*var\(--accent-ink\);/s);
-});
 
 test("phone composer keeps one text origin and one semantic control order", async () => {
   const css = await read("../src/composerAdaptive.css");
@@ -40,45 +30,8 @@ test("phone composer never reserves empty widget slots or leaks desktop actions"
     "only the microphone makes the leading extension lane visible");
   assert.match(css, /\.composer-mobile \.composer-actions > \.composer-extensions\s*\{[^}]*display:\s*none;[^}]*width:\s*0;/s,
     "desktop trailing widgets do not reflow the phone composer");
-  assert.doesNotMatch(css, /\.composer-mobile \.composer-actions > \.composer-extensions:has\(\.mic-btn\)/,
-    "the microphone cannot be moved into the trailing action lane");
-  assert.match(css, /\.composer-simple \.composer-primary \.send\s*\{[^}]*display:\s*inline-flex;/s,
-    "Send remains visible as the terminal action even with an empty draft");
-});
-
-test("the primary action is terminal and draft engagement survives blur", async () => {
-  const composer = await read("../src/components/Composer.tsx");
-  const voice = await read("../../../packages/dictation/widgets/voice.tsx");
-  const primary = composer.indexOf('<span className="composer-primary">');
-  const trailingCustomize = composer.indexOf('<CustomizeZoneButton slot="composer.trailing" />');
-  assert.ok(primary > trailingCustomize, "the primary action follows trailing customization controls");
-  const queue = composer.indexOf('className="send composer-delivery composer-queue"');
-  const menu = composer.indexOf('className="composer-send-options"');
-  assert.ok(queue > menu, "the queue/send action follows active-run alternatives");
-  assert.match(composer.slice(primary), /className="send"/, "idle compositions retain Send");
-  assert.match(composer, /abortSession\("composer"\)/, "composer stop is attributed, not a generic user abort");
-  assert.match(
-    composer,
-    /event\.detail !== 0 && Date\.now\(\) - stopPointerAt\.current > 1000/,
-    "a remounted Stop ignores click-through from the Send slot",
-  );
-  assert.equal(
-    composerLayoutState({ phoneLayout: true, inputFocused: false, shellMode: false, hasDraft: true }),
-    "phone-engaged",
-    "a typed draft stays engaged after the input blurs",
-  );
-  assert.equal(
-    composerLayoutState({ phoneLayout: true, inputFocused: false, shellMode: false, hasDraft: false }),
-    "phone-resting",
-    "an idle or working phone composer uses the compact resting row",
-  );
-  assert.equal(
-    composerLayoutState({ phoneLayout: false, inputFocused: false, shellMode: false, hasDraft: false }),
-    "desktop",
-    "desktop keeps its existing non-phone layout",
-  );
-  assert.doesNotMatch(voice, /supportedSlots:\s*\[[\s\S]*?"composer\.trailing"/,
-    "voice cannot be placed after the primary action");
+  assert.match(css, /\.composer-mobile \.composer-actions > \.composer-extensions:has\(\.mic-btn\)/,
+    "a user-moved microphone remains supported without exposing other widgets");
 });
 
 test("thinking effort lives in the model picker", async () => {

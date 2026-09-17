@@ -1,5 +1,4 @@
 import { getLocale, tr } from "../../../apps/web/src/i18n/index.ts";
-import type { RefObject } from "react";
 import {
   Button,
   ResponsiveOverlay,
@@ -22,13 +21,11 @@ type RecurrenceView = Extract<CadenceView, { mode: "weekly" | "monthly" }>;
 export default function PlannerRecurrenceSheet({
   open,
   onClose,
-  anchorRef,
   value,
   onChange,
 }: {
   open: boolean;
   onClose: () => void;
-  anchorRef: RefObject<HTMLElement | null>;
   value: RecurrenceView;
   onChange: (next: RecurrenceView) => void;
 }) {
@@ -79,9 +76,6 @@ export default function PlannerRecurrenceSheet({
       title={tr("scheduleview.recurrence")}
       desktop="dialog"
       dialogSize="sm"
-      phone="popover"
-      anchorRef={anchorRef}
-      stableAnchor
       className="planner-sheet-overlay"
       sheetAction={{ label: tr("common.done"), onClick: onClose }}
       dialogFooter={<Button variant="primary" onClick={onClose}>{tr("common.done")}</Button>}

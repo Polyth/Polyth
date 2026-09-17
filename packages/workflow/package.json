@@ -18,16 +18,7 @@
       "enabled": true,
       "settingsGroup": "Engineering",
       "icon": "workflow",
-      "hasSettings": false,
-      "category": "operations",
-      "projectAffinity": {
-        "directions": [
-          "operations",
-          "engineering",
-          "research"
-        ],
-        "recommended": true
-      }
+      "hasSettings": false
     }
   },
   "dependencies": {

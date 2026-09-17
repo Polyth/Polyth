@@ -1,6 +1,7 @@
 import { join, resolve } from "node:path";
 import type { Project, ProjectService, SpaceContext } from "@polyth/contracts";
 import type { ServerPackageHost } from "./serverPackage.ts";
+import { RUNTIME_SYSTEM_PRINCIPAL_ID } from "./systemSessions.ts";
 
 export interface PackageWorkspace {
   projectId: string;
@@ -15,16 +16,21 @@ interface PackageWorkspaceProjectService extends ProjectService {
   }): Promise<Project>;
 }
 
+type PackageWorkspaceHost = Pick<ServerPackageHost, "pluginId" | "projects" | "spaceStorage">
+  & Partial<Pick<ServerPackageHost, "forSpace">>;
+
 /**
  * Resolve the calling package's private runtime anchor in the supplied,
  * gateway-validated Space. The package id and path come from the host, never
  * from request/model input, so one package cannot choose another namespace.
  *
- * This deliberately keeps the existing project-shaped runtime/session
- * contracts intact while hiding the anchor from user-facing project lists.
+ * Canonical hosts then re-open the anchor through a system-scoped project
+ * facade. That materializes/verifies the control-plane resource before any
+ * session can use this hidden project as its parent. Lightweight legacy/test
+ * hosts without `forSpace` retain the historical registry-only behavior.
  */
 export async function packageWorkspace(
-  host: Pick<ServerPackageHost, "pluginId" | "projects" | "spaceStorage">,
+  host: PackageWorkspaceHost,
   space: SpaceContext,
 ): Promise<PackageWorkspace> {
   const projects = host.projects as PackageWorkspaceProjectService;
@@ -44,5 +50,21 @@ export async function packageWorkspace(
       code: "forbidden",
     });
   }
+
+  if (typeof host.forSpace === "function") {
+    const governed = await host.forSpace({
+      ...space,
+      userId: RUNTIME_SYSTEM_PRINCIPAL_ID,
+      role: "owner",
+    }).projects.get(project.id);
+    if (!governed || governed.id !== project.id || governed.spaceId !== space.spaceId
+      || resolve(governed.path) !== cwd) {
+      throw Object.assign(new Error("package workspace canonical ownership mismatch"), {
+        code: "recovery-required",
+      });
+    }
+    return { projectId: governed.id, cwd: governed.path };
+  }
+
   return { projectId: project.id, cwd: project.path };
 }

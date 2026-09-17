@@ -9,7 +9,8 @@ import {
   setActiveBrowserAccount,
 } from "../src/accountStorage.ts";
 import { consumeAuthPrefetch, isBrowserAccountScopeResolved, prefetchAuthStatus } from "../src/authPrefetch.ts";
-import { loginAccount } from "../src/accounts.ts";
+import { clearAuthCsrf } from "../src/authClient.ts";
+import { loginAccount, recoverAccount } from "../src/accounts.ts";
 
 class MemoryStorage {
   private values = new Map<string, string>();
@@ -53,15 +54,80 @@ test("browser-local state is isolated by active account", () => {
 test("a successful first login establishes the authenticated persistence namespace", async () => {
   const restoreStorage = installStorage();
   const previousFetch = globalThis.fetch;
+  clearAuthCsrf();
   try {
-    globalThis.fetch = async (input) => {
-      assert.equal(String(input), "/api/auth/login");
-      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    const csrfToken = "f".repeat(64);
+    const seen: string[] = [];
+    globalThis.fetch = async (input, init) => {
+      const path = String(input);
+      seen.push(path);
+      if (path === "/api/auth/status") {
+        return new Response(JSON.stringify({
+          required: true,
+          authorized: false,
+          scope: "anonymous",
+          state: "ready",
+          csrfToken,
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (path === "/api/auth/login") {
+        assert.equal((init?.headers as Record<string, string>)["x-polyth-csrf"], csrfToken);
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      if (path === "/api/auth/me") {
+        return new Response(JSON.stringify({ id: "usr_alice", displayName: "Alice" }), { status: 200 });
+      }
+      throw new Error(`unexpected fetch ${path}`);
     };
     assert.deepEqual(await loginAccount("Alice", "secret"), { ok: true });
+    assert.deepEqual(seen, ["/api/auth/status", "/api/auth/login", "/api/auth/me"]);
     assert.equal(activeBrowserAccountId(), "usr_alice");
     assert.equal(isBrowserAccountScopeResolved(), true);
   } finally {
+    clearAuthCsrf();
+    globalThis.fetch = previousFetch;
+    restoreStorage();
+  }
+});
+
+test("recovery replaces credentials without manufacturing an authenticated browser namespace", async () => {
+  const restoreStorage = installStorage();
+  const previousFetch = globalThis.fetch;
+  clearAuthCsrf();
+  try {
+    const csrfToken = "a".repeat(64);
+    const seen: string[] = [];
+    globalThis.fetch = async (input, init) => {
+      const path = String(input);
+      seen.push(path);
+      if (path === "/api/auth/status") {
+        return new Response(JSON.stringify({
+          required: true,
+          authorized: false,
+          scope: "anonymous",
+          state: "ready",
+          csrfToken,
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      assert.equal(path, "/api/auth/recover");
+      assert.equal((init?.headers as Record<string, string>)["x-polyth-csrf"], csrfToken);
+      assert.deepEqual(JSON.parse(String(init?.body)), {
+        login: "alice",
+        code: "recovery-code",
+        password: "replacement passphrase",
+      });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    };
+
+    assert.deepEqual(
+      await recoverAccount(" Alice ", " recovery-code ", "replacement passphrase"),
+      { ok: true },
+    );
+    assert.deepEqual(seen, ["/api/auth/status", "/api/auth/recover"]);
+    assert.equal(activeBrowserAccountId(), "usr_owner");
+    assert.equal(isBrowserAccountScopeResolved(), false);
+  } finally {
+    clearAuthCsrf();
     globalThis.fetch = previousFetch;
     restoreStorage();
   }

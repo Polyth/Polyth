@@ -24,12 +24,12 @@ import {
   claimTerminalStateEvidence,
   createTranslateState,
   errorMessageOf,
-  modelUnavailableOf,
   providerLimitOf,
   finishTranslateTurn,
   flushAssistantOnIdle,
   markTranslateTurnAborting,
   normalizeOcObservation,
+  splitNormalizedObservation,
   translateOcEvent,
   type TranslateState,
 } from "./events.ts";
@@ -505,14 +505,11 @@ export const createOpenCodeRuntimeFacade = (
       return [{ type: "turn/stopped", reason: "aborted" }];
     }
     const retry = providerLimitOf(event);
-    // Capacity first: a wait-and-retry failure is never a model-selection one.
-    const modelUnavailable = !retry && modelUnavailableOf(event);
     return [{
       type: "turn/stopped",
       reason: "error",
       error: errorMessageOf(event) ?? "session failed",
       ...(retry ? { retry } : {}),
-      ...(modelUnavailable ? { code: "model-unavailable" as const } : {}),
     }];
   };
 
@@ -603,8 +600,17 @@ export const createOpenCodeRuntimeFacade = (
         ...translated,
         ...terminalEvents(canonical, ev, st),
       ];
-      const observation = { ...normalized.observation, events };
-      for (const cb of observationListeners) cb(canonical, observation);
+      if (
+        events.length === normalized.observation.events.length
+        && normalized.observation.events.length > 1
+      ) {
+        for (const observation of splitNormalizedObservation(normalized.observation)) {
+          for (const cb of observationListeners) cb(canonical, observation);
+        }
+      } else {
+        const observation = { ...normalized.observation, events };
+        for (const cb of observationListeners) cb(canonical, observation);
+      }
       const notice = translated.find((event) => event.type === "assistant/message")?.reasoning;
       const hint = notice ? classifyProviderLimitNotice(notice) : null;
       const turn = activeTurn.get(canonical);
@@ -1070,8 +1076,7 @@ export const createOpenCodeRuntimeFacade = (
       reconciliationOrdinals.set(binding.canonicalSessionId, ordinal!);
       const protocol = await lifecycle.protocol();
       const snapshot = await lifecycle.reconcile({ ...binding, protocol }, after);
-      if (!snapshot.events.some((entry) =>
-        entry.events.some((event) => event.type === "task/snapshot"))) {
+      if (!snapshot.events.some((entry) => entry.event.type === "task/snapshot")) {
         return snapshot;
       }
 
@@ -1081,16 +1086,13 @@ export const createOpenCodeRuntimeFacade = (
       const state = stateFor(binding.canonicalSessionId);
       let revision = state.taskRevision;
       let key = state.lastTaskKey;
-      const events = snapshot.events.map((entry) => ({
-        ...entry,
-        events: entry.events.map((event) => {
-          if (event.type !== "task/snapshot") return event;
-          const nextKey = JSON.stringify(event.items);
-          if (nextKey !== key) revision += 1;
-          key = nextKey;
-          return { ...event, revision };
-        }),
-      }));
+      const events = snapshot.events.map((entry) => {
+        if (entry.event.type !== "task/snapshot") return entry;
+        const nextKey = JSON.stringify(entry.event.items);
+        if (nextKey !== key) revision += 1;
+        key = nextKey;
+        return { ...entry, event: { ...entry.event, revision } };
+      });
       state.taskRevision = revision;
       state.lastTaskKey = key;
       return { ...snapshot, events };

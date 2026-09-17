@@ -111,7 +111,7 @@ const notify = (opts: PluginRegistryOptions, id: string): void => {
 
 const assertServerEntryAllowed = (manifest: ManagedPluginManifest, source: string): void => {
   if (!manifest.entries?.server) return;
-  if (manifest.trust !== "privileged" && manifest.trust !== "credentialed") {
+  if (manifest.trust === "ui-only" || manifest.trust === "pure") {
     throw err("invalid-input", `trust class "${manifest.trust}" cannot declare entries.server`);
   }
   if (!source.startsWith("file:")) {
@@ -542,19 +542,7 @@ export function createPluginRegistry(opts: PluginRegistryOptions): PluginRegistr
           host: {
             pluginId: pkg.persisted.id,
             storageDir,
-            routes: {
-              add(handler) {
-                return opts.routes!.add(async (request) => {
-                  // Trusted server code is process-global, but package enablement
-                  // remains Space-scoped. Never let a global handler observe a
-                  // request from a Space where the package is disabled.
-                  if (!opts.packageSpaces) return handler(request);
-                  const target = allSpaces().find((space) => space.spaceId === request.space.spaceId);
-                  if (!target || !readSpaceEnabled(target.storage, pkg.persisted.id)) return false;
-                  return handler(request);
-                });
-              },
-            },
+            routes: opts.routes,
             root: opts.root,
           },
         });

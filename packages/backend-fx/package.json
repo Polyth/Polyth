@@ -17,9 +17,7 @@
       "core": false,
       "enabled": true,
       "icon": "command",
-      "hasSettings": false,
-      "category": "system",
-      "projectAffinity": {}
+      "hasSettings": false
     }
   }
 }

@@ -14,7 +14,6 @@ export default defineWebPackage((host) => () => {
       label: tr("editor.profile.authoring"),
       description: tr("editor.profile.authoringDescription"),
       order: 10,
-      projectAffinity: { directions: ["research"], recommended: true },
       defaultLayout: {
         surfaces: [
           { surface: "session", region: "primary", active: true },
@@ -28,7 +27,6 @@ export default defineWebPackage((host) => () => {
       label: tr("editor.profile.development"),
       description: tr("editor.profile.developmentDescription"),
       order: 20,
-      projectAffinity: { directions: ["engineering"], recommended: true },
       defaultLayout: {
         surfaces: [
           { surface: "files", region: "primary", active: true },

@@ -11,6 +11,8 @@ import {
   type ServerPackageHost,
 } from "@polyth/plugins";
 import type { PackageLifecycle } from "./packageLifecycle.ts";
+import { governPackageHost } from "./packageHostAuthority.ts";
+import { governPackageRuntimeHost } from "./packageRuntimeAuthority.ts";
 import type { RouteRegistry } from "./routeRegistry.ts";
 
 export interface PackageDiscoveryDeps {
@@ -62,10 +64,9 @@ export async function registerDiscoveredPackages(
   const packages = deps.discovered ?? await discoverServerPackages(deps.packagesDir);
   for (const discovered of packages) {
     try {
-      const pkg = await loadServerPackage(
-        discovered,
-        deps.hostFor?.(discovered.id) ?? { ...deps.host, pluginId: discovered.id },
-      );
+      const rawHost = deps.hostFor?.(discovered.id) ?? { ...deps.host, pluginId: discovered.id };
+      const governed = governPackageHost(rawHost);
+      const pkg = await loadServerPackage(discovered, governPackageRuntimeHost(rawHost, governed));
       registerServerPackage(deps, discovered.id, pkg);
       registered.push(discovered.id);
     } catch (error) {

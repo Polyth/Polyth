@@ -597,9 +597,6 @@ export type AttachmentModality = "image" | "file" | "pdf" | "audio" | "url";
 export type RuntimeErrorCode =
   | "rate-limited" | "quota-exhausted" | "overloaded" | "auth-expired"
   | "invalid-attachment"
-  /** The provider refused the selected model for this account/plan. Recoverable
-   * by picking another model; never by waiting or by silently substituting one. */
-  | "model-unavailable"
   | "unsupported" | "unknown";
 
 /**
@@ -1629,7 +1626,7 @@ export interface SessionService {
   /** Read-only recovery view for one account-scoped client admission token.
    * It projects the existing durable operation/queue authorities. */
   clientMutationStatus?(sessionId: string, clientOperationId: string): Promise<ClientMutationStatusDto>;
-  abort(sessionId: string, options?: { source?: string }): Promise<void>;
+  abort(sessionId: string): Promise<void>;
   /** Request native context compaction when the active runtime supports it. */
   compact?(sessionId: string): Promise<void>;
   /** Drop a pending rate-limit auto-resume (projection.resume). No-op when
@@ -1942,10 +1939,6 @@ export interface RuntimeSessionBinding {
 
 export type RuntimeReconciliationBinding = RuntimeSessionBinding & {
   reconciliationOrdinal?: number;
-  /** Durable per-entity checkpoints already canonicalized for this backend
-   * session. Pull reconstruction derives canonical facts from final upstream
-   * state, so without them it cannot know which facts Polyth already holds. */
-  checkpoints?: readonly ObservationCheckpoint[];
 };
 
 export interface PersistedRuntimeBinding {
@@ -2009,17 +2002,10 @@ export interface RuntimeSnapshot {
     /** Stable upstream entity revision when the protocol exposes one. */
     revision?: string;
   }>;
-  /** One native observation with every canonical event normalization derived
-   * from it. The members are one admission unit: identity, state rank and
-   * checkpoint decide once for the whole entry, so a split member can never
-   * suppress its siblings and a re-observed source can never re-append them. */
   events: Array<{
     entityKey: string;
     revision: string;
-    artifactKind?: ObservationArtifactKind;
-    events: RuntimeEvent[];
-    stateRank?: number;
-    checkpoint?: JsonObject;
+    event: RuntimeEvent;
   }>;
   /** Protocol-proven links between durable Polyth operations and accepted
    * upstream entities. Adapters omit this when the backend exposes no stable
@@ -3664,25 +3650,6 @@ export interface ProjectPatch {
   defaults?: ProjectDefaults;
 }
 
-/** Presentation-only state shared by every client of one project. The web
- * client owns the schema of each value; the server only bounds the known keys
- * and stores the JSON record beside its project. */
-export const PROJECT_PRESENTATION_SETTING_KEYS = [
-  "widgetLayout",
-  "workspacePanel",
-  "workspacePane",
-  "workbenchLayout",
-  "capabilityLayout",
-  "workspaceMode",
-] as const;
-export type ProjectPresentationSettingKey = typeof PROJECT_PRESENTATION_SETTING_KEYS[number];
-
-export interface ProjectPresentationSettingsDto {
-  revision: number;
-  updatedAt: number;
-  settings: Partial<Record<ProjectPresentationSettingKey, JsonValue>>;
-}
-
 /** Clone a GitHub/GitLab repository on the current Polyth host or an SSH host. */
 export interface ProjectCloneInput {
   repository: string;
@@ -3701,12 +3668,6 @@ export interface ProjectService {
   get(id: string): Promise<Project | undefined>;
   /** PATCH metadata/defaults; optional so old fakes remain valid. */
   update?(id: string, patch: ProjectPatch): Promise<Project>;
-  /** Presentation-only layout state, isolated with the project scope. */
-  getPresentationSettings?(id: string): Promise<ProjectPresentationSettingsDto>;
-  putPresentationSettings?(
-    id: string,
-    settings: Record<string, unknown>,
-  ): Promise<ProjectPresentationSettingsDto>;
   /** Register a project whose path lives on a remote machine — the local
    *  existence check does not apply. Optional so old fakes remain valid. */
   addRemote?(path: string, remote: ProjectRemote, name?: string): Promise<Project>;

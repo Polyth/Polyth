@@ -12,11 +12,7 @@ import {
   registerDocumentEditorBridge,
 } from "../../../apps/web/src/resources/documents.ts";
 import { subscribeLocale, tr } from "../../../apps/web/src/i18n/index.ts";
-import {
-  registerEditorReplace,
-  registerEditorSelection,
-  type EditorSurfaceProps,
-} from "../../../apps/web/src/resources/views.ts";
+import { registerEditorSelection, type EditorSurfaceProps } from "../../../apps/web/src/resources/views.ts";
 import { editorTheme } from "./theme.ts";
 import { detectIndentUnit, languageOf, lineRangeFromOffsets, PLAIN_TEXT_LABEL } from "./languages.ts";
 
@@ -484,27 +480,6 @@ export function editorSelection(docKey: string): { text: string; startLine: numb
   };
 }
 
-export function replaceEditorSelection(
-  docKey: string,
-  replacement: string,
-  expectedText: string,
-): boolean {
-  const retained = states.get(docKey);
-  if (!retained) return false;
-  const main = retained.state.selection.main;
-  if (main.empty) return false;
-  const from = Math.min(main.from, main.to);
-  const to = Math.max(main.from, main.to);
-  const current = retained.state.sliceDoc(from, to);
-  if (current !== expectedText) return false;
-  for (const group of groups.values()) {
-    if (!group.active || resourceKey(group.active.ref) !== docKey) continue;
-    group.view.dispatch({ changes: { from, to, insert: replacement } });
-    return true;
-  }
-  return false;
-}
-
 registerDocumentEditorBridge({
   onAuthoritativeReset(ref, text, generation) {
     resetRetainedState(ref, text, generation);
@@ -706,4 +681,3 @@ export default function EditorRuntime(props: EditorSurfaceProps): ReactElement {
 }
 
 registerEditorSelection(editorSelection);
-registerEditorReplace(replaceEditorSelection);

@@ -6,6 +6,7 @@ import type {
   OpenCodePluginRemoveResponseDto,
   RouteHandler,
 } from "@polyth/contracts";
+import { requireInstanceOwnerAuthority } from "@polyth/contracts/instance-authority";
 import type { PluginConfigService } from "./pluginRouteShared.ts";
 
 const pluginDto = (entry: OpenCodePluginConfigEntry): OpenCodePluginEntryDto =>
@@ -18,17 +19,19 @@ const listResponse = (
 ): OpenCodePluginListResponseDto => ({ plugins: plugins.map(pluginDto) });
 
 export function opencodePluginRoutes(config: PluginConfigService): RouteHandler {
-  return async ({ path, method, body, json }) => {
+  return async (request) => {
+    const { path, method, body, json } = request;
     if (path === "/api/plugins/opencode" && method === "GET") {
       json(200, listResponse(await config.listPlugins()));
       return true;
     }
     if (path === "/api/plugins/opencode/import" && method === "POST") {
-      const request = await body();
-      const field = Object.prototype.hasOwnProperty.call(request, "plugins")
+      requireInstanceOwnerAuthority(request, "OpenCode configuration changes require the instance owner");
+      const input = await body();
+      const field = Object.prototype.hasOwnProperty.call(input, "plugins")
         ? "plugins"
         : "plugin";
-      const raw = request[field];
+      const raw = input[field];
       if (!Array.isArray(raw)) {
         throw Object.assign(new Error(`${field} must be an array`), {
           code: "invalid-input",
@@ -50,6 +53,7 @@ export function opencodePluginRoutes(config: PluginConfigService): RouteHandler 
     }
     const remove = path.match(/^\/api\/plugins\/opencode\/(.+)$/);
     if (remove && method === "DELETE") {
+      requireInstanceOwnerAuthority(request, "OpenCode configuration changes require the instance owner");
       const result = await config.removePlugin(decodeURIComponent(remove[1]!));
       const response: OpenCodePluginRemoveResponseDto = {
         ...listResponse(result.plugins),

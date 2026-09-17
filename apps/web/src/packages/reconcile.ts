@@ -1,5 +1,4 @@
 import type { PackageDescriptorDto } from "@polyth/contracts";
-import { updateProjectPackageDescriptor } from "./projectRelevance.ts";
 
 interface PackageReconcileContext {
   packageStates: Map<string, boolean>;
@@ -15,7 +14,6 @@ export function configurePackageReconcile(next: PackageReconcileContext): void {
 
 export function reconcilePackage(pkg: PackageDescriptorDto): void {
   if (!context) return;
-  updateProjectPackageDescriptor(pkg);
   context.packageStates.set(pkg.id, pkg.enabled);
   context.applyCanonicalState(pkg.id);
   context.notify();

@@ -9,7 +9,6 @@ import {
 import { createFileService, MAX_RAW_BYTES, type FileService } from "./index.ts";
 import { createRemoteFileService } from "./remote.ts";
 import { registerFilesHandoffSources } from "./handoffSources.ts";
-import { inlineAiRoutes } from "./inlineAiRoutes.ts";
 import {
   createWorkspaceInstructionSource,
   type WorkspaceInstructionSourceService,
@@ -330,7 +329,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       if (handoffRegistry) {
         registerFilesHandoffSources({ registry: handoffRegistry, files, projects: host.projects });
       }
-      const fileRoutes = workspaceRoutes({
+      routes ??= workspaceRoutes({
         projects: host.projects,
         sessions: host.sessions,
         files,
@@ -338,14 +337,6 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           ? { ssh: host.services.get(serverServiceKey<SshTransportService>("ssh"))! }
           : {}),
       });
-      const aiRoutes = inlineAiRoutes(host, {
-        projects: host.projects,
-        sessions: host.sessions,
-      });
-      routes ??= async (request) => {
-        if (await aiRoutes(request)) return true;
-        return fileRoutes(request);
-      };
     },
   };
 }

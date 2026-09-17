@@ -1,4 +1,4 @@
-import { realpath, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
@@ -8,6 +8,7 @@ import type {
   RouteHandler,
 } from "@polyth/contracts";
 import { loadPlugin } from "@polyth/kernel";
+import { parseManifest } from "./managedManifest.ts";
 
 export interface TrustedServerPluginHost {
   pluginId: string;
@@ -20,6 +21,25 @@ export type ServerPluginFactory = (
   host: TrustedServerPluginHost,
 ) => Plugin | Promise<Plugin>;
 
+type TrustedServerSpaceGate = (pluginId: string, spaceId: string) => boolean;
+let trustedServerSpaceGate: TrustedServerSpaceGate | null = null;
+
+/**
+ * Bind the deployment's canonical package/Space enablement lookup. Trusted
+ * Node packages register global HTTP handlers, so the host must stop a handler
+ * before package code sees requests from Spaces where that package is disabled.
+ * Missing gate is fail-closed; production package composition binds it before
+ * any managed server entry can activate.
+ */
+export function bindTrustedServerSpaceGate(gate: TrustedServerSpaceGate): Disposable {
+  trustedServerSpaceGate = gate;
+  return {
+    dispose() {
+      if (trustedServerSpaceGate === gate) trustedServerSpaceGate = null;
+    },
+  };
+}
+
 const inside = (base: string, candidate: string): boolean =>
   candidate === base || candidate.startsWith(base + sep);
 
@@ -30,6 +50,20 @@ export async function loadServerEntry(opts: {
   host: TrustedServerPluginHost;
 }): Promise<Disposable> {
   const installDir = await realpath(opts.installDir);
+  const manifestPath = await realpath(resolve(installDir, "polyth-plugin.json"));
+  if (!inside(installDir, manifestPath)) {
+    throw new Error("plugin manifest escapes the plugin install directory");
+  }
+  const manifest = parseManifest(await readFile(manifestPath, "utf8"));
+  if (manifest.id !== opts.host.pluginId) {
+    throw new Error(
+      `installed manifest id "${manifest.id}" does not match package id "${opts.host.pluginId}"`,
+    );
+  }
+  if (manifest.entries?.server !== opts.entryPath) {
+    throw new Error("installed manifest server entry changed since activation was planned");
+  }
+
   const requested = resolve(installDir, opts.entryPath);
   if (!inside(installDir, requested)) {
     throw new Error("server entry escapes the plugin install directory");
@@ -49,7 +83,23 @@ export async function loadServerEntry(opts: {
     throw new Error("server entry default export must be a plugin factory");
   }
 
-  const plugin = await (loaded.default as ServerPluginFactory)(opts.host);
+  const guardedHost: TrustedServerPluginHost = {
+    ...opts.host,
+    routes: {
+      add(handler) {
+        return opts.host.routes.add(async (request) => {
+          const allowed = trustedServerSpaceGate?.(
+            opts.host.pluginId,
+            request.space.spaceId,
+          ) === true;
+          if (!allowed) return false;
+          return handler(request);
+        });
+      },
+    },
+  };
+
+  const plugin = await (loaded.default as ServerPluginFactory)(guardedHost);
   if (
     !plugin
     || typeof plugin !== "object"

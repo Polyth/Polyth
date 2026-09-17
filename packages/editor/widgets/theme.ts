@@ -18,11 +18,11 @@ export const editorTheme = EditorView.theme({
     overscrollBehavior: "contain",
   },
   ".cm-content": {
-    padding: "var(--space-1) 0",
+    padding: "var(--space-2) 0",
     caretColor: "var(--text)",
     minHeight: "100%",
   },
-  ".cm-line": { padding: "0 var(--space-3) 0 var(--space-2)" },
+  ".cm-line": { padding: "0 var(--space-4) 0 var(--space-2)" },
   ".cm-cursor, .cm-dropCursor": { borderLeft: "2px solid var(--text)", marginLeft: "-1px" },
   "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
     backgroundColor: selection,
@@ -30,16 +30,12 @@ export const editorTheme = EditorView.theme({
   ".cm-activeLine": { backgroundColor: "var(--surface-overlay-hover)" },
   ".cm-activeLineGutter": { backgroundColor: "transparent", color: "var(--text-dim)" },
   ".cm-gutters": {
-    backgroundColor: "color-mix(in srgb, var(--sunken) 92%, var(--panel))",
+    backgroundColor: "var(--sunken)",
     color: "var(--faint)",
     border: "0",
     borderRight: "1px solid var(--hair)",
   },
-  ".cm-lineNumbers .cm-gutterElement": {
-    padding: "0 var(--space-2) 0 var(--space-3)",
-    minWidth: "3.25ch",
-    textAlign: "right",
-  },
+  ".cm-lineNumbers .cm-gutterElement": { padding: "0 var(--space-2) 0 var(--space-3)", minWidth: "3.5ch" },
   ".cm-panels": {
     backgroundColor: "var(--panel)",
     color: "var(--text)",

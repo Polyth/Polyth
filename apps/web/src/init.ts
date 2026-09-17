@@ -29,7 +29,6 @@ import { flushClientPersistence, type PersistenceScope } from "./clientPersisten
 import { hydrateLocalMutationIntent, reconcileLocalMutationIntent, submitDirectPrompt } from "./mutationIntent.ts";
 import { isNativeMobile, isPolythLinkLoopbackOrigin, returnToMobileConnectionHub } from "@polyth/mobile/runtime";
 import { scopedDraftCacheKey } from "./draftRecord.ts";
-import { initProjectPresentationSync } from "./projectPresentationSync.ts";
 
 let sync: SyncClient | null = null;
 let syncStatus: SyncStatus = "disconnected";
@@ -346,9 +345,6 @@ export function init(): Promise<void> {
   // PWA installability is independent from the opt-in push subscription.
   // Auth has already succeeded before init(), so register without prompting.
   void registerServiceWorker().catch((err) => console.warn("service worker registration failed", err));
-  // Project presentation records are server-backed, while the existing local
-  // records remain the synchronous/offline rendering path.
-  initProjectPresentationSync(store.subscribeStore, () => store.getState().activeProjectId);
   // UX-ONBOARDING boot: project, model, and agent hydration launch
   // independently and publish as soon as each settles. Awaiting a combined
   // Promise.all/allSettled before publishing any result is forbidden — a slow
@@ -695,7 +691,6 @@ function startSync(): void {
     // Re-pull shared settings: a broadcast may have been missed while the
     // socket was down.
     initSettingsSync();
-    initProjectPresentationSync(store.subscribeStore, () => store.getState().activeProjectId);
     // A reconnect after backend churn is the moment an empty model catalog
     // becomes fetchable again — heal it now instead of waiting out a backoff.
     recheckRuntimeCatalog();
@@ -1430,11 +1425,11 @@ export async function sendMessage(text: string, model?: JsonObject, agent?: stri
   }
 }
 
-export async function abortSession(source = "composer"): Promise<void> {
+export async function abortSession(): Promise<void> {
   const id = store.getState().activeSessionId;
   if (!id) return;
   try {
-    await api.abort(id, source);
+    await api.abort(id);
   } catch (err) {
     console.error("abort failed", err);
     store.setUiError(friendlyError(tr("composer.stopTheCurrentResponse"), err));

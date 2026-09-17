@@ -41,12 +41,12 @@ const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { MarkdownDoc } = await import("../src/markdown/render.tsx");
 
-async function mount(text: string, props: { showGalleryShortcut?: boolean } = {}) {
+async function mount(text: string) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   await act(async () => {
-    root.render(createElement(MarkdownDoc, { text, keyBase: "md-test", ...props }));
+    root.render(createElement(MarkdownDoc, { text, keyBase: "md-test" }));
   });
   return {
     container,
@@ -140,38 +140,6 @@ test("blocks taller than the viewport collapse to a third and expand from the in
     document.documentElement.style.removeProperty("--visual-vh");
     if (originalScroll) Object.defineProperty(HTMLElement.prototype, "scrollHeight", originalScroll);
     else delete (HTMLElement.prototype as { scrollHeight?: unknown }).scrollHeight;
-  }
-});
-
-test("blocked image source renders as readable text, not a dead line-through button", async () => {
-  const view = await mount("![shot](/tmp/opencode/selection-menu-light.png)");
-  try {
-    assert.equal(view.container.querySelector(".md-img-btn"), null, "blocked source must not render an image button");
-    const blocked = view.container.querySelector(".md-blocked");
-    assert.ok(blocked, "blocked source is announced inline");
-    assert.equal(view.container.querySelector("del"), null, "blocked source is not struck through");
-    assert.equal(view.container.textContent?.includes("blocked image source"), true);
-  } finally {
-    await view.unmount();
-  }
-});
-
-test("gallery shortcut renders only when sanitized images exist and opens the lightbox", async () => {
-  const without = await mount("plain text answer", { showGalleryShortcut: true });
-  try {
-    assert.equal(without.container.querySelector(".gallery-shortcut"), null, "no images → no shortcut");
-  } finally {
-    await without.unmount();
-  }
-  const withImage = await mount("![pic](https://x.dev/i.png)", { showGalleryShortcut: true });
-  try {
-    const shortcut = withImage.container.querySelector(".gallery-shortcut") as HTMLButtonElement | null;
-    assert.ok(shortcut, "sanitized image present → shortcut renders");
-    await act(async () => { shortcut!.click(); });
-    // The a11y Dialog portals its surface to document.body, not the mount root.
-    assert.ok(document.body.querySelector(".gallery-dialog"), "shortcut opens the gallery");
-  } finally {
-    await withImage.unmount();
   }
 });
 

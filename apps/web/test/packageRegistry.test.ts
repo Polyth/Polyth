@@ -48,65 +48,22 @@ const descriptors = new Map<string, PackageDescriptorDto>([
   }],
 ]);
 
-let harnessRosterRequests = 0;
-let harnessRoster = [
-  { identity: { id: "codex", name: "Codex", integration: "App Server" }, policy: { enabled: true, priority: 10, autoSelect: true } },
-];
-
 Object.defineProperty(globalThis, "fetch", {
   configurable: true,
-  value: async (input: string | URL | Request) => {
-    const url = String(input);
-    return {
-      ok: true,
-      status: 200,
-      statusText: "OK",
-      json: async () => {
-        if (url.includes("/api/harnesses/roster")) {
-          harnessRosterRequests++;
-          return harnessRoster;
-        }
-        return url.endsWith("/packages-manifest.json")
-          ? { packages: [] }
-          : { packages: [...descriptors.values()] };
-      },
-      text: async () => "",
-    };
-  },
+  value: async (input: string | URL | Request) => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    json: async () => String(input).endsWith("/packages-manifest.json")
+      ? { packages: [] }
+      : { packages: [...descriptors.values()] },
+    text: async () => "",
+  }),
 });
 
-const { bootPackages, isPackageEnabled, reconcilePackage, subscribePackages } =
+const { bootPackages, isPackageEnabled, subscribePackages } =
   await import("../src/packages/registry.ts");
 const { getState, setActiveView } = await import("../src/store.ts");
-const { invalidateRuntimeCatalogs, readHarnessRoster } =
-  await import("@polyth/models/runtime-catalog");
-
-// Must stay the first test in this file: it asserts what the *first* boot of a
-// page does to caches warmed before packages finished loading.
-test("the first boot adopts the harness topology instead of discarding warm catalogs", async () => {
-  descriptors.set("backend-testharness", {
-    id: "backend-testharness",
-    name: "Test harness",
-    description: "Harness topology package.",
-    core: false,
-    enabled: true,
-    hasSettings: false,
-  });
-  const scope = { projectId: "project-boot", spaceId: "space-boot" };
-  harnessRosterRequests = 0;
-  await readHarnessRoster(scope);
-  assert.equal(harnessRosterRequests, 1);
-
-  await bootPackages();
-  await readHarnessRoster(scope);
-  assert.equal(harnessRosterRequests, 1,
-    "discovering the harness packages for the first time must not evict metadata already cached this page");
-
-  descriptors.get("backend-testharness")!.enabled = false;
-  await bootPackages();
-  await readHarnessRoster(scope);
-  assert.equal(harnessRosterRequests, 2, "a real harness topology change still forces fresh discovery");
-});
 
 test("package state follows server descriptors when the web manifest is empty", async () => {
   let notifications = 0;
@@ -129,35 +86,4 @@ test("package state follows server descriptors when the web manifest is empty", 
   assert.equal(getState().activeView, "session", "disabling the active workflow package returns to chat");
   assert.equal(notifications, 2);
   unsubscribe();
-});
-
-test("backend package changes invalidate the cached harness roster", async () => {
-  invalidateRuntimeCatalogs();
-  harnessRosterRequests = 0;
-  harnessRoster = [
-    { identity: { id: "codex", name: "Codex", integration: "App Server" }, policy: { enabled: true, priority: 10, autoSelect: true } },
-  ];
-  const scope = { projectId: "project-a", spaceId: "space-a" };
-
-  assert.deepEqual((await readHarnessRoster(scope)).map((row) => row.identity.id), ["codex"]);
-  assert.equal(harnessRosterRequests, 1);
-
-  harnessRoster = [
-    ...harnessRoster,
-    { identity: { id: "commandcode", name: "Command Code", integration: "Headless + Mod" }, policy: { enabled: true, priority: 65, autoSelect: false } },
-  ];
-  assert.deepEqual((await readHarnessRoster(scope)).map((row) => row.identity.id), ["codex"], "page-lifetime roster is cached before package topology changes");
-  assert.equal(harnessRosterRequests, 1);
-
-  reconcilePackage({
-    id: "backend-commandcode",
-    name: "Command Code harness",
-    description: "Command Code native harness",
-    core: false,
-    enabled: true,
-    hasSettings: false,
-  });
-
-  assert.deepEqual((await readHarnessRoster(scope)).map((row) => row.identity.id), ["codex", "commandcode"]);
-  assert.equal(harnessRosterRequests, 2, "backend package activation must force a fresh harness roster");
 });

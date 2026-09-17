@@ -120,10 +120,6 @@ test("fresh mobile chat exposes project targets and attachments use the platform
   // and appears only while its project/worktree target is still editable.
   assert.doesNotMatch(surface, /<SessionContextBar/);
   assert.match(composer, /\{!session && !creatingSession && <SessionContextBar \{\.\.\.contextBar\} \/>\}/);
-  assert.match(contextBar, /<Picker/);
-  assert.doesNotMatch(contextBar, /<Sheet|context-trigger|useSheetTrigger/);
-  assert.match(contextBar, /popoverClassName="context-picker-pop"/);
-  assert.match(contextBar, /footerAction:/);
   assert.match(contextBar, /tr\("mobile\.sessioncontextbar\.projectCurrentValue"/);
   assert.match(contextBar, /tr\("mobile\.sessioncontextbar\.worktreeCurrentValue"/);
   assert.match(composer, /target: \{ kind: "branch", branch: candidate\.name \}/);

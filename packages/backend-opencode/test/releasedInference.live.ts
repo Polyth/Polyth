@@ -443,12 +443,12 @@ test("live: released V2 runs local prompt, queue, interrupt, SSE, and MCP permis
         reconciliationBinding(endpoint, canonicalSessionId, completedBackendSessionId),
       );
       assert.equal(
-        snapshot.events.some((entry) => entry.events.some((event) => event.type === "assistant/message")),
+        snapshot.events.some((entry) => entry.event.type === "assistant/message"),
         true,
         JSON.stringify({
           events: snapshot.events.map((entry) => ({
             entityKey: entry.entityKey,
-            events: entry.events,
+            event: entry.event,
           })),
           nativeMessages,
         }),

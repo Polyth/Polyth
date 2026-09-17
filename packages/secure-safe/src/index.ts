@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -10,15 +11,34 @@ import type {
   SecureSafePatchInput,
   SecureSafeScope,
   SecureSafeService,
+  SpaceContext,
 } from "@polyth/contracts";
 
 export interface SecureSafeOptions {
   dataDir: string;
   /** Called after a mutation has regenerated the handle-only manifest. */
   onChanged?(): Promise<void>;
+  /** Build a physical Space/host store, bypassing process-level Space routing. */
+  localOnly?: boolean;
 }
 
 const error = (code: string, message: string) => Object.assign(new Error(message), { code });
+const spaceContext = new AsyncLocalStorage<SpaceContext>();
+let spaceResolver: ((ctx: SpaceContext) => SecureSafeService | undefined) | null = null;
+const physicalSafes = new Set<SecureSafeService>();
+
+/** Bind process-local Space storage. The resolver receives only a server-issued
+ * SpaceContext; request payloads can never select a secret store directly. */
+export function configureSecureSafeSpaceRouting(
+  resolver: (ctx: SpaceContext) => SecureSafeService | undefined,
+): void {
+  spaceResolver = resolver;
+}
+
+/** Carry the already-authorized Space across one scoped service operation. */
+export function runWithSecureSafeSpace<T>(ctx: SpaceContext, action: () => T): T {
+  return spaceContext.run(ctx, action);
+}
 
 function load<T>(path: string, fallback: T): T {
   try {
@@ -196,7 +216,7 @@ export function createSecureSafeService(opts: SecureSafeOptions): SecureSafeServ
     return { ...row };
   };
 
-  return {
+  const physical: SecureSafeService = {
     redact(text) {
       for (const value of Object.values(secrets).filter(Boolean).sort((a, b) => b.length - a.length)) text = text.split(value).join("[redacted]");
       return text;
@@ -250,5 +270,44 @@ export function createSecureSafeService(opts: SecureSafeOptions): SecureSafeServ
       }
       persistSecrets();
     },
+  };
+  physicalSafes.add(physical);
+  if (opts.localOnly) return physical;
+
+  const selected = (): SecureSafeService => {
+    const ctx = spaceContext.getStore();
+    if (!ctx) return physical;
+    const safe = spaceResolver?.(ctx);
+    if (!safe) throw error("HOST_UNAVAILABLE", "Space-owned Secure Safe is unavailable");
+    return safe;
+  };
+
+  return {
+    redact(text) {
+      const ctx = spaceContext.getStore();
+      if (ctx) return selected().redact?.(text) ?? text;
+      // Background continuity/log sanitizers may run outside the originating
+      // request async resource. Over-redaction across already-open physical
+      // safes is safe; selecting another Space for writes/reads is not.
+      for (const safe of physicalSafes) text = safe.redact?.(text) ?? text;
+      return text;
+    },
+    list: () => selected().list(),
+    manifest: () => selected().manifest(),
+    hasHandle(handle) {
+      // Never reveal that a handle exists in another Space when the runtime
+      // callback lacks a trusted Space context.
+      if (!spaceContext.getStore()) return physical.hasHandle(handle);
+      return selected().hasHandle(handle);
+    },
+    create: (input) => selected().create(input),
+    update: (id, patch) => selected().update(id, patch),
+    remove: (id) => selected().remove(id),
+    upsertByHandle: (input) => selected().upsertByHandle(input),
+    syncForbiddenConfig: () => selected().syncForbiddenConfig(),
+    putOpaque: (key, value) => selected().putOpaque(key, value),
+    getOpaque: (key) => selected().getOpaque(key),
+    deleteOpaque: (key) => selected().deleteOpaque(key),
+    deleteOpaqueByPrefix: (prefix) => selected().deleteOpaqueByPrefix(prefix),
   };
 }

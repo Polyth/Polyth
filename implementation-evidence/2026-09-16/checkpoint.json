@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 1,
+  "status": "partial-not-release-qualified",
+  "branch": "feat/identity-governed-workspaces-20260916",
+  "codeCommit": "af6529cda869908a8537977481e2a668725948df",
+  "testedCodeTree": "96a812ef555d9419ce9679fad6e92e69f364fe4d",
+  "sourceCommit": "29f13bdd2e4b5451d129e58a0476108f9ea31098",
+  "blueprintBaseline": "ff883b3f245545306f107c8fdc90b872e76762d0",
+  "identityActivatedInMainServer": false,
+  "legacyMigrationExecuted": false,
+  "masterModified": false,
+  "merged": false,
+  "deployed": false,
+  "targetedTests": {
+    "total": 96,
+    "passed": 96,
+    "failed": 0,
+    "skipped": 0
+  },
+  "catalog": {
+    "taskCount": 104,
+    "testCount": 1159,
+    "fullyAcceptedTasks": 0,
+    "catalogAcceptanceCertified": false
+  },
+  "checks": [
+    {
+      "id": "targeted-tests",
+      "command": "node --experimental-strip-types --test packages/control-plane/test/*.test.ts packages/identity/test/*.test.ts packages/server/test/authState.test.ts packages/tenancy/test/*.test.ts apps/web/test/authBootstrap.test.ts apps/web/test/multiUserAccountScope.test.ts",
+      "exitCode": 0,
+      "status": "passed",
+      "log": "targeted-tests.tap",
+      "logSha256": "f48ad88c19fb3d5c2d162fbb4991d0e8bf67a9e0458024663eccfa7ce1ad129c"
+    },
+    {
+      "id": "control-typecheck",
+      "command": "node node_modules/typescript/bin/tsc --noEmit -p packages/control-plane/tsconfig.json",
+      "exitCode": 0,
+      "status": "passed",
+      "log": "control-tsc.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "identity-typecheck",
+      "command": "node node_modules/typescript/bin/tsc --noEmit -p packages/identity/tsconfig.json",
+      "exitCode": 0,
+      "status": "passed",
+      "log": "identity-tsc.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "web-typecheck",
+      "command": "node node_modules/typescript/bin/tsc --noEmit -p apps/web/tsconfig.json",
+      "exitCode": 2,
+      "status": "baseline-identical-failure",
+      "log": "working-web-tsc.log",
+      "logSha256": "b7bc46b8fba790e59d5bdb9609cf42968a7f70daa7f33648214f1defe117ae9d"
+    },
+    {
+      "id": "server-typecheck",
+      "command": "node node_modules/typescript/bin/tsc --noEmit -p packages/server/tsconfig.json",
+      "exitCode": 2,
+      "status": "baseline-identical-failure",
+      "log": "working-server-tsc.log",
+      "logSha256": "a8270126ffaf3c05189b36894010a8137fe7405de3d48c2b94d564e19f846e42"
+    },
+    {
+      "id": "web-build",
+      "command": "npm run build:web",
+      "exitCode": 1,
+      "status": "platform-dependency-blocked",
+      "log": "build-web.log",
+      "logSha256": "2b7c944367529b7ab55336f1b62c9adaeeb9b62ca73643c1897e62266642a212"
+    },
+    {
+      "id": "full-suite",
+      "command": "timeout 15s npm test",
+      "exitCode": 124,
+      "status": "incomplete-with-observed-failures",
+      "log": "npm-test.log",
+      "logSha256": "957c2f348e1c35997b0b1cad9cc17aa0467c88549a4b7efd6e599c835d24c6e9"
+    }
+  ],
+  "unverified": [
+    "main-server identity switch-over",
+    "reviewed legacy migration",
+    "full application test suite",
+    "browser UI E2E",
+    "positive live HTTPS",
+    "native and physical devices",
+    "external identity providers",
+    "paired ingress intersection",
+    "all-consumer authorization"
+  ],
+  "taskStatuses": {
+    "idRange": {
+      "prefix": "PT-",
+      "digits": 3,
+      "first": 1,
+      "last": 104
+    },
+    "default": {
+      "status": "not-implemented-in-this-checkpoint",
+      "accepted": false
+    },
+    "overrides": {
+      "PT-001": {
+        "status": "partial",
+        "accepted": false,
+        "note": "Baseline and source ownership inspected; not a complete drift-consumer audit."
+      },
+      "PT-005": {
+        "status": "partial",
+        "accepted": false,
+        "note": "SQLite authority and migration/sentinel guards implemented and tested; not composed into host."
+      },
+      "PT-006": {
+        "status": "partial",
+        "accepted": false,
+        "note": "Partial canonical identity/org/Space schema and constraints; remaining resource/policy/key schema and provisioning integration absent."
+      },
+      "PT-007": {
+        "status": "partial",
+        "accepted": false,
+        "note": "Atomic replay and durable leased outbox implemented and tested; production consumers/telemetry not connected."
+      },
+      "PT-008": {
+        "status": "partial",
+        "accepted": false,
+        "note": "Unknown profile and fail-open browser/auth-state fixes; legacy ambient human identity still present."
+      },
+      "PT-010": {
+        "status": "partial",
+        "accepted": false,
+        "note": "Opaque identity/lifecycle SDK and login-mapping constraints; main-host identity/tenancy not migrated."
+      },
+      "PT-011": {
+        "status": "partial",
+        "accepted": false,
+        "note": "Local owner-claim domain and isolated HTTP fixture; operator console, main-host allowlist and UI not connected."
+      },
+      "PT-012": {
+        "status": "partial",
+        "accepted": false,
+        "note": "Asynchronous bounded KDF, legacy upgrade and local recovery; passkeys, full method lifecycle and break-glass missing."
+      },
+      "PT-013": {
+        "status": "partial",
+        "accepted": false,
+        "note": "Session and isolated HTTP/WS auth adapter tests; main-server ingress, stream invalidation and paired intersection missing."
+      }
+    }
+  }
+}

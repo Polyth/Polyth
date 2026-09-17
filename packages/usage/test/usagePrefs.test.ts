@@ -62,7 +62,6 @@ test("groupQuotaWindows without model windows yields a single unlabeled bucket",
 test("parseUsagePrefs round-trips and survives garbage", () => {
   const prefs = {
     hiddenProviders: ["anthropic"],
-    hiddenBlocks: ["cache"],
     pinnedProviders: ["openai"],
     collapsedGroups: ["openai/gpt"],
     dashboard: { view: "providers", layout: "compact", rangeDays: 90, overviewOrder: ["models"], providerOrder: ["openai"] },
@@ -70,7 +69,6 @@ test("parseUsagePrefs round-trips and survives garbage", () => {
   assert.deepEqual(parseUsagePrefs(JSON.stringify(prefs)), prefs);
   const defaults = {
     hiddenProviders: [],
-    hiddenBlocks: [],
     pinnedProviders: [],
     collapsedGroups: [],
     dashboard: { view: "overview", layout: "expanded", rangeDays: 7, overviewOrder: [], providerOrder: [] },

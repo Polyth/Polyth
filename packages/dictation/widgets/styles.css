@@ -94,6 +94,11 @@ body[data-dictate="false"] .mic-control .mic-btn {
     padding: 0;
   }
 
+  /* Final dictation inserts into the draft; once text exists the draft owns
+     the compact leading slot and the mic yields until it is cleared. */
+  .composer-mobile.composer-has-draft .composer-mobile-extensions .mic-btn {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -17,7 +17,6 @@ test("document viewport exposes safe areas with a fixed chat scale", async () =>
   ]) {
     assert.ok(viewport.includes(directive), `viewport includes ${directive}`);
   }
-  assert.ok(viewport.includes("minimum-scale=1"), "zooming out is capped");
   assert.ok(viewport.includes("maximum-scale=1"), "pinch zoom is capped");
   assert.ok(viewport.includes("user-scalable=no"), "user zoom is disabled");
   assert.match(
@@ -25,14 +24,6 @@ test("document viewport exposes safe areas with a fixed chat scale", async () =>
     /<meta name="mobile-web-app-capable" content="yes" \/>/,
     "the standards-based installed-app capability tag is present",
   );
-});
-
-test("touch zoom is restricted at the document for pages and portaled modals without blocking pans", async () => {
-  const css = await read("../src/mobileViewport.css");
-  assert.match(css, /@media \(any-pointer: coarse\)\s*\{\s*html\s*\{\s*touch-action: pan-x pan-y;/);
-  const main = await read("../src/main.tsx");
-  assert.ok(main.indexOf('import "./mobileViewport.css"') < main.indexOf("await prepareMobileLaunch()"),
-    "the policy loads before the connection screen or app branch");
 });
 
 test("global CSS provides mobile-first sizing, touch, overflow, and focus contracts", async () => {

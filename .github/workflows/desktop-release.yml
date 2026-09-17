@@ -224,9 +224,15 @@ jobs:
           POLYTH_TARGET_PLATFORM=darwin POLYTH_TARGET_ARCH=x64 npm run desktop:download-opencode
           POLYTH_TARGET_PLATFORM=darwin POLYTH_TARGET_ARCH=arm64 npm run desktop:download-opencode
 
-      - name: Package artifact for verification
+      - name: Package unsigned validation artifact
+        if: needs.plan.outputs.is_tag_release != 'true'
         working-directory: apps/desktop
         run: npx electron-builder ${{ matrix.builder }} --publish never
+
+      - name: Package and publish release artifact
+        if: needs.plan.outputs.is_tag_release == 'true'
+        working-directory: apps/desktop
+        run: npx electron-builder ${{ matrix.builder }} --publish always
 
       - name: End-to-end test packaged AppImage
         if: matrix.platform == 'linux' && matrix.e2e
@@ -271,11 +277,6 @@ jobs:
             exit 1
           fi
           printf 'packaged %s\n' "${artifacts[@]}"
-
-      - name: Publish verified release artifact
-        if: needs.plan.outputs.is_tag_release == 'true'
-        working-directory: apps/desktop
-        run: npx electron-builder ${{ matrix.builder }} --publish always
 
       - uses: actions/upload-artifact@v4
         if: needs.plan.outputs.is_tag_release != 'true'

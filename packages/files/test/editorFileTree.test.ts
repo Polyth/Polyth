@@ -15,25 +15,10 @@ Object.assign(globalThis, {
   window: dom as unknown as typeof globalThis & Window,
   document: dom.document as unknown as Document,
   HTMLElement: dom.HTMLElement,
-  Element: dom.Element,
-  Node: dom.Node,
-  getComputedStyle: (elt: Element) =>
-    (dom as unknown as { getComputedStyle(el: Element): CSSStyleDeclaration }).getComputedStyle(elt),
 });
 Object.defineProperty(globalThis, "navigator", { value: dom.navigator, configurable: true });
 Object.defineProperty(globalThis, "localStorage", { value: dom.localStorage, configurable: true });
 Object.defineProperty(globalThis, "location", { value: dom.location, configurable: true });
-Object.defineProperty(globalThis, "requestAnimationFrame", {
-  configurable: true,
-  value: (callback: FrameRequestCallback) => {
-    callback(0);
-    return 1;
-  },
-});
-Object.defineProperty(globalThis, "cancelAnimationFrame", {
-  configurable: true,
-  value: () => {},
-});
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // Deterministic files API: one root listing, one src/ listing, empty reads.
@@ -101,7 +86,9 @@ test("file tree renders an ARIA tree with disclosure, indentation, and namespace
     assert.equal(file.hasAttribute("aria-expanded"), false, "leaf has no aria-expanded");
     assert.ok(dir.querySelector(".ft-chevron"), "disclosure chevron rendered");
     assert.ok(file.querySelector(".ft-name"), "name span rendered");
-    assert.equal(file.querySelector(".file-row-actions"), null, "leaf rows have no per-row overflow menu");
+    const actions = file.querySelector<HTMLButtonElement>(".file-row-actions .ui-icon-btn");
+    assert.ok(actions, "leaf rows reuse the shared actions menu instead of a hover-only @ affordance");
+    assert.equal(actions!.getAttribute("aria-label"), "Actions for README.md");
 
     // Finding 1 (UX-FILES-TIMELINE-03): rows carry decorative type glyphs —
     // a folder icon on directories, a family-tinted file icon on leaves, and
@@ -115,9 +102,6 @@ test("file tree renders an ARIA tree with disclosure, indentation, and namespace
     assert.ok(fileIcon?.querySelector("svg"), "file renders a type glyph");
     assert.equal(fileIcon!.getAttribute("data-ft"), "doc", "README.md maps to the doc family");
     assert.equal(file.querySelector(".ft-chevron svg"), null, "leaf rows render no disclosure");
-    assert.equal(dirIcon!.querySelector("svg")!.getAttribute("fill"), "currentColor", "folder glyph is filled");
-    assert.equal(dirIcon!.querySelector("svg")!.getAttribute("stroke"), null, "folder glyph is not an outline");
-    assert.equal(fileIcon!.querySelector("svg")!.getAttribute("fill"), "currentColor", "file glyph is filled");
 
     // Expand the directory: child appears one level deeper, indented further.
     await act(async () => { click(dir); });
@@ -139,7 +123,7 @@ test("file tree renders an ARIA tree with disclosure, indentation, and namespace
       "code",
       "index.ts maps to the code family",
     );
-    const indentOf = (el: HTMLElement) => Number(el.style.getPropertyValue("--ft-depth") || "0");
+    const indentOf = (el: HTMLElement) => parseInt(el.style.paddingInlineStart || "0", 10);
     assert.ok(indentOf(child!) > indentOf(dir), "child indents deeper than its parent");
 
     // Selecting a file uses the NAMESPACED class — never the `.sel` widget class.
@@ -155,34 +139,6 @@ test("file tree renders an ARIA tree with disclosure, indentation, and namespace
       child!.id,
       "tree points its active descendant at the selected row",
     );
-  } finally {
-    await act(async () => { root.unmount(); });
-    container.remove();
-  }
-});
-
-test("tree context menu anchors to document.body at the click", async () => {
-  activateProject("p-files");
-  const container = document.createElement("div");
-  document.body.appendChild(container);
-  const root = createRoot(container);
-  try {
-    await act(async () => { root.render(createElement(EditorView)); });
-    await act(async () => { await Promise.resolve(); });
-    const treeEl = container.querySelector<HTMLElement>('[role="tree"]');
-    assert.ok(treeEl, "role=tree container rendered");
-    const file = [...treeEl!.querySelectorAll<HTMLElement>('[role="treeitem"]')]
-      .find((el) => (el.textContent ?? "").includes("README.md"));
-    assert.ok(file, "file row rendered");
-    await act(async () => {
-      file!.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, clientX: 120, clientY: 80 }));
-    });
-    const anchor = document.body.querySelector<HTMLElement>(".files-ctx-anchor");
-    assert.ok(anchor, "click anchor is portaled to document.body");
-    assert.equal(anchor!.parentElement, document.body);
-    assert.equal(anchor!.style.left, "120px");
-    assert.equal(anchor!.style.top, "80px");
-    assert.equal(container.querySelector(".files-ctx-anchor"), null, "anchor is not trapped in the files pane");
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();

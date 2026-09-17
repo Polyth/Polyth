@@ -106,23 +106,3 @@ test("rate-limit recovery keeps model and harness identities separate", () => {
     null,
   );
 });
-
-test("a model-unavailable stop offers recovery without a countdown", () => {
-  const model = buildModel([
-    ev("user/message", { text: "hi" }),
-    ev("turn/started", { turnId: "t1" }),
-    ev("turn/stopped", {
-      turnId: "t1",
-      reason: "error",
-      error: "403 MODEL_NOT_IN_PLAN",
-      code: "model-unavailable",
-    }),
-  ]);
-  assert.equal(model.turn?.status, "failed");
-  assert.deepEqual(model.turn?.limit, {
-    scope: "unknown",
-    attempt: 1,
-    code: "model-unavailable",
-  });
-  assert.equal(model.turn?.limit?.resumeAt, undefined, "an unavailable model has no wait to run out");
-});

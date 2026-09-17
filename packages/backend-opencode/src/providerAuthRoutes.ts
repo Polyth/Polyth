@@ -6,6 +6,7 @@ import type {
   SpaceContext,
 } from "@polyth/contracts";
 import { allowsInteractiveProviderAuth } from "@polyth/contracts";
+import { requireInstanceOwnerAuthority } from "@polyth/contracts/instance-authority";
 import { assertInteractiveProviderAuth } from "./providerAuthTarget.ts";
 import type { ProviderAuthController } from "./providerAuth.ts";
 
@@ -68,6 +69,10 @@ export function providerAuthRoutes(deps: {
     if (!path.startsWith("/api/providers")) return false;
     const { method, json, body, space } = request;
     const runtime = () => deps.runtime(space);
+    const requireGlobalMutation = () => requireInstanceOwnerAuthority(
+      request,
+      "provider credential changes require the instance owner",
+    );
 
     if (path === "/api/providers/available" && method === "GET") {
       if (!deps.visibility || !deps.catalog) return false;
@@ -97,6 +102,7 @@ export function providerAuthRoutes(deps: {
       return true;
     }
     if (path === "/api/providers/auth/well-known/execute" && method === "POST") {
+      requireGlobalMutation();
       assertInteractiveProviderAuth(space);
       const input = await body();
       if (typeof input.origin !== "string" || typeof input.hash !== "string" || input.confirm !== true) {
@@ -114,12 +120,14 @@ export function providerAuthRoutes(deps: {
       return true;
     }
     if (match && method === "DELETE") {
+      requireGlobalMutation();
       assertInteractiveProviderAuth(space);
       json(200, deps.auth.cancelAttempt(decodeURIComponent(match[1]!), space));
       return true;
     }
     match = path.match(/^\/api\/providers\/auth\/attempts\/([^/]+)\/complete$/);
     if (match && method === "POST") {
+      requireGlobalMutation();
       assertInteractiveProviderAuth(space);
       const input = await body();
       const code = typeof input.code === "string" ? input.code : undefined;
@@ -141,6 +149,7 @@ export function providerAuthRoutes(deps: {
     }
     match = path.match(/^\/api\/providers\/([^/]+)\/auth\/attempts$/);
     if (match && method === "POST") {
+      requireGlobalMutation();
       assertInteractiveProviderAuth(space);
       const providerId = decodeURIComponent(match[1]!);
       const input = await body();
@@ -159,6 +168,7 @@ export function providerAuthRoutes(deps: {
     }
     match = path.match(/^\/api\/providers\/([^/]+)\/disconnect$/);
     if (match && method === "POST") {
+      requireGlobalMutation();
       assertInteractiveProviderAuth(space);
       json(200, await deps.auth.disconnect(decodeURIComponent(match[1]!), space));
       return true;

@@ -309,8 +309,7 @@ ignored by the web reducer (never crash).
   `/api/packages`, and `reducers.ts` hosts client-side event reducers.
 - `widgets/` — widget system: `catalog.ts` (definitions + `registerWidget`/
   `registerWidgetPlugin`), `widgetLayout.ts` (zones, placement, per-instance
-  config, `polyth.widgetLayout.<projectId>` local cache plus project-settings
-  persistence),
+  config, `polyth.widgetLayout.<projectId>` localStorage persistence),
   `WidgetCanvas.tsx` (the drag/resize canvas), `widgetLibrary.ts`,
   `builtinWidgets.tsx`/`builtinMiniWidgets.tsx`/`capabilityWidgets.tsx`
   (shell widgets), `areas.ts`/`builtinAreas.ts` (placement areas). Full

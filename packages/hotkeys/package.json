@@ -18,9 +18,7 @@
       "enabled": true,
       "settingsGroup": "Workspace",
       "icon": "keyboard",
-      "hasSettings": true,
-      "category": "system",
-      "projectAffinity": {}
+      "hasSettings": true
     }
   },
   "dependencies": {

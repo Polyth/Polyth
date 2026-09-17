@@ -38,25 +38,6 @@ const DESCRIPTION =
   + "Same-project sessions created by an agent are canonical children of the calling session, so hierarchy, permission inheritance, recovery, and UI grouping remain intact. "
   + "Create delegated sessions with a concise title and use session.debug for the bounded, redacted troubleshooting surface.";
 
-// Deployment skill: always available in any project/Space, not a managed project skill.
-// Design/debug skills remain opt-in; this only covers core session/subagent orchestration.
-// Future per-user customization can replace this deployment text with a Space-scoped override.
-export const polythSessionsSkill = {
-  descriptor: {
-    id: "harness-runtime.skill.polyth-sessions",
-    kind: "skill" as const,
-    owner: "harness-runtime",
-    scope: "deployment" as const,
-    revision: "1",
-    name: "polyth-sessions",
-    title: "Polyth sessions",
-    description: "Orchestrate Polyth sessions and delegated subagents in any project.",
-    instructions: `Use the available polyth tool (its harness may prefix the name) to work with canonical Polyth sessions. This is a Polyth product capability — available in every project and not dependent on project-specific skill installs.
-${DESCRIPTION}
-For subagent work, create delegated sessions with session.create (title + optional prompt/harness), then drive them with session.send / session.debug / session.messages. Keep delegated work bounded and report findings via the peer observation skill instead of copying full transcripts. Respect cross-project approvals and Space isolation; never assume access to another project without an explicit grant.`,
-  },
-} satisfies import("@polyth/contracts").AgentCapabilityContribution;
-
 const inputSchema: JsonObject = {
   type: "object",
   additionalProperties: false,
@@ -372,7 +353,7 @@ export function registerPolythSessionControl(host: ServerPackageHost) {
         return { output: JSON.stringify({ sessionId: session.id, sendResult }), metadata: { action, projectId: targetProjectId } };
       }
       if (action === "session.cancel") {
-        await scoped.sessions.abort(session.id, { source: "agent" });
+        await scoped.sessions.abort(session.id);
         return { output: JSON.stringify({ ok: true, sessionId: session.id }), metadata: { action, projectId: targetProjectId } };
       }
       if (action === "session.archive") {

@@ -1,6 +1,9 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
-import { api } from "@polyth/session/web-api";
+import { authBootstrapPhase } from "./authBootstrap.ts";
+import { fetchAuthStatus } from "./authClient.ts";
+import { Button } from "./components/ui/index.ts";
+import { tr } from "./i18n/index.ts";
 import { consumeAuthPrefetch } from "./authPrefetch.ts";
 import { init, navigateBackInApp, openNativeAppPath, setSyncForeground } from "./init.ts";
 import { flushClientPersistence } from "./clientPersistence.ts";
@@ -34,6 +37,7 @@ import { bootPackages } from "./packages/registry.ts";
 import { getLocaleSnapshot, subscribeLocale } from "./i18n/index.ts";
 import App from "./App.tsx";
 import LockScreen from "./components/LockScreen.tsx";
+import SetupScreen from "./components/SetupScreen.tsx";
 import { dismissTopEscapeLayer } from "./useEscape.ts";
 import { isWorkspaceSurface, listSurfaces } from "./surfaces.ts";
 import { installNativeMobileIntegration } from "@polyth/mobile/native";
@@ -44,28 +48,18 @@ import { openPendingNativePushAfterHydration, reconcileNativePushForeground } fr
 applySettingsToDom(getState().settings);
 applyUiSettings();
 applyBackgroundToDom();
-// UX-MOBILE-01: publish visual-viewport geometry before first paint so the
-// sticky interaction zone is never laid out against a stale 100vh.
 startMobileViewport();
 exposeSlots();
 exposeSurfaces();
 exposeCapabilities();
 exposeWidgets();
 exposeAreas();
-// Widget-areas (WA1): register the built-in placement areas before any widget
-// plugin boots, so `canPlaceWidget` fit hints and the Widget Library see the
-// full area catalogue from the first render.
 installBuiltinAreas();
 installBuiltinMiniWidgets();
 installSystemWidgets();
-// Every rail capability is also a placeable mini-widget; subscribes to the
-// capability registry so packages that register late still get a widget.
 installCapabilityWidgets();
-// NTF-01: bell + panel arrive through the slot registry, never via App.tsx.
 installNotificationCentre();
 installRuntimeEpochBanner();
-// No-op in browsers; Electron's preload exposes the bridge that enables the
-// desktop settings page and custom titlebar controls through existing slots.
 installDesktopIntegration();
 installNativeMobileIntegration({
   handleBack: () => {
@@ -98,14 +92,12 @@ installNativeMobileIntegration({
   },
   setKeyboardInset: setNativeKeyboardInset,
 });
-// Palette commands + keyboard shortcuts: one install, synced with the
-// capability registry from then on (UX-PERSONAS: search sees every tool).
 installShell();
 installNativeConnectionCommands();
 installCommandSlotBridge();
 
-// F16: init() loads REST data and opens /ws — it must not run until the
-// server says this device is authorized (or that no password is set).
+// No package, private REST preload or WebSocket is admitted until the server
+// proves both canonical identity and a fully started application runtime.
 let booted = false;
 const bootOnce = (): void => {
   if (booted) return;
@@ -115,28 +107,28 @@ const bootOnce = (): void => {
   void init().then(openPendingNativePushAfterHydration).catch(() => undefined);
 };
 
+type BootstrapPhase = "checking" | "setup" | "restart" | "locked" | "ready" | "unavailable";
+
 function Root() {
-  const [phase, setPhase] = useState<"checking" | "locked" | "ready">("checking");
+  const [phase, setPhase] = useState<BootstrapPhase>("checking");
   const locale = useSyncExternalStore(subscribeLocale, getLocaleSnapshot, getLocaleSnapshot);
 
   useEffect(() => {
     let cancelled = false;
-    // main.tsx started this fetch before the app graph downloaded; falling
-    // back to a fresh call covers re-mounts (locale switches remount Root).
-    void (consumeAuthPrefetch() ?? api.authStatus())
-      .then(async (s) => {
-        // Account restoration above must finish before the trusted native
-        // connection namespace selects its app-owned persistence backend.
-        if (!s.required || s.authorized) {
+    let invalidated = false;
+    void (consumeAuthPrefetch() ?? fetchAuthStatus())
+      .then(async (status) => {
+        if (cancelled || invalidated) return;
+        const nextPhase = authBootstrapPhase(status);
+        if (nextPhase === "ready") {
           await initializeClientReliabilityContext();
+          if (cancelled || invalidated) return;
           await reconcileNativePushForeground(true).catch(() => undefined);
         }
-        if (!cancelled) setPhase(s.required && !s.authorized ? "locked" : "ready");
+        if (!cancelled && !invalidated) setPhase(nextPhase);
       })
-      // Status unreachable → proceed; init()'s own error banner reports it.
-      .catch(() => { if (!cancelled) setPhase("ready"); });
-    // Mid-session 401 (session revoked / password newly set) re-locks the UI.
-    const onAuthRequired = () => setPhase("locked");
+      .catch(() => { if (!cancelled && !invalidated) setPhase("unavailable"); });
+    const onAuthRequired = () => { invalidated = true; setPhase("locked"); };
     window.addEventListener("polyth:auth-required", onAuthRequired);
     return () => {
       cancelled = true;
@@ -155,16 +147,19 @@ function Root() {
   useEffect(() => { if (phase === "ready") bootOnce(); }, [phase]);
 
   if (phase === "checking") return null;
+  if (phase === "unavailable") return (
+    <div className="lock-screen">
+      <div className="lock-card">
+        <h1>{tr("lockscreen.polythIsLocked")}</h1>
+        <p className="lock-hint" role="status">{tr("lockscreen.couldnTReachTheServer")}</p>
+        <Button onClick={() => location.reload()}>{tr("common.retry")}</Button>
+      </div>
+    </div>
+  );
+  if (phase === "setup") return <SetupScreen key={locale} />;
+  if (phase === "restart") return <SetupScreen key={locale} restartRequired />;
   if (phase === "locked") {
-    // After a mid-session revoke the store/WS state is stale — reload for a
-    // clean slate; on the initial lock just proceed into the normal boot.
-    return <LockScreen key={locale} onUnlocked={() => {
-      if (booted) {
-        location.reload();
-        return;
-      }
-      void initializeClientReliabilityContext().then(() => setPhase("ready"));
-    }} />;
+    return <LockScreen key={locale} onUnlocked={() => location.reload()} />;
   }
   return <App key={locale} />;
 }

@@ -1,4 +1,4 @@
-// Organization routes (WP5): session rename/organize, folders,
+// Organization routes (WP5): project PATCH, session rename/organize, folders,
 // labels, bulk archive/restore with partial-failure reporting, richer search.
 import type { BulkSessionResult } from "@polyth/contracts";
 import type { Store } from "@polyth/session";
@@ -14,22 +14,43 @@ export function orgRoutes(deps: {
 
   return async (rc) => {
     const { path, method, url, body, json } = rc;
+    // Path-match BEFORE reading `rc.space`: the getter resolves tenancy and
+    // throws for anonymous callers. These handlers also see static SPA paths.
     if (!path.startsWith("/api/")) return false;
     if (!(
-      path.startsWith("/api/sessions")
+      path.startsWith("/api/projects/")
+      || path.startsWith("/api/sessions")
       || path.startsWith("/api/folders")
       || path.startsWith("/api/labels")
       || path.startsWith("/api/search/")
     )) return false;
+    // Scoped services + the tenant id used for the label rows. Every read
+    // below therefore starts inside the caller's Space.
     const space = rc.space;
     const { projects, sessions, guard } = deps.spaces(space);
     const spaceId = space.spaceId;
+    // A folder id carries no Space; ownership is proven through its project.
     const assertFolderInSpace = (folderId: string): void => {
       const projectId = store.folderProject(folderId);
       if (!projectId) throw Object.assign(new Error("folder not found"), { code: "not-found" });
       guard.assertProject(space, projectId);
     };
-    let m = path.match(/^\/api\/sessions\/([^/]+)\/rename$/);
+    // ---- project PATCH -----------------------------------------------------
+    let m = path.match(/^\/api\/projects\/([^/]+)$/);
+    if (m && method === "PATCH") {
+      if (!projects.update) { json(501, { error: "unsupported" }); return true; }
+      const b = await body();
+      json(200, await projects.update(m[1]!, {
+        ...(typeof b.name === "string" ? { name: b.name } : {}),
+        ...(typeof b.color === "string" ? { color: b.color } : {}),
+        ...(typeof b.icon === "string" ? { icon: b.icon } : {}),
+        ...(b.defaults && typeof b.defaults === "object" ? { defaults: b.defaults as Record<string, never> } : {}),
+      }));
+      return true;
+    }
+
+    // ---- session rename + organize ----------------------------------------
+    m = path.match(/^\/api\/sessions\/([^/]+)\/rename$/);
     if (m && method === "POST") {
       const b = await body();
       await sessions.rename?.(m[1]!, String(b.title ?? ""));
@@ -55,6 +76,8 @@ export function orgRoutes(deps: {
       json(200, { ok: true });
       return true;
     }
+
+    // ---- session read cursor (navigator unread bold) ----------------------
     m = path.match(/^\/api\/sessions\/([^/]+)\/read$/);
     if (m && method === "POST") {
       const b = await body();
@@ -67,6 +90,8 @@ export function orgRoutes(deps: {
       json(200, { ok: true });
       return true;
     }
+
+    // ---- session draft (server-synced composer text) ----------------------
     m = path.match(/^\/api\/sessions\/([^/]+)\/draft$/);
     if (m && method === "PATCH") {
       if (!sessions.saveDraft) { json(501, { error: "unsupported" }); return true; }
@@ -81,10 +106,16 @@ export function orgRoutes(deps: {
         json(400, { error: "invalid-input", message: "expectedDraftUpdatedAt must be a timestamp or null" });
         return true;
       }
-      const saved = await sessions.saveDraft(m[1]!, b.text, expected);
+      const saved = await sessions.saveDraft(
+        m[1]!,
+        b.text,
+        expected,
+      );
       json(200, saved);
       return true;
     }
+
+    // ---- bulk archive/restore ----------------------------------------------
     if (path === "/api/sessions/bulk" && method === "POST") {
       const b = await body();
       const op = b.op === "archive" || b.op === "restore" ? b.op : null;
@@ -106,6 +137,8 @@ export function orgRoutes(deps: {
       json(200, result);
       return true;
     }
+
+    // ---- folders -------------------------------------------------------------
     if (path === "/api/folders" && method === "GET") {
       const projectId = url.searchParams.get("projectId");
       if (!projectId) { json(400, { error: "invalid-input", message: "projectId required" }); return true; }
@@ -137,6 +170,8 @@ export function orgRoutes(deps: {
       json(removed ? 200 : 404, removed ? { ok: true } : { error: "not-found" });
       return true;
     }
+
+    // ---- labels ---------------------------------------------------------------
     if (path === "/api/labels" && method === "GET") {
       json(200, await store.labelList(spaceId));
       return true;
@@ -161,6 +196,8 @@ export function orgRoutes(deps: {
       json(removed ? 200 : 404, removed ? { ok: true } : { error: "not-found" });
       return true;
     }
+
+    // ---- palette workspace search (WP13) ------------------------------------
     if (path === "/api/search/workspaces" && method === "GET") {
       const q = (url.searchParams.get("q") ?? "").trim();
       const archivedFlag = url.searchParams.get("archived") === "true";
@@ -181,6 +218,8 @@ export function orgRoutes(deps: {
       json(200, { items });
       return true;
     }
+
+    // ---- richer session search --------------------------------------------
     if (path === "/api/search/sessions" && method === "GET") {
       const q = (url.searchParams.get("q") ?? "").trim();
       const projectId = url.searchParams.get("projectId") ?? undefined;
@@ -210,7 +249,7 @@ export function orgRoutes(deps: {
       const projIndex = new Map(projections.map((p) => [p.id, p] as const));
       for (const hit of textHits) {
         const p = projIndex.get(hit.sessionId);
-        if (!p) continue;
+        if (!p) continue; // out-of-scope project or deleted session
         const e = entry(p);
         if (e.matches.length < 3) e.matches.push({ field: "message", snippet: hit.snippet });
       }
@@ -221,6 +260,7 @@ export function orgRoutes(deps: {
       json(200, results);
       return true;
     }
+
     return false;
   };
 }

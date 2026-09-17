@@ -17,6 +17,7 @@ export {
   type TenancyFile,
   type TenancyStore,
 } from "./store.ts";
+export { createControlTenancyStore } from "./controlStore.ts";
 export {
   createIdentityResolver,
   createSpaceResolver,
@@ -36,6 +37,17 @@ export {
 } from "./paths.ts";
 export { AUDIT, createAuditSink, redact, type AuditSink } from "./audit.ts";
 export {
+  inventoryLegacyMigration,
+  LEGACY_OWNER_ALIAS,
+  type LegacyInventoryOptions,
+  type LegacyMigrationInventory,
+  type LegacyMigrationIssue,
+  type LegacyOwnershipProof,
+  type LegacyPlannedAdoption,
+  type LegacySourceEvidence,
+  type LegacySourceKind,
+} from "./legacyMigration.ts";
+export {
   BOOTSTRAP_USER_ID,
   DEFAULT_SPACE_NAME,
   migrateToSpaces,
@@ -43,3 +55,32 @@ export {
   type MigrationResult,
   type MigrationTargets,
 } from "./migrate.ts";
+export {
+  loadLegacyAuthState,
+  parseLegacyAuthState,
+  type LegacyCredential,
+  type LegacyAuthSession,
+  type LegacyAuthState,
+} from "./legacyAuth.ts";
+export {
+  stageLegacyMigration,
+  verifyMigrationStage,
+  type MigrationStageArtifact,
+  type MigrationStageManifest,
+  type StageLegacyMigrationOptions,
+} from "./migrationStage.ts";
+export {
+  applyLegacyResourceAdoptions,
+  type AppliedLegacyResourceAdoptions,
+  type ApplyLegacyResourceAdoptionsOptions,
+} from "./migrationResources.ts";
+export {
+  applyLegacyIdentityMigration,
+  type AppliedLegacyMigration,
+  type ApplyLegacyMigrationOptions,
+} from "./migrationApply.ts";
+export {
+  parseLegacyTenancyState,
+  loadLegacyTenancyState,
+  type LegacyTenancyIssue,
+} from "./legacyTenancy.ts";

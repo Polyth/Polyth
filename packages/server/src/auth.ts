@@ -7,9 +7,11 @@
 // Canonical API is ingress-aware `resolve()`. Loopback optional never applies
 // to Polyth Link ingress, even when the tunnel physically connects via 127.0.0.1.
 import { randomBytes, scryptSync, timingSafeEqual, createHash } from "node:crypto";
-import { readFileSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
+import { loadAuthState, type StoredSession } from "./authState.ts";
 import { dirname } from "node:path";
 import { atomicWriteSync } from "@polyth/plugins";
+import { canonicalSecurity } from "./runtimeSecurity.ts";
 import type {
   AuthPrincipal,
   AuthResolution,
@@ -192,28 +194,6 @@ export const UNTRUSTED_INGRESS_HEADERS = [
   "x-polyth-link-device",
 ] as const;
 
-interface StoredCredential {
-  userId: string;
-  passwordHash: string;
-}
-
-interface StoredSession {
-  id: string;
-  userId: string;
-  tokenHash: string;
-  createdAt: number;
-  lastSeenAt: number;
-  label: string;
-}
-
-interface AuthFile {
-  version: number;
-  /** Legacy bootstrap-owner hash. Kept readable for backwards compatibility. */
-  passwordHash: string | null;
-  credentials: StoredCredential[];
-  sessions: StoredSession[];
-}
-
 type IdentifiedPrincipal = AuthPrincipal & { userId?: string };
 
 export const isLoopbackAddress = (addr: string | undefined): boolean =>
@@ -232,6 +212,17 @@ export function parseCookieToken(cookieHeader: string | undefined, cookieName = 
     }
   }
   return null;
+}
+
+function strictCookieToken(cookieHeader: string | undefined, cookieName: string): string | null {
+  if (!cookieHeader || cookieHeader.length > 16_384) return null;
+  const values: string[] = [];
+  for (const part of cookieHeader.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1 || part.slice(0, eq).trim() !== cookieName) continue;
+    values.push(part.slice(eq + 1).trim());
+  }
+  return values.length === 1 && /^[0-9a-f]{64}$/.test(values[0]!) ? values[0]! : null;
 }
 
 export function publicHttpIngress(
@@ -287,7 +278,52 @@ export function clearAuthCookieHeader(opts: { name: string; secure: boolean }): 
 
 const ANONYMOUS: AuthPrincipal = { kind: "anonymous" };
 
+function canonicalOnly(): never {
+  throw Object.assign(new Error("Canonical identity HTTP/API is the active authority"), { code: "unavailable" });
+}
+
+function boundCanonicalAuthService(): AuthService | null {
+  const security = canonicalSecurity();
+  if (!security) return null;
+  const gateway = security.auth;
+  const tokenOf = (req: AuthRequestLike): string | null => strictCookieToken(req.headers.cookie, gateway.cookieName());
+  return {
+    enabled: () => true,
+    cookieName: () => gateway.cookieName(),
+    resolve: (request, ingress) => gateway.resolve(request, ingress),
+    gate: (request, ingress) => gateway.gate(request, ingress),
+    requireCapability: (principal, capability) => requirePrincipalCapability(principal, capability),
+    userIdForPrincipal: (principal) => gateway.userIdForPrincipal(principal),
+    accountIds: () => security.control.all<{ id: string }>(
+      "SELECT u.id FROM users u JOIN principals p ON p.id=u.id WHERE p.kind='user' AND p.status='active' ORDER BY u.id",
+    ).map((row) => row.id),
+    // In canonical mode account existence, not a legacy password row, is the
+    // durable delivery/pairing existence check. Accounts may authenticate via
+    // passkey or an external identity without a local password credential.
+    hasCredential: (userId) => gateway.accountExists(userId),
+    setPassword: () => canonicalOnly(),
+    removeAccount: () => canonicalOnly(),
+    login: () => canonicalOnly(),
+    logout(token) { security.identity.sessions.logout(token); },
+    logoutAll: () => canonicalOnly(),
+    listSessions: () => canonicalOnly(),
+    revoke: () => canonicalOnly(),
+    tokenOf,
+    attachPairedDeviceResolver: (resolver) => gateway.attachPairedDeviceResolver(resolver),
+    statusDto(resolution) {
+      return {
+        required: resolution.principal.kind !== "paired-device",
+        authorized: resolution.authenticated,
+        scope: resolution.principal.kind,
+      };
+    },
+  };
+}
+
 export function createAuthService(opts: AuthServiceOptions): AuthService {
+  const canonical = boundCanonicalAuthService();
+  if (canonical) return canonical;
+
   const now = opts.now ?? Date.now;
   const ttl = opts.sessionTtlMs ?? 30 * 24 * 60 * 60_000;
   const limiter = opts.limiter ?? createLoginRateLimiter({ now });
@@ -296,38 +332,7 @@ export function createAuthService(opts: AuthServiceOptions): AuthService {
   const localUser = { kind: "local-user", trustedLoopback: true, userId: ownerUserId } as AuthPrincipal;
   let pairedResolver: PairedDeviceResolver | undefined = opts.resolvePairedDevice;
 
-  let stored: AuthFile = { version: 2, passwordHash: null, credentials: [], sessions: [] };
-  let adoptedLegacySessions = false;
-  try {
-    const raw = JSON.parse(readFileSync(opts.file, "utf8")) as Partial<AuthFile> & {
-      sessions?: Array<Partial<StoredSession>>;
-    };
-    stored = {
-      version: 2,
-      passwordHash: typeof raw.passwordHash === "string" ? raw.passwordHash : null,
-      credentials: Array.isArray(raw.credentials)
-        ? raw.credentials.filter((credential): credential is StoredCredential =>
-            !!credential && typeof credential.userId === "string" && typeof credential.passwordHash === "string")
-        : [],
-      sessions: Array.isArray(raw.sessions)
-        ? raw.sessions.filter((session) =>
-            !!session && typeof session.id === "string" && typeof session.tokenHash === "string"
-            && typeof session.createdAt === "number" && typeof session.lastSeenAt === "number")
-            .map((session) => {
-              const userId = typeof session.userId === "string" && session.userId ? session.userId : ownerUserId;
-              if (session.userId !== userId) adoptedLegacySessions = true;
-              return {
-                id: session.id!,
-                userId,
-                tokenHash: session.tokenHash!,
-                createdAt: session.createdAt!,
-                lastSeenAt: session.lastSeenAt!,
-                label: typeof session.label === "string" ? session.label : "",
-              };
-            })
-        : [],
-    };
-  } catch { /* first boot or unreadable — start clean */ }
+  const { stored, adoptedLegacySessions } = loadAuthState(opts.file, ownerUserId);
 
   // Env password wins for the bootstrap owner but is never written to disk:
   // removing the variable returns to the stored owner hash/credential.

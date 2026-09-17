@@ -18,14 +18,7 @@
       "enabled": true,
       "settingsGroup": "Workspace",
       "icon": "handoff",
-      "hasSettings": false,
-      "category": "operations",
-      "projectAffinity": {
-        "directions": [
-          "engineering",
-          "operations"
-        ]
-      }
+      "hasSettings": false
     }
   },
   "dependencies": {

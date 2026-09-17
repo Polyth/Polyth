@@ -461,7 +461,7 @@ test("V2 core session methods use native paths and reconcile pending requests", 
   assert.equal(snapshot.questions[0]?.requestId, "frm_1");
   assert.deepEqual(snapshot.questions[0]?.questions.map((question) => question.id), ["count", "proceed"]);
   assert.deepEqual(
-    snapshot.events.flatMap((entry) => entry.events).find((event) => event.type === "task/snapshot"),
+    snapshot.events.find((entry) => entry.event.type === "task/snapshot")?.event,
     {
       type: "task/snapshot",
       listId: "todo",
@@ -469,7 +469,7 @@ test("V2 core session methods use native paths and reconcile pending requests", 
       items: [{ id: "todo-v2", text: "Render current tasks on mobile", status: "active" }],
     },
   );
-  assert.ok(snapshot.events.some((entry) => entry.events.some((event) => event.type === "assistant/message")));
+  assert.ok(snapshot.events.some((event) => event.event.type === "assistant/message"));
   assert.equal(
     snapshot.state.value,
     "idle",
@@ -680,7 +680,7 @@ test("V2 history and reconcile never send OpenCode's rejected message limit", as
 
   assert.deepEqual(await adapter.history(live), [{ role: "assistant", text: "done" }]);
   const snapshot = await adapter.reconcile({ ...live, reconciliationOrdinal: 4 });
-  assert.ok(snapshot.events.some((entry) => entry.events.some((event) => event.type === "assistant/message")));
+  assert.ok(snapshot.events.some((event) => event.event.type === "assistant/message"));
   const messageQueries = fake.queries.filter((path) => path.includes("/message?"));
   assert.equal(messageQueries.length, 2);
   for (const path of messageQueries) {

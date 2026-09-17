@@ -5,7 +5,6 @@ import { join, resolve } from "node:path";
 const workspaceRoot = resolve(import.meta.dirname, "../../..");
 const coreTokens = join(workspaceRoot, "apps/web/src/tokens.css");
 const coreStyles = join(workspaceRoot, "apps/web/src/styles.css");
-const composerAdaptive = join(workspaceRoot, "apps/web/src/composerAdaptive.css");
 const packagesDir = join(workspaceRoot, "packages");
 
 function packageStylePathsSync(): string[] {
@@ -43,9 +42,6 @@ export async function readWebStyles(): Promise<string> {
   return [
     await readFile(coreTokens, "utf8"),
     await readFile(coreStyles, "utf8"),
-    // main.tsx loads this shell-owned layer after the core stylesheet; keep
-    // source/style assertions on the same cascade as the running app.
-    await readFile(composerAdaptive, "utf8"),
     ...packageStyles,
   ].join("\n");
 }
@@ -54,7 +50,6 @@ export function readWebStylesSync(): string {
   return [
     readFileSync(coreTokens, "utf8"),
     readFileSync(coreStyles, "utf8"),
-    readFileSync(composerAdaptive, "utf8"),
     ...packageStylePathsSync().map((path) => readFileSync(path, "utf8")),
   ].join("\n");
 }

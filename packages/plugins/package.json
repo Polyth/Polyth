@@ -6,8 +6,7 @@
     ".": "./src/index.ts",
     "./i18n": "./src/i18n/index.ts",
     "./widgets": "./widgets/index.tsx",
-    "./i18n/*": "./src/i18n/*.ts",
-    "./atomic-write": "./src/atomicWrite.ts"
+    "./i18n/*": "./src/i18n/*.ts"
   },
   "polyth": {
     "serverEntry": "./src/serverEntry.ts",
@@ -19,9 +18,7 @@
       "enabled": true,
       "settingsGroup": "Customize",
       "icon": "plugin",
-      "hasSettings": true,
-      "category": "system",
-      "projectAffinity": {}
+      "hasSettings": true
     }
   },
   "dependencies": {

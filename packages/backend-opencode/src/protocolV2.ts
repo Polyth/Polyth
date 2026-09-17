@@ -28,7 +28,6 @@ import type {
 import { formatBrowserContextForModel } from "@polyth/contracts";
 import {
   createTranslateState,
-  indexObservationCheckpoints,
   type ObservationBinding,
 } from "./events.ts";
 import { createV2ProviderClient } from "./providerV2.ts";
@@ -1187,10 +1186,9 @@ export const createV2ProtocolAdapter = (
       };
       const events: RuntimeSnapshot["events"] = [];
       const state = createTranslateState();
-      const checkpoints = indexObservationCheckpoints(input.checkpoints);
       for (const row of messageRows) {
         for (const event of pulledV2MessageEvents(row, backendSessionId)) {
-          appendPulledEvents(events, event, observed, state, checkpoints);
+          appendPulledEvents(events, event, observed, state);
         }
       }
       const todoRows = todosResult.ok ? optionalDataArray(todosResult.value) : undefined;
@@ -1207,7 +1205,6 @@ export const createV2ProtocolAdapter = (
           },
           observed,
           state,
-          checkpoints,
         );
       }
       const permissions = permissionRows.map((value, index) => {

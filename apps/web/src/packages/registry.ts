@@ -1,11 +1,9 @@
 import { api } from "@polyth/session/web-api";
-import { invalidateRuntimeCatalogs } from "@polyth/models/runtime-catalog";
 import { installIntegrationsPackage } from "./integrations.ts";
 import { installMcpPackage } from "./mcp.ts";
 import { configurePackageReconcile, reconcilePackage } from "./reconcile.ts";
 import { registerBuiltinPackageTours } from "./onboarding/builtinTours.ts";
-import { getState, openWorkspacePane, setActiveView, setRailPlugin, subscribeStore } from "../store.ts";
-import { hasSurfaceRegistration, isSurfaceProjectRelevant } from "../surfaces.ts";
+import { getState, openWorkspacePane, setActiveView } from "../store.ts";
 import {
   activateWebPackage,
   loadWebPackageCatalog,
@@ -14,11 +12,8 @@ import {
 } from "./webEntries.ts";
 import { createPackageActivation } from "./activation.ts";
 import { webPackageHost } from "./webHost.ts";
-import { replaceProjectPackageCatalog, setProjectCompositionContext } from "./projectRelevance.ts";
-import { installProjectWidgetReconciler } from "./projectWidgetReconcile.ts";
 
 registerBuiltinPackageTours();
-installProjectWidgetReconciler();
 
 type PackageInstaller = () => () => void;
 
@@ -45,32 +40,10 @@ let enabled = new Set<string>();
 const packageStates = new Map<string, boolean>();
 const listeners = new Set<() => void>();
 let bootQueue = Promise.resolve();
-let harnessTopologySynced = false;
 let catalogByCanonical = new Map<string, WebPackageAsset>();
 let loaderOptions: WebEntryLoaderOptions = {};
 
 const canonicalId = (id: string): string => aliases.get(id) ?? id;
-const isHarnessTopologyPackage = (id: string): boolean =>
-  id === "harness-runtime" || id.startsWith("backend-");
-
-const syncProjectCompositionContext = (): void => {
-  const state = getState();
-  const project = state.projectRegistry.projects.find((candidate) => candidate.id === state.activeProjectId);
-  setProjectCompositionContext(project?.id ?? null, project?.composition);
-
-  // Preserve unknown ids for late web-package registration, but close a
-  // surface we KNOW is registered when the newly active project's composition
-  // makes its owner irrelevant. Without the raw-registration probe the
-  // relevance-filtered catalog made this case indistinguishable from "not
-  // loaded yet", leaving railPlugin set and rendering an empty open pane.
-  const rail = state.railPlugin;
-  if (rail !== null && hasSurfaceRegistration(rail) && !isSurfaceProjectRelevant(rail)) {
-    setRailPlugin(null);
-  }
-};
-
-subscribeStore(syncProjectCompositionContext);
-syncProjectCompositionContext();
 
 const runtimeOf = (canonical: string): PackageRuntime => {
   let rec = runtimes.get(canonical);
@@ -177,7 +150,6 @@ function knownCanonicalIds(): string[] {
 configurePackageReconcile({
   packageStates,
   applyCanonicalState: (id) => {
-    if (isHarnessTopologyPackage(id)) invalidateRuntimeCatalogs();
     refreshDesired(canonicalId(id));
     void applyCanonicalState(id);
   },
@@ -187,9 +159,6 @@ configurePackageReconcile({
 });
 
 async function syncPackages(): Promise<void> {
-  const previousHarnessStates = new Map(
-    [...packageStates].filter(([id]) => isHarnessTopologyPackage(id)),
-  );
   const [catalog, response] = await Promise.all([
     loadWebPackageCatalog(loaderOptions),
     api.packagesList(),
@@ -208,23 +177,10 @@ async function syncPackages(): Promise<void> {
   }
   catalogByCanonical = nextCatalog;
 
-  replaceProjectPackageCatalog(response.packages);
   packageStates.clear();
   for (const descriptor of response.packages) {
     packageStates.set(descriptor.id, descriptor.enabled);
   }
-  const nextHarnessStates = new Map(
-    [...packageStates].filter(([id]) => isHarnessTopologyPackage(id)),
-  );
-  // The first sync of a page establishes the baseline; it does not change it.
-  // Treating "unknown → known" as a topology change wiped the day-long
-  // persisted catalogs on every page load, so short-lived clients (phones,
-  // PWA resumes) never got to paint from them before discovery finished.
-  const harnessTopologyChanged = harnessTopologySynced
-    && (previousHarnessStates.size !== nextHarnessStates.size
-      || [...nextHarnessStates].some(([id, value]) => previousHarnessStates.get(id) !== value));
-  harnessTopologySynced = true;
-  if (harnessTopologyChanged) invalidateRuntimeCatalogs();
 
   const ids = knownCanonicalIds();
   for (const id of ids) refreshDesired(id);
@@ -259,10 +215,6 @@ export function subscribePackages(callback: () => void): () => void {
   return () => { listeners.delete(callback); };
 }
 
-export async function whenPackagesSettled(): Promise<void> {
-  // bootPackages() and init() start concurrently. Waiting only on runtime
-  // records could resolve before catalog/API discovery has even populated them.
-  // The queue is the authoritative latest boot/reconcile barrier.
-  await bootQueue;
-  await Promise.all([...runtimes.values()].map((rec) => rec.inflight ?? Promise.resolve()));
+export function whenPackagesSettled(): Promise<void> {
+  return Promise.all([...runtimes.values()].map((rec) => rec.inflight ?? Promise.resolve())).then(() => undefined);
 }

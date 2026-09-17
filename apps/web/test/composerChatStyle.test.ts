@@ -113,30 +113,17 @@ test("conversation rows omit role chrome, keep assistant prose flat, and accent 
   assert.match(css, /\.msg\.user\s*\{\s*align-items:\s*flex-end;/);
   assert.match(css, /\.msg\.assistant\s*\{\s*align-items:\s*flex-start;/);
   assert.match(css, /\.msg\.user \.bubble\s*\{[^}]*background:\s*var\(--bubble-user-bg\)/s);
-  assert.match(css, /\.msg\.assistant > \.bubble,\s*\.msg\.assistant \.bubble\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent/s);
+  assert.match(css, /\.msg\.assistant > \.bubble\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent/s);
 });
 
 test("chat prompt type uses the same role as the assistant response", () => {
   const css = read("../src/styles.css");
 
   assert.match(css, /\.msg\.user \.bubble\s*\{[^}]*font-size:\s*var\(--font-response\);[^}]*line-height:\s*var\(--font-response-lh\)/s);
-  assert.match(css, /\.msg\.assistant > \.bubble,\s*\.msg\.assistant \.bubble\s*\{[^}]*font-size:\s*var\(--font-response\);[^}]*line-height:\s*var\(--font-response-lh\)/s);
+  assert.match(css, /\.msg\.assistant > \.bubble\s*\{[^}]*font-size:\s*var\(--font-response\);[^}]*line-height:\s*var\(--font-response-lh\)/s);
   assert.match(css, /\.composer-card textarea\s*\{[^}]*font-size:\s*var\(--font-response\);[^}]*line-height:\s*var\(--font-response-lh\)/s);
   assert.match(css, /\.composer-editor\s*\{[^}]*font-size:\s*var\(--font-response\);[^}]*line-height:\s*var\(--font-response-lh\)/);
   assert.doesNotMatch(css, /\.composer-simple \.composer-card textarea\s*\{[^}]*font-size:\s*14px/);
-});
-
-test("visible assistant prose uses the answer type role around activity", () => {
-  const timeline = read("../src/components/Timeline.tsx");
-  const css = read("../src/styles.css");
-
-  assert.match(timeline, /function AssistantProse/);
-  assert.match(timeline, /const source = m\.reasoning;/);
-  assert.doesNotMatch(timeline, /m\.reasoning \|\| m\.text/);
-  assert.match(timeline, /<AssistantProse key=\{`\$\{item\.id\}-text`\}/);
-  assert.match(css, /\.activity-live-content \.reasoning-body\s*\{[^}]*font-size:\s*var\(--font-response\)/s);
-  assert.match(css, /\.activity-group-items \.reasoning-body\s*\{[^}]*font-size:\s*var\(--font-technical\)/s);
-  assert.doesNotMatch(css, /\.msg\.assistant > \.bubble \{\s*font-size:\s*calc\(15px/);
 });
 
 test("conversation code surfaces follow the configured glass material", () => {

@@ -78,53 +78,6 @@ test("shell previews remove setup noise and keep raw commands in details only", 
   assert.equal(executionPresentation(tool({ input: { command: "command -v chromium || true" } })).preview, "Check command availability");
 });
 
-test("browser helper and native tools show actions without IDs or typed values", () => {
-  const helper = "node ~/.config/opencode/skills/polyth-browser/scripts/polyth-browser.mjs";
-  const cases = [
-    ["open proj-1 https://example.com?token=private chat-1", "Open page · example.com"],
-    ["navigate browser-1 https://example.com/help", "Go to · example.com/help"],
-    ["snapshot browser-1", "Read page"],
-    ["snapshot browser-1 '#main'", "Read page · #main"],
-    ["click browser-1 'a[href*=\"iana.org\"]'", 'Click · a[href*="iana.org"]'],
-    ["type browser-1 '#search' 'private typed value' submit", "Type · #search"],
-    ["scroll browser-1 down", "Scroll · down"],
-    ["capture browser-1 /tmp/page.png", "Screenshot"],
-    ["close browser-1", "Close page"],
-    ["capability", "Check browser capability"],
-    ["projects", "List projects"],
-    ["sessions proj-1", "List browser sessions"],
-  ];
-  for (const [args, expected] of cases) {
-    const command = `${helper} ${args}`;
-    const presentation = executionPresentation(tool({ input: { command } }));
-    assert.equal(presentation.kind, "browser", args);
-    assert.equal(presentation.label, "Browser", args);
-    assert.equal(presentation.preview, expected, args);
-    assert.equal(presentation.command, command, "keep original command in details");
-  }
-  const compound = `${helper} click browser-1 '#more' && ${helper} snapshot browser-1`;
-  assert.equal(executionPresentation(tool({ input: { command: compound } })).preview, "Click · #more; Read page");
-  assert.equal(executionPresentation(tool({ input: { command: `/bin/bash -lc '${helper} snapshot browser-1'` } })).preview, "Read page");
-  assert.equal(executionPresentation(tool({ input: { command: `POLYTH_URL=http://localhost:4400 ${helper} snapshot browser-1` } })).preview, "Read page");
-  for (const command of [
-    `echo ${helper} snapshot browser-1`,
-    "node unrelated-polyth-browser.mjs snapshot browser-1",
-    `${helper} snapshot browser-1 && node other.mjs`,
-    `${helper} unknown browser-1`,
-  ]) assert.notEqual(classifyTool("bash", { command }), "browser", command);
-
-  for (const name of ["polyth-agent-tools_polyth_browser", "mcp__polyth-agent-tools__polyth_browser", "mcp__browser__open", "browser.open"]) {
-    const presentation = executionPresentation(tool({
-      tool: name, input: { action: "browser.open", parameters: { url: "https://example.com?private=value" } },
-    }));
-    assert.equal(presentation.kind, "browser", name);
-    assert.equal(presentation.preview, "Open page · example.com", name);
-  }
-  assert.equal(executionPresentation(tool({
-    tool: "polyth_browser", input: { action: "browser.type", parameters: { selector: "#search", value: "private typed value" } },
-  })).preview, "Type · #search");
-});
-
 test("shell-backed repository inspection is presented by semantic action", () => {
   const searchTool = tool({
     input: { command: "/bin/bash -lc 'rg -n -C 12 -S \"harnessTransition\" packages/server/test/harnessSwitch.test.ts'" },
@@ -389,8 +342,6 @@ test("execution code surfaces override the global prose font preference", async 
   assert.match(rowSource, /reverted \? "Redo" : "Revert changes"/);
   assert.match(rowSource, /reverted \? RedoIcon : UndoIcon/);
   assert.match(rowSource, /applyUnifiedDiff\(current, file\.diff, direction\)/);
-  assert.match(rowSource, /api\.abort\(sessionId, "execution"\)/);
-  assert.match(rowSource, /onPointerDown=\{\(\) => \{ stopPointerAt\.current = Date\.now\(\); \}\}/);
   assert.match(css, /grid-template-rows var\(--motion-normal\)[\s\S]*?opacity var\(--motion-normal\)/);
   assert.match(css, /\.reasoning-preview\s*\{[\s\S]*?-webkit-mask-image:\s*linear-gradient\(to right, #000 90%, transparent 100%\);[\s\S]*?mask-image:\s*linear-gradient\(to right, #000 90%, transparent 100%\);/);
 });
@@ -412,8 +363,6 @@ Object.assign(globalThis, {
   HTMLElement: dom.HTMLElement,
   Element: dom.Element,
   Event: dom.Event,
-  CustomEvent: dom.CustomEvent,
-  getComputedStyle: dom.getComputedStyle,
   MouseEvent: dom.MouseEvent,
   PointerEvent: dom.PointerEvent,
   KeyboardEvent: dom.KeyboardEvent,
@@ -426,11 +375,10 @@ Object.defineProperty(globalThis, "localStorage", { value: dom.localStorage, con
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 register("./tsxHooks.mjs", import.meta.url);
-const { act, createElement, Fragment } = await import("react");
+const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { default: ExecutionRow } = await import("../src/components/ExecutionRow.tsx");
-const { default: Timeline, ActivityGroupView, UserPrompt } = await import("../src/components/Timeline.tsx");
-const { emptyModel, reduceEvent, cloneModel } = await import("../src/reduce.ts");
+const { ActivityGroupView, UserPrompt } = await import("../src/components/Timeline.tsx");
 
 /** Build the derived activity projection the timeline hands to the group view. */
 const activityGroup = (
@@ -447,87 +395,22 @@ const activityGroup = (
   ms,
   settled: !items.some((item) => item.kind === "tool" && (item.status === "pending" || item.status === "running")),
 });
-
-/** Full store → reduce → Timeline mount: the reproducer shape behind the
- *  reported bug. Uses the same projection path as the running app. */
-let timelineHostSeq = 0;
-const timelineHost = () => {
-  const sessionId = `activity-status-${++timelineHostSeq}`;
-  const { viewport, host } = activityTimelineHost();
-  const root = createRoot(host);
-  const event = (seq: number, type: string, data: Record<string, unknown>, time = seq) => ({
-    id: `ev-${sessionId}-${seq}`,
-    sessionId,
-    seq,
-    time,
-    type,
-    data,
-    v: 1,
-  });
-  return {
-    event,
-    host,
-    async render(events: ReturnType<typeof event>[]) {
-      await act(async () => {
-        activateProject("activity-status-test");
-        setSessions("activity-status-test", [{
-          id: sessionId,
-          projectId: "activity-status-test",
-          title: "Activity status",
-          status: "idle",
-          createdAt: 1,
-          updatedAt: 1,
-        }]);
-        activateSession(sessionId);
-        for (const ev of events) applyEvent(ev);
-        root.render(createElement(Timeline, { model: reduceSessionModel(sessionId, getState().events[sessionId] ?? []) }));
-      });
-    },
-    async cleanup() {
-      await act(async () => {
-        activateSession(null);
-        setSessions("activity-status-test", []);
-      });
-      await act(async () => root.unmount());
-      viewport.remove();
-    },
-  };
-};
-/** Minimal timeline shell for activity ordering and scheduling tests. */
-const activityTimelineHost = () => {
+/** Viewport shell with the clipped live overlay the real timeline mounts beside the scroller. */
+const activityOverlayHost = () => {
   const viewport = document.createElement("div");
   viewport.className = "timeline-viewport";
   const timeline = document.createElement("div");
   timeline.className = "timeline";
+  const layer = document.createElement("div");
+  layer.className = "activity-live-layer";
   const host = document.createElement("div");
   timeline.appendChild(host);
-  viewport.append(timeline);
+  viewport.append(timeline, layer);
   document.body.appendChild(viewport);
-  return { viewport, timeline, host };
+  return { viewport, timeline, layer, host };
 };
 const { default: PermissionBanner } = await import("../../../packages/permissions/widgets/PermissionBanner.tsx");
-const { activateProject, activateSession, applyEvent, getState, setSessions, reduceSessionModel } = await import("../src/store.ts");
-
-test("browser activity rows expose readable summaries and retain command details", async () => {
-  const container = document.createElement("div");
-  document.body.appendChild(container);
-  const root = createRoot(container);
-  const command = "node ~/.config/opencode/skills/polyth-browser/scripts/polyth-browser.mjs snapshot browser-1";
-  try {
-    await act(async () => root.render(createElement(ExecutionRow, { message: tool({ input: { command } }) })));
-    assert.equal(container.querySelector(".execution-row")?.getAttribute("data-execution-kind"), "browser");
-    assert.equal(container.querySelector(".tool-name")?.textContent, "Browser");
-    assert.equal(container.querySelector(".tool-preview")?.textContent, "Read page");
-    const disclosure = container.querySelector<HTMLButtonElement>(".execution-summary")!;
-    assert.equal(disclosure.getAttribute("aria-label"), "Expand Browser: Read page");
-    await act(async () => disclosure.click());
-    assert.ok(container.querySelector(".execution-details")?.textContent?.includes("polyth-browser.mjs"));
-    assert.ok(container.textContent?.includes("View raw result"));
-  } finally {
-    await act(async () => root.unmount());
-    container.remove();
-  }
-});
+const { activateProject, activateSession, applyEvent, getState, setSessions } = await import("../src/store.ts");
 
 test("execution row renders collapsed value first, expands inline, and opens level three on demand", async () => {
   const timeline = document.createElement("div");
@@ -610,8 +493,8 @@ test("execution row renders collapsed value first, expands inline, and opens lev
   }
 });
 
-test("the running action sits after the folded block while settled rows stay inside it", async () => {
-  const { viewport, host } = activityTimelineHost();
+test("the running action floats out of the folded block while settled rows stay inside it", async () => {
+  const { viewport, host } = activityOverlayHost();
   const root = createRoot(host);
   const first = tool({ id: "call-first", callId: "call-first", eventSeq: 1 });
   const latest = tool({
@@ -648,9 +531,9 @@ test("the running action sits after the folded block while settled rows stay ins
       entering: true,
     })));
     const live = [...viewport.querySelectorAll(".activity-live .execution-row")];
-    assert.equal(live.length, 1, "only one running action sits below the block while the next waits");
+    assert.equal(live.length, 1, "only one running action floats above the block while the next waits");
     assert.equal(live[0]?.querySelector(".tool-preview")?.textContent, "Run tests");
-    assert.ok(!live[0]?.classList.contains("open"), "a live action names itself without dumping its output");
+    assert.ok(!live[0]?.classList.contains("open"), "a floating action names itself without dumping its output");
     const toggle = viewport.querySelector<HTMLButtonElement>(".ui-run-summary")!;
     assert.equal(toggle.getAttribute("aria-expanded"), "false", "the block never opens itself while work runs");
     assert.equal(viewport.querySelectorAll(".execution-row").length, 1, "settled rows stay folded away");
@@ -903,10 +786,8 @@ test("expanded activity keeps its collapse control visible while scrolling", asy
     "expanded activity and its pinned header use the same glass material as other floating chrome");
   assert.match(css, /body\[data-glass="off"\]\s+\.activity-group::before[\s\S]*?backdrop-filter:\s*none !important/,
     "activity keeps an opaque fallback when transparency is disabled");
-  assert.match(css, /\.activity-live-stage \{[^}]*width:\s*100%;[^}]*display:\s*grid;[^}]*margin-block-start:/s,
-    "the live row owns normal-flow space immediately after its activity card");
-  assert.doesNotMatch(css, /\.activity-live-stage \{[^}]*position:\s*absolute/s,
-    "live activity must never escape transcript layout");
+  assert.match(css, /\.activity-live-layer \{[^}]*z-index:\s*calc\(var\(--z-shell\) \+ 2\)/s,
+    "live flight stays above the raised expanded activity card");
 });
 
 test("multi-file patches list each file with its own line counts", async () => {
@@ -982,7 +863,7 @@ test("pending and running execution states stay visually and accessibly distinct
   document.body.appendChild(container);
   const root = createRoot(container);
   const originalFetch = globalThis.fetch;
-  let abortRequest: { url: string; method: string; body: string } | undefined;
+  let abortRequest: { url: string; method: string } | undefined;
   try {
     await act(async () => {
       setSessions("execution-status-test", [{
@@ -1027,18 +908,13 @@ test("pending and running execution states stay visually and accessibly distinct
     const stop = container.querySelector<HTMLButtonElement>(".execution-stop");
     assert.equal(stop?.textContent, "Stop");
     globalThis.fetch = async (input, init) => {
-      abortRequest = {
-        url: String(input),
-        method: String(init?.method ?? "GET"),
-        body: String(init?.body ?? ""),
-      };
+      abortRequest = { url: String(input), method: String(init?.method ?? "GET") };
       return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
     };
     await act(async () => { stop?.click(); });
     assert.deepEqual(abortRequest, {
       url: "/api/sessions/execution-status-session/abort",
       method: "POST",
-      body: JSON.stringify({ source: "execution" }),
     });
     await act(async () => {
       applyEvent({
@@ -1100,61 +976,6 @@ test("orphaned-tool interrupt reasons map to cancelled vs failed display status"
   }
 });
 
-for (const [reason, expected] of [["stopped", "completed"], ["error", "failed"], ["aborted", "cancelled"]]) {
-  test(`a ${reason} turn settles activity and a new turn cannot revive it`, async () => {
-    const t = timelineHost();
-    const state = () => t.host.querySelector<HTMLElement>(".activity-group > .ui-run-summary")?.dataset.state;
-    try {
-      await t.render([
-        t.event(1, "turn/started", { turnId: "turn-1" }),
-        t.event(2, "task/snapshot", { revision: 1, items: [{ id: "1", text: "Fix", status: "active" }] }),
-      ]);
-      assert.equal(state(), "active");
-      await t.render([t.event(3, "turn/stopped", { turnId: "turn-1", reason })]);
-      assert.equal(state(), expected);
-      assert.equal(t.host.querySelector(".activity-group .ui-spinner"), null);
-      // Equal timestamps still belong to different canonical turns.
-      await t.render([t.event(4, "turn/started", { turnId: "turn-2" }, 2)]);
-      assert.ok(!["active", "waiting"].includes(state() ?? ""), "a new turn cannot revive old activity");
-      await t.render([
-        t.event(5, "assistant/message", { partId: "p1", text: "Next step." }),
-        t.event(6, "tool/started", { callId: "call-2", tool: "bash", input: { command: "npm test" } }),
-      ]);
-      const summaries = [...t.host.querySelectorAll<HTMLElement>(".activity-group > .ui-run-summary")];
-      assert.equal(summaries.length, 2);
-      assert.equal(summaries[1]?.dataset.state, "active", "new work is still live");
-    } finally {
-      await t.cleanup();
-    }
-  });
-}
-
-test("a task that completes in a later activity block does not leave earlier blocks spinning", async () => {
-  // Task snapshots push started/completed as separate history entries, so a
-  // prose answer between them splits them into two blocks. The block holding
-  // only the started entry must not read active forever.
-  const t = timelineHost();
-  try {
-    await t.render([
-      t.event(1, "turn/started", { turnId: "turn-1" }),
-      t.event(2, "task/snapshot", { revision: 1, items: [{ id: "1", text: "Fix", status: "active" }] }),
-      t.event(3, "assistant/chunk", { partId: "p1", text: "Starting on it." }),
-      t.event(4, "assistant/message", { partId: "p1", text: "Starting on it." }),
-      t.event(5, "task/snapshot", { revision: 2, items: [{ id: "1", text: "Fix", status: "done" }] }),
-      t.event(6, "assistant/chunk", { partId: "p2", text: "Done." }),
-      t.event(7, "assistant/message", { partId: "p2", text: "Done." }),
-    ]);
-    const summaries = () => [...t.host.querySelectorAll<HTMLElement>(".activity-group > .ui-run-summary")];
-    assert.equal(summaries().length, 2, "the prose splits the task entries into two blocks");
-    assert.deepEqual(summaries().map((summary) => summary.dataset.state), ["completed", "active"],
-      "only the latest block follows the ongoing turn");
-    await t.render([t.event(8, "turn/stopped", { turnId: "turn-1", reason: "stopped" })]);
-    assert.deepEqual(summaries().map((summary) => summary.dataset.state), ["completed", "completed"]);
-  } finally {
-    await t.cleanup();
-  }
-});
-
 test("execution rows stay folded by default while running and after settling", async () => {
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -1181,23 +1002,48 @@ test("execution rows stay folded by default while running and after settling", a
   }
 });
 
-test("a live action occupies timeline flow before the content that follows it", async () => {
-  const { viewport, timeline, host } = activityTimelineHost();
+test("ActivityGroupView never mounts live flight inside the timeline scroller", async () => {
+  const timelineSource = await readFile(new URL("../src/components/Timeline.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(timelineSource, /\{!liveLayer && stage\}/,
+    "live rows must portal into the overlay or stay unmounted, never in-flow under .timeline");
+});
+
+test("a live action flies in the viewport overlay and leaves timeline scroll geometry alone", async () => {
+  const viewport = document.createElement("div");
+  viewport.className = "timeline-viewport";
+  const timeline = document.createElement("div");
+  timeline.className = "timeline";
+  const layer = document.createElement("div");
+  layer.className = "activity-live-layer";
+  const host = document.createElement("div");
+  timeline.appendChild(host);
+  viewport.append(timeline, layer);
+  document.body.appendChild(viewport);
   const root = createRoot(host);
   const running = tool({ status: "running", output: undefined, finishTime: undefined, time: Date.now() });
+  const baseScrollHeight = 640;
+  Object.defineProperty(timeline, "scrollHeight", {
+    configurable: true,
+    get: () => baseScrollHeight + (timeline.querySelector(".activity-live, .activity-live-stage") ? 240 : 0),
+  });
+  Object.defineProperty(timeline, "clientHeight", { configurable: true, get: () => 480 });
+  timeline.scrollTop = 160;
   try {
-    await act(async () => root.render(createElement(Fragment, null,
-      createElement(ActivityGroupView, {
-        g: activityGroup("activity-before-prose", [running]),
-        subagents: null,
-      }),
-      createElement("article", { className: "msg assistant", "data-following-prose": true }, "Later assistant text"),
-    )));
-    const stage = viewport.querySelector<HTMLElement>(".activity-live-stage");
-    const following = viewport.querySelector<HTMLElement>("[data-following-prose]");
-    assert.ok(stage && following);
-    assert.equal(timeline.contains(stage), true, "the live row reserves real scroll-layout space");
-    assert.equal(stage.nextElementSibling, following, "later prose follows the live row in DOM and visual order");
+    await act(async () => root.render(createElement(ActivityGroupView, {
+      g: activityGroup("activity-overlay", [running]),
+      subagents: null,
+    })));
+    assert.equal(timeline.querySelector(".activity-live-stage"), null,
+      "the flying row is not a scroll child of the timeline");
+    assert.ok(layer.querySelector(".activity-live-stage"),
+      "it sits in the clipped viewport overlay beside the scroller");
+    assert.ok(layer.querySelector(".activity-live .execution-row"),
+      "the action itself is on screen");
+    assert.equal(timeline.contains(layer.querySelector(".activity-live")!), false,
+      "flight uses a non-scroller containing block");
+    assert.equal(timeline.scrollHeight, baseScrollHeight, "adding the live row does not grow scrollHeight");
+    assert.equal(timeline.clientHeight, 480, "and does not shrink the scrollport");
+    assert.equal(timeline.scrollTop, 160, "and does not move scrollTop");
   } finally {
     await act(async () => root.unmount());
     viewport.remove();
@@ -1205,7 +1051,7 @@ test("a live action occupies timeline flow before the content that follows it", 
 });
 
 test("a lone running action gets a stable summary and folds into it when it settles", async () => {
-  const { viewport } = activityTimelineHost();
+  const { viewport } = activityOverlayHost();
   const root = createRoot(viewport.querySelector(".timeline")!.firstElementChild!);
   const running = tool({ status: "running", output: undefined, finishTime: undefined, time: Date.now() });
   const group = (message: ToolMsg) => activityGroup("activity-1", [message]);
@@ -1232,11 +1078,12 @@ test("a lone running action gets a stable summary and folds into it when it sett
   }
 });
 
-test("a reopened session never replays unfinished history in the conversation", async () => {
+test("a reopened session never floats unfinished history over the conversation", async () => {
   // A turn that ended mid-action leaves `running` tools and unfinalized
   // assistant parts in history forever. Opening that session must not replay
-  // them as live rows: an hours-old action must not be replayed on every open.
-  const { viewport } = activityTimelineHost();
+  // them as live rows: the float sits over whatever follows the block, so the
+  // answer below it would be overlapped by an hours-old action on every open.
+  const { viewport } = activityOverlayHost();
   const root = createRoot(viewport.querySelector(".timeline")!.firstElementChild!);
   const stale = tool({ status: "running", output: undefined, finishTime: undefined });
   const unfinalized = {
@@ -1261,18 +1108,18 @@ test("a reopened session never replays unfinished history in the conversation", 
       "stale in-flight history mounts folded inside the block");
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 60)); });
     assert.equal(viewport.querySelector(".activity-live"), null,
-      "and nothing reappears a beat later either");
+      "and nothing rises into the overlay a beat later either");
   } finally {
     await act(async () => root.unmount());
     viewport.remove();
   }
 });
 
-test("a restored group with history never replays its current action", async () => {
+test("a restored group with history never flies its current action", async () => {
   // Cached reopen of a turn the reader left mid-flight: the group already
   // contains settled work plus a still-open action. That is restore, not the
   // first action of a new group, even when the open action is recent.
-  const { viewport } = activityTimelineHost();
+  const { viewport } = activityOverlayHost();
   const root = createRoot(viewport.querySelector(".timeline")!.firstElementChild!);
   const settled = tool({ id: "call-settled", callId: "call-settled" });
   const running = tool({
@@ -1300,9 +1147,9 @@ test("a restored group with history never replays its current action", async () 
 test("opening a finished turn does not replay activity over the answer", async () => {
   // The reported reopen: the agent has already answered, the reader opens the
   // chat, and a completed action whose timestamp is still inside the show
-  // window reappears after that answer before folding into the block. Recency
+  // window flies in over that answer before folding into the block. Recency
   // alone would treat that as live; a finished item at mount is history.
-  const { viewport } = activityTimelineHost();
+  const { viewport } = activityOverlayHost();
   const root = createRoot(viewport.querySelector(".timeline")!.firstElementChild!);
   const recent = tool({ time: Date.now(), finishTime: Date.now() });
   try {
@@ -1314,7 +1161,7 @@ test("opening a finished turn does not replay activity over the answer", async (
       "a just-finished action mounts folded inside the block");
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 60)); });
     assert.equal(viewport.querySelector(".activity-live"), null,
-      "and does not reappear after the first frame");
+      "and does not rise into the overlay after the first frame");
   } finally {
     await act(async () => root.unmount());
     viewport.remove();
@@ -1325,7 +1172,7 @@ test("an idle session does not treat reconcile suffix history as live arrivals",
   // Revisited chats paint the cached group immediately, then the append-only
   // suffix lands as new ids on the already-mounted group. Those rows are
   // history, not a live burst, even when their timestamps are "now".
-  const { viewport } = activityTimelineHost();
+  const { viewport } = activityOverlayHost();
   const root = createRoot(viewport.querySelector(".timeline")!.firstElementChild!);
   const cached = tool({ id: "call-cached", callId: "call-cached" });
   const suffix = tool({
@@ -1339,13 +1186,13 @@ test("an idle session does not treat reconcile suffix history as live arrivals",
     await act(async () => root.render(createElement(ActivityGroupView, {
       g: activityGroup("activity-cached", [cached]),
       subagents: null,
-      livePresentation: false,
+      liveFlight: false,
     })));
     assert.equal(viewport.querySelector(".activity-live"), null, "cached history mounts folded");
     await act(async () => root.render(createElement(ActivityGroupView, {
       g: activityGroup("activity-cached", [cached, suffix]),
       subagents: null,
-      livePresentation: false,
+      liveFlight: false,
     })));
     assert.equal(viewport.querySelector(".activity-live"), null,
       "the idle suffix does not rise over the conversation");
@@ -1355,67 +1202,26 @@ test("an idle session does not treat reconcile suffix history as live arrivals",
   }
 });
 
-test("an idle reopen never presents a recent cached running tool", async () => {
-  const { viewport } = activityTimelineHost();
+test("an idle reopen never floats a recent cached running tool", async () => {
+  const { viewport } = activityOverlayHost();
   const root = createRoot(viewport.querySelector(".timeline")!.firstElementChild!);
   const running = tool({ status: "running", output: undefined, finishTime: undefined, time: Date.now() });
   try {
     await act(async () => root.render(createElement(ActivityGroupView, {
       g: activityGroup("activity-idle", [running]),
       subagents: null,
-      livePresentation: false,
+      liveFlight: false,
     })));
     assert.equal(viewport.querySelector(".activity-live"), null,
       "a finished session does not resurrect cached in-flight rows");
-    assert.equal(viewport.querySelector(".ui-run-summary")?.getAttribute("data-state"), "completed");
-    for (const [error, expected] of [["Command failed", "failed"], ["Interrupted", "cancelled"]]) {
-      await act(async () => root.render(createElement(ActivityGroupView, {
-        g: activityGroup("activity-idle", [tool({ status: "error", error })]),
-        subagents: null,
-        livePresentation: false,
-      })));
-      assert.equal(viewport.querySelector(".ui-run-summary")?.getAttribute("data-state"), expected,
-        "historical headers retain recorded errors");
-    }
   } finally {
-    await act(async () => root.unmount());
-    viewport.remove();
-  }
-});
-
-test("a hidden tab commits activity directly and never replays it on return", async () => {
-  const { viewport } = activityTimelineHost();
-  const root = createRoot(viewport.querySelector(".timeline")!.firstElementChild!);
-  const settled = tool({ id: "call-visible", callId: "call-visible" });
-  const running = tool({ id: "call-hidden", callId: "call-hidden", status: "running", output: undefined, finishTime: undefined, time: Date.now() });
-  const previous = Object.getOwnPropertyDescriptor(document, "hidden");
-  try {
-    await act(async () => root.render(createElement(ActivityGroupView, {
-      g: activityGroup("activity-hidden", [settled]),
-      subagents: null,
-    })));
-
-    Object.defineProperty(document, "hidden", { configurable: true, value: true });
-    await act(async () => document.dispatchEvent(new dom.Event("visibilitychange")));
-    await act(async () => root.render(createElement(ActivityGroupView, {
-      g: activityGroup("activity-hidden", [settled, running]),
-      subagents: null,
-    })));
-    assert.equal(viewport.querySelector(".activity-live"), null, "activity arriving while hidden is rendered in its final folded position");
-
-    Object.defineProperty(document, "hidden", { configurable: true, value: false });
-    await act(async () => document.dispatchEvent(new dom.Event("visibilitychange")));
-    assert.equal(viewport.querySelector(".activity-live"), null, "returning to the tab does not replay missed flight");
-  } finally {
-    if (previous) Object.defineProperty(document, "hidden", previous);
-    else delete (document as Document & { hidden?: boolean }).hidden;
     await act(async () => root.unmount());
     viewport.remove();
   }
 });
 
 test("an action that arrives already finished still appears outside the block first", async () => {
-  const { viewport } = activityTimelineHost();
+  const { viewport } = activityOverlayHost();
   const root = createRoot(viewport.querySelector(".timeline")!.firstElementChild!);
   const settled = tool();
   // A fast tool can be called and answered inside one render batch, so it is
@@ -1433,15 +1239,15 @@ test("an action that arrives already finished still appears outside the block fi
     assert.equal(
       viewport.querySelector(".ui-run-summary")?.getAttribute("aria-expanded"),
       "false",
-      "the block stays folded while the action is presented",
+      "the block stays folded while the action floats",
     );
 
     const next = tool({ id: "call-3", callId: "call-3", input: { command: "npm test" } });
     await act(async () => root.render(createElement(ActivityGroupView, { g: group([settled, fast, next]), subagents: null })));
-    const presented = [...viewport.querySelectorAll(".activity-live:not(.leaving)")];
-    assert.equal(presented.length, 1, "a second arrival waits its turn instead of stacking or cutting in");
+    const floating = [...viewport.querySelectorAll(".activity-live:not(.leaving)")];
+    assert.equal(floating.length, 1, "a second arrival waits its turn instead of stacking or cutting in");
     assert.equal(
-      presented[0]?.querySelector(".tool-preview")?.textContent,
+      floating[0]?.querySelector(".tool-preview")?.textContent,
       "Review changes",
       "the action already on screen keeps it for its full turn",
     );

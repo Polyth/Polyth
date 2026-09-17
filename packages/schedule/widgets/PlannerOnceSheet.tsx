@@ -1,5 +1,4 @@
 import { getLocale, tr } from "../../../apps/web/src/i18n/index.ts";
-import type { RefObject } from "react";
 import {
   Button,
   ResponsiveOverlay,
@@ -17,14 +16,12 @@ import PlannerNativeField from "./PlannerNativeField.tsx";
 export default function PlannerOnceSheet({
   open,
   onClose,
-  anchorRef,
   value,
   onChange,
   disabled = false,
 }: {
   open: boolean;
   onClose: () => void;
-  anchorRef: RefObject<HTMLElement | null>;
   value: number;
   onChange: (at: number) => void;
   disabled?: boolean;
@@ -40,9 +37,6 @@ export default function PlannerOnceSheet({
       title={tr("scheduleview.once")}
       desktop="dialog"
       dialogSize="sm"
-      phone="popover"
-      anchorRef={anchorRef}
-      stableAnchor
       className="planner-sheet-overlay"
       sheetAction={{ label: tr("common.done"), onClick: onClose }}
       dialogFooter={<Button variant="primary" onClick={onClose}>{tr("common.done")}</Button>}

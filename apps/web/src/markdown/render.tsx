@@ -18,7 +18,6 @@ import {
   ChevronDownIcon,
   ChevronUpIcon,
   Icon,
-  ImageIcon,
 } from "../components/ui/index.ts";
 import { highlight } from "../highlight.ts";
 import { codeBlockOverflow } from "./codeBlock.ts";
@@ -75,11 +74,7 @@ function textWithRefs(text: string, keyBase: string, asCode: boolean): ReactNode
 function InlineImage({ src, alt }: { src: string; alt: string }) {
   const ctx = useContext(DocContext);
   const resolved = sanitizeImageSrc(src, { ...(ctx.projectId !== undefined ? { projectId: ctx.projectId } : {}) });
-  if (resolved === null) return (
-    <span className="md-blocked">
-      {tr("markdown.render.blockedImageSource")}: {alt || src}
-    </span>
-  );
+  if (resolved === null) return <code className="md-blocked" title={tr("markdown.render.blockedImageSource")}>{alt || src}</code>;
   return (
     <button className="md-img-btn" title={alt || src} onClick={() => ctx.openGallery(resolved)}>
       <img className="md-img" src={resolved} alt={alt} loading="lazy" />
@@ -298,11 +293,7 @@ export function renderBlocks(blocks: Block[], keyBase: string): ReactNode[] {
 
 // ---------------------------------------------------------------- document
 
-export function MarkdownDoc({ text, keyBase = "md", showGalleryShortcut = false }: {
-  text: string;
-  keyBase?: string;
-  showGalleryShortcut?: boolean;
-}) {
+export function MarkdownDoc({ text, keyBase = "md" }: { text: string; keyBase?: string }) {
   const projectId = useStore((s) => s.activeProjectId) ?? undefined;
   const blocks = useMemo(() => parseMarkdown(text), [text]);
   const images = useMemo(() => {
@@ -327,11 +318,6 @@ export function MarkdownDoc({ text, keyBase = "md", showGalleryShortcut = false 
   return (
     <DocContext.Provider value={ctx}>
       {renderBlocks(blocks, keyBase)}
-      {showGalleryShortcut && images.length > 0 && (
-        <Button size="sm" variant="ghost" className="gallery-shortcut" iconStart={ImageIcon} onClick={() => setGalleryAt(0)}>
-          {tr("timeline.openAnswerImages")}
-        </Button>
-      )}
       {galleryAt !== null && images.length > 0 && (
         <GalleryLightbox images={images} start={galleryAt} onClose={() => setGalleryAt(null)} />
       )}
@@ -340,8 +326,8 @@ export function MarkdownDoc({ text, keyBase = "md", showGalleryShortcut = false 
 }
 
 /** Compatibility face for existing call sites: same signature as Markdown-lite. */
-export function renderMarkdown(text: string, keyBase = "md", opts: { showGalleryShortcut?: boolean } = {}): ReactNode[] {
-  return [<MarkdownDoc key={keyBase} text={text} keyBase={keyBase} {...(opts.showGalleryShortcut ? { showGalleryShortcut: true } : {})} />];
+export function renderMarkdown(text: string, keyBase = "md"): ReactNode[] {
+  return [<MarkdownDoc key={keyBase} text={text} keyBase={keyBase} />];
 }
 
 /** Escape hatch used by non-hook contexts. */

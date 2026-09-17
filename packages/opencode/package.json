@@ -14,9 +14,7 @@
       "core": true,
       "enabled": true,
       "icon": "braces",
-      "hasSettings": false,
-      "category": "system",
-      "projectAffinity": {}
+      "hasSettings": false
     }
   },
   "dependencies": {

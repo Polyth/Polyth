@@ -606,7 +606,7 @@ test("a reconciled task list seeds the next live todo revision", async () => {
       reconciliationOrdinal: 1,
     });
     assert.equal(
-      snapshot.events.flatMap((entry) => entry.events).find((event) => event.type === "task/snapshot")?.revision,
+      snapshot.events.find((entry) => entry.event.type === "task/snapshot")?.event.revision,
       1,
     );
 
@@ -647,7 +647,7 @@ test("a reconciled task list seeds the next live todo revision", async () => {
       reconciliationOrdinal: 2,
     });
     assert.deepEqual(
-      recovered.events.flatMap((entry) => entry.events).find((event) => event.type === "task/snapshot"),
+      recovered.events.find((entry) => entry.event.type === "task/snapshot")?.event,
       {
         type: "task/snapshot",
         listId: "todo",

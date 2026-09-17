@@ -282,17 +282,6 @@ export default function registerPackage(host: ServerPackageHost) {
         // rejects any accidental attempt to select one as the primary agent.
         return Object.assign(runtime, {
           agents: () => discoverCommandCodeAgents(context.cwd),
-          releaseExecution: async (binding, operationId) => {
-            if (!context.space || context.remote) return { kind: "rejected" as const, code: "unsupported", message: "Local Space context required" };
-            if (process.platform !== "linux") {
-              return {
-                kind: "rejected" as const,
-                code: "unsupported",
-                message: "Crash-safe cross-harness switching currently requires Linux; Command Code can still be used normally",
-              };
-            }
-            return releaseProcessExecution(paths(context).authority, binding, operationId);
-          },
         });
       } catch (error) {
         await rpc.close().catch(() => undefined);

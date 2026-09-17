@@ -109,20 +109,7 @@ export default function registerPackage(host: ServerPackageHost) {
       }
       const rpc = await connectPi(context, { stateFile: stateFile(context) });
       try {
-        const runtime = createPiRuntime(context, rpc);
-        return Object.assign(runtime, {
-          releaseExecution: async (binding, operationId) => {
-            if (!context.space || context.remote) return { kind: "rejected" as const, code: "unsupported", message: "Local Space context required" };
-            if (process.platform !== "linux") {
-              return {
-                kind: "rejected" as const,
-                code: "unsupported",
-                message: "Crash-safe cross-harness switching currently requires Linux; Pi can still be used normally",
-              };
-            }
-            return releaseProcessExecution(stateFile(context), binding, operationId);
-          },
-        });
+        return createPiRuntime(context, rpc);
       } catch (error) {
         await rpc.close().catch(() => undefined);
         throw error;

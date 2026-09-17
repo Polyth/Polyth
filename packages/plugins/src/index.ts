@@ -9,10 +9,10 @@ export {
   type ServerPluginFactory,
   type TrustedServerPluginHost,
 } from "./trustedServerEntry.ts";
-export { discoverServerPackages } from "./projectCompositionDiscovery.ts";
 export {
   createServerServiceRegistry,
   bindPackageServices,
+  discoverServerPackages,
   INFRASTRUCTURE_PACKAGE_DIRS,
   loadServerPackage,
   localOnlyRemoteAccess,
@@ -32,8 +32,23 @@ export {
   type ServerServiceRegistry,
   type SessionRuntimeBinding,
 } from "./serverPackage.ts";
+export {
+  SPACE_SECURE_SAFE,
+  type SpaceSecureSafeRegistry,
+} from "./pluginRouteShared.ts";
 export { packageWorkspace, type PackageWorkspace } from "./packageWorkspace.ts";
-export { PairedSocketRegistry } from "./pairedSockets.ts";
+export {
+  RUNTIME_SYSTEM_PRINCIPAL_ID,
+  systemAppendSessionEvent,
+  systemSessionsForProject,
+  systemSessionsForSession,
+} from "./systemSessions.ts";
+export {
+  PairedSocketRegistry,
+  closeAuthSessionSockets,
+  closeAuthUserSessionSockets,
+  closeAuthUserSockets,
+} from "./pairedSockets.ts";
 export {
   allowWsCapability,
   claimWsUpgrade,

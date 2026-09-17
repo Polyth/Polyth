@@ -18,9 +18,7 @@
       "core": false,
       "enabled": true,
       "icon": "assist",
-      "hasSettings": false,
-      "category": "system",
-      "projectAffinity": {}
+      "hasSettings": false
     }
   },
   "optionalDependencies": {

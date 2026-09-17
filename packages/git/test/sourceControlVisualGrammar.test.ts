@@ -36,17 +36,6 @@ test("Source Control polish stays package-owned", () => {
   assert.match(polish, /^\/\* Source control interaction grammar\./);
 });
 
-test("edited-files rows use compact technical type instead of editor code size", () => {
-  const styles = readFileSync(new URL("../widgets/styles.css", import.meta.url), "utf8");
-  assert.match(
-    styles,
-    /\.pending-changes-file\s*\{[^}]*font:\s*400 var\(--font-meta\) \/ 1\.4 var\(--mono\)/s,
-  );
-  assert.match(styles, /\.pending-changes-file\s*\{[^}]*min-height:\s*var\(--control-h-sm\)/s);
-  assert.doesNotMatch(styles, /\.pending-changes-file-name\s*\{[^}]*font-size:\s*var\(--font-code\)/s);
-  assert.match(styles, /\.pending-changes-file::after\s*\{[^}]*var\(--hit-min\)/s);
-});
-
 test("Source Control refreshes on project change, not on every store notification", () => {
   assert.match(packageEntry, /projectId === scope && !force/);
   assert.match(packageEntry, /host\.store\.subscribe\(\(\) => refreshActive\(\)\)/);

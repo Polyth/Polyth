@@ -51,15 +51,6 @@ export function createPackageRegistry(opts: {
   const byId = new Map<string, PackageDescriptorDto>(
     packages.map((descriptor) => [descriptor.id, descriptor]),
   );
-  // Derived discovery metadata for agent relevance. Enablement remains owned
-  // by packages.json; this catalog deliberately contains no lifecycle state.
-  atomicWriteSync(
-    `${dirname(opts.file)}/package-composition.json`,
-    `${JSON.stringify(Object.fromEntries(packages.map((descriptor) => [descriptor.id, {
-      ...(descriptor.category ? { category: descriptor.category } : {}),
-      ...(descriptor.projectAffinity ? { projectAffinity: descriptor.projectAffinity } : {}),
-    }])), null, 2)}\n`,
-  );
   const defaults: EnabledState = Object.fromEntries(
     packages
       .filter((descriptor) => !descriptor.core)

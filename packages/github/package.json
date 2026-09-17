@@ -19,14 +19,7 @@
       "enabled": true,
       "settingsGroup": "Engineering",
       "icon": "github",
-      "hasSettings": false,
-      "category": "engineering",
-      "projectAffinity": {
-        "directions": [
-          "engineering",
-          "operations"
-        ]
-      }
+      "hasSettings": false
     }
   },
   "dependencies": {

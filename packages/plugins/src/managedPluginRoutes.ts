@@ -23,7 +23,6 @@ import {
   assertSpacePackageDisable,
   assertSpacePackageEnable,
   assertSpacePackageGrant,
-  assertTrustedServerRuntimeMutator,
 } from "./lifecycleAuth.ts";
 import { assertOauthTxMatchesActive, consumeOauthTx, oauthRedirectOrigin } from "./oauthTx.ts";
 import { notFound, optionalSecretVault, secretVault } from "./pluginRouteShared.ts";
@@ -362,17 +361,9 @@ export function managedPluginRoutes(
       const operation = match[2]!;
       if (operation === "enable") {
         assertSpacePackageEnable(request, request.space);
-        assertTrustedServerRuntimeMutator(
-          request,
-          Boolean(registry.canonicalManifest(id).runtime?.server),
-        );
         request.json(200, await registry.enable(id, storage));
       } else if (operation === "disable") {
         assertSpacePackageDisable(request, request.space);
-        assertTrustedServerRuntimeMutator(
-          request,
-          Boolean(registry.canonicalManifest(id).runtime?.server),
-        );
         invocationLeases.revokePackage(id);
         request.json(200, await registry.disable(id, storage));
       } else if (operation === "reload") {

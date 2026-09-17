@@ -18,21 +18,20 @@ const APPLICATION_URL = "http://127.0.0.1:4400";
 test("production Browser contribution follows the live exact login-origin seam only", async () => {
   const previousFakeBrowser = process.env.POLYTH_FAKE_BROWSER;
   process.env.POLYTH_FAKE_BROWSER = "1";
-  const contributions = new Map<string, AgentCapabilityContribution>();
+  let contribution: AgentCapabilityContribution | undefined;
   let pkg: ServerPackage | undefined;
   let loginOrigin: string | null = APPLICATION_URL;
   const services = new Map<string, unknown>();
   const capabilities: AgentCapabilityContributionRegistry = {
     register(_owner, next) {
-      contributions.set(next.descriptor.id, next);
-      return { dispose: () => { contributions.delete(next.descriptor.id); } };
+      contribution = next;
+      return { dispose: () => { if (contribution === next) contribution = undefined; } };
     },
-    list: () => [...contributions.values()],
-    resolve: () => [...contributions.values()].map((c) => c.descriptor),
-    contribution: (id) => contributions.get(id),
-    executor: (id) => contributions.get(id)?.execute,
+    list: () => contribution ? [contribution] : [],
+    resolve: () => contribution ? [contribution.descriptor] : [],
+    contribution: (id) => contribution?.descriptor.id === id ? contribution : undefined,
+    executor: (id) => contribution?.descriptor.id === id ? contribution.execute : undefined,
   };
-  const contribution = () => contributions.get("browser.polyth-browser");
   services.set(serverServiceKey("harness.capabilities").id, capabilities);
   services.set(SERVER_APPLICATION_SURFACE.id, {
     controlledBrowserLoginOrigin: () => loginOrigin,
@@ -63,25 +62,17 @@ test("production Browser contribution follows the live exact login-origin seam o
   try {
     pkg = await registerBrowserPackage(host);
     await pkg.onEnable?.();
-    const tool = contribution();
-    assert.ok(tool, "browser tool must be registered");
-    assert.equal(tool.descriptor.id, "browser.polyth-browser");
-    assert.ok(tool.execute);
-    assert.equal(typeof tool.autoApprove, "function");
-    assert.equal(tool.descriptor.kind, "tool");
-    if (tool.descriptor.kind !== "tool") throw new Error("Browser contribution must be a tool");
-    assert.match(tool.descriptor.description, /Take control/);
-    assert.match(tool.descriptor.description, /return control to the agent/);
-    assert.match(tool.descriptor.description, /reply when it is ready/);
-    assert.match(tool.descriptor.description, /Never request credentials/);
-    // Deployment skill: available in every project, not a project-owned managed skill.
-    const skill = contributions.get("browser.skill.polyth-browser");
-    assert.ok(skill, "browser deployment skill must be registered");
-    assert.equal(skill.descriptor.kind, "skill");
-    assert.equal(skill.descriptor.scope, "deployment");
-    assert.match(skill.descriptor.instructions, /polyth_browser/);
+    assert.equal(contribution?.descriptor.id, "browser.polyth-browser");
+    assert.ok(contribution?.execute);
+    assert.equal(typeof contribution?.autoApprove, "function");
+    assert.equal(contribution.descriptor.kind, "tool");
+    if (contribution.descriptor.kind !== "tool") throw new Error("Browser contribution must be a tool");
+    assert.match(contribution.descriptor.description, /Take control/);
+    assert.match(contribution.descriptor.description, /return control to the agent/);
+    assert.match(contribution.descriptor.description, /reply when it is ready/);
+    assert.match(contribution.descriptor.description, /Never request credentials/);
 
-    const opened = JSON.parse((await tool.execute({
+    const opened = JSON.parse((await contribution.execute({
       action: "browser.open",
       parameters: { url: `${APPLICATION_URL}/` },
     }, {

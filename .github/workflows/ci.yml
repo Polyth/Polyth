@@ -1,9 +1,9 @@
 name: CI
 
 on:
-  # Temporarily keep CI manual-only while the current failure is investigated.
-  # This prevents failure notifications for every commit without removing the
-  # workflow or its checks.
+  # Temporarily keep CI manual-only while GitHub Actions jobs are failing before
+  # runner assignment (zero workflow steps execute). Keep the validation
+  # contract current so normal triggers can be restored without another audit.
   workflow_dispatch:
 
 concurrency:
@@ -41,6 +41,9 @@ jobs:
             packages/contracts
             packages/plugins
             packages/server
+            packages/tenancy
+            packages/secure-safe
+            packages/pairing-qr
             packages/tunnel
             packages/terminal
             packages/markets

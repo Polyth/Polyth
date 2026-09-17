@@ -1,14 +1,20 @@
-name: Release quality
+name: Release quality gate
 
 on:
   workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: release-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  quality:
+  validate:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -17,12 +23,8 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
-      - uses: dtolnay/rust-toolchain@1.91.0
+      - name: Install locked workspace dependencies
+        run: npm ci --no-audit --no-fund
 
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Install workspace dependencies
-        run: npm ci
-
-      - name: Validate release quality
+      - name: Run release quality contract
         run: node scripts/ci/release-quality.mjs

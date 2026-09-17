@@ -3,17 +3,12 @@
 // with defaults on load — boot with an empty in-memory registry and leave the
 // file untouched until a deliberate user write succeeds.
 import { readFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
-import { atomicWriteSync } from "@polyth/plugins/atomic-write";
+import { atomicWriteSync } from "@polyth/plugins";
 import { createHash, randomUUID } from "node:crypto";
 import { basename, dirname, resolve } from "node:path";
-import { PROJECT_PRESENTATION_SETTING_KEYS } from "@polyth/contracts";
-import { parseProjectComposition } from "@polyth/contracts/project-composition";
 import type {
-  JsonValue,
   Project,
   ProjectPatch,
-  ProjectComposition,
-  ProjectPresentationSettingsDto,
   ProjectRemote,
   ProjectService,
   SpaceContext,
@@ -24,15 +19,15 @@ interface PackageWorkspaceMarker {
   packageId: string;
 }
 
-type StoredProject = Project & {
-  internal?: PackageWorkspaceMarker;
-  presentation?: StoredProjectPresentationSettings;
-};
+type StoredProject = Project & { internal?: PackageWorkspaceMarker };
 
-interface StoredProjectPresentationSettings {
-  revision: number;
-  updatedAt: number;
-  settings: Record<string, JsonValue>;
+export interface ProjectProvisionInput {
+  id: string;
+  spaceId: string;
+  path: string;
+  name?: string;
+  createDirectory?: boolean;
+  remote?: ProjectRemote;
 }
 
 /** Project registry with tenancy. `ProjectService` methods on this object are
@@ -43,6 +38,9 @@ interface StoredProjectPresentationSettings {
  *  returns a ProjectService that cannot see or touch another Space's rows. */
 export interface ProjectRegistry extends ProjectService {
   forSpace(ctx: Pick<SpaceContext, "spaceId">): ProjectService;
+  /** Canonical provisioning seam. The control plane reserves `id` before this
+   * domain write; request-facing code must never accept the id from a client. */
+  provision(input: ProjectProvisionInput): Promise<Project>;
   /** Owning Space of a project id, or undefined for unknown / pre-tenancy. */
   spaceOfProject(id: string): string | undefined;
   /** Boot migration: stamp ownerless projects with the default Space. */
@@ -64,71 +62,7 @@ const IMAGE_ICON = /^data:(image\/(?:png|svg\+xml|x-icon|vnd\.microsoft\.icon))(
 const PROJECT_ICON_PATH = /^\/assets\/project-icons\/[a-z0-9]+(?:-[a-z0-9]+)*\.svg$/;
 const HARNESS_ID = /^[a-z][a-z0-9-]*$/;
 const PACKAGE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
-const MAX_PROJECT_PRESENTATION_BYTES = 256 * 1024;
-const PROJECT_PRESENTATION_KEYS = new Set<string>(PROJECT_PRESENTATION_SETTING_KEYS);
-
-const emptyPresentationSettings = (): ProjectPresentationSettingsDto => ({
-  revision: 0,
-  updatedAt: 0,
-  settings: {},
-});
-
-function isJsonValue(value: unknown): value is JsonValue {
-  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
-  if (typeof value === "number") return Number.isFinite(value);
-  if (Array.isArray(value)) return value.every(isJsonValue);
-  if (typeof value !== "object") return false;
-  return Object.values(value as Record<string, unknown>).every(isJsonValue);
-}
-
-function presentationDto(value: unknown): ProjectPresentationSettingsDto {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return emptyPresentationSettings();
-  const stored = value as Partial<StoredProjectPresentationSettings>;
-  const revision = stored.revision;
-  const updatedAt = stored.updatedAt;
-  if (typeof revision !== "number" || !Number.isFinite(revision)
-    || typeof updatedAt !== "number" || !Number.isFinite(updatedAt)
-    || !stored.settings || typeof stored.settings !== "object" || Array.isArray(stored.settings)) {
-    return emptyPresentationSettings();
-  }
-  const settings: Partial<Record<typeof PROJECT_PRESENTATION_SETTING_KEYS[number], JsonValue>> = {};
-  for (const [key, item] of Object.entries(stored.settings)) {
-    if (PROJECT_PRESENTATION_KEYS.has(key) && isJsonValue(item)) {
-      settings[key as typeof PROJECT_PRESENTATION_SETTING_KEYS[number]] = item;
-    }
-  }
-  return {
-    revision: Math.max(0, Math.trunc(revision)),
-    updatedAt: Math.max(0, updatedAt),
-    settings,
-  };
-}
-
-function normalizeIncomingPresentationSettings(value: unknown): Record<string, JsonValue> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw Object.assign(new Error("presentation settings must be an object"), { code: "invalid-input" });
-  }
-  const settings: Record<string, JsonValue> = {};
-  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-    if (!PROJECT_PRESENTATION_KEYS.has(key)) {
-      throw Object.assign(new Error(`unknown presentation setting: ${key}`), { code: "invalid-input" });
-    }
-    if (!isJsonValue(item)) {
-      throw Object.assign(new Error(`presentation setting ${key} is not JSON`), { code: "invalid-input" });
-    }
-    settings[key] = item;
-  }
-  let serialized: string;
-  try {
-    serialized = JSON.stringify(settings);
-  } catch {
-    throw Object.assign(new Error("presentation settings must be JSON"), { code: "invalid-input" });
-  }
-  if (Buffer.byteLength(serialized, "utf8") > MAX_PROJECT_PRESENTATION_BYTES) {
-    throw Object.assign(new Error("presentation settings exceed 256 KiB"), { code: "invalid-input" });
-  }
-  return settings;
-}
+const CANONICAL_PROJECT_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$/;
 
 function sanitizeProjectIconSvg(svg: string): string {
   return svg
@@ -196,8 +130,8 @@ const isPackageWorkspace = (project: StoredProject): project is StoredProject & 
   project.internal?.kind === "package-workspace" && typeof project.internal.packageId === "string";
 
 const publicProject = (project: StoredProject): Project => {
-  const { internal: _internal, presentation: _presentation, ...visible } = project;
-  return structuredClone(visible);
+  const { internal: _internal, ...visible } = project;
+  return { ...visible };
 };
 
 export function createProjectService(
@@ -212,7 +146,6 @@ export function createProjectService(
   let unreadable = false;
   try {
     const parsed = JSON.parse(readFileSync(file, "utf8")) as StoredProject[];
-    if (!Array.isArray(parsed)) throw new Error("project registry must be an array");
     items = parsed;
   } catch (err) {
     // Missing file = first run. Anything else (corrupt JSON, unreadable) keeps
@@ -223,7 +156,7 @@ export function createProjectService(
     }
   }
 
-  const persist = (next: StoredProject[] = items) => {
+  const persist = () => {
     mkdirSync(dirname(file), { recursive: true });
     if (unreadable) {
       // Keep whatever we could not parse: it is the only copy of the user's
@@ -241,30 +174,69 @@ export function createProjectService(
       }
       unreadable = false;
     }
-    atomicWriteSync(file, JSON.stringify(next, null, 2));
-    items = next;
+    atomicWriteSync(file, JSON.stringify(items, null, 2));
   };
-  // `spaceId` is threaded through the private helpers rather than read from a
-  // caller-supplied field: a scoped view binds it, the unscoped view leaves it
-  // undefined, and no request path can choose it.
-  const add = async (path: string, name?: string, spaceId?: string, composition?: ProjectComposition): Promise<Project> => {
-    const parsedComposition = composition === undefined ? undefined : parseProjectComposition(composition);
+
+  const add = async (
+    path: string,
+    name?: string,
+    spaceId?: string,
+    id = randomUUID(),
+  ): Promise<Project> => {
     const abs = resolve(path);
     if (!existsSync(abs)) throw Object.assign(new Error(`path does not exist: ${abs}`), { code: "invalid-path" });
-    // Two Spaces may legitimately register the same directory; only a
-    // same-Space duplicate is deduplicated. Internal package workspaces are
-    // never returned as a user's project merely because their paths match.
     const existing = items.find((p) => !isPackageWorkspace(p) && p.path === abs && p.spaceId === spaceId);
     if (existing) return publicProject(existing);
+    if (!CANONICAL_PROJECT_ID.test(id) || items.some((project) => project.id === id)) {
+      throw Object.assign(new Error("project id already exists or is invalid"), { code: "conflict" });
+    }
     const project: StoredProject = {
-      id: randomUUID(),
+      id,
       path: abs,
       name: name || basename(abs),
-      ...(parsedComposition ? { composition: parsedComposition } : {}),
       createdAt: Date.now(),
       ...(spaceId ? { spaceId } : {}),
     };
-    persist([...items, project]);
+    items.push(project);
+    try { persist(); }
+    catch (cause) {
+      items = items.filter((candidate) => candidate !== project);
+      throw cause;
+    }
+    return publicProject(project);
+  };
+
+  const addRemote = async (
+    path: string,
+    remote: ProjectRemote,
+    name?: string,
+    spaceId?: string,
+    id = randomUUID(),
+  ): Promise<Project> => {
+    if (!path.startsWith("/")) {
+      throw Object.assign(new Error("remote path must be absolute"), { code: "invalid-input" });
+    }
+    const existing = items.find((p) =>
+      !isPackageWorkspace(p)
+      && p.path === path && p.remote?.connectionId === remote.connectionId && p.spaceId === spaceId);
+    if (existing) return publicProject(existing);
+    if (!CANONICAL_PROJECT_ID.test(id) || items.some((project) => project.id === id)) {
+      throw Object.assign(new Error("project id already exists or is invalid"), { code: "conflict" });
+    }
+    const project: StoredProject = {
+      id,
+      path,
+      name: name || basename(path) || path,
+      createdAt: Date.now(),
+      ...(spaceId ? { spaceId } : {}),
+      remote: { kind: remote.kind, connectionId: remote.connectionId },
+    };
+    items.push(project);
+    try { persist(); }
+    catch (cause) {
+      items = items.filter((candidate) => candidate !== project);
+      throw cause;
+    }
     return publicProject(project);
   };
 
@@ -280,8 +252,6 @@ export function createProjectService(
     };
     const requireUserProject = (id: string): StoredProject => {
       const project = find(id);
-      // Internal runtime anchors are intentionally indistinguishable from
-      // missing projects on user mutation surfaces.
       if (!project || isPackageWorkspace(project)) {
         throw Object.assign(new Error("project not found"), { code: "not-found" });
       }
@@ -296,62 +266,32 @@ export function createProjectService(
         const project = find(id);
         return project ? publicProject(project) : undefined;
       },
-      add: (path, name, composition) => add(path, name, spaceId, composition),
-      async create(path, name, composition) {
-        if (composition !== undefined) parseProjectComposition(composition);
+      add: (path, name) => add(path, name, spaceId),
+      async create(path, name) {
         const abs = resolve(path);
         mkdirSync(abs, { recursive: true });
-        return add(abs, name, spaceId, composition);
+        return add(abs, name, spaceId);
       },
       async remove(id) {
-        // A delete that names another tenant's project must not silently
-        // succeed either — it removes nothing and says not-found. Internal
-        // package workspaces cannot be removed through ProjectService.
-        const project = publicProject(requireUserProject(id));
-        persist(items.filter((p) => p.id !== id));
-        // Project deletion is canonical even if best-effort auxiliary cleanup
-        // fails. Stores also resolve only existing project IDs, so a failed hook
-        // can leave at most unreachable garbage, never a cross-tenant reference.
+        const stored = requireUserProject(id);
+        const project = publicProject(stored);
+        const previous = items;
+        items = items.filter((p) => p.id !== id);
+        try { persist(); }
+        catch (cause) {
+          items = previous;
+          throw cause;
+        }
         try {
           await opts.onRemoved?.(project);
         } catch (cause) {
           console.warn(`[polyth] project cleanup skipped for ${project.id}`, cause);
         }
       },
-
-      // Remote-bound project: `path` lives on the machine behind `remote`, so
-      // the local existence check does not apply. Callers (the SSH routes)
-      // validate the path on the remote host before registering.
-      async addRemote(path, remote: ProjectRemote, name?: string): Promise<Project> {
-        if (!path.startsWith("/")) {
-          throw Object.assign(new Error("remote path must be absolute"), { code: "invalid-input" });
-        }
-        const existing = items.find((p) =>
-          !isPackageWorkspace(p)
-          && p.path === path && p.remote?.connectionId === remote.connectionId && p.spaceId === spaceId);
-        if (existing) return publicProject(existing);
-        const project: StoredProject = {
-          id: randomUUID(),
-          path,
-          name: name || basename(path) || path,
-          createdAt: Date.now(),
-          ...(spaceId ? { spaceId } : {}),
-          remote: { kind: remote.kind, connectionId: remote.connectionId },
-        };
-        persist([...items, project]);
-        return publicProject(project);
-      },
+      addRemote: (path, remote, name) => addRemote(path, remote, name, spaceId),
 
       async update(id, patch: ProjectPatch): Promise<Project> {
-        const existing = requireUserProject(id);
-        if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
-          throw Object.assign(new Error("project patch must be an object"), { code: "invalid-input" });
-        }
-        const project = structuredClone(existing);
-        if (patch.composition !== undefined) {
-          if (patch.composition === null) delete project.composition;
-          else project.composition = parseProjectComposition(patch.composition);
-        }
+        const project = requireUserProject(id);
         if (patch.name !== undefined) {
           if (typeof patch.name !== "string") throw Object.assign(new Error("name must be text"), { code: "invalid-input" });
           const name = patch.name.trim();
@@ -395,10 +335,7 @@ export function createProjectService(
           if (patch.defaults.agentProfileId !== undefined && patch.defaults.agentProfileId !== null && typeof patch.defaults.agentProfileId !== "string") {
             throw Object.assign(new Error("defaults.agentProfileId must be a profile id or null"), { code: "invalid-input" });
           }
-          // Harness-qualified model refs are a client-side catalog identity.
-          // ProjectDefaults stores that identity canonically as ModelRef + the
-          // separate harness selection, so never persist harnessId inside model.
-          const defaults = structuredClone(patch.defaults);
+          const defaults = { ...patch.defaults };
           const model = defaults.model as ({ providerID: string; modelID: string; harnessId?: unknown } | null | undefined);
           if (model?.harnessId !== undefined) {
             const harnessId = model.harnessId;
@@ -406,32 +343,12 @@ export function createProjectService(
               throw Object.assign(new Error("defaults.model.harnessId must be a valid harness id"), { code: "invalid-input" });
             }
             defaults.model = { providerID: model.providerID, modelID: model.modelID };
-            // An explicit harness in the same patch wins. Otherwise preserve
-            // the exact harness-qualified model the client selected.
             if (defaults.harness === undefined) defaults.harness = { mode: "pinned", harnessId };
           }
-          // shallow-merge defaults so a partial patch never wipes other defaults
           project.defaults = { ...project.defaults, ...defaults };
         }
-        persist(items.map((candidate) => candidate === existing ? project : candidate));
+        persist();
         return publicProject(project);
-      },
-      async getPresentationSettings(id): Promise<ProjectPresentationSettingsDto> {
-        return presentationDto(requireUserProject(id).presentation);
-      },
-      async putPresentationSettings(id, input): Promise<ProjectPresentationSettingsDto> {
-        const existing = requireUserProject(id);
-        const project = structuredClone(existing);
-        const settings = normalizeIncomingPresentationSettings(input);
-        const current = presentationDto(project.presentation);
-        const next: StoredProjectPresentationSettings = {
-          revision: current.revision + 1,
-          updatedAt: Date.now(),
-          settings,
-        };
-        project.presentation = next;
-        persist(items.map((candidate) => candidate === existing ? project : candidate));
-        return { ...next, settings: { ...next.settings } };
       },
     };
   };
@@ -439,12 +356,24 @@ export function createProjectService(
   return {
     ...view(undefined),
     forSpace: (ctx) => view(ctx.spaceId),
+    async provision(input) {
+      if (!input.spaceId || !CANONICAL_PROJECT_ID.test(input.id)) {
+        throw Object.assign(new Error("canonical project id and Space are required"), { code: "invalid-input" });
+      }
+      if (input.remote) {
+        if (input.createDirectory) throw Object.assign(new Error("remote provisioning cannot create a local directory"), { code: "invalid-input" });
+        return addRemote(input.path, input.remote, input.name, input.spaceId, input.id);
+      }
+      const path = resolve(input.path);
+      if (input.createDirectory) mkdirSync(path, { recursive: true });
+      return add(path, input.name, input.spaceId, input.id);
+    },
     spaceOfProject: (id) => items.find((p) => p.id === id)?.spaceId,
     adoptIntoSpace(spaceId) {
       const orphans = items.filter((p) => !p.spaceId && !isPackageWorkspace(p));
       if (orphans.length === 0) return 0;
-      const orphanIds = new Set(orphans.map((project) => project.id));
-      persist(items.map((project) => orphanIds.has(project.id) ? { ...project, spaceId } : project));
+      for (const project of orphans) project.spaceId = spaceId;
+      persist();
       return orphans.length;
     },
     async ensurePackageWorkspace(input) {
@@ -459,12 +388,9 @@ export function createProjectService(
         && project.spaceId === input.spaceId
         && project.internal.packageId === input.packageId);
       if (existing) {
-        // Space roots can move between deployments. Refresh the runtime path
-        // when the owning package resolves its workspace again.
         if (existing.path !== path) {
-          const updated = { ...existing, path };
-          persist(items.map((project) => project === existing ? updated : project));
-          return publicProject(updated);
+          existing.path = path;
+          persist();
         }
         return publicProject(existing);
       }
@@ -480,7 +406,8 @@ export function createProjectService(
       if (collision) {
         throw Object.assign(new Error("package workspace id collision"), { code: "conflict" });
       }
-      persist([...items, project]);
+      items.push(project);
+      persist();
       return publicProject(project);
     },
   };

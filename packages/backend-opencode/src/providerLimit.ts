@@ -264,36 +264,6 @@ export const classifyProviderLimit = (
   };
 };
 
-// The provider refuses the SELECTED MODEL for this account/plan/region, rather
-// than being out of capacity. Deliberately narrow and vendor-neutral: it must
-// not swallow ordinary bad requests, and Polyth never invents the entitlement
-// itself — this only recognizes that the provider stated one.
-const MODEL_UNAVAILABLE_RE = [
-  /\bmodel[_\s-]?not[_\s-]?(?:in[_\s-]?plan|found|available|allowed|supported|permitted)\b/i,
-  /\b(?:unknown|unsupported|unavailable|invalid|unrecognized|restricted)\s+model\b/i,
-  /\bmodel\b[^.\n]{0,60}\b(?:is\s+)?(?:not\s+(?:available|enabled|included|supported|permitted|authorized|accessible)|unavailable|requires?\s+(?:a\s+)?(?:higher|paid|upgraded|different)\s+plan)\b/i,
-  /\b(?:do(?:es)?\s+not\s+have\s+access\s+to|no\s+access\s+to)\b[^.\n]{0,40}\bmodel\b/i,
-  /\bavailable\s+in\b[^.\n]{0,60}\bplans?\b/i,
-];
-
-/**
- * True when the failure says the selected model is not usable on this account,
- * plan or provider route. Callers classify capacity first: a wait-and-retry
- * failure is never a model-selection failure.
- */
-export const isModelUnavailableError = (error: unknown): boolean => {
-  const record = asRecord(error);
-  const nested = asRecord(record?.error);
-  const data = asRecord(record?.data) ?? asRecord(nested?.data);
-  const haystack = typeof error === "string"
-    ? error
-    : [record?.name, record?.message, nested?.name, nested?.message, data?.message]
-        .filter((value): value is string => typeof value === "string")
-        .join(" ");
-  if (!haystack.trim()) return false;
-  return MODEL_UNAVAILABLE_RE.some((pattern) => pattern.test(haystack));
-};
-
 /** Command Code writes this reserved reasoning marker instead of a
  * `session.error` when its provider window has closed. It still needs the
  * normal resume path, so extract the same retry hint from the marker. */

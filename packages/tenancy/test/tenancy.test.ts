@@ -153,7 +153,7 @@ test("the local control socket acts as the operator only in a trusted deployment
   assert.equal(trusted.resolver.forPrincipal(service).spaceId, trusted.home.id);
 
   // Hosted: there is no ambient operator, so a service gets no tenant and must
-  // be handed an explicit context by whatever invoked it.
+  // be handed an explicit context by whatever invoked it, so it gets none here.
   const hosted = resolverFor(tmp(), "multi-tenant-sandboxed");
   assert.throws(
     () => hosted.resolver.forPrincipal(service),
@@ -300,5 +300,7 @@ test("migration adopts a single-user installation into Personal and is idempoten
 test("the deployment profile comes from one env var and defaults to local-trusted", () => {
   assert.equal(deploymentProfileFromEnv({}), "local-trusted");
   assert.equal(deploymentProfileFromEnv({ POLYTH_DEPLOYMENT_PROFILE: "multi-tenant-sandboxed" }), "multi-tenant-sandboxed");
-  assert.equal(deploymentProfileFromEnv({ POLYTH_DEPLOYMENT_PROFILE: "nonsense" }), "local-trusted");
+  for (const value of ["nonsense", "", " ", "LOCAL-TRUSTED", "server-trusted\n"]) {
+    assert.throws(() => deploymentProfileFromEnv({ POLYTH_DEPLOYMENT_PROFILE: value }), { code: "invalid-deployment-profile" });
+  }
 });

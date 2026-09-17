@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode, type RefObject } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type { Project } from "@polyth/contracts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { useShellMode } from "../../../apps/web/src/responsiveShell.ts";
@@ -22,7 +22,6 @@ export function PlannerProjectMark({ project }: { project: Project }): ReactNode
 export default function PlannerProjectPicker({
   open,
   onClose,
-  anchorRef,
   projects,
   value,
   onChange,
@@ -31,7 +30,6 @@ export default function PlannerProjectPicker({
 }: {
   open: boolean;
   onClose: () => void;
-  anchorRef: RefObject<HTMLElement | null>;
   projects: readonly Project[];
   value: string | null;
   onChange: (projectId: string | null) => void;
@@ -68,15 +66,21 @@ export default function PlannerProjectPicker({
       title={title}
       desktop="dialog"
       dialogSize="sm"
-      phone="popover"
-      anchorRef={anchorRef}
-      stableAnchor
       className="planner-picker-overlay"
       sheetSize={searchable ? "tall" : "auto"}
-      initialFocus={!phone && searchable ? ".planner-picker-search" : undefined}
+      {...(searchable && phone
+        ? {
+            sheetSearch: {
+              value: query,
+              onChange: setQuery,
+              placeholder: tr("scheduleview.searchProjects"),
+              ariaLabel: tr("scheduleview.searchProjects"),
+            },
+          }
+        : {})}
     >
       <div className="planner-picker">
-        {searchable && (
+        {searchable && !phone && (
           <TextInput
             className="planner-picker-search"
             value={query}

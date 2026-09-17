@@ -23,7 +23,6 @@ import type { UsageMessageKey } from "@polyth/usage/i18n";
 import type { WalkthroughMessageKey } from "@polyth/walkthrough/i18n";
 import type { WorkflowMessageKey } from "@polyth/workflow/i18n";
 import type { AppMessageKey } from "./locales/en.ts";
-import type { ProjectCompositionMessageKey } from "./projectComposition.ts";
 
 export { LOCALES } from "@polyth/contracts";
 export type { Locale } from "@polyth/contracts";
@@ -32,7 +31,6 @@ export type { Locale } from "@polyth/contracts";
  *  package locale bundle merged into the runtime catalog. */
 export type TranslationKey =
   | AppMessageKey
-  | ProjectCompositionMessageKey
   | BrowserMessageKey
   | CommandsMessageKey
   | DictationMessageKey

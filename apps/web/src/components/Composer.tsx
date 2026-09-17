@@ -72,7 +72,6 @@ import {
   requestComposerReplace,
 } from "../composerInsert.ts";
 import { activeToken, completeToken, shellCommand, type PromptToken } from "../composer/language.ts";
-import { composerLayoutState } from "../composerLayout.ts";
 import {
   catalogFromResult,
   commandAutocomplete,
@@ -589,7 +588,6 @@ export default function Composer({
   const turn = model.turn;
   const canStop = working;
   const abortPendingRef = useRef(false);
-  const stopPointerAt = useRef(0);
   const [abortPending, setAbortPending] = useState(false);
   useEffect(() => {
     if (!canStop) {
@@ -597,17 +595,14 @@ export default function Composer({
       setAbortPending(false);
     }
   }, [canStop]);
-  const stopActiveTurn = useCallback(async (event?: { detail?: number }) => {
+  const stopActiveTurn = useCallback(async () => {
     // One stop intent per active turn. If the stream settles while the request
     // is in flight, the idle Send state wins and the late response is ignored.
     if (!canStop || abortPendingRef.current) return;
-    // Send and Stop occupy the same slot. A remount can fire click on Stop
-    // without pointerdown on that button (the down started on Send).
-    if (event && event.detail !== 0 && Date.now() - stopPointerAt.current > 1000) return;
     abortPendingRef.current = true;
     setAbortPending(true);
     try {
-      await abortSession("composer");
+      await abortSession();
     } finally {
       abortPendingRef.current = false;
       setAbortPending(false);
@@ -2186,11 +2181,10 @@ export default function Composer({
   // its minified resting state (same as the fresh-session composer) so a busy
   // agent never inflates the interaction dock — Stop stays reachable in the
   // collapsed row.
-  const layoutState = composerLayoutState({ phoneLayout, inputFocused, shellMode, hasDraft });
-  const expanded = layoutState !== "phone-resting";
-  const stateClass = layoutState === "desktop"
-    ? ""
-    : ` composer-mobile ${expanded ? "composer-expanded" : "composer-collapsed"}${inputFocused ? " composer-input-active" : ""}${hasDraft ? " composer-has-draft" : ""}`;
+  const expanded = !phoneLayout || inputFocused || shellMode;
+  const stateClass = phoneLayout
+    ? ` composer-mobile ${expanded ? "composer-expanded" : "composer-collapsed"}${inputFocused ? " composer-input-active" : ""}${hasDraft ? " composer-has-draft" : ""}`
+    : "";
   const attachmentStrip = attachments.length > 0 && (
     <AttachmentPills
       attachments={attachments}
@@ -2421,11 +2415,35 @@ export default function Composer({
           <div className="composer-config">
             {!phoneLayout && modelControl}
           </div>
-          {!phoneLayout && <CustomizeZoneButton slot="composer.trailing" />}
           <span className="composer-primary">
             {canStop ? (
               (working && (queueEdit || (followUp === "queue" && (!sendDisabled || emptySteerItem)))) ? (
                 <div className="composer-send-split">
+                    <button
+                      className="send composer-delivery composer-queue"
+                      onClick={() => send()}
+                      aria-label={queueEdit
+                        ? tr("composer.saveQueuedMessageInIts")
+                        : emptySteerItem
+                          ? tr("queuedmessagelist.steer")
+                          : tr("composer.queueMessageUntilTheCurrentResponseFinishes")}
+                      title={queueEdit
+                        ? tr("composer.saveQueuedMessageInIts")
+                        : emptySteerItem
+                          ? tr("queuedmessagelist.steer")
+                          : tr("composer.queueMessageUntilTheCurrentResponseFinishes")}
+                      aria-busy={!!emptySteerItem && steeringQueuedId === emptySteerItem.id}
+                      disabled={queueEdit
+                        ? queueEditSaving || !text.trim()
+                        : !!emptySteerItem && steeringQueuedId !== null}
+                    >
+                      {emptySteerItem ? <SendIcon /> : queueEdit ? <CheckIcon /> : <QueueIcon />}
+                      <span className="composer-action-label">{queueEdit
+                        ? tr("common.save")
+                        : emptySteerItem
+                          ? tr("settings.pages.steer")
+                          : tr("composer.queue")}</span>
+                  </button>
                   <Menu
                     label={tr("composer.moreActiveRunActions")}
                     align="end"
@@ -2460,31 +2478,6 @@ export default function Composer({
                       </button>
                     )}
                   </Menu>
-                    <button
-                      className="send composer-delivery composer-queue"
-                      onClick={() => send()}
-                      aria-label={queueEdit
-                        ? tr("composer.saveQueuedMessageInIts")
-                        : emptySteerItem
-                          ? tr("queuedmessagelist.steer")
-                          : tr("composer.queueMessageUntilTheCurrentResponseFinishes")}
-                      title={queueEdit
-                        ? tr("composer.saveQueuedMessageInIts")
-                        : emptySteerItem
-                          ? tr("queuedmessagelist.steer")
-                          : tr("composer.queueMessageUntilTheCurrentResponseFinishes")}
-                      aria-busy={!!emptySteerItem && steeringQueuedId === emptySteerItem.id}
-                      disabled={queueEdit
-                        ? queueEditSaving || !text.trim()
-                        : !!emptySteerItem && steeringQueuedId !== null}
-                    >
-                      {emptySteerItem ? <SendIcon /> : queueEdit ? <CheckIcon /> : <QueueIcon />}
-                      <span className="composer-action-label">{queueEdit
-                        ? tr("common.save")
-                        : emptySteerItem
-                          ? tr("settings.pages.steer")
-                        : tr("composer.queue")}</span>
-                  </button>
                 </div>
               ) : (
                 <button
@@ -2493,8 +2486,7 @@ export default function Composer({
                   aria-label={tr("composer.stopTheCurrentResponse")}
                   aria-busy={abortPending}
                   disabled={abortPending}
-                  onPointerDown={() => { stopPointerAt.current = Date.now(); }}
-                  onClick={(event) => void stopActiveTurn(event)}
+                  onClick={() => void stopActiveTurn()}
                 >
                   <Icon.stop /><span className="composer-action-label">{tr("common.stop")}</span>
                 </button>
@@ -2508,6 +2500,7 @@ export default function Composer({
               </button>
             )}
           </span>
+          {!phoneLayout && <CustomizeZoneButton slot="composer.trailing" />}
         </div>
       </div>
       {focusMode && (

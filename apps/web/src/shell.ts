@@ -172,7 +172,7 @@ export function installShell(): void {
   registerCommand({
     id: "cmd.abort", label: tr("shell.abortCurrentTurn"), group: tr("shell.session"),
     when: () => !!getState().activeSessionId,
-    run: () => void abortSession("palette"),
+    run: () => void abortSession(),
   });
   registerCommand({
     id: "cmd.export", label: tr("shell.exportSession"), group: tr("shell.session"),

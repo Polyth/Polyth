@@ -1,5 +1,4 @@
 import type { SessionProjection } from "@polyth/contracts";
-import type { RefObject } from "react";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import {
   Button,
@@ -37,7 +36,6 @@ function Choice({
 export default function PlannerRunBehaviorSheet({
   open,
   onClose,
-  anchorRef,
   targetMode,
   sessionId,
   overlap,
@@ -46,7 +44,6 @@ export default function PlannerRunBehaviorSheet({
 }: {
   open: boolean;
   onClose: () => void;
-  anchorRef: RefObject<HTMLElement | null>;
   targetMode: TargetMode;
   sessionId: string;
   overlap: Overlap;
@@ -60,9 +57,6 @@ export default function PlannerRunBehaviorSheet({
       title={tr("scheduleview.runGroup")}
       desktop="dialog"
       dialogSize="sm"
-      phone="popover"
-      anchorRef={anchorRef}
-      stableAnchor
       className="planner-sheet-overlay"
       sheetAction={{ label: tr("common.done"), onClick: onClose }}
       dialogFooter={<Button variant="primary" onClick={onClose}>{tr("common.done")}</Button>}

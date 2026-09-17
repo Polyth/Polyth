@@ -41,32 +41,7 @@ test("voice installs per-reply read-aloud and a renderable microphone control", 
   })));
 
   const dom = new Window();
-  Object.assign(globalThis, {
-    window: dom,
-    document: dom.document,
-    CustomEvent: dom.CustomEvent,
-    IS_REACT_ACT_ENVIRONMENT: true,
-  });
-  class FakeRecognition {
-    static latest: FakeRecognition | null = null;
-    static throwOnStart = false;
-    started = 0;
-    aborted = 0;
-    lang = "";
-    continuous = false;
-    interimResults = false;
-    onresult: ((event: { resultIndex: number; results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null = null;
-    onerror: ((event: { error?: string }) => void) | null = null;
-    onend: (() => void) | null = null;
-    constructor() { FakeRecognition.latest = this; }
-    start() {
-      if (FakeRecognition.throwOnStart) throw new Error("recognition start failed");
-      this.started++;
-    }
-    stop() { this.onend?.(); }
-    abort() { this.aborted++; this.onend?.(); }
-  }
-  Object.defineProperty(dom, "SpeechRecognition", { value: FakeRecognition, configurable: true });
+  Object.assign(globalThis, { window: dom, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true });
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({ available: false }), { status: 200 });
   const { createRoot } = await import("react-dom/client");
@@ -78,35 +53,6 @@ test("voice installs per-reply read-aloud and a renderable microphone control", 
     assert.ok(widget, "the voice plugin declares a renderable widget");
     await act(async () => { root.render(widget.render({} as never)); });
     assert.ok(container.querySelector(".mic-btn"), "the microphone mounts instead of failing its slot boundary");
-    const mic = container.querySelector<HTMLButtonElement>(".mic-btn");
-    assert.ok(mic && !mic.disabled, "browser recognition keeps mobile mic usable while the provider is unavailable");
-    const inserted: string[] = [];
-    const consume = (event: Event) => {
-      inserted.push(String((event as CustomEvent).detail));
-      event.preventDefault();
-    };
-    dom.addEventListener("polyth:composer-insert", consume);
-    await act(async () => { mic.click(); });
-    const recognition = FakeRecognition.latest;
-    assert.equal(recognition?.started, 1, "the browser recognition fallback starts from the mic intent");
-    await act(async () => {
-    recognition?.onresult?.({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: "mobile dictation" } }] });
-    });
-    await act(async () => { recognition?.onend?.(); });
-    assert.deepEqual(inserted, ["mobile dictation"], "the final browser transcript inserts exactly once");
-    await act(async () => {
-      recognition?.onresult?.({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: "late stale result" } }] });
-    });
-    assert.deepEqual(inserted, ["mobile dictation"], "a result queued after onend cannot mutate the idle composer");
-    await act(async () => { mic.click(); });
-    const errored = FakeRecognition.latest;
-    await act(async () => { errored?.onerror?.({ error: "not-allowed" }); });
-    assert.equal(errored?.aborted, 1, "recognition errors abort and release the active recognizer");
-    assert.deepEqual(inserted, ["mobile dictation"], "an error abort cannot commit a partial browser transcript");
-    FakeRecognition.throwOnStart = true;
-    await act(async () => { mic.click(); });
-    assert.equal(FakeRecognition.latest?.aborted, 1, "a synchronous browser start failure releases the recognition object");
-    dom.removeEventListener("polyth:composer-insert", consume);
   } finally {
     await act(async () => { root.unmount(); });
     globalThis.fetch = originalFetch;

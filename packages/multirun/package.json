@@ -19,14 +19,7 @@
       "enabled": true,
       "settingsGroup": "Engineering",
       "icon": "layers",
-      "hasSettings": false,
-      "category": "engineering",
-      "projectAffinity": {
-        "directions": [
-          "engineering",
-          "research"
-        ]
-      }
+      "hasSettings": false
     }
   },
   "dependencies": {

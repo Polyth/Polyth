@@ -18,14 +18,7 @@
       "enabled": true,
       "settingsGroup": "Engineering",
       "icon": "combine",
-      "hasSettings": false,
-      "category": "research",
-      "projectAffinity": {
-        "directions": [
-          "research",
-          "engineering"
-        ]
-      }
+      "hasSettings": false
     }
   },
   "dependencies": {

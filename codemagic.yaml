@@ -48,37 +48,25 @@ workflows:
           set -euo pipefail
           npm ci
 
-      - name: Install pinned Rust toolchain for release quality
-        script: |
-          set -euo pipefail
-          if ! command -v rustup >/dev/null 2>&1; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-              | sh -s -- -y --profile minimal --default-toolchain none
-          fi
-          export PATH="$HOME/.cargo/bin:$PATH"
-          rustup toolchain install 1.91.0 --profile minimal
-          rustup default 1.91.0
-
-      - name: Validate release quality
-        script: |
-          set -euo pipefail
-          export PATH="$HOME/.cargo/bin:$PATH"
-          node scripts/ci/release-quality.mjs
-
       - name: Resolve and validate release version
         script: |
           set -euo pipefail
           node scripts/release-version.mjs
+
+      - name: Release quality gate
+        script: |
+          set -euo pipefail
+          node scripts/ci/release-quality.mjs
 
       - name: Resolve iOS build number from App Store Connect
         script: |
           set -euo pipefail
           bash scripts/ci/resolve-ios-build-number.sh
 
-      - name: Build web and sync iOS project
+      - name: Sync quality-gated web build into iOS project
         script: |
           set -euo pipefail
-          npm run build:mobile
+          npm --workspace @polyth/mobile run sync
 
       - name: Build native Polyth Link XCFramework
         script: |

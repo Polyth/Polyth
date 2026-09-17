@@ -16,7 +16,7 @@ this codebase:
 | §3 open-as-slide-over → pin → split → focus → return | `dynamic` overlay → `togglePanePin` → `pinned` → `togglePaneFullscreen`. `closeWorkspacePane` returns to chat. |
 | §4 resizable divider, min/max, touch + keyboard resize | `.rail-resize` separator, `clampDockWidth`, pointer + arrow-key handlers in `ContextRail.tsx`. |
 | §4 package preferred min width / split ratio | `RailSurface.presentation.minWidth` / `defaultRatio` / `preferredMaxWidth`. |
-| §5 remember layout per context | Project records mirror `polyth.workspacePane.v2.<projectId>` (widths, heights, pinned-open set) and `widgets/workspaceMode.ts` (`polyth.workspaceMode.v1.<projectId>`); `polyth.railPrefs` remains device-local. |
+| §5 remember layout per context | `polyth.workspacePane.v2.<projectId>` (widths, heights, pinned-open set), `polyth.railPrefs`, `widgets/workspaceMode.ts` (`polyth.workspaceMode.v1.<projectId>`). |
 | §6 portrait / narrow: nav off-canvas drawer + tools off-canvas | `shellMode === "compact"` (≤`COMPACT_MAX_WIDTH`, 960px): `.sidebar.open` drawer + `.sidebar-backdrop`; contextual panels → `.panel-sheet`; workspace panes → full-screen layer. `Sidebar.tsx` / `ContextRail.tsx` already branch on this. |
 | §1 selection UI only after entering select mode | `Sidebar.tsx` `selectMode` state; the bulk bar is `{selectMode && …}`; "Select sessions" lives in the project `⋯` menu. Already correct. |
 | §1 compact search that expands | `compact`: search is behind the toolbar `SearchIcon` (`searchOpen`); `wide`: always-on field. Already correct. |

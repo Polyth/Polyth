@@ -18,15 +18,7 @@
       "enabled": true,
       "settingsGroup": "Engineering",
       "icon": "terminal",
-      "hasSettings": false,
-      "category": "engineering",
-      "projectAffinity": {
-        "directions": [
-          "engineering",
-          "operations"
-        ],
-        "recommended": true
-      }
+      "hasSettings": false
     }
   },
   "dependencies": {

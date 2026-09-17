@@ -516,40 +516,6 @@ test("ResponsiveOverlay: desktop dialog vs anchored popover vs phone sheet and c
   }
 });
 
-test("compact popover swallows the opening gesture's ghost click", async () => {
-  media.phone = true;
-  let selected = 0;
-  const phoneAnchorRef = createRef<HTMLElement>();
-  const phoneAnchorHost = await mount(createElement("button", { ref: phoneAnchorRef }, "anchor"));
-  const phonePopover = await mount(createElement(ui.ResponsiveOverlay, {
-    open: true,
-    onClose: () => {},
-    title: "Harness",
-    anchorRef: phoneAnchorRef,
-    children: createElement("button", {
-      type: "button",
-      className: "harness-tab",
-      onClick: () => { selected += 1; },
-    }, "cursor"),
-  }));
-  try {
-    const tab = document.body.querySelector<HTMLButtonElement>(".harness-tab")!;
-    await act(async () => {
-      tab.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1 }));
-    });
-    assert.equal(selected, 0, "a click with no press inside the compact popover is swallowed");
-    await act(async () => {
-      tab.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
-      tab.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1 }));
-    });
-    assert.equal(selected, 1, "a real press inside the compact popover still selects");
-  } finally {
-    await phonePopover.unmount();
-    await phoneAnchorHost.unmount();
-    media.phone = false;
-  }
-});
-
 test("Badge, Separator, Spinner, Progress, Skeleton, VisuallyHidden semantics", async () => {
   const view = await mount(createElement("div", null,
     createElement(ui.Badge, { tone: "success", dot: true, children: "Healthy" }),

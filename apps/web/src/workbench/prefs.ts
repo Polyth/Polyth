@@ -28,7 +28,6 @@ import {
   parseWorkspacePanePrefs,
   type WorkspacePanePrefs,
 } from "../workspace/panePrefs.ts";
-import { markProjectPresentationChanged } from "../projectPresentationSync.ts";
 
 export const WORKBENCH_PREFS_VERSION = 1;
 
@@ -218,16 +217,7 @@ export function writeWorkbenchPrefs(projectId: string, prefs: WorkbenchPrefs): v
   cache.set(projectId, prefs);
   const store = storage();
   if (!store) return;
-  try {
-    store.setItem(workbenchPrefsKey(projectId), serializeWorkbenchPrefs(prefs));
-    markProjectPresentationChanged(projectId, "workbenchLayout");
-  } catch { /* full/private */ }
-}
-
-/** Drop one project's cached record before a server hydration event. */
-export function reloadWorkbenchPrefs(projectId: string): WorkbenchPrefs {
-  cache.delete(projectId);
-  return readWorkbenchPrefs(projectId);
+  try { store.setItem(workbenchPrefsKey(projectId), serializeWorkbenchPrefs(prefs)); } catch { /* full/private */ }
 }
 
 /** Test seam: forget the in-memory cache (e.g. between simulated projects). */

@@ -165,9 +165,10 @@
 
 /* Mobile ------------------------------------------------------------------ */
 @media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
-  /* Both phone states live here. Shared chrome and engaged geometry first;
-     resting dissolves the rail into one compact input/action row below. */
-  .composer-mobile .composer-card {
+  /* One surface, one geometry. Focus changes state, not the composer's shape. */
+  .composer-mobile .composer-card,
+  .composer-mobile.composer-collapsed .composer-card,
+  .composer-mobile.composer-expanded .composer-card {
     min-height: 0;
     display: flex;
     flex-direction: column;
@@ -186,18 +187,19 @@
     box-shadow: none;
   }
 
-  .composer-mobile .composer-input {
+  .composer-mobile .composer-input,
+  .composer-mobile.composer-collapsed .composer-input {
     order: 1;
     width: 100%;
     min-width: 0;
     flex: 0 0 auto;
   }
 
-  /* Placeholder, one-line drafts and long drafts share one top-left origin.
-     min-height stays on the textarea so a short keyboard band can not inherit
-     a card from a taller state. */
-  .composer-mobile .composer-card textarea {
-    font-size: max(var(--font-input), var(--font-response));
+  /* Placeholder, one-line drafts and long drafts share one top-left origin. */
+  .composer-mobile .composer-card textarea,
+  .composer-mobile.composer-collapsed .composer-card textarea,
+  .composer-mobile.composer-expanded .composer-card textarea {
+    min-height: var(--control-h-sm);
     max-height: min(var(--composer-max-input-height), 18dvh);
     padding: var(--space-3) var(--space-4) var(--space-1);
     overflow-x: hidden;
@@ -209,7 +211,9 @@
 
   /* The rail is one optical baseline. Its children, not nested wrapper boxes,
      own the order: Add | spacer | Thinking | Model | Mic | Action. */
-  .composer-mobile .composer-rail {
+  .composer-mobile .composer-rail,
+  .composer-mobile.composer-collapsed .composer-rail,
+  .composer-mobile.composer-expanded .composer-rail {
     order: 2;
     width: 100%;
     min-height: var(--tap);
@@ -217,12 +221,13 @@
     align-items: center;
     flex-wrap: nowrap;
     gap: calc(var(--space-1) / 2);
-    padding: 0 var(--space-4) var(--space-2);
+    padding: 0 var(--space-3) var(--space-2);
   }
 
   /* Flatten the leading wrapper so Add and Voice can occupy independent
      positions in the parent rail instead of being locked together. */
-  .composer-mobile .composer-leading-zone {
+  .composer-mobile .composer-leading-zone,
+  .composer-mobile.composer-collapsed .composer-leading-zone {
     display: contents;
   }
 
@@ -231,7 +236,8 @@
     flex: none;
   }
 
-  .composer-mobile .composer-execution {
+  .composer-mobile .composer-execution,
+  .composer-mobile.composer-collapsed .composer-execution {
     order: 2;
     min-width: 0;
     max-width: 52vw;
@@ -248,7 +254,6 @@
     display: none;
     width: 0;
     min-width: 0;
-    max-width: var(--tap);
     height: var(--tap);
     flex: 0 0 auto;
     overflow: visible;
@@ -273,7 +278,8 @@
     display: contents;
   }
 
-  .composer-mobile .composer-actions {
+  .composer-mobile .composer-actions,
+  .composer-mobile.composer-collapsed .composer-actions {
     order: 4;
     display: flex;
     align-items: center;
@@ -284,8 +290,7 @@
 
   /* Desktop-customizable trailing widgets must not leak back into the phone
      primary row. They were the source of stacked Workflow/Assist icons in the
-     screenshot. Voice has no trailing placement; it stays in the input-method
-     lane before the primary action. */
+     screenshot. If Voice was explicitly moved here, keep only Voice. */
   .composer-mobile .composer-actions > .composer-extensions {
     display: none;
     width: 0;
@@ -293,8 +298,22 @@
     flex: 0 0 auto;
   }
 
+  .composer-mobile .composer-actions > .composer-extensions:has(.mic-btn) {
+    width: var(--tap);
+    min-width: var(--tap);
+    height: var(--tap);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 var(--tap);
+  }
+
   .composer-mobile .composer-actions > .composer-extensions > .placed-mini-widget {
     display: none;
+  }
+
+  .composer-mobile .composer-actions > .composer-extensions > .placed-mini-widget:has(.mic-btn) {
+    display: contents;
   }
 
   .composer-mobile .composer-actions > .composer-config {
@@ -503,28 +522,5 @@
 
   .composer-simple .composer-config + .composer-primary {
     margin-inline-start: calc(var(--space-1) / 2);
-  }
-}
-
-/* The Add glyph shares the editor's text origin. Keep its hit box generous
-   while placing the visible glyph at the same inline start on every rail. */
-.composer-simple .composer-rail {
-  padding-inline: var(--space-4);
-}
-
-.composer-simple .composer-add-trigger {
-  justify-content: flex-start;
-  padding-inline: 0;
-}
-
-/* Send is the stable terminal action. Dictation is an input method and never
-   replaces or follows the primary action, including an empty phone draft. */
-.composer-simple .composer-primary .send {
-  display: inline-flex;
-}
-
-@media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
-  .composer-mobile .composer-primary .send {
-    display: inline-flex;
   }
 }

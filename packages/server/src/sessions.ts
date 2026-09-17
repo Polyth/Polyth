@@ -337,7 +337,6 @@ type RuntimeDurability = Pick<
   | "ingestObservation"
   | "ingestSnapshot"
   | "observationCheckpoint"
-  | "observationCheckpoints"
   | "observationCursor"
   | "startReconciliation"
   | "reconciliation"
@@ -533,7 +532,6 @@ export function createSessionService(deps: {
     "ingestObservation",
     "ingestSnapshot",
     "observationCheckpoint",
-    "observationCheckpoints",
     "observationCursor",
     "startReconciliation",
     "reconciliation",
@@ -1876,17 +1874,9 @@ export function createSessionService(deps: {
           backendSessionId: binding.backendSessionId,
           channel: "runtime",
         });
-        // Pull reconstruction derives canonical facts from final upstream
-        // state. Without the durable checkpoints it cannot tell which of those
-        // facts Polyth already recorded live, and re-derives the whole history.
-        const checkpoints = await durable.observationCheckpoints({
-          authorityId: binding.authorityId,
-          location: binding.location,
-          backendSessionId: binding.backendSessionId,
-        });
         const snapshot = await reconcile.call(
           rt,
-          { ...binding, reconciliationOrdinal: started.ordinal, checkpoints },
+          { ...binding, reconciliationOrdinal: started.ordinal },
           cursor,
         );
         const current = await durable.reconciliation(sessionId);
@@ -1914,7 +1904,7 @@ export function createSessionService(deps: {
         const historyBaseline = currentProjection?.runtimeBinding?.historyBaseline;
         const observations: Parameters<RuntimeDurability["ingestSnapshot"]>[0]["observations"] = [];
         for (const observed of snapshot.events) {
-          const normalized = observed.events.map(canonicalRuntimeEvent);
+          const normalized = canonicalRuntimeEvent(observed.event);
           observations.push({
             sessionId,
             identity: {
@@ -1922,27 +1912,14 @@ export function createSessionService(deps: {
               generation: binding.generation,
               location: binding.location,
               backendSessionId: binding.backendSessionId,
-              // The source observation owns its artifact kind. Deriving it from
-              // a member event splits one entity across two durable identities
-              // (a completed part observed as `part` live and `message` here).
-              artifactKind: observed.artifactKind ?? normalized[0]?.artifactKind ?? "message",
+              artifactKind: normalized.artifactKind,
               entityId: observed.entityKey,
               revision: observed.revision,
             },
             reconciliationOrdinal: started.ordinal,
             // A verified fork already copied this exact backend history into
             // the child log. Claim entity mappings without appending it again.
-            events: historyBaseline === "copied"
-              ? []
-              : normalized.flatMap((member) => member.events),
-            ...(observed.checkpoint
-              ? {
-                  checkpoint: {
-                    ...(observed.stateRank !== undefined ? { stateRank: observed.stateRank } : {}),
-                    value: observed.checkpoint,
-                  },
-                }
-              : {}),
+            events: historyBaseline === "copied" ? [] : normalized.events,
           });
         }
         for (const permission of snapshot.permissions) {
@@ -2125,11 +2102,10 @@ export function createSessionService(deps: {
         }
         // Warm-restart recovery: the rebind above only succeeds against the
         // SAME verified owned backend session. When it is demonstrably alive
-        // (definite running/idle evidence) or indeterminate after a restart
-        // reattach (unknown), lift any turn stranded `unknown` by a Polyth
-        // restart out of the admission barrier so the session is usable again
-        // on that same backend — the operation stays `unknown`.
-        if (authoritativeState.value === "running" || authoritativeState.value === "idle" || authoritativeState.value === "unknown") {
+        // (definite running/idle evidence), lift any turn stranded `unknown` by
+        // a Polyth restart out of the admission barrier so the session is
+        // usable again on that same backend — the operation stays `unknown`.
+        if (authoritativeState.value === "running" || authoritativeState.value === "idle") {
           const recovered = await broadcastTail(sessionId, () =>
             durable.recoverRestartInterruptedTurns({
               sessionId,
@@ -2172,7 +2148,7 @@ export function createSessionService(deps: {
           barrierState,
           unresolved
             ? `operation ${unresolved.operationId} remains ${unresolved.state}`
-            : barrierState === "unknown"
+            : authoritativeState.value === "unknown"
               ? "runtime status evidence is insufficient"
               : undefined,
         ));
@@ -3058,39 +3034,6 @@ export function createSessionService(deps: {
             deps.notify?.turnStopped(sessionId, effectiveReason);
             if (effectiveReason === "completed") hooks.onTurnCompleted?.(sessionId, replyText(sessionId));
             if (!requestsOpen && effectiveReason !== "error") {
-              // A terminal stop is the proof that a requested abort took
-              // effect. ACP-style runtimes cannot acknowledge `session/cancel`
-              // synchronously, so the turn-abort operation stays `unknown` and
-              // the reconciliation barrier it blocked never releases — which
-              // would strand every queued message (send-now included) forever.
-              // Resolve proven abort operations and lift the barrier only when
-              // this stop actually resolved one; a fresh blocking operation
-              // (e.g. a new turn already admitted) keeps the barrier untouched.
-              let settledAbort = false;
-              for (const operation of await durable.operations(sessionId)) {
-                if (operation.mutationKind !== "turn-abort" || operation.state !== "unknown") continue;
-                await broadcastTail(sessionId, () => durable.settleOperation(operation.operationId, {
-                  kind: "confirmed",
-                  ...(ev.turnId ? { receipt: ev.turnId } : {}),
-                }));
-                settledAbort = true;
-              }
-              if (settledAbort) {
-                const recoveredIds = await restartRecoveredOperationIds(sessionId);
-                const barrier = await durable.reconciliation(sessionId);
-                if (barrier && (barrier.state === "blocked" || barrier.state === "unknown")) {
-                  const remaining = (await durable.operations(sessionId)).find((operation) =>
-                    isRuntimeOperationBlocking(operation)
-                    && !(operation.state === "unknown" && recoveredIds.has(operation.operationId)));
-                  if (!remaining) {
-                    await broadcastTail(sessionId, () => durable.settleReconciliation(
-                      sessionId,
-                      barrier.ordinal,
-                      "ready",
-                    ));
-                  }
-                }
-              }
               void dispatchQueue(sessionId);
             }
           }
@@ -3436,15 +3379,9 @@ export function createSessionService(deps: {
         // never becomes a canonical row. Still apply side effects after ingest
         // records the observation identity, otherwise occupancy and native
         // catalogs die once adapters emit through onObservation.
-        // A suppressed duplicate `turn/stopped` also captures as empty — that
-        // is not telemetry. Replaying it would relabel an explicit abort as
-        // `failed` when OpenCode later emits session.error.
-        const event = observation.events[index]!;
-        if (event.type === "context/updated" || event.type === "runtime/commands-changed") {
-          await onRuntimeEvent(sessionId, event, {
-            persist: async () => undefined as unknown as SessionEvent,
-          });
-        }
+        await onRuntimeEvent(sessionId, observation.events[index]!, {
+          persist: async () => undefined as unknown as SessionEvent,
+        });
         continue;
       }
       const runtimeEventSeq = Math.max(
@@ -4485,9 +4422,8 @@ export function createSessionService(deps: {
   };
 
   /** Commit a staged rewind after the old turn has released execution. The
-   * caller owns the session lock. Exact native branching is preferred; runtimes
-   * without fork support use a fresh runtime epoch with canonical continuity.
-   * Failures leave the marker and any queued replacement intact. */
+   * caller owns the session lock. Branch first, then publish the replacement
+   * clear; failures leave both the marker and any queued replacement intact. */
   const replaceRewoundRuntimeUnderLock = async (
     sessionId: string,
     projection: SessionProjection,
@@ -4500,24 +4436,8 @@ export function createSessionService(deps: {
     if (turnActive(sessionId)) {
       throw Object.assign(new Error("cannot replace rewound history while a turn is running"), { code: "conflict" });
     }
-    // A submit-time switch has already released the old leg and published a
-    // fresh empty target. It has not received a prompt yet, so its first turn
-    // can carry the rewind-effective canonical continuity directly; avoid a
-    // second native reset for that cross-harness path.
-    if (
-      current.runtimeBinding?.historyBaseline === "empty"
-      && current.runtimeLeg?.bootstrap === "continuity"
-      && current.runtimeLeg.canonicalThroughSeq === 0
-    ) {
-      await appendAndBroadcast(sessionId, "session/rewind-cleared", {
-        rewindSeq: rewind.markerSeq,
-        replaced: true,
-        strategy: "fresh-runtime-epoch",
-      });
-      return (await store.projection(sessionId)) ?? current;
-    }
-    if (!rt.branchSession && !rt.branchSessionOperation) {
-      return replaceRewoundRuntimeWithFreshRuntimeEpochUnderLock(sessionId, current, rt);
+    if (!rt.branchSession) {
+      throw Object.assign(new Error("runtime cannot branch rewound history"), { code: "unsupported" });
     }
     const project = await projects.get(current.projectId);
     const cwd = current.worktreePath ?? project?.path ?? process.cwd();
@@ -4552,13 +4472,6 @@ export function createSessionService(deps: {
         : rt.branchSession!(request),
       (backendSessionId) => ({ backendSessionId }),
     );
-    // A definitive missing-prefix rejection made no branch. Native history
-    // can diverge after continuity recovery; reuse the release-proven epoch
-    // path instead of requiring that disposable history to contain the prefix.
-    // Unknown outcomes must still reconcile, never trigger another mutation.
-    if (outcome.kind === "rejected" && outcome.code === "history-mismatch") {
-      return replaceRewoundRuntimeWithFreshRuntimeEpochUnderLock(sessionId, current, rt);
-    }
     if (outcome.kind !== "confirmed") {
       if (outcome.kind === "unknown") {
         await updateProjection(sessionId, { status: "unknown" });
@@ -4653,15 +4566,12 @@ export function createSessionService(deps: {
         if (queued[0] && queueEditHeld(sessionId, queued[0].id)) return;
         // A replacement submitted while the old turn was running is queued
         // ahead of its abort. Only after the confirmed stop reaches this idle
-        // dispatcher do we replace the runtime leg and resolve the soft rewind.
+        // dispatcher do we branch and resolve the soft rewind.
         let rt: AgentRuntime | undefined;
         if ((await logFacts(sessionId)).rewind) {
           rt = await ensureWired(sessionId, proj);
           proj = await replaceRewoundRuntimeUnderLock(sessionId, proj, rt);
           if (turnActive(sessionId) || proj.status !== "idle") return;
-          // A non-fork rewind retires the old facade and wires a fresh runtime
-          // epoch. Do not let the queued turn use the pre-replacement object.
-          rt = await ensureWired(sessionId, proj);
         }
         const reserved = await broadcastTail(
           sessionId,
@@ -5876,7 +5786,6 @@ export function createSessionService(deps: {
     sessionId: string,
     reason: "user" | "tool-timeout",
     toolError: string,
-    source?: string,
   ): Promise<void> {
     const projection = await store.projection(sessionId);
     if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
@@ -5901,7 +5810,7 @@ export function createSessionService(deps: {
       mutationKind: "turn-abort",
       intentEvent: {
         type: "turn/abort-requested",
-        data: { reason, ...(source ? { source } : {}) },
+        data: { reason },
         ignorable: true,
       },
     }));
@@ -5956,9 +5865,7 @@ export function createSessionService(deps: {
     if (transition.phase === "requested") {
       if (transition.timing === "after-turn" && turnActive(sessionId)) return projection;
       const old = await runtimeFor(projection, cwd);
-      if (transition.timing === "stop-now") {
-        await abortTurnUnderLock(sessionId, "user", "Stopped to change harness", "harness-switch");
-      }
+      if (transition.timing === "stop-now") await abortTurnUnderLock(sessionId, "user", "Stopped to change harness");
       else {
         await ensureWired(sessionId, projection);
         await reconcileSession(sessionId, projection, old, "harness-switch");
@@ -6087,7 +5994,6 @@ export function createSessionService(deps: {
         const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(operation,
           (id) => target.resetSessionOperation ? target.resetSessionOperation(request, id)
             : target.createSessionOperation ? target.createSessionOperation(request, id)
-            : target.resetSession ? target.resetSession(request)
             : target.ensureSession(request),
           (backendSessionId) => ({ backendSessionId }),
           async (result, unknownCode) => {
@@ -6157,69 +6063,6 @@ export function createSessionService(deps: {
     events.forEach((event) => broadcast.event(event));
     publishProjection((await store.projection(sessionId))!);
   };
-
-  /** When exact native branching is unavailable, reuse the
-   * normal release/create/epoch transaction so the old execution is proven
-   * released, the new leg is fenced by a durable epoch, and the next prompt
-   * receives canonical continuity. The same-harness route is retained by the
-   * epoch projector; only its native session leg changes. */
-  async function replaceRewoundRuntimeWithFreshRuntimeEpochUnderLock(
-    sessionId: string,
-    projection: SessionProjection,
-    runtime: AgentRuntime,
-  ): Promise<SessionProjection> {
-    const events = await store.events(sessionId);
-    const rewind = activeRewind(events);
-    let current = (await store.projection(sessionId)) ?? projection;
-    if (!rewind) return current;
-    if (turnActive(sessionId)) {
-      throw Object.assign(new Error("cannot replace rewound history while a turn is running"), { code: "conflict" });
-    }
-    if (current.harnessTransition) {
-      throw Object.assign(new Error("rewind replacement is waiting for a harness transition"), { code: "outcome-unknown" });
-    }
-    const targetHarnessId = current.resolvedHarnessId ?? runtime.harnessId;
-    if (!targetHarnessId) {
-      throw Object.assign(new Error("rewind replacement requires a resolved harness"), { code: "unsupported" });
-    }
-    if (!runtime.resetSessionOperation && !runtime.resetSession && !runtime.createSessionOperation) {
-      throw Object.assign(new Error("runtime cannot create a fresh session for rewound history"), { code: "unsupported" });
-    }
-    const selection: HarnessSelection = current.harness
-      && (current.harness.mode === "auto" || current.harness.harnessId === targetHarnessId)
-      ? current.harness
-      : { mode: "pinned", harnessId: targetHarnessId };
-    const transition: HarnessTransition = {
-      id: randomUUID(),
-      selection,
-      targetHarnessId,
-      timing: "after-turn",
-      phase: "requested",
-    };
-    await appendAndBroadcast(sessionId, "session/replacement-intended", {
-      rewindSeq: rewind.markerSeq,
-      atSeq: rewind.atSeq,
-      strategy: "fresh-runtime-epoch",
-      harnessId: targetHarnessId,
-    }, { ignorable: true });
-    await commitHarnessIntent(sessionId, { harnessTransition: transition }, "harness/switch-requested", {
-      transitionId: transition.id,
-      targetHarnessId,
-      timing: transition.timing,
-      reason: "rewind replacement requires a fresh runtime epoch",
-      selection: { ...selection },
-    });
-    current = await finishHarnessSwitchUnderLock(sessionId);
-    if (current.harnessTransition) {
-      throw Object.assign(new Error("rewind replacement harness transition is still pending"), { code: "outcome-unknown" });
-    }
-    await appendAndBroadcast(sessionId, "session/rewind-cleared", {
-      rewindSeq: rewind.markerSeq,
-      replaced: true,
-      strategy: "fresh-runtime-epoch",
-    });
-    return (await store.projection(sessionId)) ?? current;
-  }
 
   const service: RuntimeEpochSessionService = {
     dispose() {
@@ -6914,9 +6757,21 @@ export function createSessionService(deps: {
         proj = (await store.projection(sessionId)) ?? proj;
         stoppedTurnRecorded = hasPersistedStoppedTurn(await store.events(sessionId));
       }
-      // A steer/interrupt is new intent, not proof that an unknown turn ended.
-      // Preserve it in the queue until reconciliation establishes safe admission;
-      // a fabricated local stop would admit direct sends but strand queued ones.
+      // Steer and interrupt are "act on it now" intents. When a Polyth restart
+      // left the session `unknown` and reconciliation could not recover the
+      // stranded backend turn, do not reject the message: record the durable
+      // aborted stop (which lifts the send-admission barrier) and let the text
+      // continue immediately as the next turn on the rebound runtime.
+      if (
+        proj.status === "unknown"
+        && !recoverEpoch
+        && !stoppedTurnRecorded
+        && (input.delivery === "steer" || input.delivery === "interrupt")
+      ) {
+        await withSessionLock(sessionId, () => stopLocally(sessionId));
+        proj = (await store.projection(sessionId)) ?? proj;
+        stoppedTurnRecorded = hasPersistedStoppedTurn(await store.events(sessionId));
+      }
       if (
         proj.status === "unknown"
         && !recoverEpoch
@@ -7102,14 +6957,11 @@ export function createSessionService(deps: {
           }
           // Revert itself never stops work. Submitting the edited draft is the
           // commit point, so it always uses the proven interrupt path: enqueue
-          // first, request abort second, replace only after turn/stopped.
+          // first, request abort second, branch only after turn/stopped.
           delivery = "interrupt";
         } else {
           proj = await withSessionLock(sessionId, () =>
             replaceRewoundRuntimeUnderLock(sessionId, proj!, rt));
-          // The fallback replacement deliberately retires and rewires the
-          // runtime. Refresh the local facade before admitting the edited turn.
-          rt = await ensureWired(sessionId, proj);
         }
       }
 
@@ -7433,16 +7285,9 @@ export function createSessionService(deps: {
       });
     },
 
-    async abort(sessionId, options) {
+    async abort(sessionId) {
       await withSessionLock(sessionId, () =>
-        abortTurnUnderLock(
-          sessionId,
-          "user",
-          "Command stopped by user.",
-          typeof options?.source === "string" && options.source.trim()
-            ? options.source.trim().slice(0, 64)
-            : undefined,
-        ));
+        abortTurnUnderLock(sessionId, "user", "Command stopped by user."));
     },
 
     async compact(sessionId) {
@@ -7495,25 +7340,7 @@ export function createSessionService(deps: {
       > => {
         const proj = await store.projection(sessionId);
         if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
-        if (!proj.resume) {
-          // A failure that must never auto-resume (the provider refused the
-          // selected model) carries no durable plan. An explicit route/model
-          // switch still continues THIS session with the same last prompt —
-          // Polyth never picks the replacement model itself.
-          const failed = proj.status === "failed" && (options.model || options.harness);
-          const last = failed ? lastUserMessage(await store.events(sessionId)) : undefined;
-          if (!last?.text.trim()) {
-            throw Object.assign(new Error("no pending resume"), { code: "no-resume" });
-          }
-          return {
-            text: last.text,
-            ...(last.attachments
-              ? { attachments: last.attachments as unknown as AttachmentRef[] }
-              : {}),
-            ...(options.model ? { model: options.model } : {}),
-            ...(options.harness ? { harness: options.harness } : {}),
-          };
-        }
+        if (!proj.resume) throw Object.assign(new Error("no pending resume"), { code: "no-resume" });
         const last = lastUserMessage(await store.events(sessionId));
         if (!last || last.seq !== proj.resume.userMessageSeq || !last.text.trim()) {
           await clearResume(sessionId, "user");

@@ -71,7 +71,9 @@ jobs:
       - run: npm run build:web
       - run: npm --workspace @polyth/mobile run assets
       - run: cd apps/mobile && npx cap sync android
-      - run: cd apps/mobile/android && ./gradlew :app:assembleDebug :app:assembleAndroidTest --stacktrace
+      - run: >-
+          cd apps/mobile/android &&
+          ./gradlew :app:assembleDebug :app:assembleAndroidTest --stacktrace
 
   ios:
     runs-on: macos-15

@@ -25,9 +25,7 @@
       "enabled": true,
       "settingsGroup": "Engineering",
       "icon": "database",
-      "hasSettings": false,
-      "category": "system",
-      "projectAffinity": {}
+      "hasSettings": false
     }
   },
   "dependencies": {

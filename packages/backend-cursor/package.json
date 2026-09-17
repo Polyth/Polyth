@@ -18,9 +18,7 @@
       "core": false,
       "enabled": true,
       "icon": "pointer",
-      "hasSettings": false,
-      "category": "system",
-      "projectAffinity": {}
+      "hasSettings": false
     }
   }
 }

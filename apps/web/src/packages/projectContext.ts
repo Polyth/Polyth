@@ -1,7 +1,6 @@
 import { useSyncExternalStore } from "react";
 import type { ProjectContextContribution, ProjectContextSnapshot, Unregister } from "@polyth/web-sdk";
 import { assertOwnerCanReplace } from "./ownership.ts";
-import { isProjectContributionRelevant, subscribeProjectRelevance } from "./projectRelevance.ts";
 
 export interface BoundProjectContextContribution {
   id: string;
@@ -30,8 +29,6 @@ function bump(): void {
   for (const listener of [...listeners]) listener();
 }
 
-subscribeProjectRelevance(bump);
-
 export function registerProjectContext(
   contribution: ProjectContextContribution,
   ownerPackageId?: string,
@@ -59,7 +56,6 @@ export function registerProjectContext(
 
 export function listProjectContextContributions(): BoundProjectContextContribution[] {
   return [...registry.entries()]
-    .filter(([, entry]) => isProjectContributionRelevant(entry.ownerPackageId, entry.contribution.projectAffinity))
     .map(([id, entry]) => ({
       id,
       ownerPackageId: entry.ownerPackageId,

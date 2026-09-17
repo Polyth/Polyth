@@ -32,7 +32,7 @@ import {
   type BrowserService,
   type ProfileRegistry,
 } from "./index.ts";
-import { browserSkill, createBrowserAgentTool } from "./agentTool.ts";
+import { createBrowserAgentTool } from "./agentTool.ts";
 import { readBrowserAgentAutoApprove, writeBrowserAgentAutoApprove } from "./agentToolSettings.ts";
 import { originOf } from "./policy.ts";
 import { isBrowserArtifactId } from "./artifacts.ts";
@@ -525,16 +525,12 @@ export default async function registerPackage(host: ServerPackageHost): Promise<
   host.services.provide(serverServiceKey<ProfileRegistry>("browser.profiles"), profiles);
   let routes: RouteHandler | null = null;
   let agentTool: Disposable | undefined;
-  let agentSkill: Disposable | undefined;
   return {
     remoteAccess: BROWSER_REMOTE_ACCESS,
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
       const capabilities = host.services.require(serverServiceKey<AgentCapabilityContributionRegistry>("harness.capabilities"));
       agentTool = capabilities.register("browser", createBrowserAgentTool(browser));
-      // Deployment skill: available in every Space/project, not a project-owned managed skill.
-      // Design/debug skills remain opt-in; this only covers core browser usage.
-      if (!agentSkill) agentSkill = capabilities.register("browser", browserSkill);
       routes = async (request) => {
         if (!request.path.startsWith("/api/browser/")) return false;
         const scoped = host.forSpace(request.space);
@@ -555,8 +551,6 @@ export default async function registerPackage(host: ServerPackageHost): Promise<
       };
     },
     async onDisable() {
-      agentSkill?.dispose();
-      agentSkill = undefined;
       agentTool?.dispose();
       agentTool = undefined;
       routes = null;

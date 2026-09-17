@@ -1,9 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { Window } from "happy-dom";
 import {
   freshTurnContextOffset,
+  isLiveTimelineOverlay,
   requiredTurnSheetPadding,
   timelineFollowState,
+  timelineMutationAffectsFollow,
 } from "../src/timelineFollow.ts";
 
 test("explicit reader intent detaches immediately and is not reclaimed by tail proximity", () => {
@@ -132,4 +135,40 @@ test("the previous-answer peek yields to the prompt and next answer on a short v
     responseToPromptGap: 60,
     responseLineHeight: 24,
   }), 0, "the first prompt does not reserve nonexistent history");
+});
+
+test("live overlay mutations are not follow-worthy timeline changes", () => {
+  const { document } = new Window();
+  const timeline = document.createElement("div");
+  timeline.className = "timeline";
+  const group = document.createElement("section");
+  group.className = "activity-group";
+  const stage = document.createElement("div");
+  stage.className = "activity-live-stage";
+  const live = document.createElement("div");
+  live.className = "activity-live";
+  live.append("running");
+  stage.append(live);
+  group.append(stage);
+  timeline.append(group);
+
+  assert.equal(isLiveTimelineOverlay(live), true);
+  assert.equal(isLiveTimelineOverlay(live.firstChild!), true);
+  assert.equal(isLiveTimelineOverlay(stage), true);
+  assert.equal(isLiveTimelineOverlay(group), false);
+  assert.equal(timelineMutationAffectsFollow([{
+    target: group,
+    addedNodes: [stage],
+    removedNodes: [],
+  }]), false, "inserting the live stage must not chase scrollHeight");
+  assert.equal(timelineMutationAffectsFollow([{
+    target: live,
+    addedNodes: [],
+    removedNodes: [],
+  }]), false, "class/fold updates on the flying row stay out of follow");
+  assert.equal(timelineMutationAffectsFollow([{
+    target: timeline,
+    addedNodes: [group],
+    removedNodes: [],
+  }]), true, "a real in-flow activity card still drives follow");
 });

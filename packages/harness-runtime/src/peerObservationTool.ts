@@ -23,22 +23,6 @@ type ObservationKind = typeof KINDS[number];
 const ACTIONS = ["session.observe", "session.observations"] as const;
 type Action = typeof ACTIONS[number];
 
-// Deployment skill for subagent coordination: always available, not project-dependent.
-export const polythPeerSkill = {
-  descriptor: {
-    id: "harness-runtime.skill.polyth-peer",
-    kind: "skill" as const,
-    owner: "harness-runtime",
-    scope: "deployment" as const,
-    revision: "1",
-    name: "polyth-peer",
-    title: "Polyth peer observations",
-    description: "Coordinate delegated subagents via bounded peer observations in any project.",
-    instructions: `Use the available polyth_peer tool to coordinate delegated Polyth sessions. This is a Polyth product capability — available in every project and not a project-owned skill.
-Exchange only concise structured observations (finding/question/answer/artifact/blocker/review) between related delegated sessions in the same project tree. Use session.observe to publish and session.observations to read. Never send chain-of-thought or hidden reasoning; keep content bounded and task-focused. Observations are limited to sessions sharing the same delegated root; cross-project sharing is blocked.`,
-  },
-} satisfies import("@polyth/contracts").AgentCapabilityContribution;
-
 const schema: JsonObject = {
   type: "object",
   additionalProperties: false,
