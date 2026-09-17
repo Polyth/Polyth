@@ -35,6 +35,15 @@ interface StoredProjectPresentationSettings {
   settings: Record<string, JsonValue>;
 }
 
+export interface ProjectProvisionInput {
+  id: string;
+  spaceId: string;
+  path: string;
+  name?: string;
+  createDirectory?: boolean;
+  remote?: ProjectRemote;
+}
+
 /** Project registry with tenancy. `ProjectService` methods on this object are
  *  the UNSCOPED, server-internal view: the runtime pool and session service
  *  resolve a project by id after tenancy was already checked upstream.
@@ -43,6 +52,9 @@ interface StoredProjectPresentationSettings {
  *  returns a ProjectService that cannot see or touch another Space's rows. */
 export interface ProjectRegistry extends ProjectService {
   forSpace(ctx: Pick<SpaceContext, "spaceId">): ProjectService;
+  /** Canonical provisioning seam. The control plane reserves `id` before this
+   * domain write; request-facing code must never accept the id from a client. */
+  provision(input: ProjectProvisionInput): Promise<Project>;
   /** Owning Space of a project id, or undefined for unknown / pre-tenancy. */
   spaceOfProject(id: string): string | undefined;
   /** Boot migration: stamp ownerless projects with the default Space. */
@@ -64,6 +76,7 @@ const IMAGE_ICON = /^data:(image\/(?:png|svg\+xml|x-icon|vnd\.microsoft\.icon))(
 const PROJECT_ICON_PATH = /^\/assets\/project-icons\/[a-z0-9]+(?:-[a-z0-9]+)*\.svg$/;
 const HARNESS_ID = /^[a-z][a-z0-9-]*$/;
 const PACKAGE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const CANONICAL_PROJECT_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$/;
 const MAX_PROJECT_PRESENTATION_BYTES = 256 * 1024;
 const PROJECT_PRESENTATION_KEYS = new Set<string>(PROJECT_PRESENTATION_SETTING_KEYS);
 
@@ -247,22 +260,57 @@ export function createProjectService(
   // `spaceId` is threaded through the private helpers rather than read from a
   // caller-supplied field: a scoped view binds it, the unscoped view leaves it
   // undefined, and no request path can choose it.
-  const add = async (path: string, name?: string, spaceId?: string, composition?: ProjectComposition): Promise<Project> => {
+  const add = async (
+    path: string,
+    name?: string,
+    spaceId?: string,
+    composition?: ProjectComposition,
+    id = randomUUID(),
+  ): Promise<Project> => {
     const parsedComposition = composition === undefined ? undefined : parseProjectComposition(composition);
     const abs = resolve(path);
     if (!existsSync(abs)) throw Object.assign(new Error(`path does not exist: ${abs}`), { code: "invalid-path" });
-    // Two Spaces may legitimately register the same directory; only a
-    // same-Space duplicate is deduplicated. Internal package workspaces are
-    // never returned as a user's project merely because their paths match.
     const existing = items.find((p) => !isPackageWorkspace(p) && p.path === abs && p.spaceId === spaceId);
     if (existing) return publicProject(existing);
+    if (!CANONICAL_PROJECT_ID.test(id) || items.some((project) => project.id === id)) {
+      throw Object.assign(new Error("project id already exists or is invalid"), { code: "conflict" });
+    }
     const project: StoredProject = {
-      id: randomUUID(),
+      id,
       path: abs,
       name: name || basename(abs),
       ...(parsedComposition ? { composition: parsedComposition } : {}),
       createdAt: Date.now(),
       ...(spaceId ? { spaceId } : {}),
+    };
+    persist([...items, project]);
+    return publicProject(project);
+  };
+
+  const addRemote = async (
+    path: string,
+    remote: ProjectRemote,
+    name?: string,
+    spaceId?: string,
+    id = randomUUID(),
+  ): Promise<Project> => {
+    if (!path.startsWith("/")) {
+      throw Object.assign(new Error("remote path must be absolute"), { code: "invalid-input" });
+    }
+    const existing = items.find((p) =>
+      !isPackageWorkspace(p)
+      && p.path === path && p.remote?.connectionId === remote.connectionId && p.spaceId === spaceId);
+    if (existing) return publicProject(existing);
+    if (!CANONICAL_PROJECT_ID.test(id) || items.some((project) => project.id === id)) {
+      throw Object.assign(new Error("project id already exists or is invalid"), { code: "conflict" });
+    }
+    const project: StoredProject = {
+      id,
+      path,
+      name: name || basename(path) || path,
+      createdAt: Date.now(),
+      ...(spaceId ? { spaceId } : {}),
+      remote: { kind: remote.kind, connectionId: remote.connectionId },
     };
     persist([...items, project]);
     return publicProject(project);
@@ -280,8 +328,6 @@ export function createProjectService(
     };
     const requireUserProject = (id: string): StoredProject => {
       const project = find(id);
-      // Internal runtime anchors are intentionally indistinguishable from
-      // missing projects on user mutation surfaces.
       if (!project || isPackageWorkspace(project)) {
         throw Object.assign(new Error("project not found"), { code: "not-found" });
       }
@@ -318,29 +364,10 @@ export function createProjectService(
           console.warn(`[polyth] project cleanup skipped for ${project.id}`, cause);
         }
       },
-
       // Remote-bound project: `path` lives on the machine behind `remote`, so
       // the local existence check does not apply. Callers (the SSH routes)
       // validate the path on the remote host before registering.
-      async addRemote(path, remote: ProjectRemote, name?: string): Promise<Project> {
-        if (!path.startsWith("/")) {
-          throw Object.assign(new Error("remote path must be absolute"), { code: "invalid-input" });
-        }
-        const existing = items.find((p) =>
-          !isPackageWorkspace(p)
-          && p.path === path && p.remote?.connectionId === remote.connectionId && p.spaceId === spaceId);
-        if (existing) return publicProject(existing);
-        const project: StoredProject = {
-          id: randomUUID(),
-          path,
-          name: name || basename(path) || path,
-          createdAt: Date.now(),
-          ...(spaceId ? { spaceId } : {}),
-          remote: { kind: remote.kind, connectionId: remote.connectionId },
-        };
-        persist([...items, project]);
-        return publicProject(project);
-      },
+      addRemote: (path, remote, name) => addRemote(path, remote, name, spaceId),
 
       async update(id, patch: ProjectPatch): Promise<Project> {
         const existing = requireUserProject(id);
@@ -406,11 +433,8 @@ export function createProjectService(
               throw Object.assign(new Error("defaults.model.harnessId must be a valid harness id"), { code: "invalid-input" });
             }
             defaults.model = { providerID: model.providerID, modelID: model.modelID };
-            // An explicit harness in the same patch wins. Otherwise preserve
-            // the exact harness-qualified model the client selected.
             if (defaults.harness === undefined) defaults.harness = { mode: "pinned", harnessId };
           }
-          // shallow-merge defaults so a partial patch never wipes other defaults
           project.defaults = { ...project.defaults, ...defaults };
         }
         persist(items.map((candidate) => candidate === existing ? project : candidate));
@@ -439,6 +463,18 @@ export function createProjectService(
   return {
     ...view(undefined),
     forSpace: (ctx) => view(ctx.spaceId),
+    async provision(input) {
+      if (!input.spaceId || !CANONICAL_PROJECT_ID.test(input.id)) {
+        throw Object.assign(new Error("canonical project id and Space are required"), { code: "invalid-input" });
+      }
+      if (input.remote) {
+        if (input.createDirectory) throw Object.assign(new Error("remote provisioning cannot create a local directory"), { code: "invalid-input" });
+        return addRemote(input.path, input.remote, input.name, input.spaceId, input.id);
+      }
+      const path = resolve(input.path);
+      if (input.createDirectory) mkdirSync(path, { recursive: true });
+      return add(path, input.name, input.spaceId, undefined, input.id);
+    },
     spaceOfProject: (id) => items.find((p) => p.id === id)?.spaceId,
     adoptIntoSpace(spaceId) {
       const orphans = items.filter((p) => !p.spaceId && !isPackageWorkspace(p));
@@ -459,8 +495,6 @@ export function createProjectService(
         && project.spaceId === input.spaceId
         && project.internal.packageId === input.packageId);
       if (existing) {
-        // Space roots can move between deployments. Refresh the runtime path
-        // when the owning package resolves its workspace again.
         if (existing.path !== path) {
           const updated = { ...existing, path };
           persist(items.map((project) => project === existing ? updated : project));
