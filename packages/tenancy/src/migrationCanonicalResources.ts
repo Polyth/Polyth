@@ -3,6 +3,7 @@ import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { ControlPlane } from "@polyth/control-plane";
+import type { ResourceLifecycle, ResourceVisibility } from "@polyth/control-plane/resources";
 import type { MigrationStageArtifact, MigrationStageManifest } from "./migrationStage.ts";
 
 const sha256 = (value: Buffer): string => createHash("sha256").update(value).digest("hex");
@@ -44,6 +45,7 @@ interface ImportedSession {
   projectId: string;
   spaceId: string;
   createdAt: number;
+  archived: boolean;
 }
 
 function projectsFromStage(manifest: MigrationStageManifest, stageRoot: string, now: number): ImportedProject[] {
@@ -88,6 +90,7 @@ function sessionsFromStage(manifest: MigrationStageManifest, stageRoot: string, 
         projectId: projection.projectId,
         spaceId: projection.spaceId,
         createdAt: integerTime(projection.createdAt, now),
+        archived: projection.status === "archived",
       });
     }
     return result;
@@ -116,8 +119,8 @@ export interface CanonicalResourceImportResult {
 /**
  * Materialize resources only while the reviewed legacy capsule is being
  * converted inside the unpublished temporary control-plane. Legacy stores are
- * already durable, so imported resources start active directly; the live
- * runtime uses resource_provisioning for every new cross-store write.
+ * already durable, so imported resources enter their existing durable
+ * lifecycle directly; live cross-store writes use resource_provisioning.
  */
 export function materializeCanonicalResources(
   control: ControlPlane,
@@ -148,6 +151,8 @@ export function materializeCanonicalResources(
     spaceId: string,
     parentId: string | null,
     createdAt: number,
+    visibility: ResourceVisibility,
+    lifecycle: Extract<ResourceLifecycle, "active" | "archived">,
   ): void => {
     if (seen.has(id)) fail("migration-resource-id-collision");
     seen.add(id);
@@ -156,18 +161,29 @@ export function materializeCanonicalResources(
       `INSERT INTO resources(
          id,kind,org_id,space_id,parent_id,owner_principal_id,created_by,
          visibility,lifecycle,created_at_ms,updated_at_ms
-       ) VALUES(?,?,?,?,?,?,?,'space','active',?,?)`,
-      id, kind, orgForSpace(spaceId), spaceId, parentId, owner, owner, createdAt, Math.max(createdAt, now),
+       ) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+      id, kind, orgForSpace(spaceId), spaceId, parentId, owner, owner,
+      visibility, lifecycle, createdAt, Math.max(createdAt, now),
     );
   };
 
   control.transaction(() => {
-    for (const project of projects) insert("project", project.id, project.spaceId, null, project.createdAt);
+    for (const project of projects) {
+      insert("project", project.id, project.spaceId, null, project.createdAt, "space", "active");
+    }
     const projectById = new Map(projects.map((project) => [project.id, project]));
     for (const session of sessions) {
       const project = projectById.get(session.projectId);
       if (!project || project.spaceId !== session.spaceId) fail("migration-resource-parent-mismatch");
-      insert("session", session.id, session.spaceId, session.projectId, session.createdAt);
+      insert(
+        "session",
+        session.id,
+        session.spaceId,
+        session.projectId,
+        session.createdAt,
+        "inherit",
+        session.archived ? "archived" : "active",
+      );
     }
     if (projects.length || sessions.length) {
       control.audit("system:legacy-migration", "migration.resources-materialized", manifest.id);
