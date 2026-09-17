@@ -89,6 +89,15 @@ export function createResourceLifecycleAuthority(
       if (current.revision !== input.expectedRevision) throw controlError("conflict", "Resource revision is stale");
       const placeholders = input.from.map(() => "?").join(",");
       return control.transaction(() => {
+        // A parent cannot disappear while a durable child still depends on it.
+        // BEGIN IMMEDIATE makes this check and the lifecycle write one writer
+        // critical section, so a concurrent child cannot race in afterward.
+        if (input.to === "deleting" && control.get(
+          "SELECT 1 FROM resources WHERE parent_id=? AND lifecycle<>'deleted' LIMIT 1",
+          input.resourceId,
+        )) {
+          throw controlError("conflict", "Delete child resources before deleting their parent");
+        }
         const changes = control.run(
           `UPDATE resources
               SET lifecycle=?,revision=revision+1,access_revision=access_revision+?,updated_at_ms=?
