@@ -56,6 +56,12 @@ test("the primary action is terminal and draft engagement survives blur", async 
   const menu = composer.indexOf('className="composer-send-options"');
   assert.ok(queue > menu, "the queue/send action follows active-run alternatives");
   assert.match(composer.slice(primary), /className="send"/, "idle compositions retain Send");
+  assert.match(composer, /abortSession\("composer"\)/, "composer stop is attributed, not a generic user abort");
+  assert.match(
+    composer,
+    /event\.detail !== 0 && Date\.now\(\) - stopPointerAt\.current > 1000/,
+    "a remounted Stop ignores click-through from the Send slot",
+  );
   assert.equal(
     composerLayoutState({ phoneLayout: true, inputFocused: false, shellMode: false, hasDraft: true }),
     "phone-engaged",

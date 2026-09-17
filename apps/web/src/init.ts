@@ -1430,11 +1430,11 @@ export async function sendMessage(text: string, model?: JsonObject, agent?: stri
   }
 }
 
-export async function abortSession(): Promise<void> {
+export async function abortSession(source = "composer"): Promise<void> {
   const id = store.getState().activeSessionId;
   if (!id) return;
   try {
-    await api.abort(id);
+    await api.abort(id, source);
   } catch (err) {
     console.error("abort failed", err);
     store.setUiError(friendlyError(tr("composer.stopTheCurrentResponse"), err));

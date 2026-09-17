@@ -698,7 +698,10 @@ export const api = {
     jfetch<SendResult>(`/api/sessions/${id}/message`, json("POST", body)),
   runtimeFeatures: (id: string) =>
     jfetch<RuntimeFeaturesDto>(`/api/harnesses/sessions/${encodeURIComponent(id)}/features`),
-  abort: (id: string) => jfetch<void>(`/api/sessions/${id}/abort`, { method: "POST" }),
+  abort: (id: string, source?: string) => jfetch<void>(
+    `/api/sessions/${id}/abort`,
+    json("POST", source ? { source } : { source: "http" }),
+  ),
   compact: (id: string) => jfetch<{ ok: true }>(`/api/sessions/${id}/compact`, { method: "POST" }),
   /** Drop a pending rate-limit auto-resume; the session stays failed. */
   cancelResume: (id: string) =>
@@ -1530,7 +1533,7 @@ export const api = {
   controlFork: (sessionId: string, atSeq?: number) =>
     jfetch<SessionRef>(`/api/sessions/${encodeURIComponent(sessionId)}/fork`, json("POST", atSeq === undefined ? {} : { atSeq })),
   controlAbort: (sessionId: string) =>
-    jfetch<{ ok: true }>(`/api/sessions/${encodeURIComponent(sessionId)}/abort`, { method: "POST" }),
+    jfetch<{ ok: true }>(`/api/sessions/${encodeURIComponent(sessionId)}/abort`, json("POST", { source: "control" })),
 
   // ---- commands + snippets CRUD ------------------------------------------------
   saveCommand: (projectId: string, scope: "user" | "project", cmd: { name: string; prompt: string; description?: string; agent?: string; model?: string }) =>

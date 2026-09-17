@@ -258,7 +258,7 @@ test("the parent's completed task snapshot retires the delegated child", async (
     { role: "assistant", text: "rail looks aligned" },
   ]);
   reconcileFor.set("be-child-2", (b) => idleSnapshot(b, [
-    { entityKey: "part:a1", revision: "1", event: { type: "assistant/message", partId: "part:a1", text: "rail looks aligned" } },
+    { entityKey: "part:a1", revision: "1", events: [{ type: "assistant/message", partId: "part:a1", text: "rail looks aligned" }] },
   ]));
   // OpenCode keeps addressing the sub-run by its backend session id; the
   // handler remaps it to the canonical child that already exists.

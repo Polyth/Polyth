@@ -235,10 +235,13 @@ export interface TurnLimitState {
   provider?: string;
   /** Provider-advised wait in seconds, when the error carried one. */
   retryAfterSec?: number;
-  /** ms epoch the server will resend the last message. */
-  resumeAt: number;
+  /** ms epoch the server will resend the last message. Absent when the stop is
+   *  not auto-resumable and only a model switch can clear it. */
+  resumeAt?: number;
   /** 1 on the first hit for this message, higher on repeats. */
   attempt: number;
+  /** Structured provider refusal that waiting cannot clear. */
+  code?: "model-unavailable";
 }
 
 export interface TurnState {
@@ -1066,7 +1069,11 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
               resumeAt: retry.resumeAt,
               attempt: typeof retry.attempt === "number" ? retry.attempt : 1,
             }
-          : undefined;
+          // The provider refused the selected model: no wait can clear it, so
+          // the same inline surface offers the model switch without a countdown.
+          : str(d, "code") === "model-unavailable"
+            ? { scope: "unknown" as RateLimitScope, attempt: 1, code: "model-unavailable" as const }
+            : undefined;
       const t = model.turn;
       if (t) {
         t.status = status;

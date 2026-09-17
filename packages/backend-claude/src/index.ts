@@ -91,8 +91,10 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
     const endpoint = { authorityId: authority.authorityId, generation: authority.generation, continuity: "generation-only" as const, url: "sdk:", location: { directory: context.cwd }, control: { kind: "owned" as const, instanceToken: authority.authorityId }, config: { kind: "read-only" as const }, authentication: { kind: "none" as const } };
     const emit = (event: RuntimeEvent, key: string) => {
         const revision = digest(event);
-        events.push({ entityKey: key, revision, event });
         const artifactKind = event.type.startsWith("tool/") ? "tool" : event.type.startsWith("turn/") ? "turn" : event.type === "permission/requested" ? "permission" : "message";
+        // Live and pull must claim one durable entity: the snapshot carries the
+        // same artifact kind the observation below publishes.
+        events.push({ entityKey: key, revision, artifactKind, events: [event] });
         if (observations.size && reconciliationOrdinal > 0)
             for (const cb of observations)
                 cb(context.sessionId!, { channel: "sse", entityKey: key, identity: { ...endpoint, backendSessionId: nativeId, artifactKind, entityId: key, revision }, reconciliationOrdinal, events: [event] });

@@ -6,18 +6,26 @@ import { test } from "node:test";
 
 import type {
   AgentRuntime,
+  OpenCodeTransport,
   PersistedRuntimeBinding,
   Project,
   ProjectService,
   RuntimeEndpoint,
   RuntimeEvent,
   RuntimeLifecycleNotification,
+  RuntimeObservation,
   RuntimeSessionBinding,
   RuntimeSnapshot,
+  SessionEvent,
   SessionProjection,
 } from "@polyth/contracts";
 import type { PermissionService } from "@polyth/permissions";
 import { createStore } from "@polyth/session";
+import {
+  createTranslateState,
+  normalizeOcObservation,
+} from "../../backend-opencode/src/events.ts";
+import { createLegacyProtocolAdapter } from "../../backend-opencode/src/protocolLegacy.ts";
 import { createSessionService, type Broadcaster } from "../src/sessions.ts";
 
 const waitFor = async (condition: () => boolean | Promise<boolean>): Promise<void> => {
@@ -1410,13 +1418,13 @@ test("fork and import first-wire reconciliation does not duplicate copied histor
         : [{
             entityKey: `part:${binding.backendSessionId}`,
             revision: "1",
-            event: {
+            events: [{
               type: "assistant/message",
               partId: `part:${binding.backendSessionId}`,
               text: binding.backendSessionId === "backend-child"
                 ? "copied answer"
                 : "imported answer",
-            },
+            }],
           }],
     }),
     async () => [{
@@ -1488,12 +1496,12 @@ test("whole snapshot ingestion rolls back every artifact and cursor on an inject
       {
         entityKey: "assistant-part-1",
         revision: "revision-1",
-        event: { type: "assistant/message", partId: "assistant-part-1", text: "first" },
+        events: [{ type: "assistant/message", partId: "assistant-part-1", text: "first" }],
       },
       {
         entityKey: "assistant-part-2",
         revision: "revision-1",
-        event: { type: "assistant/message", partId: "assistant-part-2", text: "second" },
+        events: [{ type: "assistant/message", partId: "assistant-part-2", text: "second" }],
       },
     ],
   }));
@@ -1784,4 +1792,277 @@ test("backend listing never offers an active deletion tombstone for re-adoption"
   assert.deepEqual(listing.items, []);
   assert.equal(await store.projection("deleted-session"), undefined);
   await store.close();
+});
+
+// ---------------------------------------------------------------- incident
+// A Polyth restart reattached a live OpenCode session and the pull rebuilt the
+// whole native transcript as new canonical history (~217 duplicated events).
+// These run the real OpenCode normalization on both paths: live SSE through the
+// AgentRuntime observation seam, recovery through the real legacy pull.
+
+const TOOL_OUTPUT = "Wrote file successfully.";
+
+const incidentPart = (kind: "tool" | "text", state: Record<string, unknown>) =>
+  kind === "tool"
+    ? {
+        id: "part-tool-a",
+        callID: "call-tool-a",
+        messageID: "msg-assistant-a",
+        sessionID: "backend-tool",
+        type: "tool",
+        tool: "write",
+        state,
+      }
+    : {
+        id: "part-text-a",
+        messageID: "msg-assistant-a",
+        sessionID: "backend-tool",
+        type: "text",
+        text: state.text,
+        time: state.time,
+      };
+
+/** Final native state, which is all a restarted pull can see. */
+const COMPLETED_HISTORY = [{
+  info: { id: "msg-assistant-a", role: "assistant", sessionID: "backend-tool" },
+  parts: [
+    incidentPart("tool", { status: "completed", input: { filePath: "marker.txt" }, output: TOOL_OUTPUT }),
+    incidentPart("text", { text: "done", time: { start: 1, end: 2 } }),
+  ],
+}];
+
+const incidentHarness = async (livePartStates: Array<["tool" | "text", Record<string, unknown>]>) => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-incident-"));
+  const endpoint = endpointFor(dir);
+  // Native history only becomes visible once the live turn is over, exactly as
+  // a restart sees it: the earlier lifecycle states are gone.
+  let history: unknown[] = [];
+  const transport: OpenCodeTransport = {
+    async query<T>(request: { method: "GET" | "HEAD"; path: string; deadlineMs: number }): Promise<T> {
+      if (request.path.startsWith("/session/status")) {
+        return { "backend-tool": { type: "busy" } } as T;
+      }
+      if (request.path.startsWith("/session/backend-tool/message")) return history as T;
+      return [] as T;
+    },
+    async mutate() {
+      throw new Error("reconciliation must not mutate");
+    },
+    async stream() {},
+  };
+  const adapter = createLegacyProtocolAdapter({ transport, endpoint, promptPaths: ["prompt_async"] });
+  let observe: ((sessionId: string, observation: RuntimeObservation) => void) | undefined;
+  const runtime: AgentRuntime = {
+    ...runtimeWithSnapshot(endpoint, () => {
+      throw new Error("this runtime reconciles through the real OpenCode pull");
+    }),
+    reconcile: (binding) => adapter.reconcile(binding),
+    onObservation: (callback) => {
+      observe = callback;
+      return { dispose: () => { observe = undefined; } };
+    },
+  };
+  const { sessions, store, project } = makeHarness(runtime, dir);
+  const sessionId = "session-tool";
+  await store.upsertProjection({
+    id: sessionId,
+    projectId: project.id,
+    backendSessionId: "backend-tool",
+    runtimeBinding: persistedBindingFor(endpoint, "backend-tool"),
+    title: "Tool",
+    status: "idle",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+
+  // A fresh session service is exactly what a Polyth restart produces: the
+  // durable store survives, every in-memory translation state does not.
+  const restart = async (service = sessions) => {
+    history = COMPLETED_HISTORY;
+    const before = (await store.reconciliation(sessionId))?.ordinal ?? 0;
+    await service.events(sessionId, 0);
+    await waitFor(async () => ((await store.reconciliation(sessionId))?.ordinal ?? 0) > before
+      || (await store.reconciliation(sessionId))?.state === "ready");
+    return store.events(sessionId);
+  };
+  const restarted = () => createSessionService({
+    store,
+    projects: {
+      list: async () => [project],
+      get: async (id) => id === project.id ? project : undefined,
+      add: async () => project,
+      create: async () => project,
+      remove: async () => undefined,
+    } as ProjectService,
+    permissions: {
+      evaluate: () => "ask",
+      addRule: () => undefined,
+      rules: () => [],
+    } as unknown as PermissionService,
+    broadcast: { event: () => undefined, projection: () => undefined } as Broadcaster,
+    queue: store,
+    runtimes: { forProject: async () => runtime },
+  });
+
+  await sessions.events(sessionId, 0);
+  assert.ok(observe, "the runtime observation seam was not wired");
+  const liveState = createTranslateState();
+  const derived = (events: readonly SessionEvent[]) => events
+    .filter((event) =>
+      !event.type.startsWith("reconciliation/") && !event.type.startsWith("runtime/"))
+    .map((event) => event.type);
+  const settle = async () => {
+    let last = -1;
+    let stable = 0;
+    await waitFor(async () => {
+      const count = (await store.events(sessionId)).length;
+      if (count === last) stable += 1;
+      else {
+        last = count;
+        stable = 0;
+      }
+      return stable >= 3;
+    });
+  };
+  const emitLive = async (
+    parts: Array<["tool" | "text", Record<string, unknown>]>,
+    state = createTranslateState(),
+  ) => {
+    const current = await store.reconciliation(sessionId);
+    assert.ok(current);
+    assert.ok(observe, "the runtime observation seam was not wired");
+    const binding = {
+      authorityId: endpoint.authorityId,
+      generation: endpoint.generation,
+      location: endpoint.location,
+      backendSessionId: "backend-tool",
+      reconciliationOrdinal: current.ordinal,
+    };
+    for (const [kind, partState] of parts) {
+      const normalized = normalizeOcObservation({
+        data: {
+          type: "message.part.updated",
+          properties: { sessionID: "backend-tool", part: incidentPart(kind, partState) },
+        },
+        channel: "sse",
+        observed: binding,
+        current: binding,
+        state,
+      });
+      assert.equal(normalized.kind, "accepted");
+      if (normalized.kind !== "accepted") throw new Error("live observation was not accepted");
+      observe(sessionId, normalized.observation);
+    }
+    await settle();
+  };
+
+  if (livePartStates.length) await emitLive(livePartStates, liveState);
+
+  return {
+    store,
+    restart,
+    restarted,
+    derived,
+    emitLive,
+    live: await store.events(sessionId),
+    entities: async () => (await store.observationCheckpoints({
+      authorityId: endpoint.authorityId,
+      location: endpoint.location,
+      backendSessionId: "backend-tool",
+    }))
+      .filter((checkpoint) => checkpoint.key.artifactKind !== "status")
+      .map((checkpoint) => `${checkpoint.key.artifactKind}:${checkpoint.key.entityId}:${checkpoint.revision}`)
+      .sort(),
+  };
+};
+
+test("a restarted pull re-derives no canonical fact the live stream already recorded", async () => {
+  const harness = await incidentHarness([
+    ["tool", { status: "pending" }],
+    ["tool", { status: "completed", input: { filePath: "marker.txt" }, output: TOOL_OUTPUT }],
+    ["text", { text: "done", time: { start: 1, end: 2 } }],
+  ]);
+  assert.deepEqual(
+    harness.derived(harness.live),
+    ["tool/call", "tool/result", "assistant/chunk", "assistant/message"],
+  );
+
+  const afterRestart = await harness.restart(harness.restarted());
+
+  assert.deepEqual(
+    harness.derived(afterRestart),
+    harness.derived(harness.live),
+    "the recovery pull re-appended native history Polyth already held",
+  );
+  assert.deepEqual(await harness.entities(), [
+    "part:part-text-a:complete:2",
+    "tool:call-tool-a:state:completed",
+  ]);
+  await harness.store.close();
+});
+
+test("a restarted pull recovers the terminal fact a partial live lifecycle missed", async () => {
+  const harness = await incidentHarness([["tool", { status: "pending" }]]);
+  assert.deepEqual(harness.derived(harness.live), ["tool/call"]);
+
+  const afterRestart = await harness.restart(harness.restarted());
+
+  assert.deepEqual(
+    afterRestart.filter((event) => event.type === "tool/call").length,
+    1,
+    "the already known tool call was duplicated by recovery",
+  );
+  const results = afterRestart.filter((event) => event.type === "tool/result");
+  assert.equal(results.length, 1, "the missing tool result was not recovered exactly once");
+  assert.equal(results[0]?.data.output, TOOL_OUTPUT);
+  assert.equal(
+    afterRestart.filter((event) => event.type === "assistant/message").length,
+    1,
+  );
+  await harness.store.close();
+});
+
+test("pull-only recovery appends every derived fact once and stays idempotent", async () => {
+  const harness = await incidentHarness([]);
+  assert.deepEqual(harness.derived(harness.live), []);
+
+  const recovered = await harness.restart(harness.restarted());
+  assert.deepEqual(
+    harness.derived(recovered),
+    ["tool/call", "tool/result", "assistant/chunk", "assistant/message"],
+  );
+
+  const again = await harness.restart(harness.restarted());
+  assert.deepEqual(harness.derived(again), harness.derived(recovered));
+  await harness.store.close();
+});
+
+test("pull-first then late live SSE still keeps each native fact once", async () => {
+  const harness = await incidentHarness([]);
+  const recovered = await harness.restart(harness.restarted());
+  const expected = harness.derived(recovered);
+
+  await harness.emitLive([
+    ["tool", { status: "pending" }],
+    ["tool", { status: "completed", input: { filePath: "marker.txt" }, output: TOOL_OUTPUT }],
+    ["text", { text: "done", time: { start: 1, end: 2 } }],
+  ]);
+
+  assert.deepEqual(harness.derived(await harness.store.events("session-tool")), expected);
+  await harness.store.close();
+});
+
+test("older pending after a completed source does not duplicate the call", async () => {
+  const harness = await incidentHarness([
+    ["tool", { status: "pending" }],
+    ["tool", { status: "completed", input: { filePath: "marker.txt" }, output: TOOL_OUTPUT }],
+  ]);
+  assert.equal(harness.live.filter((event) => event.type === "tool/call").length, 1);
+
+  await harness.emitLive([["tool", { status: "pending" }]]);
+
+  const events = await harness.store.events("session-tool");
+  assert.equal(events.filter((event) => event.type === "tool/call").length, 1);
+  assert.equal(events.filter((event) => event.type === "tool/result").length, 1);
+  await harness.store.close();
 });

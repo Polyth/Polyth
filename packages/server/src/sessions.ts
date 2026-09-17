@@ -337,6 +337,7 @@ type RuntimeDurability = Pick<
   | "ingestObservation"
   | "ingestSnapshot"
   | "observationCheckpoint"
+  | "observationCheckpoints"
   | "observationCursor"
   | "startReconciliation"
   | "reconciliation"
@@ -532,6 +533,7 @@ export function createSessionService(deps: {
     "ingestObservation",
     "ingestSnapshot",
     "observationCheckpoint",
+    "observationCheckpoints",
     "observationCursor",
     "startReconciliation",
     "reconciliation",
@@ -1874,9 +1876,17 @@ export function createSessionService(deps: {
           backendSessionId: binding.backendSessionId,
           channel: "runtime",
         });
+        // Pull reconstruction derives canonical facts from final upstream
+        // state. Without the durable checkpoints it cannot tell which of those
+        // facts Polyth already recorded live, and re-derives the whole history.
+        const checkpoints = await durable.observationCheckpoints({
+          authorityId: binding.authorityId,
+          location: binding.location,
+          backendSessionId: binding.backendSessionId,
+        });
         const snapshot = await reconcile.call(
           rt,
-          { ...binding, reconciliationOrdinal: started.ordinal },
+          { ...binding, reconciliationOrdinal: started.ordinal, checkpoints },
           cursor,
         );
         const current = await durable.reconciliation(sessionId);
@@ -1904,7 +1914,7 @@ export function createSessionService(deps: {
         const historyBaseline = currentProjection?.runtimeBinding?.historyBaseline;
         const observations: Parameters<RuntimeDurability["ingestSnapshot"]>[0]["observations"] = [];
         for (const observed of snapshot.events) {
-          const normalized = canonicalRuntimeEvent(observed.event);
+          const normalized = observed.events.map(canonicalRuntimeEvent);
           observations.push({
             sessionId,
             identity: {
@@ -1912,14 +1922,27 @@ export function createSessionService(deps: {
               generation: binding.generation,
               location: binding.location,
               backendSessionId: binding.backendSessionId,
-              artifactKind: normalized.artifactKind,
+              // The source observation owns its artifact kind. Deriving it from
+              // a member event splits one entity across two durable identities
+              // (a completed part observed as `part` live and `message` here).
+              artifactKind: observed.artifactKind ?? normalized[0]?.artifactKind ?? "message",
               entityId: observed.entityKey,
               revision: observed.revision,
             },
             reconciliationOrdinal: started.ordinal,
             // A verified fork already copied this exact backend history into
             // the child log. Claim entity mappings without appending it again.
-            events: historyBaseline === "copied" ? [] : normalized.events,
+            events: historyBaseline === "copied"
+              ? []
+              : normalized.flatMap((member) => member.events),
+            ...(observed.checkpoint
+              ? {
+                  checkpoint: {
+                    ...(observed.stateRank !== undefined ? { stateRank: observed.stateRank } : {}),
+                    value: observed.checkpoint,
+                  },
+                }
+              : {}),
           });
         }
         for (const permission of snapshot.permissions) {
@@ -3413,9 +3436,15 @@ export function createSessionService(deps: {
         // never becomes a canonical row. Still apply side effects after ingest
         // records the observation identity, otherwise occupancy and native
         // catalogs die once adapters emit through onObservation.
-        await onRuntimeEvent(sessionId, observation.events[index]!, {
-          persist: async () => undefined as unknown as SessionEvent,
-        });
+        // A suppressed duplicate `turn/stopped` also captures as empty — that
+        // is not telemetry. Replaying it would relabel an explicit abort as
+        // `failed` when OpenCode later emits session.error.
+        const event = observation.events[index]!;
+        if (event.type === "context/updated" || event.type === "runtime/commands-changed") {
+          await onRuntimeEvent(sessionId, event, {
+            persist: async () => undefined as unknown as SessionEvent,
+          });
+        }
         continue;
       }
       const runtimeEventSeq = Math.max(
@@ -5847,6 +5876,7 @@ export function createSessionService(deps: {
     sessionId: string,
     reason: "user" | "tool-timeout",
     toolError: string,
+    source?: string,
   ): Promise<void> {
     const projection = await store.projection(sessionId);
     if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
@@ -5871,7 +5901,7 @@ export function createSessionService(deps: {
       mutationKind: "turn-abort",
       intentEvent: {
         type: "turn/abort-requested",
-        data: { reason },
+        data: { reason, ...(source ? { source } : {}) },
         ignorable: true,
       },
     }));
@@ -5926,7 +5956,9 @@ export function createSessionService(deps: {
     if (transition.phase === "requested") {
       if (transition.timing === "after-turn" && turnActive(sessionId)) return projection;
       const old = await runtimeFor(projection, cwd);
-      if (transition.timing === "stop-now") await abortTurnUnderLock(sessionId, "user", "Stopped to change harness");
+      if (transition.timing === "stop-now") {
+        await abortTurnUnderLock(sessionId, "user", "Stopped to change harness", "harness-switch");
+      }
       else {
         await ensureWired(sessionId, projection);
         await reconcileSession(sessionId, projection, old, "harness-switch");
@@ -7401,9 +7433,16 @@ export function createSessionService(deps: {
       });
     },
 
-    async abort(sessionId) {
+    async abort(sessionId, options) {
       await withSessionLock(sessionId, () =>
-        abortTurnUnderLock(sessionId, "user", "Command stopped by user."));
+        abortTurnUnderLock(
+          sessionId,
+          "user",
+          "Command stopped by user.",
+          typeof options?.source === "string" && options.source.trim()
+            ? options.source.trim().slice(0, 64)
+            : undefined,
+        ));
     },
 
     async compact(sessionId) {
@@ -7456,7 +7495,25 @@ export function createSessionService(deps: {
       > => {
         const proj = await store.projection(sessionId);
         if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
-        if (!proj.resume) throw Object.assign(new Error("no pending resume"), { code: "no-resume" });
+        if (!proj.resume) {
+          // A failure that must never auto-resume (the provider refused the
+          // selected model) carries no durable plan. An explicit route/model
+          // switch still continues THIS session with the same last prompt —
+          // Polyth never picks the replacement model itself.
+          const failed = proj.status === "failed" && (options.model || options.harness);
+          const last = failed ? lastUserMessage(await store.events(sessionId)) : undefined;
+          if (!last?.text.trim()) {
+            throw Object.assign(new Error("no pending resume"), { code: "no-resume" });
+          }
+          return {
+            text: last.text,
+            ...(last.attachments
+              ? { attachments: last.attachments as unknown as AttachmentRef[] }
+              : {}),
+            ...(options.model ? { model: options.model } : {}),
+            ...(options.harness ? { harness: options.harness } : {}),
+          };
+        }
         const last = lastUserMessage(await store.events(sessionId));
         if (!last || last.seq !== proj.resume.userMessageSeq || !last.text.trim()) {
           await clearResume(sessionId, "user");

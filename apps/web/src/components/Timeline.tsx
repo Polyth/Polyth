@@ -1231,7 +1231,9 @@ function formatWait(totalSeconds: number): string {
 
 /** Provider capacity stop: countdown to the server's auto-resume, with
  *  cancel-wait and a full harness-qualified model recovery picker. Replaces
- *  the generic "Last turn failed" line while `turn.limit` is set. */
+ *  the generic "Last turn failed" line while `turn.limit` is set.
+ *  A refused model has no wait to run out: the same surface keeps the picker
+ *  and drops the countdown, so recovery is one explicit user choice. */
 function RateLimitNotice({ sessionId, limit }: { sessionId: string; limit: TurnLimitState }) {
   const session = useStore((s) => s.sessions.find((candidate) => candidate.id === sessionId) ?? null);
   const models = useStore((s) => s.models);
@@ -1262,7 +1264,8 @@ function RateLimitNotice({ sessionId, limit }: { sessionId: string; limit: TurnL
   const selectedModel = selectedHarnessId === currentHarnessId && session?.model
     ? { ...session.model, ...(currentHarnessId ? { harnessId: currentHarnessId } : {}) }
     : undefined;
-  const remaining = useRemainingSeconds(limit.resumeAt);
+  const unavailable = limit.code === "model-unavailable";
+  const remaining = useRemainingSeconds(limit.resumeAt ?? 0);
   const [busy, setBusy] = useState<null | "resume" | "cancel" | "switch">(null);
 
   const providerLabel = limit.provider
@@ -1274,9 +1277,13 @@ function RateLimitNotice({ sessionId, limit }: { sessionId: string; limit: TurnL
       : limit.scope === "overloaded"
         ? tr("timeline.rateLimit.scopeOverloaded")
         : tr("timeline.rateLimit.scopeRate");
-  const heading = providerLabel
-    ? tr("timeline.rateLimit.headingProvider", { provider: providerLabel, scope: scopeLabel })
-    : tr("timeline.rateLimit.heading", { scope: scopeLabel });
+  const heading = unavailable
+    ? tr("timeline.modelUnavailable.heading", {
+        model: session?.model?.modelID ?? tr("timeline.modelUnavailable.thisModel"),
+      })
+    : providerLabel
+      ? tr("timeline.rateLimit.headingProvider", { provider: providerLabel, scope: scopeLabel })
+      : tr("timeline.rateLimit.heading", { scope: scopeLabel });
 
   const run = (kind: "resume" | "cancel", op: Promise<unknown>) => {
     setBusy(kind);
@@ -1306,14 +1313,16 @@ function RateLimitNotice({ sessionId, limit }: { sessionId: string; limit: TurnL
       heading={heading}
       actions={
         <>
-          <Button
-            size="sm"
-            variant="quiet"
-            className="turn-rate-limit-action"
-            busy={busy === "resume"}
-            disabled={busy !== null}
-            onClick={() => run("resume", resumeNow(sessionId))}
-          >{tr("timeline.rateLimit.resumeNow")}</Button>
+          {!unavailable && (
+            <Button
+              size="sm"
+              variant="quiet"
+              className="turn-rate-limit-action"
+              busy={busy === "resume"}
+              disabled={busy !== null}
+              onClick={() => run("resume", resumeNow(sessionId))}
+            >{tr("timeline.rateLimit.resumeNow")}</Button>
+          )}
           <span className="turn-rate-limit-model">
             <ModelPicker
               models={routeCatalog.models}
@@ -1339,21 +1348,25 @@ function RateLimitNotice({ sessionId, limit }: { sessionId: string; limit: TurnL
               className="picker-chip"
             />
           </span>
-          <Button
-            size="sm"
-            variant="quiet"
-            className="turn-rate-limit-action"
-            busy={busy === "cancel"}
-            disabled={busy !== null}
-            onClick={() => run("cancel", cancelResume(sessionId))}
-          >{tr("timeline.rateLimit.cancelWait")}</Button>
+          {!unavailable && (
+            <Button
+              size="sm"
+              variant="quiet"
+              className="turn-rate-limit-action"
+              busy={busy === "cancel"}
+              disabled={busy !== null}
+              onClick={() => run("cancel", cancelResume(sessionId))}
+            >{tr("timeline.rateLimit.cancelWait")}</Button>
+          )}
         </>
       }
     >
-      {remaining > 0
-        ? tr("timeline.rateLimit.resumesIn", { time: formatWait(remaining) })
-        : tr("timeline.rateLimit.resuming")}
-      {limit.attempt > 1 ? ` · ${tr("timeline.rateLimit.attempt", { n: String(limit.attempt) })}` : ""}
+      {unavailable
+        ? tr("timeline.modelUnavailable.body")
+        : remaining > 0
+          ? tr("timeline.rateLimit.resumesIn", { time: formatWait(remaining) })
+          : tr("timeline.rateLimit.resuming")}
+      {!unavailable && limit.attempt > 1 ? ` · ${tr("timeline.rateLimit.attempt", { n: String(limit.attempt) })}` : ""}
     </Notice>
   );
 }

@@ -174,7 +174,7 @@ function scopeSessions(
     switchHarness: base.switchHarness ? (sessionId, selection, timing) => guarded(() => base.switchHarness!(g(sessionId), selection, timing)) : undefined,
     cancelHarnessSwitch: base.cancelHarnessSwitch ? (sessionId) => guarded(() => base.cancelHarnessSwitch!(g(sessionId))) : undefined,
     send: (sessionId, input) => guarded(() => base.send(g(sessionId), withoutPrivatePreset(input))),
-    abort: (sessionId) => guarded(() => base.abort(g(sessionId))),
+    abort: (sessionId, options) => guarded(() => base.abort(g(sessionId), options)),
     fork: (sessionId, atSeq) => guarded(() => base.fork(g(sessionId), atSeq)),
     archive: (sessionId) => guarded(async () => {
       for (const id of await lifecycleOrder(sessionId)) await base.archive(id);

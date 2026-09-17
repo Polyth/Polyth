@@ -372,7 +372,7 @@ export function registerPolythSessionControl(host: ServerPackageHost) {
         return { output: JSON.stringify({ sessionId: session.id, sendResult }), metadata: { action, projectId: targetProjectId } };
       }
       if (action === "session.cancel") {
-        await scoped.sessions.abort(session.id);
+        await scoped.sessions.abort(session.id, { source: "agent" });
         return { output: JSON.stringify({ ok: true, sessionId: session.id }), metadata: { action, projectId: targetProjectId } };
       }
       if (action === "session.archive") {

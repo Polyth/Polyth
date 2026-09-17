@@ -868,13 +868,17 @@ export function ExecutionRow({
   });
   const [stopping, setStopping] = useState(false);
   const canStop = !!sessionId && toolActive && status === "running";
+  const stopPointerAt = useRef(0);
   useEffect(() => {
     if (!canStop) setStopping(false);
   }, [canStop]);
-  const stop = () => {
+  const stop = (event?: { detail?: number }) => {
     if (!sessionId || !canStop || stopping) return;
+    // A Send→Stop remount can deliver click without pointerdown on this
+    // control. Keyboard and programmatic clicks use detail 0 and still work.
+    if ((event?.detail ?? 0) !== 0 && Date.now() - stopPointerAt.current > 1000) return;
     setStopping(true);
-    void api.abort(sessionId)
+    void api.abort(sessionId, "execution")
       .catch((error) => setUiError(error instanceof Error ? error.message : String(error)))
       .finally(() => setStopping(false));
   };
@@ -1003,7 +1007,8 @@ export function ExecutionRow({
               size="sm"
               iconStart={StopIcon}
               busy={stopping}
-              onClick={stop}
+              onPointerDown={() => { stopPointerAt.current = Date.now(); }}
+              onClick={(event) => stop(event)}
             >
               {tr("common.stop")}
             </Button>

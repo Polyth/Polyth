@@ -29,6 +29,7 @@ import { formatBrowserContextForModel } from "@polyth/contracts";
 import {
   comparableStatusRevision,
   createTranslateState,
+  indexObservationCheckpoints,
   type ObservationBinding,
 } from "./events.ts";
 import { createProviderHttpClient } from "./providerHttp.ts";
@@ -1332,6 +1333,7 @@ export const createLegacyProtocolAdapter = (
       const events: RuntimeSnapshot["events"] = [];
       const acceptedOperations: NonNullable<RuntimeSnapshot["acceptedOperations"]> = [];
       const state = createTranslateState();
+      const checkpoints = indexObservationCheckpoints(input.checkpoints);
       // Pulled reconciliation replays the full backend history. OpenCode's
       // session rows replay as `message.updated` with the CURRENT session
       // title, so a pulled `title:...` observation identity would race the
@@ -1364,6 +1366,7 @@ export const createLegacyProtocolAdapter = (
             },
             observed,
             state,
+            checkpoints,
           );
         }
         for (const part of Array.isArray(row.parts) ? row.parts : []) {
@@ -1379,6 +1382,7 @@ export const createLegacyProtocolAdapter = (
             },
             observed,
             state,
+            checkpoints,
           );
         }
       }
@@ -1395,6 +1399,7 @@ export const createLegacyProtocolAdapter = (
           },
           observed,
           state,
+          checkpoints,
         );
       }
 

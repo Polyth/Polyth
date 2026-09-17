@@ -18,7 +18,6 @@ import {
   normalizeAndIngestOcObservation,
   normalizeOcObservation,
   snapshotAbsenceIsAuthoritative,
-  splitNormalizedObservation,
   terminalStateEvidenceOf,
   type ObservationBinding,
 } from "../src/events.ts";
@@ -165,7 +164,7 @@ test("pull reconciliation recovers identified pending permission and question", 
   }]);
   assert.equal(snapshot.questions[0]?.requestId, "question-a");
   assert.deepEqual(
-    snapshot.events.find((entry) => entry.event.type === "task/snapshot")?.event,
+    snapshot.events.flatMap((entry) => entry.events).find((event) => event.type === "task/snapshot"),
     {
       type: "task/snapshot",
       listId: "todo",
@@ -174,7 +173,7 @@ test("pull reconciliation recovers identified pending permission and question", 
     },
   );
   assert.ok(
-    snapshot.events.every((entry) => entry.event.type !== "assistant/message"),
+    snapshot.events.every((entry) => entry.events.every((event) => event.type !== "assistant/message")),
     "unmapped user history is never re-appended as recovered model output",
   );
 });
@@ -212,7 +211,7 @@ test("todo.updated is a durable identified task observation", () => {
   }]);
 });
 
-test("live and pulled multi-event tool facts share per-event semantic revisions", async () => {
+test("live and pulled multi-event tool facts share one source observation identity", async () => {
   const observed: ObservationBinding = {
     authorityId: endpoint.authorityId,
     generation: endpoint.generation,
@@ -248,18 +247,20 @@ test("live and pulled multi-event tool facts share per-event semantic revisions"
   });
   assert.equal(normalized.kind, "accepted");
   if (normalized.kind !== "accepted") throw new Error("tool event was not accepted");
-  const live = splitNormalizedObservation(normalized.observation);
+  const live = normalized.observation;
   assert.deepEqual(
-    live.map((entry) => ({
-      revision: entry.identity.revision,
-      type: entry.events[0]?.type,
-      checkpoint: entry.checkpoint?.stateRank,
-      cursor: entry.cursorAfter,
-    })),
-    [
-      { revision: "state:completed#0", type: "tool/call", checkpoint: undefined, cursor: undefined },
-      { revision: "state:completed#1", type: "tool/result", checkpoint: 2, cursor: "evt-tool-completed" },
-    ],
+    {
+      revision: live.identity.revision,
+      types: live.events.map((event) => event.type),
+      checkpoint: live.checkpoint?.stateRank,
+      cursor: live.cursorAfter,
+    },
+    {
+      revision: "state:completed",
+      types: ["tool/call", "tool/result"],
+      checkpoint: 2,
+      cursor: "evt-tool-completed",
+    },
   );
 
   const transport: OpenCodeTransport = {
@@ -300,12 +301,75 @@ test("live and pulled multi-event tool facts share per-event semantic revisions"
   assert.deepEqual(
     snapshot.events
       .filter((entry) => entry.entityKey === "call-tool-a")
-      .map((entry) => ({ revision: entry.revision, type: entry.event.type })),
-    live.map((entry) => ({
-      revision: entry.identity.revision,
-      type: entry.events[0]!.type,
-    })),
+      .map((entry) => ({
+        revision: entry.revision,
+        artifactKind: entry.artifactKind,
+        types: entry.events.map((event) => event.type),
+        stateRank: entry.stateRank,
+      })),
+    [{
+      revision: live.identity.revision,
+      artifactKind: live.identity.artifactKind,
+      types: live.events.map((event) => event.type),
+      stateRank: live.checkpoint?.stateRank,
+    }],
   );
+
+  // The same native tool, re-pulled after its live observation was
+  // canonicalized, derives no canonical fact at all.
+  const durableCheckpoint = {
+    key: {
+      authorityId: endpoint.authorityId,
+      location: endpoint.location,
+      backendSessionId: "session-a",
+      artifactKind: live.identity.artifactKind,
+      entityId: "call-tool-a",
+    },
+    revision: live.identity.revision,
+    stateRank: live.checkpoint?.stateRank,
+    value: live.checkpoint!.value,
+    updatedAt: 1,
+  };
+  const afterLive = await adapter.reconcile({
+    ...binding,
+    reconciliationOrdinal: 22,
+    checkpoints: [durableCheckpoint],
+  });
+  assert.deepEqual(
+    afterLive.events.filter((entry) => entry.entityKey === "call-tool-a"),
+    [],
+  );
+
+  const pending = {
+    ...toolEvent,
+    properties: {
+      ...toolEvent.properties,
+      part: {
+        ...toolEvent.properties.part,
+        state: { status: "pending", input: { filePath: "marker.txt" } },
+      },
+    },
+  };
+  const latePending = normalizeOcObservation({
+    data: pending,
+    channel: "sse",
+    observed,
+    current: observed,
+    checkpoint: durableCheckpoint,
+  });
+  assert.equal(latePending.kind, "stale");
+
+  const seenCompleted = normalizeOcObservation({
+    data: toolEvent,
+    channel: "pull",
+    observed,
+    current: observed,
+    checkpoint: durableCheckpoint,
+  });
+  assert.equal(seenCompleted.kind, "accepted");
+  if (seenCompleted.kind === "accepted") {
+    assert.deepEqual(seenCompleted.observation.events, []);
+  }
 });
 
 test("legacy terminal status requires a numeric comparable revision", async () => {
@@ -638,11 +702,9 @@ test("partial snapshot absence cannot close durable attention", () => {
     false,
   );
   assert.equal(
-    snapshot.events.some(
-      (entry) =>
-        entry.event.type === "permission/requested"
-        || entry.event.type === "question/asked",
-    ),
+    snapshot.events.some((entry) =>
+      entry.events.some((event) =>
+        event.type === "permission/requested" || event.type === "question/asked")),
     false,
   );
 });

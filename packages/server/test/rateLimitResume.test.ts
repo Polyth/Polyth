@@ -289,3 +289,74 @@ test("server restart repairs a pending resume that lacks its terminal event", as
   assert.equal((await second.store.projection(id))?.resume, undefined);
   await second.store.close();
 });
+
+// A provider that refuses the SELECTED MODEL is recoverable, but never by
+// waiting and never by Polyth substituting a model on the user's behalf.
+const MODEL_UNAVAILABLE_STOP: Extract<RuntimeEvent, { type: "turn/stopped" }> = {
+  type: "turn/stopped",
+  turnId: "t1",
+  reason: "error",
+  error: "403 MODEL_NOT_IN_PLAN: this model is available in higher plans",
+  code: "model-unavailable",
+};
+
+test("an unavailable model fails the turn without a resume plan and recovers on an explicit switch", async () => {
+  const h = harness();
+  const { id } = await h.sessions.create({ projectId: "p1", title: "T" });
+  await h.sessions.send(id, { text: "keep going" });
+  await flush();
+
+  h.emit(id, MODEL_UNAVAILABLE_STOP);
+  await flush();
+
+  const proj = await h.store.projection(id);
+  assert.equal(proj?.status, "failed");
+  assert.equal(proj?.resume, undefined, "an unavailable model must never auto-resume");
+  const stop = (await h.store.events(id)).findLast((e) => e.type === "turn/stopped");
+  assert.equal((stop!.data as { code?: string }).code, "model-unavailable");
+  assert.equal((stop!.data as { retry?: unknown }).retry, undefined);
+  assert.equal((await h.store.events(id)).filter((e) => e.type === "user/message").length, 1);
+
+  // Without an explicit choice there is nothing to continue on: no fallback.
+  await assert.rejects(() => h.sessions.resumeNow!(id), /no pending resume|no-resume/);
+
+  await h.sessions.resumeNow!(id, { providerID: "openai", modelID: "gpt-5" });
+  await flush();
+
+  assert.deepEqual(h.startedTexts, ["keep going", "keep going"]);
+  assert.deepEqual((await h.store.projection(id))?.model, { providerID: "openai", modelID: "gpt-5" });
+  assert.equal((await h.store.events(id)).filter((e) => e.type === "session/created").length, 1);
+  await h.store.close();
+});
+
+test("a late error observation does not relabel an aborted turn as failed", async () => {
+  const h = harness();
+  const { id } = await h.sessions.create({ projectId: "p1", title: "T" });
+  await h.sessions.send(id, { text: "keep going" });
+  await flush();
+
+  await h.sessions.abort(id, { source: "composer" });
+  await flush();
+  assert.equal((await h.store.projection(id))?.status, "idle");
+  const abort = (await h.store.events(id)).findLast((event) => event.type === "turn/abort-requested");
+  assert.equal((abort?.data as { source?: string }).source, "composer");
+  const stopsBefore = (await h.store.events(id)).filter((event) => event.type === "turn/stopped");
+  assert.equal(stopsBefore.length, 1);
+  assert.equal((stopsBefore[0]!.data as { reason?: string }).reason, "aborted");
+
+  const reconciliation = await h.store.reconciliation(id);
+  assert.ok(reconciliation, "wired session should have a reconciliation ordinal");
+  h.observe(id, {
+    type: "turn/stopped",
+    turnId: "late-error",
+    reason: "error",
+    error: "session failed",
+  }, reconciliation.ordinal);
+  for (let i = 0; i < 8; i++) await flush();
+
+  assert.equal((await h.store.projection(id))?.status, "idle");
+  const stops = (await h.store.events(id)).filter((event) => event.type === "turn/stopped");
+  assert.equal(stops.length, 1);
+  assert.equal((stops[0]!.data as { reason?: string }).reason, "aborted");
+  await h.store.close();
+});

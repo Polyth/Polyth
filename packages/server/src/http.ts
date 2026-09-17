@@ -718,7 +718,15 @@ async function dispatchHttp(
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/(abort|archive|restore)$/);
       if (m && method === "POST") {
-        await (m[2] === "abort" ? space().sessions.abort(m[1]!) : m[2] === "archive" ? space().sessions.archive(m[1]!) : space().sessions.restore(m[1]!));
+        if (m[2] === "abort") {
+          const b = await loadBody();
+          const source = typeof b.source === "string" && b.source.trim()
+            ? b.source.trim().slice(0, 64)
+            : "http";
+          await space().sessions.abort(m[1]!, { source });
+        } else {
+          await (m[2] === "archive" ? space().sessions.archive(m[1]!) : space().sessions.restore(m[1]!));
+        }
         return json(res, 200, { ok: true });
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/compact$/);

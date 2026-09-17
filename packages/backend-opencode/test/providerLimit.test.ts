@@ -3,8 +3,10 @@ import { test } from "node:test";
 import {
   classifyProviderLimit,
   classifyProviderLimitNotice,
+  isModelUnavailableError,
   parseRetryAfterSec,
 } from "../src/providerLimit.ts";
+import { modelUnavailableOf } from "../src/events.ts";
 
 const NOW = 1_700_000_000_000;
 
@@ -129,4 +131,48 @@ test("Command Code rate-limit reasoning gives the normal retry hint", () => {
     { scope: "rate", provider: "anthropic", retryAfterSec: 10_380 },
   );
   assert.equal(classifyProviderLimitNotice("I mention a rate limit in passing"), null);
+});
+
+// A model the account/plan may not use is a selection failure, not capacity:
+// it must never arm a wait-and-retry, and it must be recognizable generically.
+const INCIDENT_ERROR = {
+  name: "ProviderError",
+  data: {
+    message: "POST /alpha/generate → 403 {\"success\":false,\"error\":{\"code\":\"FORBIDDEN\","
+      + "\"status\":403,\"message\":\"MODEL_NOT_IN_PLAN: Muse Spark 1.3 available in GOAT and "
+      + "above plans or extra on demand usage\"}}",
+    statusCode: 403,
+  },
+};
+
+test("a provider model-entitlement refusal is recognized and never auto-retried", () => {
+  assert.equal(isModelUnavailableError(INCIDENT_ERROR), true);
+  assert.equal(classifyProviderLimit(INCIDENT_ERROR, NOW), null);
+  assert.equal(
+    modelUnavailableOf({ type: "session.error", properties: { error: INCIDENT_ERROR } }),
+    true,
+  );
+});
+
+test("model-unavailable recognition is provider-neutral and stays narrow", () => {
+  for (const message of [
+    "The model `gpt-5-preview` does not exist or you do not have access to it. model_not_found",
+    "Your organization does not have access to the model claude-opus-5",
+    "This model is not available on your current plan",
+    "unknown model: meta/muse-spark-1.3",
+    "model requires a higher plan",
+  ]) {
+    assert.equal(isModelUnavailableError({ data: { message } }), true, message);
+  }
+  for (const message of [
+    "429 rate_limit_error: too many requests",
+    "Overloaded",
+    "ENOENT: no such file",
+    "Invalid API key provided",
+    "the model returned an empty response",
+  ]) {
+    assert.equal(isModelUnavailableError({ data: { message } }), false, message);
+  }
+  assert.equal(isModelUnavailableError(undefined), false);
+  assert.equal(modelUnavailableOf({ type: "session.idle", properties: {} }), false);
 });

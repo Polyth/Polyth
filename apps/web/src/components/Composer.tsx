@@ -589,6 +589,7 @@ export default function Composer({
   const turn = model.turn;
   const canStop = working;
   const abortPendingRef = useRef(false);
+  const stopPointerAt = useRef(0);
   const [abortPending, setAbortPending] = useState(false);
   useEffect(() => {
     if (!canStop) {
@@ -596,14 +597,17 @@ export default function Composer({
       setAbortPending(false);
     }
   }, [canStop]);
-  const stopActiveTurn = useCallback(async () => {
+  const stopActiveTurn = useCallback(async (event?: { detail?: number }) => {
     // One stop intent per active turn. If the stream settles while the request
     // is in flight, the idle Send state wins and the late response is ignored.
     if (!canStop || abortPendingRef.current) return;
+    // Send and Stop occupy the same slot. A remount can fire click on Stop
+    // without pointerdown on that button (the down started on Send).
+    if (event && event.detail !== 0 && Date.now() - stopPointerAt.current > 1000) return;
     abortPendingRef.current = true;
     setAbortPending(true);
     try {
-      await abortSession();
+      await abortSession("composer");
     } finally {
       abortPendingRef.current = false;
       setAbortPending(false);
@@ -2489,7 +2493,8 @@ export default function Composer({
                   aria-label={tr("composer.stopTheCurrentResponse")}
                   aria-busy={abortPending}
                   disabled={abortPending}
-                  onClick={() => void stopActiveTurn()}
+                  onPointerDown={() => { stopPointerAt.current = Date.now(); }}
+                  onClick={(event) => void stopActiveTurn(event)}
                 >
                   <Icon.stop /><span className="composer-action-label">{tr("common.stop")}</span>
                 </button>

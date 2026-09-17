@@ -1,16 +1,19 @@
-import type { RuntimeSnapshot } from "@polyth/contracts";
+import type { ObservationCheckpoint, RuntimeSnapshot } from "@polyth/contracts";
 import {
   normalizeOcObservation,
-  splitNormalizedObservation,
   type ObservationBinding,
   type TranslateState,
 } from "./events.ts";
 
+/** One pulled native observation becomes one snapshot entry carrying every
+ * canonical event it derives. Grouping is what lets the session store admit
+ * the source observation once instead of per canonical member. */
 export const appendPulledEvents = (
   target: RuntimeSnapshot["events"],
   data: unknown,
   binding: ObservationBinding,
   state: TranslateState,
+  checkpoints?: ReadonlyMap<string, ObservationCheckpoint>,
 ): void => {
   const normalized = normalizeOcObservation({
     data,
@@ -18,15 +21,19 @@ export const appendPulledEvents = (
     observed: binding,
     current: binding,
     state,
+    ...(checkpoints ? { checkpoints } : {}),
   });
   if (normalized.kind !== "accepted") return;
-  for (const observation of splitNormalizedObservation(normalized.observation)) {
-    const event = observation.events[0];
-    if (!event) continue;
-    target.push({
-      entityKey: observation.entityKey,
-      revision: observation.identity.revision,
-      event,
-    });
-  }
+  const observation = normalized.observation;
+  if (!observation.events.length) return;
+  target.push({
+    entityKey: observation.entityKey,
+    revision: observation.identity.revision,
+    artifactKind: observation.identity.artifactKind,
+    events: observation.events,
+    ...(observation.checkpoint?.stateRank !== undefined
+      ? { stateRank: observation.checkpoint.stateRank }
+      : {}),
+    ...(observation.checkpoint ? { checkpoint: observation.checkpoint.value } : {}),
+  });
 };

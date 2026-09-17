@@ -389,6 +389,8 @@ test("execution code surfaces override the global prose font preference", async 
   assert.match(rowSource, /reverted \? "Redo" : "Revert changes"/);
   assert.match(rowSource, /reverted \? RedoIcon : UndoIcon/);
   assert.match(rowSource, /applyUnifiedDiff\(current, file\.diff, direction\)/);
+  assert.match(rowSource, /api\.abort\(sessionId, "execution"\)/);
+  assert.match(rowSource, /onPointerDown=\{\(\) => \{ stopPointerAt\.current = Date\.now\(\); \}\}/);
   assert.match(css, /grid-template-rows var\(--motion-normal\)[\s\S]*?opacity var\(--motion-normal\)/);
   assert.match(css, /\.reasoning-preview\s*\{[\s\S]*?-webkit-mask-image:\s*linear-gradient\(to right, #000 90%, transparent 100%\);[\s\S]*?mask-image:\s*linear-gradient\(to right, #000 90%, transparent 100%\);/);
 });
@@ -980,7 +982,7 @@ test("pending and running execution states stay visually and accessibly distinct
   document.body.appendChild(container);
   const root = createRoot(container);
   const originalFetch = globalThis.fetch;
-  let abortRequest: { url: string; method: string } | undefined;
+  let abortRequest: { url: string; method: string; body: string } | undefined;
   try {
     await act(async () => {
       setSessions("execution-status-test", [{
@@ -1025,13 +1027,18 @@ test("pending and running execution states stay visually and accessibly distinct
     const stop = container.querySelector<HTMLButtonElement>(".execution-stop");
     assert.equal(stop?.textContent, "Stop");
     globalThis.fetch = async (input, init) => {
-      abortRequest = { url: String(input), method: String(init?.method ?? "GET") };
+      abortRequest = {
+        url: String(input),
+        method: String(init?.method ?? "GET"),
+        body: String(init?.body ?? ""),
+      };
       return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
     };
     await act(async () => { stop?.click(); });
     assert.deepEqual(abortRequest, {
       url: "/api/sessions/execution-status-session/abort",
       method: "POST",
+      body: JSON.stringify({ source: "execution" }),
     });
     await act(async () => {
       applyEvent({

@@ -911,11 +911,11 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
                         continue;
                     const event = eventFor(item);
                     if (event)
-                        events.push({ entityKey: item.id, revision: digest(event), event });
+                        events.push({ entityKey: item.id, revision: digest(event), events: [event] });
                 }
                 if (turn.status !== "inProgress") {
                     const event = stopped(turn, lastRateLimitResetAt);
-                    events.push({ entityKey: turn.id + ":stop", revision: digest(event), event });
+                    events.push({ entityKey: turn.id + ":stop", revision: digest(event), events: [event] });
                 }
             }
             const createEntry = Object.entries(rpc.receipts).find(([, id]) => id === binding.backendSessionId);
