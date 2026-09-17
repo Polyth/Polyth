@@ -47,6 +47,12 @@ export function canonicalProjectService(
   const assertScope = (resource: CanonicalResource): void => {
     if (resource.kind !== "project" || resource.orgId !== org.id || resource.spaceId !== ctx.spaceId) throw recovery();
   };
+  const requireReadable = (resourceId: string): CanonicalResource => security.resourceAccess.requireReadable({
+    resourceId,
+    principalId: ctx.userId,
+    orgId: org.id,
+    spaceId: ctx.spaceId,
+  });
   const transition = (
     id: string,
     from: "active" | "deleting",
@@ -106,6 +112,7 @@ export function canonicalProjectService(
       security.resources.activate(operationId, current.revision);
       const active = security.resources.active(project.id, scope);
       if (!active || active.kind !== "project") throw recovery();
+      requireReadable(project.id);
       return project;
     } catch (cause) {
       const current = security.resources.resource(project.id);
@@ -127,10 +134,16 @@ export function canonicalProjectService(
       throw recovery();
     }
     assertScope(resource);
-    if (resource.lifecycle === "active") return project;
+    if (resource.lifecycle === "active") {
+      requireReadable(project.id);
+      return project;
+    }
     if (resource.lifecycle === "deleting") {
       resource = restoreDeleting(resource);
-      if (resource.lifecycle === "active") return project;
+      if (resource.lifecycle === "active") {
+        requireReadable(project.id);
+        return project;
+      }
     }
     if (resource.lifecycle === "provisioning" || resource.lifecycle === "quarantined") {
       const saga = security.resources.pending().find((candidate) => candidate.resourceId === project.id);
@@ -140,7 +153,10 @@ export function canonicalProjectService(
       if (!resource) throw recovery();
       security.resources.activate(saga.operationId, resource.revision);
       const active = security.resources.active(project.id, scope);
-      if (active?.kind === "project") return project;
+      if (active?.kind === "project") {
+        requireReadable(project.id);
+        return project;
+      }
     }
     throw recovery();
   };
@@ -243,7 +259,15 @@ export function canonicalProjectService(
     ...base,
     async list() {
       const projects = await base.list();
-      return projects.map(ensureActive);
+      const visible: Project[] = [];
+      for (const project of projects) {
+        try { visible.push(ensureActive(project)); }
+        catch (cause) {
+          if ((cause as { code?: unknown } | null)?.code === "not-found") continue;
+          throw cause;
+        }
+      }
+      return visible;
     },
     async get(id) {
       const project = await base.get(id);
