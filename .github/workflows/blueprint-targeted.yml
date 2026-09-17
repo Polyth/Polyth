@@ -40,6 +40,7 @@ jobs:
             packages/server/test/canonicalAuth.test.ts \
             packages/server/test/canonicalIdentityHttp.test.ts \
             packages/server/test/canonicalSecurity.test.ts \
+            packages/server/test/canonicalSpaceAuthority.test.ts \
             packages/server/test/providerHost.test.ts \
             packages/server/test/runtimeSecurityBinding.test.ts \
             apps/web/test/accountProfile.test.ts \
