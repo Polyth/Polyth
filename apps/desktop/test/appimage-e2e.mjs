@@ -6,6 +6,11 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 
+const opencodeLock = JSON.parse(await readFile(new URL("../opencode.json", import.meta.url), "utf8"));
+const bundledOpenCodeVersion = String(opencodeLock.version ?? "");
+if (!bundledOpenCodeVersion) throw new Error("apps/desktop/opencode.json is missing version");
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 const appImage = resolve(process.argv[2] ?? "");
 const screenshotPath = resolve(process.argv[3] ?? join(tmpdir(), "polyth-appimage-e2e.png"));
 const logArtifactPath = resolve(process.argv[4] ?? join(tmpdir(), "polyth-appimage-e2e.log"));
@@ -421,7 +426,7 @@ await writeFile(logArtifactPath, combined);
 
 if (failure) throw failure;
 assert.match(combined, /System tray created with context menu/);
-assert.match(combined, /Bundled OpenCode 1\.18\.22/);
+assert.match(combined, new RegExp(`Bundled OpenCode ${escapeRegExp(bundledOpenCodeVersion)}`));
 assert.match(combined, /Revealed path in native file manager/);
 assert.match(combined, /Window hidden to tray/);
 assert.match(combined, /Polyth server stopped/);

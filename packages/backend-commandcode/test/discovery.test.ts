@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
   COMMANDCODE_REQUIRED_FLAGS,
+  commandCodeCompatibility,
   commandCodeCompatibilityMessage,
+  commandCodeStatus,
+  commandCodeVersion,
   discoverCommandCodeAgents,
+  discoverCommandCodeModels,
   inspectCommandCodeHelp,
   parseCommandCodeAgentFile,
   parseCommandCodeModelList,
@@ -100,4 +104,58 @@ test("compatibility does not confuse prefix lookalikes with required flags", () 
   const compatibility = inspectCommandCodeHelp(help);
   assert.equal(compatibility.compatible, false);
   assert.ok(compatibility.missing.includes("--model"));
+});
+
+const fakeCommandCodeCli = async (root: string): Promise<string> => {
+  const script = join(root, "cli.mjs");
+  const flags = COMMANDCODE_REQUIRED_FLAGS.map((flag) => JSON.stringify(flag)).join(", ");
+  await writeFile(script, `const arg = process.argv[2];
+if (arg === "--version") { process.stdout.write("9.9.9\\n"); process.exit(0); }
+if (arg === "--help") {
+  process.stdout.write([${flags}].map((flag) => "  " + flag).join("\\n") + "\\n");
+  process.exit(0);
+}
+if (arg === "status") {
+  process.stdout.write(JSON.stringify({ authenticated: true, email: "probe@example.com" }) + "\\n");
+  process.exit(0);
+}
+if (arg === "--list-models") { process.stdout.write("gpt-5.6-sol\\n"); process.exit(0); }
+process.exit(1);
+`, "utf8");
+  const node = process.execPath.replaceAll("\\", "\\\\");
+  const command = join(root, process.platform === "win32" ? "command-code.CMD" : "command-code");
+  if (process.platform === "win32") {
+    await writeFile(command, `@echo off\r\n"${node}" "${script}" %*\r\n`, "utf8");
+  } else {
+    await writeFile(command, `#!/bin/sh\nexec "${node}" "${script}" "$@"\n`, "utf8");
+    await chmod(command, 0o755);
+  }
+  return command;
+};
+
+test("Command Code probes use an explicit CLI path without await in parameter defaults", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "polyth-commandcode-cli-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const command = await fakeCommandCodeCli(root);
+
+  assert.equal(await commandCodeVersion(command), "9.9.9");
+  assert.deepEqual(await commandCodeCompatibility(command), { compatible: true, missing: [] });
+  assert.deepEqual(await commandCodeStatus(command), {
+    authenticated: true,
+    accountLabel: "probe@example.com",
+    raw: { authenticated: true, email: "probe@example.com" },
+  });
+  assert.equal((await discoverCommandCodeModels(command))[0]?.modelID, "gpt-5.6-sol");
+});
+
+test("Command Code probes resolve the installed binary when the path is omitted", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "polyth-commandcode-missing-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const previous = process.env.POLYTH_COMMANDCODE_BIN;
+  t.after(() => {
+    if (previous === undefined) delete process.env.POLYTH_COMMANDCODE_BIN;
+    else process.env.POLYTH_COMMANDCODE_BIN = previous;
+  });
+  process.env.POLYTH_COMMANDCODE_BIN = join(root, "missing-command-code");
+  await assert.rejects(() => commandCodeVersion(), (error: NodeJS.ErrnoException) => error.code === "not-installed");
 });

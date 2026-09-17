@@ -64,8 +64,12 @@ const run = async (command: string, args: string[], cwd?: string, timeout = 10_0
   return String(stdout || stderr || "").trim();
 };
 
-export const commandCodeVersion = async (command = await resolveCommandCodeBinary()): Promise<string | undefined> => {
-  const value = await run(command, ["--version"], undefined, 5_000).catch(() => "");
+const commandCodeBinary = async (command?: string): Promise<string> =>
+  command ?? await resolveCommandCodeBinary();
+
+export const commandCodeVersion = async (command?: string): Promise<string | undefined> => {
+  const resolved = await commandCodeBinary(command);
+  const value = await run(resolved, ["--version"], undefined, 5_000).catch(() => "");
   return value.trim() || undefined;
 };
 
@@ -83,9 +87,9 @@ export function inspectCommandCodeHelp(output: string): CommandCodeCompatibility
 }
 
 export async function commandCodeCompatibility(
-  command = await resolveCommandCodeBinary(),
+  command?: string,
 ): Promise<CommandCodeCompatibility> {
-  const help = await run(command, ["--help"], undefined, 5_000);
+  const help = await run(await commandCodeBinary(command), ["--help"], undefined, 5_000);
   return inspectCommandCodeHelp(help);
 }
 
@@ -114,9 +118,9 @@ const authState = (value: Record<string, unknown>): boolean | "unknown" => {
 };
 
 export async function commandCodeStatus(
-  command = await resolveCommandCodeBinary(),
+  command?: string,
 ): Promise<CommandCodeStatus> {
-  const text = await run(command, ["status", "--json"], undefined, 7_500);
+  const text = await run(await commandCodeBinary(command), ["status", "--json"], undefined, 7_500);
   let parsed: Record<string, unknown>;
   try {
     parsed = record(JSON.parse(text)) ?? {};
@@ -179,10 +183,10 @@ export function parseCommandCodeModelList(output: string): ModelDescriptor[] {
 }
 
 export async function discoverCommandCodeModels(
-  command = await resolveCommandCodeBinary(),
+  command?: string,
   cwd?: string,
 ): Promise<ModelDescriptor[]> {
-  const text = await run(command, ["--list-models"], cwd, 15_000);
+  const text = await run(await commandCodeBinary(command), ["--list-models"], cwd, 15_000);
   const models = parseCommandCodeModelList(text);
   if (!models.length) {
     throw Object.assign(new Error("Command Code returned no parseable models"), { code: "catalog-unavailable" });
