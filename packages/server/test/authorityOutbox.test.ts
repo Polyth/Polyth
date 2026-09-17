@@ -82,7 +82,7 @@ test("production worker drains durable authority events into diagnostics telemet
   assert.equal(worker.status().lastDeliveredEventId, observed[0]?.id);
 });
 
-test("durable revocation events close only the affected live authority sockets", async () => {
+test("durable revocation events close the exact authority class they invalidate", async () => {
   const registry = new PairedSocketRegistry();
   const closed: string[] = [];
   const revoked = {}, sibling = {}, device = {};
@@ -98,23 +98,31 @@ test("durable revocation events close only the affected live authority sockets",
   assert.equal(registry.size, 1, "paired-device bookkeeping is unchanged by a browser-session revoke");
 
   await publishAuthorityEvent(event("auth.password-changed", "usr_owner"));
+  assert.deepEqual(closed.sort(), ["revoked", "sibling"]);
+  assert.equal(registry.size, 1, "password/session authority is independent from pairing grants");
+
+  // Account lifecycle revocation invalidates the user behind both auth classes.
+  await publishAuthorityEvent(event("identity.suspended", "usr_owner", "usr_admin"));
   assert.deepEqual(closed.sort(), ["device", "revoked", "sibling"]);
   assert.equal(registry.size, 0);
 
   // At-least-once outbox replay is harmless after the first close removed the entries.
-  await publishAuthorityEvent(event("auth.password-changed", "usr_owner"));
+  await publishAuthorityEvent(event("identity.suspended", "usr_owner", "usr_admin"));
   assert.equal(closed.length, 3);
 });
 
-test("actor-scoped auth method removal invalidates that user's live channels", async () => {
+test("actor-scoped auth method removal invalidates that user's browser sessions only", async () => {
   const registry = new PairedSocketRegistry();
   const closed: string[] = [];
-  const owner = {}, other = {};
+  const owner = {}, device = {}, other = {};
   registry.bind(owner, ui("ses_owner_method", "usr_owner_method"), () => closed.push("owner"));
+  registry.bind(device, paired("usr_owner_method"), () => closed.push("device"));
   registry.bind(other, ui("ses_other_method", "usr_other_method"), () => closed.push("other"));
 
   await publishAuthorityEvent(event("auth.passkey-removed", "pky_credential", "usr_owner_method"));
   assert.deepEqual(closed, ["owner"]);
+  assert.equal(registry.size, 1);
+  registry.closeDevice("dev_owner");
   registry.unbind(other);
 });
 
