@@ -35,6 +35,7 @@ export {
 export { packageWorkspace, type PackageWorkspace } from "./packageWorkspace.ts";
 export {
   RUNTIME_SYSTEM_PRINCIPAL_ID,
+  systemAppendSessionEvent,
   systemSessionsForProject,
   systemSessionsForSession,
 } from "./systemSessions.ts";
