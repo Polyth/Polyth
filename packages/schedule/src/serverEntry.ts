@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { ProjectService, RouteHandler } from "@polyth/contracts";
+import type { RouteHandler } from "@polyth/contracts";
 import {
   localOnlyRemoteAccess,
   serverServiceKey,
@@ -43,7 +43,10 @@ const targetOf = (raw: unknown): ScheduleTarget | undefined => {
   };
 };
 
-export function scheduleRoutes(deps: { schedule: ScheduleService; projects: ProjectService }): RouteHandler {
+export function scheduleRoutes(deps: {
+  schedule: ScheduleService;
+  forSpace: ServerPackageHost["forSpace"];
+}): RouteHandler {
   const inputOf = (input: Record<string, unknown>): Partial<ScheduleTaskInput> => ({
     ...(input.projectId !== undefined ? { projectId: String(input.projectId) } : {}),
     ...(input.prompt !== undefined ? { prompt: String(input.prompt) } : {}),
@@ -61,13 +64,50 @@ export function scheduleRoutes(deps: { schedule: ScheduleService; projects: Proj
   return async (rc) => {
     const { path, method, url, body, json } = rc;
     if (!path.startsWith("/api/schedule")) return false;
+    const scoped = deps.forSpace(rc.space);
+    const project = async (projectId: string) => scoped.projects.get(projectId);
+    const allowedTask = async (id: string) => {
+      const task = deps.schedule.get(id);
+      if (!task || !(await project(task.projectId))) return undefined;
+      return task;
+    };
+    const validateTarget = async (input: Partial<ScheduleTaskInput>, fallbackProjectId?: string): Promise<boolean> => {
+      const projectId = input.projectId ?? fallbackProjectId;
+      if (!projectId || !(await project(projectId))) return false;
+      const sessionId = input.target?.sessionId ?? input.sessionId;
+      if (sessionId) {
+        try {
+          const session = await scoped.sessions.snapshot(sessionId);
+          if (session.projectId !== projectId) return false;
+        } catch { return false; }
+      }
+      return true;
+    };
+
     if (path === "/api/schedule" && method === "GET") {
-      const projectId = url.searchParams.get("projectId") ?? undefined;
-      json(200, { tasks: deps.schedule.list(projectId), loopErrors: deps.schedule.loopErrors(projectId) });
+      const requested = url.searchParams.get("projectId") ?? undefined;
+      if (requested && !(await project(requested))) {
+        json(200, { tasks: [], loopErrors: [] });
+        return true;
+      }
+      const allowedIds = requested
+        ? new Set([requested])
+        : new Set((await scoped.projects.list()).map((item) => item.id));
+      json(200, {
+        tasks: deps.schedule.list(requested).filter((task) => allowedIds.has(task.projectId)),
+        loopErrors: requested
+          ? deps.schedule.loopErrors(requested)
+          : [...allowedIds].flatMap((projectId) => deps.schedule.loopErrors(projectId)),
+      });
       return true;
     }
     if (path === "/api/schedule" && method === "POST") {
-      json(200, deps.schedule.create(inputOf(await body()) as ScheduleTaskInput));
+      const input = inputOf(await body()) as ScheduleTaskInput;
+      if (!(await validateTarget(input))) {
+        json(404, { error: "not-found", message: "project or target session not found" });
+        return true;
+      }
+      json(200, deps.schedule.create(input));
       return true;
     }
     if (path === "/api/schedule/preview" && method === "POST") {
@@ -79,40 +119,37 @@ export function scheduleRoutes(deps: { schedule: ScheduleService; projects: Proj
     }
     if (path === "/api/schedule/loops" && method === "GET") {
       const projectId = url.searchParams.get("projectId") ?? "";
+      if (!projectId || !(await project(projectId))) { json(200, []); return true; }
       json(200, deps.schedule.list(projectId).filter((task) => task.source === "loop-file"));
       return true;
     }
     if (path === "/api/schedule/loops/rescan" && method === "POST") {
       const input = await body();
       const projectId = String(input.projectId ?? "");
-      const project = await deps.projects.get(projectId);
-      if (!project || (project.spaceId !== undefined && project.spaceId !== rc.space.spaceId)) {
-        json(404, { error: "not-found", message: "project not found" });
-        return true;
-      }
-      json(200, deps.schedule.syncLoops(projectId, scanLoopsDir(project.path), { explicit: true }));
+      const owned = await project(projectId);
+      if (!owned) { json(404, { error: "not-found", message: "project not found" }); return true; }
+      json(200, deps.schedule.syncLoops(projectId, scanLoopsDir(owned.path), { explicit: true }));
       return true;
     }
     if (path === "/api/schedule/loops/errors/dismiss" && method === "POST") {
       const input = await body();
-      json(200, { ok: deps.schedule.dismissLoopError(String(input.projectId ?? ""), String(input.path ?? "")) });
+      const projectId = String(input.projectId ?? "");
+      if (!(await project(projectId))) { json(404, { error: "not-found", message: "project not found" }); return true; }
+      json(200, { ok: deps.schedule.dismissLoopError(projectId, String(input.path ?? "")) });
       return true;
     }
 
     const trustMatch = path.match(/^\/api\/schedule\/([^/]+)\/trust$/);
     if (trustMatch && method === "POST") {
       const id = trustMatch[1]!;
-      const task = deps.schedule.get(id);
+      const task = await allowedTask(id);
       if (!task || task.source !== "loop-file" || !task.sourcePath || !task.loopId) {
         json(404, { error: "not-found", message: "managed loop task not found" });
         return true;
       }
-      const project = await deps.projects.get(task.projectId);
-      if (!project || (project.spaceId !== undefined && project.spaceId !== rc.space.spaceId)) {
-        json(404, { error: "not-found", message: "project not found" });
-        return true;
-      }
-      const scan = scanLoopsDir(project.path);
+      const owned = await project(task.projectId);
+      if (!owned) { json(404, { error: "not-found", message: "project not found" }); return true; }
+      const scan = scanLoopsDir(owned.path);
       const current = scan.find((file) => file.path === task.sourcePath && file.loop?.id === task.loopId);
       if (!current?.loop || current.digest !== task.sourceDigest) {
         deps.schedule.syncLoops(task.projectId, scan, { explicit: true });
@@ -132,7 +169,14 @@ export function scheduleRoutes(deps: { schedule: ScheduleService; projects: Proj
     if (!match) return false;
     const id = match[1]!;
     const action = match[2];
-    if (!action && method === "PATCH") { json(200, deps.schedule.update(id, inputOf(await body()))); return true; }
+    const task = await allowedTask(id);
+    if (!task) { json(404, { error: "not-found" }); return true; }
+    if (!action && method === "PATCH") {
+      const input = inputOf(await body());
+      if (!(await validateTarget(input, task.projectId))) { json(404, { error: "not-found" }); return true; }
+      json(200, deps.schedule.update(id, input));
+      return true;
+    }
     if (!action && method === "DELETE") { json(200, { ok: deps.schedule.remove(id) }); return true; }
     if (method === "GET" && action === "runs") { json(200, deps.schedule.runsOf(id, Number(url.searchParams.get("limit") ?? 50))); return true; }
     if (method === "POST" && (action === "pause" || action === "resume")) { json(200, deps.schedule.setEnabled(id, action === "resume")); return true; }
@@ -193,7 +237,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     remoteAccess: localOnlyRemoteAccess(["schedule"]),
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
-      routes ??= scheduleRoutes({ schedule, projects: host.projects });
+      routes ??= scheduleRoutes({ schedule, forSpace: host.forSpace });
       schedule.start();
       void loopSync();
       if (loopTimer) { clearInterval(loopTimer); loopTimer = null; }
