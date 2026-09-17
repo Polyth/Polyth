@@ -10,6 +10,7 @@ import {
 } from "@polyth/contracts";
 import type { CanonicalResource } from "@polyth/control-plane/resources";
 import type { ProjectRegistry } from "./projects.ts";
+import { projectResourceReceipt } from "./resourceReceipts.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
 
 const recovery = (): Error => Object.assign(
@@ -20,15 +21,6 @@ const forbidden = (): Error => Object.assign(
   new Error("Space member access is required to modify projects"),
   { code: "forbidden" },
 );
-
-const durableReceipt = (project: Project): string => JSON.stringify({
-  id: project.id,
-  spaceId: project.spaceId ?? null,
-  path: project.path,
-  remote: project.remote
-    ? { kind: project.remote.kind, connectionId: project.remote.connectionId }
-    : null,
-});
 
 export function canonicalProjectService(
   ctx: SpaceContext,
@@ -97,7 +89,7 @@ export function canonicalProjectService(
     if (resource.lifecycle === "provisioning" || resource.lifecycle === "quarantined") {
       const saga = security.resources.pending().find((candidate) => candidate.resourceId === project.id);
       if (!saga) throw recovery();
-      security.resources.recordDomainReady(saga.operationId, durableReceipt(project));
+      security.resources.recordDomainReady(saga.operationId, projectResourceReceipt(project));
       resource = security.resources.resource(project.id);
       if (!resource) throw recovery();
       security.resources.activate(saga.operationId, resource.revision);
@@ -152,7 +144,7 @@ export function canonicalProjectService(
         security.resources.abortMissingDomain(operationId, begun.resource.revision);
         return ensureActive(domain);
       }
-      security.resources.recordDomainReady(operationId, durableReceipt(domain));
+      security.resources.recordDomainReady(operationId, projectResourceReceipt(domain));
       const current = security.resources.resource(resourceId);
       if (!current) throw recovery();
       security.resources.activate(operationId, current.revision);
