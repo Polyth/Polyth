@@ -62,6 +62,20 @@ export const currentBrowserLogin = (): string => {
 const rememberLogin = (login: string): void => {
   try { localStorage.setItem(LAST_LOGIN_KEY, login.trim().toLowerCase()); } catch { /* private mode */ }
 };
+const accountAuthResult = (
+  response: Response,
+  body: { error?: string; message?: string; retryAfterSec?: number },
+): AccountLoginResult => {
+  const retryHeader = Number(response.headers.get("retry-after"));
+  return {
+    ok: false,
+    ...(body.error ? { error: body.error } : {}),
+    ...(body.message ? { message: body.message } : {}),
+    ...(typeof body.retryAfterSec === "number"
+      ? { retryAfterSec: body.retryAfterSec }
+      : Number.isFinite(retryHeader) && retryHeader > 0 ? { retryAfterSec: retryHeader } : {}),
+  };
+};
 
 export async function loginAccount(login: string, password: string): Promise<AccountLoginResult> {
   const canonicalLogin = login.trim().toLowerCase();
@@ -79,15 +93,24 @@ export async function loginAccount(login: string, password: string): Promise<Acc
     rememberLogin(canonicalLogin);
     return { ok: true };
   }
-  const retryHeader = Number(response.headers.get("retry-after"));
-  return {
-    ok: false,
-    ...(body.error ? { error: body.error } : {}),
-    ...(body.message ? { message: body.message } : {}),
-    ...(typeof body.retryAfterSec === "number"
-      ? { retryAfterSec: body.retryAfterSec }
-      : Number.isFinite(retryHeader) && retryHeader > 0 ? { retryAfterSec: retryHeader } : {}),
-  };
+  return accountAuthResult(response, body);
+}
+
+/**
+ * Consume one recovery code to replace the local password. Recovery deliberately
+ * does not authenticate the browser: the caller must perform a fresh login so
+ * the new session is minted after the old auth epoch and sessions were revoked.
+ */
+export async function recoverAccount(login: string, code: string, password: string): Promise<AccountLoginResult> {
+  const canonicalLogin = login.trim().toLowerCase();
+  const { response, body } = await authJson<{
+    ok?: unknown; error?: string; message?: string; retryAfterSec?: number;
+  }>("/api/auth/recover", { login: canonicalLogin, code: code.trim(), password });
+  if (response.ok) {
+    rememberLogin(canonicalLogin);
+    return { ok: true };
+  }
+  return accountAuthResult(response, body);
 }
 
 export async function accountState(): Promise<AccountState> {
