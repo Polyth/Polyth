@@ -29,6 +29,7 @@ import type {
 } from "@polyth/contracts";
 import type { ProjectRegistry } from "./projects.ts";
 import { createCanonicalSpaceGateway } from "./canonicalSpaces.ts";
+import { verifyCanonicalAgentProfileOwnership } from "./profileOwnershipPreflight.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
 import { reconcileCanonicalResourcesAtBoot } from "./resourceStartupReconciliation.ts";
 import {
@@ -178,6 +179,7 @@ export async function createSpaceGateway(
     if (!security) {
       throw Object.assign(new Error("Canonical authority disappeared during boot"), { code: "recovery-required" });
     }
+    verifyCanonicalAgentProfileOwnership({ dataDir: opts.dataDir, control: security.control });
     const reconciled = await reconcileCanonicalResourcesAtBoot({
       security,
       projects: opts.registry,
@@ -272,7 +274,7 @@ export async function createSpaceGateway(
  *  re-checks membership before honouring it. */
 export function parseSpaceCookie(cookieHeader: string | undefined, cookieName: string): string | null {
   if (!cookieHeader) return null;
-  for (const part of cookieHeader.split(";")) {
+  for (const part of cookieHeader.split(";") ) {
     const eq = part.indexOf("=");
     if (eq === -1) continue;
     if (part.slice(0, eq).trim() !== cookieName) continue;
