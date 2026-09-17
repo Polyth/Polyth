@@ -9,6 +9,7 @@ import { parseLegacyAuthState, type LegacyAuthState } from "./legacyAuth.ts";
 import { inventoryLegacyMigration, LEGACY_OWNER_ALIAS } from "./legacyMigration.ts";
 import { parseLegacyTenancyState, type TenancyFile } from "./legacyTenancy.ts";
 import { verifyMigrationStage, type MigrationStageManifest } from "./migrationStage.ts";
+import { materializeCanonicalResources } from "./migrationCanonicalResources.ts";
 
 const hash = (value: string | Buffer): string => createHash("sha256").update(value).digest("hex");
 function fail(code: string): never {
@@ -23,6 +24,8 @@ export interface AppliedLegacyMigration {
   spacesImported: number;
   credentialsImported: number;
   sessionsRevoked: number;
+  projectResourcesImported: number;
+  sessionResourcesImported: number;
   generatedLogins: Record<string, string>;
 }
 
@@ -83,7 +86,14 @@ function allocateLogins(userIds: readonly string[]): Map<string, string> {
   return result;
 }
 
-function populate(control: ControlPlane, manifest: MigrationStageManifest, auth: LegacyAuthState, tenancy: TenancyFile, now: number): AppliedLegacyMigration {
+function populate(
+  control: ControlPlane,
+  manifest: MigrationStageManifest,
+  stageRoot: string,
+  auth: LegacyAuthState,
+  tenancy: TenancyFile,
+  now: number,
+): AppliedLegacyMigration {
   const credentials = effectiveCredentials(auth);
   const historicalAlias = manifest.inventory.ownership.some((proof) =>
     proof.resourceKind === "user" && proof.resourceId === LEGACY_OWNER_ALIAS
@@ -173,6 +183,12 @@ function populate(control: ControlPlane, manifest: MigrationStageManifest, auth:
     control.audit(LEGACY_OWNER_ALIAS, "migration.legacy-identity-adopted", manifest.id);
   });
 
+  // The temporary control-plane is still unpublished here. Projects and
+  // sessions were already made tenant-explicit by the reviewed adoption pass,
+  // so materialize them as active canonical resources from the exact staged
+  // bytes and ownership proof before the directory can be renamed live.
+  const resources = materializeCanonicalResources(control, manifest, stageRoot, now);
+
   return {
     migrationId: manifest.id,
     manifestDigest: manifest.manifestDigest,
@@ -181,6 +197,8 @@ function populate(control: ControlPlane, manifest: MigrationStageManifest, auth:
     spacesImported: spaces.length,
     credentialsImported: credentials.size,
     sessionsRevoked: auth.sessions.length,
+    projectResourcesImported: resources.projectsImported,
+    sessionResourcesImported: resources.sessionsImported,
     generatedLogins: Object.fromEntries([...logins].filter(([userId]) => credentials.has(userId))),
   };
 }
@@ -223,7 +241,7 @@ export function applyLegacyIdentityMigration(opts: ApplyLegacyMigrationOptions):
   let published = false;
   try {
     control = openControlPlane({ directory: temporary });
-    const result = populate(control, manifest, auth, tenancy, opts.now?.() ?? Date.now());
+    const result = populate(control, manifest, stageRoot, auth, tenancy, opts.now?.() ?? Date.now());
     control.close();
     control = undefined;
 
@@ -232,6 +250,11 @@ export function applyLegacyIdentityMigration(opts: ApplyLegacyMigrationOptions):
       if (check.installation().state !== "ready") fail("migration-not-ready");
       if (!check.get("SELECT 1 FROM instance_roles WHERE user_id=? AND role='owner'", LEGACY_OWNER_ALIAS)) fail("migration-owner-unproven");
       if (!check.get("SELECT 1 FROM legacy_imports WHERE name='migration-stage' AND digest=?", manifest.manifestDigest)) fail("migration-provenance-missing");
+      const expectedProjects = result.projectResourcesImported;
+      const expectedSessions = result.sessionResourcesImported;
+      const actualProjects = Number(check.get<{ n: number | bigint }>("SELECT count(*) AS n FROM resources WHERE kind='project' AND lifecycle='active'")?.n ?? -1);
+      const actualSessions = Number(check.get<{ n: number | bigint }>("SELECT count(*) AS n FROM resources WHERE kind='session' AND lifecycle='active'")?.n ?? -1);
+      if (actualProjects !== expectedProjects || actualSessions !== expectedSessions) fail("migration-resource-verification-failed");
     } finally { check.close(); }
 
     renameSync(join(temporary, "control-plane"), controlRoot);
