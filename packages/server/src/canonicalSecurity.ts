@@ -1,5 +1,10 @@
-import type { PasswordService, WebAuthnConfig } from "@polyth/identity";
-import { createIdentityService, type IdentityService } from "@polyth/identity";
+import type { IdentityProviderAdapter, PasswordService, WebAuthnConfig } from "@polyth/identity";
+import {
+  bitbucketIdentityAdapter,
+  createIdentityService,
+  githubIdentityAdapter,
+  type IdentityService,
+} from "@polyth/identity";
 import { createIdentityHttpAdapter } from "@polyth/identity/http";
 import { openControlPlane, type ControlPlane } from "@polyth/control-plane";
 import { createResourceRegistry, type ResourceRegistry } from "@polyth/control-plane/resources";
@@ -8,6 +13,10 @@ import {
   type ResourceLifecycleAuthority,
 } from "@polyth/control-plane/resource-lifecycle";
 import { createCanonicalAuthGateway, type CanonicalAuthGateway } from "./canonicalAuth.ts";
+import {
+  createCanonicalProviderNetwork,
+  createCanonicalProviderSecrets,
+} from "./providerHost.ts";
 
 export interface CanonicalSecurityOptions {
   dataDir: string;
@@ -20,6 +29,8 @@ export interface CanonicalSecurityOptions {
   absoluteMs?: number;
   passwords?: PasswordService;
   webauthn?: Omit<WebAuthnConfig, "origin">;
+  /** Host-reviewed adapters only. GitHub + Bitbucket Cloud are enabled by default. */
+  providerAdapters?: IdentityProviderAdapter[];
 }
 
 export interface CanonicalSecurity {
@@ -45,12 +56,19 @@ export function createCanonicalSecurity(options: CanonicalSecurityOptions): Cano
   const control = openControlPlane({ directory: options.dataDir });
   let identity: IdentityService | undefined;
   try {
+    const providerSecrets = createCanonicalProviderSecrets(options.dataDir);
+    const providerNetwork = createCanonicalProviderNetwork(control);
     identity = createIdentityService(control, {
       ...(options.now ? { now: options.now } : {}),
       ...(options.idleMs !== undefined ? { idleMs: options.idleMs } : {}),
       ...(options.absoluteMs !== undefined ? { absoluteMs: options.absoluteMs } : {}),
       ...(options.passwords ? { passwords: options.passwords } : {}),
       webauthn: { origin: options.origin, ...options.webauthn },
+      providers: {
+        adapters: options.providerAdapters ?? [githubIdentityAdapter, bitbucketIdentityAdapter],
+        secrets: providerSecrets,
+        network: providerNetwork,
+      },
     });
     const resources = createResourceRegistry(control, options.now ? { now: options.now } : {});
     const resourceLifecycle = createResourceLifecycleAuthority(
