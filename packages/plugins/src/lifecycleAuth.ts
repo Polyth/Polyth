@@ -5,11 +5,7 @@ import {
   type RouteRequest,
   type SpaceContext,
 } from "@polyth/contracts";
-
-type AuthoritativeSpaceContext = SpaceContext & {
-  /** Canonical server-minted deployment authority; request input cannot set it. */
-  readonly instanceOwner?: boolean;
-};
+import { requireInstanceOwnerAuthority } from "@polyth/contracts/instance-authority";
 
 const forbidden = (message: string): never => {
   throw Object.assign(new Error(message), { code: "forbidden" });
@@ -23,11 +19,10 @@ const forbidden = (message: string): never => {
  * canonical ui-session accounts never receive ambient deployment authority.
  */
 export function assertDeploymentPackageMutator(request: RouteRequest): void {
-  const space = request.space as AuthoritativeSpaceContext;
-  const legacyLocalOperator = request.principal.kind === "local-user" && space.instanceOwner === undefined;
-  if (space.instanceOwner !== true && !legacyLocalOperator) {
-    forbidden("package installation and binary changes require the instance owner");
-  }
+  requireInstanceOwnerAuthority(
+    request,
+    "package installation and binary changes require the instance owner",
+  );
   // Paired-device callers must also possess the privileged transport grant.
   // ui-session/local-user pass this legacy transport layer only after the
   // durable account authority above has admitted them.
