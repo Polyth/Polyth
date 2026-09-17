@@ -218,12 +218,12 @@ test("entries.server on a trusted file install loads and disposes the server plu
   const { dir, trusted } = scaffold();
   const pluginDir = join(trusted, "sample");
   writeFileSync(join(pluginDir, "polyth-plugin.json"), manifest({
-    trust: "workspace",
+    trust: "privileged",
     entries: { server: "./server.mjs" },
   }));
   writeFileSync(join(pluginDir, "server.mjs"), `
     export default (host) => ({
-      manifest: { id: host.pluginId, version: "1.0.0", trust: "workspace" },
+      manifest: { id: host.pluginId, version: "1.0.0", trust: "privileged" },
       setup(context) {
         const route = host.routes.add(async () => true);
         context.effect(() => route.dispose());
@@ -253,16 +253,21 @@ test("entries.server on a trusted file install loads and disposes the server plu
   await root.dispose();
 });
 
-test("low-trust manifests cannot install executable server entries", async () => {
-  const { dir, trusted } = scaffold();
-  writeFileSync(
-    join(trusted, "sample", "polyth-plugin.json"),
-    manifest({ entries: { server: "./server.mjs" } }),
-  );
-  writeFileSync(join(trusted, "sample", "server.mjs"), "export default () => ({})");
-  const reg = createPluginRegistry({ dir, trustedDir: trusted });
-  await assert.rejects(() => reg.install("file:sample"), /ui-only.*cannot declare entries\.server/);
-  await reg.dispose();
+test("only broad trust classes may install executable server entries", async () => {
+  for (const trust of ["ui-only", "pure", "workspace", "network", "device"] as const) {
+    const { dir, trusted } = scaffold();
+    writeFileSync(
+      join(trusted, "sample", "polyth-plugin.json"),
+      manifest({ trust, entries: { server: "./server.mjs" } }),
+    );
+    writeFileSync(join(trusted, "sample", "server.mjs"), "export default () => ({})");
+    const reg = createPluginRegistry({ dir, trustedDir: trusted });
+    await assert.rejects(
+      () => reg.install("file:sample"),
+      new RegExp(`${trust}.*cannot declare entries\\.server`),
+    );
+    await reg.dispose();
+  }
 });
 
 test("concurrent disable then enable is serialized per plugin", async () => {
@@ -439,4 +444,57 @@ test("legacy trust classes do not invent sandbox network.fetch capabilities", as
   assert.equal(loaded.canonical.runtime?.kind, "trusted-local");
   assert.equal((loaded.canonical.capabilities ?? []).some((cap) => cap.name === "network.fetch"), false);
   assert.equal(loaded.legacy.trust, "network");
+});
+
+
+test("trusted server routes stay inside enabled Spaces", async () => {
+  const { dir, trusted } = scaffold();
+  const pluginDir = join(trusted, "sample");
+  writeFileSync(join(pluginDir, "polyth-plugin.json"), manifest({
+    trust: "privileged",
+    entries: { server: "./server.mjs" },
+    contributions: [],
+  }));
+  writeFileSync(join(pluginDir, "server.mjs"), `
+    export default (host) => ({
+      manifest: { id: host.pluginId, version: "1.0.0", trust: "privileged" },
+      setup(context) {
+        const route = host.routes.add(async () => true);
+        context.effect(() => route.dispose());
+      },
+    });
+  `);
+  const root = createContext("tenant-route-test");
+  const storageA = testSpaceStorage(join(dir, "..", "space-a"));
+  const storageB = testSpaceStorage(join(dir, "..", "space-b"));
+  const activeRoutes = new Set<RouteHandler>();
+  const reg = createPluginRegistry({
+    dir,
+    trustedDir: trusted,
+    root,
+    packageSpaces: () => [
+      { spaceId: "spc_a", storage: storageA },
+      { spaceId: "spc_b", storage: storageB },
+    ],
+    routes: {
+      add(handler) {
+        activeRoutes.add(handler);
+        return { dispose: () => { activeRoutes.delete(handler); } };
+      },
+    },
+  });
+  await reg.install("file:sample");
+  await reg.enable("sample.widget", storageA);
+  const handler = [...activeRoutes][0]!;
+  assert.equal(await handler({ space: { spaceId: "spc_a" } } as never), true);
+  assert.equal(await handler({ space: { spaceId: "spc_b" } } as never), false);
+
+  await reg.enable("sample.widget", storageB);
+  assert.equal(await handler({ space: { spaceId: "spc_b" } } as never), true);
+  await reg.disable("sample.widget", storageA);
+  assert.equal(await handler({ space: { spaceId: "spc_a" } } as never), false);
+  assert.equal(await handler({ space: { spaceId: "spc_b" } } as never), true);
+
+  await reg.dispose();
+  await root.dispose();
 });

@@ -28,7 +28,11 @@ permissions:
   contents: read
 
 jobs:
+  quality-gate:
+    uses: ./.github/workflows/release-quality.yml
+
   release:
+    needs: quality-gate
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -62,7 +66,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
           cache: gradle
 
       - name: Install workspace dependencies
