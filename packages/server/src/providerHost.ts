@@ -66,15 +66,12 @@ const assertDestination = (expectedIssuer: string, request: ProviderNetworkReque
   if (issuer.protocol !== "https:" || url.protocol !== "https:" || url.username || url.password || url.hash) {
     throw Object.assign(new Error("Identity provider transport must use HTTPS"), { code: "forbidden" });
   }
-  if (url.port && url.port !== "443") {
-    throw Object.assign(new Error("Identity provider transport uses an unexpected port"), { code: "forbidden" });
-  }
   const issuerOrigin = issuer.origin.toLowerCase();
   const host = url.hostname.toLowerCase();
   if (issuerOrigin === "https://github.com") {
-    if (host !== "github.com" && host !== "api.github.com") throw Object.assign(new Error("GitHub identity request escaped its allowlist"), { code: "forbidden" });
+    if (url.port || (host !== "github.com" && host !== "api.github.com")) throw Object.assign(new Error("GitHub identity request escaped its allowlist"), { code: "forbidden" });
   } else if (issuerOrigin === "https://bitbucket.org") {
-    if (host !== "bitbucket.org" && host !== "api.bitbucket.org") throw Object.assign(new Error("Bitbucket identity request escaped its allowlist"), { code: "forbidden" });
+    if (url.port || (host !== "bitbucket.org" && host !== "api.bitbucket.org")) throw Object.assign(new Error("Bitbucket identity request escaped its allowlist"), { code: "forbidden" });
   } else if (url.origin.toLowerCase() !== issuer.origin.toLowerCase()) {
     throw Object.assign(new Error("Identity provider request escaped its configured issuer"), { code: "forbidden" });
   }
@@ -132,7 +129,7 @@ export function createCanonicalProviderNetwork(control: ControlPlane): ProviderN
         const req = httpsRequest({
           protocol: "https:",
           hostname: url.hostname,
-          port: 443,
+          port: url.port ? Number(url.port) : 443,
           path: `${url.pathname}${url.search}`,
           method,
           headers,
