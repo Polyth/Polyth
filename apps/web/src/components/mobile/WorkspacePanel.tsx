@@ -11,6 +11,11 @@ import {
 import { useResolvedCapabilities } from "../../capabilities.ts";
 import { getCapabilityPlacements } from "../../capabilityLayout.ts";
 import { selectionFeedback, successFeedback } from "../../haptics.ts";
+import {
+  markProjectPresentationChanged,
+  PROJECT_PRESENTATION_HYDRATED_EVENT,
+  projectPresentationEventProjectId,
+} from "../../projectPresentationSync.ts";
 import { railIconFor, widgetIconFor } from "../../railIcons.ts";
 import { useStore } from "../../store.ts";
 import { getWidget, useWidgetCatalog } from "../../widgets/catalog.ts";
@@ -51,7 +56,10 @@ function storedLayout(projectId: string | null, catalog: readonly PanelItemDefin
 
 function persist(projectId: string | null, layout: WorkspacePanelLayout): void {
   if (!projectId) return;
-  try { localStorage.setItem(workspacePanelStorageKey(projectId), JSON.stringify(layout)); } catch { /* private/full */ }
+  try {
+    localStorage.setItem(workspacePanelStorageKey(projectId), JSON.stringify(layout));
+    markProjectPresentationChanged(projectId, "workspacePanel");
+  } catch { /* private/full */ }
 }
 
 function LayoutItem({ item, editing, onLabel }: { item: PanelItemInstance; editing: boolean; onLabel: (label: string) => void }) {
@@ -173,6 +181,14 @@ export default function WorkspacePanel({ onClose }: { onClose: () => void }) {
     setSelectedId(null);
     clearDrag();
   }, [projectId]);
+  useEffect(() => {
+    const onHydrated = (event: Event) => {
+      if (projectPresentationEventProjectId(event) !== projectId) return;
+      setLayout(storedLayout(projectId, catalog, migrated));
+    };
+    window.addEventListener(PROJECT_PRESENTATION_HYDRATED_EVENT, onHydrated);
+    return () => window.removeEventListener(PROJECT_PRESENTATION_HYDRATED_EVENT, onHydrated);
+  }, [catalog, migrated, projectId]);
   useEffect(() => () => { if (touchTimer.current) clearTimeout(touchTimer.current); }, []);
 
   const commit = (next: WorkspacePanelLayout, message?: string) => {

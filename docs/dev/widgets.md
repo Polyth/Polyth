@@ -207,9 +207,9 @@ export default defineWebPackage((host) => () => {
 ## 7. Config and settings
 
 - Per-instance config is persisted in the widget layout
-  (`localStorage` key `polyth.widgetLayout.<projectId>`), **browser-local** —
-  never session events, never server settings. Widget config is presentation
-  preference, not model-visible state.
+  (`localStorage` key `polyth.widgetLayout.<projectId>`) as a fast local cache
+  and mirrored through the project presentation-settings route. It remains
+  presentation-only — never session events or model-visible state.
 - `settingsSchema` is a JSON-Schema-shaped object; the canvas auto-renders
   boolean/string/enum controls from it when `settingsRender` is absent
   (`SchemaWidgetSettings` in `WidgetCanvas.tsx`). Provide `settingsRender`

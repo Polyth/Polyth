@@ -129,7 +129,8 @@ implementation of the same pattern.
 | New global extension seam (a slot that doesn't exist) | host/web-sdk change (§5) — not a per-feature decision |
 | REST endpoint | feature `RouteHandler` via `polyth.serverEntry` (see `README.md`) |
 | Model-visible durable state | session event (append before display) |
-| Browser-only preference | `localStorage` under `polyth.<area>.<key>` (widget layout: `polyth.widgetLayout.<projectId>`) |
+| Browser-only preference | `localStorage` under `polyth.<area>.<key>` when it is intentionally device-local |
+| Project presentation preference | Local cache under the project key, mirrored through `/api/projects/:id/settings` (widget, panel, pane, workbench, capability/icon order, and workspace mode) |
 | Shared server setting (other devices must see it) | server/package settings persistence + route |
 
 When two mechanisms look plausible, prefer the one with the smallest blast
@@ -336,8 +337,9 @@ registrations.
 allowed and identity-safe (a stale unregister cannot delete the new
 registration). Reducers compose per event type and are not exclusive.
 
-**Widget layout** is project-scoped **client-local** UI state
-(`polyth.widgetLayout.<projectId>`). Missing storage seeds
+**Widget layout** is project-scoped presentation state. The local record
+(`polyth.widgetLayout.<projectId>`) is the synchronous cache and is mirrored
+to the server through `/api/projects/:id/settings`; missing storage seeds
 `createDefaultWidgetLayout()` from the live catalog; existing storage is
 preserved. `defaultVisible` (and `DEFAULT_VISIBLE` / `requiredVisible`) applies
 when a widget is **first seen** by `ensureWidgets` / parse — including when a

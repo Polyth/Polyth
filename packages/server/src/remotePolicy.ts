@@ -133,6 +133,8 @@ export const CORE_REMOTE_ACCESS: RemoteAccessPolicy = {
     { methods: ["POST"], path: "/api/projects", capability: REMOTE_CAPABILITY.coreProjectsWrite, mutation: true },
     { methods: ["POST"], path: "/api/projects/create", capability: REMOTE_CAPABILITY.coreProjectsWrite, mutation: true },
     { methods: ["DELETE"], path: "/api/projects/:id", capability: REMOTE_CAPABILITY.coreProjectsWrite, mutation: true },
+    { methods: ["GET"], path: "/api/projects/:id/settings", capability: REMOTE_CAPABILITY.coreProjectsRead, mutation: false },
+    { methods: ["PUT"], path: "/api/projects/:id/settings", capability: REMOTE_CAPABILITY.coreProjectsWrite, mutation: true },
     { methods: ["GET"], path: "/api/sessions", capability: REMOTE_CAPABILITY.coreSessionsRead, mutation: false },
     { methods: ["POST"], path: "/api/sessions", capability: REMOTE_CAPABILITY.coreSessionsCreate, mutation: true },
     { methods: ["GET"], path: "/api/sessions/:id", capability: REMOTE_CAPABILITY.coreSessionsRead, mutation: false },

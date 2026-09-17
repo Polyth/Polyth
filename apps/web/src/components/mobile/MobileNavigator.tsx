@@ -964,11 +964,8 @@ export default function MobileNavigator() {
                       }}
                     >
                       <span className="mobile-nav-project-name">{project.name || project.path}</span>
-                      <span className="mobile-nav-project-meta">
-                        <span className="mobile-nav-project-meta-copy">
-                          {tr("sidebar.sessionlist.valueSessions", { length: matching.length })}
-                        </span>
-                        {!expanded && statusLabel && (
+                      {!expanded && statusLabel && (
+                        <span className="mobile-nav-project-meta">
                           <span className="mobile-nav-project-statuses" aria-label={statusLabel}>
                             {activeCount > 0 && (
                               <span className="mobile-nav-project-status is-running" title={`${activeCount} ${tr("common.running")}`}>
@@ -995,8 +992,8 @@ export default function MobileNavigator() {
                               </span>
                             )}
                           </span>
-                        )}
-                      </span>
+                        </span>
+                      )}
                     </button>
                   )}
                   <div className="mobile-nav-project-actions">

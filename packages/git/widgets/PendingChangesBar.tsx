@@ -8,7 +8,6 @@ import { resolveModelPresentation } from "@polyth/contracts/model-presentation";
 import { api } from "@polyth/session/web-api";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { toggleSessionStatusPopover } from "../../../apps/web/src/sessionStatusPopover.ts";
-import { useShellMode } from "../../../apps/web/src/responsiveShell.ts";
 import ProviderLogo from "../../models/widgets/ProviderLogo.tsx";
 import {
   AgentStatusDock,
@@ -107,7 +106,6 @@ export default function PendingChangesBar() {
     const session = state.sessions.find((candidate) => candidate.id === state.activeSessionId);
     return session?.worktreePath ? session.id : null;
   });
-  const phone = useShellMode() === "phone";
   const working = model.turn?.status === "working";
   const status = useGitStatus(projectId, working, sessionId);
   const selected = useMemo(
@@ -289,9 +287,7 @@ export default function PendingChangesBar() {
     }
   };
 
-  // Phones keep the per-file labels above the composer; the desktop bubble hides
-  // them until the user expands the summary.
-  if (!detailsOpen && !phone) {
+  if (!detailsOpen) {
     return (
       <section className="pending-changes-bar pending-changes-bar--collapsed">
         <RunSummary
@@ -347,15 +343,13 @@ export default function PendingChangesBar() {
           >
             {tr("pendingchangesbar.review")}
           </Button>
-          {!phone && (
-            <IconButton
-              variant="ghost"
-              size="sm"
-              icon={ChevronDownIcon}
-              label={tr("pendingchangesbar.collapse")}
-              onClick={() => setDetailsOpen(false)}
-            />
-          )}
+          <IconButton
+            variant="ghost"
+            size="sm"
+            icon={ChevronDownIcon}
+            label={tr("pendingchangesbar.collapse")}
+            onClick={() => setDetailsOpen(false)}
+          />
         </div>
       </div>
       <div className="pending-changes-list">

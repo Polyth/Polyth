@@ -32,7 +32,7 @@ import {
   useModelPrefs,
 } from "./modelPrefs.ts";
 import { useShellMode } from "@polyth/web/responsive-shell";
-import { dismissKeyboard } from "@polyth/web/mobile-viewport";
+import { dismissKeyboard, getViewportMetrics } from "@polyth/web/mobile-viewport";
 import { tapFeedback } from "@polyth/web/haptics";
 import {
   Button,
@@ -233,6 +233,11 @@ export default function ModelPicker({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const pickerShellRef = useRef<HTMLDivElement>(null);
+  const openRequestRef = useRef(0);
+
+  useEffect(() => () => {
+    openRequestRef.current += 1;
+  }, []);
 
   const current = value
     ? models.find((model) => pickerModelMatches(model, value))
@@ -380,6 +385,7 @@ export default function ModelPicker({
   }, [open, phone]);
 
   const close = () => {
+    openRequestRef.current += 1;
     setOpen(false);
     dispatchPicker({ type: "reset" });
     setEditing(false);
@@ -501,15 +507,27 @@ export default function ModelPicker({
     event.dataTransfer.dropEffect = "move";
   };
 
-  // §22: tapping the model while typing dismisses the keyboard FIRST, then
-  // opens the sheet — the picker can never end up under the keyboard.
+  // §22: tapping the model while typing dismisses the keyboard FIRST. Delay
+  // mounting the compact popover until that promise settles so its stable
+  // anchor captures the composer's final, keyboard-closed position.
   const toggleOpen = () => {
     if (open) {
       close();
       return;
     }
-    setOpen(true);
-    if (phone) void dismissKeyboard();
+    const request = ++openRequestRef.current;
+    const reveal = () => {
+      if (request === openRequestRef.current) setOpen(true);
+    };
+    if (!phone) {
+      reveal();
+      return;
+    }
+    const viewport = getViewportMetrics();
+    const keyboardWasOpen = viewport.covering || viewport.keyboardInset > 0;
+    const dismissal = dismissKeyboard();
+    if (keyboardWasOpen) void dismissal.then(reveal);
+    else reveal();
   };
 
   const onSearchKey = (event: KeyboardEvent<HTMLInputElement>) => {

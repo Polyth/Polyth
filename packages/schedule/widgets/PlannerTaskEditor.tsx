@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Project } from "@polyth/contracts";
 import { api, type ScheduleTaskDto } from "@polyth/session/web-api";
 import { useStore } from "../../../apps/web/src/store.ts";
@@ -101,6 +101,10 @@ export default function PlannerTaskEditor({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [baseline, setBaseline] = useState("");
+  const projectTriggerRef = useRef<HTMLButtonElement>(null);
+  const onceTriggerRef = useRef<HTMLButtonElement>(null);
+  const recurrenceTriggerRef = useRef<HTMLButtonElement>(null);
+  const behaviorTriggerRef = useRef<HTMLButtonElement>(null);
 
   const sessions = useMemo(
     () => allSessions.filter((session) => session.projectId === projectId && session.status !== "archived"),
@@ -338,6 +342,7 @@ export default function PlannerTaskEditor({
           <section className="planner-section">
             <span className="planner-section-label">{tr("scheduleview.project")}</span>
             <button
+              ref={projectTriggerRef}
               type="button"
               className="planner-summary-row"
               onClick={() => setProjectOpen(true)}
@@ -389,6 +394,7 @@ export default function PlannerTaskEditor({
                 />
                 {view.mode === "once" && (
                   <button
+                    ref={onceTriggerRef}
                     type="button"
                     className="planner-summary-row"
                     disabled={loopFile}
@@ -402,6 +408,7 @@ export default function PlannerTaskEditor({
                 )}
                 {(view.mode === "weekly" || view.mode === "monthly") && (
                   <button
+                    ref={recurrenceTriggerRef}
                     type="button"
                     className="planner-summary-row"
                     disabled={loopFile}
@@ -441,6 +448,7 @@ export default function PlannerTaskEditor({
           <section className="planner-section">
             <span className="planner-section-label">{tr("scheduleview.runBehavior")}</span>
             <button
+              ref={behaviorTriggerRef}
               type="button"
               className="planner-summary-row"
               disabled={loopFile}
@@ -456,6 +464,7 @@ export default function PlannerTaskEditor({
       <PlannerProjectPicker
         open={projectOpen}
         onClose={() => setProjectOpen(false)}
+        anchorRef={projectTriggerRef}
         projects={projects}
         value={projectId || null}
         onChange={(id) => {
@@ -472,6 +481,7 @@ export default function PlannerTaskEditor({
         <PlannerOnceSheet
           open={onceOpen}
           onClose={() => setOnceOpen(false)}
+          anchorRef={onceTriggerRef}
           value={view.at}
           disabled={loopFile}
           onChange={(at) => setView({ mode: "once", at })}
@@ -481,6 +491,7 @@ export default function PlannerTaskEditor({
         <PlannerRecurrenceSheet
           open={recurrenceOpen}
           onClose={() => setRecurrenceOpen(false)}
+          anchorRef={recurrenceTriggerRef}
           value={recurrence}
           onChange={(next: RecurrenceView) => setView(next)}
         />
@@ -488,6 +499,7 @@ export default function PlannerTaskEditor({
       <PlannerRunBehaviorSheet
         open={behaviorOpen}
         onClose={() => setBehaviorOpen(false)}
+        anchorRef={behaviorTriggerRef}
         targetMode={targetMode}
         sessionId={sessionId}
         overlap={overlap}

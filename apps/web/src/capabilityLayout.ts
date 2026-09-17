@@ -1,5 +1,10 @@
 import { useSyncExternalStore } from "react";
 import { getState, subscribeStore } from "./store.ts";
+import {
+  markProjectPresentationChanged,
+  PROJECT_PRESENTATION_HYDRATED_EVENT,
+  projectPresentationEventProjectId,
+} from "./projectPresentationSync.ts";
 
 export type CapabilityTier = "primary" | "more" | "technical";
 
@@ -104,6 +109,7 @@ function write(projectId: string | null, layout: CapabilityLayoutRecord): void {
   if (projectId === null) return;
   try {
     localStorage.setItem(capabilityLayoutStorageKey(projectId), JSON.stringify(layout));
+    markProjectPresentationChanged(projectId, "capabilityLayout");
   } catch {
     // Browser storage may be unavailable; keep the current in-memory layout.
   }
@@ -124,6 +130,15 @@ subscribeStore(() => {
   state = read(activeProjectId);
   emit();
 });
+
+if (typeof window !== "undefined") {
+  window.addEventListener(PROJECT_PRESENTATION_HYDRATED_EVENT, (event) => {
+    const hydratedProjectId = projectPresentationEventProjectId(event);
+    if (hydratedProjectId === null || hydratedProjectId !== activeProjectId) return;
+    state = read(activeProjectId);
+    emit();
+  });
+}
 
 export function getCapabilityPlacements(): Record<string, PlacementOverride> {
   return state.placements;

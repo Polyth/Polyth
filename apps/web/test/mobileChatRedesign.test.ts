@@ -291,7 +291,7 @@ test("the mobile viewport is fixed and requests keyboard content resizing", asyn
   assert.match(html, /interactive-widget=resizes-content/, "supporting browsers resize content for the keyboard");
 });
 
-test("every redesigned overlay uses the one sheet system", async () => {
+test("every redesigned overlay uses the shared overlay system", async () => {
   const [sheet, dialog] = await Promise.all([
     read("../src/components/mobile/Sheet.tsx"),
     read("../src/components/a11y/Dialog.tsx"),
@@ -308,23 +308,24 @@ test("every redesigned overlay uses the one sheet system", async () => {
   for (const [name, rel] of [
     ["model picker", "../../../packages/models/widgets/ModelPicker.tsx"],
     ["starter picker", "../src/components/mobile/StarterPicker.tsx"],
-    ["project/branch bar", "../src/components/mobile/SessionContextBar.tsx"],
     ["agent/mode picker", "../src/components/Picker.tsx"],
   ] as const) {
     const src = await read(rel);
     assert.match(
       src,
       /(?:from "(?:[^"]*\/)?(?:mobile\/)?Sheet\.tsx"|ResponsiveOverlay)/,
-      `${name} renders the shared sheet`,
+      `${name} renders a shared overlay`,
     );
   }
+  const contextBar = await read("../src/components/mobile/SessionContextBar.tsx");
+  assert.match(contextBar, /<Picker/);
+  assert.doesNotMatch(contextBar, /<Sheet|context-trigger|useSheetTrigger/);
 });
 
-test("a sheet opens on pointer-down and survives the keyboard dismissal (§22)", async () => {
+test("mobile pickers survive keyboard dismissal and compact reflow (§22)", async () => {
   // The bug this pins: pointer-down dismisses the keyboard, the reflow moves
   // the control out from under the finger, and the click — which used to be
-  // what opened the sheet — is delivered to nothing. "The keyboard just
-  // closes and no picker opens."
+  // what opened the picker — is delivered to nothing.
   const trigger = await read("../src/components/mobile/sheetTrigger.ts");
   assert.ok(trigger.includes("onPointerDown"), "touch activates on pointer-down");
   assert.ok(trigger.includes("POINTER_ACTIVATION_WINDOW"), "the echo click is ignored by time, not by a one-shot flag");
@@ -332,15 +333,18 @@ test("a sheet opens on pointer-down and survives the keyboard dismissal (§22)",
   assert.ok(trigger.includes("event.currentTarget.focus"), "the modal records the pointer trigger as its opener");
   assert.ok(trigger.includes("activate();"), "keyboard activation still arrives as a click");
 
-  for (const [rel, name] of [
-    ["../src/components/Picker.tsx", "mode/thinking (sheet opt-in)"],
-    ["../src/components/mobile/SessionContextBar.tsx", "project/branch"],
-    ["../src/components/workspace/builtinSurfaces.tsx", "starter"],
-  ] as const) {
-    const src = await read(rel);
-    assert.ok(src.includes("useSheetTrigger("), `the ${name} trigger uses the shared activation`);
-    assert.ok(!/dismissKeyboard\(\)\.then/.test(src), `the ${name} sheet never waits on the keyboard to open`);
-  }
+  const picker = await read("../src/components/Picker.tsx");
+  assert.ok(picker.includes("useSheetTrigger(asSheet, toggleOpen)"), "Picker keeps shared activation for sheet opt-ins");
+  assert.match(picker, /const keyboardWasOpen = viewport\.covering \|\| viewport\.keyboardInset > 0/);
+  assert.match(picker, /if \(keyboardWasOpen\) void dismissal\.then\(reveal\)/);
+  assert.match(picker, /stableAnchor=\{phone\}/, "compact pickers keep a stable anchor during reflow");
+
+  const contextBar = await read("../src/components/mobile/SessionContextBar.tsx");
+  assert.match(contextBar, /<Picker/);
+  assert.doesNotMatch(contextBar, /useSheetTrigger|dismissKeyboard/);
+
+  const surface = await read("../src/components/workspace/builtinSurfaces.tsx");
+  assert.ok(surface.includes("useSheetTrigger("), "starter surfaces keep shared sheet activation");
 });
 
 test("sheets escape their ancestors: portal, top-most Escape, contained focus", async () => {
@@ -374,18 +378,34 @@ test("sheets escape their ancestors: portal, top-most Escape, contained focus", 
   );
 });
 
-test("session edited-file labels stay visible above the phone composer", async () => {
+test("session edited-file labels stay collapsed until the user opens the dock", async () => {
   const pending = await read("../../../packages/git/widgets/PendingChangesBar.tsx");
-  assert.match(pending, /useShellMode\(\)/, "pending changes follow the shared phone shell seam");
-  assert.match(
+  const gitCss = await read("../../../packages/git/widgets/styles.css");
+  assert.match(pending, /if \(!detailsOpen\) \{/, "the edited-files dock stays collapsed until opened");
+  assert.doesNotMatch(
     pending,
     /if \(!detailsOpen && !phone\)/,
-    "phones skip the collapsed count bubble so filename labels stay in the dock",
+    "phone no longer skips the collapsed count bubble",
   );
   assert.match(
     pending,
-    /!phone && \([\s\S]*?setDetailsOpen\(false\)/,
-    "collapse is desktop-only once the file list is open",
+    /setDetailsOpen\(false\)/,
+    "collapse remains available after the file list is open",
+  );
+  assert.match(
+    gitCss,
+    /\.pending-changes-file\s*\{[^}]*font:\s*400 var\(--font-meta\) \/ 1\.4 var\(--mono\)/s,
+    "file rows use compact technical type, not editor/code size",
+  );
+  assert.match(
+    gitCss,
+    /\.pending-changes-file\s*\{[^}]*min-height:\s*var\(--control-h-sm\)/s,
+    "visible file rows stay compact; coarse pointers grow the tap box separately",
+  );
+  assert.match(
+    gitCss,
+    /\.pending-changes-file::after\s*\{[^}]*var\(--hit-min\)/s,
+    "the tap box grows on coarse pointers without stretching the list",
   );
 });
 
@@ -394,10 +414,10 @@ test("the composer is adaptive, with one primary action at a time", async () => 
   assert.ok(composer.includes("composer-collapsed"), "an idle phone composer is compact");
   assert.ok(composer.includes("composer-expanded"), "focus expands it");
   assert.ok(composer.includes("composer-input-active"), "textarea focus is exposed for keyboard-safe shell CSS");
-  assert.ok(composer.includes("composer-has-draft"), "the draft state drives the mic/send morph");
+  assert.ok(composer.includes("composer-has-draft"), "the draft state keeps the composer engaged");
   assert.ok(
-    composer.includes("const expanded = !phoneLayout || inputFocused || shellMode"),
-    "focus and shell mode expand the phone composer; a working turn alone keeps it minified (Stop stays in the collapsed row)",
+    composer.includes("const expanded = !phoneLayout || inputFocused || shellMode || hasDraft"),
+    "focus, shell mode, and an existing draft expand the phone composer; a working turn alone keeps it minified (Stop stays in the collapsed row)",
   );
   assert.ok(composer.includes('hasDraft ? " composer-has-draft" : ""'),
     "text and attachments retain their independent draft state");
@@ -524,8 +544,10 @@ test("phone CSS keeps the layout inside the visible viewport", async () => {
   assert.match(phone, /touch-action: manipulation/, "§28: no accidental double-tap zoom on controls");
   assert.match(phone, /body\[data-keyboard="open"\]/, "§43: the empty state yields to the keyboard");
   assert.match(phone, /body\[data-band="short"\] \.hero-body \{ display: none; \}/, "a short band drops the empty state entirely");
-  assert.match(phone, /composer-mobile:not\(\.composer-has-draft\) \.composer-primary \.send \{ display: none; \}/);
-  assert.match(phone, /composer-mobile\.composer-has-draft \.composer-mobile-extensions \.mic-btn\s*\{\s*display:\s*none;/);
+  assert.doesNotMatch(phone, /composer-mobile:not\(\.composer-has-draft\) \.composer-primary \.send \{ display: none; \}/,
+    "an empty composer keeps its disabled Send affordance instead of swapping to mic");
+  assert.doesNotMatch(phone, /composer-mobile\.composer-has-draft \.composer-mobile-extensions \.mic-btn\s*\{\s*display:\s*none;/,
+    "dictation remains available after text is entered");
   assert.match(
     phone,
     /\.composer-mobile \.composer-mobile-extensions \{[^}]*max-width:\s*var\(--tap\);[^}]*overflow-x:\s*auto;/s,
@@ -571,12 +593,16 @@ test("touch targets and design tokens are centralized", async () => {
   }
   const section = css.slice(css.indexOf("UX-MOBILE-01 — mobile-first new chat"));
   // Repeated controls size themselves from --tap rather than ad-hoc pixels.
-  for (const selector of [".starter-chip", ".context-trigger", ".config-chip", ".sheet-row-star"]) {
+  for (const selector of [".starter-chip", ".config-chip", ".sheet-row-star"]) {
     const at = section.search(new RegExp(`\\${selector}\\s*[,{]`));
     assert.ok(at > 0, `${selector} is styled in the redesign section`);
     const rule = section.slice(at, section.indexOf("}", at));
     assert.match(rule, /var\(--tap\)/, `${selector} is at least one tap target tall`);
   }
+  const contextChipAt = section.lastIndexOf(".context-selector .picker-chip");
+  assert.ok(contextChipAt > 0, ".context-selector .picker-chip is styled in the redesign section");
+  const contextChipRule = section.slice(contextChipAt, section.indexOf("}", contextChipAt));
+  assert.match(contextChipRule, /min-height:\s*var\(--tap\)/, "mobile context picker is a tap target");
   assert.match(
     css,
     /@media \(pointer: coarse\) \{\s*\.composer-simple \.composer-add-trigger \{[^}]*min-width:\s*var\(--tap\);/s,

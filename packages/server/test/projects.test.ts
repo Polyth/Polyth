@@ -162,6 +162,22 @@ test("project metadata PATCH is served by the project route", async () => {
       name: "After",
       icon: pngDataUrl,
     });
+    const saveSettings = await fetch(`http://127.0.0.1:${port}/api/projects/${project.id}/settings`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ settings: { workspaceMode: "widgets" } }),
+    });
+    assert.equal(saveSettings.status, 200);
+    assert.equal((await saveSettings.json()).settings.workspaceMode, "widgets");
+    const loadSettings = await fetch(`http://127.0.0.1:${port}/api/projects/${project.id}/settings`);
+    assert.equal(loadSettings.status, 200);
+    assert.equal((await loadSettings.json()).settings.workspaceMode, "widgets");
+    const invalidSettings = await fetch(`http://127.0.0.1:${port}/api/projects/${project.id}/settings`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ settings: { unknown: true } }),
+    });
+    assert.equal(invalidSettings.status, 400);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -208,6 +224,48 @@ test("project model memory is persisted without erasing the remembered model", a
       defaults: { rememberModelSelection: "yes" } as never,
     }),
     /rememberModelSelection must be boolean/,
+  );
+});
+
+test("project presentation settings persist per project and stay tenant-scoped", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-projects-"));
+  const rootA = join(dir, "a");
+  const rootB = join(dir, "b");
+  mkdirSync(rootA);
+  mkdirSync(rootB);
+  const projects = createProjectService(dir);
+  const tenancy = await testTenancy({ dataDir: dir, projects });
+  const spaceA = tenancy.services(tenancy.defaultContext).projects;
+  const contextB = tenancy.addSpace("Other");
+  const spaceB = tenancy.services(contextB).projects;
+  const projectA = await spaceA.add(rootA, "A");
+  const projectB = await spaceB.add(rootB, "B");
+
+  const saved = await spaceA.putPresentationSettings!(projectA.id, {
+    widgetLayout: { version: 1, widgets: { "core.chat": { visible: true } } },
+    workspaceMode: "widgets",
+  });
+  assert.equal(saved.revision, 1);
+  assert.equal((await spaceA.getPresentationSettings!(projectA.id)).settings.workspaceMode, "widgets");
+  assert.equal("presentation" in (await spaceA.get(projectA.id))!, false);
+  await assert.rejects(
+    () => spaceB.getPresentationSettings!(projectA.id),
+    (error: Error & { code?: string }) => error.code === "not-found",
+  );
+  await spaceB.putPresentationSettings!(projectB.id, { workspaceMode: "edit" });
+
+  const reopened = createProjectService(dir);
+  const reopenedA = reopened.forSpace(tenancy.defaultContext);
+  const reopenedB = reopened.forSpace(contextB);
+  assert.equal((await reopenedA.getPresentationSettings!(projectA.id)).settings.workspaceMode, "widgets");
+  assert.equal((await reopenedB.getPresentationSettings!(projectB.id)).settings.workspaceMode, "edit");
+  await assert.rejects(
+    () => reopenedA.putPresentationSettings!(projectA.id, { notASetting: true }),
+    (error: Error & { code?: string }) => error.code === "invalid-input",
+  );
+  await assert.rejects(
+    () => reopenedA.putPresentationSettings!(projectA.id, { widgetLayout: "x".repeat(256 * 1024) }),
+    (error: Error & { code?: string }) => error.code === "invalid-input",
   );
 });
 

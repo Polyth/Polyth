@@ -386,8 +386,11 @@ function MicButton() {
   const language = serverSelection?.language || prefs.lang || "auto";
   const contextInjection = serverSelection?.contextInjection ?? prefs.contextInjection;
   const processingPolicy = serverSelection?.processingPolicy ?? prefs.processingPolicy;
-  const browserFallback = processingPolicy === "browser-fallback";
-  const cloudPrimaryPolicy = processingPolicy === "prefer-cloud" || browserFallback;
+  // The processing policy chooses the preferred provider. An unavailable
+  // server/native route may use Web Speech as a last-mile fallback (including
+  // mobile WebKit), except when local-only is an explicit privacy choice.
+  const browserFallback = support.stt && processingPolicy !== "local-only";
+  const cloudPrimaryPolicy = processingPolicy === "prefer-cloud" || processingPolicy === "browser-fallback";
   const directCapability = providerCapabilities(provider);
   // Auto-fallback remains on the server so recoverable cloud failures can replay
   // PCM into local Nemotron. Direct is selected only from verified capability data.
@@ -483,9 +486,10 @@ function MicButton() {
     return () => { cancelled = true; };
   }, [prefs.dictation, selectionReady, directCloud, provider, transport, processingPolicy]);
 
-  const providerOrBrowserAvailable = Boolean(capability?.available) || (browserFallback && support.stt);
+  const providerOrBrowserAvailable = Boolean(capability?.available) || browserFallback;
   const availability: { available: boolean; reason?: string } =
     !prefs.dictation ? { available: false, reason: tr("voice.dictationOff") }
+    : browserFallback ? { available: true }
     : !selectionReady || capability === null ? { available: false, reason: tr("voice.checkingMicrophone") }
       : !providerOrBrowserAvailable
         ? {
@@ -609,14 +613,23 @@ function MicButton() {
     };
     rec.onerror = (e) => {
       if (startGeneration.current !== generation || composerScopeKey() !== originScope) return;
-      recRef.current = null;
+      // Abort can synchronously trigger `onend` in some WebKit builds. Fence
+      // this recognizer before aborting so an error never commits its partial
+      // transcript through that callback.
+      startGeneration.current++;
       browserCommitRef.current = false;
+      try { rec.abort(); } catch { /* recognition may already be closed */ }
+      recRef.current = null;
       fail(e.error ?? tr("voice.microphoneError"));
     };
     rec.onend = () => {
       if (startGeneration.current !== generation || composerScopeKey() !== originScope) return;
       const commit = browserCommitRef.current;
       const text = browserTranscriptRef.current.trim();
+      // Invalidate this recognizer before publishing idle. Some mobile WebKit
+      // builds deliver a queued result after `onend`; the generation fence
+      // keeps that stale callback from mutating a new/idle composer.
+      startGeneration.current++;
       browserCommitRef.current = false;
       browserTranscriptRef.current = "";
       recRef.current = null;
@@ -626,7 +639,14 @@ function MicButton() {
       if (commit && text) requestComposerInsert(text);
     };
     recRef.current = rec;
-    rec.start();
+    try {
+      rec.start();
+    } catch (startError) {
+      if (startGeneration.current === generation && composerScopeKey() === originScope) {
+        fail(startError);
+      }
+      return;
+    }
     if (startGeneration.current !== generation || composerScopeKey() !== originScope) {
       recRef.current = null;
       try { rec.abort(); } catch { /* already ended */ }
@@ -740,7 +760,6 @@ const VOICE_WIDGET_PLUGIN = defineWidgetPlugin({
     defaultSlot: "composer.leading",
     supportedSlots: [
       "composer.leading",
-      "composer.trailing",
       "app.header.actions",
       "session.header.actions",
       "app.nav",

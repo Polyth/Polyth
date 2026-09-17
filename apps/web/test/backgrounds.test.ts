@@ -45,6 +45,16 @@ test("background and glass controls are wired into Appearance and the held-Shift
   assert.match(picker, /useShiftArmed\(\)/);
   assert.match(styles, /\.background-quick-trigger\s*\{[^}]*position:\s*fixed;[^}]*inset-inline-end:/s);
   assert.doesNotMatch(styles, /\.workspace > \.main\s*\{[^}]*background:/s);
+  assert.match(
+    styles,
+    /html\[data-background\]:not\(\[data-background="none"\]\)\s*\{[^}]*background-image:[\s\S]*?var\(--app-background-image\)/s,
+    "the selected background is rooted at the viewport so it can paint behind the phone safe area",
+  );
+  assert.match(
+    styles,
+    /html\[data-background\]:not\(\[data-background="none"\]\) body,\s*html\[data-background\]:not\(\[data-background="none"\]\) \.app\s*\{[^}]*background-color:\s*transparent;[^}]*background-image:\s*none;/s,
+    "the app canvas lets the root background continue through the safe area",
+  );
   assert.match(styles, /backdrop-filter:\s*blur\(var\(--material-glass-blur\)\)\s*saturate\(var\(--material-glass-saturation\)\)/);
   assert.doesNotMatch(styles, /prefers-reduced-motion:\s*no-preference[\s\S]{0,1200}data-glass/);
 });

@@ -45,7 +45,7 @@ test("pending catalog discovery shows loading instead of an authoritative empty 
       root.render(createElement(ModelPicker, { models: [], catalogLoading: true, onPick: () => {} }));
     });
     await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
-    assert.match(document.body.querySelector(".sheet-empty")?.textContent ?? "", /loading/i);
+    assert.match(document.body.querySelector(".palette-empty")?.textContent ?? "", /loading/i);
     assert.doesNotMatch(document.body.textContent ?? "", /no models found/i);
   } finally {
     phoneMode = false;
@@ -154,6 +154,64 @@ test("stable anchoring ignores composer layout movement and still clamps after v
   } finally {
     Object.defineProperty(window, "innerWidth", { value: originalWidth, configurable: true });
     await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("compact stable anchoring follows visual viewport changes but ignores catalog reflow", async () => {
+  const { act, createElement, useRef } = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { useAnchoredPosition } = await import("../src/components/ui/useAnchoredPosition.ts");
+  let left = 120;
+  let position: { left: number; ready: boolean } | undefined;
+  const anchor = { getBoundingClientRect: () => ({ left, right: left + 40, top: 100, bottom: 140, width: 40, height: 40 }) } as HTMLElement;
+  const surface = { getBoundingClientRect: () => ({ width: 200, height: 240 }) } as HTMLElement;
+  function Harness() {
+    position = useAnchoredPosition(true, useRef(anchor), useRef(surface), {
+      side: "down",
+      stableAnchor: true,
+      compact: true,
+    });
+    return null;
+  }
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const originalWidth = window.innerWidth;
+  const originalHeight = window.innerHeight;
+  try {
+    Object.defineProperty(window, "innerWidth", { value: 390, configurable: true });
+    Object.defineProperty(window, "innerHeight", { value: 800, configurable: true });
+    await act(async () => { root.render(createElement(Harness)); });
+    assert.equal(position?.left, 120);
+
+    left = 40;
+    await act(async () => { window.dispatchEvent(new window.Event("scroll")); });
+    assert.equal(position?.left, 120, "catalog/layout changes do not move an open picker");
+
+    await act(async () => { window.visualViewport?.dispatchEvent(new window.Event("scroll")); });
+    assert.equal(position?.left, 120, "Safari visual-viewport pans must not retarget harness tabs");
+
+    await act(async () => {
+      window.dispatchEvent(new window.Event("pointerdown"));
+      window.dispatchEvent(new window.Event("resize"));
+    });
+    assert.equal(position?.left, 120, "an in-flight press keeps the picker still");
+    await act(async () => { window.dispatchEvent(new window.Event("pointerup")); });
+    assert.equal(position?.left, 40, "keyboard re-anchor flushes after the press");
+
+    const { setNativeKeyboardInset } = await import("../src/mobileViewport.ts");
+    left = 80;
+    await act(async () => { setNativeKeyboardInset(300); });
+    assert.equal(position?.left, 80, "a real keyboard inset change re-anchors to the settled composer");
+  } finally {
+    Object.defineProperty(window, "innerWidth", { value: originalWidth, configurable: true });
+    Object.defineProperty(window, "innerHeight", { value: originalHeight, configurable: true });
+    const { setNativeKeyboardInset } = await import("../src/mobileViewport.ts");
+    await act(async () => {
+      setNativeKeyboardInset(0);
+      root.unmount();
+    });
     container.remove();
   }
 });
@@ -550,4 +608,35 @@ test("every harness catalog uses the same compact popover surface on desktop and
   assert.doesNotMatch(source, /sheetSize="tall"/);
   assert.doesNotMatch(styles, /\.model-pop--compact/);
   assert.match(styles, /\.model-pop\s*\{[^}]*height:\s*min\(560px,\s*72vh\)/s);
+  assert.match(
+    styles,
+    /\.model-pop \.pkg-harnesses-tablist \.provider-logo\s*\{[^}]*color:\s*currentColor;/s,
+    "compact picker harness logos inherit selected-tab color",
+  );
+  assert.match(source, /getViewportMetrics\(\)/, "phone opening checks whether the keyboard is actually open");
+  assert.match(source, /if \(keyboardWasOpen\) void dismissal\.then\(reveal\)/,
+    "phone opening waits for keyboard geometry only when needed");
+  assert.match(
+    styles,
+    /@media \(pointer: coarse\) \{[\s\S]*?\.model-pop\s*\{[\s\S]*?height:\s*min\(560px,\s*calc\(var\(--visual-vh,\s*100dvh\)\s*\*\s*0\.52\)\);[\s\S]*?max-height:\s*min\(560px,\s*calc\(var\(--visual-vh,\s*100dvh\)\s*\*\s*0\.52\)\);[\s\S]*?border-radius:\s*var\(--radius-surface\);/s,
+    "phone picker keeps a fixed compact size and uses the user-scaled surface radius",
+  );
+  assert.doesNotMatch(
+    styles,
+    /@media \(pointer: coarse\) \{[\s\S]*?\.model-pop\s*\{[^}]*height:\s*auto/s,
+    "phone catalog changes cannot switch the popover back to content-sized geometry",
+  );
+  const hook = await read("../src/components/ui/useAnchoredPosition.ts");
+  const popover = await read("../src/components/ui/Popover.tsx");
+  assert.match(hook, /addEventListener\("scroll", onVisualScroll\)/,
+    "visual-viewport pans update geometry without resetting the opening anchor");
+  assert.match(hook, /keyboardOrSizeChanged/,
+    "native/visual keyboard inset is the only compact re-anchor signal besides layout resize");
+  assert.match(hook, /pointerActive && reanchorOnViewportChange/,
+    "a finger down on a harness tab freezes re-anchor until release");
+  assert.match(
+    popover,
+    /event\.detail > 0 && !pointerInside\.current[\s\S]*?event\.preventDefault\(\)/,
+    "the opening gesture's ghost click cannot select a harness tab",
+  );
 });

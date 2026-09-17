@@ -3035,6 +3035,39 @@ export function createSessionService(deps: {
             deps.notify?.turnStopped(sessionId, effectiveReason);
             if (effectiveReason === "completed") hooks.onTurnCompleted?.(sessionId, replyText(sessionId));
             if (!requestsOpen && effectiveReason !== "error") {
+              // A terminal stop is the proof that a requested abort took
+              // effect. ACP-style runtimes cannot acknowledge `session/cancel`
+              // synchronously, so the turn-abort operation stays `unknown` and
+              // the reconciliation barrier it blocked never releases — which
+              // would strand every queued message (send-now included) forever.
+              // Resolve proven abort operations and lift the barrier only when
+              // this stop actually resolved one; a fresh blocking operation
+              // (e.g. a new turn already admitted) keeps the barrier untouched.
+              let settledAbort = false;
+              for (const operation of await durable.operations(sessionId)) {
+                if (operation.mutationKind !== "turn-abort" || operation.state !== "unknown") continue;
+                await broadcastTail(sessionId, () => durable.settleOperation(operation.operationId, {
+                  kind: "confirmed",
+                  ...(ev.turnId ? { receipt: ev.turnId } : {}),
+                }));
+                settledAbort = true;
+              }
+              if (settledAbort) {
+                const recoveredIds = await restartRecoveredOperationIds(sessionId);
+                const barrier = await durable.reconciliation(sessionId);
+                if (barrier && (barrier.state === "blocked" || barrier.state === "unknown")) {
+                  const remaining = (await durable.operations(sessionId)).find((operation) =>
+                    isRuntimeOperationBlocking(operation)
+                    && !(operation.state === "unknown" && recoveredIds.has(operation.operationId)));
+                  if (!remaining) {
+                    await broadcastTail(sessionId, () => durable.settleReconciliation(
+                      sessionId,
+                      barrier.ordinal,
+                      "ready",
+                    ));
+                  }
+                }
+              }
               void dispatchQueue(sessionId);
             }
           }
@@ -4423,8 +4456,9 @@ export function createSessionService(deps: {
   };
 
   /** Commit a staged rewind after the old turn has released execution. The
-   * caller owns the session lock. Branch first, then publish the replacement
-   * clear; failures leave both the marker and any queued replacement intact. */
+   * caller owns the session lock. Exact native branching is preferred; runtimes
+   * without fork support use a fresh runtime epoch with canonical continuity.
+   * Failures leave the marker and any queued replacement intact. */
   const replaceRewoundRuntimeUnderLock = async (
     sessionId: string,
     projection: SessionProjection,
@@ -4437,8 +4471,24 @@ export function createSessionService(deps: {
     if (turnActive(sessionId)) {
       throw Object.assign(new Error("cannot replace rewound history while a turn is running"), { code: "conflict" });
     }
-    if (!rt.branchSession) {
-      throw Object.assign(new Error("runtime cannot branch rewound history"), { code: "unsupported" });
+    // A submit-time switch has already released the old leg and published a
+    // fresh empty target. It has not received a prompt yet, so its first turn
+    // can carry the rewind-effective canonical continuity directly; avoid a
+    // second native reset for that cross-harness path.
+    if (
+      current.runtimeBinding?.historyBaseline === "empty"
+      && current.runtimeLeg?.bootstrap === "continuity"
+      && current.runtimeLeg.canonicalThroughSeq === 0
+    ) {
+      await appendAndBroadcast(sessionId, "session/rewind-cleared", {
+        rewindSeq: rewind.markerSeq,
+        replaced: true,
+        strategy: "fresh-runtime-epoch",
+      });
+      return (await store.projection(sessionId)) ?? current;
+    }
+    if (!rt.branchSession && !rt.branchSessionOperation) {
+      return replaceRewoundRuntimeWithFreshRuntimeEpochUnderLock(sessionId, current, rt);
     }
     const project = await projects.get(current.projectId);
     const cwd = current.worktreePath ?? project?.path ?? process.cwd();
@@ -4567,12 +4617,15 @@ export function createSessionService(deps: {
         if (queued[0] && queueEditHeld(sessionId, queued[0].id)) return;
         // A replacement submitted while the old turn was running is queued
         // ahead of its abort. Only after the confirmed stop reaches this idle
-        // dispatcher do we branch and resolve the soft rewind.
+        // dispatcher do we replace the runtime leg and resolve the soft rewind.
         let rt: AgentRuntime | undefined;
         if ((await logFacts(sessionId)).rewind) {
           rt = await ensureWired(sessionId, proj);
           proj = await replaceRewoundRuntimeUnderLock(sessionId, proj, rt);
           if (turnActive(sessionId) || proj.status !== "idle") return;
+          // A non-fork rewind retires the old facade and wires a fresh runtime
+          // epoch. Do not let the queued turn use the pre-replacement object.
+          rt = await ensureWired(sessionId, proj);
         }
         const reserved = await broadcastTail(
           sessionId,
@@ -5995,6 +6048,7 @@ export function createSessionService(deps: {
         const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(operation,
           (id) => target.resetSessionOperation ? target.resetSessionOperation(request, id)
             : target.createSessionOperation ? target.createSessionOperation(request, id)
+            : target.resetSession ? target.resetSession(request)
             : target.ensureSession(request),
           (backendSessionId) => ({ backendSessionId }),
           async (result, unknownCode) => {
@@ -6064,6 +6118,69 @@ export function createSessionService(deps: {
     events.forEach((event) => broadcast.event(event));
     publishProjection((await store.projection(sessionId))!);
   };
+
+  /** Non-fork harnesses cannot materialize an exact native branch. Reuse the
+   * normal release/create/epoch transaction so the old execution is proven
+   * released, the new leg is fenced by a durable epoch, and the next prompt
+   * receives canonical continuity. The same-harness route is retained by the
+   * epoch projector; only its native session leg changes. */
+  async function replaceRewoundRuntimeWithFreshRuntimeEpochUnderLock(
+    sessionId: string,
+    projection: SessionProjection,
+    runtime: AgentRuntime,
+  ): Promise<SessionProjection> {
+    const events = await store.events(sessionId);
+    const rewind = activeRewind(events);
+    let current = (await store.projection(sessionId)) ?? projection;
+    if (!rewind) return current;
+    if (turnActive(sessionId)) {
+      throw Object.assign(new Error("cannot replace rewound history while a turn is running"), { code: "conflict" });
+    }
+    if (current.harnessTransition) {
+      throw Object.assign(new Error("rewind replacement is waiting for a harness transition"), { code: "outcome-unknown" });
+    }
+    const targetHarnessId = current.resolvedHarnessId ?? runtime.harnessId;
+    if (!targetHarnessId) {
+      throw Object.assign(new Error("rewind replacement requires a resolved harness"), { code: "unsupported" });
+    }
+    if (!runtime.resetSessionOperation && !runtime.resetSession && !runtime.createSessionOperation) {
+      throw Object.assign(new Error("runtime cannot create a fresh session for rewound history"), { code: "unsupported" });
+    }
+    const selection: HarnessSelection = current.harness
+      && (current.harness.mode === "auto" || current.harness.harnessId === targetHarnessId)
+      ? current.harness
+      : { mode: "pinned", harnessId: targetHarnessId };
+    const transition: HarnessTransition = {
+      id: randomUUID(),
+      selection,
+      targetHarnessId,
+      timing: "after-turn",
+      phase: "requested",
+    };
+    await appendAndBroadcast(sessionId, "session/replacement-intended", {
+      rewindSeq: rewind.markerSeq,
+      atSeq: rewind.atSeq,
+      strategy: "fresh-runtime-epoch",
+      harnessId: targetHarnessId,
+    }, { ignorable: true });
+    await commitHarnessIntent(sessionId, { harnessTransition: transition }, "harness/switch-requested", {
+      transitionId: transition.id,
+      targetHarnessId,
+      timing: transition.timing,
+      reason: "rewind replacement requires a fresh runtime epoch",
+      selection: { ...selection },
+    });
+    current = await finishHarnessSwitchUnderLock(sessionId);
+    if (current.harnessTransition) {
+      throw Object.assign(new Error("rewind replacement harness transition is still pending"), { code: "outcome-unknown" });
+    }
+    await appendAndBroadcast(sessionId, "session/rewind-cleared", {
+      rewindSeq: rewind.markerSeq,
+      replaced: true,
+      strategy: "fresh-runtime-epoch",
+    });
+    return (await store.projection(sessionId)) ?? current;
+  }
 
   const service: RuntimeEpochSessionService = {
     dispose() {
@@ -6958,11 +7075,14 @@ export function createSessionService(deps: {
           }
           // Revert itself never stops work. Submitting the edited draft is the
           // commit point, so it always uses the proven interrupt path: enqueue
-          // first, request abort second, branch only after turn/stopped.
+          // first, request abort second, replace only after turn/stopped.
           delivery = "interrupt";
         } else {
           proj = await withSessionLock(sessionId, () =>
             replaceRewoundRuntimeUnderLock(sessionId, proj!, rt));
+          // The fallback replacement deliberately retires and rewires the
+          // runtime. Refresh the local facade before admitting the edited turn.
+          rt = await ensureWired(sessionId, proj);
         }
       }
 

@@ -1635,10 +1635,12 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 
 /* Assistant answers are document prose on the content canvas. Reasoning stays
    quiet and technical output keeps the only opaque boundaries in the turn. */
-.msg.assistant > .bubble {
+.msg.assistant > .bubble,
+.msg.assistant .bubble {
   width: 100%; max-inline-size: 100%; align-self: stretch;
   padding: 0; border: 0; border-radius: 0; background: transparent;
-  color: var(--text); font-size: var(--font-response); line-height: var(--font-response-lh); box-shadow: none;
+  color: var(--text); font-size: var(--font-response); line-height: var(--font-response-lh);
+  font-family: var(--ui-font-family); box-shadow: none;
 }
 /* Markdown code stays part of the conversation material. Keep an opaque
    fallback for unsupported/low-resource clients; the glass pass below applies
@@ -3022,8 +3024,8 @@ html[data-density="compact"] .set-row { padding: 6px 0; }
 
 @media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
 /* Compact: workspace surfaces are always the full-screen layer; the desktop
-     dock and separator reserve no width. Contextual surfaces use A390's
-     modal sheet, while workspace panes retain the pane-model layer. */
+     dock and separator reserve no width. Contextual surfaces use a compact
+     anchored popover, while workspace panes retain the pane-model layer. */
   .rail:not(.rail-workspace):not(.rail-fullscreen) { display: none; }
   .rail-fullscreen { right: 0; bottom: 0; }
   .timeline { padding-inline: 16px; }
@@ -8116,7 +8118,27 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
 .context-selector .picker-trigger-icon svg { width: 17px; height: 17px; }
 .context-selector .picker-chip-text { min-width: 0; flex: 1; }
 .context-selector .picker-caret { color: var(--faint); }
-.context-selector .picker-pop { width: min(320px, calc(100vw - 32px)); }
+.context-picker-pop {
+  /* Popover content is portalled to body, so scope its geometry with a class
+     on the surface itself rather than through the trigger’s ancestry. */
+  width: min(320px, calc(100vw - 32px));
+}
+@media (pointer: coarse) {
+  /* Match the model picker’s stable phone surface: the list gets a real
+     scroll region while the popover stays anchored beside its chip. */
+  .context-picker-pop {
+    width: min(360px, calc(100vw - 2 * var(--screen-gutter) - var(--safe-left) - var(--safe-right)));
+    min-width: 0;
+    height: min(560px, calc(var(--visual-vh, 100dvh) * 0.52));
+    max-height: min(560px, calc(var(--visual-vh, 100dvh) * 0.52));
+    border-radius: var(--radius-surface);
+  }
+  .context-picker-pop .picker-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+  }
+}
 .context-isolation-control {
   flex: none;
   min-height: max(var(--control-h-sm), var(--hit-min));
@@ -8136,31 +8158,6 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   color: var(--text);
 }
 .context-isolation-label { font-size: var(--font-meta); font-weight: 540; }
-.context-trigger {
-  flex: 1;
-  min-width: 0;
-  min-height: var(--tap);
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 0 var(--space-3);
-  border: 1px solid transparent;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--text-dim);
-  font-size: var(--font-label);
-  font-weight: 540;
-  cursor: pointer;
-  touch-action: manipulation;
-}
-.context-trigger:hover { border-color: var(--hair); color: var(--text); background: var(--surface-activity); }
-.context-trigger:active { background: var(--surface-activity); }
-.context-trigger:disabled { opacity: .6; cursor: default; }
-.context-trigger-icon { flex: none; display: inline-flex; color: var(--muted); }
-.context-trigger-icon svg { width: 17px; height: 17px; }
-.context-trigger-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
-.context-trigger-caret { flex: none; display: inline-flex; color: var(--faint); }
-.context-trigger-caret svg { width: 15px; height: 15px; }
 .context-sep { display: none; }
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
   /* §33/§34: no child may widen the viewport. */
@@ -8171,8 +8168,11 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
      the layout "fall apart" — not the zoom gesture itself. */
   input, textarea, select { font-size: max(16px, 1em); }
   button, a, [role="button"] { touch-action: manipulation; }
-  .composer-mobile .context-trigger { gap: var(--space-1); padding-inline: var(--space-2); }
-  .composer-mobile .context-trigger-caret { display: none; }
+  .context-selector .picker-chip {
+    min-height: var(--tap);
+    gap: var(--space-1);
+    padding-inline: var(--space-2);
+  }
   /* Inline links still need a real, measurable touch box. The negative block
      margin keeps prose rhythm compact while the clickable element is 44px. */
   .file-ref {
@@ -8446,12 +8446,6 @@ width: var(--tap);
     color: var(--faint);
   }
   .composer-mobile .composer-action-label { display: none; }
-
-  /* §16/§18: empty draft → microphone, typed draft → send. Never both. */
-  .composer-mobile:not(.composer-has-draft) .composer-primary .send { display: none; }
-  body[data-dictate="false"] .composer-mobile:not(.composer-has-draft) .composer-primary .send {
-    display: inline-flex;
-  }
 
   /* Fresh and in-conversation chats use this same composer gutter. */
   .composer-chat.composer-mobile {
@@ -9377,7 +9371,8 @@ font-size: var(--font-label);
   body[data-band="short"] .composer-chat.composer-mobile {
     padding-block: 0 var(--space-1);
   }
-  body[data-keyboard="open"] .composer-chat.composer-mobile { padding-bottom: var(--space-1); }
+  body[data-keyboard="open"] .composer-chat.composer-mobile,
+  body[data-keyboard="open"] .hero-dock { padding-bottom: var(--space-1); }
 }
 
 
@@ -10961,11 +10956,6 @@ color: var(--text);
 /* Agent execution language -------------------------------------------------
    One dense timeline across tool families. The first disclosure stays inline;
    only explicitly requested full output uses the level-three viewer. */
-.msg.assistant > .bubble {
-  font-size: calc(15px * var(--ui-font-scale, 1));
-  line-height: 1.6;
-}
-
 .tool-card.execution-row {
   width: 100%;
   max-width: 100%;
@@ -11722,9 +11712,10 @@ html[data-font] body :is(
   /* 24px inline indent aligns the body text with the "Thinking" label (icon
      18px + gap 6px) and gives the right edge breathing room. */
   padding: 2px 24px;
-  color: var(--muted);
-  font-size: calc(14px * var(--ui-font-scale, 1));
-  line-height: 1.55;
+  color: var(--text);
+  font-size: var(--font-response);
+  line-height: var(--font-response-lh);
+  font-family: var(--ui-font-family);
   overflow-wrap: anywhere;
   white-space: normal; /* legacy .reasoning-body rules set pre-wrap */
 }
@@ -11878,7 +11869,8 @@ html[data-font] body :is(
 }
 
 @media (max-width: 620px) {
-  .msg.assistant > .bubble { font-size: var(--font-body); line-height: 1.6; }
+  .msg.assistant > .bubble,
+  .msg.assistant .bubble { font-size: var(--font-body); line-height: 1.6; }
   .execution-summary.tool-disclosure {
     min-height: 36px;
     grid-template-columns: 18px minmax(0, 1fr) auto 67px 14px;
@@ -12807,9 +12799,11 @@ html[data-font] body :is(
 .agent-status-dock-time { align-self: center; color: var(--muted); font-size: var(--font-response-meta); font-variant-numeric: tabular-nums; white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .agent-status-dock::after { animation: none; } }
 
-.msg.assistant > .bubble {
+.msg.assistant > .bubble,
+.msg.assistant .bubble {
   font-size: var(--font-response);
   line-height: var(--font-response-lh);
+  font-family: var(--ui-font-family);
 }
 
 /* The block is the only framed surface in this region: a live action is a bare
@@ -12972,10 +12966,18 @@ body[data-desktop-low-resource="true"] .activity-live { transition: none; }
   font-size: var(--font-tool-label);
   line-height: var(--font-tool-label-lh);
 }
-:is(.activity-group, .activity-live) .reasoning-body {
+.activity-group-items .reasoning-body {
   color: var(--muted);
   font-size: var(--font-technical);
   line-height: var(--font-technical-lh);
+}
+.activity-live-content .reasoning-body {
+  padding-inline: 0;
+  max-height: none;
+  color: var(--text);
+  font-size: var(--font-response);
+  line-height: var(--font-response-lh);
+  font-family: var(--ui-font-family);
 }
 :is(.activity-group, .activity-live) .task-activity {
   min-height: var(--activity-row-height);
@@ -13120,7 +13122,8 @@ body[data-desktop-low-resource="true"] .activity-live { transition: none; }
     padding-inline: var(--conversation-chrome-inset);
     gap: var(--timeline-gap);
   }
-  .msg.assistant > .bubble { font-size: var(--font-response); line-height: var(--font-response-lh); }
+  .msg.assistant > .bubble,
+  .msg.assistant .bubble { font-size: var(--font-response); line-height: var(--font-response-lh); }
   .execution-summary.tool-disclosure { min-height: var(--activity-row-height); }
   .response-footer-model { max-width: 28vw; }
   .response-footer-duration { display: none; }
@@ -13373,7 +13376,7 @@ html[data-background="none"] .app {
   background-color: var(--bg);
   background-image: none;
 }
-html[data-background]:not([data-background="none"]) .app {
+html[data-background]:not([data-background="none"]) {
   background-color: var(--bg);
   background-image:
     linear-gradient(color-mix(in srgb, var(--bg) 76%, transparent), color-mix(in srgb, var(--bg) 76%, transparent)),
@@ -13381,6 +13384,11 @@ html[data-background]:not([data-background="none"]) .app {
   background-position: center;
   background-repeat: no-repeat;
   background-size: cover;
+}
+html[data-background]:not([data-background="none"]) body,
+html[data-background]:not([data-background="none"]) .app {
+  background-color: transparent;
+  background-image: none;
 }
 html[data-background]:not([data-background="none"]) .stage::before { background: transparent; }
 html[data-background]:not([data-background="none"]) .rail.rail-workspace:not(.rail-fullscreen) {

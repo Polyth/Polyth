@@ -17,7 +17,7 @@
       "core": true,
       "enabled": true,
       "icon": "files",
-      "hasSettings": false,
+      "hasSettings": true,
       "category": "workspace",
       "projectAffinity": {
         "recommended": true

@@ -116,6 +116,7 @@ export default function PlannerView() {
   const [projectOpen, setProjectOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const loadGen = useRef(0);
+  const projectFilterRef = useRef<HTMLButtonElement>(null);
 
   const updateFilters = (next: PlannerFilters) => {
     setFilters(next);
@@ -273,6 +274,7 @@ export default function PlannerView() {
       <div className="planner-toolbar">
         <GlassIsland strength="chrome" className="planner-chrome">
         <button
+          ref={projectFilterRef}
           type="button"
           className="planner-filter-btn"
           aria-haspopup="dialog"
@@ -380,6 +382,7 @@ export default function PlannerView() {
       <PlannerProjectPicker
         open={projectOpen}
         onClose={() => setProjectOpen(false)}
+        anchorRef={projectFilterRef}
         projects={projects}
         value={filters.projectId}
         includeAll

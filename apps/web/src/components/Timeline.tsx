@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { HarnessSelection, SessionEvent } from "@polyth/contracts";
 import { renderMarkdown } from "../markdown.tsx";
@@ -185,9 +185,20 @@ function reasoningSeen(text: string): boolean {
   return false;
 }
 
+function AssistantProse({ m, entering = false }: { m: AssistantMsg; entering?: boolean }) {
+  return (
+    <div className={`msg assistant${entering ? " timeline-row-enter" : ""}`} data-message-seq={m.eventSeq}>
+      <div className="bubble" dir="auto">
+        {renderMarkdown(m.text, m.id)}
+        {!m.finalized && <span className="caret" />}
+      </div>
+    </div>
+  );
+}
+
 function Thinking({ m, live, entering = false }: { m: AssistantMsg; live: boolean; entering?: boolean }) {
   const prefs = useUiSettings();
-  const source = m.reasoning || m.text;
+  const source = m.reasoning;
   // Fresh live thought: its row is the turn's live latest, the answer has not
   // started, and this reasoning never revealed before → type out from empty.
   const fresh = live && m.text === "" && !reasoningSeen(source);
@@ -638,12 +649,22 @@ function activityItemNode(
   entering: boolean,
 ) {
   // An arriving action shows what it is, not its whole output: it stays folded
-  // outside the block exactly as it will be inside it.
-  return item.kind === "tool"
-    ? <ExecutionRow key={item.id} message={item} subagent={childForTool(item, subagents)} entering={entering} />
-    : item.kind === "assistant"
-      ? <Thinking key={item.id} m={item} live={live} entering={entering} />
-      : <TaskActivityRow key={item.id} activity={item} entering={entering} />;
+  // outside the block exactly as it will be inside it. Assistant text is the
+  // same reading surface as the timeline answer — never secondary thinking type.
+  if (item.kind === "tool") {
+    return <ExecutionRow key={item.id} message={item} subagent={childForTool(item, subagents)} entering={entering} />;
+  }
+  if (item.kind === "assistant") {
+    const thought = item.reasoning.trim() !== ""
+      ? <Thinking key={`${item.id}-reasoning`} m={{ ...item, text: "" }} live={live} entering={entering} />
+      : null;
+    const prose = item.text.trim() !== ""
+      ? <AssistantProse key={`${item.id}-text`} m={item} entering={entering} />
+      : null;
+    if (thought && prose) return <Fragment key={item.id}>{thought}{prose}</Fragment>;
+    return thought ?? prose;
+  }
+  return <TaskActivityRow key={item.id} activity={item} entering={entering} />;
 }
 
 function liveLayerFor(group: Element | null): HTMLElement | null {

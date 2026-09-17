@@ -41,33 +41,39 @@ test("expanded phone composer uses one compact spacing and control rhythm", asyn
 
   assert.match(
     css,
-    /\.composer-mobile\.composer-expanded \.composer-card textarea\s*\{[^}]*min-height:\s*calc\(var\(--control-h-lg\) \+ var\(--space-3\)\);[^}]*padding:\s*var\(--space-2\) var\(--space-3\) var\(--space-1\);/s,
+    /\.composer-mobile \.composer-card textarea,[\s\S]*?min-height:\s*var\(--control-h-sm\);[\s\S]*?padding:\s*var\(--space-3\) var\(--space-4\) var\(--space-1\);/s,
   );
   assert.match(
     css,
-    /\.composer-mobile\.composer-expanded \.composer-rail\s*\{[^}]*min-height:\s*calc\(var\(--tap\) \+ var\(--space-3\)\);[^}]*gap:\s*var\(--space-1\);[^}]*padding:\s*var\(--space-1\) var\(--space-2\) var\(--space-2\);/s,
+    /\.composer-mobile \.composer-rail,[\s\S]*?min-height:\s*var\(--tap\);[\s\S]*?gap:\s*calc\(var\(--space-1\) \/ 2\);[\s\S]*?padding:\s*0 var\(--space-4\) var\(--space-2\);/s,
   );
   assert.match(
     css,
-    /\.composer-mobile \.composer-extensions \.ui-icon-btn\s*\{[^}]*width:\s*var\(--tap\);[^}]*min-width:\s*var\(--tap\);[^}]*height:\s*var\(--tap\);[^}]*min-height:\s*var\(--tap\);/s,
-    "contributed icon controls should occupy the same mobile layout box as built-in actions",
+    /\.composer-mobile \.composer-mobile-extensions \.mic-btn,[\s\S]*?width:\s*var\(--tap\);[\s\S]*?min-height:\s*var\(--tap\);/s,
+    "the microphone occupies the same mobile layout box as the primary action",
   );
   assert.match(
     css,
-    /\.composer-mobile \.composer-execution \.model-picker-trigger\s*\{[^}]*height:\s*var\(--tap\);[^}]*max-width:\s*100%;/s,
+    /\.composer-mobile \.composer-execution \.model-picker-trigger\s*\{[^}]*max-width:\s*32vw;[^}]*height:\s*var\(--tap\);/s,
     "the model control should align to the action row and yield width before overflowing",
   );
   assert.match(
     css,
-    /@media \(max-width: 340px\)[\s\S]*?\.composer-mobile \.composer-actions > \.composer-extensions\s*\{[^}]*width:\s*var\(--tap\);[^}]*flex:\s*0 0 var\(--tap\);[^}]*overflow-x:\s*auto;/s,
-    "the narrowest phone should give extra trailing actions one scrollable touch-width lane",
+    /\.composer-mobile \.composer-actions > \.composer-extensions\s*\{[^}]*display:\s*none;[^}]*width:\s*0;/s,
+    "trailing widgets stay out of the phone primary row",
   );
 });
 
-test("desktop keeps extension actions bounded and model next to send", async () => {
+test("desktop keeps extension actions bounded and primary action terminal", async () => {
   const css = await read("../src/composerAdaptive.css");
+  const composer = await read("../src/components/Composer.tsx");
 
   assert.match(css, /\.composer-simple \.composer-actions > \.composer-extensions\s*\{[\s\S]*?max-width:\s*min\(30vw, 260px\)/);
   assert.match(css, /\.composer-simple \.composer-config\s*\{[\s\S]*?flex:\s*0 0 auto;/);
-  assert.match(css, /\.composer-simple \.composer-config \+ \.composer-primary\s*\{\s*margin-inline-start:\s*2px;/);
+  assert.match(css, /\.composer-simple \.composer-config\s*\{[\s\S]*?flex:\s*0 0 auto;/);
+  assert.ok(
+    composer.indexOf('<CustomizeZoneButton slot="composer.trailing" />')
+      < composer.indexOf('<span className="composer-primary">'),
+    "desktop customization stays before the terminal primary action",
+  );
 });

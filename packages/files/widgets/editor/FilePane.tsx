@@ -5,6 +5,7 @@
 // model); this pane is chrome + preview. Keep-alive (hidden, inert) is
 // PaneHost; revision polling pauses while hidden.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { api } from "@polyth/session/web-api";
 import { clearEditorLocation, useStore } from "../../../../apps/web/src/store.ts";
 import { MarkdownDoc } from "../../../../apps/web/src/markdown.tsx";
@@ -20,6 +21,7 @@ import { confirmAlert } from "../../../../apps/web/src/alerts.ts";
 import {
   EditorSurfaceSlot,
   readEditorSelection,
+  replaceEditorSelection,
   resourceViewsVersion,
   subscribeResourceViews,
 } from "../../../../apps/web/src/resources/views.ts";
@@ -28,12 +30,14 @@ import {
   isDocDirty, openFileDoc, peekFileDoc, removeDoc, renameDoc, subscribeDocs,
 } from "./fileDocs.ts";
 import {
+  AssistIcon,
   Button,
+  ChatIcon,
   CheckIcon,
   CloseIcon,
+  EditIcon,
   IconButton,
   Menu,
-  MoreIcon,
   Spinner,
   Switch,
   TextInput,
@@ -48,6 +52,7 @@ import { registerPaneProvider, type PaneResourceContext } from "../../../../apps
 import { usePaneActions } from "../../../../apps/web/src/components/workspace/PaneHost.tsx";
 import { tr } from "../../../../apps/web/src/i18n/index.ts";
 import EmptyState from "../../../../apps/web/src/components/EmptyState.tsx";
+import { ContextMenuAnchor } from "./contextMenuAnchor.tsx";
 
 const baseOf = (p: string) => p.split("/").pop() ?? p;
 const msg = (err: unknown) => (err instanceof Error ? err.message : String(err));
@@ -125,8 +130,22 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
   const [hlRange, setHlRange] = useState<[number, number] | null>(null);
   const [gotoOpen, setGotoOpen] = useState(false);
   const [gotoVal, setGotoVal] = useState("");
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [selHint, setSelHint] = useState<{ x: number; y: number } | null>(null);
+  const [fileMenu, setFileMenu] = useState<{ x: number; y: number } | null>(null);
+  const [selectionMenu, setSelectionMenu] = useState<{
+    x: number;
+    y: number;
+    text: string;
+    startLine: number;
+    endLine: number;
+  } | null>(null);
+  const [explainPanel, setExplainPanel] = useState<{
+    x: number;
+    y: number;
+    text: string;
+    loading: boolean;
+    error: string;
+  } | null>(null);
+  const [inlineStatus, setInlineStatus] = useState("");
   const [reveal, setReveal] = useState<{ startLine: number; endLine: number } | null>(null);
 
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -160,7 +179,8 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
   const setPreviewMode = (on: boolean, opts: { persist?: boolean } = {}) => {
     if (!doc || readOnly || !td) return;
     td.editing = !on;
-    setSelHint(null);
+    setSelectionMenu(null);
+    setExplainPanel(null);
     const kind = previewKindForPath(doc.path);
     if (opts.persist !== false && kind) setEditorPreviewDefault(kind, on);
   };
@@ -217,30 +237,121 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
     insertToChat(readOnly || !td ? `@${doc.path}` : formatFileChat(doc.path, td.handle.getBuffer(), INLINE_FILE_CHARS));
   };
 
-  const placeHint = (x: number, y: number) =>
-    setSelHint(clampMenuPosition(x, y, 34, 30, window.innerWidth, window.innerHeight));
+  const previewSelection = (): { text: string; startLine: number; endLine: number } | null => {
+    const s = window.getSelection();
+    const container = bodyRef.current;
+    if (!s || s.isCollapsed || s.rangeCount === 0 || !container) return null;
+    const range = s.getRangeAt(0);
+    if (!container.contains(range.commonAncestorContainer)) return null;
+    const lnOf = (node: Node | null): number | null => {
+      const el = node instanceof Element ? node : node?.parentElement ?? null;
+      const row = el?.closest("[data-ln]");
+      const n = row ? Number(row.getAttribute("data-ln")) : NaN;
+      return Number.isFinite(n) ? n : null;
+    };
+    const text = s.toString().replace(/\n$/, "");
+    if (!text) return null;
+    const a = lnOf(range.startContainer) ?? 1;
+    const b = lnOf(range.endContainer) ?? a;
+    return { text, startLine: Math.min(a, b), endLine: Math.max(a, b) };
+  };
+
+  const currentSelection = (): { text: string; startLine: number; endLine: number } | null => {
+    if (editing) {
+      const sel = readEditorSelection(resourceRef);
+      return sel?.text ? sel : null;
+    }
+    return previewSelection();
+  };
+
+  const openFileActionsMenu = (x: number, y: number) => {
+    setFileMenu({ x, y });
+    setSelectionMenu(null);
+  };
+
+  const openSelectionMenu = (x: number, y: number, sel: { text: string; startLine: number; endLine: number }) => {
+    setSelectionMenu({ x, y, ...sel });
+    setFileMenu(null);
+  };
+
+  const onSurfaceContextMenu = (e: { preventDefault(): void; clientX: number; clientY: number }) => {
+    e.preventDefault();
+    const sel = currentSelection();
+    if (sel) openSelectionMenu(e.clientX, e.clientY, sel);
+    else openFileActionsMenu(e.clientX, e.clientY);
+  };
+
+  const onSurfaceMouseUp = (e: { button: number; clientX: number; clientY: number }) => {
+    if (e.button !== 0) return;
+    const { clientX, clientY } = e;
+    const reveal = () => {
+      const sel = currentSelection();
+      if (sel) openSelectionMenu(clientX, clientY, sel);
+      else setSelectionMenu(null);
+    };
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(reveal);
+    else reveal();
+  };
+
+  const surfaceInteract = {
+    onContextMenu: onSurfaceContextMenu,
+    onMouseUp: onSurfaceMouseUp,
+  };
+
+  const runExplain = async (sel: { text: string; startLine: number; endLine: number }, anchor: { x: number; y: number }) => {
+    setSelectionMenu(null);
+    setExplainPanel({
+      ...clampMenuPosition(anchor.x, anchor.y, 320, 240, window.innerWidth, window.innerHeight),
+      text: "",
+      loading: true,
+      error: "",
+    });
+    try {
+      const { text } = await api.filesInlineAi({
+        action: "explain",
+        projectId,
+        path: doc?.path ?? path,
+        selection: sel.text,
+        language: langOf(doc?.path ?? path),
+        ...(sid ? { sessionId: sid } : {}),
+      });
+      setExplainPanel((panel) => panel ? { ...panel, text, loading: false } : null);
+    } catch (err) {
+      setExplainPanel((panel) => panel ? {
+        ...panel,
+        loading: false,
+        error: msg(err),
+      } : null);
+    }
+  };
+
+  const runFix = async (sel: { text: string }) => {
+    setSelectionMenu(null);
+    setInlineStatus(tr("editor.filepane.fixing"));
+    try {
+      const { text } = await api.filesInlineAi({
+        action: "fix",
+        projectId,
+        path: doc?.path ?? path,
+        selection: sel.text,
+        language: langOf(doc?.path ?? path),
+        ...(sid ? { sessionId: sid } : {}),
+      });
+      const applied = editing
+        ? replaceEditorSelection(resourceRef, text.trim(), sel.text)
+        : false;
+      setInlineStatus(applied ? tr("editor.filepane.fixApplied") : tr("editor.filepane.fixFailed"));
+    } catch (err) {
+      setInlineStatus(msg(err));
+    }
+    setTimeout(() => setInlineStatus(""), 2400);
+  };
 
   useEffect(() => {
-    if (!visible || editing) return;
-    const onSelectionChange = () => {
-      const s = window.getSelection();
-      const container = bodyRef.current;
-      if (!s || s.isCollapsed || s.rangeCount === 0 || !container
-        || !container.contains(s.getRangeAt(0).commonAncestorContainer)) {
-        setSelHint(null);
-        return;
-      }
-      const range = s.getRangeAt(0);
-      const rects = range.getClientRects();
-      const r = rects.length > 0 ? rects[rects.length - 1]! : range.getBoundingClientRect();
-      placeHint(r.right + 6, r.bottom + 8);
-    };
-    document.addEventListener("selectionchange", onSelectionChange);
-    return () => document.removeEventListener("selectionchange", onSelectionChange);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, editing]);
-
-  useEffect(() => { setSelHint(null); }, [visible, editing, path]);
+    setSelectionMenu(null);
+    setFileMenu(null);
+    setExplainPanel(null);
+  }, [visible, editing, path]);
 
   const save = async (opts: { force?: boolean } = {}) => {
     if (!td) return;
@@ -337,10 +448,20 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
       } else if (mod && e.key.toLowerCase() === "g" && doc) {
         e.preventDefault();
         setGotoOpen(true);
+      } else if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
+        const sel = currentSelection();
+        if (sel) {
+          e.preventDefault();
+          const row = bodyRef.current?.getBoundingClientRect();
+          openSelectionMenu(row ? row.left + 24 : 48, row ? row.top + 24 : 48, sel);
+        } else {
+          e.preventDefault();
+          openFileActionsMenu(48, 48);
+        }
       } else if (e.key === "Escape") {
-        if (menuOpen) return;
+        if (fileMenu || selectionMenu) return;
+        if (explainPanel) { setExplainPanel(null); return; }
         if (gotoOpen) { setGotoOpen(false); return; }
-        if (selHint) { setSelHint(null); return; }
         if (confirmDel) { setConfirmDel(false); return; }
         if (renameTo !== null) return;
         actions?.closeSelf("file", path);
@@ -387,9 +508,46 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
     );
   }
 
+  const showToolbar = previewKind !== null
+    || live?.kind === "saving"
+    || live?.kind === "saved"
+    || !!flash
+    || !!inlineStatus
+    || gotoOpen
+    || (!readOnly && dirty);
+
+  const fileActionEntries: MenuEntry[] = [
+    { id: "add-file", label: tr("editor.filepane.addFileToChat"), onSelect: () => addFile() },
+    { id: "add-selection", label: tr("editor.filepane.addSelectionToChatValueL", { MOD }), onSelect: () => addSelection() },
+    { id: "copy-path", label: tr("editor.filepane.copyPath"), onSelect: () => void copyText(doc.path) },
+    { id: "goto", label: tr("editor.filepane.goToLineValueG", { MOD }), onSelect: () => setGotoOpen(true) },
+    {
+      id: "wrap",
+      label: wrap ? tr("editor.filepane.wrapLines") : tr("editor.filepane.wrapLines2"),
+      kind: "checkbox",
+      checked: wrap,
+      onSelect: () => setWrap((value) => !value),
+    },
+    ...(!readOnly && dirty
+      ? [{
+          id: "discard",
+          label: tr("editor.filepane.discardChanges"),
+          onSelect: () => {
+            void confirmAlert(tr("editor.filepane.discardUnsavedChanges"), {
+              title: tr("common.discardChanges"),
+              confirmLabel: tr("common.discard"),
+            }).then((ok) => { if (ok) td?.handle.discard(); });
+          },
+        } satisfies MenuEntry]
+      : []),
+    { id: "rename", label: tr("editor.filepane.renameMove"), onSelect: () => setRenameTo(doc.path) },
+    { id: "delete", label: tr("editor.filepane.delete"), danger: true, onSelect: () => setConfirmDel(true) },
+  ];
+
   return (
     <>
-      <div className="editor-toolbar">
+      {showToolbar && (
+      <div className="editor-toolbar editor-toolbar--accessory">
         {previewKind !== null && (
           <span className="editor-mode-switch">
             <span className={`editor-mode-label${editing ? " on" : ""}`}>{tr("common.edit")}</span>
@@ -404,6 +562,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
         {live?.kind === "saving" && <span className="editor-save-state">{tr("common.saving")}</span>}
         {live?.kind === "saved" && <span className="editor-save-state">{tr("common.saved")}</span>}
         {flash && <span className="editor-flash">{flash}</span>}
+        {inlineStatus && <span className="editor-save-state">{inlineStatus}</span>}
         <span className="header-spacer" />
         {gotoOpen && (
           <span className="editor-goto">
@@ -438,63 +597,104 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
             onClick={() => void save()}
           />
         )}
-        <Menu
-          label={tr("editor.filepane.actionsForValue", { path: doc.path })}
-          title={tr("editor.filepane.fileActions")}
-          align="end"
-          open={menuOpen}
-          onOpenChange={setMenuOpen}
-          entries={([
-            { id: "add-file", label: tr("editor.filepane.addFileToChat"), onSelect: () => addFile() },
-            { id: "add-selection", label: tr("editor.filepane.addSelectionToChatValueL", { MOD }), onSelect: () => addSelection() },
-            { id: "copy-path", label: tr("editor.filepane.copyPath"), onSelect: () => void copyText(doc.path) },
-            { id: "goto", label: tr("editor.filepane.goToLineValueG", { MOD }), onSelect: () => setGotoOpen(true) },
-            {
-              id: "wrap",
-              label: wrap ? tr("editor.filepane.wrapLines") : tr("editor.filepane.wrapLines2"),
-              kind: "checkbox",
-              checked: wrap,
-              onSelect: () => setWrap((value) => !value),
-            },
-            ...(!readOnly && dirty
-              ? [{
-                  id: "discard",
-                  label: tr("editor.filepane.discardChanges"),
-                  onSelect: () => {
-                    void confirmAlert(tr("editor.filepane.discardUnsavedChanges"), {
-                      title: tr("common.discardChanges"),
-                      confirmLabel: tr("common.discard"),
-                    }).then((ok) => { if (ok) td?.handle.discard(); });
-                  },
-                } satisfies MenuEntry]
-              : []),
-            { id: "rename", label: tr("editor.filepane.renameMove"), onSelect: () => setRenameTo(doc.path) },
-            { id: "delete", label: tr("editor.filepane.delete"), danger: true, onSelect: () => setConfirmDel(true) },
-          ] satisfies MenuEntry[])}
-        >
-          {(trigger) => (
-            <IconButton
-              {...trigger}
-              icon={MoreIcon}
-              size="sm"
-              className="editor-more-btn"
-              label={tr("editor.filepane.actionsForValue", { path: doc.path })}
-              title={tr("editor.filepane.fileActions")}
-            />
-          )}
-        </Menu>
       </div>
-      {selHint && (
-        <button
-          className="editor-sel-hint"
-          style={{ left: selHint.x, top: selHint.y }}
-          aria-label={tr("editor.filepane.addSelectionToChatValueL", { MOD: MOD })}
-          title={tr("editor.filepane.addSelectionToChatValueL", { MOD: MOD })}
-          onPointerDown={(e) => e.preventDefault()}
-          onClick={() => { addSelection(); setSelHint(null); }}
+      )}
+      <Menu
+        key={fileMenu ? `file-${fileMenu.x}-${fileMenu.y}` : "file-closed"}
+        label={tr("editor.filepane.actionsForValue", { path: doc.path })}
+        title={tr("editor.filepane.fileActions")}
+        phonePresentation="popover"
+        open={fileMenu !== null}
+        onOpenChange={(open) => { if (!open) setFileMenu(null); }}
+        entries={fileActionEntries}
+      >
+        {(trigger) => (
+          <ContextMenuAnchor
+            trigger={trigger}
+            className="editor-ctx-anchor"
+            hidden={!fileMenu}
+            x={fileMenu?.x ?? 0}
+            y={fileMenu?.y ?? 0}
+          />
+        )}
+      </Menu>
+      <Menu
+        key={selectionMenu ? `sel-${selectionMenu.x}-${selectionMenu.y}` : "sel-closed"}
+        label={tr("editor.filepane.selectionActions")}
+        title={tr("editor.filepane.selectionActions")}
+        phonePresentation="popover"
+        open={selectionMenu !== null}
+        onOpenChange={(open) => { if (!open) setSelectionMenu(null); }}
+        entries={selectionMenu ? [
+          {
+            id: "add-chat",
+            icon: ChatIcon,
+            label: tr("editorview.addToChat"),
+            detail: `${MOD}+L`,
+            onSelect: () => {
+              insertToChat(formatSelectionChat(doc.path, selectionMenu.text, selectionMenu.startLine, selectionMenu.endLine));
+              setSelectionMenu(null);
+            },
+          },
+          {
+            id: "explain",
+            icon: AssistIcon,
+            label: tr("editor.filepane.explainSelection"),
+            onSelect: () => void runExplain(selectionMenu, selectionMenu),
+          },
+          ...(editing && !readOnly ? [{
+            id: "fix",
+            icon: EditIcon,
+            label: tr("editor.filepane.fixSelection"),
+            onSelect: () => void runFix(selectionMenu),
+          }] : []),
+        ] satisfies MenuEntry[] : []}
+      >
+        {(trigger) => (
+          <ContextMenuAnchor
+            trigger={trigger}
+            className="editor-ctx-anchor"
+            hidden={!selectionMenu}
+            x={selectionMenu?.x ?? 0}
+            y={selectionMenu?.y ?? 0}
+          />
+        )}
+      </Menu>
+      {explainPanel && typeof document !== "undefined" && createPortal(
+        <div
+          className="editor-explain-panel"
+          style={{ left: explainPanel.x, top: explainPanel.y }}
+          role="dialog"
+          aria-label={tr("editor.filepane.explainSelection")}
         >
-          @
-        </button>
+          <div className="editor-explain-head">
+            <span>{tr("editor.filepane.explainSelection")}</span>
+            <IconButton
+              icon={CloseIcon}
+              size="sm"
+              label={tr("common.close")}
+              onClick={() => setExplainPanel(null)}
+            />
+          </div>
+          {explainPanel.loading && <Spinner />}
+          {explainPanel.error && <p className="form-error">{explainPanel.error}</p>}
+          {!explainPanel.loading && explainPanel.text && (
+            <>
+              <p className="editor-explain-body">{explainPanel.text}</p>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  insertToChat(explainPanel.text);
+                  setExplainPanel(null);
+                }}
+              >
+                {tr("editor.filepane.addExplanationToChat")}
+              </Button>
+            </>
+          )}
+        </div>,
+        document.body,
       )}
       {renameTo !== null && (
         <div className="files-create editor-rename">
@@ -548,7 +748,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
       {snap.binary && <div className="editor-banner">{tr("editor.filepane.binaryFileDetectedReadOnly")}</div>}
       {shownError && <div className="form-error editor-error">{shownError}</div>}
       {editing && !readOnly ? (
-        <div className="editor-edit">
+        <div className="editor-edit" {...surfaceInteract}>
           <EditorSurfaceSlot
             groupId={FILES_GROUP_ID}
             resource={resourceRef}
@@ -564,13 +764,13 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
           />
         </div>
       ) : previewKind === "markdown" && !editing ? (
-        <div className="editor-body editor-md-preview" ref={bodyRef}>
+        <div className="editor-body editor-md-preview" ref={bodyRef} {...surfaceInteract}>
           <div className="editor-md-content">
             <MarkdownDoc text={previewText} keyBase={`md-${doc.path}`} />
           </div>
         </div>
       ) : previewKind === "html" && !editing ? (
-        <div className="editor-body editor-html-preview" ref={bodyRef}>
+        <div className="editor-body editor-html-preview" ref={bodyRef} {...surfaceInteract}>
           <iframe
             className="html-preview-frame"
             title={tr("editor.filepane.previewOfValue", { path: doc.path })}
@@ -581,7 +781,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
             {tr("editor.filepane.sandboxedPreviewScriptsAreIsolatedAndNetwork")}</div>
         </div>
       ) : previewKind === "json" && !editing ? (
-        <div className="editor-body editor-json-preview" ref={bodyRef}>
+        <div className="editor-body editor-json-preview" ref={bodyRef} {...surfaceInteract}>
           {jsonValue !== undefined ? (
             <JsonTree value={jsonValue} defaultDepth={prefs.jsonTreeDepth} />
           ) : (
@@ -607,7 +807,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
         <div
           className="editor-body"
           ref={bodyRef}
-          onContextMenu={(e) => { e.preventDefault(); setMenuOpen(true); }}
+          {...surfaceInteract}
         >
           {lines.length <= MAX_ROWED_LINES ? (
             <div className={`code-lines${wrap ? " wrap" : ""}`}>

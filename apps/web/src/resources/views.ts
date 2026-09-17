@@ -121,3 +121,22 @@ export function registerEditorSelection(reader: (docKey: string) => EditorSelect
 export function readEditorSelection(ref: ResourceRef): EditorSelection {
   return selectionReader?.(resourceKey(ref)) ?? null;
 }
+
+let selectionReplacer: ((docKey: string, replacement: string, expectedText: string) => boolean) | null = null;
+
+export function registerEditorReplace(
+  replacer: (docKey: string, replacement: string, expectedText: string) => boolean,
+): Unregister {
+  selectionReplacer = replacer;
+  return () => {
+    if (selectionReplacer === replacer) selectionReplacer = null;
+  };
+}
+
+export function replaceEditorSelection(
+  ref: ResourceRef,
+  replacement: string,
+  expectedText: string,
+): boolean {
+  return selectionReplacer?.(resourceKey(ref), replacement, expectedText) ?? false;
+}

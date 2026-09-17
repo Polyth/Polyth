@@ -9,6 +9,11 @@
 // Deliberately NOT migrated from the global polyth.railPrefs: that record is
 // browser-global, and copying its widths into every project record on first
 // load would replicate one project's layout everywhere (forbidden by spec).
+import {
+  markProjectPresentationChanged,
+  PROJECT_PRESENTATION_HYDRATED_EVENT,
+  projectPresentationEventProjectId,
+} from "../projectPresentationSync.ts";
 
 export const WORKSPACE_PANE_PREFS_VERSION = 2;
 export type PaneMode = "dynamic" | "pinned" | "fullscreen";
@@ -197,7 +202,10 @@ function read(projectId: string): WorkspacePanePrefs {
 
 function write(projectId: string, prefs: WorkspacePanePrefs): void {
   cache.set(projectId, prefs);
-  try { localStorage.setItem(workspacePaneKey(projectId), serializeWorkspacePanePrefs(prefs)); } catch { /* full/private */ }
+  try {
+    localStorage.setItem(workspacePaneKey(projectId), serializeWorkspacePanePrefs(prefs));
+    markProjectPresentationChanged(projectId, "workspacePane");
+  } catch { /* full/private */ }
 }
 
 export function getWorkspacePanePrefs(projectId: string): WorkspacePanePrefs {
@@ -254,4 +262,11 @@ export function setPaneLastResource(projectId: string, surfaceId: string, resour
 /** Test seam: forget the in-memory cache (e.g. between simulated projects). */
 export function resetWorkspacePanePrefsCache(): void {
   cache.clear();
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener(PROJECT_PRESENTATION_HYDRATED_EVENT, (event) => {
+    const hydratedProjectId = projectPresentationEventProjectId(event);
+    if (hydratedProjectId !== null) cache.delete(hydratedProjectId);
+  });
 }

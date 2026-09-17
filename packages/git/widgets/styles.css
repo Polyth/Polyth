@@ -87,24 +87,36 @@
 .pending-changes-list {
   display: flex;
   flex-direction: column;
+  gap: 0;
   min-width: 0;
   border-top: 1px solid var(--hair);
   padding-top: var(--space-1);
 }
 .pending-changes-file {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
-  min-height: max(var(--control-h-sm), var(--hit-min));
-  padding: 0 var(--space-1);
+  min-height: var(--control-h-sm);
+  padding: 2px var(--space-1);
   border: 0;
   border-radius: var(--radius-control);
   background: transparent;
   color: inherit;
-  font: inherit;
+  font: 400 var(--font-meta) / 1.4 var(--mono);
   text-align: left;
   cursor: pointer;
+}
+/* Grow the tap box on coarse pointers without stretching the visible row. */
+.pending-changes-file::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, var(--hit-min));
+  height: max(100%, var(--hit-min));
+  transform: translate(-50%, -50%);
 }
 .pending-changes-file:hover,
 .pending-changes-file:focus-visible {
@@ -116,8 +128,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--mono);
-  font-size: var(--font-code);
+  font: inherit;
   color: var(--text-dim);
 }
 .pending-changes-bar .pending-changes-more {

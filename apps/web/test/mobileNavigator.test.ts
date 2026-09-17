@@ -37,6 +37,20 @@ test("phone navigator uses the canonical viewport, safe-area, and semantic color
   }
 });
 
+test("phone project rows omit session totals and group backgrounds", async () => {
+  const [source, css] = await Promise.all([
+    read("../src/components/mobile/MobileNavigator.tsx"),
+    read("../src/components/mobile/MobileNavigator.css"),
+  ]);
+
+  assert.doesNotMatch(source, /sidebar\.sessionlist\.valueSessions/,
+    "project rows do not show a total session count beneath the project name");
+  assert.doesNotMatch(source, /mobile-nav-project-meta-copy/,
+    "the removed session-count metadata node is not rendered");
+  assert.match(css, /\.mobile-nav-project\s*\{[^}]*background:\s*transparent;/s);
+  assert.match(css, /\.mobile-nav-project\.is-current\s*\{[^}]*background:\s*transparent;/s);
+});
+
 test("phone navigator keeps the tap floor while compacting its rhythm", async () => {
   const [source, css] = await Promise.all([
     read("../src/components/mobile/MobileNavigator.tsx"),
@@ -78,17 +92,16 @@ test("phone navigator keeps the tap floor while compacting its rhythm", async ()
     "navigator type must use role tokens, not fixed pixel sizes");
 });
 
-test("phone navigator glass is an appearance choice with a readable fallback", async () => {
-  const css = await read("../src/components/mobile/MobileNavigator.css");
+test("phone navigator shares the mobile Workspace surface", async () => {
+  const [css, workspaceCss] = await Promise.all([
+    read("../src/components/mobile/MobileNavigator.css"),
+    read("../src/workspacePanelPremium.css"),
+  ]);
 
   assert.match(css, /\.mobile-navigator\s*\{[^}]*background:\s*var\(--material-glass-strong\);/s);
-  // Blur only inside @supports, and only while glass is on and the client is
-  // not in low-resource mode (the shared Quiet Glass contract).
-  const blurBlocks = css.match(/backdrop-filter:[^;]+;/g) ?? [];
-  assert.ok(blurBlocks.length > 0);
-  const supports = css.slice(css.indexOf("@supports"));
-  for (const rule of blurBlocks) assert.ok(supports.includes(rule), `${rule} is gated by @supports`);
-  assert.match(supports, /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\) \.mobile-navigator/);
+  assert.match(workspaceCss, /\.workspace-panel-sheet\.sheet\s*\{[^}]*background:\s*var\(--material-glass-strong\);/s);
+  assert.doesNotMatch(css, /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\) \.mobile-navigator/);
+  assert.doesNotMatch(css, /\.mobile-nav-toolbar\s*\{[^}]*background:\s*var\(--material-glass-chrome\);/s);
 });
 
 test("adding a project and starting a chat are visibly different actions", async () => {
@@ -156,7 +169,7 @@ test("phone navigator shares project sorting and reorders from the project row",
   assert.match(source, /aria-expanded=\{expanded\}/);
   assert.match(css, /\.mobile-nav-project\.is-dragging > \.mobile-nav-project-head\s*\{[^}]*touch-action:\s*none;/s);
   assert.match(css, /\.mobile-nav-project\.is-drag-over\s*> \.mobile-nav-project-head/);
-  assert.match(css, /\.mobile-nav-project\s*\{[^}]*background:\s*color-mix/s);
+  assert.match(css, /\.mobile-nav-project\s*\{[^}]*background:\s*transparent;/s);
   assert.doesNotMatch(css, /\.mobile-nav-disclosure/);
   assert.doesNotMatch(css, /\.mobile-nav-project-drag-handle/);
 });

@@ -25,15 +25,29 @@ test("mobile task rows keep switch and menu on the same grid row", async () => {
   );
 });
 
-test("project picker uses one search field on phone", async () => {
+test("project picker is an anchored compact picker on phone", async () => {
   const source = await read("../widgets/PlannerProjectPicker.tsx");
   assert.match(source, /useShellMode\(\) === "phone"/);
-  assert.match(source, /searchable && phone/);
-  assert.match(source, /searchable && !phone/);
-  assert.doesNotMatch(
-    source,
-    /searchable\s*\n\s*\?\s*\{[\s\S]*sheetSearch[\s\S]*\{searchable && \(/,
-  );
+  assert.match(source, /anchorRef: RefObject<HTMLElement \| null>/);
+  assert.match(source, /phone="popover"/);
+  assert.match(source, /stableAnchor/);
+  assert.match(source, /initialFocus=\{!phone && searchable/);
+  assert.match(source, /searchable && \(/);
+  assert.doesNotMatch(source, /sheetSearch/);
+});
+
+test("planner choice overlays use the model picker's anchored phone presentation", async () => {
+  const editor = await read("../widgets/PlannerTaskEditor.tsx");
+  for (const file of ["PlannerOnceSheet.tsx", "PlannerRecurrenceSheet.tsx", "PlannerRunBehaviorSheet.tsx"]) {
+    const source = await read(`../widgets/${file}`);
+    assert.match(source, /anchorRef: RefObject<HTMLElement \| null>/, file);
+    assert.match(source, /phone="popover"/, file);
+    assert.match(source, /stableAnchor/, file);
+  }
+  assert.match(editor, /projectTriggerRef/);
+  assert.match(editor, /onceTriggerRef/);
+  assert.match(editor, /recurrenceTriggerRef/);
+  assert.match(editor, /behaviorTriggerRef/);
 });
 
 test("create defaults to a rounded once cadence and disables invalid sheet actions", async () => {

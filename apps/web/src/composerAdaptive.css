@@ -221,7 +221,7 @@
     align-items: center;
     flex-wrap: nowrap;
     gap: calc(var(--space-1) / 2);
-    padding: 0 var(--space-3) var(--space-2);
+    padding: 0 var(--space-4) var(--space-2);
   }
 
   /* Flatten the leading wrapper so Add and Voice can occupy independent
@@ -254,6 +254,7 @@
     display: none;
     width: 0;
     min-width: 0;
+    max-width: var(--tap);
     height: var(--tap);
     flex: 0 0 auto;
     overflow: visible;
@@ -290,7 +291,8 @@
 
   /* Desktop-customizable trailing widgets must not leak back into the phone
      primary row. They were the source of stacked Workflow/Assist icons in the
-     screenshot. If Voice was explicitly moved here, keep only Voice. */
+     screenshot. Voice has no trailing placement; it stays in the input-method
+     lane before the primary action. */
   .composer-mobile .composer-actions > .composer-extensions {
     display: none;
     width: 0;
@@ -298,22 +300,8 @@
     flex: 0 0 auto;
   }
 
-  .composer-mobile .composer-actions > .composer-extensions:has(.mic-btn) {
-    width: var(--tap);
-    min-width: var(--tap);
-    height: var(--tap);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex: 0 0 var(--tap);
-  }
-
   .composer-mobile .composer-actions > .composer-extensions > .placed-mini-widget {
     display: none;
-  }
-
-  .composer-mobile .composer-actions > .composer-extensions > .placed-mini-widget:has(.mic-btn) {
-    display: contents;
   }
 
   .composer-mobile .composer-actions > .composer-config {
@@ -522,5 +510,28 @@
 
   .composer-simple .composer-config + .composer-primary {
     margin-inline-start: calc(var(--space-1) / 2);
+  }
+}
+
+/* The Add glyph shares the editor's text origin. Keep its hit box generous
+   while placing the visible glyph at the same inline start on every rail. */
+.composer-simple .composer-rail {
+  padding-inline: var(--space-4);
+}
+
+.composer-simple .composer-add-trigger {
+  justify-content: flex-start;
+  padding-inline: 0;
+}
+
+/* Send is the stable terminal action. Dictation is an input method and never
+   replaces or follows the primary action, including an empty phone draft. */
+.composer-simple .composer-primary .send {
+  display: inline-flex;
+}
+
+@media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
+  .composer-mobile .composer-primary .send {
+    display: inline-flex;
   }
 }

@@ -39,9 +39,12 @@ const { registerResourceProvider } = await import("../../../apps/web/src/resourc
 const {
   default: EditorRuntime,
   editorViewCount,
+  replaceEditorSelection,
   resetEditorRuntimeForTest,
   retainedStateCount,
 } = await import("../widgets/runtime.tsx");
+const { replaceEditorSelection: replaceViaSeam } = await import("../../../apps/web/src/resources/views.ts");
+const { resourceKey } = await import("@polyth/web-sdk");
 
 const scheme = `editor-rt-${process.pid}`;
 const bodies = new Map<string, string>([
@@ -110,8 +113,14 @@ test("one EditorView per group; tab A→B→A restores state; discard undo is a 
     const { EditorView } = await import("@codemirror/view");
     const found = EditorView.findFromDOM(first.container.querySelector(".cm-editor") as HTMLElement);
     assert.ok(found, "EditorView.findFromDOM");
+    found!.dispatch({ selection: { anchor: 0, head: 3 } });
+    const ref = docRef("a.ts");
+    assert.equal(replaceEditorSelection(resourceKey(ref), "hel", "aaa"), true);
+    assert.equal(first.handle.getBuffer(), "hel");
+    assert.equal(replaceViaSeam(ref, "bye", "hel"), true);
+    assert.equal(first.handle.getBuffer(), "bye");
     found!.dispatch({ changes: { from: found!.state.doc.length, insert: "-edit" } });
-    assert.equal(first.handle.getBuffer(), "aaa-edit");
+    assert.equal(first.handle.getBuffer(), "bye-edit");
     assert.equal(first.handle.getSnapshot().dirty, true);
     assert.equal(first.handle.getSnapshot().saved, "aaa");
 
@@ -123,7 +132,7 @@ test("one EditorView per group; tab A→B→A restores state; discard undo is a 
 
     await first.setPath("a.ts");
     const foundA = EditorView.findFromDOM(first.container.querySelector(".cm-editor") as HTMLElement);
-    assert.equal(foundA!.state.doc.toString(), "aaa-edit");
+    assert.equal(foundA!.state.doc.toString(), "bye-edit");
     assert.equal(editorViewCount(), 1);
 
     first.handle.discard();
