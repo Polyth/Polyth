@@ -1,0 +1,508 @@
+name: Restore transferred branch and snapshot
+
+on:
+  push:
+    branches:
+      - feat/identity-governed-workspaces-20260916
+    paths:
+      - .github/workflows/restore-blueprint-snapshot.yml
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/identity-governed-workspaces-20260916
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@1.91.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Restore post-transfer hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          ROOT = Path.cwd()
+
+          def read(path):
+              return (ROOT / path).read_text()
+
+          def write(path, content):
+              target = ROOT / path
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_text(content)
+
+          def replace(path, old, new, count=1):
+              data = read(path)
+              if old not in data:
+                  raise SystemExit(f"expected patch anchor missing in {path}: {old[:100]!r}")
+              write(path, data.replace(old, new, count))
+
+          # -----------------------------------------------------------------
+          # Package lifecycle authority: local browser sessions are not ambient
+          # administrators. Space mutations require admin membership; global
+          # binary/runtime mutations require an explicit deployment owner path.
+          # -----------------------------------------------------------------
+          write("packages/plugins/src/lifecycleAuth.ts", '''import {
+            REMOTE_CAPABILITY,
+            roleAtLeast,
+            type RouteRequest,
+            type SpaceContext,
+          } from "@polyth/contracts";
+
+          const forbidden = (message: string): never => {
+            throw Object.assign(new Error(message), { code: "forbidden" });
+          };
+
+          /**
+           * Deployment-global package binary/runtime mutations.
+           *
+           * A Space owner is not automatically a deployment administrator on a
+           * shared control plane. V1 therefore permits the local trusted operator
+           * only in local-trusted deployments, or a paired device carrying the
+           * deliberately rare packages.install capability. Both paths still need
+           * owner membership in the active Space.
+           */
+          export function assertDeploymentPackageMutator(request: RouteRequest): void {
+            if (!roleAtLeast(request.space.role, "owner")) {
+              forbidden("deployment package mutations require an owner");
+            }
+            const principal = request.principal;
+            if (
+              request.space.deployment === "local-trusted"
+              && (principal.kind === "local-user" || principal.kind === "ui-session")
+            ) {
+              return;
+            }
+            if (
+              principal.kind === "paired-device"
+              && principal.grants.includes(REMOTE_CAPABILITY.packagesInstall)
+            ) {
+              return;
+            }
+            forbidden("deployment package mutation is not allowed for this principal");
+          }
+
+          function assertSpaceAdmin(space: SpaceContext): void {
+            if (!roleAtLeast(space.role, "admin")) {
+              forbidden("package lifecycle changes require a Space admin");
+            }
+          }
+
+          /** Enable in the calling Space. Does not mutate the global binary. */
+          export function assertSpacePackageEnable(_request: RouteRequest, space: SpaceContext): void {
+            assertSpaceAdmin(space);
+          }
+
+          /** Disable in the calling Space. Last-Space disable may dispose process runtime. */
+          export function assertSpacePackageDisable(_request: RouteRequest, space: SpaceContext): void {
+            assertSpaceAdmin(space);
+          }
+
+          /** Capability grants and connection-definition approval are Space operations. */
+          export function assertSpacePackageGrant(_request: RouteRequest, space: SpaceContext): void {
+            assertSpaceAdmin(space);
+          }
+
+          /**
+           * Trusted server entries execute setup()/dispose() in the deployment's
+           * Node process. Starting or stopping one is therefore deployment-wide
+           * authority even though the enabled bit remains Space-scoped.
+           */
+          export function assertTrustedServerRuntimeMutator(
+            request: RouteRequest,
+            hasServerRuntime: boolean,
+          ): void {
+            if (hasServerRuntime) assertDeploymentPackageMutator(request);
+          }
+          ''')
+
+          routes = read("packages/plugins/src/managedPluginRoutes.ts")
+          routes = routes.replace(
+              "  assertSpacePackageGrant,\n} from \"./lifecycleAuth.ts\";",
+              "  assertSpacePackageGrant,\n  assertTrustedServerRuntimeMutator,\n} from \"./lifecycleAuth.ts\";",
+              1,
+          )
+          routes = routes.replace(
+              '''      if (operation === "enable") {\n        assertSpacePackageEnable(request, request.space);\n        request.json(200, await registry.enable(id, storage));\n      } else if (operation === "disable") {\n        assertSpacePackageDisable(request, request.space);\n        invocationLeases.revokePackage(id);\n        request.json(200, await registry.disable(id, storage));''',
+              '''      if (operation === "enable") {\n        assertSpacePackageEnable(request, request.space);\n        assertTrustedServerRuntimeMutator(\n          request,\n          Boolean(registry.canonicalManifest(id).runtime?.server),\n        );\n        request.json(200, await registry.enable(id, storage));\n      } else if (operation === "disable") {\n        assertSpacePackageDisable(request, request.space);\n        assertTrustedServerRuntimeMutator(\n          request,\n          Boolean(registry.canonicalManifest(id).runtime?.server),\n        );\n        invocationLeases.revokePackage(id);\n        request.json(200, await registry.disable(id, storage));''',
+              1,
+          )
+          write("packages/plugins/src/managedPluginRoutes.ts", routes)
+
+          registry = read("packages/plugins/src/managedRegistry.ts")
+          registry = registry.replace(
+              '''  if (manifest.trust === "ui-only" || manifest.trust === "pure") {\n    throw err("invalid-input", `trust class "${manifest.trust}" cannot declare entries.server`);\n  }''',
+              '''  if (manifest.trust !== "privileged" && manifest.trust !== "credentialed") {\n    throw err("invalid-input", `trust class "${manifest.trust}" cannot declare entries.server`);\n  }''',
+              1,
+          )
+          registry = registry.replace(
+              '''            routes: opts.routes,\n            root: opts.root,''',
+              '''            routes: {\n              add(handler) {\n                return opts.routes!.add(async (request) => {\n                  // Trusted server code is process-global, but package enablement\n                  // remains Space-scoped. Never let a global handler observe a\n                  // request from a Space where the package is disabled.\n                  if (!opts.packageSpaces) return handler(request);\n                  const target = allSpaces().find((space) => space.spaceId === request.space.spaceId);\n                  if (!target || !readSpaceEnabled(target.storage, pkg.persisted.id)) return false;\n                  return handler(request);\n                });\n              },\n            },\n            root: opts.root,''',
+              1,
+          )
+          write("packages/plugins/src/managedRegistry.ts", registry)
+
+          # Security regression coverage.
+          security = read("packages/plugins/test/session1Security.test.ts")
+          security = security.replace(
+              'import { assertDeploymentPackageMutator } from "../src/lifecycleAuth.ts";',
+              'import { assertDeploymentPackageMutator, assertSpacePackageDisable, assertSpacePackageEnable, assertSpacePackageGrant, assertTrustedServerRuntimeMutator } from "../src/lifecycleAuth.ts";',
+              1,
+          )
+          anchor = 'test("managed plugin HTTP denies Space admin without deployment authority", async () => {'
+          auth_test = r'''
+          test("package lifecycle authority follows Space role and deployment scope", () => {
+            const base = {
+              req: { headers: {} } as RouteRequest["req"],
+              res: {} as RouteRequest["res"],
+              url: new URL("http://127.0.0.1/"),
+              path: "/",
+              method: "POST",
+              ingress: { kind: "public-http", listenerId: "local", loopback: true, secure: false } as const,
+              body: async () => ({}),
+              json() {},
+            };
+            const request = (principal: AuthPrincipal, role: SpaceRole, deployment: SpaceContext["deployment"] = "local-trusted"): RouteRequest => ({
+              ...base,
+              principal,
+              space: space(role, { deployment }),
+              requireCapability: requireCapabilityOf(principal),
+            });
+
+            const uiMember = request({ kind: "ui-session", sessionId: "s", rememberedDeviceId: "d" }, "member");
+            assert.throws(() => assertSpacePackageEnable(uiMember, uiMember.space), /Space admin|lifecycle/);
+            assert.throws(() => assertSpacePackageDisable(uiMember, uiMember.space), /Space admin|lifecycle/);
+            assert.throws(() => assertSpacePackageGrant(uiMember, uiMember.space), /Space admin|lifecycle/);
+
+            const uiAdmin = request({ kind: "ui-session", sessionId: "s", rememberedDeviceId: "d" }, "admin");
+            assert.doesNotThrow(() => assertSpacePackageEnable(uiAdmin, uiAdmin.space));
+            assert.doesNotThrow(() => assertSpacePackageDisable(uiAdmin, uiAdmin.space));
+            assert.doesNotThrow(() => assertSpacePackageGrant(uiAdmin, uiAdmin.space));
+            assert.throws(() => assertTrustedServerRuntimeMutator(uiAdmin, true), /owner/);
+            assert.doesNotThrow(() => assertTrustedServerRuntimeMutator(uiAdmin, false));
+
+            const uiOwner = request({ kind: "ui-session", sessionId: "s", rememberedDeviceId: "d" }, "owner");
+            assert.doesNotThrow(() => assertDeploymentPackageMutator(uiOwner));
+            assert.doesNotThrow(() => assertTrustedServerRuntimeMutator(uiOwner, true));
+
+            const sharedOwner = request({ kind: "ui-session", sessionId: "s", rememberedDeviceId: "d" }, "owner", "server-trusted");
+            assert.throws(() => assertDeploymentPackageMutator(sharedOwner), /not allowed/);
+
+            const remoteOwner = request(paired([REMOTE_CAPABILITY.packagesInstall]), "owner", "server-trusted");
+            assert.doesNotThrow(() => assertDeploymentPackageMutator(remoteOwner));
+          });
+
+          '''
+          if "package lifecycle authority follows Space role and deployment scope" not in security:
+              if anchor not in security:
+                  raise SystemExit("session1Security insertion anchor missing")
+              security = security.replace(anchor, auth_test + anchor, 1)
+          # Existing test encoded the old ambient local-user mutation behavior.
+          security = security.replace('space: space("member"),', 'space: space("owner"),', 1)
+          write("packages/plugins/test/session1Security.test.ts", security)
+
+          plugins_test = read("packages/plugins/test/plugins.test.ts")
+          plugins_test = plugins_test.replace(
+              '''    trust: "workspace",\n    entries: { server: "./server.mjs" },''',
+              '''    trust: "privileged",\n    entries: { server: "./server.mjs" },''',
+              1,
+          ).replace(
+              '''      manifest: { id: host.pluginId, version: "1.0.0", trust: "workspace" },''',
+              '''      manifest: { id: host.pluginId, version: "1.0.0", trust: "privileged" },''',
+              1,
+          )
+          old_low = '''test("low-trust manifests cannot install executable server entries", async () => {\n  const { dir, trusted } = scaffold();\n  writeFileSync(\n    join(trusted, "sample", "polyth-plugin.json"),\n    manifest({ entries: { server: "./server.mjs" } }),\n  );\n  writeFileSync(join(trusted, "sample", "server.mjs"), "export default () => ({})");\n  const reg = createPluginRegistry({ dir, trustedDir: trusted });\n  await assert.rejects(() => reg.install("file:sample"), /ui-only.*cannot declare entries\\.server/);\n  await reg.dispose();\n});'''
+          new_low = '''test("only broad trust classes may install executable server entries", async () => {\n  for (const trust of ["ui-only", "pure", "workspace", "network", "device"] as const) {\n    const { dir, trusted } = scaffold();\n    writeFileSync(\n      join(trusted, "sample", "polyth-plugin.json"),\n      manifest({ trust, entries: { server: "./server.mjs" } }),\n    );\n    writeFileSync(join(trusted, "sample", "server.mjs"), "export default () => ({})");\n    const reg = createPluginRegistry({ dir, trustedDir: trusted });\n    await assert.rejects(\n      () => reg.install("file:sample"),\n      new RegExp(`${trust}.*cannot declare entries\\\\.server`),\n    );\n    await reg.dispose();\n  }\n});'''
+          if old_low not in plugins_test:
+              raise SystemExit("plugins low-trust test anchor missing")
+          plugins_test = plugins_test.replace(old_low, new_low, 1)
+
+          if "trusted server routes stay inside enabled Spaces" not in plugins_test:
+              route_test = r'''
+
+          test("trusted server routes stay inside enabled Spaces", async () => {
+            const { dir, trusted } = scaffold();
+            const pluginDir = join(trusted, "sample");
+            writeFileSync(join(pluginDir, "polyth-plugin.json"), manifest({
+              trust: "privileged",
+              entries: { server: "./server.mjs" },
+              contributions: [],
+            }));
+            writeFileSync(join(pluginDir, "server.mjs"), `
+              export default (host) => ({
+                manifest: { id: host.pluginId, version: "1.0.0", trust: "privileged" },
+                setup(context) {
+                  const route = host.routes.add(async () => true);
+                  context.effect(() => route.dispose());
+                },
+              });
+            `);
+            const root = createContext("tenant-route-test");
+            const storageA = testSpaceStorage(join(dir, "..", "space-a"));
+            const storageB = testSpaceStorage(join(dir, "..", "space-b"));
+            const activeRoutes = new Set<RouteHandler>();
+            const reg = createPluginRegistry({
+              dir,
+              trustedDir: trusted,
+              root,
+              packageSpaces: () => [
+                { spaceId: "spc_a", storage: storageA },
+                { spaceId: "spc_b", storage: storageB },
+              ],
+              routes: {
+                add(handler) {
+                  activeRoutes.add(handler);
+                  return { dispose: () => { activeRoutes.delete(handler); } };
+                },
+              },
+            });
+            await reg.install("file:sample");
+            await reg.enable("sample.widget", storageA);
+            const handler = [...activeRoutes][0]!;
+            assert.equal(await handler({ space: { spaceId: "spc_a" } } as never), true);
+            assert.equal(await handler({ space: { spaceId: "spc_b" } } as never), false);
+
+            await reg.enable("sample.widget", storageB);
+            assert.equal(await handler({ space: { spaceId: "spc_b" } } as never), true);
+            await reg.disable("sample.widget", storageA);
+            assert.equal(await handler({ space: { spaceId: "spc_a" } } as never), false);
+            assert.equal(await handler({ space: { spaceId: "spc_b" } } as never), true);
+
+            await reg.dispose();
+            await root.dispose();
+          });
+          '''
+              plugins_test += route_test
+          write("packages/plugins/test/plugins.test.ts", plugins_test)
+
+          # -----------------------------------------------------------------
+          # Release quality gate: one executable contract shared by GitHub and
+          # Codemagic before signing or publishing any native artifact.
+          # -----------------------------------------------------------------
+          write("scripts/ci/release-quality.mjs", r'''#!/usr/bin/env node
+          import { spawnSync } from "node:child_process";
+
+          const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+          const npx = process.platform === "win32" ? "npx.cmd" : "npx";
+
+          function run(command, args, options = {}) {
+            console.log(`release-quality: ${command} ${args.join(" ")}`);
+            const result = spawnSync(command, args, {
+              cwd: process.cwd(),
+              env: process.env,
+              stdio: "inherit",
+              ...options,
+            });
+            if (result.error) throw result.error;
+            if (result.status !== 0) process.exit(result.status ?? 1);
+          }
+
+          function lines(command, args) {
+            const result = spawnSync(command, args, {
+              cwd: process.cwd(),
+              env: process.env,
+              encoding: "utf8",
+            });
+            if (result.error) throw result.error;
+            if (result.status !== 0) {
+              process.stderr.write(result.stderr ?? "");
+              process.exit(result.status ?? 1);
+            }
+            return (result.stdout ?? "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+          }
+
+          run(process.execPath, ["scripts/release-version.mjs"]);
+          run(npm, ["run", "build:web"]);
+
+          for (const project of [
+            "packages/contracts",
+            "packages/plugins",
+            "packages/server",
+            "packages/tunnel",
+            "packages/terminal",
+            "apps/mobile",
+            "apps/desktop",
+          ]) {
+            run(npx, ["tsc", "--noEmit", "-p", project]);
+          }
+
+          const stable = lines(process.execPath, ["scripts/ci/select-tests.mjs", "ci"]);
+          run(process.execPath, ["--experimental-strip-types", "--test", ...stable]);
+
+          run("cargo", ["build", "-p", "polyth-link-core", "--bin", "polyth-link-ws-echo"]);
+          const link = lines(process.execPath, ["scripts/ci/select-tests.mjs", "polyth-link"]);
+          run(process.execPath, ["--experimental-strip-types", "--test", ...link]);
+          ''')
+
+          write(".github/workflows/release-quality.yml", '''name: Release quality\n\non:\n  workflow_call:\n\npermissions:\n  contents: read\n\njobs:\n  quality:\n    runs-on: ubuntu-24.04\n    steps:\n      - uses: actions/checkout@v4\n\n      - uses: actions/setup-node@v4\n        with:\n          node-version-file: .nvmrc\n          cache: npm\n\n      - uses: dtolnay/rust-toolchain@1.91.0\n\n      - uses: Swatinem/rust-cache@v2\n\n      - name: Install workspace dependencies\n        run: npm ci\n\n      - name: Validate release quality\n        run: node scripts/ci/release-quality.mjs\n''')
+
+          android_release = read(".github/workflows/android-release.yml")
+          android_release = android_release.replace(
+              "jobs:\n  release:\n    runs-on: ubuntu-24.04",
+              "jobs:\n  quality-gate:\n    uses: ./.github/workflows/release-quality.yml\n\n  release:\n    needs: quality-gate\n    runs-on: ubuntu-24.04",
+              1,
+          ).replace('java-version: "17"', 'java-version: "21"', 1)
+          write(".github/workflows/android-release.yml", android_release)
+
+          desktop = read(".github/workflows/desktop-release.yml")
+          desktop = desktop.replace(
+              "jobs:\n  plan:",
+              "jobs:\n  quality-gate:\n    uses: ./.github/workflows/release-quality.yml\n\n  plan:",
+              1,
+          ).replace("    needs: plan\n", "    needs: [quality-gate, plan]\n", 1)
+          old_package = '''      - name: Package unsigned validation artifact\n        if: needs.plan.outputs.is_tag_release != 'true'\n        working-directory: apps/desktop\n        run: npx electron-builder ${{ matrix.builder }} --publish never\n\n      - name: Package and publish release artifact\n        if: needs.plan.outputs.is_tag_release == 'true'\n        working-directory: apps/desktop\n        run: npx electron-builder ${{ matrix.builder }} --publish always\n'''
+          new_package = '''      - name: Package artifact for verification\n        working-directory: apps/desktop\n        run: npx electron-builder ${{ matrix.builder }} --publish never\n'''
+          if old_package not in desktop:
+              raise SystemExit("desktop package/publish anchor missing")
+          desktop = desktop.replace(old_package, new_package, 1)
+          upload_anchor = '''      - uses: actions/upload-artifact@v4\n        if: needs.plan.outputs.is_tag_release != 'true'\n'''
+          publish_step = '''      - name: Publish verified release artifact\n        if: needs.plan.outputs.is_tag_release == 'true'\n        working-directory: apps/desktop\n        run: npx electron-builder ${{ matrix.builder }} --publish always\n\n'''
+          if upload_anchor not in desktop:
+              raise SystemExit("desktop upload anchor missing")
+          desktop = desktop.replace(upload_anchor, publish_step + upload_anchor, 1)
+          write(".github/workflows/desktop-release.yml", desktop)
+
+          codemagic = read("codemagic.yaml")
+          codemagic = codemagic.replace("      xcode: latest", "      xcode: 26.6", 1)
+          npm_step = '''      - name: Install npm dependencies\n        script: |\n          set -euo pipefail\n          npm ci\n'''
+          quality_steps = '''      - name: Install npm dependencies\n        script: |\n          set -euo pipefail\n          npm ci\n\n      - name: Install pinned Rust toolchain for release quality\n        script: |\n          set -euo pipefail\n          if ! command -v rustup >/dev/null 2>&1; then\n            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \\\n              | sh -s -- -y --profile minimal --default-toolchain none\n          fi\n          export PATH=\"$HOME/.cargo/bin:$PATH\"\n          rustup toolchain install 1.91.0 --profile minimal\n          rustup default 1.91.0\n\n      - name: Validate release quality\n        script: |\n          set -euo pipefail\n          export PATH=\"$HOME/.cargo/bin:$PATH\"\n          node scripts/ci/release-quality.mjs\n'''
+          if npm_step not in codemagic:
+              raise SystemExit("Codemagic npm anchor missing")
+          codemagic = codemagic.replace(npm_step, quality_steps, 1)
+          write("codemagic.yaml", codemagic)
+
+          # -----------------------------------------------------------------
+          # Native build correctness: Java 21 matches Capacitor-generated code,
+          # Android CI compiles instrumented tests, Xcode is reproducibly pinned.
+          # -----------------------------------------------------------------
+          gradle = read("apps/mobile/android/app/build.gradle")
+          gradle = gradle.replace("JavaVersion.VERSION_17", "JavaVersion.VERSION_21")
+          write("apps/mobile/android/app/build.gradle", gradle)
+
+          native = read(".github/workflows/polyth-link-native.yml")
+          android_node_anchor = '''      - uses: actions/setup-node@v4\n        with:\n          node-version-file: .nvmrc\n          cache: npm\n'''
+          java_step = '''      - uses: actions/setup-java@v4\n        with:\n          distribution: temurin\n          java-version: \"21\"\n          cache: gradle\n\n'''
+          first = native.find(android_node_anchor)
+          if first < 0:
+              raise SystemExit("native Android setup-node anchor missing")
+          native = native[:first] + java_step + native[first:]
+          native = native.replace(
+              "      - run: cd apps/mobile/android && ./gradlew :app:assembleDebug --stacktrace",
+              "      - run: cd apps/mobile/android && ./gradlew :app:assembleDebug :app:assembleAndroidTest --stacktrace",
+              1,
+          )
+          write(".github/workflows/polyth-link-native.yml", native)
+
+          old_android_test = ROOT / "apps/mobile/android/app/src/androidTest/java/com/getcapacitor/myapp/ExampleInstrumentedTest.java"
+          if old_android_test.exists():
+              old_android_test.unlink()
+          write("apps/mobile/android/app/src/androidTest/java/com/polyth/mobile/ExampleInstrumentedTest.java", '''package com.polyth.mobile;\n\nimport static org.junit.Assert.assertEquals;\n\nimport android.content.Context;\nimport androidx.test.ext.junit.runners.AndroidJUnit4;\nimport androidx.test.platform.app.InstrumentationRegistry;\nimport org.junit.Test;\nimport org.junit.runner.RunWith;\n\n@RunWith(AndroidJUnit4.class)\npublic class ExampleInstrumentedTest {\n    @Test\n    public void appContextUsesPolythApplicationId() {\n        Context appContext = InstrumentationRegistry.getInstrumentation().getTargetContext();\n        assertEquals(\"com.polyth.mobile\", appContext.getPackageName());\n    }\n}\n''')
+
+          write("scripts/test/releaseQuality.test.ts", r'''import test from "node:test";
+          import assert from "node:assert/strict";
+          import { existsSync, readFileSync } from "node:fs";
+
+          const text = (path: string) => readFileSync(path, "utf8");
+
+          test("all native release paths are blocked by the shared quality contract", () => {
+            const script = text("scripts/ci/release-quality.mjs");
+            assert.match(script, /select-tests\.mjs", "ci"/);
+            assert.match(script, /select-tests\.mjs", "polyth-link"/);
+            assert.match(script, /polyth-link-core", "--bin", "polyth-link-ws-echo"/);
+
+            const android = text(".github/workflows/android-release.yml");
+            assert.match(android, /quality-gate:\n    uses: \.\/\.github\/workflows\/release-quality\.yml/);
+            assert.match(android, /release:\n    needs: quality-gate/);
+            assert.match(android, /java-version: "21"/);
+
+            const desktop = text(".github/workflows/desktop-release.yml");
+            assert.match(desktop, /needs: \[quality-gate, plan\]/);
+            assert.ok(
+              desktop.indexOf("Verify packaged artifacts exist") < desktop.indexOf("Publish verified release artifact"),
+              "desktop publishing must happen only after packaged-artifact verification",
+            );
+            assert.ok(
+              desktop.indexOf("End-to-end test packaged AppImage") < desktop.indexOf("Publish verified release artifact"),
+              "desktop publishing must happen only after AppImage smoke testing",
+            );
+
+            const codemagic = text("codemagic.yaml");
+            assert.match(codemagic, /xcode: 26\.6/);
+            assert.ok(
+              codemagic.indexOf("Validate release quality") < codemagic.indexOf("Build signed IPA"),
+              "TestFlight signing must be gated by release quality",
+            );
+          });
+
+          test("Android native CI compiles the real com.polyth.mobile instrumented suite with Java 21", () => {
+            const gradle = text("apps/mobile/android/app/build.gradle");
+            const native = text(".github/workflows/polyth-link-native.yml");
+            assert.match(gradle, /sourceCompatibility JavaVersion\.VERSION_21/);
+            assert.match(gradle, /targetCompatibility JavaVersion\.VERSION_21/);
+            assert.match(native, /java-version: "21"/);
+            assert.match(native, /:app:assembleDebug :app:assembleAndroidTest/);
+            assert.equal(existsSync("apps/mobile/android/app/src/androidTest/java/com/getcapacitor/myapp/ExampleInstrumentedTest.java"), false);
+            assert.equal(existsSync("apps/mobile/android/app/src/androidTest/java/com/polyth/mobile/ExampleInstrumentedTest.java"), true);
+          });
+          ''')
+
+          # The bootstrap workflow is intentionally absent from the final tree.
+          Path(".github/workflows/restore-blueprint-snapshot.yml").unlink()
+          PY
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Validate restored package security
+        run: >-
+          node --experimental-strip-types --test
+          packages/plugins/test/plugins.test.ts
+          packages/plugins/test/session1Security.test.ts
+          scripts/test/releaseQuality.test.ts
+
+      - name: Typecheck affected projects
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx tsc --noEmit -p packages/plugins
+          npx tsc --noEmit -p apps/mobile
+
+      - name: Commit restored branch state
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "polyth-blueprint-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Harden package isolation and native release gates"
+          git push origin HEAD:feat/identity-governed-workspaces-20260916
+
+      - name: Stage clean repository snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/polyth-snapshot"
+          mkdir -p "$RUNNER_TEMP/polyth-snapshot"
+          git archive HEAD | tar -x -C "$RUNNER_TEMP/polyth-snapshot"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: polyth_feat-identity-governed-workspaces-20260916
+          retention-days: 7
+          include-hidden-files: true
+          if-no-files-found: error
+          path: ${{ runner.temp }}/polyth-snapshot/
