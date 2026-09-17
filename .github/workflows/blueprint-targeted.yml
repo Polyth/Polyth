@@ -1,0 +1,69 @@
+name: Blueprint targeted validation
+
+on:
+  push:
+    branches: [feat/identity-governed-workspaces-20260916]
+    paths:
+      - .github/workflows/blueprint-targeted.yml
+      - packages/control-plane/**
+      - packages/identity/**
+      - packages/server/src/authorityOutbox.ts
+      - packages/server/src/canonicalAuth.ts
+      - packages/server/src/canonicalSecurity.ts
+      - packages/server/src/runtimeSecurity.ts
+      - packages/server/test/authorityOutbox.test.ts
+      - packages/server/test/canonicalAuth.test.ts
+      - packages/server/test/canonicalIdentityHttp.test.ts
+      - packages/server/test/canonicalSecurity.test.ts
+      - packages/server/test/runtimeSecurityBinding.test.ts
+      - apps/web/src/accountStorage.ts
+      - apps/web/src/accounts.ts
+      - apps/web/src/authBootstrap.ts
+      - apps/web/src/authClient.ts
+      - apps/web/src/authPrefetch.ts
+      - apps/web/src/passkeys.ts
+      - apps/web/src/components/LockScreen.tsx
+      - apps/web/src/components/settings/AccessPage.tsx
+      - apps/web/test/authBootstrap.test.ts
+      - apps/web/test/multiUserAccountScope.test.ts
+      - apps/web/test/passkeys.test.ts
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blueprint-targeted-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  targeted:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.16.0
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Control-plane and identity typecheck
+        run: |
+          node node_modules/typescript/bin/tsc --noEmit -p packages/control-plane/tsconfig.json
+          node node_modules/typescript/bin/tsc --noEmit -p packages/identity/tsconfig.json
+      - name: Identity blueprint targeted tests
+        run: |
+          node --experimental-strip-types --test \
+            packages/control-plane/test/*.test.ts \
+            packages/identity/test/*.test.ts \
+            packages/server/test/authorityOutbox.test.ts \
+            packages/server/test/canonicalAuth.test.ts \
+            packages/server/test/canonicalIdentityHttp.test.ts \
+            packages/server/test/canonicalSecurity.test.ts \
+            packages/server/test/runtimeSecurityBinding.test.ts \
+            apps/web/test/authBootstrap.test.ts \
+            apps/web/test/multiUserAccountScope.test.ts \
+            apps/web/test/passkeys.test.ts
+      - name: Build web production bundle
+        run: npm run build:web
