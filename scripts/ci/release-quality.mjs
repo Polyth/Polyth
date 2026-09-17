@@ -1,53 +1,78 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 
+const ROOT = process.cwd();
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-const npx = process.platform === "win32" ? "npx.cmd" : "npx";
 
-function run(command, args, options = {}) {
-  console.log(`release-quality: ${command} ${args.join(" ")}`);
-  const result = spawnSync(command, args, {
-    cwd: process.cwd(),
-    env: process.env,
-    stdio: "inherit",
-    ...options,
-  });
-  if (result.error) throw result.error;
-  if (result.status !== 0) process.exit(result.status ?? 1);
+const TYPECHECK_PROJECTS = [
+  "packages/contracts",
+  "packages/plugins",
+  "packages/server",
+  "packages/control-plane",
+  "packages/identity",
+  "packages/tunnel",
+  "packages/terminal",
+  "packages/markets",
+  "apps/mobile",
+  "apps/desktop",
+];
+
+function fail(command, result) {
+  const suffix = result.error ? `: ${result.error.message}` : "";
+  console.error(`release-quality: failed: ${command}${suffix}`);
+  process.exit(typeof result.status === "number" && result.status > 0 ? result.status : 1);
 }
 
-function lines(command, args) {
+function run(command, args, options = {}) {
+  const display = [command, ...args].join(" ");
+  console.log(`\n==> ${display}`);
   const result = spawnSync(command, args, {
-    cwd: process.cwd(),
+    cwd: ROOT,
+    stdio: "inherit",
     env: process.env,
-    encoding: "utf8",
+    ...options,
   });
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    process.stderr.write(result.stderr ?? "");
-    process.exit(result.status ?? 1);
+  if (result.error || result.status !== 0) fail(display, result);
+}
+
+function capture(command, args) {
+  const display = [command, ...args].join(" ");
+  const result = spawnSync(command, args, {
+    cwd: ROOT,
+    encoding: "utf8",
+    env: process.env,
+  });
+  if (result.error || result.status !== 0) {
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    fail(display, result);
   }
-  return (result.stdout ?? "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 run(process.execPath, ["scripts/release-version.mjs"]);
 run(npm, ["run", "build:web"]);
 
-for (const project of [
-  "packages/contracts",
-  "packages/plugins",
-  "packages/server",
-  "packages/tunnel",
-  "packages/terminal",
-  "apps/mobile",
-  "apps/desktop",
-]) {
-  run(npx, ["tsc", "--noEmit", "-p", project]);
+for (const project of TYPECHECK_PROJECTS) {
+  run(process.execPath, [
+    "node_modules/typescript/bin/tsc",
+    "--noEmit",
+    "-p",
+    project,
+  ]);
 }
 
-const stable = lines(process.execPath, ["scripts/ci/select-tests.mjs", "ci"]);
+const stable = capture(process.execPath, ["scripts/ci/select-tests.mjs", "ci"]);
+if (stable.length === 0) {
+  console.error("release-quality: no tests selected");
+  process.exit(1);
+}
 run(process.execPath, ["--experimental-strip-types", "--test", ...stable]);
 
 run("cargo", ["build", "-p", "polyth-link-core", "--bin", "polyth-link-ws-echo"]);
-const link = lines(process.execPath, ["scripts/ci/select-tests.mjs", "polyth-link"]);
+const link = capture(process.execPath, ["scripts/ci/select-tests.mjs", "polyth-link"]);
 run(process.execPath, ["--experimental-strip-types", "--test", ...link]);
+console.log(`\nrelease-quality: passed (${TYPECHECK_PROJECTS.length} typecheck projects, ${stable.length + link.length} tests)`);
