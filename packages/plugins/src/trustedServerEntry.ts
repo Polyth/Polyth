@@ -1,4 +1,4 @@
-import { realpath, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
@@ -8,6 +8,7 @@ import type {
   RouteHandler,
 } from "@polyth/contracts";
 import { loadPlugin } from "@polyth/kernel";
+import { parseManifest } from "./managedManifest.ts";
 
 export interface TrustedServerPluginHost {
   pluginId: string;
@@ -30,6 +31,20 @@ export async function loadServerEntry(opts: {
   host: TrustedServerPluginHost;
 }): Promise<Disposable> {
   const installDir = await realpath(opts.installDir);
+  const manifestPath = await realpath(resolve(installDir, "polyth-plugin.json"));
+  if (!inside(installDir, manifestPath)) {
+    throw new Error("plugin manifest escapes the plugin install directory");
+  }
+  const manifest = parseManifest(await readFile(manifestPath, "utf8"));
+  if (manifest.id !== opts.host.pluginId) {
+    throw new Error(
+      `installed manifest id "${manifest.id}" does not match package id "${opts.host.pluginId}"`,
+    );
+  }
+  if (manifest.entries?.server !== opts.entryPath) {
+    throw new Error("installed manifest server entry changed since activation was planned");
+  }
+
   const requested = resolve(installDir, opts.entryPath);
   if (!inside(installDir, requested)) {
     throw new Error("server entry escapes the plugin install directory");
