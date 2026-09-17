@@ -36,6 +36,7 @@ export { packageWorkspace, type PackageWorkspace } from "./packageWorkspace.ts";
 export {
   PairedSocketRegistry,
   closeAuthSessionSockets,
+  closeAuthUserSessionSockets,
   closeAuthUserSockets,
 } from "./pairedSockets.ts";
 export {
