@@ -16,6 +16,7 @@ import type {
   SpaceContext,
 } from "@polyth/contracts";
 import type { ProjectRegistry } from "./projects.ts";
+import { canonicalProjectService } from "./projectResourceAuthority.ts";
 
 const notFound = (): Error =>
   Object.assign(new Error("session not found"), { code: "not-found" });
@@ -257,7 +258,7 @@ export function createSpaceServices(deps: {
   guard: SpaceGuard;
 }): (ctx: SpaceContext) => SpaceServices {
   return (ctx) => {
-    const projects = deps.registry.forSpace(ctx);
+    const projects = canonicalProjectService(ctx, deps.registry);
     return {
       ctx,
       projects,
