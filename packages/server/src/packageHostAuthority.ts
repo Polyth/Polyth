@@ -26,6 +26,9 @@ const unavailable = (message: string): Error => Object.assign(new Error(message)
 const archived = (): Error => Object.assign(new Error("archived sessions are read-only"), { code: "conflict" });
 
 async function systemProjectsForProject(host: ServerPackageHost, projectId: string): Promise<ProjectService> {
+  if (host.deployment !== "local-trusted") {
+    throw unavailable("global package project access requires an explicit Space context");
+  }
   const project = await host.projects.get(projectId);
   if (!project?.spaceId) throw Object.assign(new Error("project not found"), { code: "not-found" });
   const ctx: SpaceContext = {
@@ -54,6 +57,9 @@ function packageProjects(host: ServerPackageHost): ProjectService {
       }
       if (property === "list") {
         return async () => {
+          if (host.deployment !== "local-trusted") {
+            throw unavailable("global package project listing requires an explicit Space context");
+          }
           const result = [];
           for (const project of await raw.list()) {
             const governed = await (await systemProjectsForProject(host, project.id)).get(project.id);
@@ -75,10 +81,6 @@ function packageProjects(host: ServerPackageHost): ProjectService {
       if (property === "add" || property === "create" || property === "addRemote") {
         return () => { throw unavailable("package project creation requires an explicit Space context"); };
       }
-      // Internal package-workspace provisioning remains available here. The
-      // packageWorkspace helper immediately re-opens the deterministic anchor
-      // through host.forSpace(system-context), which materializes/verifies its
-      // canonical resource before returning it to package code.
       return Reflect.get(target, property, receiver);
     },
   }) as ProjectService;
@@ -181,13 +183,6 @@ function packageStore(host: ServerPackageHost): ServerPackageHost["store"] {
   }) as ServerPackageHost["store"];
 }
 
-/**
- * Package code is trusted application code, but it is not a tenant authority.
- * Route handlers already receive `rc.space`; background work must derive its
- * Space from the durable project/session it operates on. This wrapper removes
- * raw unscoped project/session authority from discovered packages while
- * preserving infrastructure seams that do not address tenant resources.
- */
 export function governPackageHost(host: ServerPackageHost): ServerPackageHost {
   return {
     ...host,
