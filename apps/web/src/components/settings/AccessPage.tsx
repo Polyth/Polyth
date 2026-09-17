@@ -5,6 +5,7 @@ import {
   changeAccountPassword,
   createAccount,
   disableAccount,
+  renameCurrentAccount,
   type AccountChoice,
 } from "../../accounts.ts";
 import { authJson, fetchAuthStatus } from "../../authClient.ts";
@@ -65,6 +66,7 @@ export default function AccessPage() {
   const [passkeys, setPasskeys] = useState<PasskeySummary[]>([]);
   const [accounts, setAccounts] = useState<AccountChoice[]>([]);
   const [currentAccountId, setCurrentAccountId] = useState("");
+  const [profileName, setProfileName] = useState("");
   const [canManage, setCanManage] = useState(false);
   const [spaceAccess, setSpaceAccess] = useState<CurrentSpaceAccess | null>(null);
   const [managementPassword, setManagementPassword] = useState("");
@@ -89,6 +91,7 @@ export default function AccessPage() {
       setStatus(nextStatus);
       setAccounts(nextAccounts.accounts);
       setCurrentAccountId(nextAccounts.currentAccountId);
+      setProfileName(nextAccounts.accounts.find((account) => account.id === nextAccounts.currentAccountId)?.name ?? "");
       setCanManage(nextAccounts.canManage);
       setSpaceAccess(nextSpaceAccess);
       void browserSessions().then(setDevices).catch(() => setDevices([]));
@@ -144,6 +147,21 @@ export default function AccessPage() {
       setNotice(`${account.name} now has member access to ${spaceAccess.name}.`);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); }
+  };
+  const saveProfile = async () => {
+    const current = accounts.find((account) => account.id === currentAccountId);
+    const name = profileName.trim();
+    if (busy || !current || current.managed || !name || name === current.name) return;
+    setBusy(true); setErr(""); setNotice("");
+    try {
+      const renamed = await renameCurrentAccount(current, name);
+      setAccounts((items) => items.map((account) => account.id === renamed.id ? { ...account, ...renamed } : account));
+      setProfileName(renamed.name);
+      setNotice("Display name updated. Your account identity and sign-in methods are unchanged.");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+      refresh();
     } finally { setBusy(false); }
   };
   const savePassword = async () => {
@@ -218,8 +236,31 @@ export default function AccessPage() {
       <Row label="Server" hint="The Polyth server this browser is connected to." itemId="access.server">
         <span className="mono">{typeof location === "undefined" ? "Polyth" : location.host}</span>
       </Row>
-      <Row label="Current account" hint="Projects, Spaces, settings, presets, and restoration use this immutable identity." itemId="access.account">
-        <span className="tag">{current?.name ?? currentAccountId}</span>
+      <Row label="Current account" hint="Your display name can change; the immutable account ID underneath continues to own Projects, Spaces, settings, presets, and restoration." itemId="access.account">
+        {current?.managed ? (
+          <span className="tag">{current.name} · Managed</span>
+        ) : (
+          <div className="set-row-control">
+            <TextInput
+              uiSize="sm"
+              value={profileName}
+              placeholder="Display name"
+              aria-label="Current account display name"
+              onChange={(event) => setProfileName(event.target.value)}
+            />
+            <Button
+              size="sm"
+              busy={busy}
+              disabled={!current || !profileName.trim() || profileName.trim() === current.name}
+              onClick={() => void saveProfile()}
+            >
+              Save name
+            </Button>
+          </div>
+        )}
+      </Row>
+      <Row label="Account ID" hint="Stable identity used by ownership and access records.">
+        <span className="mono">{currentAccountId}</span>
       </Row>
       <Row label="Current Space" hint="Accounts do not enter a Space merely because they exist on this server." itemId="access.space">
         <span className="tag">{spaceAccess ? `${spaceAccess.name} · ${spaceAccess.role}` : "Unavailable"}</span>
