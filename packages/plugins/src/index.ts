@@ -33,7 +33,11 @@ export {
   type SessionRuntimeBinding,
 } from "./serverPackage.ts";
 export { packageWorkspace, type PackageWorkspace } from "./packageWorkspace.ts";
-export { PairedSocketRegistry } from "./pairedSockets.ts";
+export {
+  PairedSocketRegistry,
+  closeAuthSessionSockets,
+  closeAuthUserSockets,
+} from "./pairedSockets.ts";
 export {
   allowWsCapability,
   claimWsUpgrade,
