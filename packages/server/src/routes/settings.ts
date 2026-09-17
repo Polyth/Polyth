@@ -2,6 +2,7 @@
 // and the managed plugin registry. Secret values never leave this boundary —
 // requests may carry them in, responses only ever name their keys.
 import type { AgentDescriptor, ClientSettingsDto, McpTransport, ModelRef, SystemInfoDto } from "@polyth/contracts";
+import { requireInstanceOwnerAuthority } from "@polyth/contracts/instance-authority";
 import type { RouteHandler } from "../http.ts";
 import type { BehaviorService } from "../behavior.ts";
 import type { ClientSettingsService } from "../clientSettings.ts";
@@ -55,6 +56,7 @@ export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
       return true;
     }
     if (path === "/api/settings/behavior" && method === "PUT") {
+      requireInstanceOwnerAuthority(rc, "global behavior changes require the instance owner");
       const b = await rc.body();
       rc.json(200, await deps.behavior.put(String(b.text ?? ""), String(b.expectedRevision ?? "")));
       return true;
@@ -64,6 +66,7 @@ export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
       return true;
     }
     if (path === "/api/settings/behavior/subagents" && method === "PUT") {
+      requireInstanceOwnerAuthority(rc, "global behavior changes require the instance owner");
       const b = await rc.body();
       if (typeof b.enabled !== "boolean") {
         throw Object.assign(new Error("enabled must be a boolean"), { code: "invalid-input" });
@@ -76,6 +79,7 @@ export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
       return true;
     }
     if (path === "/api/settings/behavior/workspace-instructions" && method === "PUT") {
+      requireInstanceOwnerAuthority(rc, "global behavior changes require the instance owner");
       const b = await rc.body();
       if (typeof b.enabled !== "boolean") {
         throw Object.assign(new Error("enabled must be a boolean"), { code: "invalid-input" });
@@ -119,6 +123,7 @@ export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
 
     const roleMatch = path.match(/^\/api\/settings\/roles\/([^/]+)$/);
     if (roleMatch && method === "PUT" && deps.saveRole) {
+      requireInstanceOwnerAuthority(rc, "global agent role changes require the instance owner");
       const b = await rc.body();
       const mode = b.mode === "subagent" || b.mode === "all" || b.mode === "auto" ? b.mode : "primary";
       const rawModel = b.model as { providerID?: unknown; modelID?: unknown } | undefined;
