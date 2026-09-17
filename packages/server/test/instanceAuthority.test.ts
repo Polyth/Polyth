@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RouteRequest, SpaceContext } from "@polyth/contracts";
 import { requireInstanceOwnerAuthority } from "@polyth/contracts/instance-authority";
+import { createOpenCodePendingService } from "../src/opencodePending.ts";
 import { createPackageRegistry } from "../src/packages.ts";
+import { opencodePendingRoutes } from "../src/routes/opencodePending.ts";
 import { packageRoutes } from "../src/routes/packages.ts";
 import { settingsRoutes } from "../src/routes/settings.ts";
 
@@ -119,4 +121,17 @@ test("global behavior mutations reject a canonical non-instance-owner before wri
     (error: Error & { code?: string }) => error.code === "forbidden",
   );
   assert.equal(writes, 0);
+});
+
+test("OpenCode apply-and-restart rejects a canonical non-instance-owner before restart", async () => {
+  let restarts = 0;
+  const pending = createOpenCodePendingService({
+    restart: async () => { restarts += 1; return 1; },
+  });
+  const route = opencodePendingRoutes(pending);
+  await assert.rejects(
+    () => route(request({ path: "/api/opencode/apply-restart", method: "POST" })),
+    (error: Error & { code?: string }) => error.code === "forbidden",
+  );
+  assert.equal(restarts, 0);
 });
