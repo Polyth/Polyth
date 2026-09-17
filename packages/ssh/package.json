@@ -18,7 +18,14 @@
       "enabled": true,
       "settingsGroup": "Engineering",
       "icon": "server",
-      "hasSettings": true
+      "hasSettings": true,
+      "category": "engineering",
+      "projectAffinity": {
+        "directions": [
+          "engineering",
+          "operations"
+        ]
+      }
     }
   },
   "dependencies": {

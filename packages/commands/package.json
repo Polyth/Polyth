@@ -19,7 +19,9 @@
       "enabled": true,
       "settingsGroup": "Engineering",
       "icon": "command",
-      "hasSettings": true
+      "hasSettings": true,
+      "category": "workspace",
+      "projectAffinity": {}
     }
   },
   "dependencies": {

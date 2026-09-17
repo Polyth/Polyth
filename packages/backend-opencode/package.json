@@ -22,7 +22,9 @@
       "core": true,
       "enabled": true,
       "icon": "terminal",
-      "hasSettings": false
+      "hasSettings": false,
+      "category": "system",
+      "projectAffinity": {}
     }
   }
 }

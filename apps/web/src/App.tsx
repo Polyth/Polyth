@@ -6,7 +6,7 @@ import StatusBar from "./components/StatusBar.tsx";
 import CommandPalette from "./components/CommandPalette.tsx";
 import SessionSearch from "./components/SessionSearch.tsx";
 import SettingsModal from "./components/SettingsModal.tsx";
-import ProjectFolderDialog from "./components/ProjectFolderDialog.tsx";
+import ProjectSetupFlowDialog from "./components/ProjectSetupFlowDialog.tsx";
 import ViewErrorBoundary from "./components/ViewErrorBoundary.ts";
 import { clearUiError, setOverlay, useStore } from "./store.ts";
 import { decideFirstRunSurface, markAutoPickerOffered, wasAutoPickerOffered } from "./projectOnboarding.ts";
@@ -102,7 +102,7 @@ export default function App() {
       <AlertDialog />
       {overlay === "palette" && <CommandPalette />}
       {overlay === "search" && <SessionSearch />}
-      {overlay === "project-picker" && <ProjectFolderDialog onClose={() => setOverlay(null)} />}
+      {overlay === "project-picker" && <ProjectSetupFlowDialog onClose={() => setOverlay(null)} />}
       {overlay === "worktree-session" && <WorktreeSessionDialog />}
       <SettingsModal open={overlay === "settings"} onClose={() => setOverlay(null)} />
       <LiveRegion />

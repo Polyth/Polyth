@@ -12,4 +12,21 @@ export {
 } from "./plugin.tsx";
 export { api } from "./api.ts";
 
-export default defineWebPackage((host) => createTaskTrackerInstaller(host));
+export default defineWebPackage((host) => {
+  const installWidgets = createTaskTrackerInstaller(host);
+  return () => {
+    const disposeWidgets = installWidgets();
+    const disposeContext = host.projectContext.register({
+      id: "task-trackers.seed",
+      order: 50,
+      getSnapshot: () => ({
+        title: "Task trackers",
+        recommendedWidgetIds: ["task-trackers.board"],
+      }),
+    });
+    return () => {
+      disposeContext();
+      disposeWidgets();
+    };
+  };
+});

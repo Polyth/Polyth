@@ -15,7 +15,14 @@
       "enabled": true,
       "settingsGroup": "Workspace",
       "icon": "coach",
-      "hasSettings": true
+      "hasSettings": true,
+      "category": "wellbeing",
+      "projectAffinity": {
+        "directions": [
+          "wellbeing"
+        ],
+        "recommended": true
+      }
     }
   },
   "dependencies": {

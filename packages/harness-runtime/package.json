@@ -25,7 +25,9 @@
       "enabled": true,
       "icon": "cpu",
       "hasSettings": true,
-      "settingsGroup": "Engineering"
+      "settingsGroup": "Engineering",
+      "category": "system",
+      "projectAffinity": {}
     },
     "webEntry": "./widgets/index.tsx"
   },

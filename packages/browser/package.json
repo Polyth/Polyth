@@ -19,7 +19,15 @@
       "enabled": true,
       "settingsGroup": "Engineering",
       "icon": "globe",
-      "hasSettings": true
+      "hasSettings": true,
+      "category": "research",
+      "projectAffinity": {
+        "directions": [
+          "research",
+          "engineering"
+        ],
+        "recommended": true
+      }
     }
   },
   "dependencies": {

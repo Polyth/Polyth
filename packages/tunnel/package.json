@@ -16,7 +16,9 @@
       "enabled": true,
       "hasSettings": true,
       "settingsGroup": "System",
-      "icon": "qr"
+      "icon": "qr",
+      "category": "system",
+      "projectAffinity": {}
     }
   },
   "dependencies": {

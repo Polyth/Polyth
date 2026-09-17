@@ -12,6 +12,7 @@ import type {
   WorkbenchProfileSummary,
 } from "@polyth/web-sdk";
 import { CHAT_SURFACE_ID } from "./layout.ts";
+import { isProjectContributionRelevant, subscribeProjectRelevance } from "../packages/projectRelevance.ts";
 
 export const CONVERSATION_PROFILE_ID = "conversation";
 
@@ -39,6 +40,8 @@ function bump(): void {
   for (const listener of [...listeners]) listener();
 }
 
+subscribeProjectRelevance(bump);
+
 /** Register (or replace by id). The built-in conversation profile cannot be
  *  replaced or removed. Returns an identity-based unregister. */
 export function registerWorkbenchProfile(definition: WorkbenchProfileDefinition): () => void {
@@ -54,11 +57,15 @@ export function registerWorkbenchProfile(definition: WorkbenchProfileDefinition)
 }
 
 export function getWorkbenchProfile(id: string): WorkbenchProfileDefinition | undefined {
-  return registry.get(id);
+  const definition = registry.get(id);
+  return definition && isProjectContributionRelevant(definition.ownerPackageId, definition.projectAffinity)
+    ? definition : undefined;
 }
 
 export function listWorkbenchProfiles(): WorkbenchProfileDefinition[] {
-  return [...registry.values()].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+  return [...registry.values()]
+    .filter((definition) => isProjectContributionRelevant(definition.ownerPackageId, definition.projectAffinity))
+    .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
 }
 
 export function profileSummary(definition: WorkbenchProfileDefinition): WorkbenchProfileSummary {

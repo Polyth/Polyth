@@ -18,7 +18,9 @@
       "enabled": true,
       "settingsGroup": "Engineering",
       "icon": "route",
-      "hasSettings": false
+      "hasSettings": false,
+      "category": "workspace",
+      "projectAffinity": {}
     }
   },
   "dependencies": {

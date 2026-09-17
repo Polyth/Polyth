@@ -45,7 +45,13 @@ export function createPackageActivation(
       list: host.slots.list,
       register: (registration) => {
         if (disposed) return reject("slots.register");
-        return track(host.slots.register({ ...registration, ownerPackageId }));
+        return track(host.slots.register({
+          ...registration,
+          ownerPackageId,
+          ...(registration.projectAffinity
+            ? { meta: { ...(registration.meta ?? {}), projectAffinity: registration.projectAffinity } }
+            : {}),
+        }));
       },
     },
     widgets: {
@@ -112,7 +118,7 @@ export function createPackageActivation(
         ...host.workbench.profiles,
         register: (definition) => {
           if (disposed) return reject("workbench.profiles.register");
-          return track(host.workbench.profiles.register(definition));
+          return track(host.workbench.profiles.register({ ...definition, ownerPackageId }));
         },
       },
     },

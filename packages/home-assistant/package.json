@@ -18,7 +18,15 @@
       "enabled": false,
       "settingsGroup": "Customize",
       "icon": "home",
-      "hasSettings": true
+      "hasSettings": true,
+      "category": "home",
+      "projectAffinity": {
+        "directions": [
+          "home",
+          "operations"
+        ],
+        "recommended": true
+      }
     }
   },
   "dependencies": {

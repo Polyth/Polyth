@@ -14,7 +14,9 @@
       "enabled": true,
       "settingsGroup": "Customize",
       "icon": "flask",
-      "hasSettings": false
+      "hasSettings": false,
+      "category": "system",
+      "projectAffinity": {}
     }
   },
   "dependencies": {

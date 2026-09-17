@@ -15,11 +15,14 @@ import {
 } from "./capabilityLayout.ts";
 import { tr } from "./i18n/index.ts";
 import { assertOwnerCanReplace } from "./packages/ownership.ts";
+import type { ProjectAffinity } from "@polyth/contracts/project-composition";
+import { isProjectContributionRelevant, subscribeProjectRelevance } from "./packages/projectRelevance.ts";
 
 export interface CapabilityDescriptor {
   id: string;
   /** Host-bound owner package. Missing means a host/core contribution. */
   ownerPackageId?: string;
+  projectAffinity?: ProjectAffinity;
   label: string;
   plainDescription: string;
   technicalLabel?: string;
@@ -104,6 +107,8 @@ function bump(): void {
   for (const l of [...listeners]) l();
 }
 
+subscribeProjectRelevance(bump);
+
 /** Register (or same-owner replace by id). Cross-owner collisions throw.
  *  Disposal is by identity. */
 export function registerCapability(descriptor: CapabilityDescriptor): () => void {
@@ -134,11 +139,14 @@ export function notifyCapabilities(): void {
 }
 
 export function listCapabilities(): CapabilityDescriptor[] {
-  return [...registry.values()];
+  return [...registry.values()].filter((descriptor) =>
+    isProjectContributionRelevant(descriptor.ownerPackageId, descriptor.projectAffinity));
 }
 
 export function getCapability(id: string): CapabilityDescriptor | null {
-  return registry.get(id) ?? null;
+  const descriptor = registry.get(id);
+  return descriptor && isProjectContributionRelevant(descriptor.ownerPackageId, descriptor.projectAffinity)
+    ? descriptor : null;
 }
 
 export function subscribeCapabilities(cb: () => void): () => void {

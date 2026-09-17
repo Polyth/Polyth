@@ -18,7 +18,15 @@
       "enabled": true,
       "settingsGroup": "Workspace",
       "icon": "chat",
-      "hasSettings": true
+      "hasSettings": true,
+      "category": "research",
+      "projectAffinity": {
+        "directions": [
+          "research",
+          "engineering"
+        ],
+        "recommended": true
+      }
     }
   },
   "dependencies": {

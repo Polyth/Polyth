@@ -17,7 +17,15 @@
       "core": true,
       "enabled": true,
       "icon": "edit",
-      "hasSettings": false
+      "hasSettings": false,
+      "category": "engineering",
+      "projectAffinity": {
+        "directions": [
+          "engineering",
+          "research"
+        ],
+        "recommended": true
+      }
     }
   },
   "dependencies": {

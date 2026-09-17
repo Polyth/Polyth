@@ -15,7 +15,14 @@
       "enabled": true,
       "settingsGroup": "Customize",
       "icon": "play",
-      "hasSettings": false
+      "hasSettings": false,
+      "category": "operations",
+      "projectAffinity": {
+        "directions": [
+          "operations",
+          "engineering"
+        ]
+      }
     }
   },
   "dependencies": {

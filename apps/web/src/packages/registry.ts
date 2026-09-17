@@ -4,7 +4,8 @@ import { installIntegrationsPackage } from "./integrations.ts";
 import { installMcpPackage } from "./mcp.ts";
 import { configurePackageReconcile, reconcilePackage } from "./reconcile.ts";
 import { registerBuiltinPackageTours } from "./onboarding/builtinTours.ts";
-import { getState, openWorkspacePane, setActiveView } from "../store.ts";
+import { getState, openWorkspacePane, setActiveView, setRailPlugin, subscribeStore } from "../store.ts";
+import { hasSurfaceRegistration, isSurfaceProjectRelevant } from "../surfaces.ts";
 import {
   activateWebPackage,
   loadWebPackageCatalog,
@@ -13,8 +14,11 @@ import {
 } from "./webEntries.ts";
 import { createPackageActivation } from "./activation.ts";
 import { webPackageHost } from "./webHost.ts";
+import { replaceProjectPackageCatalog, setProjectCompositionContext } from "./projectRelevance.ts";
+import { installProjectWidgetReconciler } from "./projectWidgetReconcile.ts";
 
 registerBuiltinPackageTours();
+installProjectWidgetReconciler();
 
 type PackageInstaller = () => () => void;
 
@@ -48,6 +52,25 @@ let loaderOptions: WebEntryLoaderOptions = {};
 const canonicalId = (id: string): string => aliases.get(id) ?? id;
 const isHarnessTopologyPackage = (id: string): boolean =>
   id === "harness-runtime" || id.startsWith("backend-");
+
+const syncProjectCompositionContext = (): void => {
+  const state = getState();
+  const project = state.projectRegistry.projects.find((candidate) => candidate.id === state.activeProjectId);
+  setProjectCompositionContext(project?.id ?? null, project?.composition);
+
+  // Preserve unknown ids for late web-package registration, but close a
+  // surface we KNOW is registered when the newly active project's composition
+  // makes its owner irrelevant. Without the raw-registration probe the
+  // relevance-filtered catalog made this case indistinguishable from "not
+  // loaded yet", leaving railPlugin set and rendering an empty open pane.
+  const rail = state.railPlugin;
+  if (rail !== null && hasSurfaceRegistration(rail) && !isSurfaceProjectRelevant(rail)) {
+    setRailPlugin(null);
+  }
+};
+
+subscribeStore(syncProjectCompositionContext);
+syncProjectCompositionContext();
 
 const runtimeOf = (canonical: string): PackageRuntime => {
   let rec = runtimes.get(canonical);
@@ -185,6 +208,7 @@ async function syncPackages(): Promise<void> {
   }
   catalogByCanonical = nextCatalog;
 
+  replaceProjectPackageCatalog(response.packages);
   packageStates.clear();
   for (const descriptor of response.packages) {
     packageStates.set(descriptor.id, descriptor.enabled);
@@ -235,6 +259,10 @@ export function subscribePackages(callback: () => void): () => void {
   return () => { listeners.delete(callback); };
 }
 
-export function whenPackagesSettled(): Promise<void> {
-  return Promise.all([...runtimes.values()].map((rec) => rec.inflight ?? Promise.resolve())).then(() => undefined);
+export async function whenPackagesSettled(): Promise<void> {
+  // bootPackages() and init() start concurrently. Waiting only on runtime
+  // records could resolve before catalog/API discovery has even populated them.
+  // The queue is the authoritative latest boot/reconcile barrier.
+  await bootQueue;
+  await Promise.all([...runtimes.values()].map((rec) => rec.inflight ?? Promise.resolve()));
 }

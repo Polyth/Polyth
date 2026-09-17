@@ -1,1 +1,26 @@
-{ "name": "@polyth/backend-codex", "version": "0.1.0", "type": "module", "exports": { ".": "./src/index.ts" }, "dependencies": { "@polyth/contracts": "0.1.0", "@polyth/harness-runtime": "0.1.0", "@polyth/plugins": "0.1.0" }, "polyth": { "serverEntry": "./src/serverEntry.ts", "descriptor": { "name": "Codex harness", "description": "Native Codex App Server execution", "core": false, "enabled": true, "icon": "code", "hasSettings": false } } }
+{
+  "name": "@polyth/backend-codex",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@polyth/contracts": "0.1.0",
+    "@polyth/harness-runtime": "0.1.0",
+    "@polyth/plugins": "0.1.0"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "descriptor": {
+      "name": "Codex harness",
+      "description": "Native Codex App Server execution",
+      "core": false,
+      "enabled": true,
+      "icon": "code",
+      "hasSettings": false,
+      "category": "system",
+      "projectAffinity": {}
+    }
+  }
+}
