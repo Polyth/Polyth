@@ -1,0 +1,81 @@
+name: Restore branch snapshot runner
+
+on:
+  push:
+    branches:
+      - feat/identity-governed-workspaces-20260916
+    paths:
+      - .github/workflows/restore-blueprint-runner.yml
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/identity-governed-workspaces-20260916
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@1.91.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Extract and run restoration script
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -n "/^          python3 <<'PY'$/,/^          PY$/p" .github/workflows/restore-blueprint-snapshot.yml \
+            | sed '1d;$d;s/^          //' > "$RUNNER_TEMP/restore.py"
+          python3 "$RUNNER_TEMP/restore.py"
+          rm -f .github/workflows/restore-blueprint-runner.yml
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Validate restored package security
+        run: >-
+          node --experimental-strip-types --test
+          packages/plugins/test/plugins.test.ts
+          packages/plugins/test/session1Security.test.ts
+          scripts/test/releaseQuality.test.ts
+
+      - name: Typecheck affected projects
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx tsc --noEmit -p packages/plugins
+          npx tsc --noEmit -p apps/mobile
+
+      - name: Commit restored branch state
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "polyth-blueprint-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Harden package isolation and native release gates"
+          git push origin HEAD:feat/identity-governed-workspaces-20260916
+
+      - name: Stage clean repository snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/polyth-snapshot"
+          mkdir -p "$RUNNER_TEMP/polyth-snapshot"
+          git archive HEAD | tar -x -C "$RUNNER_TEMP/polyth-snapshot"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: polyth_feat-identity-governed-workspaces-20260916
+          retention-days: 7
+          include-hidden-files: true
+          if-no-files-found: error
+          path: ${{ runner.temp }}/polyth-snapshot/
