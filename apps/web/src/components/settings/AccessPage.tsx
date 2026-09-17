@@ -9,6 +9,11 @@ import {
 } from "../../accounts.ts";
 import { authJson, fetchAuthStatus } from "../../authClient.ts";
 import type { BrowserAuthStatus } from "../../authBootstrap.ts";
+import {
+  grantSpaceMember,
+  loadCurrentSpaceAccess,
+  type CurrentSpaceAccess,
+} from "../../spaceAccess.ts";
 import { confirmAlert } from "../../alerts.ts";
 import { EmptyState, PageHead, Row } from "./parts.tsx";
 import { getLocale, tr } from "../../i18n/index.ts";
@@ -53,6 +58,7 @@ export default function AccessPage() {
   const [accounts, setAccounts] = useState<AccountChoice[]>([]);
   const [currentAccountId, setCurrentAccountId] = useState("");
   const [canManage, setCanManage] = useState(false);
+  const [spaceAccess, setSpaceAccess] = useState<CurrentSpaceAccess | null>(null);
   const [managementPassword, setManagementPassword] = useState("");
   const [newLogin, setNewLogin] = useState("");
   const [newName, setNewName] = useState("");
@@ -65,11 +71,16 @@ export default function AccessPage() {
 
   const refresh = useCallback(() => {
     setErr("");
-    void Promise.all([fetchAuthStatus(), accountState()]).then(([nextStatus, nextAccounts]) => {
+    void Promise.all([
+      fetchAuthStatus(),
+      accountState(),
+      loadCurrentSpaceAccess().catch(() => null),
+    ]).then(([nextStatus, nextAccounts, nextSpaceAccess]) => {
       setStatus(nextStatus);
       setAccounts(nextAccounts.accounts);
       setCurrentAccountId(nextAccounts.currentAccountId);
       setCanManage(nextAccounts.canManage);
+      setSpaceAccess(nextSpaceAccess);
       void browserSessions().then(setDevices).catch(() => setDevices([]));
     }).catch((e) => setErr(e instanceof Error ? e.message : String(e)));
   }, []);
@@ -102,10 +113,24 @@ export default function AccessPage() {
     setBusy(true); setErr(""); setNotice("");
     try {
       await reauthenticate(managementPassword);
-      await createAccount(newLogin.trim().toLowerCase(), newName.trim(), newPassword);
+      const account = await createAccount(newLogin.trim().toLowerCase(), newName.trim(), newPassword);
       setNewLogin(""); setNewName(""); setNewPassword(""); setManagementPassword("");
-      setNotice("Account created. Access to organizations and Spaces must be granted explicitly.");
+      setNotice(spaceAccess?.canManageMembers
+        ? `${account.name} was created without tenant access. Use Grant to ${spaceAccess.name} to admit this account explicitly.`
+        : "Account created. Organization and Space access remain ungranted until an authorized tenant admin admits it.");
       refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); }
+  };
+  const grantCurrentSpace = async (account: AccountChoice) => {
+    if (!spaceAccess?.canManageMembers || account.status === "disabled") return;
+    setBusy(true); setErr(""); setNotice("");
+    try {
+      await grantSpaceMember(spaceAccess.id, account.id, "member");
+      const next = await loadCurrentSpaceAccess();
+      setSpaceAccess(next);
+      setNotice(`${account.name} now has member access to ${spaceAccess.name}.`);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
@@ -146,31 +171,42 @@ export default function AccessPage() {
 
   return (
     <>
-      <PageHead title="Accounts & Access" blurb="Server identity, accounts, authentication, and remembered devices." />
+      <PageHead title="Accounts & Access" blurb="Server identity, accounts, authentication, and explicit Space grants." />
       <Row label="Server" hint="The Polyth server this browser is connected to." itemId="access.server">
         <span className="mono">{typeof location === "undefined" ? "Polyth" : location.host}</span>
       </Row>
       <Row label="Current account" hint="Projects, Spaces, settings, presets, and restoration use this immutable identity." itemId="access.account">
         <span className="tag">{current?.name ?? currentAccountId}</span>
       </Row>
+      <Row label="Current Space" hint="Accounts do not enter a Space merely because they exist on this server." itemId="access.space">
+        <span className="tag">{spaceAccess ? `${spaceAccess.name} · ${spaceAccess.role}` : "Unavailable"}</span>
+      </Row>
       <Row label={tr("settings.accesspage.passwordProtection")} hint="Canonical account authentication is required by this server." itemId="access.protection">
         <span className="tag">{tr("settings.accesspage.on")}</span>
       </Row>
 
       <div className="set-page-head"><h3>Accounts on this server</h3></div>
-      {accounts.map((account) => (
-        <Row
-          key={account.id}
-          label={account.current ? `${account.name} · Current` : account.name}
-          hint={`${account.id}${account.status ? ` · ${account.status}` : ""}`}
-        >
-          <div className="set-row-control">
-            {canManage && !account.current && !account.managed && account.status !== "disabled" && (
-              <Button size="sm" variant="danger" disabled={busy} onClick={() => void disable(account)}>Disable</Button>
-            )}
-          </div>
-        </Row>
-      ))}
+      {accounts.map((account) => {
+        const membership = spaceAccess?.members.find((member) => member.userId === account.id);
+        return (
+          <Row
+            key={account.id}
+            label={account.current ? `${account.name} · Current` : account.name}
+            hint={`${account.id}${account.status ? ` · ${account.status}` : ""}${membership && spaceAccess ? ` · ${spaceAccess.name}: ${membership.role}` : " · no current Space access"}`}
+          >
+            <div className="set-row-control">
+              {spaceAccess?.canManageMembers && !membership && account.status !== "disabled" && (
+                <Button size="sm" disabled={busy} onClick={() => void grantCurrentSpace(account)}>
+                  Grant to {spaceAccess.name}
+                </Button>
+              )}
+              {canManage && !account.current && !account.managed && account.status !== "disabled" && (
+                <Button size="sm" variant="danger" disabled={busy} onClick={() => void disable(account)}>Disable</Button>
+              )}
+            </div>
+          </Row>
+        );
+      })}
       <Row label="Switch account" hint="Sign out, then enter the other account’s login name. Account IDs are not login credentials.">
         <Button size="sm" onClick={() => void authJson("/api/auth/logout", {}).then(() => location.reload())}>Sign out</Button>
       </Row>
@@ -189,7 +225,7 @@ export default function AccessPage() {
               onChange={(event) => setManagementPassword(event.target.value)}
             />
           </Row>
-          <Row label="New account" hint="Identity creation does not grant organization, Space, project, or secret access.">
+          <Row label="New account" hint="Identity creation grants no organization, Space, project, or secret access. Grant the current Space separately above when appropriate.">
             <div className="set-row-control">
               <TextInput uiSize="sm" value={newLogin} autoComplete="off" placeholder="Login" aria-label="New account login" onChange={(event) => setNewLogin(event.target.value)} />
               <TextInput uiSize="sm" value={newName} placeholder="Display name" aria-label="New account name" onChange={(event) => setNewName(event.target.value)} />
