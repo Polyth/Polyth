@@ -4,6 +4,7 @@
 import type { BrowserAuthStatus } from "./authBootstrap.ts";
 import { fetchAuthStatus } from "./authClient.ts";
 import { setActiveBrowserAccount } from "./accountStorage.ts";
+import { completePendingProviderCallback, hasPendingProviderCallback } from "./identityProviders.ts";
 
 let inflight: Promise<BrowserAuthStatus> | null = null;
 let accountScopeResolved = false;
@@ -21,7 +22,21 @@ export function acceptAuthenticatedBrowserAccount(accountId: string): void {
 
 export function prefetchAuthStatus(): Promise<BrowserAuthStatus> {
   if (inflight) return inflight;
-  inflight = fetchAuthStatus().then(async (status) => {
+  inflight = (async () => {
+    if (hasPendingProviderCallback()) {
+      try {
+        const completed = await completePendingProviderCallback();
+        window.location.replace(completed.returnTo);
+        // Do not let the old callback document boot packages while navigation
+        // to the clean return path is still pending.
+        return await new Promise<BrowserAuthStatus>(() => undefined);
+      } catch (error) {
+        console.warn("[polyth] identity provider callback failed", error);
+        window.history.replaceState(null, "", "/");
+      }
+    }
+    return await fetchAuthStatus();
+  })().then(async (status) => {
     if (status.authorized) {
       // Account listing is protected; anonymous auth status never reveals
       // which users exist on the server. A remembered cookie can safely use
