@@ -24,11 +24,9 @@ function regularFile(path: string): boolean {
 /**
  * Canonical runtime invariant for account-owned Agent Profiles. Profiles are
  * deliberately not Space resources: one account may use the same profile in
- * multiple Spaces. The legacy owner sidecar therefore remains the ownership
- * projection, but canonical runtime accepts it only when it is complete,
- * one-to-one with the durable profile rows, and points at active canonical
- * users. This makes the historical `unmapped -> usr_owner` fallback unreachable
- * after canonical cutover.
+ * multiple Spaces. The owner projection must be complete and point at a
+ * durable canonical user. Disabled/suspended users remain valid owners so
+ * offboarding revokes access without orphaning their data or bricking boot.
  */
 export function verifyCanonicalAgentProfileOwnership(opts: {
   dataDir: string;
@@ -83,13 +81,13 @@ export function verifyCanonicalAgentProfileOwnership(opts: {
   for (const profileId of profileIds) {
     const owner = owners[profileId];
     if (typeof owner !== "string" || !USER_ID.test(owner)) recovery();
-    const active = opts.control.get<{ id: string }>(
+    const user = opts.control.get<{ id: string }>(
       `SELECT u.id
          FROM users u
          JOIN principals p ON p.id=u.id
-        WHERE u.id=? AND p.kind='user' AND p.status='active'`,
+        WHERE u.id=? AND p.kind='user'`,
       owner,
     );
-    if (!active) recovery();
+    if (!user) recovery();
   }
 }
