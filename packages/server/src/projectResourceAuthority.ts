@@ -1,0 +1,241 @@
+import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
+import {
+  roleAtLeast,
+  type Project,
+  type ProjectPatch,
+  type ProjectRemote,
+  type ProjectService,
+  type SpaceContext,
+} from "@polyth/contracts";
+import type { CanonicalResource } from "@polyth/control-plane/resources";
+import type { ProjectRegistry } from "./projects.ts";
+import { canonicalSecurity } from "./runtimeSecurity.ts";
+
+const recovery = (): Error => Object.assign(
+  new Error("Project domain state does not match the canonical resource authority"),
+  { code: "recovery-required" },
+);
+const forbidden = (): Error => Object.assign(
+  new Error("Space member access is required to modify projects"),
+  { code: "forbidden" },
+);
+
+const durableReceipt = (project: Project): string => JSON.stringify({
+  id: project.id,
+  spaceId: project.spaceId ?? null,
+  path: project.path,
+  remote: project.remote
+    ? { kind: project.remote.kind, connectionId: project.remote.connectionId }
+    : null,
+});
+
+/**
+ * Canonical project facade. The JSON registry remains the domain payload store,
+ * but existence/visibility/lifecycle come from control-plane resources.
+ */
+export function canonicalProjectService(
+  ctx: SpaceContext,
+  registry: ProjectRegistry,
+): ProjectService {
+  const base = registry.forSpace(ctx);
+  const security = canonicalSecurity();
+  if (!security) return base; // isolated legacy-shaped unit tests only
+
+  const org = security.control.get<{ id: string }>(
+    "SELECT org_id AS id FROM spaces WHERE id=?",
+    ctx.spaceId,
+  );
+  if (!org) throw recovery();
+  const scope = { orgId: org.id, spaceId: ctx.spaceId };
+
+  const requireMutation = (): void => {
+    if (!roleAtLeast(ctx.role, "member")) throw forbidden();
+  };
+
+  const row = (id: string): CanonicalResource | undefined => security.resources.resource(id);
+  const assertScope = (resource: CanonicalResource): void => {
+    if (resource.kind !== "project" || resource.orgId !== org.id || resource.spaceId !== ctx.spaceId) {
+      throw recovery();
+    }
+  };
+
+  const transition = (
+    id: string,
+    from: "active" | "deleting",
+    to: "active" | "deleting" | "deleted",
+    expectedRevision: number,
+    action: string,
+    bumpAccess: boolean,
+  ): CanonicalResource => security.control.transaction(() => {
+    const current = row(id);
+    if (!current) throw recovery();
+    assertScope(current);
+    if (current.lifecycle !== from || current.revision !== expectedRevision) throw recovery();
+    const changes = security.control.run(
+      `UPDATE resources
+          SET lifecycle=?,revision=revision+1,access_revision=access_revision+?,updated_at_ms=?
+        WHERE id=? AND revision=? AND lifecycle=?`,
+      to, bumpAccess ? 1 : 0, Date.now(), id, expectedRevision, from,
+    ).changes;
+    if (Number(changes) !== 1) throw recovery();
+    security.control.audit(ctx.userId, action, id);
+    return row(id)!;
+  });
+
+  const restoreDeleting = (resource: CanonicalResource): CanonicalResource => {
+    assertScope(resource);
+    if (resource.lifecycle !== "deleting") return resource;
+    return transition(resource.id, "deleting", "active", resource.revision, "resource.delete-rolled-back", true);
+  };
+
+  const finalizeDeleted = (resource: CanonicalResource): CanonicalResource => {
+    assertScope(resource);
+    if (resource.lifecycle === "deleted") return resource;
+    if (resource.lifecycle !== "deleting") throw recovery();
+    return transition(resource.id, "deleting", "deleted", resource.revision, "resource.deleted", false);
+  };
+
+  const ensureActive = (project: Project): Project => {
+    if (project.spaceId !== ctx.spaceId) throw recovery();
+    let resource = row(project.id);
+    if (!resource) throw recovery();
+    assertScope(resource);
+    if (resource.lifecycle === "active") return project;
+
+    // A durable domain row proves an interrupted delete never crossed the
+    // domain commit. Restore visibility instead of guessing that deletion won.
+    if (resource.lifecycle === "deleting") {
+      resource = restoreDeleting(resource);
+      if (resource.lifecycle === "active") return project;
+    }
+
+    // If JSON committed but process/control finalization was interrupted,
+    // finish the existing provisioning saga from the durable immutable receipt.
+    if (resource.lifecycle === "provisioning" || resource.lifecycle === "quarantined") {
+      const saga = security.resources.pending().find((candidate) => candidate.resourceId === project.id);
+      if (!saga) throw recovery();
+      security.resources.recordDomainReady(saga.operationId, durableReceipt(project));
+      resource = security.resources.resource(project.id);
+      if (!resource) throw recovery();
+      security.resources.activate(saga.operationId, resource.revision);
+      const active = security.resources.active(project.id, scope);
+      if (active?.kind === "project") return project;
+    }
+    throw recovery();
+  };
+
+  const existingLocal = async (path: string): Promise<Project | undefined> => {
+    const absolute = resolve(path);
+    return (await base.list()).find((project) => !project.remote && resolve(project.path) === absolute);
+  };
+  const existingRemote = async (path: string, remote: ProjectRemote): Promise<Project | undefined> =>
+    (await base.list()).find((project) => project.path === path && project.remote?.connectionId === remote.connectionId);
+
+  const provision = async (input: {
+    path: string;
+    name?: string;
+    createDirectory?: boolean;
+    remote?: ProjectRemote;
+  }): Promise<Project> => {
+    requireMutation();
+    const existing = input.remote
+      ? await existingRemote(input.path, input.remote)
+      : await existingLocal(input.path);
+    if (existing) return ensureActive(existing);
+
+    const resourceId = randomUUID();
+    const operationId = randomUUID();
+    const begun = security.resources.begin({
+      operationId,
+      resourceId,
+      kind: "project",
+      orgId: org.id,
+      spaceId: ctx.spaceId,
+      ownerPrincipalId: ctx.userId,
+      createdBy: ctx.userId,
+      visibility: "space",
+    });
+    let domain: Project | undefined;
+    try {
+      domain = await registry.provision({
+        id: resourceId,
+        spaceId: ctx.spaceId,
+        path: input.path,
+        ...(input.name ? { name: input.name } : {}),
+        ...(input.createDirectory ? { createDirectory: true } : {}),
+        ...(input.remote ? { remote: input.remote } : {}),
+      });
+      if (domain.id !== resourceId) {
+        security.resources.abortMissingDomain(operationId, begun.resource.revision);
+        return ensureActive(domain);
+      }
+      security.resources.recordDomainReady(operationId, durableReceipt(domain));
+      const current = security.resources.resource(resourceId);
+      if (!current) throw recovery();
+      security.resources.activate(operationId, current.revision);
+      return ensureActive(domain);
+    } catch (cause) {
+      if (!domain) {
+        const current = security.resources.resource(resourceId);
+        if (current && (current.lifecycle === "provisioning" || current.lifecycle === "quarantined")) {
+          try { security.resources.abortMissingDomain(operationId, current.revision); } catch { /* preserve original */ }
+        }
+      }
+      throw cause;
+    }
+  };
+
+  const remove = async (id: string): Promise<void> => {
+    requireMutation();
+    const project = await base.get(id);
+    let resource = row(id);
+    if (!project) {
+      if (resource) {
+        assertScope(resource);
+        if (resource.lifecycle === "deleting") { finalizeDeleted(resource); return; }
+      }
+      await base.remove(id);
+      return;
+    }
+    ensureActive(project);
+    resource = row(id);
+    if (!resource || resource.lifecycle !== "active") throw recovery();
+    const deleting = transition(id, "active", "deleting", resource.revision, "resource.deleting", true);
+    try {
+      await base.remove(id);
+    } catch (cause) {
+      try { restoreDeleting(row(id) ?? deleting); } catch { /* recovery will fail closed */ }
+      throw cause;
+    }
+    finalizeDeleted(row(id) ?? deleting);
+  };
+
+  const update = async (id: string, patch: ProjectPatch): Promise<Project> => {
+    requireMutation();
+    const project = await base.get(id);
+    if (!project) return base.update!(id, patch);
+    ensureActive(project);
+    return base.update!(id, patch);
+  };
+
+  return {
+    ...base,
+    async list() {
+      const projects = await base.list();
+      return projects.map(ensureActive);
+    },
+    async get(id) {
+      const project = await base.get(id);
+      return project ? ensureActive(project) : undefined;
+    },
+    add: (path, name) => provision({ path, ...(name ? { name } : {}) }),
+    create: (path, name) => provision({ path, createDirectory: true, ...(name ? { name } : {}) }),
+    remove,
+    ...(base.addRemote ? {
+      addRemote: (path: string, remote: ProjectRemote, name?: string) =>
+        provision({ path, remote, ...(name ? { name } : {}) }),
+    } : {}),
+    ...(base.update ? { update } : {}),
+  };
+}
