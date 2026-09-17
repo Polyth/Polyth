@@ -51,6 +51,17 @@ test("resource access enforces space, owner-only and inherited visibility with m
   assert.equal(access.readable(input("prj_space", "usr_outside")), undefined);
   assert.equal(access.requireReadable(input("prj_space", "usr_expiring")).id, "prj_space");
 
+  control.transaction(() => control.run("UPDATE resources SET lifecycle='deleting',revision=revision+1 WHERE id='ses_child'"));
+  assert.equal(access.readable(input("ses_child", "usr_member")), undefined);
+  assert.equal(access.requireReadable({
+    ...input("ses_child", "usr_member"),
+    lifecycles: ["active", "archived", "archiving", "deleting"],
+  }).id, "ses_child");
+  assert.equal(access.readable({
+    ...input("ses_child", "usr_outside"),
+    lifecycles: ["active", "archived", "archiving", "deleting"],
+  }), undefined);
+
   now = 2_000;
   assert.equal(access.readable(input("prj_space", "usr_expiring")), undefined);
   assert.throws(() => access.requireReadable(input("prj_private", "usr_member")), { code: "not-found" });
