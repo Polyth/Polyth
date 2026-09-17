@@ -51,8 +51,15 @@ const requestPath = (req: IncomingMessage): string | null => {
   catch { return null; }
 };
 
+const instanceGlobalVisibilityMutation = (path: string | null, method: string | undefined): boolean => {
+  if (method !== "POST" || !path) return false;
+  if (path === "/api/models/enabled") return true;
+  return /^\/api\/providers\/[^/]+\/(?:enabled|add|remove)$/.test(path);
+};
+
 export function createHttpHandler(deps: HttpDeps): HttpHandler {
-  const boundIdentity = canonicalSecurity()?.http;
+  const security = canonicalSecurity();
+  const boundIdentity = security?.http;
   const identityHttp = deps.identityHttp ?? boundIdentity;
   const { identityHttp: _explicitIdentityHttp, ...coreDeps } = deps;
   const core = createCoreHttpHandler(coreDeps);
@@ -66,6 +73,37 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
       writeJson(res, 200, { ok: true, version: deps.version, capabilities: deps.capabilities() });
       return;
     }
+
+    // Provider/model visibility is stored in one host-global OpenCode config.
+    // The large core router owns these historical routes, so enforce the
+    // canonical installation authority here before they can reach it. Core
+    // still performs its normal auth, Space and remote-capability checks.
+    if (security && instanceGlobalVisibilityMutation(path, req.method)) {
+      const resolution = security.auth.resolve({
+        headers: {
+          cookie: req.headers.cookie,
+          "user-agent": Array.isArray(req.headers["user-agent"])
+            ? req.headers["user-agent"][0]
+            : req.headers["user-agent"],
+        },
+        socket: { remoteAddress: req.socket?.remoteAddress },
+      }, ingress);
+      if (!resolution.authenticated) {
+        writeJson(res, 401, { error: "unauthorized", message: "authentication required" });
+        return;
+      }
+      const userId = security.auth.userIdForPrincipal(resolution.principal);
+      const owner = userId && security.control.get(
+        `SELECT 1 FROM instance_roles r JOIN principals p ON p.id=r.user_id
+          WHERE r.user_id=? AND r.role='owner' AND p.status='active'`,
+        userId,
+      );
+      if (!owner) {
+        writeJson(res, 403, { error: "forbidden", message: "not allowed" });
+        return;
+      }
+    }
+
     if (!path?.startsWith("/api/auth/")) return core(req, res, ingress);
 
     if (deps.admission && !deps.admission.enter()) {
