@@ -4,16 +4,22 @@ import type { AppendEventOptions, ServerPackageHost } from "./serverPackage.ts";
 export const RUNTIME_SYSTEM_PRINCIPAL_ID = "system:polyth-runtime";
 
 const notFound = (message: string): Error => Object.assign(new Error(message), { code: "not-found" });
+const requireGlobalBackgroundAuthority = (deployment: ServerPackageHost["deployment"]): void => {
+  if (deployment !== "local-trusted") {
+    throw Object.assign(
+      new Error("shared deployments require an explicit Space context for background session work"),
+      { code: "unavailable" },
+    );
+  }
+};
 
 async function systemContextForProject(
   host: Pick<ServerPackageHost, "projects" | "deployment">,
   projectId: string,
 ): Promise<SpaceContext> {
+  requireGlobalBackgroundAuthority(host.deployment);
   const project = await host.projects.get(projectId);
   if (!project?.spaceId) throw notFound("project not found");
-  // This context is never exposed as request identity. It only selects the
-  // already-owned project Space for trusted background work. The scoped server
-  // facade re-checks canonical project/session resources before every action.
   return {
     spaceId: project.spaceId,
     spaceSlug: project.spaceId,
@@ -24,7 +30,7 @@ async function systemContextForProject(
   };
 }
 
-/** Canonical session service for trusted background work on one known project. */
+/** Canonical session service for trusted local background work on one known project. */
 export async function systemSessionsForProject(
   host: Pick<ServerPackageHost, "projects" | "deployment" | "forSpace">,
   projectId: string,
@@ -33,11 +39,12 @@ export async function systemSessionsForProject(
   return host.forSpace(context).sessions;
 }
 
-/** Canonical session service for trusted background work on one durable session. */
+/** Canonical session service for trusted local background work on one durable session. */
 export async function systemSessionsForSession(
   host: Pick<ServerPackageHost, "projects" | "deployment" | "forSpace" | "store">,
   sessionId: string,
 ): Promise<SessionService> {
+  requireGlobalBackgroundAuthority(host.deployment);
   const projection = await host.store.projection(sessionId);
   if (!projection) throw notFound("session not found");
   return systemSessionsForProject(host, projection.projectId);
