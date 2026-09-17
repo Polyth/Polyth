@@ -57,14 +57,22 @@ const text = (body: Record<string, unknown>, key: string): string => {
   if (typeof value !== 'string') throw controlError('invalid-input', 'Required string field is missing');
   return value;
 };
+const returnTo = (body: Record<string, unknown>): string => typeof body.returnTo === 'string' ? body.returnTo : '/';
 const statusFor: Readonly<Record<string, number>> = {
   unauthorized: 401, 'invalid-credentials': 401, 'invalid-claim': 401,
   forbidden: 403, 'wrong-origin': 403, 'insecure-transport': 403, 'reauth-required': 403, 'managed-identity': 403,
-  'not-found': 404, conflict: 409, 'last-owner': 409, 'last-auth-method': 409, 'invalid-transition': 409, 'setup-completed': 409,
-  'invalid-input': 400, 'request-timeout': 408, 'recovery-ack-required': 400, 'body-too-large': 413, 'rate-limited': 429,
-  'recovery-required': 503, unavailable: 503,
+  'not-found': 404, expired: 410,
+  conflict: 409, 'last-owner': 409, 'last-auth-method': 409, 'invalid-transition': 409, 'setup-completed': 409,
+  replayed: 409, cancelled: 409, 'uncertain-exchange': 409, 'provider-scope-escalation': 409,
+  'private-network-approval-required': 409,
+  'invalid-input': 400, 'invalid-provider-transaction': 400, 'callback-mismatch': 400,
+  'request-timeout': 408, 'recovery-ack-required': 400, 'body-too-large': 413, 'rate-limited': 429,
+  'invalid-provider-response': 502, 'invalid-identity': 502,
+  'recovery-required': 503, unavailable: 503, 'provider-unavailable': 503,
 };
 const accountStatusPath = /^\/api\/auth\/accounts\/([A-Za-z0-9][A-Za-z0-9_-]{0,199})\/status$/;
+const providerEnabledPath = /^\/api\/auth\/providers\/([a-z0-9][a-z0-9_-]{0,63})\/enabled$/;
+const linkPath = /^\/api\/auth\/links\/(lid_[a-f0-9-]{36})$/;
 
 export function createIdentityHttpAdapter(identity: IdentityService, options: {
   /** App/operator configuration, never req.headers.host or forwarded headers. */
@@ -78,6 +86,7 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
     || (!secure && !(url.protocol === 'http:' && options.localOnly === true && ['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname)))) {
     throw controlError('invalid-input', 'Identity requires HTTPS or an explicitly local-only HTTP origin');
   }
+  const providerCallbackUrl = `${origin}/auth/provider/callback`;
   const cookieName = `${secure ? '__Host-' : ''}${identity.sessions.cookieName()}`;
   const csrfCookie = `${cookieName}_csrf`;
   const cookie = (name: string, value: string, maxAge?: number): string => `${name}=${value}; Path=/; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}${maxAge === undefined ? '' : `; Max-Age=${maxAge}`}`;
@@ -92,6 +101,14 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
   };
   const tokenOf = (req: IncomingMessage): string | null => cookieToken(req, cookieName);
   const requireHuman = (req: IncomingMessage) => { transport(req); return identity.sessions.require(tokenOf(req)); };
+  const providerService = () => {
+    if (!identity.providers) throw controlError('unavailable', 'External identity providers are unavailable');
+    return identity.providers;
+  };
+  const linkService = () => {
+    if (!identity.links) throw controlError('unavailable', 'External identity linking is unavailable');
+    return identity.links;
+  };
   return {
     cookieName,
     requireHuman,
@@ -118,6 +135,10 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
           send(200, { ...identity.setup.status(), required: true, authorized: !!actor, scope: actor ? 'ui-session' : 'anonymous', csrfToken: csrfFor(nonce) });
           return true;
         }
+        if (req.method === 'GET' && path === '/api/auth/providers') {
+          send(200, { providers: providerService().list().filter(provider => provider.enabled).map(({ id, kind, issuer }) => ({ id, kind, issuer })) });
+          return true;
+        }
         if (req.method === 'GET') {
           const actor = requireHuman(req);
           if (path === '/api/auth/accounts') {
@@ -130,7 +151,11 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
           } else if (path === '/api/auth/sessions') send(200, { sessions: identity.sessions.list(token!) });
           else if (path === '/api/auth/me') send(200, identity.accounts.current(token!));
           else if (path === '/api/auth/passkeys') send(200, { passkeys: identity.passkeys.list(token!) });
-          else throw controlError('not-found', 'Authentication route not found');
+          else if (path === '/api/auth/links') send(200, { links: linkService().list(token!) });
+          else if (path === '/api/auth/providers/manage') {
+            if (!identity.accounts.canManage(token!)) throw controlError('forbidden', 'Instance owner access required');
+            send(200, { providers: providerService().list() });
+          } else throw controlError('not-found', 'Authentication route not found');
           return true;
         }
         if (!['POST', 'DELETE'].includes(req.method ?? '')) throw controlError('not-found', 'Authentication route not found');
@@ -138,13 +163,13 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
         const nonce = cookieToken(req, csrfCookie);
         if (!nonce || !csrfMatches(req.headers['x-polyth-csrf'], nonce)) throw controlError('forbidden', 'CSRF validation failed');
         const body = await readBody(req);
-        const issued = (result: { token: string; session: { expiresAt: number; createdAt: number } }): void => {
+        const issued = (result: { token: string; session: { expiresAt: number; createdAt: number } }, extra: Record<string, unknown> = {}): void => {
           const freshNonce = newToken();
           res.setHeader('Set-Cookie', [
             cookie(cookieName, result.token, Math.floor((result.session.expiresAt - result.session.createdAt) / 1000)),
             cookie(csrfCookie, freshNonce),
           ]);
-          send(200, { ok: true, csrfToken: csrfFor(freshNonce) });
+          send(200, { ok: true, csrfToken: csrfFor(freshNonce), ...extra });
         };
         if (req.method === 'POST' && path === '/api/auth/setup/claim') {
           send(200, identity.setup.bindClaim(text(body, 'claimToken'), nonce));
@@ -157,6 +182,24 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
           issued(result);
         } else if (req.method === 'POST' && path === '/api/auth/login') {
           issued(await identity.credentials.login({ login: text(body, 'login'), password: text(body, 'password'), address: req.socket.remoteAddress, label: req.headers['user-agent'] }));
+        } else if (req.method === 'POST' && path === '/api/auth/providers/login/begin') {
+          if (!secure) throw controlError('unavailable', 'External browser identity requires an HTTPS Polyth origin');
+          send(200, await providerService().begin({
+            providerId: text(body, 'providerId'), purpose: 'login', browserBinding: nonce,
+            callbackUrl: providerCallbackUrl, returnTo: returnTo(body),
+          }));
+        } else if (req.method === 'POST' && path === '/api/auth/providers/login/complete') {
+          let session: ReturnType<IdentityService['sessions']['issue']> | undefined;
+          const providerId = text(body, 'providerId');
+          const completed = await providerService().complete({
+            providerId, purpose: 'login', state: text(body, 'state'), browserBinding: nonce, code: text(body, 'code'),
+          }, (external) => {
+            const userId = providerService().resolveLinkedUser(providerId, external);
+            if (!userId) throw controlError('invalid-credentials', 'External identity is not linked to an active account');
+            session = identity.sessions.issue(userId, req.headers['user-agent']);
+          });
+          if (!session) throw controlError('invalid-credentials', 'External identity could not establish a session');
+          issued(session, { returnTo: completed.returnTo });
         } else if (req.method === 'POST' && path === '/api/auth/passkeys/authenticate/options') {
           send(200, identity.passkeys.beginAuthentication());
         } else if (req.method === 'POST' && path === '/api/auth/passkeys/authenticate/complete') {
@@ -172,7 +215,11 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
         } else if (req.method === 'POST' && path === '/api/auth/logout') {
           identity.sessions.logout(token); res.setHeader('Set-Cookie', cookie(cookieName, '', 0)); send(200, { ok: true });
         } else {
-          requireHuman(req);
+          const actor = requireHuman(req);
+          const requireOwner = (elevated = false): void => {
+            if (elevated) identity.sessions.require(token!, true);
+            if (!identity.accounts.canManage(token!)) throw controlError('forbidden', 'Instance owner access required');
+          };
           if (req.method === 'POST' && path === '/api/auth/logout-all') {
             identity.sessions.logoutAll(token!); res.setHeader('Set-Cookie', cookie(cookieName, '', 0)); send(200, { ok: true });
           } else if (req.method === 'POST' && path === '/api/auth/reauthenticate') {
@@ -186,6 +233,31 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
               login: text(body, 'login'), name: text(body, 'name'), password: text(body, 'password'),
             });
             send(200, { ...account, name: account.displayName, current: false });
+          } else if (req.method === 'POST' && path === '/api/auth/providers/configure') {
+            requireOwner(true);
+            const publicConfig = body.publicConfig === undefined ? undefined : body.publicConfig as Record<string, unknown>;
+            const clientSecret = body.clientSecret === null || typeof body.clientSecret === 'string' ? body.clientSecret : undefined;
+            send(200, await providerService().configure({
+              id: text(body, 'id'), kind: text(body, 'kind'), issuer: text(body, 'issuer'), publicConfig, clientSecret,
+            }));
+          } else if (req.method === 'POST' && providerEnabledPath.test(path)) {
+            requireOwner(true);
+            const match = providerEnabledPath.exec(path)!;
+            if (typeof body.enabled !== 'boolean') throw controlError('invalid-input', 'Provider enabled state must be boolean');
+            send(200, providerService().setEnabled(match[1]!, Number(body.expectedRevision), body.enabled));
+          } else if (req.method === 'POST' && path === '/api/auth/links/begin') {
+            if (!secure) throw controlError('unavailable', 'External browser identity requires an HTTPS Polyth origin');
+            send(200, await linkService().begin(token!, {
+              providerId: text(body, 'providerId'), browserBinding: nonce,
+              callbackUrl: providerCallbackUrl, returnTo: returnTo(body),
+            }));
+          } else if (req.method === 'POST' && path === '/api/auth/links/complete') {
+            send(200, await linkService().complete(token!, {
+              providerId: text(body, 'providerId'), state: text(body, 'state'), browserBinding: nonce, code: text(body, 'code'),
+            }));
+          } else if (req.method === 'DELETE' && linkPath.test(path)) {
+            const match = linkPath.exec(path)!;
+            linkService().unlink(token!, match[1]!, Number(body.expectedRevision)); send(200, { ok: true });
           } else {
             const statusMatch = req.method === 'POST' ? accountStatusPath.exec(path) : null;
             if (statusMatch) {
@@ -210,6 +282,7 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
               identity.sessions.revoke(token!, path.slice('/api/auth/sessions/'.length), body.expectedRevision as number); send(200, { ok: true });
             } else throw controlError('not-found', 'Authentication route not found');
           }
+          void actor;
         }
       } catch (error) {
         const code = (error as { code?: unknown } | null)?.code;
