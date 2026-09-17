@@ -120,6 +120,11 @@ test("pinned OpenCode lock covers packaged CPU and operating-system targets", as
   );
   assert.match(mainSource, /packagedResource\(join\("polyth-link"/);
   assert.match(mainSource, /POLYTH_LINK_HOST/);
+  assert.match(mainSource, /roundedCorners:\s*true/);
+  assert.match(mainSource, /enable-transparent-visuals/);
+  assert.match(mainSource, /transparent:\s*process\.platform === "linux"/);
+  assert.match(mainSource, /hasShadow:\s*process\.platform !== "linux"/);
+  assert.match(mainSource, /backgroundColor:\s*process\.platform === "linux" \? "#00000000" : "#121110"/);
   const buildSource = await readFile(join(desktopDir, "build.ts"), "utf8");
   assert.match(buildSource, /resources", "polyth-link"/);
   assert.match(buildSource, /resources", "runtime-supervisor"/);

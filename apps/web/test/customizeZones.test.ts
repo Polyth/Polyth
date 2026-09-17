@@ -111,6 +111,12 @@ test("Shift exposes editors without a resting gap or content overlap", async () 
   assert.match(styles, /body\[data-ui-editing\] \.customize-zone/);
   assert.match(styles, /body\[data-shift-held\] \.customize-zone:hover \.zone-customize-trigger/);
   assert.match(styles, /body\[data-ui-editing\] \.zone-customize-trigger/);
+  assert.match(styles, /\.zone-customize-trigger\s*\{[^}]*visibility:\s*hidden/s);
+  assert.doesNotMatch(
+    styles,
+    /@media \(hover: hover\) and \(pointer: fine\) \{\s*\.zone-customize-trigger \{/,
+    "customize pencils stay hidden on Electron and hybrid pointers, not only CSS hover:fine",
+  );
   assert.match(styles, /\.customize-zone > \.zone-edit-button\s*\{[^}]*position:\s*absolute;/s);
   assert.match(styles, /body\[data-shift-held\] \.customize-zone:hover > \.zone-edit-button[\s\S]*position:\s*static;/);
   assert.match(styles, /\.placed-mini-widget\s*\{[^}]*display:\s*contents;/s);

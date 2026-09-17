@@ -59,6 +59,12 @@ export default function App() {
   const shellMode = useShellMode();
 
   useEffect(() => {
+    if (workspaceMode === "edit") document.body.dataset.uiEditing = "true";
+    else delete document.body.dataset.uiEditing;
+    return () => { delete document.body.dataset.uiEditing; };
+  }, [workspaceMode]);
+
+  useEffect(() => {
     const openSettings = () => setOverlay("settings");
     window.addEventListener("polyth:open-settings", openSettings);
     return () => window.removeEventListener("polyth:open-settings", openSettings);
