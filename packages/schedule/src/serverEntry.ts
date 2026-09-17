@@ -3,6 +3,8 @@ import type { ProjectService, RouteHandler } from "@polyth/contracts";
 import {
   localOnlyRemoteAccess,
   serverServiceKey,
+  systemSessionsForProject,
+  systemSessionsForSession,
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
@@ -217,9 +219,6 @@ export function scheduleRoutes(deps: {
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
-  // Scheduled prompts: every run owns a VISIBLE session per its target mode;
-  // schedule/run-started is appended before the prompt so the durable log
-  // explains why the message arrived (all model flow stays in sessions).
   const schedule = createScheduleService({
     file: join(host.storageDir, "schedule.json"),
     runner: {
@@ -231,8 +230,6 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           }
           const current = scanLoopsDir(project.path)
             .find((file) => file.path === task.sourcePath && file.loop?.id === task.loopId);
-          // This immediate re-read closes the scanner interval window for any
-          // external/manual/agent/Git mutation of repository-controlled input.
           const owningSpaceId = project.spaceId ?? task.trustReceipt?.spaceId ?? "";
           assertLoopExecutionTrusted(task, current, owningSpaceId);
         }
@@ -248,19 +245,30 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
             sessionId = task.lastSessionId;
           }
         }
+
+        let sessions = sessionId
+          ? await systemSessionsForSession(host, sessionId)
+          : await systemSessionsForProject(host, task.projectId);
         if (!sessionId) {
-          const ref = await host.sessions.create({
+          const ref = await sessions.create({
             projectId: task.projectId,
             title: task.title ?? `Scheduled: ${task.prompt.slice(0, 48)}`,
           });
           sessionId = ref.id;
+          // Route subsequent operations from the durable session itself; this
+          // catches any project/Space drift before the run writes its marker.
+          sessions = await systemSessionsForSession(host, sessionId);
+        }
+        const projection = await sessions.snapshot(sessionId);
+        if (projection.status === "archived") {
+          throw Object.assign(new Error("target session is archived"), { code: "conflict" });
         }
         await host.events.append(sessionId, "schedule/run-started", {
           taskId: task.id, runId,
           ...(task.title ? { taskTitle: task.title } : {}),
           ...(task.source === "loop-file" ? { source: "loop-file", ...(task.loopId ? { loopId: task.loopId } : {}) } : {}),
         }, { ignorable: true, producerPlugin: "schedule" });
-        await host.sessions.send(sessionId, { text: task.prompt });
+        await sessions.send(sessionId, { text: task.prompt });
         return { sessionId };
       },
     },
