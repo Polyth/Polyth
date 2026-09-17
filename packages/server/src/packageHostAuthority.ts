@@ -1,5 +1,6 @@
-import type { SessionPersistence, SessionService } from "@polyth/contracts";
+import type { ProjectService, SessionPersistence, SessionService, SpaceContext } from "@polyth/contracts";
 import {
+  RUNTIME_SYSTEM_PRINCIPAL_ID,
   systemAppendSessionEvent,
   systemSessionsForProject,
   systemSessionsForSession,
@@ -23,6 +24,65 @@ const BLOCKED_STORE_MUTATIONS = new Set<PropertyKey>([
 
 const unavailable = (message: string): Error => Object.assign(new Error(message), { code: "unavailable" });
 const archived = (): Error => Object.assign(new Error("archived sessions are read-only"), { code: "conflict" });
+
+async function systemProjectsForProject(host: ServerPackageHost, projectId: string): Promise<ProjectService> {
+  const project = await host.projects.get(projectId);
+  if (!project?.spaceId) throw Object.assign(new Error("project not found"), { code: "not-found" });
+  const ctx: SpaceContext = {
+    spaceId: project.spaceId,
+    spaceSlug: project.spaceId,
+    userId: RUNTIME_SYSTEM_PRINCIPAL_ID,
+    role: "owner",
+    deployment: host.deployment,
+    storageDir: "",
+  };
+  return host.forSpace(ctx).projects;
+}
+
+function packageProjects(host: ServerPackageHost): ProjectService {
+  const raw = host.projects;
+  return new Proxy(raw, {
+    get(target, property, receiver) {
+      if (property === "get") {
+        return async (projectId: string) => {
+          try { return await (await systemProjectsForProject(host, projectId)).get(projectId); }
+          catch (cause) {
+            if ((cause as { code?: unknown } | null)?.code === "not-found") return undefined;
+            throw cause;
+          }
+        };
+      }
+      if (property === "list") {
+        return async () => {
+          const result = [];
+          for (const project of await raw.list()) {
+            const governed = await (await systemProjectsForProject(host, project.id)).get(project.id);
+            if (governed) result.push(governed);
+          }
+          return result;
+        };
+      }
+      if (property === "update" || property === "remove") {
+        const value = Reflect.get(target, property, receiver);
+        if (typeof value !== "function") return value;
+        return async (projectId: string, ...rest: unknown[]) => {
+          const scoped = await systemProjectsForProject(host, projectId);
+          const method = Reflect.get(scoped, property) as ((...args: unknown[]) => unknown) | undefined;
+          if (typeof method !== "function") throw unavailable(`project method unavailable: ${String(property)}`);
+          return method.call(scoped, projectId, ...rest);
+        };
+      }
+      if (property === "add" || property === "create" || property === "addRemote") {
+        return () => { throw unavailable("package project creation requires an explicit Space context"); };
+      }
+      // Internal package-workspace provisioning remains available here. The
+      // packageWorkspace helper immediately re-opens the deterministic anchor
+      // through host.forSpace(system-context), which materializes/verifies its
+      // canonical resource before returning it to package code.
+      return Reflect.get(target, property, receiver);
+    },
+  }) as ProjectService;
+}
 
 function packageSessions(host: ServerPackageHost): SessionService {
   const raw = host.sessions;
@@ -125,12 +185,13 @@ function packageStore(host: ServerPackageHost): ServerPackageHost["store"] {
  * Package code is trusted application code, but it is not a tenant authority.
  * Route handlers already receive `rc.space`; background work must derive its
  * Space from the durable project/session it operates on. This wrapper removes
- * raw unscoped session authority from discovered packages while preserving the
- * infrastructure seams that do not address tenant resources.
+ * raw unscoped project/session authority from discovered packages while
+ * preserving infrastructure seams that do not address tenant resources.
  */
 export function governPackageHost(host: ServerPackageHost): ServerPackageHost {
   return {
     ...host,
+    projects: packageProjects(host),
     sessions: packageSessions(host),
     store: packageStore(host),
     events: {
