@@ -214,7 +214,7 @@ test("disable clears scope and persists disabled state when disposal fails", asy
   await reg.dispose();
 });
 
-test("entries.server on a trusted file install loads and disposes the server plugin", async () => {
+test("entries.server on a privileged trusted file install loads and disposes the server plugin", async () => {
   const { dir, trusted } = scaffold();
   const pluginDir = join(trusted, "sample");
   writeFileSync(join(pluginDir, "polyth-plugin.json"), manifest({
@@ -253,7 +253,7 @@ test("entries.server on a trusted file install loads and disposes the server plu
   await root.dispose();
 });
 
-test("only broad trust classes may install executable server entries", async () => {
+test("non-broad trust manifests cannot install executable server entries", async () => {
   for (const trust of ["ui-only", "pure", "workspace", "network", "device"] as const) {
     const { dir, trusted } = scaffold();
     writeFileSync(
@@ -264,7 +264,7 @@ test("only broad trust classes may install executable server entries", async () 
     const reg = createPluginRegistry({ dir, trustedDir: trusted });
     await assert.rejects(
       () => reg.install("file:sample"),
-      new RegExp(`${trust}.*cannot declare entries\\.server`),
+      new RegExp(`trust class "${trust}" cannot declare entries\\.server`),
     );
     await reg.dispose();
   }
