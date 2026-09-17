@@ -13,6 +13,8 @@ const projection: SessionProjection = {
 test("discovered package sessions route through system-scoped Space services", async () => {
   let rawCreate = 0;
   let rawSnapshot = 0;
+  let rawProjection = 0;
+  let rawStoreAppend = 0;
   let scopedCreate = 0;
   let scopedSnapshot = 0;
   let appended = 0;
@@ -30,7 +32,10 @@ test("discovered package sessions route through system-scoped Space services", a
     deployment: "local-trusted",
     projects: { get: async (id: string) => id === project.id ? project : undefined },
     sessions: raw,
-    store: { projection: async (id: string) => id === projection.id ? projection : undefined },
+    store: {
+      async projection(id: string) { rawProjection++; return id === projection.id ? projection : undefined; },
+      async append() { rawStoreAppend++; throw new Error("raw store append called"); },
+    },
     forSpace(ctx: SpaceContext) {
       assert.equal(ctx.spaceId, "spc_home");
       assert.equal(ctx.userId, RUNTIME_SYSTEM_PRINCIPAL_ID);
@@ -49,11 +54,14 @@ test("discovered package sessions route through system-scoped Space services", a
   assert.deepEqual(await governed.sessions.create({ projectId: project.id }), { id: "ses_created" });
   assert.equal((await governed.sessions.snapshot(projection.id)).id, projection.id);
   await governed.events.append(projection.id, "test/event", {});
+  assert.equal((await governed.store.projection(projection.id))?.id, projection.id);
+  await governed.store.append(projection.id, "test/store-event", {});
 
   assert.equal(rawCreate, 0);
   assert.equal(rawSnapshot, 0);
+  assert.equal(rawStoreAppend, 0);
+  assert.equal(rawProjection, 4);
   assert.equal(scopedCreate, 1);
-  // One explicit snapshot plus the event append lifecycle guard.
-  assert.equal(scopedSnapshot, 2);
-  assert.equal(appended, 1);
+  assert.equal(scopedSnapshot, 4);
+  assert.equal(appended, 2);
 });
