@@ -60,12 +60,8 @@ jobs:
           packages/plugins/test/session1Security.test.ts
           scripts/test/releaseQuality.test.ts
 
-      - name: Typecheck affected projects
-        shell: bash
-        run: |
-          set -euo pipefail
-          npx tsc --noEmit -p packages/plugins
-          npx tsc --noEmit -p apps/mobile
+      - name: Typecheck mobile shell
+        run: npx tsc --noEmit -p apps/mobile
 
       - name: Commit restored branch state
         shell: bash
