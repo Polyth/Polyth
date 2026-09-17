@@ -1,6 +1,7 @@
 import {
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -17,6 +18,7 @@ import {
   moveUsageBlock,
   orderPinnedUsageBlocks,
   orderUsageBlocks,
+  setBlockHidden,
   setProviderHidden,
   setProviderPinned,
   setUsageDashboardPrefs,
@@ -28,7 +30,11 @@ import {
   AddIcon,
   Button,
   ChevronRightIcon,
+  DragHandleIcon,
+  EditIcon,
   EmptyState,
+  HideIcon,
+  ShowIcon,
   IconButton,
   PinIcon,
   RefreshIcon,
@@ -69,22 +75,29 @@ interface SortableBlock {
   label: string;
   content: ReactNode;
   className?: string;
+  hidden?: boolean;
 }
 
-function SortableBlocks({
+export function SortableBlocks({
   blocks,
   order,
   onChange,
   className,
   pinnedIds = [],
+  editing = false,
+  onHiddenChange,
 }: {
   blocks: SortableBlock[];
   order: string[];
   onChange: (order: string[]) => void;
   className: string;
   pinnedIds?: readonly string[];
+  editing?: boolean;
+  onHiddenChange?: (id: string, hidden: boolean) => void;
 }) {
   const [dragged, setDragged] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const rectsRef = useRef<Map<string, DOMRect> | null>(null);
   const touchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchPending = useRef<{ id: string; x: number; y: number; pointerId: number } | null>(null);
   const sorted = pinnedIds.length > 0
@@ -92,6 +105,7 @@ function SortableBlocks({
     : orderUsageBlocks(blocks, order, (block) => block.id);
   const ids = sorted.map((block) => block.id);
   const move = (id: string, to: string | number) => {
+    snapshotRects();
     const next = moveUsageBlock(ids, id, to);
     onChange(pinnedIds.length > 0
       ? orderPinnedUsageBlocks(next, next, pinnedIds, (item) => item)
@@ -106,8 +120,37 @@ function SortableBlocks({
   useEffect(() => () => {
     if (touchTimer.current) clearTimeout(touchTimer.current);
   }, []);
+  // FLIP: snapshot positions before React reorders, then animate each card
+  // from its old slot to the new one (iOS-style smooth reorder).
+  useLayoutEffect(() => {
+    const rects = rectsRef.current;
+    rectsRef.current = null;
+    if (!rects) return;
+    const root = containerRef.current;
+    if (!root) return;
+    for (const child of root.children) {
+      const id = (child as HTMLElement).dataset.usageBlock;
+      const previous = id ? rects.get(id) : undefined;
+      if (!previous) continue;
+      const delta = previous.top - child.getBoundingClientRect().top;
+      if (Math.abs(delta) < 1) continue;
+      if (typeof child.animate !== "function" || typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches) continue;
+      child.animate(
+        [{ transform: `translateY(${delta}px)` }, { transform: "translateY(0)" }],
+        { duration: 260, easing: "cubic-bezier(.2,.8,.2,1)" },
+      );
+    }
+  });
+  const snapshotRects = () => {
+    const root = containerRef.current;
+    if (!root) return;
+    rectsRef.current = new Map([...root.children].map((child) => {
+      const element = child as HTMLElement;
+      return [element.dataset.usageBlock ?? "", element.getBoundingClientRect()];
+    }));
+  };
   const onPointerDown = (event: PointerEvent<HTMLDivElement>, id: string) => {
-    if (event.pointerType !== "touch" || (event.target as Element).closest("button,a,input,select,textarea")) return;
+    if (!editing || event.pointerType !== "touch" || (event.target as Element).closest("button,a,input,select,textarea")) return;
     touchPending.current = { id, x: event.clientX, y: event.clientY, pointerId: event.pointerId };
     const target = event.currentTarget;
     touchTimer.current = setTimeout(() => {
@@ -116,6 +159,7 @@ function SortableBlocks({
     }, 280);
   };
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    if (!editing) return;
     const pending = touchPending.current;
     if (!pending || pending.pointerId !== event.pointerId) return;
     if (!dragged && Math.hypot(event.clientX - pending.x, event.clientY - pending.y) > 8) {
@@ -128,17 +172,17 @@ function SortableBlocks({
     if (target?.dataset.usageBlock && target.dataset.usageBlock !== dragged) move(dragged, target.dataset.usageBlock);
   };
   return (
-    <div className={className}>
-      {sorted.map((block) => (
+    <div className={className} ref={containerRef}>
+      {sorted.filter((block) => editing || !block.hidden).map((block) => (
         <div
-          className={`usage-sortable-item${block.className ? ` ${block.className}` : ""}${dragged === block.id ? " dragging" : ""}`}
+          className={`usage-sortable-item${block.className ? ` ${block.className}` : ""}${dragged === block.id ? " dragging" : ""}${editing && block.hidden ? " usage-block-hidden" : ""}`}
           key={block.id}
           data-usage-block={block.id}
-          draggable
-          tabIndex={0}
-          role="group"
-          aria-label={block.label}
-          aria-roledescription={tr("usage.usagedashboard.sortableDashboardBlock")}
+          draggable={editing}
+          tabIndex={editing ? 0 : undefined}
+          role={editing ? "group" : undefined}
+          aria-label={editing ? block.label : undefined}
+          aria-roledescription={editing ? tr("usage.usagedashboard.sortableDashboardBlock") : undefined}
           onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
             if ((event.target as Element).closest("button,a,input,select,textarea")) return;
             if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
@@ -150,6 +194,7 @@ function SortableBlocks({
               event.preventDefault();
               return;
             }
+            snapshotRects();
             setDragged(block.id);
             event.dataTransfer.effectAllowed = "move";
             event.dataTransfer.setData("text/plain", block.id);
@@ -166,6 +211,23 @@ function SortableBlocks({
           onPointerUp={clearTouch}
           onPointerCancel={clearTouch}
         >
+          {editing && (
+            <div className="usage-block-edit-bar">
+              <span className="usage-block-grip" aria-hidden="true"><DragHandleIcon /></span>
+              <IconButton
+                icon={block.hidden ? ShowIcon : HideIcon}
+                size="sm"
+                pressed={block.hidden}
+                label={block.hidden
+                  ? tr("usage.usagedashboard.showValueInBreakdowns", { label: block.label })
+                  : tr("usage.usagedashboard.hideValueInBreakdowns", { label: block.label })}
+                onClick={() => {
+                  snapshotRects();
+                  onHiddenChange?.(block.id, !block.hidden);
+                }}
+              />
+            </div>
+          )}
           {block.content}
         </div>
       ))}
@@ -1019,6 +1081,7 @@ export function UsageDashboard(): ReactNode {
     if (pane) pane.scrollTop = 0;
   }, [view]);
   const [refreshing, setRefreshing] = useState(false);
+  const [editing, setEditing] = useState(false);
   const data = useMemo(
     () => buildUsageDashboardData(projectSessions, snapshots, rangeDays),
     [projectSessions, rangeDays, snapshots],
@@ -1091,7 +1154,11 @@ export function UsageDashboard(): ReactNode {
       className: "usage-block-full",
       content: <UsageActionStrip hiddenCount={hiddenCount} onProviders={() => setView("providers")} onAddProvider={addProvider} />,
     },
-  ];
+  ].map((block) => ({
+    ...block,
+    hidden: prefs.hiddenBlocks.includes(block.id),
+  }));
+  const hiddenBlockCount = overviewBlocks.filter((block) => block.hidden).length;
 
   return (
     <div
@@ -1136,6 +1203,14 @@ export function UsageDashboard(): ReactNode {
             onChange={(value) => setLayout(value as typeof layout)}
           />
           <IconButton
+            icon={EditIcon}
+            className="usage-edit-toggle"
+            pressed={editing}
+            label={editing ? tr("usage.usagedashboard.editLayoutDone") : tr("usage.usagedashboard.editLayout")}
+            title={editing ? tr("usage.usagedashboard.editLayoutDone") : tr("usage.usagedashboard.editLayoutHint")}
+            onClick={() => setEditing((current) => !current)}
+          />
+          <IconButton
             icon={RefreshIcon}
             className={quotaBusy ? "refreshing" : undefined}
             label={quotaBusy ? tr("usage.usagedashboard.refreshingProviderQuotaFeeds") : tr("usage.usagedashboard.refreshProviderQuotaFeeds")}
@@ -1154,9 +1229,23 @@ export function UsageDashboard(): ReactNode {
         </div>
       )}
 
+      {editing && hiddenBlockCount > 0 && (
+        <div className="usage-hidden-strip" role="note">
+          <HideIcon />
+          <span>{tr("usage.usagedashboard.hiddenBlocksValue", { count: hiddenBlockCount })}</span>
+        </div>
+      )}
+
       <TabPanel idBase={viewTabsId} tabId="overview" active={view === "overview"}>
         <div className="usage-dashboard-content" data-usage-view="overview">
-          <SortableBlocks className="usage-overview-blocks" blocks={overviewBlocks} order={prefs.dashboard.overviewOrder} onChange={(overviewOrder) => setUsageDashboardPrefs({ overviewOrder })} />
+          <SortableBlocks
+            className="usage-overview-blocks"
+            blocks={overviewBlocks}
+            order={prefs.dashboard.overviewOrder}
+            onChange={(overviewOrder) => setUsageDashboardPrefs({ overviewOrder })}
+            editing={editing}
+            onHiddenChange={(id, hidden) => setBlockHidden(id, hidden)}
+          />
         </div>
       </TabPanel>
       <TabPanel idBase={viewTabsId} tabId="providers" active={view === "providers"}>

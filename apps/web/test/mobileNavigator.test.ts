@@ -93,10 +93,14 @@ test("phone navigator keeps the tap floor while compacting its rhythm", async ()
 });
 
 test("phone navigator shares the mobile Workspace surface", async () => {
-  const [css, workspaceCss] = await Promise.all([
+  const [css, workspaceCss, sharedCss] = await Promise.all([
     read("../src/components/mobile/MobileNavigator.css"),
     read("../src/workspacePanelPremium.css"),
+    read("../src/styles.css"),
   ]);
+
+  assert.match(sharedCss, /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\) :is\([^)]*\.sheet,\s*\.mobile-navigator,[^)]*\)\s*\{\s*background:\s*radial-gradient/,
+    "Workspace and phone navigator share the final preference-aware glass rule");
 
   assert.match(css, /\.mobile-navigator\s*\{[^}]*background:\s*var\(--material-glass-strong\);/s);
   assert.match(workspaceCss, /\.workspace-panel-sheet\.sheet\s*\{[^}]*background:\s*var\(--material-glass-strong\);/s);

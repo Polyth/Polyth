@@ -22,6 +22,7 @@ function fixture(path = ":memory:", options: {
     read(root: string, projectId: string): Promise<string | null>;
   };
   workspaceInstructionsEnabled?: boolean;
+  branchOutcome?: "mismatch" | "unknown";
 } = {}) {
   let store = createStore(path);
   const detach: Array<() => void> = [];
@@ -90,6 +91,11 @@ function fixture(path = ":memory:", options: {
         models: async () => [], agents: async () => [],
         ensureSession: async (input) => nativeId = input.backendSessionId ?? nativeId,
         createSessionOperation: create, resetSessionOperation: create,
+        ...(options.branchOutcome ? {
+          branchSessionOperation: async (_request, operationId) => options.branchOutcome === "mismatch"
+            ? { kind: "rejected" as const, code: "history-mismatch", message: "requested history prefix is not present in the backend session" }
+            : { kind: "unknown" as const, operationId, message: "branch response lost" },
+        } satisfies Partial<AgentRuntime> : {}),
         sessions: async () => nativeId ? [{ id: nativeId, title: "fake", createdAt: 0, updatedAt: 0, ...(exposeReceipt ? { operationId: lastCreateId } : {}) }] : [],
         history: async () => [], endpoint: async () => endpoint, protocol: async () => "legacy",
         reconcile: async (binding) => ({
@@ -241,6 +247,99 @@ test("rewind replacement creates a fresh leg across non-fork harnesses", async (
       await f.idle(id);
     }
   } finally {
+    await f.close();
+  }
+});
+
+test("rewind replacement recovers from rejected native history without including the discarded tail", async () => {
+  const f = fixture(":memory:", { branchOutcome: "mismatch" });
+  try {
+    const { id } = await f.sessions.create({ projectId: "p" });
+    for (const text of ["keep this context", "discard this tail"]) {
+      await f.sessions.send(id, { text });
+      f.engines.at(-1)!.complete();
+      await f.idle(id);
+    }
+    for (const replacement of ["first replacement", "second replacement"]) {
+      const before = (await f.store.projection(id))!;
+      // Existing sessions can have a binding without runtime-leg metadata.
+      // Exercise native branching rather than the send-time stale-leg reset.
+      await f.store.upsertProjection({ ...before, runtimeLeg: undefined });
+      const target = (await f.store.events(id)).findLast((event) => event.type === "user/message")!;
+      await f.sessions.rewind!(id, target.seq);
+      const submitted = await f.sessions.send(id, { text: replacement });
+      assert.equal(typeof submitted.turnId, "string");
+      const request = f.engines.at(-1)!.requests.at(-1)!;
+      assert.match(request.text, /keep this context/);
+      assert.doesNotMatch(request.text, /discard this tail/);
+      if (replacement === "second replacement") assert.doesNotMatch(request.text, /first replacement/);
+      assert.ok(request.text.endsWith(replacement));
+      const after = (await f.store.projection(id))!;
+      assert.notEqual(after.backendSessionId, before.backendSessionId);
+      assert.equal(after.resolvedHarnessId, before.resolvedHarnessId);
+      const events = await f.store.events(id);
+      assert.equal(events.findLast((event) => event.type === "session/rewind-cleared")?.data.strategy, "fresh-runtime-epoch");
+      assert.ok(events.some((event) => event.type === "mutation/rejected" && event.data.code === "history-mismatch"));
+      assert.equal(events.findLast((event) => event.type === "user/message")?.data.text, replacement);
+      f.engines.at(-1)!.complete();
+      await f.idle(id);
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+for (const failure of ["unknown branch", "unknown release"] as const) {
+  test(`rewind replacement preserves the marker and creates no new leg after ${failure}`, async () => {
+    const f = fixture(":memory:", { branchOutcome: failure === "unknown branch" ? "unknown" : "mismatch" });
+    try {
+      const { id } = await f.sessions.create({ projectId: "p" });
+      for (const text of ["keep", "replace me"]) {
+        await f.sessions.send(id, { text });
+        f.engines.at(-1)!.complete();
+        await f.idle(id);
+      }
+      const before = (await f.store.projection(id))!;
+      await f.store.upsertProjection({ ...before, runtimeLeg: undefined });
+      const creates = f.nativeCreates.length;
+      const target = (await f.store.events(id)).findLast((event) => event.type === "user/message")!;
+      await f.sessions.rewind!(id, target.seq);
+      if (failure === "unknown release") f.setReleaseUnknown(true);
+      await assert.rejects(f.sessions.send(id, { text: "replacement" }), { code: "outcome-unknown" });
+      f.beginShutdown();
+      assert.equal(f.nativeCreates.length, creates);
+      assert.equal((await f.store.projection(id))?.backendSessionId, before.backendSessionId);
+      const events = await f.store.events(id);
+      assert.equal(events.some((event) => event.type === "session/rewind-cleared"), false);
+      assert.equal(events.some((event) => event.type === "user/message" && event.data.text === "replacement"), false);
+    } finally {
+      await f.close();
+    }
+  });
+}
+
+test("queued rewind replacement recovers from missing native history", async () => {
+  const f = fixture(":memory:", { branchOutcome: "mismatch" });
+  try {
+    const { id } = await f.sessions.create({ projectId: "p" });
+    await f.sessions.send(id, { text: "keep queued context" });
+    f.engines[0]!.complete();
+    await f.idle(id);
+    await f.sessions.send(id, { text: "discard running tail" });
+    const target = (await f.store.events(id)).findLast((event) => event.type === "user/message")!;
+    await f.sessions.rewind!(id, target.seq);
+    const queued = await f.sessions.send(id, { text: "queued replacement" });
+    assert.equal(queued.queued, true);
+    f.engines[0]!.complete();
+    await until(async () => f.engines.some((engine) => engine.requests.some((request) => request.text.endsWith("queued replacement"))));
+    const engine = f.engines.at(-1)!;
+    assert.match(engine.requests.at(-1)!.text, /keep queued context/);
+    assert.doesNotMatch(engine.requests.at(-1)!.text, /discard running tail/);
+    assert.equal(f.engines.flatMap((engine) => engine.requests).filter((request) => request.text.endsWith("queued replacement")).length, 1);
+    engine.complete();
+    await f.idle(id);
+  } finally {
+    f.beginShutdown();
     await f.close();
   }
 });

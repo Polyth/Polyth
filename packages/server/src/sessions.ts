@@ -4523,6 +4523,13 @@ export function createSessionService(deps: {
         : rt.branchSession!(request),
       (backendSessionId) => ({ backendSessionId }),
     );
+    // A definitive missing-prefix rejection made no branch. Native history
+    // can diverge after continuity recovery; reuse the release-proven epoch
+    // path instead of requiring that disposable history to contain the prefix.
+    // Unknown outcomes must still reconcile, never trigger another mutation.
+    if (outcome.kind === "rejected" && outcome.code === "history-mismatch") {
+      return replaceRewoundRuntimeWithFreshRuntimeEpochUnderLock(sessionId, current, rt);
+    }
     if (outcome.kind !== "confirmed") {
       if (outcome.kind === "unknown") {
         await updateProjection(sessionId, { status: "unknown" });
@@ -6119,7 +6126,7 @@ export function createSessionService(deps: {
     publishProjection((await store.projection(sessionId))!);
   };
 
-  /** Non-fork harnesses cannot materialize an exact native branch. Reuse the
+  /** When exact native branching is unavailable, reuse the
    * normal release/create/epoch transaction so the old execution is proven
    * released, the new leg is fenced by a durable epoch, and the next prompt
    * receives canonical continuity. The same-harness route is retained by the
@@ -6875,21 +6882,9 @@ export function createSessionService(deps: {
         proj = (await store.projection(sessionId)) ?? proj;
         stoppedTurnRecorded = hasPersistedStoppedTurn(await store.events(sessionId));
       }
-      // Steer and interrupt are "act on it now" intents. When a Polyth restart
-      // left the session `unknown` and reconciliation could not recover the
-      // stranded backend turn, do not reject the message: record the durable
-      // aborted stop (which lifts the send-admission barrier) and let the text
-      // continue immediately as the next turn on the rebound runtime.
-      if (
-        proj.status === "unknown"
-        && !recoverEpoch
-        && !stoppedTurnRecorded
-        && (input.delivery === "steer" || input.delivery === "interrupt")
-      ) {
-        await withSessionLock(sessionId, () => stopLocally(sessionId));
-        proj = (await store.projection(sessionId)) ?? proj;
-        stoppedTurnRecorded = hasPersistedStoppedTurn(await store.events(sessionId));
-      }
+      // A steer/interrupt is new intent, not proof that an unknown turn ended.
+      // Preserve it in the queue until reconciliation establishes safe admission;
+      // a fabricated local stop would admit direct sends but strand queued ones.
       if (
         proj.status === "unknown"
         && !recoverEpoch

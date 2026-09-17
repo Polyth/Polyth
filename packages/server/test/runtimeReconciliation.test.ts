@@ -1141,24 +1141,37 @@ test("Stop always closes the turn even when the backend abort outcome is unknown
   await store.close();
 });
 
-test("a steer to an unrecovered unknown session is admitted immediately as the next turn", async () => {
+test("steer preserves an unknown turn and drains queued messages only after verified idle", async () => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-steer-unknown-"));
   const endpoint = endpointFor(dir);
-  let submissions = 0;
+  const submitted: string[] = [];
+  let state: RuntimeSnapshot["state"] = { value: "unknown" };
+  let notifyLifecycle: ((notification: RuntimeLifecycleNotification) => void) | undefined;
   const runtime = runtimeWithSnapshot(endpoint, (binding) => ({
     authorityId: binding.authorityId,
     generation: binding.generation,
     location: binding.location,
     backendSessionId: binding.backendSessionId!,
     reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
-    // Reconciliation cannot recover the stranded turn.
-    state: { value: "unknown" },
+    state,
     completeness: { events: "partial", permissions: "partial", questions: "partial" },
     permissions: [],
     questions: [],
     events: [],
   }));
-  runtime.startTurn = async () => { submissions += 1; };
+  let emit: ((sessionId: string, event: RuntimeEvent) => void) | undefined;
+  runtime.onEvent = (callback) => {
+    emit = callback;
+    return { dispose: () => { emit = undefined; } };
+  };
+  runtime.onLifecycle = (callback) => {
+    notifyLifecycle = callback;
+    return { dispose: () => { notifyLifecycle = undefined; } };
+  };
+  runtime.startTurn = async (request) => {
+    submitted.push(request.text);
+    emit!(request.sessionId, { type: "turn/started", turnId: `next-${submitted.length}` });
+  };
   const { sessions, store, project } = makeHarness(runtime, dir);
   const sessionId = "session-steer-unknown";
   await store.upsertProjection({
@@ -1173,21 +1186,28 @@ test("a steer to an unrecovered unknown session is admitted immediately as the n
   });
   await store.append(sessionId, "turn/started", { turnId: "stranded-1" });
 
-  await sessions.send(sessionId, { text: "go left instead", delivery: "steer" }); // must not throw
+  await sessions.events(sessionId, 0);
+  const first = await sessions.send(sessionId, { text: "continue", delivery: "queue" });
+  const second = await sessions.send(sessionId, { text: "go left instead", delivery: "steer" });
+  assert.equal(first.queued, true);
+  assert.equal(second.queued, true);
+  assert.deepEqual(submitted, []);
+  assert.deepEqual((await store.events(sessionId))
+    .filter((event) => event.type.startsWith("turn/")).map((event) => event.type), ["turn/started"]);
+  assert.equal((await store.projection(sessionId))?.status, "unknown");
+  assert.equal((await store.reconciliation(sessionId))?.state, "unknown");
+  assert.deepEqual((await store.queueList(sessionId)).map((item) => item.text), ["continue", "go left instead"]);
 
-  const events = await store.events(sessionId);
-  const turnEvents = events.filter((event) => event.type.startsWith("turn/")).map((event) => event.type);
-  // The stranded turn is closed by a local aborted stop, then the steer text
-  // is admitted to the backend as the next turn (the fake runtime records the
-  // submission but emits no turn lifecycle events of its own).
-  assert.deepEqual(turnEvents, ["turn/started", "turn/stopped"]);
-  assert.equal((events.find((event) => event.type === "turn/stopped")?.data as { reason?: string }).reason, "aborted");
-  assert.equal(submissions, 1);
-  assert.equal(
-    events.some((event) => event.type === "user/message"
-      && (event.data as { text?: string }).text === "go left instead"),
-    true,
-  );
+  state = { value: "idle", comparison: { domain: "test-status", order: 1 } };
+  notifyLifecycle!({ type: "stream-connected" });
+  await waitFor(async () => (await store.events(sessionId)).some((event) =>
+    event.type === "turn/started" && event.data.turnId === "next-1"));
+  assert.deepEqual(submitted, ["continue"]);
+  emit!(sessionId, { type: "turn/stopped", turnId: "next-1", reason: "completed" });
+  await waitFor(async () => (await store.events(sessionId)).some((event) =>
+    event.type === "turn/started" && event.data.turnId === "next-2"));
+  assert.deepEqual(submitted, ["continue", "go left instead"]);
+  assert.deepEqual(await store.queueList(sessionId), []);
   await store.close();
 });
 

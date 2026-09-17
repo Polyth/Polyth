@@ -81,6 +81,33 @@ const { getState, setActiveView } = await import("../src/store.ts");
 const { invalidateRuntimeCatalogs, readHarnessRoster } =
   await import("@polyth/models/runtime-catalog");
 
+// Must stay the first test in this file: it asserts what the *first* boot of a
+// page does to caches warmed before packages finished loading.
+test("the first boot adopts the harness topology instead of discarding warm catalogs", async () => {
+  descriptors.set("backend-testharness", {
+    id: "backend-testharness",
+    name: "Test harness",
+    description: "Harness topology package.",
+    core: false,
+    enabled: true,
+    hasSettings: false,
+  });
+  const scope = { projectId: "project-boot", spaceId: "space-boot" };
+  harnessRosterRequests = 0;
+  await readHarnessRoster(scope);
+  assert.equal(harnessRosterRequests, 1);
+
+  await bootPackages();
+  await readHarnessRoster(scope);
+  assert.equal(harnessRosterRequests, 1,
+    "discovering the harness packages for the first time must not evict metadata already cached this page");
+
+  descriptors.get("backend-testharness")!.enabled = false;
+  await bootPackages();
+  await readHarnessRoster(scope);
+  assert.equal(harnessRosterRequests, 2, "a real harness topology change still forces fresh discovery");
+});
+
 test("package state follows server descriptors when the web manifest is empty", async () => {
   let notifications = 0;
   const unsubscribe = subscribePackages(() => { notifications++; });

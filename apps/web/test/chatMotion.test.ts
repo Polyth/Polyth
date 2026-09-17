@@ -46,16 +46,14 @@ test("explicit sends lift the prompt to a contextual anchor and FLIP previous ro
   assert.match(timeline, /responseToPromptGap: Math\.max\(0, row\.top - bubbleRect\.bottom\)/);
 });
 
-test("every live action rises out of the composer and honours the motion switch", () => {
+test("every live action enters quietly in its chronological slot and honours the motion switch", () => {
   const controller = source("../src/chatMotion.ts");
   const css = source("../src/styles.css");
 
   assert.match(controller, /element\.matches\("\.activity-live"\)/);
-  assert.match(controller, /playActionRise/);
-  assert.match(controller, /composerAnchor\(\)/);
-  assert.match(controller, /function playActionRise[^}]*motionDisabled\(\)/s);
-  assert.match(controller, /element\.closest\("\.timeline"\) && !element\.closest\("\.activity-live-layer"\)/,
-    "rise is skipped while the row is still a scroller descendant");
+  assert.match(controller, /element\.matches\("\.activity-live"\)[\s\S]*?playEntrance\(element\)/);
+  assert.doesNotMatch(controller, /playActionRise|actionRiseTimeline|composerOrigin/,
+    "actions never travel across transcript content from the composer");
   assert.match(css, /html\[data-reduce-animations="true"\] \.activity-live/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.activity-live \{ transition: none; \}/);
 });
@@ -64,12 +62,11 @@ test("a burst of fast actions is paced, not stampeded", () => {
   const timeline = source("../src/components/Timeline.tsx");
   const controller = source("../src/chatMotion.ts");
   const show = Number(/ACTION_SHOW_MS = ([\d_]+)/.exec(timeline)?.[1]?.replaceAll("_", ""));
-  const lift = Number(/SEND_LIFT_TOUCH_MS = (\d+)/.exec(controller)?.[1]);
-  const stretch = Number(/Math\.min\(Math\.abs\(delta\) \/ 1200, (0\.\d+)\)/.exec(controller)?.[1]);
+  const entrance = Number(/DESKTOP_DURATION_MS = (\d+)/.exec(controller)?.[1]);
 
-  // An action must outlast its own longest possible rise, or the motion is cut
-  // short by the fold and the burst reads as flicker.
-  assert.ok(show > lift * (1 + stretch), `${show}ms outside must exceed the ${lift * (1 + stretch)}ms rise`);
+  // An action must outlast its own entrance, or the motion is cut short by the
+  // fold and the burst reads as flicker.
+  assert.ok(show > entrance, `${show}ms outside must exceed the ${entrance}ms entrance`);
   // The pause between two actions is the fold itself: the previous card is
   // gone before the next one rises.
   assert.match(timeline, /const ACTION_GAP_MS = ACTIVITY_LIVE_EXIT_MS/);
@@ -80,31 +77,20 @@ test("a burst of fast actions is paced, not stampeded", () => {
   assert.doesNotMatch(timeline, /defaultOpen=\{live\}/);
 });
 
-test("the rise stays smooth over long travel and flies outside the scroller", () => {
+test("live activity owns in-flow layout and never uses the viewport overlay", () => {
   const controller = source("../src/chatMotion.ts");
   const css = source("../src/styles.css");
   const timeline = source("../src/components/Timeline.tsx");
 
-  // Opacity lands on its own early offset; transform keeps the full duration.
-  assert.match(controller, /\{ opacity: 1, offset: settle \? 0\.28 : 0\.32 \}/);
-  // Longer travel, longer duration: a fixed one reads as a teleport.
-  assert.match(controller, /Math\.min\(Math\.abs\(delta\) \/ 1200, 0\.45\)/);
-  // After portal the flying row is not a `.timeline` descendant; the viewport
-  // still owns the composer seam used as the rise origin.
-  assert.match(controller, /function actionRiseTimeline/);
-  assert.match(controller, /closest\("\.timeline-viewport"\)\?\.querySelector<HTMLElement>\(":scope > \.timeline"\)/);
-  // Follow/sheet ignore overlay mutations so they cannot chase transform overflow.
-  assert.match(timeline, /timelineMutationAffectsFollow/);
-  // A live action is a bare row, not a nested list in the folded block — and
-  // it wears no frame of its own. Flight is painted in a clipped sibling of
-  // the scroller so fill:both cannot grow scrollHeight.
+  assert.match(timeline, /\{stage\}/);
+  assert.doesNotMatch(timeline, /createPortal\(stage|activity-live-layer/);
+  assert.match(controller, /TOP_LEVEL_TIMELINE_ROW_SELECTOR = "[^"]*\.activity-live-stage/);
   assert.match(css, /\.activity-group,\s*\.task-list \{/);
   const liveRule = /\n\.activity-live \{([^}]*)\}/.exec(css)?.[1] ?? "";
   assert.doesNotMatch(liveRule, /border|box-shadow|background/);
-  assert.match(css, /\.activity-live-layer \{[^}]*position: absolute;[^}]*inset: 0;[^}]*overflow: hidden;/s);
-  assert.match(css, /\.activity-live-stage \{[^}]*position: absolute;/s);
-  assert.doesNotMatch(css, /inset-block-start: calc\(100% \+ var\(--space-1\)\)/);
-  assert.match(css, /Inserting or\s+growing a\s+live row must not change the scrollport/s);
+  assert.match(css, /\.activity-live-stage \{[^}]*width: 100%;[^}]*display: grid;[^}]*margin-block-start:/s);
+  assert.doesNotMatch(css, /\.activity-live-stage \{[^}]*position: absolute/s);
+  assert.doesNotMatch(css, /\.activity-live-layer/);
   assert.match(css, /--activity-live-exit: 280ms/);
   assert.match(css, /opacity calc\(var\(--activity-live-exit\) \* 0\.55\) linear/);
   assert.match(css, /\.activity-live\.leaving \{[^}]*grid-template-rows: 0fr[^}]*scale\(\.985\)/s);

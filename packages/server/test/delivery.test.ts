@@ -201,6 +201,33 @@ test("idle send starts a normal turn; active send queues; FIFO dispatch on stop"
   await store.close();
 });
 
+test("aborted idle turn admits the next queued message without an abort flag reset", { timeout: 5000 }, async () => {
+  const fake = fakeRuntime();
+  const { sessions, store } = makeService(fake);
+  const { id } = await sessions.create({ projectId: "p1", title: "Abort then queue" });
+  await sessions.send(id, { text: "first" });
+  await sessions.abort(id);
+  assert.equal((await store.projection(id))?.status, "idle");
+  assert.equal((await store.events(id)).findLast((event) => event.type === "turn/stopped")?.data.reason, "aborted");
+
+  const queued = await store.enqueue(id, "next", "queue");
+  let resolveStarted!: () => void;
+  const started = new Promise<void>((resolve) => { resolveStarted = resolve; });
+  const patchProjection = store.patchProjection.bind(store);
+  store.patchProjection = async (...args) => {
+    const result = await patchProjection(...args);
+    if (result?.id === id && result.status === "working") resolveStarted();
+    return result;
+  };
+  await sessions.queueEdit(id, queued.item.id, "next");
+  await started;
+  assert.deepEqual(fake.startedTexts, ["first", "next"]);
+  assert.deepEqual(await store.queueList(id), []);
+  // Join the runtime callback's session lock without scheduling another stop.
+  await assert.rejects(sessions.queueEditStart(id, queued.item.id), { code: "conflict" });
+  await store.close();
+});
+
 test("AGENTS.md is hidden in only the first runtime-leg prompt", async () => {
   const fake = fakeRuntime();
   const reads: Array<{ root: string; projectId: string }> = [];

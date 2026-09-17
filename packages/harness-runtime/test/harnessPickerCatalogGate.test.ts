@@ -24,6 +24,7 @@ globalThis.fetch = ((input, init) => fetchHandler(input, init)) as typeof fetch;
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { HarnessTabs, HarnessTransitionStatus } = await import("../widgets/runtime.tsx");
+const { invalidateRuntimeCatalogs } = await import("@polyth/models/runtime-catalog");
 
 const snapshot = (id: string, modelID?: string, availability?: Partial<{ state: string; installed: boolean; healthy: boolean; authenticated: boolean }>) => ({
   identity: { id, name: id === "cursor" ? "Cursor" : "Codex" },
@@ -237,6 +238,41 @@ test("only executable harnesses remain after availability snapshots load", async
     });
     assert.deepEqual(tabProviders(container), ["openai"],
       "setup-required, not-installed and policy-disabled harnesses stay hidden");
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("an open picker keeps its tabs and selection while invalidated metadata reloads", async () => {
+  fetchHandler = async () => new Response(JSON.stringify([snapshot("codex"), snapshot("cursor")]));
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const selected = () => [...container.querySelectorAll<HTMLElement>("[role=tab]")]
+    .map((tab) => `${tab.id.split("-tab-")[1]}:${tab.getAttribute("aria-selected")}`);
+  try {
+    await act(async () => { root.render(createElement(HarnessTabs, {
+      ...props(host({ value: 0 }), "invalidation-hold"),
+      harnessSelection: { mode: "pinned", harnessId: "cursor" },
+      sessionId: "session-1",
+    })); });
+    await act(async () => { await Promise.resolve(); });
+    assert.deepEqual(selected(), ["codex:false", "cursor:true"]);
+
+    // A package reconcile or a forced refresh empties the shared caches while
+    // the replacement request is still in flight; the harness the user just
+    // chose must not lose its highlight until the answer arrives.
+    const pending: Array<() => void> = [];
+    fetchHandler = async () => new Response(JSON.stringify(await new Promise((resolve) => {
+      pending.push(() => resolve([snapshot("codex"), snapshot("cursor")]));
+    })));
+    await act(async () => { invalidateRuntimeCatalogs(); });
+    await act(async () => { await Promise.resolve(); });
+    assert.deepEqual(selected(), ["codex:false", "cursor:true"], "the strip holds its last known rows");
+    await act(async () => { pending.forEach((run) => run()); await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+    assert.deepEqual(selected(), ["codex:false", "cursor:true"]);
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();

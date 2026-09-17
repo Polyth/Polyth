@@ -38,7 +38,7 @@
   max-width: none;
   overflow: hidden;
   color: var(--text);
-  /* Readable opaque fallback; translucency is opt-in below. */
+  /* Opaque fallback; shared sheet material in styles.css owns translucency. */
   background: var(--material-glass-strong);
   border: 0;
   box-shadow: none;
@@ -51,7 +51,7 @@
 }
 
 /* ---- material ----------------------------------------------------------
- * The full-screen navigator shares the mobile Workspace's opaque surface.
+ * The full-screen navigator shares the mobile Workspace's sheet material.
  * Its toolbar stays part of that same surface so switching between the two
  * destinations does not change the page material underneath the controls. */
 .mobile-nav-toolbar {

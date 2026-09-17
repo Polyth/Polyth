@@ -41,6 +41,7 @@ let enabled = new Set<string>();
 const packageStates = new Map<string, boolean>();
 const listeners = new Set<() => void>();
 let bootQueue = Promise.resolve();
+let harnessTopologySynced = false;
 let catalogByCanonical = new Map<string, WebPackageAsset>();
 let loaderOptions: WebEntryLoaderOptions = {};
 
@@ -191,8 +192,14 @@ async function syncPackages(): Promise<void> {
   const nextHarnessStates = new Map(
     [...packageStates].filter(([id]) => isHarnessTopologyPackage(id)),
   );
-  const harnessTopologyChanged = previousHarnessStates.size !== nextHarnessStates.size
-    || [...nextHarnessStates].some(([id, value]) => previousHarnessStates.get(id) !== value);
+  // The first sync of a page establishes the baseline; it does not change it.
+  // Treating "unknown → known" as a topology change wiped the day-long
+  // persisted catalogs on every page load, so short-lived clients (phones,
+  // PWA resumes) never got to paint from them before discovery finished.
+  const harnessTopologyChanged = harnessTopologySynced
+    && (previousHarnessStates.size !== nextHarnessStates.size
+      || [...nextHarnessStates].some(([id, value]) => previousHarnessStates.get(id) !== value));
+  harnessTopologySynced = true;
   if (harnessTopologyChanged) invalidateRuntimeCatalogs();
 
   const ids = knownCanonicalIds();

@@ -233,6 +233,7 @@ export function classifyTool(tool: string, input: JsonObject): ExecutionKind {
   // Some native runtimes expose repository work through one command transport.
   // Keep that transport in history, but present the operation's semantic intent.
   if (shell && command) {
+    if (browserCommandPreview(command)) return "browser";
     const operation = cleanShellCommand(command);
     const executable = operation.match(/^\s*(?:command\s+)?([^\s]+)/)?.[1]
       ?.replace(/^["']|["']$/g, "")
@@ -249,8 +250,8 @@ export function classifyTool(tool: string, input: JsonObject): ExecutionKind {
   }
   if (shell) return "shell";
   if (/(^|[_:/-])(subagent|agent|task)([_:/-]|$)/.test(value) || value === "task") return "subagent";
+  if (/polyth_browser|^(?:mcp__)?browser(?:[_.:/-]|$)/.test(value)) return "browser";
   if (/mcp|github|linear|slack|notion|figma/.test(value)) return "mcp";
-  if (/polyth_browser|^browser(?:[_:/-]|$)/.test(value)) return "browser";
   if (/web|fetch|url|http/.test(value)) return "web";
   if (/grep|glob|search|ripgrep|find/.test(value)) return "search";
   if (/delete|remove|unlink/.test(value)) return "delete";
@@ -405,6 +406,62 @@ function gitCommandPreview(command: string): string {
   return "Repository operation";
 }
 
+/** Browser-transport previews: helper commands carrying
+ *  `polyth-browser.mjs <verb>` read as browser actions, not "Run node". */
+const BROWSER_VERBS: Readonly<Record<string, string>> = {
+  capability: "Check browser capability",
+  projects: "List projects",
+  sessions: "List browser sessions",
+  open: "Open page",
+  navigate: "Go to",
+  snapshot: "Read page",
+  click: "Click",
+  type: "Type",
+  scroll: "Scroll",
+  action: "Browser action",
+  capture: "Screenshot",
+  close: "Close page",
+};
+
+function browserActionPreview(action: string, input: JsonObject): string {
+  const verb = action.replace(/^browser[._:/-]/, "");
+  const label = BROWSER_VERBS[verb] ?? ({
+    back: "Go back", forward: "Go forward", inspect: "Inspect page",
+    resize: "Resize browser", colorScheme: "Change browser appearance",
+  } as Record<string, string>)[verb] ?? "Browser action";
+  const target = verb === "open" || verb === "navigate"
+    ? firstString(input, ["url"])
+    : verb === "click" ? firstString(input, ["text", "selector"])
+    : verb === "type" || verb === "snapshot" ? firstString(input, ["selector"])
+    : verb === "scroll" ? firstString(input, ["direction"])
+    : verb === "resize" ? firstString(input, ["viewport"])
+    : undefined;
+  // Typed values and opaque session/project IDs are never summary text.
+  return target ? `${label} · ${endTruncate(verb === "open" || verb === "navigate" ? compactUrl(target) : target, 48)}` : label;
+}
+
+function browserCommandPreview(command: string): string | undefined {
+  const previews: string[] = [];
+  for (const segment of shellSegments(unwrapShellLauncher(command.trim()))) {
+    if (/^(?:cd|pushd|popd)\s/.test(segment)) continue;
+    const words = shellWords(stripEnvironmentPrefix(segment));
+    // Recognize a direct helper invocation, not its name inside echo, tests or JS.
+    const scriptIndex = commandBasename(words[0] ?? "") === "node" ? 1 : 0;
+    if (commandBasename(words[scriptIndex] ?? "") !== "polyth-browser.mjs") return undefined;
+    const verb = words[scriptIndex + 1];
+    if (!verb || !Object.hasOwn(BROWSER_VERBS, verb)) return undefined;
+    const args = words.slice(scriptIndex + 2);
+    if (args.some((arg) => /^(?:\|\|?|&|>|>>|<)$/.test(arg))) return undefined;
+    const target = args[1]; // Every target follows an opaque project/session ID.
+    previews.push(browserActionPreview(verb, {
+      ...(/^(?:open|navigate)$/.test(verb) && target ? { url: target } : {}),
+      ...(/^(?:click|type|snapshot)$/.test(verb) && target ? { selector: target } : {}),
+      ...(verb === "scroll" && target ? { direction: target } : {}),
+    }));
+  }
+  return previews.length ? previews.join("; ") : undefined;
+}
+
 /** Collapsed rows describe intent; the complete command remains available in
  * the expanded Command section for inspection and copying. */
 function shellCommandPreview(kind: ExecutionKind, command: string): string {
@@ -459,11 +516,10 @@ export function executionPresentation(message: Pick<ToolMsg, "tool" | "input" | 
     const operation = description ?? (query ? `Search "${endTruncate(query, 38)}"` : "Open");
     preview = `${operation}${url ? ` · ${compactUrl(url, 48)}` : ""}`;
   } else if (kind === "browser") {
-    const action = firstString(input, ["action", "kind", "operation"]) ?? description ?? "Browse";
-    const target = url
-      ?? firstString(input, ["selector", "text", "target"])
-      ?? query;
-    preview = `${action.replace(/[-_]+/g, " ")}${target ? ` · ${endTruncate(target, 48)}` : ""}`;
+    const parameters = input.parameters;
+    const browserInput = parameters && typeof parameters === "object" && !Array.isArray(parameters) ? parameters : input;
+    const action = firstString(input, ["action", "kind", "operation"]) ?? tool.split(/[._:/-]/).at(-1) ?? "browse";
+    preview = endTruncate((command ? browserCommandPreview(command) : undefined) ?? browserActionPreview(action, browserInput));
   } else if (kind === "mcp") {
     const action = description ?? tool.split(/__|[:/]/).at(-1)?.replace(/[-_]+/g, " ") ?? "Request";
     const humanized = action.replace(/\b(pr|pull request)\s*#?(\d+)/i, "pull request #$2");

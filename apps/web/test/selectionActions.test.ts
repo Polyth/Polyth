@@ -3,7 +3,22 @@
 // leaves the viewport. Pure helpers — no DOM.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { clampMenuPosition, quoteForReply, selectionTitle } from "../src/selectionActions.ts";
+
+test("selection glass separates overlapping text while retaining user transparency and fallbacks", async () => {
+  const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  const selector = 'body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .selection-menu';
+  const start = css.indexOf(`${selector} {`);
+  assert.ok(start >= 0);
+  const rule = css.slice(start, css.indexOf("}", start));
+  for (const token of ["fill", "edge"]) {
+    assert.ok(rule.includes(`calc((100% + var(--material-glass-${token})) / 2)`));
+  }
+  assert.match(rule, /backdrop-filter: blur\(calc\(var\(--material-glass-blur\) \+ 12px\)\)/);
+  assert.match(css, /body\[data-glass="off"\][^{]*\.selection-menu[^}]*backdrop-filter:\s*none !important/s);
+  assert.match(css, /body\[data-desktop-low-resource="true"\][^{]*\.selection-menu[^}]*backdrop-filter:\s*none/s);
+});
 
 test("quoteForReply prefixes every line and leaves the caret on a fresh line", () => {
   assert.equal(quoteForReply("one line"), "> one line\n\n");

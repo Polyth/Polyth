@@ -373,7 +373,11 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   --nav-row-project: 56px;
   --nav-row-branch: 50px;
   --nav-row-session: 48px;
-  background: var(--material-glass);
+  /* The compact drawer uses the same sheet-grade surface as mobile Workspace;
+     the glass cascade below reads this value for both translucent and opaque
+     appearance modes. */
+  --sidebar-glass-surface: var(--material-glass);
+  background: var(--sidebar-glass-surface);
   border-right: 1px solid var(--material-glass-border);
   display: flex;
   flex-direction: column;
@@ -1517,15 +1521,6 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column;
   overflow: hidden;
 }
-/* Clipped sibling of `.timeline`, not a scroll child. Live rows rise here so
-   a filled WAAPI transform cannot inflate the scroller's overflow. */
-.activity-live-layer {
-  position: absolute;
-  inset: 0;
-  z-index: calc(var(--z-shell) + 2);
-  overflow: hidden;
-  pointer-events: none;
-}
 /* Centered reading measure: fluid up to 768px, minimum 16px logical gutters
    at narrow widths (§2.2). Bottom padding is the ≥32px (target 40px) tail
    clearance between the last surface and the composer boundary. */
@@ -1573,7 +1568,8 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 /* flex alignment is writing-mode aware: user turns sit at the logical end. */
 .msg.user { align-items: flex-end; }
 .timeline > .msg.user + .activity-group,
-.timeline > .activity-group + .msg.assistant {
+.timeline > .activity-group + .msg.assistant,
+.timeline > .activity-live-stage + .msg.assistant {
   margin-block-start: calc(var(--conversation-group-gap) - var(--conversation-message-gap));
 }
 .bubble {
@@ -4483,6 +4479,7 @@ body[data-glass="clear"] .prompt-nav-panel { --prompt-nav-panel-blur: 22px; }
   .sidebar {
     position: fixed; top: 0; bottom: 0; left: 0; z-index: var(--z-overlay);
     width: min(320px, calc(100vw - 24px)); min-width: 0; height: auto;
+    --sidebar-glass-surface: var(--material-glass-strong);
     padding-bottom: var(--safe-bottom);
     overscroll-behavior: contain;
     border-right: 1px solid var(--border);
@@ -4507,7 +4504,7 @@ body[data-glass="clear"] .prompt-nav-panel { --prompt-nav-panel-blur: 22px; }
     flex: none;
     padding: var(--safe-top) max(8px, var(--safe-right)) 0 max(8px, var(--safe-left));
     border-bottom: 1px solid var(--border-soft);
-    background: color-mix(in srgb, var(--panel) 94%, var(--elevated));
+    background: transparent;
   }
   .sidebar-drawer-tools {
     min-width: 0;
@@ -5545,7 +5542,7 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 }
 .composer-focus-light .composer-actions > .icon-btn:hover,
 .composer-focus-light .composer-add-trigger:hover { color: var(--text); background: var(--bg); }
-.send-plane { display: inline-grid; place-items: center; color: white; }
+.send-plane { display: inline-grid; place-items: center; }
 .send-plane svg { width: 19px; height: 19px; }
 body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display: none !important; }
 
@@ -7490,8 +7487,7 @@ color: var(--green);
   .agent-reply-header:hover .agent-reply-actions,
   .agent-reply-header:focus-within .agent-reply-actions { opacity: 1; pointer-events: auto; }
 }
-.agent-reply-actions button,
-.assistant-gallery-shortcut {
+.agent-reply-actions button {
   width: 28px; height: 28px; display: grid; place-items: center; padding: 0;
   border: 0; border-radius: var(--radius-control); background: transparent;
   color: var(--muted);
@@ -7500,7 +7496,6 @@ color: var(--green);
 .agent-reply-actions button:focus-visible,
 .agent-reply-actions button.active { color: var(--accent); border: 0; background: transparent; box-shadow: none; }
 .agent-reply-actions svg { width: 15px; height: 15px; shape-rendering: geometricPrecision; }
-.assistant-gallery-shortcut { width: auto; gap: 6px; font-size: var(--font-meta); }
 
 .composer-actions { gap: var(--space-2); }
 /* Rendered as ui/IconButton (lg = --control-h geometry); only the accent tint
@@ -9222,7 +9217,6 @@ width: var(--tap);
     white-space: normal;
   }
   .agent-reply-actions button,
-  .assistant-gallery-shortcut,
   .msg.user .msg-action-btn,
   .focus-conversation .msg .msg-action-btn,
   .reorder-control {
@@ -10037,8 +10031,7 @@ color: var(--muted);
   .msg.assistant .msg-action-btn,
   .msg.assistant .msg-actions-entry,
   .focus-conversation .msg .msg-action-btn,
-  .agent-reply-actions button,
-  .assistant-gallery-shortcut {
+  .agent-reply-actions button {
     width: var(--tap);
     min-width: var(--tap);
     height: var(--tap);
@@ -10913,12 +10906,6 @@ color: var(--text);
 }
 @media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
   body[data-keyboard="open"] .app.mode-chat.view-session .workspace { padding-bottom: 0; }
-  .composer-mobile .composer-rail .send {
-    background: var(--composer-green);
-    color: var(--accent-ink);
-    box-shadow: 0 5px 14px -7px color-mix(in srgb, var(--composer-green) 80%, transparent);
-  }
-  .composer-mobile .send-plane { color: var(--accent-ink); }
 }
 
 /* Mobile COMPOSER focus owns the chat band. Hide competing navigation only
@@ -12463,11 +12450,10 @@ html[data-font] body :is(
     -webkit-backdrop-filter: blur(var(--material-glass-blur));
     backdrop-filter: blur(var(--material-glass-blur));
   }
-  /* Compact drawer (<=960px): same glass language as the desktop dock below,
-     scoped to .open so the off-screen state never pays for a blur layer. */
+  /* Compact shell surfaces keep the same glass language as the desktop dock;
+     the drawer's surface is selected by --sidebar-glass-surface on .sidebar. */
   @media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
-    .app > .header,
-    .sidebar.open {
+    .app > .header {
       background: radial-gradient(140% 140% at 50% 50%,
         color-mix(in srgb, var(--material-glass) 86%, transparent) 0%,
         color-mix(in srgb, var(--material-glass) 48%, transparent) 100%);
@@ -12513,7 +12499,7 @@ html[data-font] body :is(
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
-  :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .app > .header, .sidebar, .sidebar-project-rail, .railbar) { background: var(--material-glass); }
+  :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .app > .header, .sidebar, .sidebar-project-rail, .railbar) { background: var(--sidebar-glass-surface, var(--material-glass)); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.dialog-panel, .sheet, .composer-card, .response-footer-metadata-grid, .workspace-customize-panel, .error-banner) { background: var(--material-glass-strong); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.activity-group, .activity-group.open > .ui-run-summary, .task-list),
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) .activity-group::before { background: var(--surface-activity); }
@@ -12532,7 +12518,7 @@ html[data-font] body :is(
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
-  :is(.app > .header, .sidebar, .sidebar-project-rail, .railbar) { background: var(--material-glass); }
+  :is(.app > .header, .sidebar, .sidebar-project-rail, .railbar) { background: var(--sidebar-glass-surface, var(--material-glass)); }
   .composer-card,
   .composer-mobile .composer-card { background: var(--material-glass-strong); }
   :is(.activity-group, .activity-group.open > .ui-run-summary, .task-list),
@@ -12859,8 +12845,7 @@ html[data-font] body :is(
 }
 .activity-group:not(.open) > .ui-run-summary { border-radius: var(--radius-activity); }
 /* Expanded details float above neighboring timeline rows and the composer
-   dock so the list is not trapped under chrome. Live flight stays above this
-   via `.activity-live-layer`. */
+   dock so the list is not trapped under chrome. */
 .activity-group.open {
   z-index: calc(var(--z-shell) + 1);
   box-shadow: var(--material-glass-highlight), var(--material-glass-shadow);
@@ -12900,11 +12885,9 @@ html[data-font] body :is(
 .activity-group-items > :last-child { border-bottom: 0; }
 
 /* Live actions -------------------------------------------------------------
- * A running action is a bare row at the tail of the timeline, not a card:
- * entering the block's normal layout added a second list to a surface meant
- * to stay folded, and framing it read as a detached card. It rises out of the
- * composer, sits just under the block while it runs, then folds up into it.
- * The block itself never opens on its own. */
+ * A running action is a bare, in-flow row directly after its folded summary.
+ * Keeping it in the transcript's layout is the ordering contract: subsequent
+ * prose always starts below the action instead of sharing its pixels. */
 .activity-live {
   --activity-live-exit: 280ms;
   --activity-live-exit-ease: cubic-bezier(0.4, 0, 0.7, 0.2);
@@ -12922,21 +12905,12 @@ html[data-font] body :is(
     transform var(--activity-live-exit) var(--activity-live-exit-ease);
 }
 .activity-live-stage {
-  position: absolute;
-  inset-inline: 0;
   width: 100%;
   min-width: 0;
   display: grid;
-}
-/* Portaled into `.activity-live-layer`. Left/width/top track the block; the
-   gap sits in existing timeline tail padding instead of below the group's
-   border box (that previous inset grew scrollHeight). Inserting or growing a
-   live row must not change the scrollport or move every earlier row while
-   the composer-to-block rise is in flight. */
-.activity-live-layer > .activity-live-stage {
-  inset-inline: auto;
-  width: auto;
-  margin-block-start: var(--space-1);
+  /* The flex scroller contributes its normal row gap. Pull back only the
+     summary-to-action edge so the two still read as one activity sequence. */
+  margin-block-start: calc(var(--space-1) - var(--timeline-gap));
 }
 .activity-live.leaving {
   grid-template-rows: 0fr;
@@ -13446,15 +13420,14 @@ body:not([data-glass="off"]) .header-profile { border: 0; background: transparen
       .picker-pop,
       .menu-popup,
       .ac-popup,
-      .selection-menu,
       .ui-tooltip,
       .turn-rate-limit .turn-rate-limit-action,
       .turn-rate-limit .turn-rate-limit-model .picker-chip,
       .jump-latest
     ) {
       background: radial-gradient(140% 140% at 50% 50%,
-        color-mix(in srgb, var(--material-glass) var(--material-glass-fill), transparent) 0%,
-        color-mix(in srgb, var(--material-glass) var(--material-glass-edge), transparent) 100%);
+        color-mix(in srgb, var(--sidebar-glass-surface, var(--material-glass)) var(--material-glass-fill), transparent) 0%,
+        color-mix(in srgb, var(--sidebar-glass-surface, var(--material-glass)) var(--material-glass-edge), transparent) 100%);
       -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
       backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
     }
@@ -13469,6 +13442,15 @@ body:not([data-glass="off"]) .header-profile { border: 0; background: transparen
         color-mix(in srgb, var(--material-glass) var(--material-glass-edge), transparent) 100%);
       -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
       backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
+    }
+    /* Selection actions overlap transcript text: strengthen the tint and blur
+       without discarding the user's glass fill/edge or opaque fallbacks. */
+    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .selection-menu {
+      background: radial-gradient(140% 140% at 50% 50%,
+        color-mix(in srgb, var(--material-glass) calc((100% + var(--material-glass-fill)) / 2), transparent) 0%,
+        color-mix(in srgb, var(--material-glass) calc((100% + var(--material-glass-edge)) / 2), transparent) 100%);
+      -webkit-backdrop-filter: blur(calc(var(--material-glass-blur) + 12px)) saturate(var(--material-glass-saturation)) !important;
+      backdrop-filter: blur(calc(var(--material-glass-blur) + 12px)) saturate(var(--material-glass-saturation)) !important;
     }
     /* Prompt previews sit directly over conversation text and need stronger
        optical separation than ordinary menus, especially in Clear glass. */
@@ -13492,6 +13474,7 @@ body:not([data-glass="off"]) .header-profile { border: 0; background: transparen
       .composer-card,
       .dialog-panel,
       .sheet,
+      .mobile-navigator,
       .settings-shell,
       .response-footer-metadata-grid,
       .workspace-customize-panel,
@@ -13564,7 +13547,7 @@ body[data-glass="off"] :is(
   .turn-rate-limit .turn-rate-limit-model .picker-chip,
   .jump-latest
 ) {
-  background: var(--material-glass);
+  background: var(--sidebar-glass-surface, var(--material-glass));
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }

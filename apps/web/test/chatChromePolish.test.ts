@@ -53,10 +53,12 @@ test("chat chrome is component-owned, compact and readable", () => {
   const css = read("../src/components/ChatChrome.css");
   const footer = read("../src/components/ChatResponseFooter.tsx");
   const messageActions = read("../src/components/MessageQuickActions.tsx");
-  assert.match(css, /\.chat-response-footer\s*\{[^}]*display:\s*grid;/s);
-  assert.match(css, /grid-template-areas:\s*"identity info actions"/);
-  assert.match(css, /@media \(max-width:\s*600px\)[\s\S]*grid-template-areas:\s*"identity info actions"/s);
-  assert.match(css, /@media \(max-width:\s*340px\) and \(pointer:\s*coarse\)[\s\S]*grid-template-columns:\s*repeat\(4, var\(--control-h-sm\)\)[\s\S]*\.chat-response-action-item\s*\{\s*display:\s*contents;/s);
+  assert.match(css, /\.chat-response-footer\s*\{[^}]*display:\s*flex;/s);
+  assert.match(css, /\.chat-message-actions,\s*\n\.chat-response-actions\s*\{[^}]*display:\s*grid;[^}]*gap:\s*var\(--space-2\)/s);
+  assert.match(footer, /className="chat-response-actions"[\s\S]*className="chat-response-info"/);
+  assert.doesNotMatch(css, /grid-template-areas:\s*"identity info actions"/);
+  assert.doesNotMatch(css, /chat-response-action-item/);
+  assert.doesNotMatch(footer, /chat-response-action-item/);
   assert.match(css, /@media \(hover:\s*none\), \(pointer:\s*coarse\)[\s\S]*\.ui-tooltip\.chat-action-tooltip\s*\{\s*display:\s*none;/s);
   assert.match(css, /\.chat-action-status\s*\{[^}]*max-width:\s*min\(24ch, 100%\)/s);
   assert.match(messageActions, /chat-action-status/);
