@@ -179,6 +179,8 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
             await identity.credentials.reauthenticate(token!, text(body, 'password'), req.socket.remoteAddress); send(200, { ok: true });
           } else if (req.method === 'POST' && path === '/api/auth/password') {
             await identity.credentials.changePassword(token!, text(body, 'password')); res.setHeader('Set-Cookie', cookie(cookieName, '', 0)); send(200, { ok: true });
+          } else if (req.method === 'POST' && path === '/api/auth/me') {
+            send(200, identity.accounts.renameSelf(token!, text(body, 'name'), Number(body.expectedRevision)));
           } else if (req.method === 'POST' && path === '/api/auth/accounts') {
             const account = await identity.accounts.createLocal(token!, {
               login: text(body, 'login'), name: text(body, 'name'), password: text(body, 'password'),
