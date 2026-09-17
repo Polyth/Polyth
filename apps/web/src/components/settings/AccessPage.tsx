@@ -24,6 +24,7 @@ import {
 } from "../../spaceAccess.ts";
 import { confirmAlert } from "../../alerts.ts";
 import { EmptyState, PageHead, Row } from "./parts.tsx";
+import ExternalIdentitySettings from "./ExternalIdentitySettings.tsx";
 import { getLocale, tr } from "../../i18n/index.ts";
 import { Button, TextInput } from "../ui/index.ts";
 
@@ -354,6 +355,8 @@ export default function AccessPage() {
           <span className="tag">Unavailable</span>
         </Row>
       )}
+
+      <ExternalIdentitySettings />
 
       <div className="set-page-head"><h3>{tr("settings.accesspage.rememberedDevices")}</h3></div>
       {devices.length === 0
