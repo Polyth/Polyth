@@ -13,6 +13,9 @@ import type { ProjectRegistry } from "./projects.ts";
 import { projectResourceReceipt } from "./resourceReceipts.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
 
+const RUNTIME_SYSTEM_PRINCIPAL_ID = "system:polyth-runtime";
+const PACKAGE_WORKSPACE_ID = /^__polyth_pkg_[a-f0-9]{32}$/;
+
 const recovery = (): Error => Object.assign(
   new Error("Project domain state does not match the canonical resource authority"),
   { code: "recovery-required" },
@@ -76,10 +79,53 @@ export function canonicalProjectService(
     return transition(resource.id, "deleting", "deleted", resource.revision, "resource.deleted", false);
   };
 
+  const adoptSystemPackageWorkspace = (project: Project): Project => {
+    if (ctx.userId !== RUNTIME_SYSTEM_PRINCIPAL_ID || !PACKAGE_WORKSPACE_ID.test(project.id)
+      || project.spaceId !== ctx.spaceId || project.remote) throw recovery();
+    const principal = security.control.get<{ kind: string; status: string }>(
+      "SELECT kind,status FROM principals WHERE id=?",
+      RUNTIME_SYSTEM_PRINCIPAL_ID,
+    );
+    if (principal?.kind !== "system" || principal.status !== "active") throw recovery();
+
+    const operationId = randomUUID();
+    const begun = security.resources.begin({
+      operationId,
+      resourceId: project.id,
+      kind: "project",
+      orgId: org.id,
+      spaceId: ctx.spaceId,
+      ownerPrincipalId: RUNTIME_SYSTEM_PRINCIPAL_ID,
+      createdBy: RUNTIME_SYSTEM_PRINCIPAL_ID,
+      visibility: "space",
+    });
+    try {
+      security.resources.recordDomainReady(operationId, projectResourceReceipt(project));
+      const current = security.resources.resource(project.id);
+      if (!current) throw recovery();
+      security.resources.activate(operationId, current.revision);
+      const active = security.resources.active(project.id, scope);
+      if (!active || active.kind !== "project") throw recovery();
+      return project;
+    } catch (cause) {
+      const current = security.resources.resource(project.id);
+      if (current && current.id === begun.resource.id
+        && (current.lifecycle === "provisioning" || current.lifecycle === "quarantined")) {
+        try { security.resources.quarantineUnknown(operationId, current.revision); } catch { /* preserve failure */ }
+      }
+      throw cause;
+    }
+  };
+
   const ensureActive = (project: Project): Project => {
     if (project.spaceId !== ctx.spaceId) throw recovery();
     let resource = row(project.id);
-    if (!resource) throw recovery();
+    if (!resource) {
+      if (ctx.userId === RUNTIME_SYSTEM_PRINCIPAL_ID && PACKAGE_WORKSPACE_ID.test(project.id)) {
+        return adoptSystemPackageWorkspace(project);
+      }
+      throw recovery();
+    }
     assertScope(resource);
     if (resource.lifecycle === "active") return project;
     if (resource.lifecycle === "deleting") {
