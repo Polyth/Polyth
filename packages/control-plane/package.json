@@ -7,6 +7,7 @@
     "./operations": "./src/operations.ts",
     "./outbox": "./src/outbox.ts",
     "./resources": "./src/resources.ts",
-    "./resource-lifecycle": "./src/resourceLifecycle.ts"
+    "./resource-lifecycle": "./src/resourceLifecycle.ts",
+    "./resource-access": "./src/resourceAccess.ts"
   }
 }
