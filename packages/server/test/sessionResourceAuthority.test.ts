@@ -208,6 +208,26 @@ test("archive, restore and hard delete move canonical lifecycle with the domain 
   assert.equal(f.security.resources.resource(ref.id)?.lifecycle, "deleted");
 });
 
+test("missing domain row finalizes an interrupted deleting tombstone on reconciliation", async t => {
+  const f = fixture(t);
+  const sessions = canonicalSessionService(f.ctx("usr_owner", "owner"), f.base, f.projects);
+  const ref = await sessions.create({ projectId: "prj_one" });
+  const resource = f.security.resources.resource(ref.id)!;
+  f.security.control.transaction(() => {
+    f.security.control.run(
+      "UPDATE resources SET lifecycle='deleting',revision=revision+1,access_revision=access_revision+1 WHERE id=? AND revision=?",
+      ref.id, resource.revision,
+    );
+  });
+  f.domain.projections.delete(ref.id);
+  f.domain.histories.delete(ref.id);
+
+  assert.equal((await sessions.list("prj_one")).some((row) => row.id === ref.id), false);
+  assert.equal(f.security.resources.resource(ref.id)?.lifecycle, "deleted");
+  await sessions.delete!(ref.id);
+  assert.equal(f.security.resources.resource(ref.id)?.lifecycle, "deleted");
+});
+
 test("forked child is admitted with the request actor, while imported delegated child inherits parent owner", async t => {
   const f = fixture(t);
   const sessions = canonicalSessionService(f.ctx("usr_owner", "owner"), f.base, f.projects);
