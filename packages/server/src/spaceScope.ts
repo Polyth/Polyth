@@ -15,6 +15,7 @@ import type {
   SessionService,
   SpaceContext,
 } from "@polyth/contracts";
+import { runWithSecureSafeSpace } from "@polyth/secure-safe";
 import type { ProjectRegistry } from "./projects.ts";
 import { canonicalProjectService } from "./projectResourceAuthority.ts";
 import { accessControlledSessionService } from "./sessionResourceAccess.ts";
@@ -132,7 +133,7 @@ function scopeSessions(
   };
   const guarded = <T,>(run: () => Promise<T>): Promise<T> => {
     try {
-      return run();
+      return runWithSecureSafeSpace(ctx, run);
     } catch (error) {
       return Promise.reject(error);
     }
@@ -173,7 +174,7 @@ function scopeSessions(
     async create(input) {
       const project = await projects.get(input.projectId);
       if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
-      return base.create(input);
+      return runWithSecureSafeSpace(ctx, () => base.create(input));
     },
     switchHarness: base.switchHarness ? (sessionId, selection, timing) => guarded(() => base.switchHarness!(g(sessionId), selection, timing)) : undefined,
     cancelHarnessSwitch: base.cancelHarnessSwitch ? (sessionId) => guarded(() => base.cancelHarnessSwitch!(g(sessionId))) : undefined,
@@ -185,18 +186,22 @@ function scopeSessions(
     }),
     restore: (sessionId) => guarded(() => base.restore(g(sessionId))),
     async list(projectId) {
-      if (projectId !== undefined) {
-        guard.assertProject(ctx, projectId);
-        if (!await projects.get(projectId)) throw Object.assign(new Error("project not found"), { code: "not-found" });
-      }
-      const rows = await base.list(projectId);
-      return rows.filter((p) => guard.owns(ctx, p));
+      return runWithSecureSafeSpace(ctx, async () => {
+        if (projectId !== undefined) {
+          guard.assertProject(ctx, projectId);
+          if (!await projects.get(projectId)) throw Object.assign(new Error("project not found"), { code: "not-found" });
+        }
+        const rows = await base.list(projectId);
+        return rows.filter((p) => guard.owns(ctx, p));
+      });
     },
     async sync(projectId) {
-      guard.assertProject(ctx, projectId);
-      if (!await projects.get(projectId)) throw Object.assign(new Error("project not found"), { code: "not-found" });
-      const rows = await base.sync(projectId);
-      return rows.filter((p) => guard.owns(ctx, p));
+      return runWithSecureSafeSpace(ctx, async () => {
+        guard.assertProject(ctx, projectId);
+        if (!await projects.get(projectId)) throw Object.assign(new Error("project not found"), { code: "not-found" });
+        const rows = await base.sync(projectId);
+        return rows.filter((p) => guard.owns(ctx, p));
+      });
     },
     snapshot: (sessionId) => guarded(() => base.snapshot(g(sessionId))),
     events: (sessionId, afterSeq, page) => guarded(() => base.events(g(sessionId), afterSeq, page)),
