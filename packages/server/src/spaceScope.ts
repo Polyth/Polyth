@@ -17,6 +17,7 @@ import type {
 } from "@polyth/contracts";
 import type { ProjectRegistry } from "./projects.ts";
 import { canonicalProjectService } from "./projectResourceAuthority.ts";
+import { accessControlledSessionService } from "./sessionResourceAccess.ts";
 import { canonicalSessionService } from "./sessionResourceAuthority.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
 
@@ -271,7 +272,8 @@ export function createSpaceServices(deps: {
 }): (ctx: SpaceContext) => SpaceServices {
   return (ctx) => {
     const projects = canonicalProjectService(ctx, deps.registry);
-    const sessions = canonicalSessionService(ctx, deps.sessions(), projects);
+    const canonicalSessions = canonicalSessionService(ctx, deps.sessions(), projects);
+    const sessions = accessControlledSessionService(ctx, canonicalSessions);
     return {
       ctx,
       projects,
