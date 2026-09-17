@@ -4,6 +4,7 @@
 // account-bound session cookie.
 import { useEffect, useRef, useState } from "react";
 import { currentBrowserLogin, loginAccount, recoverAccount, type AccountLoginResult } from "../accounts.ts";
+import { browserSupportsPasskeys, signInWithPasskey } from "../passkeys.ts";
 import { tr } from "../i18n/index.ts";
 import { Button, TextInput } from "./ui/index.ts";
 
@@ -36,6 +37,7 @@ export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
   const complete = mode === "password"
     ? !!login.trim() && !!password
     : !!login.trim() && !!recoveryCode.trim() && !!password;
+  const passkeySupported = browserSupportsPasskeys();
 
   const unlock = (): void => {
     if (typeof window !== "undefined") window.location.reload();
@@ -53,6 +55,25 @@ export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
       return;
     }
     setError(result.message ?? fallback);
+  };
+
+  const signInPasskey = async (): Promise<void> => {
+    if (busy || locked) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await signInWithPasskey();
+      if (result.ok) {
+        unlock();
+        return;
+      }
+      showFailure(result, result.error === "passkey-cancelled" ? "Passkey sign-in was cancelled." : "Passkey sign-in failed.");
+    } catch (cause) {
+      const code = (cause as { code?: unknown } | null)?.code;
+      setError(code === "unsupported" ? "Passkeys are not supported by this browser." : "Passkey sign-in failed.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const submit = async (e: React.FormEvent) => {
@@ -181,6 +202,11 @@ export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
               ? tr("lockscreen.lockedValueS", { secondsLeft })
               : mode === "password" ? tr("lockscreen.unlock") : "Recover and sign in"}
         </Button>
+        {mode === "password" && passkeySupported && (
+          <Button className="lock-submit" type="button" disabled={busy || locked} onClick={() => void signInPasskey()}>
+            Sign in with a passkey
+          </Button>
+        )}
         <Button variant="ghost" size="sm" type="button" disabled={busy} onClick={switchMode}>
           {mode === "password" ? "Use a recovery code" : "Use password instead"}
         </Button>
