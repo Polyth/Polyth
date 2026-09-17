@@ -5,9 +5,32 @@ import {
   type DeliveryResult,
   type OutboxEvent,
 } from "@polyth/control-plane/outbox";
+import {
+  closeAuthSessionSockets,
+  closeAuthUserSockets,
+} from "@polyth/plugins";
 
 export const AUTHORITY_EVENT_CHANNEL = "polyth.control-plane.audit.v1";
 const authorityEvents = channel(AUTHORITY_EVENT_CHANNEL);
+
+const SESSION_REVOCATION_ACTIONS = new Set([
+  "auth.logout",
+  "auth.session-revoked",
+]);
+const USER_REVOCATION_RESOURCE_ACTIONS = new Set([
+  "auth.logout-all",
+  "auth.password-changed",
+  "auth.recovery-used",
+  "auth.break-glass-password-reset",
+  "identity.suspended",
+  "identity.offboarding",
+  "identity.disabled",
+  "identity.active",
+]);
+const USER_REVOCATION_ACTOR_ACTIONS = new Set([
+  "auth.passkey-removed",
+  "identity.unlinked",
+]);
 
 export interface AuthorityOutboxStatus {
   running: boolean;
@@ -39,12 +62,32 @@ export interface AuthorityOutboxOptions {
 }
 
 /**
- * Production-safe local telemetry seam for canonical authority events.
+ * Apply only revocation semantics encoded by canonical identity mutations.
+ * Ordinary audit/resource events never disconnect clients. The durable event
+ * may be delivered more than once; closing an already-closed socket is safely
+ * idempotent because the process-local socket index removes it first.
+ */
+export function invalidateAuthoritySockets(event: Readonly<OutboxEvent>): number {
+  if (SESSION_REVOCATION_ACTIONS.has(event.action)) {
+    return event.resourceId ? closeAuthSessionSockets(event.resourceId) : 0;
+  }
+  if (USER_REVOCATION_RESOURCE_ACTIONS.has(event.action)) {
+    return event.resourceId ? closeAuthUserSockets(event.resourceId) : 0;
+  }
+  if (USER_REVOCATION_ACTOR_ACTIONS.has(event.action)) {
+    return closeAuthUserSockets(event.actorId);
+  }
+  return 0;
+}
+
+/**
+ * Production-safe local delivery seam for canonical authority events.
  * The durable outbox remains authoritative; diagnostics_channel is only the
- * in-process delivery surface. Subscribers that persist events must dedupe by
+ * in-process telemetry surface. Subscribers that persist events must dedupe by
  * installationId + id because delivery is intentionally at-least-once.
  */
 export async function publishAuthorityEvent(event: Readonly<OutboxEvent>): Promise<void> {
+  invalidateAuthoritySockets(event);
   try {
     authorityEvents.publish(event);
   } catch {
