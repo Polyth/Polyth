@@ -21,6 +21,25 @@ export type ServerPluginFactory = (
   host: TrustedServerPluginHost,
 ) => Plugin | Promise<Plugin>;
 
+type TrustedServerSpaceGate = (pluginId: string, spaceId: string) => boolean;
+let trustedServerSpaceGate: TrustedServerSpaceGate | null = null;
+
+/**
+ * Bind the deployment's canonical package/Space enablement lookup. Trusted
+ * Node packages register global HTTP handlers, so the host must stop a handler
+ * before package code sees requests from Spaces where that package is disabled.
+ * Missing gate is fail-closed; production package composition binds it before
+ * any managed server entry can activate.
+ */
+export function bindTrustedServerSpaceGate(gate: TrustedServerSpaceGate): Disposable {
+  trustedServerSpaceGate = gate;
+  return {
+    dispose() {
+      if (trustedServerSpaceGate === gate) trustedServerSpaceGate = null;
+    },
+  };
+}
+
 const inside = (base: string, candidate: string): boolean =>
   candidate === base || candidate.startsWith(base + sep);
 
@@ -64,7 +83,23 @@ export async function loadServerEntry(opts: {
     throw new Error("server entry default export must be a plugin factory");
   }
 
-  const plugin = await (loaded.default as ServerPluginFactory)(opts.host);
+  const guardedHost: TrustedServerPluginHost = {
+    ...opts.host,
+    routes: {
+      add(handler) {
+        return opts.host.routes.add(async (request) => {
+          const allowed = trustedServerSpaceGate?.(
+            opts.host.pluginId,
+            request.space.spaceId,
+          ) === true;
+          if (!allowed) return false;
+          return handler(request);
+        });
+      },
+    },
+  };
+
+  const plugin = await (loaded.default as ServerPluginFactory)(guardedHost);
   if (
     !plugin
     || typeof plugin !== "object"
