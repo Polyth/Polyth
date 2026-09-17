@@ -98,6 +98,17 @@ test("package routes list packages and update enablement", async () => {
       url,
       path: url.pathname,
       method,
+      ingress: { kind: "public-http", listenerId: "test", loopback: true, secure: false },
+      principal: { kind: "local-user", trustedLoopback: true },
+      space: {
+        spaceId: "spc_test",
+        spaceSlug: "test",
+        userId: "usr_test",
+        role: "owner",
+        deployment: "local-trusted",
+        storageDir: temporaryFile(),
+      },
+      requireCapability() {},
       body: async () => body,
       json: (code, value) => {
         status = code;
