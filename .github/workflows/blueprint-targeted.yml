@@ -36,9 +36,11 @@ jobs:
             packages/server/test/canonicalAuth.test.ts \
             packages/server/test/canonicalIdentityHttp.test.ts \
             packages/server/test/canonicalSecurity.test.ts \
+            packages/server/test/providerHost.test.ts \
             packages/server/test/runtimeSecurityBinding.test.ts \
             apps/web/test/accountProfile.test.ts \
             apps/web/test/authBootstrap.test.ts \
+            apps/web/test/identityProviders.test.ts \
             apps/web/test/multiUserAccountScope.test.ts \
             apps/web/test/passkeys.test.ts \
             scripts/test/break-glass-password.test.ts
