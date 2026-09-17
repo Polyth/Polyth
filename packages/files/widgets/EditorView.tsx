@@ -14,8 +14,8 @@ import { usePaneVisible } from "../../../apps/web/src/workspace/paneVisibility.t
 import { setPaneLastResource } from "../../../apps/web/src/workspace/panePrefs.ts";
 import type { PaneTab } from "../../../apps/web/src/workspace/paneStore.ts";
 import PaneHost, { type PaneHostHandle } from "../../../apps/web/src/components/workspace/PaneHost.tsx";
-import FileRowActions from "./FileRowActions.tsx";
 import { ChevronGlyph, FileTypeGlyph, FolderGlyph, fileTypeKeyOf } from "./editor/fileTreeIcons.tsx";
+import { ContextMenuAnchor } from "./editor/contextMenuAnchor.tsx";
 import { confirmAlert, promptAlert } from "../../../apps/web/src/alerts.ts";
 import { desktopBridge } from "../../../apps/web/src/desktopBridge.ts";
 import "./editor/FilePane.tsx"; // registers the "file" pane provider
@@ -40,7 +40,7 @@ const treeItemId = (p: string) => `ft-item-${encodeURIComponent(p)}`;
 interface CtxMenu {
   x: number;
   y: number;
-  entry: FileEntry;
+  entry: FileEntry | null;
 }
 
 export default function EditorView() {
@@ -291,8 +291,52 @@ export default function EditorView() {
 
   const onRowContext = (ev: MouseEvent, entry: FileEntry) => {
     ev.preventDefault();
+    ev.stopPropagation();
     setSel(entry.path);
     setCtx({ x: ev.clientX, y: ev.clientY, entry });
+  };
+
+  const onTreeBackgroundContext = (ev: MouseEvent) => {
+    if ((ev.target as HTMLElement).closest('[role="treeitem"]')) return;
+    ev.preventDefault();
+    setCtx({ x: ev.clientX, y: ev.clientY, entry: null });
+  };
+
+  const longPressRef = useRef<{ timer: ReturnType<typeof setTimeout> | null; entry: FileEntry | null }>({
+    timer: null,
+    entry: null,
+  });
+
+  const clearLongPress = () => {
+    if (longPressRef.current.timer) clearTimeout(longPressRef.current.timer);
+    longPressRef.current.timer = null;
+    longPressRef.current.entry = null;
+  };
+
+  const onRowPointerDown = (ev: React.PointerEvent, entry: FileEntry) => {
+    if (ev.pointerType === "mouse" && ev.button !== 0) return;
+    clearLongPress();
+    const { clientX, clientY } = ev;
+    longPressRef.current.entry = entry;
+    longPressRef.current.timer = setTimeout(() => {
+      setSel(entry.path);
+      setCtx({ x: clientX, y: clientY, entry });
+      clearLongPress();
+    }, 520);
+  };
+
+  const onTreeKeyContext = (e: KeyboardEvent) => {
+    if (e.key !== "ContextMenu" && !(e.key === "F10" && e.shiftKey)) return;
+    const cur = rows.find((r) => r.e.path === sel)?.e;
+    if (!cur) return;
+    e.preventDefault();
+    const row = document.getElementById(treeItemId(cur.path));
+    const rect = row?.getBoundingClientRect();
+    setCtx({
+      x: rect ? rect.left + 12 : 0,
+      y: rect ? rect.top + 8 : 0,
+      entry: cur,
+    });
   };
 
   if (!projectId) return <EmptyState title={tr("editorview.noProjectSelected")} description={tr("editorview.openAProjectToBrowseAndEdit")} />;
@@ -312,21 +356,29 @@ export default function EditorView() {
       />
       <aside className="editor-tree" aria-label={tr("editorview.files")}>
         <div className="files-search">
-          <TextInput
-            uiSize="sm"
-            placeholder={tr("editorview.searchFiles")}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void search();
-              else if (e.key === "Escape" && searchResults !== null) {
-                e.stopPropagation();
-                setSearchResults(null);
-                setQuery("");
-              }
-            }}
-          />
-          <IconButton icon={SearchIcon} size="sm" label={tr("editorview.searchFiles2")} onClick={() => void search()} />
+          <span className="files-search-field">
+            <TextInput
+              uiSize="sm"
+              placeholder={tr("editorview.searchFiles")}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void search();
+                else if (e.key === "Escape" && searchResults !== null) {
+                  e.stopPropagation();
+                  setSearchResults(null);
+                  setQuery("");
+                }
+              }}
+            />
+            <IconButton
+              className="files-search-icon"
+              icon={SearchIcon}
+              size="sm"
+              label={tr("editorview.searchFiles2")}
+              onClick={() => void search()}
+            />
+          </span>
         </div>
         {treeErr && <div className="form-error">{treeErr}</div>}
         {searchResults !== null ? (
@@ -351,7 +403,6 @@ export default function EditorView() {
                   </span>
                   <span className="files-file-name">{fp}</span>
                 </button>
-                <FileRowActions projectId={projectId} path={fp} onOpen={() => openFile(fp)} />
               </div>
             ))}
           </div>
@@ -368,7 +419,8 @@ export default function EditorView() {
               role="tree"
               aria-label={tr("editorview.projectFiles")}
               tabIndex={0}
-              onKeyDown={onTreeKey}
+              onKeyDown={(e) => { onTreeKey(e); onTreeKeyContext(e); }}
+              onContextMenu={onTreeBackgroundContext}
               aria-activedescendant={sel ? treeItemId(sel) : undefined}
             >
               {rows.map(({ e, depth }) => {
@@ -383,10 +435,14 @@ export default function EditorView() {
                     aria-selected={selected}
                     {...(e.dir ? { "aria-expanded": open.has(e.path) } : {})}
                     className={`ft-row${e.dir ? " ft-dir" : ""}${selected ? " ft-selected" : ""}`}
-                    style={{ paddingInlineStart: 8 + depth * 16 }}
+                    style={{ "--ft-depth": String(depth) }}
                     draggable
                     onDragStart={(ev) => setDragPath(ev.dataTransfer, e.path)}
                     onContextMenu={(ev) => onRowContext(ev, e)}
+                    onPointerDown={(ev) => onRowPointerDown(ev, e)}
+                    onPointerUp={clearLongPress}
+                    onPointerCancel={clearLongPress}
+                    onPointerLeave={clearLongPress}
                     onClick={() => {
                       setSel(e.path);
                       if (e.dir) toggle(e.path);
@@ -401,10 +457,9 @@ export default function EditorView() {
                       data-ft={e.dir ? "folder" : fileTypeKeyOf(e.name)}
                       aria-hidden
                     >
-                      {e.dir ? <FolderGlyph /> : <FileTypeGlyph type={fileTypeKeyOf(e.name)} />}
+                      {e.dir ? <FolderGlyph open={expanded} /> : <FileTypeGlyph type={fileTypeKeyOf(e.name)} />}
                     </span>
                     <span className="ft-name">{e.name}</span>
-                    {!e.dir && <FileRowActions projectId={projectId} path={e.path} onOpen={() => openFile(e.path)} />}
                   </div>
                 );
               })}
@@ -414,52 +469,44 @@ export default function EditorView() {
       </aside>
 
       <Menu
-        key={ctx ? `${ctx.entry.path}:${ctx.x}:${ctx.y}` : "closed"}
-        label={ctx ? tr("filerowactions.actionsForValue", { path: ctx.entry.path }) : tr("editorview.files")}
+        key={ctx ? `${ctx.entry?.path ?? "root"}:${ctx.x}:${ctx.y}` : "closed"}
+        label={ctx?.entry ? tr("filerowactions.actionsForValue", { path: ctx.entry.path }) : tr("editorview.files")}
+        phonePresentation="popover"
         open={ctx !== null}
         onOpenChange={(open) => { if (!open) setCtx(null); }}
-        entries={ctx ? ([
+        entries={ctx ? (ctx.entry ? ([
           ...(!ctx.entry.dir
-            ? [{ id: "open", label: tr("common.open"), onSelect: () => openFile(ctx.entry.path) }]
+            ? [{ id: "open", label: tr("common.open"), onSelect: () => openFile(ctx.entry!.path) }]
             : []),
-          { id: "chat", label: tr("editorview.addToChat"), onSelect: () => attachPath(ctx.entry.path) },
-          { id: "copy", label: tr("editorview.copyPath"), onSelect: () => void navigator.clipboard?.writeText(ctx.entry.path) },
+          { id: "chat", label: tr("editorview.addToChat"), onSelect: () => attachPath(ctx.entry!.path) },
+          { id: "copy", label: tr("editorview.copyPath"), onSelect: () => void navigator.clipboard?.writeText(ctx.entry!.path) },
           ...(desktopBridge() && !project?.remote
             ? [{
                 id: "reveal",
                 label: tr(ctx.entry.dir ? "editorview.openInFileManager" : "editorview.revealInFileManager"),
-                onSelect: () => void revealNative(ctx.entry),
+                onSelect: () => void revealNative(ctx.entry!),
               }]
             : []),
           ...(ctx.entry.dir
             ? [
-                { id: "new-file", label: tr("editorview.newFile"), onSelect: () => void ctxNew(ctx.entry.path, "file") },
-                { id: "new-folder", label: tr("editorview.newFolder"), onSelect: () => void ctxNew(ctx.entry.path, "folder") },
+                { id: "new-file", label: tr("editorview.newFile"), onSelect: () => void ctxNew(ctx.entry!.path, "file") },
+                { id: "new-folder", label: tr("editorview.newFolder"), onSelect: () => void ctxNew(ctx.entry!.path, "folder") },
               ]
             : []),
-          { id: "rename", label: tr("editorview.renameMove"), onSelect: () => void ctxRename(ctx.entry) },
-          { id: "delete", label: tr("editorview.delete"), danger: true, onSelect: () => void ctxDelete(ctx.entry) },
-        ] satisfies MenuEntry[]) : []}
+          { id: "rename", label: tr("editorview.renameMove"), onSelect: () => void ctxRename(ctx.entry!) },
+          { id: "delete", label: tr("editorview.delete"), danger: true, onSelect: () => void ctxDelete(ctx.entry!) },
+        ] satisfies MenuEntry[]) : [
+          { id: "new-file", label: tr("editorview.newFile"), onSelect: () => void ctxNew("", "file") },
+          { id: "new-folder", label: tr("editorview.newFolder"), onSelect: () => void ctxNew("", "folder") },
+        ]) : []}
       >
         {(trigger) => (
-          <button
-            {...trigger}
-            type="button"
+          <ContextMenuAnchor
+            trigger={trigger}
             className="files-ctx-anchor"
-            tabIndex={-1}
-            aria-hidden="true"
-            style={{
-              position: "fixed",
-              left: ctx?.x ?? 0,
-              top: ctx?.y ?? 0,
-              width: 1,
-              height: 1,
-              padding: 0,
-              margin: 0,
-              overflow: "hidden",
-              opacity: 0,
-              pointerEvents: "none",
-            }}
+            hidden
+            x={ctx?.x ?? 0}
+            y={ctx?.y ?? 0}
           />
         )}
       </Menu>

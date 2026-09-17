@@ -1175,6 +1175,25 @@ export const api = {
         rows.map((r) => (typeof r === "string" ? { path: r, kind: "file", score: 0, matches: [] } : r)),
       )
       .catch((): FileSearchHitDto[] => []),
+  filesInlineAiSettingsGet: () =>
+    jfetch<{ explainPrompt: string; fixPrompt: string; modelOverride?: string }>("/api/files/inline-ai/settings"),
+  filesInlineAiSettingsPut: (settings: {
+    explainPrompt?: string;
+    fixPrompt?: string;
+    modelOverride?: string;
+  }) => jfetch<{ explainPrompt: string; fixPrompt: string; modelOverride?: string }>(
+    "/api/files/inline-ai/settings",
+    json("PUT", settings),
+  ),
+  filesInlineAi: (input: {
+    action: "explain" | "fix";
+    projectId: string;
+    path: string;
+    selection: string;
+    language?: string;
+    sessionId?: string;
+  }) => jfetch<{ text: string }>("/api/files/inline-ai", json("POST", input)),
+
   /** Palette project/session search (WP13); metadata only. */
   searchWorkspaces: (q: string, limit = 10, archived = false) =>
     jfetch<{ items: WorkspaceSearchItemDto[] }>(

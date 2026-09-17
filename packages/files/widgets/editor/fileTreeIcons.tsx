@@ -1,7 +1,7 @@
-// UX-FILES-TIMELINE-03 finding 1: file-type aware glyphs for the Project
-// Files tree. One pure name→family mapping plus tiny inline SVGs so the tree
-// (EditorView), search results, and tests share a single source of truth.
-// Families tint via `data-ft` rules in styles.css — no per-type components.
+// File-tree glyphs for the Project Files navigator. One name→family mapping
+// plus compact filled SVGs (VS Code explorer density) so the tree, search
+// results, and tests share a single source of truth. Families tint via
+// `data-ft` rules in styles.css — no per-type components.
 import type { JSX } from "react";
 
 /** Broad visual family for a file name (drives the icon shape and tint). */
@@ -34,65 +34,93 @@ export function fileTypeKeyOf(name: string): FileTypeKey {
 }
 
 const g = {
-  className: "file-tree-glyph", viewBox: "0 0 24 24", fill: "none",
-  stroke: "currentColor", strokeWidth: 1.8,
-  strokeLinecap: "round" as const, strokeLinejoin: "round" as const,
-  "aria-hidden": true as const, focusable: false,
+  className: "file-tree-glyph",
+  viewBox: "0 0 16 16",
+  fill: "currentColor",
+  "aria-hidden": true as const,
+  focusable: false,
 };
 
 /** Disclosure triangle for directory rows; CSS rotates it when open. */
 export function ChevronGlyph(): JSX.Element {
-  return <svg {...g} className="file-tree-glyph file-tree-chevron"><path d="m9 18 6-6-6-6" /></svg>;
-}
-
-export function FolderGlyph(): JSX.Element {
   return (
-    <svg {...g}>
-      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+    <svg {...g} className="file-tree-glyph file-tree-chevron">
+      <path d="M6 3.2 11.2 8 6 12.8z" />
     </svg>
   );
 }
 
-const FILE_OUTLINE = <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />;
-const FILE_CORNER = <path d="M13 2v7h7" />;
+export function FolderGlyph({ open = false }: { open?: boolean }): JSX.Element {
+  if (open) {
+    return (
+      <svg {...g}>
+        <path d="M1.5 3.1h4.35L7.1 4.5h6.9l.5.5V6H1.6L1.5 3.1z" />
+        <path d="M1.4 6.4h13.35L13.15 13.5H2.65z" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...g}>
+      <path d="M1.5 2.4h4.4L7.1 3.9h7.4l.5.5v8.7l-.5.5h-13l-.5-.5V2.9l.5-.5z" />
+    </svg>
+  );
+}
 
-/** File glyph per family: a shared doc outline for text-ish files and
- *  distinct shapes for code, images, data, styles, shells, and configs. */
+function FilePage(): JSX.Element {
+  return (
+    <svg {...g}>
+      <path d="M3.2 1.4h5.55L12.8 5.45V14.6H3.2z" />
+    </svg>
+  );
+}
+
+/** File glyph per family: a shared filled page for text-ish files and
+ *  distinct silhouettes for code, images, data, styles, shells, and configs. */
 export function FileTypeGlyph({ type }: { type: FileTypeKey }): JSX.Element {
   switch (type) {
     case "code":
     case "markup":
-      return <svg {...g}><path d="m18 16 4-4-4-4" /><path d="m6 8-4 4 4 4" /><path d="m14.5 4-5 16" /></svg>;
+      return (
+        <svg {...g}>
+          <path d="M5.7 3.4 2.15 8 5.7 12.6l-.95.75L1.05 8 4.75 2.65zM10.3 3.4 13.85 8 10.3 12.6l.95.75L14.95 8 11.25 2.65z" />
+        </svg>
+      );
     case "image":
       return (
         <svg {...g}>
-          <rect x="3" y="3" width="18" height="18" rx="2" />
-          <circle cx="8.5" cy="8.5" r="1.5" />
-          <path d="m21 15-5-5L5 21" />
+          <path
+            fillRule="evenodd"
+            d="M2.2 2.2h11.6v11.6H2.2zm2.35 2.15a1.2 1.2 0 1 1 0 2.4 1.2 1.2 0 0 1 0-2.4zM3.4 12.55l2.35-2.1 1.7 1.45 3.15-3.7 3 3.7v.65z"
+          />
         </svg>
       );
     case "data":
       return (
         <svg {...g}>
-          <ellipse cx="12" cy="5" rx="9" ry="3" />
-          <path d="M3 5v14a9 3 0 0 0 18 0V5" />
-          <path d="M3 12a9 3 0 0 0 18 0" />
+          <path d="M8 1.4c3.4 0 6.2 1.15 6.2 2.55v8.1C14.2 13.45 11.4 14.6 8 14.6S1.8 13.45 1.8 12.05v-8.1C1.8 2.55 4.6 1.4 8 1.4zm0 1.35c-2.7 0-4.85.75-4.85 1.2S5.3 5.15 8 5.15s4.85-.75 4.85-1.2S10.7 2.75 8 2.75z" />
         </svg>
       );
     case "style":
-      return <svg {...g}><path d="M12 2.7 6.3 8.4a8 8 0 1 0 11.4 0Z" /></svg>;
+      return (
+        <svg {...g}>
+          <path d="M8 1.5 3.4 6.4a6.5 6.5 0 1 0 9.2 0z" />
+        </svg>
+      );
     case "shell":
-      return <svg {...g}><path d="m4 17 6-5-6-5" /><path d="M12 19h8" /></svg>;
+      return (
+        <svg {...g}>
+          <path d="M2.4 3.6 7.1 8 2.4 12.4l1.05.95L9.15 8 3.45 2.65zM8.6 12.15h5.2v1.45H8.6z" />
+        </svg>
+      );
     case "config":
       return (
         <svg {...g}>
-          <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3" />
-          <path d="M1 14h6M9 8h6M17 16h6" />
+          <path d="M3.1 1.5h1.7v5.1H3.1zm0 7.9h1.7v5.1H3.1zm4.05-4.4h1.7v9.5H7.15zm0-3.5h1.7v2.1H7.15zm4.05 6.2h1.7v6.4h-1.7zm0-8.6h1.7v7.2h-1.7z" />
         </svg>
       );
     case "doc":
-      return <svg {...g}>{FILE_OUTLINE}{FILE_CORNER}<path d="M9 13h6M9 17h4" /></svg>;
+      return <FilePage />;
     default:
-      return <svg {...g}>{FILE_OUTLINE}{FILE_CORNER}</svg>;
+      return <FilePage />;
   }
 }

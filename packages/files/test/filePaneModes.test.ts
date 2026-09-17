@@ -3,7 +3,7 @@
 // on/off switch whose choice persists per kind, (4) other files open straight
 // into edit mode with a syntax-highlight backdrop under the textarea, and
 // (5) the toolbar is trimmed — Delete/Rename/Edit/Wrap/Go to line/Add-to-chat
-// live in the "⋯" actions menu, not as permanent buttons.
+// live in the context menu, not as permanent buttons.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
@@ -40,6 +40,8 @@ const contents: Record<string, string> = {
   "src/app.ts": "const total = 1;\nexport default total;\n",
   "README.md": "# Title\n\nBody text\n",
   "notes.md": "# Notes\n",
+  "package.json": "{\"name\":\"demo\",\"private\":true}\n",
+  "index.html": "<h1>Hello</h1>\n",
 };
 (globalThis as { fetch?: unknown }).fetch = async (url: string) => {
   const u = new URL(String(url), "http://localhost:3000");
@@ -64,7 +66,7 @@ const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { resetDocsForTest } = await import("../widgets/editor/fileDocs.ts");
 const { getEditorPrefs } = await import("../../../apps/web/src/uiPrefs.ts");
-const { registerEditorSurface } = await import("../../../apps/web/src/resources/views.ts");
+const { registerEditorSurface, registerEditorSelection } = await import("../../../apps/web/src/resources/views.ts");
 const { registerResourceProvider } = await import("../../../apps/web/src/resources/providers.ts");
 const { fileResourceProvider } = await import("../widgets/fileProvider.ts");
 const { default: FilePane } = await import("../widgets/editor/FilePane.tsx");
@@ -77,6 +79,8 @@ registerEditorSurface((props) => createElement("div", {
   "data-path": props.path,
   "data-group": props.groupId,
 }));
+let selectionForTest: { text: string; startLine: number; endLine: number } | null = null;
+registerEditorSelection(() => selectionForTest);
 
 const MouseEventCtor = (dom as unknown as { MouseEvent: typeof MouseEvent }).MouseEvent;
 const click = (el: Element) => el.dispatchEvent(new MouseEventCtor("click", { bubbles: true }));
@@ -110,26 +114,22 @@ test("code files open straight into edit mode; toolbar is trimmed", async () => 
     assert.equal(surface!.getAttribute("aria-label"), "Edit src/app.ts");
     assert.equal(container.querySelector('[role="switch"]'), null, "non-previewable files have no mode switch");
 
-    // Finding 5: the trimmed toolbar has no permanent single-action buttons.
-    const toolbar = container.querySelector<HTMLElement>(".editor-toolbar")!;
     assert.equal(container.querySelector(".editor-head"), null, "the tab is the only file title row");
     assert.equal(
       container.querySelector('[aria-label="Close file"]'),
       null,
       "FilePane does not duplicate the tab close action",
     );
-    const toolbarLabels = [...toolbar.querySelectorAll("button")].map((b) => (b.textContent ?? "").trim());
-    for (const gone of ["Edit", "Rename", "Delete", "Wrap", "Go to line", "Add file to chat", "Add selection to chat"]) {
-      assert.equal(toolbarLabels.includes(gone), false, `toolbar must not contain a "${gone}" button`);
-    }
-    const more = toolbar.querySelector<HTMLElement>('[aria-haspopup="menu"]');
-    assert.ok(more, "actions menu button present");
-    assert.equal(more!.getAttribute("aria-label"), "Actions for src/app.ts");
+    assert.equal(container.querySelector(".editor-more-btn"), null, "no permanent overflow button");
+    assert.equal(container.querySelector('[aria-label="Actions for src/app.ts"]'), null, "no permanent actions trigger");
 
-    // Every removed capability is reachable from the menu.
-    await act(async () => { click(more!); });
+    const editSurface = container.querySelector<HTMLElement>(".editor-edit")!;
+    assert.ok(editSurface, "editor edit surface present");
+    await act(async () => {
+      editSurface.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, clientX: 48, clientY: 48 }));
+    });
     const menu = document.querySelector<HTMLElement>('[role="menu"]');
-    assert.ok(menu, "actions menu opens");
+    assert.ok(menu, "file actions context menu opens");
     const items = [...menu!.querySelectorAll("button")].map((b) => (b.textContent ?? "").trim());
     for (const needed of ["Add file to chat", "Copy path", "Rename / move…", "Delete…"]) {
       assert.ok(items.includes(needed), `menu offers "${needed}"`);
@@ -139,11 +139,7 @@ test("code files open straight into edit mode; toolbar is trimmed", async () => 
     const wrapItem = menu!.querySelector<HTMLElement>('[role="menuitemcheckbox"]');
     assert.ok(wrapItem, "wrap is a checkable menu item");
     assert.equal(wrapItem!.getAttribute("aria-checked"), "true", "wrap defaults on");
-    assert.equal(
-      container.querySelector(".editor-sel-hint"),
-      null,
-      "selection hint absent without an active selection",
-    );
+    assert.equal(container.querySelector(".editor-sel-hint"), null, "legacy @ hint removed");
   } finally {
     await unmount();
   }
@@ -187,3 +183,54 @@ test("markdown opens in preview behind a real switch; the choice persists per ki
     await second.unmount();
   }
 });
+
+test("json and html files land in preview", async () => {
+  resetDocsForTest();
+  const json = await mountFile("package.json");
+  try {
+    assert.ok(json.container.querySelector(".editor-json-preview"), "json lands in tree preview");
+    assert.equal(json.container.querySelector(".editor-code"), null);
+    const sw = json.container.querySelector<HTMLElement>('[role="switch"]');
+    assert.ok(sw, "json has a preview switch");
+    assert.equal(sw!.getAttribute("aria-checked"), "true");
+  } finally {
+    await json.unmount();
+  }
+
+  resetDocsForTest();
+  const html = await mountFile("index.html");
+  try {
+    assert.ok(html.container.querySelector(".editor-html-preview"), "html lands in sandboxed preview");
+    assert.ok(html.container.querySelector("iframe.html-preview-frame"), "html preview uses an iframe");
+    assert.equal(html.container.querySelector(".editor-code"), null);
+  } finally {
+    await html.unmount();
+  }
+});
+
+test("selecting text opens the selection menu with chat, explain, and fix", async () => {
+  resetDocsForTest();
+  selectionForTest = { text: "const total = 1;", startLine: 1, endLine: 1 };
+  const { container, unmount } = await mountFile("src/app.ts");
+  try {
+    const editSurface = container.querySelector<HTMLElement>(".editor-edit")!;
+    assert.ok(editSurface, "editor edit surface present");
+    await act(async () => {
+      editSurface.dispatchEvent(new MouseEventCtor("mouseup", { bubbles: true, button: 0, clientX: 64, clientY: 80 }));
+    });
+    const menus = [...document.querySelectorAll<HTMLElement>('[role="menu"]')];
+    const menu = menus.find((node) =>
+      [...node.querySelectorAll(".ui-menu-item-label")].some((label) => (label.textContent ?? "").trim() === "Explain"),
+    );
+    assert.ok(menu, "selection menu opens on mouseup");
+    const labels = [...menu!.querySelectorAll(".ui-menu-item-label")].map((node) => (node.textContent ?? "").trim());
+    assert.deepEqual(labels, ["Add to chat", "Explain", "Fix inline"]);
+    assert.equal(menu!.querySelectorAll("svg").length, 3, "selection actions have icons");
+    const detail = menu!.querySelector(".ui-menu-item-detail")?.textContent ?? "";
+    assert.match(detail, /\+L$/);
+  } finally {
+    selectionForTest = null;
+    await unmount();
+  }
+});
+
