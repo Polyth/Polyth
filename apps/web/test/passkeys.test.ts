@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { clearAuthCsrf } from "../src/authClient.ts";
 import {
+  registerPasskey,
+  removePasskey,
   signInWithPasskey,
   toPublicKeyCreationOptions,
   toPublicKeyRequestOptions,
@@ -114,6 +116,89 @@ test("passkey sign-in submits the exact assertion bytes then resolves canonical 
       "/api/auth/passkeys/authenticate/complete",
       "/api/auth/accounts",
     ]);
+  } finally {
+    clearAuthCsrf();
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("passkey registration preserves credential bytes and removal sends the observed revision", async () => {
+  const previousFetch = globalThis.fetch;
+  clearAuthCsrf();
+  let requested: CredentialCreationOptions | undefined;
+  const id = "pky_00000000-0000-0000-0000-000000000001";
+  try {
+    const csrfToken = "c".repeat(64);
+    globalThis.fetch = async (input, init) => {
+      const path = String(input);
+      if (path === "/api/auth/status") {
+        return new Response(JSON.stringify({
+          required: true,
+          authorized: true,
+          scope: "ui-session",
+          state: "ready",
+          methods: ["password", "passkey"],
+          csrfToken,
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (path === "/api/auth/passkeys/register/options") {
+        assert.deepEqual(JSON.parse(String(init?.body)), { name: "MacBook Touch ID" });
+        return new Response(JSON.stringify({
+          challenge: "AQI",
+          rp: { id: "localhost", name: "Polyth" },
+          user: { id: "dXNyX2FsaWNl", name: "alice", displayName: "Alice" },
+          pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+          timeout: 60_000,
+          attestation: "none",
+          authenticatorSelection: { residentKey: "required", userVerification: "required" },
+          excludeCredentials: [{ type: "public-key", id: "AwQ" }],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (path === "/api/auth/passkeys/register/complete") {
+        assert.deepEqual(JSON.parse(String(init?.body)), {
+          name: "MacBook Touch ID",
+          credentialId: "CQo",
+          clientDataJSON: "Cw",
+          attestationObject: "DA0",
+        });
+        return new Response(JSON.stringify({
+          id,
+          name: "MacBook Touch ID",
+          createdAt: 10,
+          lastUsedAt: null,
+          revision: 1,
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (path === `/api/auth/passkeys/${id}`) {
+        assert.equal(init?.method, "DELETE");
+        assert.deepEqual(JSON.parse(String(init?.body)), { expectedRevision: 1 });
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      throw new Error(`unexpected fetch ${path}`);
+    };
+
+    const registered = await registerPasskey(" MacBook Touch ID ", {
+      async create(options) {
+        requested = options;
+        return {
+          id: "credential",
+          type: "public-key",
+          rawId: buffer(9, 10),
+          response: {
+            clientDataJSON: buffer(11),
+            attestationObject: buffer(12, 13),
+          },
+        } as unknown as Credential;
+      },
+    });
+
+    assert.equal(registered.id, id);
+    assert.equal(registered.revision, 1);
+    assert.deepEqual(bytes(requested?.publicKey?.challenge ?? new Uint8Array()), [1, 2]);
+    assert.equal(new TextDecoder().decode(requested?.publicKey?.user.id), "usr_alice");
+    assert.deepEqual(bytes(requested?.publicKey?.excludeCredentials?.[0]?.id ?? new Uint8Array()), [3, 4]);
+
+    await removePasskey(registered);
   } finally {
     clearAuthCsrf();
     globalThis.fetch = previousFetch;
