@@ -124,6 +124,7 @@ test("desktop shell clips the frameless window to the sheet radius", async () =>
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   const desktop = await readFile(new URL("../src/desktop.tsx", import.meta.url), "utf8");
   assert.match(styles, /html:has\(body\.desktop-app\)/);
+  assert.match(styles, /body\.desktop-app\s*\{[^}]*border-radius:\s*var\(--radius-sheet\)/s);
   assert.match(styles, /body\.desktop-app \.app\s*\{[^}]*border-radius:\s*var\(--radius-sheet\)/s);
   assert.match(styles, /body\.desktop-app\[data-desktop-maximized="true"\] \.app/);
   assert.match(desktop, /dataset\.desktopMaximized/);

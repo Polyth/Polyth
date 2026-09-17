@@ -145,6 +145,10 @@ body.desktop-app #root {
   background-color: transparent;
   background-image: none;
 }
+body.desktop-app {
+  border-radius: var(--radius-sheet);
+  overflow: hidden;
+}
 body.desktop-app .app {
   border-radius: var(--radius-sheet);
   overflow: hidden;
@@ -157,6 +161,8 @@ body.desktop-app .desktop-window-controls-right {
 body.desktop-app .desktop-window-controls-left {
   border-top-left-radius: var(--radius-sheet);
 }
+body.desktop-app[data-desktop-maximized="true"],
+body.desktop-app[data-desktop-maximized="true"] #root,
 body.desktop-app[data-desktop-maximized="true"] .app,
 body.desktop-app[data-desktop-maximized="true"] .desktop-window-controls-right,
 body.desktop-app[data-desktop-maximized="true"] .desktop-window-controls-left {
