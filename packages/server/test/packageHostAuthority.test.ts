@@ -65,3 +65,25 @@ test("discovered package sessions route through system-scoped Space services", a
   assert.equal(scopedSnapshot, 4);
   assert.equal(appended, 2);
 });
+
+test("shared deployments reject package-global project and session authority", async () => {
+  let rawProjectReads = 0;
+  const host = {
+    pluginId: "test-package",
+    deployment: "server-trusted",
+    projects: {
+      async get() { rawProjectReads++; return { id: "foreign", path: "/tmp/foreign", name: "Foreign", createdAt: 1, spaceId: "spc_foreign" }; },
+      async list() { rawProjectReads++; return []; },
+    },
+    sessions: {} as SessionService,
+    store: {},
+    forSpace() { assert.fail("shared package-global authority must not derive a Space"); },
+    events: { async append() { assert.fail("unexpected append"); } },
+  } as unknown as ServerPackageHost;
+  const governed = governPackageHost(host);
+
+  await assert.rejects(governed.projects.get("foreign"), { code: "unavailable" });
+  await assert.rejects(governed.projects.list(), { code: "unavailable" });
+  await assert.rejects(governed.sessions.create({ projectId: "foreign" }), { code: "unavailable" });
+  assert.equal(rawProjectReads, 0);
+});
