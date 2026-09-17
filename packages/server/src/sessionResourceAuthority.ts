@@ -33,18 +33,13 @@ const receipt = (projection: SessionProjection): string => JSON.stringify({
 
 type CanonicalLifecycle = CanonicalResource["lifecycle"];
 
-/**
- * Canonical lifecycle around the existing session engine. Runtime/provider
- * durability remains owned by SessionService; this facade only governs whether
- * that durable domain row is an admitted account/Space resource.
- */
 export function canonicalSessionService(
   ctx: SpaceContext,
   base: SessionService,
   projects: ProjectService,
 ): SessionService {
   const security = canonicalSecurity();
-  if (!security) return base; // isolated legacy-shaped unit tests only
+  if (!security) return base;
   const org = security.control.get<{ id: string }>(
     "SELECT org_id AS id FROM spaces WHERE id=?",
     ctx.spaceId,
@@ -60,7 +55,6 @@ export function canonicalSessionService(
     if (row.kind !== "session" || row.orgId !== org.id || row.spaceId !== ctx.spaceId) throw recovery();
     if (projection && (projection.spaceId !== ctx.spaceId || row.parentId !== projection.projectId)) throw recovery();
   };
-
   const transition = (
     id: string,
     from: readonly CanonicalLifecycle[],
@@ -69,21 +63,17 @@ export function canonicalSessionService(
     action: string,
     bumpAccess: boolean,
     actor = ctx.userId,
-  ): CanonicalResource => security.control.transaction(() => {
-    const current = resource(id);
-    if (!current) throw recovery();
-    assertScope(current);
-    if (!from.includes(current.lifecycle) || current.revision !== expectedRevision) throw recovery();
-    const placeholders = from.map(() => "?").join(",");
-    const changes = security.control.run(
-      `UPDATE resources
-          SET lifecycle=?,revision=revision+1,access_revision=access_revision+?,updated_at_ms=?
-        WHERE id=? AND revision=? AND lifecycle IN (${placeholders})`,
-      to, bumpAccess ? 1 : 0, Date.now(), id, expectedRevision, ...from,
-    ).changes;
-    if (Number(changes) !== 1) throw recovery();
-    security.control.audit(actor, action, id);
-    return resource(id)!;
+  ): CanonicalResource => security.resourceLifecycle.transition({
+    resourceId: id,
+    kind: "session",
+    orgId: org.id,
+    spaceId: ctx.spaceId,
+    from,
+    to,
+    expectedRevision,
+    actor,
+    action,
+    bumpAccess,
   });
 
   const projectionIfPresent = async (id: string): Promise<SessionProjection | undefined> => {
@@ -118,7 +108,6 @@ export function canonicalSessionService(
     } else if (row.lifecycle === "archived" && projection.status !== "archived") {
       row = transition(row.id, ["archived"], "active", row.revision, "resource.restored", true);
     } else if (row.lifecycle === "deleting") {
-      // A still-readable projection proves hard deletion did not commit.
       row = transition(
         row.id,
         ["deleting"],
@@ -156,10 +145,6 @@ export function canonicalSessionService(
     return security.resources.activate(operationId, current.revision);
   };
 
-  /** Delegated subagents are durably recorded as session/imported children.
-   * They execute on behalf of the parent session, so inheriting the parent's
-   * owner is explicit provenance. A forked child is deliberately excluded:
-   * only its request actor can truthfully populate createdBy. */
   const adoptDerivedImportedChild = async (projection: SessionProjection): Promise<void> => {
     if (resource(projection.id)) return;
     if (!projection.parentId) throw recovery();
@@ -242,7 +227,7 @@ export function canonicalSessionService(
           if (current && (current.lifecycle === "provisioning" || current.lifecycle === "quarantined")) {
             security.resources.activate(operationId, current.revision);
           }
-        } catch { /* fail closed on the original error; next read enters recovery */ }
+        } catch { /* fail closed on original error; next read enters recovery */ }
       } else {
         const current = resource(sessionId);
         if (current && (current.lifecycle === "provisioning" || current.lifecycle === "quarantined")) {
