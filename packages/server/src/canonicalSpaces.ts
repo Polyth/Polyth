@@ -23,6 +23,11 @@ export interface CanonicalSpaceGatewayOptions {
   now?: () => number;
 }
 
+type AuthoritativeSpaceContext = SpaceContext & {
+  /** Server-minted deployment authority. Never accepted from request input. */
+  readonly instanceOwner: boolean;
+};
+
 /**
  * Canonical Space gateway. Human/device contexts must arrive with a durable
  * userId and an explicit membership. Internal services are never projected to
@@ -41,20 +46,34 @@ export function createCanonicalSpaceGateway(opts: CanonicalSpaceGatewayOptions):
     deployment,
     provisionMissing: false,
   });
+  const withInstanceAuthority = (ctx: SpaceContext): AuthoritativeSpaceContext => ({
+    ...ctx,
+    instanceOwner: !!opts.control.get(
+      `SELECT 1 FROM instance_roles r JOIN principals p ON p.id=r.user_id
+        WHERE r.user_id=? AND r.role='owner' AND p.status='active'`,
+      ctx.userId,
+    ),
+  });
+  const authoritativeResolver = {
+    ...resolver,
+    forPrincipal: (principal: Parameters<typeof resolver.forPrincipal>[0], hints?: Parameters<typeof resolver.forPrincipal>[1]) =>
+      withInstanceAuthority(resolver.forPrincipal(principal, hints)),
+    forUser: (userId: string, spaceId: string) => withInstanceAuthority(resolver.forUser(userId, spaceId)),
+  };
   const guard = createSpaceGuard({
     spaceOfSession: (sessionId) => opts.store.spaceOfSession(sessionId),
     spaceOfProject: (projectId) => opts.registry.spaceOfProject(projectId),
   });
   const services = createSpaceServices({ registry: opts.registry, sessions: opts.sessions, guard });
   return {
-    resolve: (principal, hints) => resolver.forPrincipal(principal, hints),
+    resolve: (principal, hints) => authoritativeResolver.forPrincipal(principal, hints),
     resolveInternal: () => {
       throw Object.assign(new Error("internal services do not inherit a human Space"), { code: "unauthorized" });
     },
     services,
     spaceOfSession: (sessionId) => opts.store.spaceOfSession(sessionId),
     store,
-    resolver,
+    resolver: authoritativeResolver,
     guard,
     audit,
     deployment,
