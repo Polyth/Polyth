@@ -4,6 +4,7 @@ import type { AuthPrincipal } from "@polyth/contracts";
 import {
   PairedSocketRegistry,
   closeAuthSessionSockets,
+  closeAuthUserSessionSockets,
   closeAuthUserSockets,
 } from "../src/pairedSockets.ts";
 
@@ -39,7 +40,7 @@ test("one revoked browser session closes across registries without touching sibl
   a.unbind(a2);
 });
 
-test("user invalidation closes browser and paired channels while paired counters stay device-only", () => {
+test("credential invalidation closes browser sessions but preserves paired-device grants", () => {
   const registry = new PairedSocketRegistry();
   const closed: string[] = [];
   const browser = {}, device = {}, other = {};
@@ -48,10 +49,12 @@ test("user invalidation closes browser and paired channels while paired counters
   registry.bind(other, paired("dev_other", "usr_other"), () => closed.push("other"));
 
   assert.equal(registry.size, 2);
+  assert.equal(closeAuthUserSessionSockets("usr_owner"), 1);
+  assert.deepEqual(closed, ["browser"]);
   assert.equal(registry.activeCount("dev_owner"), 1);
-  assert.equal(closeAuthUserSockets("usr_owner"), 2);
+
+  assert.equal(closeAuthUserSockets("usr_owner"), 1);
   assert.deepEqual(closed.sort(), ["browser", "device"]);
-  assert.equal(registry.size, 1);
   assert.equal(registry.activeCount("dev_owner"), 0);
   assert.equal(registry.activeCount("dev_other"), 1);
 
