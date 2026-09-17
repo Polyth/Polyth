@@ -70,15 +70,20 @@ workflows:
           set -euo pipefail
           node scripts/release-version.mjs
 
+      - name: Release quality gate
+        script: |
+          set -euo pipefail
+          node scripts/ci/release-quality.mjs
+
       - name: Resolve iOS build number from App Store Connect
         script: |
           set -euo pipefail
           bash scripts/ci/resolve-ios-build-number.sh
 
-      - name: Build web and sync iOS project
+      - name: Sync quality-gated web build into iOS project
         script: |
           set -euo pipefail
-          npm run build:mobile
+          npm --workspace @polyth/mobile run sync
 
       - name: Build native Polyth Link XCFramework
         script: |
