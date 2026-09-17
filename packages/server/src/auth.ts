@@ -227,12 +227,14 @@ function strictCookieToken(cookieHeader: string | undefined, cookieName: string)
 
 export function publicHttpIngress(
   req: AuthRequestLike,
-  opts: { listenerId?: string; secure?: boolean } = {},
+  opts: { listenerId?: string; secure?: boolean; proxied?: boolean } = {},
 ): RequestIngress {
   return {
     kind: "public-http",
     listenerId: opts.listenerId ?? "public",
-    loopback: isLoopbackAddress(req.socket.remoteAddress),
+    // A request relayed by a trusted proxy is never local, whatever the peer
+    // address looks like: loopback grants local-user trust in `auth.resolve`.
+    loopback: opts.proxied !== true && isLoopbackAddress(req.socket.remoteAddress),
     secure: opts.secure === true,
   };
 }

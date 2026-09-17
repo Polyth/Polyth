@@ -39,6 +39,10 @@ function inlineAllowlistedIcon(name: string, svg: string, _color: string): strin
 export function projectRoutes(spaces: SpaceServicesFor, fetchImpl: IconifyFetch = fetch): RouteHandler {
   return async (rc) => {
     const { path, method, body, json } = rc;
+    // Reading `rc.space` resolves a tenant, so it must come after the path
+    // guard: contributed routes also see the SPA shell and static assets,
+    // where an anonymous visitor has no Space and must still get the app.
+    if (!path.startsWith("/api/projects")) return false;
     const { projects } = spaces(rc.space);
 
     if (path === "/api/projects/setup" && method === "POST") {

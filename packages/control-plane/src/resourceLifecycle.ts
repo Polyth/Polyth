@@ -5,7 +5,7 @@ import type {
   ResourceRegistry,
 } from "./resources.ts";
 
-const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$/;
+const IDENTIFIER = /^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,199}$/;
 const KIND = /^[a-z][a-z0-9.-]{0,63}$/;
 const ALLOWED: Readonly<Record<ResourceLifecycle, readonly ResourceLifecycle[]>> = {
   provisioning: [],

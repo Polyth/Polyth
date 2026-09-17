@@ -11,6 +11,7 @@ import {
   canonicalSecurity,
 } from "./runtimeSecurity.ts";
 import { createSetupServer } from "./setupServer.ts";
+import { createProxyTrust } from "./trustedProxy.ts";
 import {
   acquireDataDirectoryLease,
   boot as bootCore,
@@ -36,13 +37,38 @@ const recoveryRequired = (): Error => Object.assign(
   { code: "recovery-required" },
 );
 
+/**
+ * Operator-declared public origin (POLYTH_PUBLIC_ORIGIN), for an installation
+ * published behind a TLS-terminating reverse proxy. It is configuration, never
+ * derived from Host or forwarded headers, and it is the one identity origin:
+ * cookies, same-origin checks and passkey rpId all bind to it. This listener
+ * terminates no TLS itself, so it is only honoured together with the exact
+ * proxy peers allowed to report that TLS already happened.
+ */
+const canonicalPublicOrigin = (raw: string): string => {
+  let url: URL;
+  try { url = new URL(raw); } catch { throw invalidOrigin("POLYTH_PUBLIC_ORIGIN must be an absolute URL"); }
+  if (url.protocol !== "https:" || url.username || url.password
+    || url.pathname !== "/" || url.search || url.hash) {
+    throw invalidOrigin("POLYTH_PUBLIC_ORIGIN must be an https origin with no path, query or credentials");
+  }
+  if (createProxyTrust().size === 0) {
+    throw invalidOrigin("POLYTH_PUBLIC_ORIGIN requires POLYTH_TRUSTED_PROXIES: this listener terminates no TLS");
+  }
+  return url.origin;
+};
+const invalidOrigin = (message: string): Error => Object.assign(new Error(message), { code: "invalid-input" });
+
 export async function boot(opts: BootOptions = {}) {
   const port = opts.port ?? Number(process.env.PORT ?? 4400);
   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
     throw Object.assign(new Error("Canonical server port must be an explicit TCP port"), { code: "invalid-input" });
   }
   const hostname = opts.hostname ?? process.env.HOST ?? "127.0.0.1";
-  const origin = `http://${localOriginHost(hostname)}:${port}`;
+  const publicOrigin = (process.env.POLYTH_PUBLIC_ORIGIN ?? "").trim();
+  const origin = publicOrigin
+    ? canonicalPublicOrigin(publicOrigin)
+    : `http://${localOriginHost(hostname)}:${port}`;
   const dataDir = resolve(opts.dataDir ?? process.env.POLYTH_DATA_DIR ?? "./data");
   const preflight = inspectCanonicalInstallation(dataDir);
   if (preflight.kind === "existing" && preflight.state === "recovery") throw recoveryRequired();
@@ -50,7 +76,7 @@ export async function boot(opts: BootOptions = {}) {
   const createSecurity = (): CanonicalSecurity => createCanonicalSecurity({
     dataDir,
     origin,
-    localOnly: true,
+    localOnly: publicOrigin === "",
   });
 
   if (preflight.kind === "existing" && preflight.state === "ready") {

@@ -65,7 +65,9 @@ type ProvisioningRow = {
   domain_receipt_digest: string | null; created_at_ms: number; updated_at_ms: number; revision: number;
 };
 
-const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$/;
+// Leading `_` is admitted for derived first-party ids such as package workspace
+// projects (`__polyth_pkg_<hash>`); `.` still cannot lead, so no `.`/`..` id.
+const IDENTIFIER = /^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,199}$/;
 const KIND = /^[a-z][a-z0-9.-]{0,63}$/;
 const VISIBILITY = new Set<ResourceVisibility>(['private', 'restricted', 'space', 'inherit']);
 const SYSTEM_ACTOR = 'system:resource-provisioner';

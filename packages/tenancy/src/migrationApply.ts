@@ -252,8 +252,10 @@ export function applyLegacyIdentityMigration(opts: ApplyLegacyMigrationOptions):
       if (!check.get("SELECT 1 FROM legacy_imports WHERE name='migration-stage' AND digest=?", manifest.manifestDigest)) fail("migration-provenance-missing");
       const expectedProjects = result.projectResourcesImported;
       const expectedSessions = result.sessionResourcesImported;
+      // Archived sessions are materialized as `archived`, so counting only
+      // `active` rejected every capsule that carried one.
       const actualProjects = Number(check.get<{ n: number | bigint }>("SELECT count(*) AS n FROM resources WHERE kind='project' AND lifecycle='active'")?.n ?? -1);
-      const actualSessions = Number(check.get<{ n: number | bigint }>("SELECT count(*) AS n FROM resources WHERE kind='session' AND lifecycle='active'")?.n ?? -1);
+      const actualSessions = Number(check.get<{ n: number | bigint }>("SELECT count(*) AS n FROM resources WHERE kind='session' AND lifecycle IN ('active','archived')")?.n ?? -1);
       if (actualProjects !== expectedProjects || actualSessions !== expectedSessions) fail("migration-resource-verification-failed");
     } finally { check.close(); }
 

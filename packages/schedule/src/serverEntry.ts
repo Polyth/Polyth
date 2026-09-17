@@ -228,8 +228,9 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   host.services.provide(serverServiceKey<ScheduleService>("schedule"), schedule);
   let routes: RouteHandler | null = null;
   let loopTimer: ReturnType<typeof setInterval> | null = null;
+  // Background scan: a listing failure must degrade this sync, never crash the server.
   const loopSync = async () => {
-    for (const project of await host.projects.list()) {
+    for (const project of await host.projects.list().catch(() => [])) {
       try { schedule.syncLoops(project.id, scanLoopsDir(project.path)); } catch { /* keep scanning other projects */ }
     }
   };

@@ -79,6 +79,7 @@ import {
 import { resolveSessionRuntimeBinding } from "./sessionRuntime.ts";
 import { createRuntimeCatalog } from "./runtimeCatalog.ts";
 import { createHttpHandler, createInternalControlServer, createPublicHttpServer, createTunnelIngress, type RouteHandler } from "./http.ts";
+import { createProxyTrust } from "./trustedProxy.ts";
 import { drainAndCloseServer, HTTP_DRAIN_MS } from "./httpDrain.ts";
 import { createHttpAdmission } from "./httpAdmission.ts";
 import { packageRoutes } from "./routes/packages.ts";
@@ -2587,7 +2588,8 @@ export async function boot(opts: BootOptions = {}) {
     },
   });
   httpHandlerRef = httpHandler;
-  const server = createPublicHttpServer(httpHandler, "public");
+  const publicProxies = createProxyTrust();
+  const server = createPublicHttpServer(httpHandler, "public", publicProxies);
   publicServerForSurface = server;
   const controlSocketPath = process.env.POLYTH_CONTROL_SOCKET
     ?? (process.platform === "win32"
@@ -2602,8 +2604,12 @@ export async function boot(opts: BootOptions = {}) {
     spaceGateway,
     svc<ChatWorkspaceForWs>("chat-workspace.frames"),
   );
-  const publicIngress = (req: import("node:http").IncomingMessage) =>
-    publicHttpIngress(req, { listenerId: "public" });
+  // WebSocket upgrades bypass the request handler, so they repeat the
+  // listener's one trusted-proxy transport decision instead of inheriting it.
+  const publicIngress = (req: import("node:http").IncomingMessage) => {
+    const proxied = publicProxies.secure(req);
+    return publicHttpIngress(req, { listenerId: "public", secure: proxied, proxied });
+  };
   const wsAuthorize = (req: import("node:http").IncomingMessage) =>
     auth.resolve(req, publicIngress(req)).authenticated;
   const wsIdentity = (req: import("node:http").IncomingMessage) =>

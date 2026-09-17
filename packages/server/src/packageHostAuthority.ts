@@ -1,4 +1,4 @@
-import type { ProjectService, SessionPersistence, SessionService, SpaceContext } from "@polyth/contracts";
+import type { ProjectService, SessionPersistence, SessionProjection, SessionService, SpaceContext } from "@polyth/contracts";
 import {
   RUNTIME_SYSTEM_PRINCIPAL_ID,
   systemAppendSessionEvent,
@@ -102,6 +102,19 @@ function packageProjects(host: ServerPackageHost): ProjectService {
   }) as ProjectService;
 }
 
+/** Unscoped background listing stays whole-installation, but every row is still
+ * admitted through its own project's canonical Space service. */
+async function everyProjectSession(host: ServerPackageHost, label: string): Promise<SessionProjection[]> {
+  if (host.deployment !== "local-trusted") {
+    throw unavailable(`${label} requires an explicit project`);
+  }
+  const result: SessionProjection[] = [];
+  for (const project of await host.projects.list()) {
+    result.push(...await (await systemSessionsForProject(host, project.id)).list(project.id));
+  }
+  return result;
+}
+
 function packageSessions(host: ServerPackageHost): SessionService {
   const raw = host.sessions;
   return new Proxy(raw, {
@@ -112,8 +125,8 @@ function packageSessions(host: ServerPackageHost): SessionService {
       }
       if (property === "list") {
         return async (projectId?: string) => {
-          if (!projectId) throw unavailable("package session listing requires an explicit project");
-          return (await systemSessionsForProject(host, projectId)).list(projectId);
+          if (projectId) return (await systemSessionsForProject(host, projectId)).list(projectId);
+          return everyProjectSession(host, "package session listing");
         };
       }
       if (PROJECT_METHODS.has(property)) {
@@ -170,8 +183,8 @@ function packageStore(host: ServerPackageHost): ServerPackageHost["store"] {
       }
       if (property === "projections") {
         return async (projectId?: string) => {
-          if (!projectId) throw unavailable("package projection listing requires an explicit project");
-          return (await systemSessionsForProject(host, projectId)).list(projectId);
+          if (projectId) return (await systemSessionsForProject(host, projectId)).list(projectId);
+          return everyProjectSession(host, "package projection listing");
         };
       }
       if (property === "hasEventOfType" || property === "latestSeq") {

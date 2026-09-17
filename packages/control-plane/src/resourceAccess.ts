@@ -20,7 +20,7 @@ export interface ResourceAccessAuthority {
   requireReadable(input: ResourceAccessInput): CanonicalResource;
 }
 
-const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$/;
+const IDENTIFIER = /^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,199}$/;
 const LIFECYCLES = new Set<ResourceLifecycle>([
   "provisioning", "active", "archiving", "archived", "deleting", "deleted", "quarantined",
 ]);
@@ -73,12 +73,12 @@ export function createResourceAccessAuthority(
   ): boolean => {
     if (row.orgId !== orgId || row.spaceId !== spaceId) return false;
     if (!lifecycles.has(row.lifecycle)) return false;
-    if (row.ownerPrincipalId === principalId) {
-      // Human ownership never outlives tenant membership. Durable system
-      // principals intentionally have no Space membership and may own hidden
-      // runtime resources, so they are the only owner-only exception.
-      return principalKind(principalId) === "system" || member(principalId, spaceId);
-    }
+    // Durable system principals are the runtime itself. They intentionally have
+    // no Space membership, so background work reads inside the Space it was
+    // already scoped to instead of impersonating a member.
+    if (principalKind(principalId) === "system") return true;
+    // Human ownership never outlives tenant membership.
+    if (row.ownerPrincipalId === principalId) return member(principalId, spaceId);
     if (row.visibility === "private" || row.visibility === "restricted") return false;
     if (row.visibility === "space") return member(principalId, spaceId);
     if (!row.parentId || seen.has(row.id) || seen.size >= 32) {

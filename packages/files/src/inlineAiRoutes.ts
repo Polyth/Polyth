@@ -47,8 +47,12 @@ export function inlineAiRoutes(
   };
 
   return async (request: RouteRequest) => {
-    const { path, method, space } = request;
+    const { path, method } = request;
+    // `space` is a getter that resolves a tenant, so it must not be read (or
+    // destructured) before the path guard: contributed routes also see the SPA
+    // shell, where an anonymous visitor has no Space and must still get the app.
     if (!path.startsWith("/api/files/inline-ai")) return false;
+    const space = request.space;
     const storage = host.spaceStorage(space);
 
     if (path === "/api/files/inline-ai/settings") {

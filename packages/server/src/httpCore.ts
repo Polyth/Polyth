@@ -48,6 +48,8 @@ import {
   CORE_REMOTE_ACCESS,
   type OwnedRemotePolicy,
 } from "./remotePolicy.ts";
+import { TERMINATED_TLS } from "@polyth/identity/http";
+import { createProxyTrust, type ProxyTrust } from "./trustedProxy.ts";
 import { logHttp500 } from "./httpLog.ts";
 import type { HttpAdmission } from "./httpAdmission.ts";
 
@@ -885,7 +887,21 @@ async function dispatchHttp(
           body: async () => loadBody(),
           json: (code, body) => json(res, code, body),
         };
-        for (const route of deps.routes) if (await route(rc)) return;
+        for (const route of deps.routes) {
+          // Outside /api a contributed route is offered the SPA shell and
+          // static assets, where an anonymous visitor has no tenant. A route
+          // that reads `rc.space` there is simply not applicable — it must not
+          // turn the lock screen into a 401 JSON body. Anything already
+          // written, and every /api path, keeps the real failure.
+          try {
+            if (await route(rc)) return;
+          } catch (error) {
+            const code = (error as { code?: string } | null)?.code;
+            const denial = error instanceof AuthorizationError
+              || code === "unauthorized" || code === "forbidden";
+            if (!denial || path.startsWith("/api/") || res.headersSent) throw error;
+          }
+        }
       }
 
       if (path.startsWith("/api/")) return json(res, 404, { error: "not-found", path });
@@ -1007,10 +1023,19 @@ async function dispatchHttp(
     }
 }
 
-export function createPublicHttpServer(handler: HttpHandler, listenerId = "public"): Server {
+export function createPublicHttpServer(
+  handler: HttpHandler,
+  listenerId = "public",
+  proxies: ProxyTrust = createProxyTrust(),
+): Server {
   return createServer((req, res) => {
     const encrypted = Boolean((req.socket as { encrypted?: boolean }).encrypted);
-    const ingress = publicHttpIngress(req, { listenerId, secure: encrypted });
+    // Forwarded headers are stripped before any handler runs, so the one
+    // trusted-proxy transport decision is made here, from the socket peer, and
+    // carried as an explicit marker rather than a re-readable header.
+    const proxied = !encrypted && proxies.secure(req);
+    if (proxied) Object.defineProperty(req, TERMINATED_TLS, { value: true, enumerable: false });
+    const ingress = publicHttpIngress(req, { listenerId, secure: encrypted || proxied, proxied });
     void handler(req, res, ingress);
   });
 }

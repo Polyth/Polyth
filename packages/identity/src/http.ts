@@ -7,6 +7,15 @@ import { newToken, validToken } from './validation.ts';
 import type { IdentityService } from './index.ts';
 
 const loopback = (address?: string): boolean => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address ?? '');
+
+/**
+ * Set by the listener — never by this adapter and never from a header — when a
+ * TLS-terminating proxy the operator explicitly trusts handled this request.
+ * Identity still enforces its own origin/Host and same-origin checks.
+ */
+export const TERMINATED_TLS = Symbol.for('polyth.identity.terminatedTls');
+const terminatedTls = (req: IncomingMessage): boolean =>
+  (req as unknown as Record<symbol, unknown>)[TERMINATED_TLS] === true;
 const csrfFor = (token: string): string => digest(`csrf:${token}`);
 const csrfMatches = (received: unknown, nonce: string): boolean => typeof received === 'string' && /^[a-f0-9]{64}$/.test(received)
   && timingSafeEqual(Buffer.from(received, 'hex'), Buffer.from(csrfFor(nonce), 'hex'));
@@ -91,7 +100,9 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
   const csrfCookie = `${cookieName}_csrf`;
   const cookie = (name: string, value: string, maxAge?: number): string => `${name}=${value}; Path=/; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}${maxAge === undefined ? '' : `; Max-Age=${maxAge}`}`;
   const transport = (req: IncomingMessage): void => {
-    if (secure ? (req.socket as typeof req.socket & { encrypted?: boolean }).encrypted !== true : (!loopback(req.socket.remoteAddress) || !loopback(req.socket.localAddress))) {
+    const encrypted = (req.socket as typeof req.socket & { encrypted?: boolean }).encrypted === true
+      || terminatedTls(req);
+    if (secure ? !encrypted : (!loopback(req.socket.remoteAddress) || !loopback(req.socket.localAddress))) {
       throw controlError('insecure-transport', 'A secure identity transport is required');
     }
     if (req.headers.host?.toLowerCase() !== url.host.toLowerCase()) throw controlError('wrong-origin', 'Origin does not match this installation');

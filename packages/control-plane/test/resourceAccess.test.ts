@@ -58,6 +58,10 @@ test("resource access enforces space, owner-only and inherited visibility with m
   assert.equal(access.readable(input("prj_space", "usr_outside")), undefined);
   assert.equal(access.requireReadable(input("prj_space", "usr_expiring")).id, "prj_space");
   assert.equal(access.requireReadable(input("prj_system", "system:polyth-runtime")).id, "prj_system");
+  // Background runtime work owns no tenant resource and holds no membership, so
+  // its read authority is the Space it was already scoped to — and nothing else.
+  assert.equal(access.requireReadable(input("prj_private", "system:polyth-runtime")).id, "prj_private");
+  assert.equal(access.readable({ ...input("prj_private", "system:polyth-runtime"), spaceId: "spc_other" }), undefined);
 
   control.transaction(() => control.run("UPDATE resources SET lifecycle='deleting',revision=revision+1 WHERE id='ses_child'"));
   assert.equal(access.readable(input("ses_child", "usr_member")), undefined);
