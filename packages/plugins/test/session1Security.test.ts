@@ -7,7 +7,7 @@ import type { AuthPrincipal, RouteRequest, SpaceContext, SpaceRole, SpaceStorage
 import { REMOTE_CAPABILITY, principalAllowsRemoteCapability } from "@polyth/contracts";
 import { createPluginRegistry } from "../src/managedRegistry.ts";
 import { managedPluginRoutes } from "../src/serverEntry.ts";
-import { assertDeploymentPackageMutator } from "../src/lifecycleAuth.ts";
+import { assertDeploymentPackageMutator, assertSpacePackageDisable, assertSpacePackageEnable, assertSpacePackageGrant, assertTrustedServerRuntimeMutator } from "../src/lifecycleAuth.ts";
 import { consumeOauthTx, createOauthTx, oauthRedirectOrigin, assertOauthTxMatchesActive } from "../src/oauthTx.ts";
 import { connectionFingerprint } from "../src/connectionFingerprint.ts";
 import { grantCapabilities, approveConnectionDefinitions, connectionReviewRequired, assertAuthConnectionGranted } from "../src/grants.ts";
@@ -97,7 +97,7 @@ test("deployment package mutations use packages.install, not Space admin", () =>
     method: "POST",
     ingress: { kind: "public-http", listenerId: "local", loopback: true, secure: false },
     principal: { kind: "local-user", trustedLoopback: true },
-    space: space("member"),
+    space: space("owner"),
     requireCapability: requireCapabilityOf({ kind: "local-user", trustedLoopback: true }),
     body: async () => ({}),
     json() {},
@@ -109,14 +109,56 @@ test("deployment package mutations use packages.install, not Space admin", () =>
     space: space("admin"),
     requireCapability: requireCapabilityOf(paired([])),
   };
-  assert.throws(() => assertDeploymentPackageMutator(adminRemote), /not allowed/);
+  assert.throws(() => assertDeploymentPackageMutator(adminRemote), /owner|not allowed/);
   const memberRemote: RouteRequest = {
     ...local,
     principal: paired([]),
     space: space("member"),
     requireCapability: requireCapabilityOf(paired([])),
   };
-  assert.throws(() => assertDeploymentPackageMutator(memberRemote), /not allowed/);
+  assert.throws(() => assertDeploymentPackageMutator(memberRemote), /owner|not allowed/);
+});
+
+
+test("package lifecycle authority follows Space role and deployment scope", () => {
+  const base = {
+    req: { headers: {} } as RouteRequest["req"],
+    res: {} as RouteRequest["res"],
+    url: new URL("http://127.0.0.1/"),
+    path: "/",
+    method: "POST",
+    ingress: { kind: "public-http", listenerId: "local", loopback: true, secure: false } as const,
+    body: async () => ({}),
+    json() {},
+  };
+  const request = (principal: AuthPrincipal, role: SpaceRole, deployment: SpaceContext["deployment"] = "local-trusted"): RouteRequest => ({
+    ...base,
+    principal,
+    space: space(role, { deployment }),
+    requireCapability: requireCapabilityOf(principal),
+  });
+
+  const uiMember = request({ kind: "ui-session", sessionId: "s", rememberedDeviceId: "d" }, "member");
+  assert.throws(() => assertSpacePackageEnable(uiMember, uiMember.space), /Space admin|lifecycle/);
+  assert.throws(() => assertSpacePackageDisable(uiMember, uiMember.space), /Space admin|lifecycle/);
+  assert.throws(() => assertSpacePackageGrant(uiMember, uiMember.space), /Space admin|lifecycle/);
+
+  const uiAdmin = request({ kind: "ui-session", sessionId: "s", rememberedDeviceId: "d" }, "admin");
+  assert.doesNotThrow(() => assertSpacePackageEnable(uiAdmin, uiAdmin.space));
+  assert.doesNotThrow(() => assertSpacePackageDisable(uiAdmin, uiAdmin.space));
+  assert.doesNotThrow(() => assertSpacePackageGrant(uiAdmin, uiAdmin.space));
+  assert.throws(() => assertTrustedServerRuntimeMutator(uiAdmin, true), /owner/);
+  assert.doesNotThrow(() => assertTrustedServerRuntimeMutator(uiAdmin, false));
+
+  const uiOwner = request({ kind: "ui-session", sessionId: "s", rememberedDeviceId: "d" }, "owner");
+  assert.doesNotThrow(() => assertDeploymentPackageMutator(uiOwner));
+  assert.doesNotThrow(() => assertTrustedServerRuntimeMutator(uiOwner, true));
+
+  const sharedOwner = request({ kind: "ui-session", sessionId: "s", rememberedDeviceId: "d" }, "owner", "server-trusted");
+  assert.throws(() => assertDeploymentPackageMutator(sharedOwner), /owner|not allowed/);
+
+  const remoteOwner = request(paired([REMOTE_CAPABILITY.packagesInstall]), "owner", "server-trusted");
+  assert.doesNotThrow(() => assertDeploymentPackageMutator(remoteOwner));
 });
 
 test("managed plugin HTTP denies Space admin without deployment authority", async () => {
@@ -144,11 +186,11 @@ test("managed plugin HTTP denies Space admin without deployment authority", asyn
   });
   await assert.rejects(
     () => handler(request("/api/plugins/com-example-demo", "DELETE", paired([]), "admin")),
-    /not allowed/,
+    /owner|not allowed/,
   );
   await assert.rejects(
     () => handler(request("/api/plugins/com-example-demo/update", "POST", paired([]), "member")),
-    /not allowed/,
+    /owner|not allowed/,
   );
   captured = {};
   assert.equal(await handler(request("/api/plugins", "GET", { kind: "local-user", trustedLoopback: true }, "member")), true);
@@ -645,12 +687,12 @@ test("failed version activation restores the previous healthy version", async ()
     id: "com-example-boom",
     name: "Boom",
     version: "1.0.0",
-    trust: "workspace",
+    trust: "privileged",
     entries: { server: "server.mjs" },
   }));
   writeFileSync(join(pkg, "server.mjs"), `
     export default (host) => ({
-      manifest: { id: host.pluginId, version: "1.0.0", trust: "workspace" },
+      manifest: { id: host.pluginId, version: "1.0.0", trust: "privileged" },
       setup() {},
     });
   `);
@@ -671,7 +713,7 @@ test("failed version activation restores the previous healthy version", async ()
     id: "com-example-boom",
     name: "Boom",
     version: "1.1.0",
-    trust: "workspace",
+    trust: "privileged",
     entries: { server: "server.mjs" },
   }));
   writeFileSync(join(pkg, "server.mjs"), `throw new Error("cannot start");\n`);

@@ -56,6 +56,12 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
@@ -65,7 +71,7 @@ jobs:
       - run: npm run build:web
       - run: npm --workspace @polyth/mobile run assets
       - run: cd apps/mobile && npx cap sync android
-      - run: cd apps/mobile/android && ./gradlew :app:assembleDebug --stacktrace
+      - run: cd apps/mobile/android && ./gradlew :app:assembleDebug :app:assembleAndroidTest --stacktrace
 
   ios:
     runs-on: macos-15
