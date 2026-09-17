@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { openControlPlane } from "@polyth/control-plane";
 import { applyLegacyIdentityMigration } from "../src/migrationApply.ts";
 import { inventoryLegacyMigration } from "../src/legacyMigration.ts";
@@ -11,7 +12,7 @@ import { stageLegacyMigration } from "../src/migrationStage.ts";
 const PASSWORD = `scrypt$${"a".repeat(32)}$${"b".repeat(64)}`;
 const json = (file: string, value: unknown): void => writeFileSync(file, `${JSON.stringify(value)}\n`, { mode: 0o600 });
 
-function fixture(t: test.TestContext, owner = "usr_owner") {
+function fixture(t: test.TestContext, owner = "usr_owner", withResources = false) {
   const root = mkdtempSync(join(tmpdir(), "polyth-migration-apply-"));
   const dataDir = join(root, "data"), stageDir = join(root, "stage");
   mkdirSync(dataDir, { mode: 0o700 });
@@ -35,6 +36,28 @@ function fixture(t: test.TestContext, owner = "usr_owner") {
     memberships: [{ userId: owner, spaceId: "spc_personal", role: "owner", createdAt: 60 }],
     selections: { desktop: "spc_personal" },
   });
+  if (withResources) {
+    json(join(dataDir, "projects.json"), [{
+      id: "prj_one",
+      path: join(root, "project-one"),
+      name: "One",
+      createdAt: 80,
+      spaceId: "spc_personal",
+    }]);
+    const db = new DatabaseSync(join(dataDir, "sessions.db"));
+    try {
+      db.exec("CREATE TABLE projections(session_id TEXT PRIMARY KEY,data TEXT NOT NULL)");
+      db.prepare("INSERT INTO projections(session_id,data) VALUES(?,?)").run("ses_one", JSON.stringify({
+        id: "ses_one",
+        projectId: "prj_one",
+        spaceId: "spc_personal",
+        title: "Imported session",
+        status: "idle",
+        createdAt: 90,
+        updatedAt: 95,
+      }));
+    } finally { db.close(); }
+  }
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const inventory = inventoryLegacyMigration({ dataDir });
   const stage = stageLegacyMigration({ dataDir, stageDir, expectedInventoryDigest: inventory.inventoryDigest });
@@ -58,6 +81,8 @@ test("verified capsule activates one ready canonical authority and revokes legac
   assert.equal(result.spacesImported, 1);
   assert.equal(result.credentialsImported, 1);
   assert.equal(result.sessionsRevoked, 1);
+  assert.equal(result.projectResourcesImported, 0);
+  assert.equal(result.sessionResourcesImported, 0);
   assert.equal(result.generatedLogins.usr_owner, "owner");
   assert.equal(existsSync(join(f.dataDir, "control-plane")), true);
   assert.equal(existsSync(join(f.dataDir, `.control-plane-adopt-${f.stage.id}`)), false);
@@ -79,6 +104,52 @@ test("verified capsule activates one ready canonical authority and revokes legac
     stageDir: f.stageDir,
     expectedManifestDigest: f.stage.manifestDigest,
   }), { code: "canonical-authority-exists" });
+});
+
+test("reviewed project and session topology is materialized as canonical active resources before publication", t => {
+  const f = fixture(t, "usr_owner", true);
+  assert.equal(f.inventory.safeToStage, true);
+  assert.equal(f.inventory.plannedAdoptions.filter(row => row.kind !== "user-alias").length, 0);
+  assert.ok(f.inventory.ownership.some(row => row.resourceKind === "project" && row.resourceId === "prj_one" && row.ownerUserId === "usr_owner"));
+  assert.ok(f.inventory.ownership.some(row => row.resourceKind === "session" && row.resourceId === "ses_one" && row.ownerUserId === "usr_owner"));
+
+  const result = applyLegacyIdentityMigration({
+    dataDir: f.dataDir,
+    stageDir: f.stageDir,
+    expectedManifestDigest: f.stage.manifestDigest,
+    now: () => 1_000,
+  });
+  assert.equal(result.projectResourcesImported, 1);
+  assert.equal(result.sessionResourcesImported, 1);
+
+  const control = openControlPlane({ directory: f.dataDir });
+  try {
+    const project = control.get<{
+      kind: string; orgId: string; spaceId: string; ownerId: string; createdBy: string;
+      lifecycle: string; createdAt: number;
+    }>(`SELECT kind,org_id AS orgId,space_id AS spaceId,owner_principal_id AS ownerId,
+              created_by AS createdBy,lifecycle,created_at_ms AS createdAt
+         FROM resources WHERE id='prj_one'`);
+    assert.deepEqual(project, {
+      kind: "project",
+      orgId: control.get<{ id: string }>("SELECT id FROM organizations")!.id,
+      spaceId: "spc_personal",
+      ownerId: "usr_owner",
+      createdBy: "usr_owner",
+      lifecycle: "active",
+      createdAt: 80,
+    });
+    const session = control.get<{ kind: string; parentId: string; spaceId: string; lifecycle: string; createdAt: number }>(
+      "SELECT kind,parent_id AS parentId,space_id AS spaceId,lifecycle,created_at_ms AS createdAt FROM resources WHERE id='ses_one'",
+    );
+    assert.deepEqual(session, {
+      kind: "session",
+      parentId: "prj_one",
+      spaceId: "spc_personal",
+      lifecycle: "active",
+      createdAt: 90,
+    });
+  } finally { control.close(); }
 });
 
 test("explicit tenant ownership cannot manufacture an instance owner without historical owner proof", t => {
