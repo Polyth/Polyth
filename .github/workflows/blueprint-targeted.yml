@@ -1,32 +1,6 @@
 name: Blueprint targeted validation
 
 on:
-  push:
-    branches: [feat/identity-governed-workspaces-20260916]
-    paths:
-      - .github/workflows/blueprint-targeted.yml
-      - packages/control-plane/**
-      - packages/identity/**
-      - packages/server/src/authorityOutbox.ts
-      - packages/server/src/canonicalAuth.ts
-      - packages/server/src/canonicalSecurity.ts
-      - packages/server/src/runtimeSecurity.ts
-      - packages/server/test/authorityOutbox.test.ts
-      - packages/server/test/canonicalAuth.test.ts
-      - packages/server/test/canonicalIdentityHttp.test.ts
-      - packages/server/test/canonicalSecurity.test.ts
-      - packages/server/test/runtimeSecurityBinding.test.ts
-      - apps/web/src/accountStorage.ts
-      - apps/web/src/accounts.ts
-      - apps/web/src/authBootstrap.ts
-      - apps/web/src/authClient.ts
-      - apps/web/src/authPrefetch.ts
-      - apps/web/src/passkeys.ts
-      - apps/web/src/components/LockScreen.tsx
-      - apps/web/src/components/settings/AccessPage.tsx
-      - apps/web/test/authBootstrap.test.ts
-      - apps/web/test/multiUserAccountScope.test.ts
-      - apps/web/test/passkeys.test.ts
   workflow_dispatch:
 
 permissions:
