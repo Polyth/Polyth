@@ -33,6 +33,7 @@ jobs:
             packages/identity/test/*.test.ts \
             packages/plugins/test/authSocketRevocation.test.ts \
             packages/plugins/test/spaceSecretVault.test.ts \
+            packages/secure-safe/test/spaceContextRouting.test.ts \
             packages/secure-safe/test/spaceOwnership.test.ts \
             packages/server/test/authorityOutbox.test.ts \
             packages/server/test/canonicalAuth.test.ts \
