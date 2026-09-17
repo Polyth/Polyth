@@ -1,5 +1,5 @@
-import type { SessionService, SpaceContext } from "@polyth/contracts";
-import type { ServerPackageHost } from "./serverPackage.ts";
+import type { JsonObject, SessionEvent, SessionService, SpaceContext } from "@polyth/contracts";
+import type { AppendEventOptions, ServerPackageHost } from "./serverPackage.ts";
 
 export const RUNTIME_SYSTEM_PRINCIPAL_ID = "system:polyth-runtime";
 
@@ -41,4 +41,20 @@ export async function systemSessionsForSession(
   const projection = await host.store.projection(sessionId);
   if (!projection) throw notFound("session not found");
   return systemSessionsForProject(host, projection.projectId);
+}
+
+/** Persist a background-owned event only after canonical session admission. */
+export async function systemAppendSessionEvent(
+  host: Pick<ServerPackageHost, "projects" | "deployment" | "forSpace" | "store" | "events">,
+  sessionId: string,
+  type: string,
+  data: JsonObject,
+  opts?: AppendEventOptions,
+): Promise<SessionEvent> {
+  const sessions = await systemSessionsForSession(host, sessionId);
+  const projection = await sessions.snapshot(sessionId);
+  if (projection.status === "archived") {
+    throw Object.assign(new Error("target session is archived"), { code: "conflict" });
+  }
+  return host.events.append(sessionId, type, data, opts);
 }
