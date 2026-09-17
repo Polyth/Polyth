@@ -30,17 +30,13 @@ const durableReceipt = (project: Project): string => JSON.stringify({
     : null,
 });
 
-/**
- * Canonical project facade. The JSON registry remains the domain payload store,
- * but existence/visibility/lifecycle come from control-plane resources.
- */
 export function canonicalProjectService(
   ctx: SpaceContext,
   registry: ProjectRegistry,
 ): ProjectService {
   const base = registry.forSpace(ctx);
   const security = canonicalSecurity();
-  if (!security) return base; // isolated legacy-shaped unit tests only
+  if (!security) return base;
 
   const org = security.control.get<{ id: string }>(
     "SELECT org_id AS id FROM spaces WHERE id=?",
@@ -52,14 +48,10 @@ export function canonicalProjectService(
   const requireMutation = (): void => {
     if (!roleAtLeast(ctx.role, "member")) throw forbidden();
   };
-
   const row = (id: string): CanonicalResource | undefined => security.resources.resource(id);
   const assertScope = (resource: CanonicalResource): void => {
-    if (resource.kind !== "project" || resource.orgId !== org.id || resource.spaceId !== ctx.spaceId) {
-      throw recovery();
-    }
+    if (resource.kind !== "project" || resource.orgId !== org.id || resource.spaceId !== ctx.spaceId) throw recovery();
   };
-
   const transition = (
     id: string,
     from: "active" | "deleting",
@@ -67,20 +59,17 @@ export function canonicalProjectService(
     expectedRevision: number,
     action: string,
     bumpAccess: boolean,
-  ): CanonicalResource => security.control.transaction(() => {
-    const current = row(id);
-    if (!current) throw recovery();
-    assertScope(current);
-    if (current.lifecycle !== from || current.revision !== expectedRevision) throw recovery();
-    const changes = security.control.run(
-      `UPDATE resources
-          SET lifecycle=?,revision=revision+1,access_revision=access_revision+?,updated_at_ms=?
-        WHERE id=? AND revision=? AND lifecycle=?`,
-      to, bumpAccess ? 1 : 0, Date.now(), id, expectedRevision, from,
-    ).changes;
-    if (Number(changes) !== 1) throw recovery();
-    security.control.audit(ctx.userId, action, id);
-    return row(id)!;
+  ): CanonicalResource => security.resourceLifecycle.transition({
+    resourceId: id,
+    kind: "project",
+    orgId: org.id,
+    spaceId: ctx.spaceId,
+    from: [from],
+    to,
+    expectedRevision,
+    actor: ctx.userId,
+    action,
+    bumpAccess,
   });
 
   const restoreDeleting = (resource: CanonicalResource): CanonicalResource => {
@@ -88,7 +77,6 @@ export function canonicalProjectService(
     if (resource.lifecycle !== "deleting") return resource;
     return transition(resource.id, "deleting", "active", resource.revision, "resource.delete-rolled-back", true);
   };
-
   const finalizeDeleted = (resource: CanonicalResource): CanonicalResource => {
     assertScope(resource);
     if (resource.lifecycle === "deleted") return resource;
@@ -102,16 +90,10 @@ export function canonicalProjectService(
     if (!resource) throw recovery();
     assertScope(resource);
     if (resource.lifecycle === "active") return project;
-
-    // A durable domain row proves an interrupted delete never crossed the
-    // domain commit. Restore visibility instead of guessing that deletion won.
     if (resource.lifecycle === "deleting") {
       resource = restoreDeleting(resource);
       if (resource.lifecycle === "active") return project;
     }
-
-    // If JSON committed but process/control finalization was interrupted,
-    // finish the existing provisioning saga from the durable immutable receipt.
     if (resource.lifecycle === "provisioning" || resource.lifecycle === "quarantined") {
       const saga = security.resources.pending().find((candidate) => candidate.resourceId === project.id);
       if (!saga) throw recovery();
