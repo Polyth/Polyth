@@ -79,7 +79,7 @@ const assertDestination = (expectedIssuer: string, request: ProviderNetworkReque
 };
 
 export function createCanonicalProviderSecrets(dataDir: string): ProviderSecretBroker {
-  const safe = createSecureSafeService({ dataDir: join(dataDir, "identity-provider-secrets") });
+  const safe = createSecureSafeService({ dataDir: join(dataDir, "identity-provider-secrets"), localOnly: true });
   return {
     async put(_purpose, secret) {
       const reference = `provider.${randomUUID()}`;
