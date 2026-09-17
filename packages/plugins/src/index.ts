@@ -34,6 +34,11 @@ export {
 } from "./serverPackage.ts";
 export { packageWorkspace, type PackageWorkspace } from "./packageWorkspace.ts";
 export {
+  RUNTIME_SYSTEM_PRINCIPAL_ID,
+  systemSessionsForProject,
+  systemSessionsForSession,
+} from "./systemSessions.ts";
+export {
   PairedSocketRegistry,
   closeAuthSessionSockets,
   closeAuthUserSessionSockets,
