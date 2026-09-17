@@ -68,6 +68,7 @@ export function canonicalSessionService(
     expectedRevision: number,
     action: string,
     bumpAccess: boolean,
+    actor = ctx.userId,
   ): CanonicalResource => security.control.transaction(() => {
     const current = resource(id);
     if (!current) throw recovery();
@@ -81,7 +82,7 @@ export function canonicalSessionService(
       to, bumpAccess ? 1 : 0, Date.now(), id, expectedRevision, ...from,
     ).changes;
     if (Number(changes) !== 1) throw recovery();
-    security.control.audit(ctx.userId, action, id);
+    security.control.audit(actor, action, id);
     return resource(id)!;
   });
 
@@ -125,6 +126,7 @@ export function canonicalSessionService(
         row.revision,
         "resource.delete-rolled-back",
         true,
+        "system:resource-reconciler",
       );
     }
     if (row.lifecycle === "deleted" || (row.lifecycle === "active" && projection.status === "archived")) throw recovery();
@@ -176,6 +178,28 @@ export function canonicalSessionService(
     return projection;
   };
 
+  const reconcileMissingDeletes = async (): Promise<void> => {
+    const rows = security.control.all<{ id: string; revision: number }>(
+      "SELECT id,revision FROM resources WHERE kind='session' AND org_id=? AND space_id=? AND lifecycle='deleting' ORDER BY id",
+      org.id, ctx.spaceId,
+    );
+    for (const row of rows) {
+      if (await projectionIfPresent(row.id)) continue;
+      const current = resource(row.id);
+      if (current?.lifecycle === "deleting") {
+        transition(
+          row.id,
+          ["deleting"],
+          "deleted",
+          current.revision,
+          "resource.delete-reconciled",
+          false,
+          "system:resource-reconciler",
+        );
+      }
+    }
+  };
+
   const requireActive = async (id: string): Promise<SessionProjection> => {
     const projection = await readProjection(id);
     const row = reconcileReadable(projection);
@@ -212,8 +236,6 @@ export function canonicalSessionService(
     } catch (cause) {
       const projection = await projectionIfPresent(sessionId).catch(() => undefined);
       if (projection) {
-        // SessionService commits its projection before runtime startup. A failed
-        // provider launch still denotes a real durable failed session.
         try {
           security.resources.recordDomainReady(operationId, receipt(projection));
           const current = resource(sessionId);
@@ -273,8 +295,26 @@ export function canonicalSessionService(
   const remove: NonNullable<SessionService["delete"]> | undefined = base.delete
     ? async (sessionId): Promise<void> => {
         requireMutation();
-        const projection = await readProjection(sessionId);
-        let row = reconcileReadable(projection);
+        const projection = await projectionIfPresent(sessionId);
+        let row = resource(sessionId);
+        if (!projection) {
+          if (!row) throw Object.assign(new Error("session not found"), { code: "not-found" });
+          assertScope(row);
+          if (row.lifecycle === "deleted") return;
+          if (row.lifecycle !== "deleting") throw recovery();
+          transition(
+            sessionId,
+            ["deleting"],
+            "deleted",
+            row.revision,
+            "resource.delete-reconciled",
+            false,
+            "system:resource-reconciler",
+          );
+          return;
+        }
+        await adoptDerivedImportedChild(projection);
+        row = reconcileReadable(projection);
         if (row.lifecycle !== "active" && row.lifecycle !== "archived") throw recovery();
         row = transition(sessionId, [row.lifecycle], "deleting", row.revision, "resource.deleting", true);
         try {
@@ -310,6 +350,16 @@ export function canonicalSessionService(
   ]);
   const readableMethodNames = new Set<PropertyKey>(["debug"]);
 
+  const reconciledList = async (projectId?: string): Promise<SessionProjection[]> => {
+    await reconcileMissingDeletes();
+    const rows = await base.list(projectId);
+    for (const projection of rows) {
+      await adoptDerivedImportedChild(projection);
+      reconcileReadable(projection);
+    }
+    return rows;
+  };
+
   return new Proxy(base, {
     get(target, property, receiver) {
       if (property === "create") return create;
@@ -324,9 +374,11 @@ export function canonicalSessionService(
           return (target.events as (...args: unknown[]) => unknown).call(target, sessionId, ...rest);
         };
       }
-      if (property === "list") {
-        return async (projectId?: string) => {
-          const rows = await target.list(projectId);
+      if (property === "list") return reconciledList;
+      if (property === "sync") {
+        return async (projectId: string) => {
+          await reconcileMissingDeletes();
+          const rows = await target.sync(projectId);
           for (const projection of rows) {
             await adoptDerivedImportedChild(projection);
             reconcileReadable(projection);
