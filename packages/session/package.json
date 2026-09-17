@@ -5,6 +5,7 @@
   "exports": {
     ".": "./src/root.ts",
     "./web-api": "./src/webApiAccountScoped.ts",
+    "./idempotent-mutation": "./src/idempotentMutation.ts",
     "./next-action": "./src/nextAction.ts",
     "./queue-pause": "./src/queuePause.ts",
     "./worktree-names": "./src/worktreeNames.ts"
