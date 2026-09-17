@@ -40,6 +40,12 @@ export function closeAuthSessionSockets(sessionId: string): number {
   return closeMatching((info) => info.kind === "ui-session" && info.sessionId === sessionId);
 }
 
+/** Close every canonical browser session owned by one user; pairings stay live. */
+export function closeAuthUserSessionSockets(userId: string): number {
+  if (!userId) return 0;
+  return closeMatching((info) => info.kind === "ui-session" && info.userId === userId);
+}
+
 /** Close every canonical browser/paired channel owned by one user identity. */
 export function closeAuthUserSockets(userId: string): number {
   if (!userId) return 0;
