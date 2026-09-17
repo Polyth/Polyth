@@ -44,6 +44,11 @@ test("explicit sends lift the prompt to a contextual anchor and FLIP previous ro
   assert.match(controller, /sourceTop - promptRect\.top, duration, 0\.72, true/);
   assert.match(timeline, /freshTurnContextOffset/);
   assert.match(timeline, /responseToPromptGap: Math\.max\(0, row\.top - bubbleRect\.bottom\)/);
+  assert.match(timeline, /followUpSendRef/);
+  assert.match(timeline, /liveFollowUp/);
+  assert.match(timeline, /newestPendingDelivery === "steer" \|\| newestPendingDelivery === "interrupt"/);
+  assert.match(timeline, /turn\.status === "aborted" && pendingSends\.length > 0/);
+  assert.match(timeline, /\.activity-group, \.activity-live-stage/);
 });
 
 test("every live action enters quietly in its chronological slot and honours the motion switch", () => {

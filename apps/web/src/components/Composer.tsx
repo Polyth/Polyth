@@ -1,5 +1,5 @@
 import {
-  useState, useRef, useEffect, useCallback, useMemo, useSyncExternalStore,
+  useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, useSyncExternalStore,
   type ClipboardEvent, type KeyboardEvent,
 } from "react";
 import {
@@ -12,6 +12,9 @@ import {
   endPendingSend,
   finishSessionSpawn,
   getState,
+  hasInFlightPrompt,
+  overlaySessionProjection,
+  pendingSendsForSurface,
   isActiveSessionSpawning,
   lastSeq,
   openSettingsPage,
@@ -19,6 +22,7 @@ import {
   saveNewSessionDraftText,
   startNewSession,
   useActiveModel,
+  usePendingSends,
   useStore,
 } from "../store.ts";
 import {
@@ -101,6 +105,7 @@ import {
 } from "../composerConfig.ts";
 import { shouldHandlePromptHistoryKey } from "../composer/history.ts";
 import { usePromptHistory } from "../composer/usePromptHistory.ts";
+import { executionSelectionChanged, immediateFollowUpDelivery } from "../followUpDelivery.ts";
 import AdaptiveTextInput, { type TextInputHandle } from "./input/AdaptiveTextInput.tsx";
 import ComposerAddMenu from "./ComposerAddMenu.tsx";
 import ComposerFocusDialog from "./ComposerFocusDialog.tsx";
@@ -152,6 +157,7 @@ import { adoptServerDraft, loadScopedDraftRecord, scopedDraftCacheKey, updateSco
 import { flushClientPersistence, type PersistenceScope } from "../clientPersistence.ts";
 import { clientPersistenceScope } from "../reliabilityContext.ts";
 import { stripRecoveryContextBlocks } from "../recoveryDisplay.ts";
+import { visibleComposerDraft } from "../drafts.ts";
 
 // Per-project command/snippet catalog cache: the composer remounts on every
 // session change (including a fresh spawn), and each mount refetched both
@@ -521,7 +527,9 @@ export default function Composer({
     s.projectRegistry.projects.find((candidate) => candidate.id === s.activeProjectId));
   const settings = useStore((s) => s.settings);
   const sessionDefaults = useSessionDefaults();
-  const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
+  const sessionRecord = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
+  const pendingSends = useStore((s) => s.pendingSends);
+  const session = overlaySessionProjection(sessionRecord, pendingSends) ?? null;
   const [cfg, setCfg] = useState<ComposerConfig>(() => loadComposerConfig(session?.id ?? null));
   const draftProfile = !session && draftExecution.profileId
     ? profiles.find((profile) => profile.id === draftExecution.profileId)
@@ -639,8 +647,10 @@ export default function Composer({
   const inputRef = useRef<TextInputHandle>(null);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
   const sessionScopeKeyRef = useRef(scopedDraftCacheKey(session?.id ?? null));
-  const [text, setText] = useState(() => (
-    stripRecoveryContextBlocks(session?.id ? loadDraft(session.id) : newSessionIntent?.draft ?? "")
+  const inFlightPrompt = usePendingSends(session?.id ?? null).length > 0;
+  const [text, setText] = useState(() => visibleComposerDraft(
+    session?.id ? loadDraft(session.id) : newSessionIntent?.draft ?? "",
+    hasInFlightPrompt(getState(), session?.id ?? null),
   ));
   const [queueEdit, setQueueEdit] = useState<QueueEdit | null>(null);
   const [queueEditStarting, setQueueEditStarting] = useState(false);
@@ -790,6 +800,7 @@ export default function Composer({
   const flushComposerDraft = useCallback(() => {
     const id = sessionIdRef.current;
     if (id === null || sendPendingRef.current) return;
+    if (hasInFlightPrompt(getState(), id)) return;
     if (scopedDraftCacheKey(id) !== sessionScopeKeyRef.current) return;
     const editing = queueEditRef.current;
     const nav = promptHistoryNavRef.current;
@@ -806,6 +817,10 @@ export default function Composer({
   // Deliberately NOT reactive to session.draft: live cross-client draft
   // updates apply below, only when the composer is empty.
   //
+  // First-send creation remounts this composer onto the new session while the
+  // submitted prompt is still staged for crash recovery. That copy already
+  // appears as the echo; do not put it back in the input.
+  //
   // This effect is registered after usePromptHistory(). The hook must not
   // destroy the browse snapshot on sessionId change, or this flush would
   // persist the recalled textarea instead of the canonical draft.
@@ -819,17 +834,16 @@ export default function Composer({
     sessionIdRef.current = session?.id ?? null;
     sessionScopeKeyRef.current = scopedDraftCacheKey(session?.id ?? null);
     setPendingLargePaste(null);
+    const inFlight = hasInFlightPrompt(getState(), session?.id ?? null);
     const serverDraft = session?.draft;
     const localDraft = session?.id
       ? (serverDraft !== undefined || session.draftUpdatedAt !== undefined
         ? adoptServerDraft(session.id, serverDraft ?? "", session.draftUpdatedAt).text
         : loadDraft(session.id))
-      : "";
-    const t = session?.id
-      ? stripRecoveryContextBlocks(localDraft)
-      : stripRecoveryContextBlocks(newSessionIntent?.draft ?? "");
+      : newSessionIntent?.draft ?? "";
+    const t = visibleComposerDraft(localDraft, inFlight);
     setText(t);
-    inputRef.current?.replaceText(t);
+    inputRef.current?.replaceText(t, undefined, inFlight ? { silent: true } : undefined);
     promptHistoryNav.reset();
     setCfg(loadComposerConfig(session?.id ?? null));
     setAcToken(null);
@@ -842,6 +856,19 @@ export default function Composer({
     setSteeringQueuedId(null);
     setPromptRewrite(null);
   }, [session?.id, newSessionIntent, flushComposerDraft]);
+
+  // First-send creation remounts this composer (hero → timeline). The staged
+  // recovery copy is still the submitted prompt; keep it out of the input so
+  // the echo is the only visible copy. Layout timing beats the first paint.
+  useLayoutEffect(() => {
+    if (!inFlightPrompt) return;
+    const live = inputRef.current?.getText() ?? committedTextRef.current;
+    if (live === "") return;
+    const pending = pendingSendsForSurface(getState(), session?.id ?? null);
+    if (!pending.some((item) => item.text === live)) return;
+    setText("");
+    inputRef.current?.replaceText("", undefined, { silent: true });
+  }, [inFlightPrompt, session?.id]);
 
   // Settings / project change is not a session switch: restore the snapshot
   // into the textarea, then end browse. Never flush the live historical text.
@@ -886,14 +913,14 @@ export default function Composer({
   // mid-typing would reset the live input to the older server value.
   useEffect(() => {
     const id = session?.id;
-    if (!id || queueEdit?.sessionId === id || sendPending) return;
+    if (!id || queueEdit?.sessionId === id || sendPending || inFlightPrompt) return;
     if (promptHistoryNavRef.current.isBrowsing()) return;
     const scopeKey = scopedDraftCacheKey(id);
     const t = setTimeout(() => {
       if (scopedDraftCacheKey(id) === scopeKey) saveDraft(id, text);
     }, 250);
     return () => clearTimeout(t);
-  }, [session?.id, text, queueEdit, activeProjectId, sendPending]);
+  }, [session?.id, text, queueEdit, activeProjectId, sendPending, inFlightPrompt]);
 
   // Apply server-side draft updates from other clients when the composer is
   // empty (user hasn't started typing). Active local edits always win — the
@@ -902,6 +929,7 @@ export default function Composer({
   useEffect(() => {
     const serverDraft = session?.draft;
     if (!session?.id || (serverDraft === undefined && session.draftUpdatedAt === undefined)) return;
+    if (inFlightPrompt) return;
     const fingerprint = `${session.draftUpdatedAt ?? "legacy"}\0${serverDraft ?? ""}`;
     if (fingerprint === lastServerDraftRef.current) return;
     lastServerDraftRef.current = fingerprint;
@@ -914,7 +942,7 @@ export default function Composer({
       setText(reconciled.text);
       inputRef.current?.replaceText(reconciled.text);
     }
-  }, [session?.draft, session?.draftUpdatedAt, session?.id, text]);
+  }, [session?.draft, session?.draftUpdatedAt, session?.id, text, inFlightPrompt]);
 
   // Drag-and-drop: tree paths and desktop files become attachment pills.
   const [dropHint, setDropHint] = useState<"path" | "files" | null>(null);
@@ -925,7 +953,7 @@ export default function Composer({
   const pending = usePendingAttachments(session?.id ?? null);
   // Submitted attachments remain in the scoped draft until admission finishes
   // so a failed request can be recovered, but they are no longer composer UI.
-  const attachments = creatingSession || sendPending
+  const attachments = creatingSession || sendPending || inFlightPrompt
     ? []
     : promptHistoryNav.displayedAttachments ?? pending;
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1236,60 +1264,95 @@ export default function Composer({
     if (sessionIdRef.current !== target || steeringQueuedBySessionRef.current.has(target)) return;
     steeringQueuedBySessionRef.current.set(target, item.id);
     setSteeringQueuedId(item.id);
+    const cfgSent = cfg;
+    const selectedProfileId = cfgSent.profile.kind === "id"
+      ? cfgSent.profile.id
+      : cfgSent.profile.kind === "inherit"
+        ? session?.agentProfileId ?? draftExecution.profileId
+        : undefined;
+    const selectedProfile = selectedProfileId
+      ? profiles.find((profile) => profile.id === selectedProfileId)
+      : undefined;
+    const selected = cfgSent.model
+      ?? (cfgSent.harness ? undefined : session?.model)
+      ?? (selectedProfile
+        ? { providerID: selectedProfile.providerID, modelID: selectedProfile.modelID }
+        : preferredModel);
+    const descriptor = selected && chatModels.find((candidate) => modelIdentityMatches(candidate, selected));
+    const thinking = resolveComposerThinking({
+      ...(descriptor ? { descriptor } : {}),
+      configThinking: cfgSent.thinking ?? selectedProfile?.thinking,
+      ...(getModelThinking(selected) ? { savedThinking: getModelThinking(selected)! } : {}),
+      ...(sessionDefaults.defaultThinking ? { sessionDefault: sessionDefaults.defaultThinking } : {}),
+    }).variant;
+    const selectedModel = selected && descriptor
+      ? { providerID: selected.providerID, modelID: selected.modelID, ...(thinking ? { variant: thinking } : {}) }
+      : undefined;
+    const profile = cfgSent.profile.kind === "none"
+      ? null
+      : selectedProfile
+        ? selectedProfile.id
+        : undefined;
+    const delivery = immediateFollowUpDelivery({
+      requested: "steer",
+      steering: runtimeFeatures?.capabilities.steering === true,
+      executionChanged: executionSelectionChanged(session, {
+        ...(selectedModel ? { model: selectedModel } : {}),
+        ...(cfgSent.agent ? { agent: cfgSent.agent } : {}),
+        ...(cfgSent.harness ? { harness: cfgSent.harness } : {}),
+      }),
+      hasAttachments: Boolean(item.attachments?.length),
+      hasCommand: Boolean(item.command),
+    });
+    setQueuedItems((items) => items.filter((candidate) => candidate.id !== item.id));
+    const echoId = beginPendingSend({
+      sessionId: target,
+      text: item.text,
+      attachments: item.attachments ?? [],
+      ...(selectedModel ? { model: selectedModel } : {}),
+      delivery,
+    });
     let reserved = false;
+    let promoted = false;
     try {
-      // Reserve before steering so turn completion cannot dispatch the same
-      // queue row while this request is promoting it.
+      // Reserve before promotion so turn completion cannot dispatch the same
+      // queue row while this request is sending it.
       const current = await api.queueEditStart(target, item.id);
       reserved = true;
-      const cfgSent = cfg;
-      const selectedProfileId = cfgSent.profile.kind === "id"
-        ? cfgSent.profile.id
-        : cfgSent.profile.kind === "inherit"
-          ? session?.agentProfileId ?? draftExecution.profileId
-          : undefined;
-      const selectedProfile = selectedProfileId
-        ? profiles.find((profile) => profile.id === selectedProfileId)
-        : undefined;
-      const selected = cfgSent.model
-        ?? (cfgSent.harness ? undefined : session?.model)
-        ?? (selectedProfile
-          ? { providerID: selectedProfile.providerID, modelID: selectedProfile.modelID }
-          : preferredModel);
-      const descriptor = selected && chatModels.find((candidate) => modelIdentityMatches(candidate, selected));
-      const thinking = resolveComposerThinking({
-        ...(descriptor ? { descriptor } : {}),
-        configThinking: cfgSent.thinking ?? selectedProfile?.thinking,
-        ...(getModelThinking(selected) ? { savedThinking: getModelThinking(selected)! } : {}),
-        ...(sessionDefaults.defaultThinking ? { sessionDefault: sessionDefaults.defaultThinking } : {}),
-      }).variant;
-      const selectedModel = selected && descriptor
-        ? { providerID: selected.providerID, modelID: selected.modelID, ...(thinking ? { variant: thinking } : {}) }
-        : undefined;
-      const profile = cfgSent.profile.kind === "none"
-        ? null
-        : selectedProfile
-          ? selectedProfile.id
-          : undefined;
       const ok = await sendMessage(current.text, selectedModel, cfgSent.agent, {
         targetSessionId: target,
-        delivery: "steer",
+        delivery,
         ...(cfgSent.harness ? { harness: cfgSent.harness } : {}),
         ...(current.attachments?.length ? { attachments: current.attachments } : {}),
         dismissPending: true,
         ...(profile !== undefined ? { agentProfileId: profile } : {}),
       });
-      if (!ok) return;
+      if (!ok) {
+        endPendingSend(echoId);
+        if (sessionIdRef.current === target) {
+          setQueuedItems((items) => items.some((candidate) => candidate.id === item.id)
+            ? items
+            : [...items, item]);
+        }
+        return;
+      }
+      promoted = true;
       consumeComposerConfig(target, cfgSent);
       if (sessionIdRef.current === target) setCfg(loadComposerConfig(target));
-      await api.queueRemove(target, current.id);
-      setQueuedItems((items) => items.filter((candidate) => candidate.id !== current.id));
+      await api.queueRemove(target, current.id).catch(() => {});
     } catch (error) {
+      if (promoted) return;
       const code = errorCodeOf(error);
+      endPendingSend(echoId);
       if (code === "not-found" || (reserved && code === "conflict")) {
         setQueuedItems((items) => items.filter((candidate) => candidate.id !== item.id));
       } else if (code !== "conflict") {
         setUiError(friendlyError(tr("common.error"), error));
+        if (sessionIdRef.current === target) {
+          setQueuedItems((items) => items.some((candidate) => candidate.id === item.id)
+            ? items
+            : [...items, item]);
+        }
       }
     } finally {
       // Also restarts queue dispatch if the turn ended while the row was held.
@@ -1299,7 +1362,10 @@ export default function Composer({
       }
       setSteeringQueuedId((current) => current === item.id ? null : current);
     }
-  }, [cfg, session?.model, preferredModel, chatModels, sessionDefaults.defaultThinking]);
+  }, [
+    cfg, session, preferredModel, chatModels, sessionDefaults.defaultThinking,
+    profiles, draftExecution.profileId, runtimeFeatures?.capabilities.steering,
+  ]);
 
   const followUp = getUiSettings().followUpBehavior;
   const emptySteerItem = working
@@ -1328,6 +1394,22 @@ export default function Composer({
       const editing = queueEdit;
       const targetScope = scopedDraftCacheKey(target);
       setQueueEditSaving(true);
+      const echoId = deliveryOverride === "interrupt"
+        ? beginPendingSend({
+          sessionId: target,
+          text: t,
+          attachments: [],
+          ...(session?.model ? { model: session.model } : {}),
+          delivery: "interrupt",
+        })
+        : null;
+      if (echoId) {
+        setQueueEdit(null);
+        setText(editing.draftBefore);
+        inputRef.current?.replaceText(editing.draftBefore);
+        saveDraft(target, editing.draftBefore);
+        promptHistoryNav.reset();
+      }
       const save = deliveryOverride === "interrupt"
         ? api.queueSendNow(target, editing.id, t)
         : api.queueEdit(target, editing.id, t);
@@ -1335,6 +1417,7 @@ export default function Composer({
         .then(() => {
           // The server updates the existing queue row, so it retains its
           // position and delivery metadata instead of becoming a new message.
+          if (echoId) return;
           if (queueEditRef.current?.id === editing.id) setQueueEdit(null);
           if (sessionIdRef.current !== target || scopedDraftCacheKey(target) !== targetScope) return;
           setText(editing.draftBefore);
@@ -1343,7 +1426,10 @@ export default function Composer({
           promptHistoryNav.reset();
           announce(tr("composer.queuedMessageValueUpdatedInPlace", { id: editing.id }));
         })
-        .catch((error) => setUiError(friendlyError("Couldn’t update queued message", error)))
+        .catch((error) => {
+          if (echoId) endPendingSend(echoId);
+          setUiError(friendlyError("Couldn’t update queued message", error));
+        })
         .finally(() => setQueueEditSaving(false));
       return;
     }
@@ -1387,7 +1473,7 @@ export default function Composer({
     // Submitting its edited prompt is the commit point: interrupt the stale
     // runtime leg so the server can branch from the rewound prefix before it
     // admits this replacement.
-    const delivery = working
+    const requestedDelivery = working
       ? rewindActive ? "interrupt" : deliveryOverride ?? getUiSettings().followUpBehavior
       : undefined;
     const cfgSent = cfg;
@@ -1436,6 +1522,19 @@ export default function Composer({
     // New-session creation already commits its harness before the first turn.
     // Only an existing session needs the staged submit-time route.
     const submittedHarness = target ? cfgSent.harness : undefined;
+    const delivery = requestedDelivery === "steer"
+      ? immediateFollowUpDelivery({
+          requested: "steer",
+          steering: runtimeFeatures?.capabilities.steering === true,
+          executionChanged: executionSelectionChanged(session, {
+            ...(sentModel ? { model: sentModel } : {}),
+            ...(cfgSent.agent ? { agent: cfgSent.agent } : {}),
+            ...(submittedHarness ? { harness: submittedHarness } : {}),
+          }),
+          hasAttachments: atts.length > 0,
+          hasCommand: Boolean(selectedNativeCommand),
+        })
+      : requestedDelivery;
     type StagedDraft = { revision: number; scopeKey: string; scope: PersistenceScope };
     const reliabilityScopeAtSend = clientPersistenceScope(activeProjectId ? { projectId: activeProjectId } : {});
     const stageTargetDraft = (targetSessionId: string, capturedScope: PersistenceScope): StagedDraft => {
@@ -1455,7 +1554,13 @@ export default function Composer({
     // the moment it lands. A queued prompt is excluded because it belongs to
     // the queue list, and a shell command produces no user turn at all.
     const echoId = command === null && delivery !== "queue"
-      ? beginPendingSend({ sessionId: target, text: t, attachments: atts })
+      ? beginPendingSend({
+        sessionId: target,
+        text: t,
+        attachments: atts,
+        ...(sentModel ? { model: sentModel } : {}),
+        ...(delivery === "steer" || delivery === "interrupt" ? { delivery } : {}),
+      })
       : null;
     // Emptying the input is itself a draft revision; anything typed after this
     // mark is a newer draft that a rejected send must not overwrite.
@@ -1568,6 +1673,7 @@ export default function Composer({
         ...(spawnHarnessId ? { harnessId: spawnHarnessId } : {}),
         ...(routeCatalog.harnessName ? { harnessName: routeCatalog.harnessName } : {}),
       });
+      markSendPending(true);
       void (async () => {
         const scopeStillCurrent = () => scopedDraftCacheKey(null) === scopedDraftCacheKey(null, reliabilityScopeAtSend)
           && getState().activeProjectId === activeProjectId;
@@ -1675,7 +1781,10 @@ export default function Composer({
             for (const attachment of atts) addAttachment(null, attachment);
           }
         })
-        .finally(() => finishSessionSpawn(spawnRequestId));
+        .finally(() => {
+          finishSessionSpawn(spawnRequestId);
+          markSendPending(false);
+        });
     }
     if (!target || command !== null) {
       clearComposerNow();
@@ -1690,7 +1799,7 @@ export default function Composer({
     session?.model, session?.status, session?.runtimeControl, preferredModel,
     sessionDefaults.defaultThinking, chatModels, creatingSession, newSessionTarget,
     newSessionAutoApprove, newSessionGoal, newSessionIntent, commandCatalog,
-    catalogHarnessId, routeCatalog.harnessName,
+    catalogHarnessId, routeCatalog.harnessName, runtimeFeatures?.capabilities.steering,
     draftExecution, profiles, activeProject?.defaults?.harness,
   ]);
 

@@ -6,6 +6,7 @@ import type {
   AttachmentRef,
   EditorLocation,
   ModelDescriptor,
+  ModelRef,
   Project,
   RuntimeFeaturesDto,
   RuntimeUnavailableReport,
@@ -120,6 +121,10 @@ export interface PendingSend {
   attachments: AttachmentRef[];
   /** Canonical tail captured at staging: only newer events can retire it. */
   afterSeq: number;
+  /** Composer selection at submit; chrome can switch to it before admission. */
+  model?: ModelRef;
+  /** How this prompt is being admitted; interrupt owns the activity dock immediately. */
+  delivery?: "steer" | "interrupt" | "normal";
 }
 
 // A new chat is intentionally not a session yet, so keep its work locally
@@ -1078,7 +1083,7 @@ let nextPendingSendId = 0;
 
 /** Stage the optimistic echo for a prompt that is being submitted now. */
 export function beginPendingSend(
-  input: Pick<PendingSend, "sessionId" | "text" | "attachments">,
+  input: Pick<PendingSend, "sessionId" | "text" | "attachments" | "model" | "delivery">,
 ): string {
   const id = `pending-send-${++nextPendingSendId}`;
   set({
@@ -1110,7 +1115,10 @@ export function endPendingSend(id: string): void {
 /** FIFO retirement: each canonical admission newer than the oldest echo's
  *  captured tail replaces exactly one echo. `queue/enqueued` counts because a
  *  normal send the server falls back to the queue produces that instead of a
- *  `user/message`. Older backfilled history can never retire anything. */
+ *  `user/message`. Interrupt parks the same text on the queue until abort
+ *  finishes — that enqueue must not retire the echo or the timeline blanks.
+ *  Steer persists a `user/message` before I/O; `delivery/steered` is only
+ *  confirmation and must not count as a second admission. */
 export function retiredPendingSends(
   pending: readonly PendingSend[],
   merged: readonly SessionEvent[],
@@ -1120,30 +1128,74 @@ export function retiredPendingSends(
   let landed = 0;
   for (let i = merged.length - 1; i >= 0 && merged[i]!.seq > oldest.afterSeq; i -= 1) {
     const type = merged[i]!.type;
-    if (type === "user/message" || type === "queue/enqueued") landed += 1;
+    if (type === "user/message") {
+      landed += 1;
+      continue;
+    }
+    if (type === "queue/enqueued") {
+      const delivery = (merged[i]!.data as { delivery?: unknown } | undefined)?.delivery;
+      if (delivery === "interrupt") continue;
+      landed += 1;
+    }
   }
   return pending.slice(0, landed);
 }
 
+/** Presentation overlay while a prompt is in flight: the session looks like
+ *  work already started, including a model the composer just selected. */
+export function overlaySessionProjection(
+  session: SessionProjection | null | undefined,
+  pendingSends: readonly PendingSend[],
+): SessionProjection | null | undefined {
+  if (!session) return session;
+  const pending = pendingSends.findLast((item) => item.sessionId === session.id);
+  if (!pending) return session;
+  if (
+    session.status === "archived"
+    || session.status === "failed"
+    || session.status === "epoch-pending"
+  ) return session;
+  return {
+    ...session,
+    status: "working",
+    ...(pending.model ? { model: pending.model } : {}),
+  };
+}
+
 const NO_PENDING_SENDS: PendingSend[] = [];
+
+type PendingSendSurface = Pick<AppState, "pendingSends" | "sessionSpawn" | "activeProjectId">;
 
 /** Echoes that belong to the surface currently on screen. An echo staged
  *  before first-send creation resolved belongs to the session that spawn is
  *  producing — including the brief window after the new id is activated but
  *  before the echo is bound to it, so the prompt never blinks out. */
+export function pendingSendsForSurface(
+  current: PendingSendSurface,
+  sessionId: string | null,
+): PendingSend[] {
+  if (current.pendingSends.length === 0) return NO_PENDING_SENDS;
+  const spawn = current.sessionSpawn;
+  const adoptUnbound = spawn !== null
+    && spawn.projectId === current.activeProjectId
+    && (spawn.sessionId === null || spawn.sessionId === sessionId);
+  const mine = current.pendingSends.filter((p) =>
+    p.sessionId === sessionId || (p.sessionId === null && adoptUnbound));
+  return mine.length === 0 ? NO_PENDING_SENDS : mine;
+}
+
+export function hasInFlightPrompt(current: PendingSendSurface, sessionId: string | null): boolean {
+  return pendingSendsForSurface(current, sessionId).length > 0;
+}
+
 export function usePendingSends(sessionId: string | null): PendingSend[] {
   const pendingSends = useStore((s) => s.pendingSends);
   const sessionSpawn = useStore((s) => s.sessionSpawn);
   const activeProjectId = useStore((s) => s.activeProjectId);
-  return useMemo(() => {
-    if (pendingSends.length === 0) return NO_PENDING_SENDS;
-    const adoptUnbound = sessionSpawn !== null
-      && sessionSpawn.projectId === activeProjectId
-      && (sessionSpawn.sessionId === null || sessionSpawn.sessionId === sessionId);
-    const mine = pendingSends.filter((p) =>
-      p.sessionId === sessionId || (p.sessionId === null && adoptUnbound));
-    return mine.length === 0 ? NO_PENDING_SENDS : mine;
-  }, [pendingSends, sessionSpawn, activeProjectId, sessionId]);
+  return useMemo(
+    () => pendingSendsForSurface({ pendingSends, sessionSpawn, activeProjectId }, sessionId),
+    [pendingSends, sessionSpawn, activeProjectId, sessionId],
+  );
 }
 
 export function isActiveSessionSpawning(current: AppState): boolean {

@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import Timeline from "../Timeline.tsx";
 import Composer from "../Composer.tsx";
 import QuestionCards from "../QuestionCards.tsx";
-import { focusComposer, isActiveSessionSpawning, setOverlay, setUiError, useActiveModel, usePendingSends, useStore } from "../../store.ts";
+import { focusComposer, isActiveSessionSpawning, overlaySessionProjection, setOverlay, setUiError, useActiveModel, usePendingSends, useStore } from "../../store.ts";
 import { openSession, prefetchSessionTail, restoreSession } from "../../init.ts";
 import { friendlyError } from "../../settings.ts";
 import { composerBlockedByArchive, sessionSurfaceKind } from "../../sessionSurface.ts";
@@ -229,11 +229,13 @@ function SessionLoading() {
  * activity zone says so instead of staying blank until the runtime answers.
  * It is a status, never a control — `aria-busy` with no abort affordance,
  * because there is nothing proven running to abort. */
-function SessionSpawnStatus({ spawning, resolvedHarnessId }: {
+function SessionSpawnStatus({ spawning, resolvedHarnessId, pendingModel }: {
   spawning: boolean;
   resolvedHarnessId?: string;
+  pendingModel?: { providerID: string; modelID: string };
 }) {
   const spawn = useStore((state) => state.sessionSpawn);
+  const models = useStore((state) => state.models);
   const status = spawning
     ? tr("workspace.builtinsurfaces.spawningAgent")
     : tr("workspace.builtinsurfaces.startingTurn");
@@ -244,7 +246,11 @@ function SessionSpawnStatus({ spawning, resolvedHarnessId }: {
     .map((part) => part[0]!.toUpperCase() + part.slice(1))
     .join(" ")
     || tr("timeline.agent");
-  const harnessLabel = `${harnessName} harness`;
+  const pendingLabel = pendingModel
+    ? models.find((item) => item.providerID === pendingModel.providerID && item.modelID === pendingModel.modelID)?.name
+      ?? `${pendingModel.providerID}/${pendingModel.modelID}`
+    : undefined;
+  const harnessLabel = pendingLabel ?? `${harnessName} harness`;
   return (
     <AgentStatusDock
       icon={harnessId
@@ -288,12 +294,14 @@ function SessionSurface() {
   const sessionId = useStore((s) => s.activeSessionId);
   const openingSessionId = useStore((s) => s.openingSessionId);
   const spawning = useStore(isActiveSessionSpawning);
-  const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
+  const sessionRecord = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
+  const pendingSends = usePendingSends(sessionId);
+  const session = overlaySessionProjection(sessionRecord, pendingSends) ?? null;
   const starterPickerOpen = useStore((s) => s.overlay === "starter-picker");
   const model = useActiveModel();
   // A submitted prompt with no turn behind it yet still owns the activity zone.
   // Once the runtime reports work, the canonical turn rows take it over.
-  const awaitingTurn = usePendingSends(sessionId).length > 0 && model.turn?.status !== "working";
+  const awaitingTurn = pendingSends.length > 0 && model.turn?.status !== "working";
   const gitStatus = useGitStatus(projectId, false);
   const starterContext = useMemo(
     () => starterContextFrom(gitStatus, starterSessionContext(model)),
@@ -306,8 +314,15 @@ function SessionSurface() {
   // Fresh state yields to pending prompts and permissions; an in-flight
   // canonical replay yields to the loading row (never a false fresh hero).
   // Archived sessions remain visible but replace the composer with the
-  // atomic restore action.
-  const kind = sessionSurfaceKind(sessionId, openingSessionId, model, session, spawning);
+  // atomic restore action. A first-send echo keeps the timeline surface so
+  // the composer is not remounted back onto the hero with the sent draft.
+  const kind = sessionSurfaceKind(
+    sessionId,
+    openingSessionId,
+    model,
+    session,
+    spawning || pendingSends.length > 0,
+  );
   const picker = starterPickerOpen ? (
     <StarterPicker
       context={starterContext}
@@ -358,6 +373,9 @@ function SessionSurface() {
               <SessionSpawnStatus
                 spawning={spawning}
                 {...(session?.resolvedHarnessId ? { resolvedHarnessId: session.resolvedHarnessId } : {})}
+                {...(pendingSends[pendingSends.length - 1]?.model
+                  ? { pendingModel: pendingSends[pendingSends.length - 1]!.model }
+                  : {})}
               />
             )}
             <Composer />

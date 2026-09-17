@@ -9,7 +9,7 @@ import {
   type TaskProgressEvent,
 } from "../mobileTaskProgress.ts";
 import { resolveSessionStatus } from "../sessionStatus.ts";
-import { useActiveModel, useStore } from "../store.ts";
+import { useActiveModel, usePendingSends, overlaySessionProjection, useStore } from "../store.ts";
 import { firstUserTextCached, lastUserTextCached } from "../utils.ts";
 import { Icon } from "../icons.tsx";
 import { Popover } from "./ui/index.ts";
@@ -110,7 +110,9 @@ export default function DesktopSessionStatus({ showTrigger = true }: { showTrigg
   const models = useStore((state) => state.models);
   const activeSessionId = useStore((state) => state.activeSessionId);
   const runtimeFeatures = useStore((state) => activeSessionId ? state.runtimeFeatures[activeSessionId] : undefined);
-  const session = sessions.find((item) => item.id === activeSessionId) ?? null;
+  const sessionRecord = sessions.find((item) => item.id === activeSessionId) ?? null;
+  const pendingSends = usePendingSends(activeSessionId);
+  const session = overlaySessionProjection(sessionRecord, pendingSends) ?? null;
   const model = useActiveModel();
   const recent = useMemo(() => recentSessionsForIsland(sessions, activeSessionId ?? undefined, 5), [sessions, activeSessionId]);
   const status = session ? resolveSessionStatus(session) : null;
@@ -126,7 +128,8 @@ export default function DesktopSessionStatus({ showTrigger = true }: { showTrigg
   const completedTasks = tasks.filter((task) => task.status === "done").length;
   const failedTasks = tasks.filter((task) => task.status === "failed").length;
   const prompt = lastUserTextCached(session ? events[session.id] : undefined);
-  const activeModel = model.contextUsage?.model ?? model.turn?.model ?? session?.model;
+  const pendingModel = pendingSends[pendingSends.length - 1]?.model;
+  const activeModel = pendingModel ?? model.contextUsage?.model ?? model.turn?.model ?? session?.model;
   const descriptor = activeModel ? models.find((item) => item.providerID === activeModel.providerID && item.modelID === activeModel.modelID) : undefined;
   const telemetryStatus = contextTelemetryStatus(runtimeFeatures?.telemetry);
   const gauge = contextGaugeForTelemetry(model, descriptor?.context, session?.contextWindow ?? null, telemetryStatus);

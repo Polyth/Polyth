@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useGitStatus, refreshGitStatus } from "./gitStatusStore.ts";
 import { selectPendingChanges, sessionEditedPaths } from "../../../apps/web/src/pendingChanges.ts";
-import { openChanges, setUiError, useActiveModel, useStore } from "../../../apps/web/src/store.ts";
+import {
+  openChanges,
+  overlaySessionProjection,
+  setUiError,
+  useActiveModel,
+  usePendingSends,
+  useStore,
+} from "../../../apps/web/src/store.ts";
 import { friendlyError } from "../../../apps/web/src/settings.ts";
 import { fmtDuration } from "../../../apps/web/src/format.ts";
 import { resolveModelPresentation } from "@polyth/contracts/model-presentation";
@@ -90,8 +97,11 @@ function DiffTotals({ stats }: { stats: DiffLineStats }) {
 
 export default function PendingChangesBar() {
   const model = useActiveModel();
-  const session = useStore((state) =>
+  const sessionRecord = useStore((state) =>
     state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null);
+  const pendingSends = usePendingSends(sessionRecord?.id ?? null);
+  const session = overlaySessionProjection(sessionRecord, pendingSends) ?? null;
+  const pendingSend = pendingSends[pendingSends.length - 1];
   const models = useStore((state) => state.models);
   const projectId = useStore((state) => state.activeProjectId);
   const repoRoot = useStore((state) => {
@@ -204,7 +214,8 @@ export default function PendingChangesBar() {
       : tr("pendingchangesbar.showMoreFilesValue", { count: overflow });
 
   if (working) {
-    const modelRef = model.turn?.model ?? session?.model;
+    const replacingTurn = pendingSend?.delivery === "interrupt";
+    const modelRef = pendingSend?.model ?? model.turn?.model ?? session?.model;
     const runtimeHarnessId = model.turn?.harnessId ?? session?.resolvedHarnessId;
     // ACP runtimes such as Cursor can omit the model from `turn/started` when
     // native Auto is active. Otherwise use the same harness-aware, human
@@ -231,15 +242,19 @@ export default function PendingChangesBar() {
     const toolName = activeTool?.kind === "tool"
       ? activeTool.title ?? activeTool.tool.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
       : undefined;
-    const action = activeTask?.text
-      ?? activeSubagent?.currentTask
-      ?? (toolName
-        ? `${toolName}${conciseToolDetail ? ` · ${conciseToolDetail}` : ""}`
-        : latestAssistant?.kind === "assistant" && latestAssistant.reasoning && !latestAssistant.text
-          ? tr("timeline.thinking")
-          : activityLabels[latestAssistant?.kind === "assistant" && latestAssistant.text ? 2 : 0]
-            ?? tr("workspace.builtinsurfaces.working"));
-    const elapsed = model.turn?.startedAt === undefined ? null : fmtDuration(now - model.turn.startedAt);
+    const action = replacingTurn
+      ? tr("workspace.builtinsurfaces.startingTurn")
+      : activeTask?.text
+        ?? activeSubagent?.currentTask
+        ?? (toolName
+          ? `${toolName}${conciseToolDetail ? ` · ${conciseToolDetail}` : ""}`
+          : latestAssistant?.kind === "assistant" && latestAssistant.reasoning && !latestAssistant.text
+            ? tr("timeline.thinking")
+            : activityLabels[latestAssistant?.kind === "assistant" && latestAssistant.text ? 2 : 0]
+              ?? tr("workspace.builtinsurfaces.working"));
+    const elapsed = replacingTurn || model.turn?.startedAt === undefined
+      ? null
+      : fmtDuration(now - model.turn.startedAt);
     return (
       <AgentStatusDock
         icon={<ProviderLogo

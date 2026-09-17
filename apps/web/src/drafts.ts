@@ -11,6 +11,7 @@ import { saveDraft } from "./utils.ts";
 import { hydratePendingAttachments, seedAttachments } from "./attachments.ts";
 import { shouldApplySeed, type SeedRecord } from "./messageActions.ts";
 import { hydrateScopedDraftRecord, loadScopedDraftRecord, updateScopedDraftRecord } from "./draftRecord.ts";
+import { stripRecoveryContextBlocks } from "./recoveryDisplay.ts";
 
 // Marker provenance belongs to the same trusted namespace as the draft text.
 export function loadSeedRecord(sessionId: string): SeedRecord | null {
@@ -54,4 +55,10 @@ export function discardComposerSeed(sessionId: string): void {
   saveDraft(sessionId, "");
   seedAttachments(sessionId, []);
   clearSeedRecord(sessionId);
+}
+
+/** Live composer text. An in-flight submit already owns an echo; the staged
+ *  recovery copy must not reappear if this composer remounts mid-admission. */
+export function visibleComposerDraft(stored: string, inFlightPrompt: boolean): string {
+  return inFlightPrompt ? "" : stripRecoveryContextBlocks(stored);
 }

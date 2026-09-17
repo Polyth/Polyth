@@ -49,7 +49,9 @@ export type SessionSurfaceKind = "loading" | "hero" | "session";
  *  claimed), an otherwise-fresh surface presents as loading — never as the
  *  fresh-session hero — so a delayed replay cannot flash a false empty state
  *  over a populated session (UX-TIMELINE-LAYOUT-01 §8, initial replay). A
- *  visible session with content stays visible during a switch, as before. */
+ *  visible session with content stays visible during a switch, as before.
+ *  Callers also pass `true` for an in-flight first-send echo so the composer
+ *  is not remounted back onto the empty hero while that prompt is on screen. */
 export function sessionSurfaceKind(
   sessionId: string | null,
   openingSessionId: string | null,

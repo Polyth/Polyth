@@ -1384,12 +1384,13 @@ function blankAssistant(m: RenderMessage): boolean {
 
 /** The fresh-turn anchor keeps continuity with the immediately preceding
  * assistant answer. Do not reach across another user turn when unusual slot
- * or recovery rows sit between messages. */
+ * or recovery rows sit between messages. Live activity is the current answer
+ * while a turn is still running, so it counts as that preceding surface. */
 function previousAssistantRow(prompt: HTMLElement): HTMLElement | null {
   for (let row = prompt.previousElementSibling; row; row = row.previousElementSibling) {
     if (!(row instanceof HTMLElement)) continue;
     if (row.matches(".msg.user, .github-conflict-card")) return null;
-    if (row.matches(".msg.assistant")) return row;
+    if (row.matches(".msg.assistant, .activity-group, .activity-live-stage")) return row;
   }
   return null;
 }
@@ -1438,6 +1439,7 @@ export default function Timeline({
     .find((message) => message.kind === "user" && !message.undone);
   const pendingSends = usePendingSends(sessionId);
   const newestPendingSendId = pendingSends[pendingSends.length - 1]?.id ?? null;
+  const newestPendingDelivery = pendingSends[pendingSends.length - 1]?.delivery;
   useSlotVersion();
   // L13 windowing: only the last `limit` rows render (see timelineWindow.ts).
   const initialLimit = initialTimelineWindow(
@@ -1484,6 +1486,10 @@ export default function Timeline({
   // the first model.version bump confirms the agent has started — the
   // useLayoutEffect scroll is authoritative until then.
   const freshTurnPending = useRef(false);
+  // A follow-up sent into a live/aborted turn must stay pinned to the tail.
+  // The fresh-turn sheet would scroll the current work off-screen and look
+  // like the transcript was cleared until admission returns.
+  const followUpSendRef = useRef(false);
   const observedPrompt = useRef({
     sessionId,
     seq: latestUserMessage?.eventSeq ?? 0,
@@ -1522,6 +1528,7 @@ export default function Timeline({
     scrollbarPointer.current = false;
     expectedScrollTop.current = null;
     lastScrollTop.current = el?.scrollTop ?? 0;
+    followUpSendRef.current = false;
     setShowJump(stored !== null && !stored.atBottom);
   }
 
@@ -1586,7 +1593,9 @@ export default function Timeline({
     const paddingTop = Number.parseFloat(getComputedStyle(el).paddingTop) || 0;
     const promptContentTop = el.scrollTop + row.top - port.top;
     const previousAssistant = previousAssistantRow(prompt);
-    const answerBubble = previousAssistant?.querySelector<HTMLElement>(":scope > .bubble") ?? null;
+    const answerBubble = previousAssistant?.matches(".msg.assistant")
+      ? previousAssistant.querySelector<HTMLElement>(":scope > .bubble")
+      : previousAssistant;
     const bubbleRect = answerBubble?.getBoundingClientRect();
     const bubbleStyle = answerBubble ? getComputedStyle(answerBubble) : null;
     const fontSize = Number.parseFloat(bubbleStyle?.fontSize ?? "") || 16;
@@ -1627,35 +1636,57 @@ export default function Timeline({
       turnSheetPromptId.current = null;
       setTurnSheetPadding(0);
       freshTurnPending.current = false;
+      followUpSendRef.current = false;
       return;
     }
     if (!latestUserMessage || latestSeq <= observedPrompt.current.seq) return;
     observedPrompt.current = { sessionId, seq: latestSeq };
-    turnSheetPromptId.current = latestUserMessage.id;
     readerIntent.current = null;
     scrollbarPointer.current = false;
     readerDetached.current = false;
     atBottom.current = true;
     setShowJump(false);
+    if (followUpSendRef.current) {
+      followUpSendRef.current = false;
+      turnSheetPromptId.current = null;
+      setTurnSheetPadding(0);
+      scrollToTail();
+      return;
+    }
+    turnSheetPromptId.current = latestUserMessage.id;
     syncTurnSheet(true);
-  }, [sessionId, latestUserMessage?.id, latestUserMessage?.eventSeq, setTurnSheetPadding, syncTurnSheet]);
+  }, [sessionId, latestUserMessage?.id, latestUserMessage?.eventSeq, setTurnSheetPadding, syncTurnSheet, scrollToTail]);
 
   // A submitted prompt opens its fresh-turn sheet the moment it is submitted,
   // not when admission returns. The canonical row inherits the same sheet with
   // identical geometry moments later, so the reader sees one settle, not two.
+  // Follow-ups into a live turn stay at the tail: the echo (and then the
+  // activity dock) appear in place instead of jumping the transcript away.
   useLayoutEffect(() => {
     if (!newestPendingSendId) return;
-    turnSheetPromptId.current = newestPendingSendId;
+    const liveFollowUp = newestPendingDelivery === "steer" || newestPendingDelivery === "interrupt"
+      || model.turn?.status === "working"
+      || model.turn?.status === "aborted";
     readerIntent.current = null;
     scrollbarPointer.current = false;
     readerDetached.current = false;
     atBottom.current = true;
     setShowJump(false);
+    if (liveFollowUp) {
+      followUpSendRef.current = true;
+      turnSheetPromptId.current = null;
+      setTurnSheetPadding(0);
+      scrollToTail();
+      freshTurnPending.current = true;
+      return;
+    }
+    followUpSendRef.current = false;
+    turnSheetPromptId.current = newestPendingSendId;
     syncTurnSheet(true);
     // The scroll is now correct. Suppress refresh() until the first
     // model.version bump so chatMotion's FLIP transforms cannot override it.
     freshTurnPending.current = turnSheetPromptId.current !== null;
-  }, [newestPendingSendId, syncTurnSheet]);
+  }, [newestPendingSendId, newestPendingDelivery, model.turn?.status, syncTurnSheet, scrollToTail, setTurnSheetPadding]);
 
   // Model commits cover durable/streamed rows. Resize observation additionally
   // covers local disclosure animation and smoothed text renders, so an open
@@ -1937,6 +1968,9 @@ export default function Timeline({
   // limits stay inline because their resume/cancel state outlives a toast.
   useEffect(() => {
     if (!transientTurnKey || !turn) return;
+    // Send-now / steer-fallback aborts the current turn on purpose. The next
+    // prompt is already on screen; a "turn aborted" toast is a false error.
+    if (turn.status === "aborted" && pendingSends.length > 0) return;
     setUiError(
       turn.status === "aborted" ? tr("timeline.turnAborted") : tr("timeline.lastTurnFailed"),
       turn.status === "failed" && lastUser && sessionId ? {
@@ -1952,7 +1986,7 @@ export default function Timeline({
       } : null,
       transientTurnKey,
     );
-  }, [transientTurnKey, turn, lastUser, sessionId]);
+  }, [transientTurnKey, turn, lastUser, sessionId, pendingSends.length]);
   useEffect(() => {
     const el = ref.current;
     const update = () => {

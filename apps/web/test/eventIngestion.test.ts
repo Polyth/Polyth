@@ -5,7 +5,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { JsonObject, SessionEvent } from "@polyth/contracts";
 import { buildModel, cloneModel, createModelCache, reduceEvent } from "../src/reduce.ts";
-import { applyEvent, applyEvents, beginPendingSend, bindPendingSend, endPendingSend, getState, lastSeq, seedSessionCache, subscribeSessionEvents, subscribeStore, upsertSession } from "../src/store.ts";
+import { applyEvent, applyEvents, beginPendingSend, bindPendingSend, endPendingSend, getState, hasInFlightPrompt, lastSeq, overlaySessionProjection, pendingSendsForSurface, seedSessionCache, subscribeSessionEvents, subscribeStore, upsertSession } from "../src/store.ts";
+import { visibleComposerDraft } from "../src/drafts.ts";
 import { titleFromPrompt } from "../src/format.ts";
 
 function mk(sessionId: string, seq: number, type = "user/message", data: JsonObject = {}): SessionEvent {
@@ -344,6 +345,65 @@ test("two rapid pending sends retire one per canonical admission, oldest first",
   assert.equal(first.length > 0, true);
 });
 
+test("an interrupt enqueue keeps the echo until the replacement user message lands", () => {
+  seedSession("interrupt-s");
+  applyEvents([mk("interrupt-s", 1, "user/message", { text: "older prompt" })]);
+  beginPendingSend({
+    sessionId: "interrupt-s",
+    text: "send now",
+    attachments: [],
+    model: { providerID: "openai", modelID: "gpt-5" },
+  });
+
+  applyEvents([mk("interrupt-s", 2, "queue/enqueued", {
+    queueId: "q-interrupt",
+    text: "send now",
+    delivery: "interrupt",
+  })]);
+  applyEvents([mk("interrupt-s", 3, "turn/stopped", { turnId: "t1", reason: "aborted" })]);
+  assert.equal(getState().pendingSends.filter((p) => p.sessionId === "interrupt-s").length, 1);
+
+  applyEvents([mk("interrupt-s", 4, "user/message", { text: "send now" })]);
+  assert.equal(getState().pendingSends.filter((p) => p.sessionId === "interrupt-s").length, 0);
+});
+
+test("a steered admission retires the echo on the persisted user message", () => {
+  seedSession("steer-s");
+  beginPendingSend({ sessionId: "steer-s", text: "go left", attachments: [] });
+  applyEvents([mk("steer-s", 1, "user/message", { text: "go left", delivery: "steer" })]);
+  assert.equal(getState().pendingSends.filter((p) => p.sessionId === "steer-s").length, 0);
+
+  beginPendingSend({ sessionId: "steer-s", text: "later", attachments: [] });
+  applyEvents([mk("steer-s", 2, "delivery/steered", { text: "go left" })]);
+  assert.deepEqual(
+    getState().pendingSends.filter((p) => p.sessionId === "steer-s").map((p) => p.text),
+    ["later"],
+  );
+});
+
+test("pending send overlays working status and the selected model", () => {
+  seedSession("overlay-s");
+  const session = getState().sessions.find((item) => item.id === "overlay-s")!;
+  assert.equal(overlaySessionProjection(session, [])?.status, "idle");
+  const overlaid = overlaySessionProjection(session, [{
+    id: "pending-send-overlay",
+    sessionId: "overlay-s",
+    text: "next",
+    attachments: [],
+    afterSeq: 0,
+    model: { providerID: "anthropic", modelID: "opus" },
+  }]);
+  assert.equal(overlaid?.status, "working");
+  assert.deepEqual(overlaid?.model, { providerID: "anthropic", modelID: "opus" });
+  assert.equal(overlaySessionProjection({ ...session, status: "archived" }, [{
+    id: "pending-send-overlay",
+    sessionId: "overlay-s",
+    text: "next",
+    attachments: [],
+    afterSeq: 0,
+  }])?.status, "archived");
+});
+
 test("a rejected send drops its echo without waiting for an event", () => {
   seedSession("reject-s");
   const echo = beginPendingSend({ sessionId: "reject-s", text: "nope", attachments: [] });
@@ -361,4 +421,36 @@ test("first-send creation binds its echo to the new session's real tail", () => 
   assert.equal(getState().pendingSends.some((p) => p.id === echo), true);
   applyEvents([mk("bound-s", 8, "user/message", { text: "first prompt" })]);
   assert.equal(getState().pendingSends.some((p) => p.id === echo), false);
+});
+
+test("an unbound first-send echo belongs to the spawning surface and holds the composer empty", () => {
+  const echo = {
+    id: "pending-send-hold",
+    sessionId: null,
+    text: "Diagnose the git problem",
+    attachments: [],
+    afterSeq: 0,
+  };
+  const spawning = {
+    pendingSends: [echo],
+    sessionSpawn: { requestId: 1, projectId: "p1", sessionId: null as string | null },
+    activeProjectId: "p1",
+  };
+  assert.equal(hasInFlightPrompt(spawning, null), true);
+  assert.equal(hasInFlightPrompt(spawning, "created-s"), true, "the activated id still owns the unbound echo");
+  assert.equal(
+    visibleComposerDraft(echo.text, hasInFlightPrompt(spawning, "created-s")),
+    "",
+    "the staged recovery copy must not reappear in the remounted composer",
+  );
+
+  const bound = {
+    ...spawning,
+    pendingSends: [{ ...echo, sessionId: "created-s" }],
+    sessionSpawn: { ...spawning.sessionSpawn, sessionId: "created-s" },
+  };
+  assert.equal(hasInFlightPrompt(bound, "created-s"), true);
+  assert.equal(hasInFlightPrompt(bound, "other-s"), false);
+  assert.equal(visibleComposerDraft("unrelated draft", false), "unrelated draft");
+  assert.equal(pendingSendsForSurface(bound, "created-s")[0]?.id, echo.id);
 });

@@ -64,11 +64,18 @@ test("spawning is an above-composer activity status and never replaces the compo
   // A submitted prompt owns the same zone until its turn is real; the dock
   // stays a passive status (no onClick) in both cases.
   assert.match(surface, /startingTurn[\s\S]*<AgentStatusDock/);
-  assert.match(surface, /awaitingTurn = usePendingSends\(sessionId\)\.length > 0 && model\.turn\?\.status !== "working"/);
+  assert.match(surface, /const pendingSends = usePendingSends\(sessionId\)/);
+  assert.match(surface, /awaitingTurn = pendingSends\.length > 0 && model\.turn\?\.status !== "working"/);
+  assert.match(surface, /spawning \|\| pendingSends\.length > 0/);
+  assert.match(surface, /pendingModel/);
   assert.match(surface, /ProviderLogo providerID=\{harnessId\}[\s\S]*model=\{harnessLabel\}/);
+  assert.match(composer, /immediateFollowUpDelivery/);
+  assert.match(composer, /beginPendingSend\(\{/);
   assert.doesNotMatch(composer, /if \(creatingSession\)\s*\{\s*return/);
   assert.match(composer, /aria-busy=\{creatingSession \|\| undefined\}/);
   assert.match(composer, /!session && !creatingSession && <SessionContextBar/);
+  assert.match(composer, /visibleComposerDraft\(/);
+  assert.match(composer, /hasInFlightPrompt\(getState\(\), session\?\.id \?\? null\)/);
 });
 
 test("agent status docks use compact borderless glass chrome", () => {
@@ -263,6 +270,8 @@ test("task plans remain represented by the status surfaces", () => {
   const pendingChanges = read("../../../packages/git/widgets/PendingChangesBar.tsx");
   assert.match(pendingChanges, /const activeTask = model\.tasks\?\.items\.find/);
   assert.match(pendingChanges, /activeTask\?\.text/);
+  assert.match(pendingChanges, /pendingSend\?\.model/);
+  assert.match(pendingChanges, /replacingTurn/);
   assert.match(pendingChanges, /toggleSessionStatusPopover\(event\.currentTarget\)/);
   assert.doesNotMatch(pendingChanges, /openWorkspacePane\("events"\)/);
 });

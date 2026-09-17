@@ -113,6 +113,18 @@ test("display text removes leading internal recovery blocks but keeps the prompt
   assert.equal((model.messages[0] as { text: string }).text, "continue");
 });
 
+test("a steered follow-up is visible as the user prompt it stands in for", () => {
+  const model = buildModel([
+    ev("user/message", { text: "investigate" }),
+    ev("turn/started", { turnId: "t1" }),
+    ev("user/message", { text: "look at the queue instead", delivery: "steer" }),
+    ev("delivery/steered", { text: "look at the queue instead" }),
+  ]);
+  assert.equal(model.messages.length, 2);
+  assert.equal(model.messages[1]?.kind, "user");
+  assert.equal((model.messages[1] as { text: string }).text, "look at the queue instead");
+});
+
 test("assistant chunks stream into one message and finalize on assistant/message", () => {
   const events = [
     ev("user/message", { text: "hi" }),
@@ -1793,6 +1805,11 @@ test("session surface: unresolved replay is loading, never the fresh-session her
   assert.equal(sessionSurfaceKind(null, null, fresh, null), "hero");
   assert.equal(sessionSurfaceKind("s1", null, fresh, idle), "hero");
   assert.equal(sessionSurfaceKind(null, null, fresh, null, true), "session");
+  assert.equal(
+    sessionSurfaceKind("s1", null, fresh, idle, true),
+    "session",
+    "an in-flight first-send echo keeps the timeline instead of remounting the hero composer",
+  );
 
   // Any in-flight open turns a would-be hero into the loading row — the boot
   // deep-link case has no active session yet, the reload case reopens its own.

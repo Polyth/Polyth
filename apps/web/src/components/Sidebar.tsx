@@ -5,7 +5,7 @@ import {
 } from "react";
 import {
   getState, useStore, activateProject, openWorkspacePane, openWorktreeSessionDialog, setOverlay,
-  setSidebarOpen, setUiError, startNewSession,
+  overlaySessionProjection, setSidebarOpen, setUiError, startNewSession,
 } from "../store.ts";
 import {
   getSyncStatus, reconnectSync, refreshSessions, removeProject, renameProject, subscribeSyncStatus,
@@ -98,7 +98,12 @@ export default function Sidebar() {
   const projects = registry.projects;
   const activeProjectId = useStore((s) => s.activeProjectId);
   const activeSessionId = useStore((s) => s.activeSessionId);
-  const sessions = useStore((s) => s.sessions);
+  const sessionsRaw = useStore((s) => s.sessions);
+  const pendingSends = useStore((s) => s.pendingSends);
+  const sessions = useMemo(
+    () => sessionsRaw.map((session) => overlaySessionProjection(session, pendingSends) ?? session),
+    [sessionsRaw, pendingSends],
+  );
   const drawerOpen = useStore((s) => s.sidebarOpen);
   // Honest presentation state for app.nav contributions: on desktop the
   // sidebar is always expanded regardless of the mobile drawer flag.

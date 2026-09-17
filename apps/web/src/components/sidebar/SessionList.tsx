@@ -8,7 +8,7 @@ import {
 import type { SessionProjection, WorkspaceLabel } from "@polyth/contracts";
 import { api, errorChangesOf, errorCodeOf, type Worktree } from "@polyth/session/web-api";
 import {
-  getState, setSidebarOpen, setUiError, startNewSession, useStore,
+  getState, overlaySessionProjection, setSidebarOpen, setUiError, startNewSession, useStore,
 } from "../../store.ts";
 import { openSession, prefetchSessionTail, deleteSession, restoreSession, forkSession, refreshSessions } from "../../init.ts";
 import { markSessionPerformance } from "../../sessionPerformance.ts";
@@ -618,7 +618,12 @@ export default function SessionList({
   searchProjectName?: string;
   dateFilter?: SessionDateFilter;
 }) {
-  const sessions = useStore((st) => st.sessions);
+  const sessionsRaw = useStore((st) => st.sessions);
+  const pendingSends = useStore((st) => st.pendingSends);
+  const sessions = useMemo(
+    () => sessionsRaw.map((session) => overlaySessionProjection(session, pendingSends) ?? session),
+    [sessionsRaw, pendingSends],
+  );
   const project = useStore((st) => st.projectRegistry.projects.find((candidate) => candidate.id === projectId));
   const activeSessionId = useStore((st) => st.activeSessionId);
   const openingSessionId = useStore((st) => st.openingSessionId);
