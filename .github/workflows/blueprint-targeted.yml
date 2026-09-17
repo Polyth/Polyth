@@ -34,6 +34,7 @@ jobs:
             packages/plugins/test/authSocketRevocation.test.ts \
             packages/plugins/test/grantRevocationRpc.test.ts \
             packages/plugins/test/lifecycleAuth.test.ts \
+            packages/plugins/test/plugins.test.ts \
             packages/plugins/test/spaceSecretVault.test.ts \
             packages/secure-safe/test/spaceContextRouting.test.ts \
             packages/secure-safe/test/spaceOwnership.test.ts \
