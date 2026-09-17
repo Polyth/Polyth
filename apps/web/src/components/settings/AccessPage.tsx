@@ -10,6 +10,13 @@ import {
 import { authJson, fetchAuthStatus } from "../../authClient.ts";
 import type { BrowserAuthStatus } from "../../authBootstrap.ts";
 import {
+  browserSupportsPasskeys,
+  listPasskeys,
+  registerPasskey,
+  removePasskey,
+  type PasskeySummary,
+} from "../../passkeys.ts";
+import {
   grantSpaceMember,
   loadCurrentSpaceAccess,
   type CurrentSpaceAccess,
@@ -55,6 +62,7 @@ const authError = (response: Response, body: Record<string, unknown>): Error => 
 export default function AccessPage() {
   const [status, setStatus] = useState<BrowserAuthStatus | null>(null);
   const [devices, setDevices] = useState<AccessDevice[]>([]);
+  const [passkeys, setPasskeys] = useState<PasskeySummary[]>([]);
   const [accounts, setAccounts] = useState<AccountChoice[]>([]);
   const [currentAccountId, setCurrentAccountId] = useState("");
   const [canManage, setCanManage] = useState(false);
@@ -65,6 +73,8 @@ export default function AccessPage() {
   const [newPassword, setNewPassword] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [password, setPassword] = useState("");
+  const [passkeyName, setPasskeyName] = useState("");
+  const [passkeyPassword, setPasskeyPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [notice, setNotice] = useState("");
@@ -82,6 +92,7 @@ export default function AccessPage() {
       setCanManage(nextAccounts.canManage);
       setSpaceAccess(nextSpaceAccess);
       void browserSessions().then(setDevices).catch(() => setDevices([]));
+      void listPasskeys().then(setPasskeys).catch(() => setPasskeys([]));
     }).catch((e) => setErr(e instanceof Error ? e.message : String(e)));
   }, []);
   useEffect(() => { refresh(); }, [refresh]);
@@ -146,6 +157,37 @@ export default function AccessPage() {
       setErr(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
   };
+  const addPasskey = async () => {
+    if (busy || !passkeyName.trim() || !passkeyPassword) return;
+    setBusy(true); setErr(""); setNotice("");
+    try {
+      await reauthenticate(passkeyPassword);
+      const added = await registerPasskey(passkeyName.trim());
+      setPasskeyName("");
+      setPasskeyPassword("");
+      setNotice(`${added.name} is now available for passwordless sign-in.`);
+      refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); }
+  };
+  const removeRegisteredPasskey = async (passkey: PasskeySummary) => {
+    if (!passkeyPassword) {
+      setErr("Enter your current password under Passkeys before removing a passkey.");
+      return;
+    }
+    if (!await confirmAlert(`Remove ${passkey.name}? This credential will stop signing in to this account.`, { title: "Remove passkey", confirmLabel: "Remove" })) return;
+    setBusy(true); setErr(""); setNotice("");
+    try {
+      await reauthenticate(passkeyPassword);
+      await removePasskey(passkey);
+      setPasskeyPassword("");
+      setNotice(`${passkey.name} was removed. Other sign-in methods remain unchanged.`);
+      refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); }
+  };
   const disable = async (account: AccountChoice) => {
     if (!managementPassword) {
       setErr("Enter your current password under Account management before disabling an account.");
@@ -168,6 +210,7 @@ export default function AccessPage() {
   if (!status) return <><PageHead title={tr("settings.accesspage.access")} /><EmptyState title={tr("common.loading")} busy /></>;
 
   const current = accounts.find((account) => account.id === currentAccountId);
+  const passkeysAvailable = status.methods?.includes("passkey") === true && browserSupportsPasskeys();
 
   return (
     <>
@@ -244,6 +287,32 @@ export default function AccessPage() {
           <Button size="sm" busy={busy} disabled={!currentPassword || password.length < 12} onClick={() => void savePassword()}>Save</Button>
         </div>
       </Row>
+      {passkeysAvailable ? (
+        <>
+          <Row label="Add passkey" hint="Passkeys are device-backed, phishing-resistant sign-in credentials. Current-password confirmation elevates this session before registration." itemId="access.passkeys">
+            <div className="set-row-control">
+              <TextInput uiSize="sm" value={passkeyName} placeholder="Passkey name" aria-label="Passkey name" onChange={(event) => setPasskeyName(event.target.value)} />
+              <TextInput uiSize="sm" type="password" value={passkeyPassword} autoComplete="current-password" placeholder="Current password" aria-label="Passkey current password" onChange={(event) => setPasskeyPassword(event.target.value)} />
+              <Button size="sm" busy={busy} disabled={!passkeyName.trim() || !passkeyPassword} onClick={() => void addPasskey()}>Add passkey</Button>
+            </div>
+          </Row>
+          {passkeys.length === 0
+            ? <Row label="Registered passkeys" hint="No passkeys are registered for this account."><span className="tag">None</span></Row>
+            : passkeys.map((passkey) => (
+              <Row
+                key={passkey.id}
+                label={passkey.name}
+                hint={`Created ${when(passkey.createdAt)}${passkey.lastUsedAt ? ` · last used ${when(passkey.lastUsedAt)}` : " · not used yet"}`}
+              >
+                <Button size="sm" variant="danger" disabled={busy} onClick={() => void removeRegisteredPasskey(passkey)}>Remove</Button>
+              </Row>
+            ))}
+        </>
+      ) : (
+        <Row label="Passkeys" hint="This browser or server does not expose WebAuthn passkeys for the current origin.">
+          <span className="tag">Unavailable</span>
+        </Row>
+      )}
 
       <div className="set-page-head"><h3>{tr("settings.accesspage.rememberedDevices")}</h3></div>
       {devices.length === 0
