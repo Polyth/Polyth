@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { RouteHandler, SecureSafeService } from "@polyth/contracts";
+import type { RouteHandler, RouteRequest, SecureSafeService } from "@polyth/contracts";
 import {
   createPluginRegistry,
   localOnlyRemoteAccess,
@@ -8,6 +8,7 @@ import {
   type ServerPackage,
   type ServerPackageHost,
 } from "./index.ts";
+import { assertDeploymentPackageMutator } from "./lifecycleAuth.ts";
 import { managedPluginRoutes } from "./managedPluginRoutes.ts";
 import { opencodePluginRoutes } from "./opencodePluginRoutes.ts";
 import { pluginAssetRoutes } from "./pluginAssetRoutes.ts";
@@ -18,6 +19,25 @@ import { bindTrustedServerSpaceGate } from "./trustedServerEntry.ts";
 export { managedPluginRoutes } from "./managedPluginRoutes.ts";
 export { opencodePluginRoutes } from "./opencodePluginRoutes.ts";
 export { pluginAssetRoutes } from "./pluginAssetRoutes.ts";
+
+/**
+ * A trusted Node server entry has deployment-wide execution authority even
+ * though enablement is recorded per Space. Starting or stopping that runtime
+ * therefore requires the instance owner; ordinary sandbox/UI package lifecycle
+ * remains a Space-admin operation inside managedPluginRoutes().
+ */
+export function guardTrustedServerLifecycle(
+  registry: Pick<PluginRegistry, "canonicalManifest">,
+  request: RouteRequest,
+): void {
+  if (request.method !== "POST") return;
+  const match = request.path.match(/^\/api\/plugins\/([^/]+)\/(enable|disable)$/);
+  if (!match) return;
+  const id = decodeURIComponent(match[1]!);
+  if (registry.canonicalManifest(id).runtime?.server) {
+    assertDeploymentPackageMutator(request);
+  }
+}
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   let routes: RouteHandler | null = null;
@@ -61,12 +81,16 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           },
         });
         host.services.provide(serverServiceKey<PluginRegistry>("plugins.managed"), registry);
+        const managed = managedPluginRoutes(registry, host);
         const handlers = [
           pluginAssetRoutes({ plugins: registry }),
           opencodePluginRoutes(host.services.require(
             serverServiceKey<PluginConfigService>("plugins.config"),
           )),
-          managedPluginRoutes(registry, host),
+          async (request: RouteRequest) => {
+            guardTrustedServerLifecycle(registry!, request);
+            return managed(request);
+          },
         ];
         routes = async (request) => {
           for (const handler of handlers) {
