@@ -31,6 +31,7 @@ jobs:
           node --experimental-strip-types --test \
             packages/control-plane/test/*.test.ts \
             packages/identity/test/*.test.ts \
+            packages/plugins/test/authSocketRevocation.test.ts \
             packages/server/test/authorityOutbox.test.ts \
             packages/server/test/canonicalAuth.test.ts \
             packages/server/test/canonicalIdentityHttp.test.ts \
