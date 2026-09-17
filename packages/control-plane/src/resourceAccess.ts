@@ -1,11 +1,18 @@
 import { controlError, type ControlPlane } from "./index.ts";
-import type { CanonicalResource, ResourceRegistry } from "./resources.ts";
+import type {
+  CanonicalResource,
+  ResourceLifecycle,
+  ResourceRegistry,
+} from "./resources.ts";
 
 export interface ResourceAccessInput {
   resourceId: string;
   principalId: string;
   orgId: string;
   spaceId: string;
+  /** Internal recovery callers may admit transitional states while preserving
+   * every ownership/visibility/membership check. Defaults to active+archived. */
+  lifecycles?: readonly ResourceLifecycle[];
 }
 
 export interface ResourceAccessAuthority {
@@ -14,9 +21,20 @@ export interface ResourceAccessAuthority {
 }
 
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$/;
+const LIFECYCLES = new Set<ResourceLifecycle>([
+  "provisioning", "active", "archiving", "archived", "deleting", "deleted", "quarantined",
+]);
+const DEFAULT_READABLE: readonly ResourceLifecycle[] = ["active", "archived"];
 const id = (value: unknown, label: string): string => {
   if (typeof value !== "string" || !IDENTIFIER.test(value)) throw controlError("invalid-input", `Invalid ${label}`);
   return value;
+};
+const allowedLifecycles = (value: readonly ResourceLifecycle[] | undefined): ReadonlySet<ResourceLifecycle> => {
+  const source = value ?? DEFAULT_READABLE;
+  if (source.length === 0 || source.some((state) => !LIFECYCLES.has(state))) {
+    throw controlError("invalid-input", "Invalid readable resource lifecycle");
+  }
+  return new Set(source);
 };
 
 /**
@@ -46,10 +64,11 @@ export function createResourceAccessAuthority(
     principalId: string,
     orgId: string,
     spaceId: string,
+    lifecycles: ReadonlySet<ResourceLifecycle>,
     seen: Set<string>,
   ): boolean => {
     if (row.orgId !== orgId || row.spaceId !== spaceId) return false;
-    if (row.lifecycle !== "active" && row.lifecycle !== "archived") return false;
+    if (!lifecycles.has(row.lifecycle)) return false;
     if (row.ownerPrincipalId === principalId) return true;
     if (row.visibility === "private" || row.visibility === "restricted") return false;
     if (row.visibility === "space") return member(principalId, spaceId);
@@ -59,7 +78,9 @@ export function createResourceAccessAuthority(
     seen.add(row.id);
     const parent = resources.resource(row.parentId);
     if (!parent) throw controlError("recovery-required", "Inherited resource parent is missing");
-    return visible(parent, principalId, orgId, spaceId, seen);
+    // A child may be in a transient lifecycle while its parent remains active,
+    // so parent visibility uses normal readable lifecycle semantics.
+    return visible(parent, principalId, orgId, spaceId, new Set(DEFAULT_READABLE), seen);
   };
 
   const readable = (raw: ResourceAccessInput): CanonicalResource | undefined => {
@@ -68,10 +89,11 @@ export function createResourceAccessAuthority(
       principalId: id(raw.principalId, "principal ID"),
       orgId: id(raw.orgId, "organization ID"),
       spaceId: id(raw.spaceId, "Space ID"),
+      lifecycles: allowedLifecycles(raw.lifecycles),
     };
     const row = resources.resource(input.resourceId);
     if (!row) return undefined;
-    return visible(row, input.principalId, input.orgId, input.spaceId, new Set()) ? row : undefined;
+    return visible(row, input.principalId, input.orgId, input.spaceId, input.lifecycles, new Set()) ? row : undefined;
   };
 
   return {
