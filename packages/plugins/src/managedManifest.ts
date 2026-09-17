@@ -203,6 +203,12 @@ export function parseManifest(raw: string): ManagedPluginManifest {
     widgetIds.add(widget.id);
   }
   const entries = parseEntries(m.entries);
+  if (entries?.server && m.trust !== "privileged" && m.trust !== "credentialed") {
+    throw err(
+      "invalid-input",
+      `trust class "${m.trust}" cannot declare entries.server; Node server entries require privileged or credentialed trust`,
+    );
+  }
   return {
     id: m.id,
     name: m.name.trim(),
