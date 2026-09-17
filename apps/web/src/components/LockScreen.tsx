@@ -5,16 +5,29 @@
 import { useEffect, useRef, useState } from "react";
 import { currentBrowserLogin, loginAccount, recoverAccount, type AccountLoginResult } from "../accounts.ts";
 import { browserSupportsPasskeys, signInWithPasskey } from "../passkeys.ts";
+import {
+  beginProviderFlow,
+  listLoginProviders,
+  type LoginProvider,
+} from "../identityProviders.ts";
 import { tr } from "../i18n/index.ts";
 import { Button, TextInput } from "./ui/index.ts";
 
 type LockMode = "password" | "recovery";
+
+const providerLabel = (provider: LoginProvider): string => {
+  if (provider.kind === "github") return "GitHub";
+  if (provider.kind === "gitlab") return "GitLab";
+  if (provider.kind === "bitbucket") return "Bitbucket";
+  return provider.id;
+};
 
 export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
   const [mode, setMode] = useState<LockMode>("password");
   const [login, setLogin] = useState(currentBrowserLogin);
   const [password, setPassword] = useState("");
   const [recoveryCode, setRecoveryCode] = useState("");
+  const [providers, setProviders] = useState<LoginProvider[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [retryAt, setRetryAt] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -24,6 +37,11 @@ export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
   useEffect(() => {
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [mode]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || window.location.protocol !== "https:") return;
+    void listLoginProviders().then(setProviders).catch(() => setProviders([]));
+  }, []);
 
   useEffect(() => {
     if (retryAt === null) return;
@@ -72,6 +90,18 @@ export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
       const code = (cause as { code?: unknown } | null)?.code;
       setError(code === "unsupported" ? "Passkeys are not supported by this browser." : "Passkey sign-in failed.");
     } finally {
+      setBusy(false);
+    }
+  };
+
+  const signInProvider = async (provider: LoginProvider): Promise<void> => {
+    if (busy || locked) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await beginProviderFlow(provider.id, "login", "/");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "External sign-in failed.");
       setBusy(false);
     }
   };
@@ -207,6 +237,11 @@ export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
             Sign in with a passkey
           </Button>
         )}
+        {mode === "password" && providers.map((provider) => (
+          <Button key={provider.id} className="lock-submit" type="button" disabled={busy || locked} onClick={() => void signInProvider(provider)}>
+            Sign in with {providerLabel(provider)}
+          </Button>
+        ))}
         <Button variant="ghost" size="sm" type="button" disabled={busy} onClick={switchMode}>
           {mode === "password" ? "Use a recovery code" : "Use password instead"}
         </Button>
