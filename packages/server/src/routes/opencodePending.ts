@@ -2,6 +2,7 @@ import type {
   OpenCodeApplyRestartResponseDto,
   OpenCodePendingResponseDto,
 } from "@polyth/contracts";
+import { requireInstanceOwnerAuthority } from "@polyth/contracts/instance-authority";
 import type { RouteHandler } from "../http.ts";
 import type { OpenCodePendingService } from "../opencodePending.ts";
 
@@ -21,6 +22,7 @@ export function opencodePendingRoutes(pending: OpenCodePendingService): RouteHan
       return true;
     }
     if (path === "/api/opencode/apply-restart" && method === "POST") {
+      requireInstanceOwnerAuthority(request, "OpenCode restart requires the instance owner");
       const response: OpenCodeApplyRestartResponseDto = await pending.applyAndRestart();
       json(200, response);
       return true;
