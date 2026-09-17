@@ -51,8 +51,8 @@ function fixture(t: test.TestContext, owner = "usr_owner", withResources = false
         id: "ses_one",
         projectId: "prj_one",
         spaceId: "spc_personal",
-        title: "Imported session",
-        status: "idle",
+        title: "Imported archived session",
+        status: "archived",
         createdAt: 90,
         updatedAt: 95,
       }));
@@ -106,7 +106,7 @@ test("verified capsule activates one ready canonical authority and revokes legac
   }), { code: "canonical-authority-exists" });
 });
 
-test("reviewed project and session topology is materialized as canonical active resources before publication", t => {
+test("reviewed project and archived session topology is materialized before publication", t => {
   const f = fixture(t, "usr_owner", true);
   assert.equal(f.inventory.safeToStage, true);
   assert.equal(f.inventory.plannedAdoptions.filter(row => row.kind !== "user-alias").length, 0);
@@ -126,9 +126,9 @@ test("reviewed project and session topology is materialized as canonical active 
   try {
     const project = control.get<{
       kind: string; orgId: string; spaceId: string; ownerId: string; createdBy: string;
-      lifecycle: string; createdAt: number;
+      lifecycle: string; visibility: string; createdAt: number;
     }>(`SELECT kind,org_id AS orgId,space_id AS spaceId,owner_principal_id AS ownerId,
-              created_by AS createdBy,lifecycle,created_at_ms AS createdAt
+              created_by AS createdBy,visibility,lifecycle,created_at_ms AS createdAt
          FROM resources WHERE id='prj_one'`);
     assert.deepEqual(project, {
       kind: "project",
@@ -136,17 +136,19 @@ test("reviewed project and session topology is materialized as canonical active 
       spaceId: "spc_personal",
       ownerId: "usr_owner",
       createdBy: "usr_owner",
+      visibility: "space",
       lifecycle: "active",
       createdAt: 80,
     });
-    const session = control.get<{ kind: string; parentId: string; spaceId: string; lifecycle: string; createdAt: number }>(
-      "SELECT kind,parent_id AS parentId,space_id AS spaceId,lifecycle,created_at_ms AS createdAt FROM resources WHERE id='ses_one'",
+    const session = control.get<{ kind: string; parentId: string; spaceId: string; lifecycle: string; visibility: string; createdAt: number }>(
+      "SELECT kind,parent_id AS parentId,space_id AS spaceId,visibility,lifecycle,created_at_ms AS createdAt FROM resources WHERE id='ses_one'",
     );
     assert.deepEqual(session, {
       kind: "session",
       parentId: "prj_one",
       spaceId: "spc_personal",
-      lifecycle: "active",
+      visibility: "inherit",
+      lifecycle: "archived",
       createdAt: 90,
     });
   } finally { control.close(); }
