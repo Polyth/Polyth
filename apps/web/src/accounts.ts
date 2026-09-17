@@ -136,6 +136,31 @@ export async function accountState(): Promise<AccountState> {
   };
 }
 
+export async function renameCurrentAccount(
+  account: Pick<AccountChoice, "id" | "revision">,
+  name: string,
+): Promise<AccountChoice> {
+  if (!Number.isSafeInteger(account.revision) || account.revision! < 1) {
+    throw Object.assign(new Error("Account revision is missing; refresh before renaming"), { code: "conflict" });
+  }
+  const result = await authJson<{
+    id?: unknown; displayName?: unknown; status?: unknown; revision?: unknown; managed?: unknown;
+  }>("/api/auth/me", { name: name.trim(), expectedRevision: account.revision });
+  if (!result.response.ok) throw authFailure(result.response, result.body);
+  if (typeof result.body.id !== "string" || typeof result.body.displayName !== "string"
+    || typeof result.body.revision !== "number") {
+    throw new Error("Invalid account profile response");
+  }
+  return {
+    id: result.body.id,
+    name: result.body.displayName,
+    revision: result.body.revision,
+    current: true,
+    ...(typeof result.body.status === "string" ? { status: result.body.status } : {}),
+    ...(typeof result.body.managed === "boolean" ? { managed: result.body.managed } : {}),
+  };
+}
+
 export async function createAccount(login: string, name: string, password: string): Promise<AccountChoice> {
   const canonical = await authJson("/api/auth/accounts", { login, name, password });
   if (canonical.response.ok) return canonical.body as unknown as AccountChoice;
