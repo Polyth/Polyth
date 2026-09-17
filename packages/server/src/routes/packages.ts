@@ -1,3 +1,4 @@
+import { requireInstanceOwnerAuthority } from "@polyth/contracts/instance-authority";
 import type { RouteHandler } from "../http.ts";
 import type { PackageRegistry } from "../packages.ts";
 
@@ -10,6 +11,7 @@ export function packageRoutes(registry: PackageRegistry): RouteHandler {
 
     const match = rc.path.match(/^\/api\/packages\/([^/]+)$/);
     if (match && rc.method === "PATCH") {
+      requireInstanceOwnerAuthority(rc, "package enablement changes require the instance owner");
       const body = await rc.body();
       if (typeof body.enabled !== "boolean") {
         throw Object.assign(new Error("enabled must be a boolean"), {
