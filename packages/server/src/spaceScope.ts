@@ -17,6 +17,7 @@ import type {
 } from "@polyth/contracts";
 import type { ProjectRegistry } from "./projects.ts";
 import { canonicalProjectService } from "./projectResourceAuthority.ts";
+import { canonicalSessionService } from "./sessionResourceAuthority.ts";
 
 const notFound = (): Error =>
   Object.assign(new Error("session not found"), { code: "not-found" });
@@ -149,8 +150,11 @@ function scopeSessions(
     fn: ((projectId: string, ...rest: A) => R) | undefined,
   ) => opt<[string, ...A], R>(
     fn as ((...args: [string, ...A]) => R) | undefined,
-    (inner) => (projectId, ...rest) => guarded(() => {
+    (inner) => (projectId, ...rest) => guarded(async () => {
       guard.assertProject(ctx, projectId);
+      // JSON tenancy ownership alone is not project existence authority any
+      // more. Canonical project lookup also proves active resource lifecycle.
+      if (!await projects.get(projectId)) throw Object.assign(new Error("project not found"), { code: "not-found" });
       return inner(projectId, ...rest) as Promise<unknown>;
     }) as R,
   );
@@ -182,12 +186,16 @@ function scopeSessions(
     }),
     restore: (sessionId) => guarded(() => base.restore(g(sessionId))),
     async list(projectId) {
-      if (projectId !== undefined) guard.assertProject(ctx, projectId);
+      if (projectId !== undefined) {
+        guard.assertProject(ctx, projectId);
+        if (!await projects.get(projectId)) throw Object.assign(new Error("project not found"), { code: "not-found" });
+      }
       const rows = await base.list(projectId);
       return rows.filter((p) => guard.owns(ctx, p));
     },
     async sync(projectId) {
       guard.assertProject(ctx, projectId);
+      if (!await projects.get(projectId)) throw Object.assign(new Error("project not found"), { code: "not-found" });
       const rows = await base.sync(projectId);
       return rows.filter((p) => guard.owns(ctx, p));
     },
@@ -259,10 +267,11 @@ export function createSpaceServices(deps: {
 }): (ctx: SpaceContext) => SpaceServices {
   return (ctx) => {
     const projects = canonicalProjectService(ctx, deps.registry);
+    const sessions = canonicalSessionService(ctx, deps.sessions(), projects);
     return {
       ctx,
       projects,
-      sessions: scopeSessions(deps.sessions(), ctx, deps.guard, projects),
+      sessions: scopeSessions(sessions, ctx, deps.guard, projects),
       guard: deps.guard,
     };
   };
