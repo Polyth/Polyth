@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-quality-${{ github.ref }}
+  group: release-quality-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
