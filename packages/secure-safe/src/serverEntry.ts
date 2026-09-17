@@ -14,7 +14,10 @@ import {
   type ServerPackageHost,
   type SpaceSecureSafeRegistry,
 } from "@polyth/plugins";
-import { createSecureSafeService } from "./index.ts";
+import {
+  configureSecureSafeSpaceRouting,
+  createSecureSafeService,
+} from "./index.ts";
 
 const kind = (value: unknown): SecureSafeKind => {
   if (value === "env" || value === "token" || value === "password") return value;
@@ -97,7 +100,7 @@ function createSpaceSafeRegistry(host: ServerPackageHost): SpaceSecureSafeRegist
     rootsBySpace.set(spaceId, root);
     let safe = safes.get(root);
     if (!safe) {
-      safe = createSecureSafeService({ dataDir: root });
+      safe = createSecureSafeService({ dataDir: root, localOnly: true });
       safes.set(root, safe);
     }
     return safe;
@@ -119,6 +122,7 @@ function createSpaceSafeRegistry(host: ServerPackageHost): SpaceSecureSafeRegist
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   const spaces = createSpaceSafeRegistry(host);
   host.services.provide(SPACE_SECURE_SAFE, spaces);
+  configureSecureSafeSpaceRouting((space) => spaces.forSpace(space));
   const routes = routeWith((space) => spaces.forSpace(space));
   return {
     remoteAccess: localOnlyRemoteAccess(["secure-safe"]),
