@@ -1,9 +1,15 @@
 import {
   REMOTE_CAPABILITY,
+  isLocalUiPrincipal,
   roleAtLeast,
   type RouteRequest,
   type SpaceContext,
 } from "@polyth/contracts";
+
+type AuthoritativeSpaceContext = SpaceContext & {
+  /** Canonical server-minted deployment authority; request input cannot set it. */
+  readonly instanceOwner?: boolean;
+};
 
 const forbidden = (message: string): never => {
   throw Object.assign(new Error(message), { code: "forbidden" });
@@ -11,52 +17,58 @@ const forbidden = (message: string): never => {
 
 /**
  * Deployment-global package binary/runtime mutations.
- *
- * A Space owner is not automatically a deployment administrator on a
- * shared control plane. V1 therefore permits the local trusted operator
- * only in local-trusted deployments, or a paired device carrying the
- * deliberately rare packages.install capability. Both paths still need
- * owner membership in the active Space.
+ * A Space owner/admin is not enough: binaries are shared by every Space on the
+ * installation. Canonical contexts carry instanceOwner from instance_roles.
+ * The local-user fallback exists only for pre-canonical trusted installations;
+ * canonical ui-session accounts never receive ambient deployment authority.
  */
 export function assertDeploymentPackageMutator(request: RouteRequest): void {
-  if (!roleAtLeast(request.space.role, "owner")) {
-    forbidden("deployment package mutations require an owner");
+  const space = request.space as AuthoritativeSpaceContext;
+  const legacyLocalOperator = request.principal.kind === "local-user" && space.instanceOwner === undefined;
+  if (space.instanceOwner !== true && !legacyLocalOperator) {
+    forbidden("package installation and binary changes require the instance owner");
   }
-  const principal = request.principal;
-  if (
-    request.space.deployment === "local-trusted"
-    && (principal.kind === "local-user" || principal.kind === "ui-session")
-  ) {
-    return;
-  }
-  if (
-    principal.kind === "paired-device"
-    && principal.grants.includes(REMOTE_CAPABILITY.packagesInstall)
-  ) {
-    return;
-  }
-  forbidden("deployment package mutation is not allowed for this principal");
+  // Paired-device callers must also possess the privileged transport grant.
+  // ui-session/local-user pass this legacy transport layer only after the
+  // durable account authority above has admitted them.
+  request.requireCapability(REMOTE_CAPABILITY.packagesInstall);
 }
 
-function assertSpaceAdmin(space: SpaceContext): void {
+function assertSpacePackageOperator(
+  request: RouteRequest,
+  space: SpaceContext,
+  capability: string,
+): void {
   if (!roleAtLeast(space.role, "admin")) {
     forbidden("package lifecycle changes require a Space admin");
+  }
+  if (!isLocalUiPrincipal(request.principal)) {
+    request.requireCapability(capability);
   }
 }
 
 /** Enable in the calling Space. Does not mutate the global binary. */
-export function assertSpacePackageEnable(_request: RouteRequest, space: SpaceContext): void {
-  assertSpaceAdmin(space);
+export function assertSpacePackageEnable(request: RouteRequest, space: SpaceContext): void {
+  assertSpacePackageOperator(request, space, REMOTE_CAPABILITY.packagesEnable);
 }
 
 /** Disable in the calling Space. Last-Space disable may dispose process runtime. */
-export function assertSpacePackageDisable(_request: RouteRequest, space: SpaceContext): void {
-  assertSpaceAdmin(space);
+export function assertSpacePackageDisable(request: RouteRequest, space: SpaceContext): void {
+  assertSpacePackageOperator(request, space, REMOTE_CAPABILITY.packagesDisable);
 }
 
-/** Capability grants and connection-definition approval are Space operations. */
-export function assertSpacePackageGrant(_request: RouteRequest, space: SpaceContext): void {
-  assertSpaceAdmin(space);
+/**
+ * Capability grants and connection-definition approval are Space operations.
+ * There is intentionally no remote grant capability in v1: an admin must use
+ * an authenticated local UI session to approve new package authority.
+ */
+export function assertSpacePackageGrant(request: RouteRequest, space: SpaceContext): void {
+  if (!roleAtLeast(space.role, "admin")) {
+    forbidden("package grants require a Space admin");
+  }
+  if (!isLocalUiPrincipal(request.principal)) {
+    forbidden("package grants require an authenticated local UI session");
+  }
 }
 
 /**
