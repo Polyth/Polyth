@@ -52,6 +52,7 @@ jobs:
             apps/web/test/identityProviders.test.ts \
             apps/web/test/multiUserAccountScope.test.ts \
             apps/web/test/passkeys.test.ts \
-            scripts/test/break-glass-password.test.ts
+            scripts/test/break-glass-password.test.ts \
+            scripts/test/release-quality-gates.test.ts
       - name: Build web production bundle
         run: npm run build:web
