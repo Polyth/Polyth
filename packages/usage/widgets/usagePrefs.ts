@@ -80,6 +80,15 @@ export function groupQuotaWindows<W extends QuotaWindowLike>(windows: readonly W
 
 // ---- persisted display prefs ------------------------------------------------
 
+export type UsageBillingKind = "api" | "subscription";
+export type UsageChartStyle = "bar" | "line";
+
+export interface UsageProviderCostProfile {
+  billing: UsageBillingKind;
+  /** Fixed monthly subscription price in USD. Null means not configured. */
+  monthlyCost: number | null;
+}
+
 export interface UsagePrefs {
   /** Provider ids unchecked in Settings → Usage; stay hidden after reload. */
   hiddenProviders: string[];
@@ -89,7 +98,9 @@ export interface UsagePrefs {
   pinnedProviders: string[];
   /** Collapsed quota groups as "providerId/family" keys. */
   collapsedGroups: string[];
-  /** Browser-local dashboard presentation, restored whenever Settings remounts. */
+  /** Browser-local billing metadata keyed by canonical provider id. */
+  providerCosts: Record<string, UsageProviderCostProfile>;
+  /** Browser-local dashboard presentation, restored whenever Usage remounts. */
   dashboard: UsageDashboardPrefs;
 }
 
@@ -97,9 +108,12 @@ export const USAGE_PREFS_KEY = "polyth.usagePrefs";
 
 const MAX_ENTRIES = 128;
 const DEFAULT_DASHBOARD_PREFS: UsageDashboardPrefs = {
-  view: "overview",
+  view: "providers",
   layout: "expanded",
   rangeDays: 7,
+  chartStyle: "bar",
+  chartMetric: "tokens",
+  showChartLegend: true,
   overviewOrder: [],
   providerOrder: [],
 };
@@ -108,6 +122,9 @@ export interface UsageDashboardPrefs {
   view: "overview" | "providers";
   layout: "expanded" | "compact";
   rangeDays: 7 | 30 | 90;
+  chartStyle: UsageChartStyle;
+  chartMetric: "tokens" | "cost" | "sessions";
+  showChartLegend: boolean;
   overviewOrder: string[];
   providerOrder: string[];
 }
@@ -116,6 +133,28 @@ const stringList = (value: unknown): string[] =>
   Array.isArray(value)
     ? value.filter((s): s is string => typeof s === "string" && s !== "").slice(0, MAX_ENTRIES)
     : [];
+
+const finiteMoney = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.round(value * 100) / 100
+    : null;
+
+const providerCostProfiles = (value: unknown): Record<string, UsageProviderCostProfile> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([providerId]) => providerId.trim() !== "")
+    .slice(0, MAX_ENTRIES)
+    .map(([providerId, rawProfile]) => {
+      const profile = rawProfile && typeof rawProfile === "object"
+        ? rawProfile as Partial<UsageProviderCostProfile>
+        : {};
+      return [providerId, {
+        billing: profile.billing === "subscription" ? "subscription" : "api",
+        monthlyCost: finiteMoney(profile.monthlyCost),
+      } satisfies UsageProviderCostProfile] as const;
+    });
+  return Object.fromEntries(entries);
+};
 
 export function parseUsagePrefs(raw: string | null): UsagePrefs {
   try {
@@ -126,12 +165,18 @@ export function parseUsagePrefs(raw: string | null): UsagePrefs {
       hiddenBlocks: stringList(data.hiddenBlocks),
       pinnedProviders: stringList(data.pinnedProviders),
       collapsedGroups: stringList(data.collapsedGroups),
+      providerCosts: providerCostProfiles(data.providerCosts),
       dashboard: {
-        view: dashboard?.view === "providers" ? "providers" : "overview",
+        view: dashboard?.view === "overview" ? "overview" : "providers",
         layout: dashboard?.layout === "compact" ? "compact" : "expanded",
         rangeDays: dashboard?.rangeDays === 30 || dashboard?.rangeDays === 90
           ? dashboard.rangeDays
           : 7,
+        chartStyle: dashboard?.chartStyle === "line" ? "line" : "bar",
+        chartMetric: dashboard?.chartMetric === "cost" || dashboard?.chartMetric === "sessions"
+          ? dashboard.chartMetric
+          : "tokens",
+        showChartLegend: dashboard?.showChartLegend !== false,
         overviewOrder: stringList(dashboard?.overviewOrder),
         providerOrder: stringList(dashboard?.providerOrder),
       },
@@ -142,6 +187,7 @@ export function parseUsagePrefs(raw: string | null): UsagePrefs {
       hiddenBlocks: [],
       pinnedProviders: [],
       collapsedGroups: [],
+      providerCosts: {},
       dashboard: { ...DEFAULT_DASHBOARD_PREFS },
     };
   }
@@ -181,6 +227,19 @@ export function setProviderPinned(providerId: string, pinned: boolean): void {
 
 export function setGroupCollapsed(key: string, collapsed: boolean): void {
   save({ ...prefs, collapsedGroups: toggled(prefs.collapsedGroups, key, collapsed) });
+}
+
+export function setProviderCostProfile(providerId: string, patch: Partial<UsageProviderCostProfile>): void {
+  const current = prefs.providerCosts[providerId] ?? { billing: "api", monthlyCost: null };
+  const next: UsageProviderCostProfile = {
+    billing: patch.billing === "subscription"
+      ? "subscription"
+      : patch.billing === "api"
+        ? "api"
+        : current.billing,
+    monthlyCost: patch.monthlyCost === undefined ? current.monthlyCost : finiteMoney(patch.monthlyCost),
+  };
+  save({ ...prefs, providerCosts: { ...prefs.providerCosts, [providerId]: next } });
 }
 
 export function setUsageDashboardPrefs(patch: Partial<UsageDashboardPrefs>): void {
