@@ -69,6 +69,16 @@ documented generic shell modules (see §10) are externalized to the shell
 bundle, so package code shares the shell's stateful stores, registries, and
 helpers instead of cloning them.
 
+### Frontend build freshness
+
+Every completed web build writes `/build-id.json` and compiles the same build
+id into the shell. `apps/web/src/buildFreshness.ts` checks that id on initial
+load and whenever a suspended page becomes visible/focused or receives
+`pageshow`. A stale standalone PWA silently reloads its current URL, so iOS
+cannot keep using a frozen pre-rebuild shell with freshly rebuilt package
+assets. The check uses `cache: "no-store"`; the service worker does not own
+application asset caching.
+
 ### Package web entry skeleton (current API)
 
 ```tsx
