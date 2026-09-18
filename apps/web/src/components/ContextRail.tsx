@@ -22,7 +22,7 @@ import ModuleView from "./ui/ModuleView.ts";
 import {
   closeAllModules, closePaneFromOutside, closeWorkspacePane, handlePaneEscape, setPaneFullscreen,
   togglePaneFullscreen, togglePanePin,
-  getState, setRailPlugin, setSidebarOpen, toggleRailPlugin, useActiveModel, useStore,
+  getState, setRailPlugin, setSidebarOpen, toggleRailPlugin, useActiveModel, useStore, workspaceProjectId,
 } from "../store.ts";
 import { useGitStatus } from "../../../../packages/git/widgets/gitStatusStore.ts";
 import { gitChangedFiles } from "../pendingChanges.ts";
@@ -113,7 +113,7 @@ interface RailButton {
  *  Reads only shared stores (git status is deduplicated) — no new poller. */
 export function useRailSurfaceModel(): RailSurfaceModel {
   const rail = useStore((s) => s.railPlugin);
-  const projectId = useStore((s) => s.activeProjectId);
+  const projectId = useStore(workspaceProjectId);
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const model = useActiveModel();
   const events = useStore((s) => (s.activeSessionId ? s.events[s.activeSessionId] : undefined) ?? NO_EVENTS);
@@ -190,7 +190,7 @@ export default function ContextRail() {
   const shellMode = useShellMode();
   const compact = shellMode !== "wide";
   const { rail, surfaces, open, ctx } = useRailSurfaceModel();
-  const projectId = useStore((s) => s.activeProjectId);
+  const projectId = useStore(workspaceProjectId);
   const paneMode = useStore((s) => s.paneMode);
   const panePreviousMode = useStore((s) => s.panePreviousMode);
   const resolved = useResolvedCapabilities();
