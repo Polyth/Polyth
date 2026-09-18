@@ -32,7 +32,7 @@ export function moveQueuedItem(
 
 /** The newest ordinary queue item is the one an empty follow-up Send promotes. */
 export function latestSteerableQueuedItem(items: readonly QueueItemDto[]): QueueItemDto | null {
-  return items.findLast((item) => !item.heldForReview) ?? null;
+  return items.findLast((item) => !item.heldForReview && !item.hiddenUserMessage) ?? null;
 }
 
 export default function QueuedMessageList({
@@ -77,7 +77,10 @@ export default function QueuedMessageList({
 
   useEffect(() => { refresh(); }, [refresh, eventCount]);
 
-  const visibleItems = items.filter((item) => item.sessionId === sessionId && item.id !== editingId);
+  const visibleItems = items.filter((item) =>
+    item.sessionId === sessionId
+    && item.id !== editingId
+    && (!item.hiddenUserMessage || item.heldForReview));
   const resumable = visibleItems.find((item) => !item.heldForReview) ?? null;
   const queuePaused = resumable !== null
     && queuePausedAfterUserInterrupt(events ?? [], items);
@@ -95,8 +98,9 @@ export default function QueuedMessageList({
       ++scope.request;
       setItems(updated);
       onItemsChange?.(sessionId, updated);
-      const position = updated.findIndex((item) => item.id === movedId);
-      announce(tr("queuedmessagelist.queuedMessageMovedToPositionValueOf", { value: position + 1, length: updated.length }));
+      const updatedVisible = updated.filter((item) => !item.hiddenUserMessage || item.heldForReview);
+      const position = updatedVisible.findIndex((item) => item.id === movedId);
+      announce(tr("queuedmessagelist.queuedMessageMovedToPositionValueOf", { value: position + 1, length: updatedVisible.length }));
     } catch {
       await refresh(); // reorder rejected (dispatch raced) — resync
     } finally {
@@ -121,9 +125,9 @@ export default function QueuedMessageList({
   };
 
   const move = (item: QueueItemDto, delta: -1 | 1) => {
-    if (item.heldForReview) return;
-    const index = items.findIndex((candidate) => candidate.id === item.id);
-    const target = items[index + delta];
+    if (item.heldForReview || item.hiddenUserMessage) return;
+    const index = visibleItems.findIndex((candidate) => candidate.id === item.id);
+    const target = visibleItems[index + delta];
     if (!target) return;
     void persistOrder(moveQueuedItem(items, item.id, target.id), item.id);
   };
@@ -189,10 +193,10 @@ export default function QueuedMessageList({
           </div>
         </div>
       )}
-      {visibleItems.map((item) => {
-        const n = item.position + 1;
+      {visibleItems.map((item, visibleIndex) => {
+        const n = visibleIndex + 1;
         const busy = busyId !== null;
-        const itemIndex = items.findIndex((candidate) => candidate.id === item.id);
+        const itemIndex = visibleIndex;
         const reorderLabel = tr("queuedmessagelist.reorderQueuedMessageValue", { value: n });
         return (
           <div
@@ -224,8 +228,10 @@ export default function QueuedMessageList({
             >
               <Icon icon={DragHandleIcon} size="sm" />
             </span>
-            <span className="queue-text" title={item.text}>{item.text}</span>
-            {item.heldForReview && (
+            <span className="queue-text" title={item.hiddenUserMessage ? undefined : item.text}>
+              {item.hiddenUserMessage ? tr("queuedmessagelist.heldForReview") : item.text}
+            </span>
+            {item.heldForReview && !item.hiddenUserMessage && (
               <span className="queue-held">{tr("queuedmessagelist.heldForReview")}</span>
             )}
             <div
@@ -245,7 +251,7 @@ export default function QueuedMessageList({
                     {
                       id: "down",
                       label: tr("queuedmessagelist.moveQueuedMessageValueDown", { value: n }),
-                      disabled: busy || itemIndex >= items.length - 1,
+                      disabled: busy || itemIndex >= visibleItems.length - 1,
                       onSelect: () => move(item, 1),
                     },
                   ]}
