@@ -210,6 +210,9 @@ export const webPackageHost: WebPackageHost = {
   },
   sessions: {
     upsert: upsertSession,
+    get: (sessionId) => getState().sessions.find((session) => session.id === sessionId),
+    events: (sessionId) => getState().events[sessionId] ?? [],
+    subscribe: subscribeStore,
     subscribeEvents: subscribeSessionEvents,
   },
   conversation: {
