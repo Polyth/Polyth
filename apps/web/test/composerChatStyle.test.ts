@@ -337,3 +337,16 @@ test("idle recap assist stays mounted at the transcript tail with usable chrome"
   assert.match(css, /\.assist-strip\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/s);
   assert.match(css, /\.assist-chip\s*\{[^}]*min-height:\s*var\(--tap\);/s);
 });
+
+
+test("mobile transcript keeps native touch ownership and hidden replays release stale turn-sheet geometry", () => {
+  const timeline = read("../src/components/Timeline.tsx");
+
+  assert.match(timeline, /const touchActive = useRef\(false\)/);
+  assert.match(timeline, /if \(!el \|\| touchActive\.current\) return;/);
+  assert.match(timeline, /if \(!el \|\| !promptId \|\| touchActive\.current\) return;/);
+  assert.match(timeline, /freshTurnPending\.current \|\| touchActive\.current/);
+  assert.match(timeline, /onTouchStartCapture=\{\(event\) => \{\s*touchActive\.current = true;/);
+  assert.match(timeline, /onTouchEndCapture=\{finishTouchScroll\}/);
+  assert.match(timeline, /const becameHidden = !previous\.hidden && model\.lastUserMessageHidden;[\s\S]*turnSheetPromptId\.current = null;[\s\S]*setTurnSheetPadding\(0\);/);
+});
