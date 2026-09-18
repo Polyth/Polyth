@@ -193,6 +193,7 @@ const messageInput = (body: Record<string, unknown>): UserTurnInput => {
     text: body.text,
     ...(command ? { command } : {}),
     ...(body.autoTitle === true ? { autoTitle: true } : {}),
+    ...(body.hiddenUserMessage === true ? { hiddenUserMessage: true } : {}),
     ...(Array.isArray(body.attachments) ? { attachments: body.attachments as never } : {}),
     ...(model ? { model } : {}),
     ...(agent !== undefined ? { agent } : {}),
