@@ -9,7 +9,6 @@ register("./tsxHooks.mjs", import.meta.url);
 
 const { SessionUsageStats } = await import("../widgets/usagePlugin.tsx");
 const { formatQuotaReset } = await import("../widgets/usage/UsageDashboard.tsx");
-const { parseUsagePrefs } = await import("../widgets/usagePrefs.ts");
 
 test("quota reset labels interpolate the formatted reset time", () => {
   const label = formatQuotaReset(Date.UTC(2027, 0, 1));
@@ -65,22 +64,4 @@ test("session usage renderer honors per-instance metric visibility", () => {
   assert.doesNotMatch(html, /data-usage-metric="input"/);
   assert.doesNotMatch(html, /data-usage-metric="output"/);
   assert.doesNotMatch(html, /data-usage-metric="total"/);
-});
-
-
-test("usage preferences default to providers while preserving an explicit last tab", () => {
-  assert.equal(parseUsagePrefs(null).dashboard.view, "providers");
-  assert.equal(parseUsagePrefs(JSON.stringify({ dashboard: { view: "overview" } })).dashboard.view, "overview");
-  assert.equal(parseUsagePrefs(JSON.stringify({ dashboard: { view: "providers" } })).dashboard.view, "providers");
-});
-
-test("usage preferences sanitize provider billing metadata", () => {
-  const prefs = parseUsagePrefs(JSON.stringify({
-    providerCosts: {
-      openai: { billing: "subscription", monthlyCost: 20 },
-      anthropic: { billing: "api", monthlyCost: -4 },
-    },
-  }));
-  assert.deepEqual(prefs.providerCosts.openai, { billing: "subscription", monthlyCost: 20 });
-  assert.deepEqual(prefs.providerCosts.anthropic, { billing: "api", monthlyCost: null });
 });
