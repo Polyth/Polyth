@@ -18,7 +18,7 @@
     "open:ios": "npm run assets && npm run native:ios && cap open ios",
     "build:android": "npm run assets && cap build android",
     "build:ios": "npm run assets && npm run native:ios && cap build ios",
-    "assets": "capacitor-assets generate --android && capacitor-assets generate --ios"
+    "assets": "node -e \"const fs=require('node:fs');if(!fs.existsSync('resources/icon-foreground.png'))fs.copyFileSync('resources/icon-only.png','resources/icon-foreground.png')\" && capacitor-assets generate --android && capacitor-assets generate --ios"
   },
   "dependencies": {
     "@polyth/pairing-qr": "0.1.0",
