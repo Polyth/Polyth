@@ -73,7 +73,7 @@ export function IsolationCard() {
   );
   const isolation = isolationOf(session);
   const [status, setStatus] = useState<IsolationStatusDto | null>(null);
-  const [busy, setBusy] = useState<"merge" | "keep" | "resolve" | "recover" | "discard" | "abandon" | null>(null);
+  const [busy, setBusy] = useState<"merge" | "resolve" | "recover" | "discard" | "abandon" | null>(null);
   const [confirmingDiscard, setConfirmingDiscard] = useState(false);
   const statusRequest = useRef(0);
 
@@ -124,7 +124,6 @@ export function IsolationCard() {
   const actions = status?.actions ?? (fallbackActions ? {
     canReview: fallbackActions.canReview,
     canMerge: fallbackActions.canMerge,
-    canKeep: fallbackActions.canKeep,
     canResolve: fallbackActions.canResolve,
     canDiscard: fallbackActions.canDiscard,
     canRecover: fallbackActions.needsRecovery,
@@ -135,7 +134,7 @@ export function IsolationCard() {
 
   const warn = conflict || unavailable || dirtyBlocked || destinationUnavailable;
 
-  const run = async (kind: "merge" | "keep" | "resolve" | "recover" | "discard" | "abandon", action: () => Promise<void>) => {
+  const run = async (kind: "merge" | "resolve" | "recover" | "discard" | "abandon", action: () => Promise<void>) => {
     setBusy(kind);
     try {
       await action();
@@ -293,18 +292,6 @@ export function IsolationCard() {
               {conflict ? tr("isolation.reviewConflicts") : tr("isolation.reviewChanges")}
             </Button>
           ) : null}
-          {actions?.canKeep === true && !recovering && (
-            <Button
-              size="sm"
-              disabled={busy !== null}
-              busy={busy === "keep"}
-              onClick={() => void run("keep", async () => {
-                applySession(await api.isolationKeep(sessionId));
-              })}
-            >
-              {tr("isolation.continueWorking")}
-            </Button>
-          )}
           {unavailable && actions?.canDiscard === true && (
             <Button
               size="sm"
