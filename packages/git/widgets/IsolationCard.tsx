@@ -3,7 +3,7 @@ import type { IsolationStatusDto, SessionIsolation, SessionProjection } from "@p
 import { isolationActions, isolationBlocksUserMutation } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
 import { friendlyError } from "../../../apps/web/src/settings.ts";
-import { openChanges, setUiError, upsertSession, useStore } from "../../../apps/web/src/store.ts";
+import { activateSession, clearRuntimeFeatures, getState, openChanges, setSessions, setUiError, upsertSession, useStore } from "../../../apps/web/src/store.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import {
   BranchIcon,
@@ -150,7 +150,15 @@ export function IsolationCard() {
   const confirmDiscard = async () => {
     setConfirmingDiscard(false);
     await run("discard", async () => {
-      applySession(await api.isolationDiscard(sessionId));
+      const projectId = session.projectId;
+      await api.deleteSession(sessionId);
+      clearRuntimeFeatures(sessionId);
+      const current = getState();
+      setSessions(
+        projectId,
+        current.sessions.filter((candidate) => candidate.projectId === projectId && candidate.id !== sessionId),
+      );
+      if (current.activeSessionId === sessionId) activateSession(null);
     });
   };
 
@@ -214,7 +222,7 @@ export function IsolationCard() {
   if (actions?.canDiscard === true && !unavailable && !recovering) {
     overflow.push({
       id: "discard",
-      label: tr("isolation.discardWorkspace"),
+      label: tr("sidebar.sessionlist.deleteSession"),
       icon: DeleteIcon,
       danger: true,
       disabled: busy !== null || working,
@@ -351,7 +359,7 @@ export function IsolationCard() {
       </section>
       {confirmingDiscard && (
         <Dialog
-          title={tr("isolation.discardTitle")}
+          title={tr("sidebar.sessionlist.deleteSession")}
           onClose={() => setConfirmingDiscard(false)}
           footer={(
             <>
@@ -363,7 +371,7 @@ export function IsolationCard() {
                 busy={busy === "discard"}
                 onClick={() => { void confirmDiscard(); }}
               >
-                {tr("isolation.discard")}
+                {tr("common.delete")}
               </Button>
             </>
           )}
