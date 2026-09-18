@@ -142,8 +142,8 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "otto-assistant",
-      "repo": "polyth",
+      "owner": "Polyth",
+      "repo": "Polyth",
       "releaseType": "release"
     }
   }
