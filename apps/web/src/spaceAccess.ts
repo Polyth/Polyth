@@ -41,3 +41,10 @@ export async function grantSpaceMember(
     { userId, role },
   );
 }
+
+export async function revokeSpaceMember(spaceId: string, userId: string): Promise<void> {
+  await mutations.request<{ ok: boolean }>(
+    `/api/spaces/${encodeURIComponent(spaceId)}/members/${encodeURIComponent(userId)}`,
+    "DELETE",
+  );
+}

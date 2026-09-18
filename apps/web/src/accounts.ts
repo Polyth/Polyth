@@ -8,6 +8,7 @@ import { authJson } from "./authClient.ts";
 export interface AccountChoice {
   id: string;
   name: string;
+  login?: string;
   current?: boolean;
   status?: string;
   revision?: number;
@@ -118,7 +119,7 @@ export async function accountState(): Promise<AccountState> {
     currentAccountId: string;
     canManage?: boolean;
     accounts: Array<{
-      id: string; name?: string; displayName?: string; current?: boolean;
+      id: string; name?: string; displayName?: string; login?: string; current?: boolean;
       status?: string; revision?: number; managed?: boolean;
     }>;
   }>("/api/auth/accounts");
@@ -128,6 +129,7 @@ export async function accountState(): Promise<AccountState> {
     accounts: raw.accounts.map((account) => ({
       id: account.id,
       name: account.name ?? account.displayName ?? account.id,
+      ...(typeof account.login === "string" && account.login ? { login: account.login } : {}),
       current: account.current ?? account.id === raw.currentAccountId,
       ...(account.status ? { status: account.status } : {}),
       ...(typeof account.revision === "number" ? { revision: account.revision } : {}),

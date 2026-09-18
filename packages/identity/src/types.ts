@@ -2,6 +2,8 @@
 export interface IdentityUser {
   id: string;
   displayName: string;
+  /** Local sign-in name when this identity has a password credential. */
+  login?: string;
   managed: boolean;
   status: 'active' | 'suspended' | 'offboarding' | 'disabled';
   revision: number;

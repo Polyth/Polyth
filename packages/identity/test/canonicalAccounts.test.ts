@@ -14,6 +14,7 @@ test('owner account creation creates identity only and never grants tenancy impl
   });
   assert.match(account.id, /^usr_[a-f0-9-]{36}$/);
   assert.equal(account.displayName, 'Alice');
+  assert.equal(account.login, 'alice');
   assert.equal(account.status, 'active');
 
   assert.equal(f.control.get('SELECT 1 FROM instance_roles WHERE user_id=?', account.id), undefined);

@@ -1586,6 +1586,7 @@ export const ar: AppMessages = {
   "settings.widgetspage.undo": "التراجع",
   "settingsview.about": "عن",
   "settingsview.access": "وصول",
+  "settingsview.users": "المستخدمون",
   "settingsview.appearance": "مظهر",
   "settingsview.backToSettings": "العودة إلى الإعدادات",
   "settingsview.behavior": "سلوك",

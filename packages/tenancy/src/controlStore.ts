@@ -338,9 +338,12 @@ export function createControlTenancyStore(control: ControlPlane, opts: { now?: (
         request: { spaceId, userId, role },
         authorize: () => { assertActiveUser(actorId); },
         mutate() {
-          requireMembership(actorId, spaceId, "admin");
+          const actor = requireMembership(actorId, spaceId, "admin");
           assertActiveUser(userId);
           const existing = membershipRow(spaceId, userId);
+          if ((existing?.role === "owner" || role === "owner") && actor.role !== "owner") {
+            throw error("forbidden", "Only a Space owner can add, remove, or change owners");
+          }
           if (existing?.role === "owner" && role !== "owner" && activeOwnerCount(spaceId, userId) === 0) {
             throw error("last-owner", "The last active Space owner must be preserved");
           }
@@ -376,9 +379,12 @@ export function createControlTenancyStore(control: ControlPlane, opts: { now?: (
         request: { spaceId, userId },
         authorize: () => { assertActiveUser(actorId); },
         mutate() {
-          requireMembership(actorId, spaceId, "admin");
+          const actor = requireMembership(actorId, spaceId, "admin");
           const existing = membershipRow(spaceId, userId);
           if (!existing) throw noSuchSpace();
+          if (existing.role === "owner" && actor.role !== "owner") {
+            throw error("forbidden", "Only a Space owner can add, remove, or change owners");
+          }
           if (existing.role === "owner" && activeOwnerCount(spaceId, userId) === 0) {
             throw error("last-owner", "The last active Space owner must be preserved");
           }
