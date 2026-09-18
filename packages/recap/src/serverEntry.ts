@@ -76,7 +76,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
 
   const recap = createRecapService({
     settings: () => settings.get(),
-    latestSeq: async (sessionId) => assistFreshnessSeq(await host.store.events(sessionId)),
+    latestSeq: (sessionId) => host.store.latestSeq(sessionId),
     eventsAfter: (sessionId, afterSeq) => host.store.events(sessionId, afterSeq),
     transcript,
     complete: async (sessionId, prompt, userId) => {
