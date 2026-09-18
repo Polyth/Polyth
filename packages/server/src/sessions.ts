@@ -101,7 +101,14 @@ const normalizeResumeOptions = (
   input?: ResumeTurnOptions | ModelRef,
 ): ResumeTurnOptions => {
   if (!input) return {};
-  if ("providerID" in input || "modelID" in input) return { model: input };
+  if (
+    "providerID" in input
+    && "modelID" in input
+    && typeof input.providerID === "string"
+    && typeof input.modelID === "string"
+  ) {
+    return { model: input as ModelRef };
+  }
   return input;
 };
 
