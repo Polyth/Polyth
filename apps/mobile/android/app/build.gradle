@@ -49,6 +49,9 @@ android {
         sourceCompatibility JavaVersion.VERSION_21
         targetCompatibility JavaVersion.VERSION_21
     }
+    buildFeatures {
+        buildConfig = true
+    }
     defaultConfig {
         applicationId "com.polyth.mobile"
         minSdkVersion rootProject.ext.minSdkVersion
