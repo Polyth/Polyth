@@ -59,25 +59,43 @@ test("groupQuotaWindows without model windows yields a single unlabeled bucket",
   assert.equal(groups[0]!.windows.length, 2);
 });
 
-test("parseUsagePrefs round-trips and survives garbage", () => {
-  const prefs = {
+test("parseUsagePrefs migrates older prefs, defaults provider-first, and survives garbage", () => {
+  const legacy = {
     hiddenProviders: ["anthropic"],
     hiddenBlocks: ["cache"],
     pinnedProviders: ["openai"],
     collapsedGroups: ["openai/gpt"],
     dashboard: { view: "providers", layout: "compact", rangeDays: 90, overviewOrder: ["models"], providerOrder: ["openai"] },
   };
-  assert.deepEqual(parseUsagePrefs(JSON.stringify(prefs)), prefs);
+  assert.deepEqual(parseUsagePrefs(JSON.stringify(legacy)), {
+    ...legacy,
+    providerCosts: {},
+    dashboard: {
+      ...legacy.dashboard,
+      chartStyle: "bar",
+      chartMetric: "tokens",
+      showChartLegend: true,
+    },
+  });
   const defaults = {
     hiddenProviders: [],
     hiddenBlocks: [],
     pinnedProviders: [],
     collapsedGroups: [],
-    dashboard: { view: "overview", layout: "expanded", rangeDays: 7, overviewOrder: [], providerOrder: [] },
+    providerCosts: {},
+    dashboard: {
+      view: "providers",
+      layout: "expanded",
+      rangeDays: 7,
+      chartStyle: "bar",
+      chartMetric: "tokens",
+      showChartLegend: true,
+      overviewOrder: [],
+      providerOrder: [],
+    },
   };
   assert.deepEqual(parseUsagePrefs(null), defaults);
   assert.deepEqual(parseUsagePrefs("not json"), defaults);
-  // non-string entries are dropped
   assert.deepEqual(
     parseUsagePrefs(JSON.stringify({
       hiddenProviders: ["a", 1, null, ""],
@@ -86,6 +104,20 @@ test("parseUsagePrefs round-trips and survives garbage", () => {
     })),
     { ...defaults, hiddenProviders: ["a"] },
   );
+});
+
+test("parseUsagePrefs preserves the last explicit tab and sanitizes provider billing", () => {
+  assert.equal(parseUsagePrefs(JSON.stringify({ dashboard: { view: "overview" } })).dashboard.view, "overview");
+  assert.equal(parseUsagePrefs(JSON.stringify({ dashboard: { view: "providers" } })).dashboard.view, "providers");
+
+  const prefs = parseUsagePrefs(JSON.stringify({
+    providerCosts: {
+      openai: { billing: "subscription", monthlyCost: 20 },
+      anthropic: { billing: "api", monthlyCost: -4 },
+    },
+  }));
+  assert.deepEqual(prefs.providerCosts.openai, { billing: "subscription", monthlyCost: 20 });
+  assert.deepEqual(prefs.providerCosts.anthropic, { billing: "api", monthlyCost: null });
 });
 
 test("pinned provider ordering stays above regular cards without losing manual order", () => {

@@ -86,8 +86,9 @@ test("narrow Usage summaries retain themed block surfaces", async () => {
   assert.match(styles, /\.usage-widget-stat-grid > div:last-child:nth-child\(odd\)\s*\{\s*grid-column:\s*1\s*\/\s*-1;/);
 });
 
-test("Usage settings keeps the Polyth shell and offers rich dashboard views", async () => {
+test("Usage surface keeps the Polyth shell while settings configure presentation", async () => {
   const source = await readFile(new URL("../widgets/usage/UsageDashboard.tsx", import.meta.url), "utf8");
+  const settingsSource = await readFile(new URL("../widgets/usage/UsageSettings.tsx", import.meta.url), "utf8");
   const quota = await readFile(new URL("../widgets/usage/quotaUi.tsx", import.meta.url), "utf8");
   const api = await readFile(new URL("../../session/src/webApi.ts", import.meta.url), "utf8");
   const registration = await readFile(new URL("../widgets/index.tsx", import.meta.url), "utf8");
@@ -96,7 +97,9 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
     await readFile(new URL("../widgets/styles.css", import.meta.url), "utf8"),
   ].join("\n");
   assert.match(source, /function ProviderSpendDonut/);
-  assert.match(source, /className="usage-spend-donut"[\s\S]*?<svg/);
+  assert.match(source, /import Chart from "chart\.js\/auto"/);
+  assert.match(source, /function UsageDoughnutChart/);
+  assert.match(source, /new Chart\(canvas, config\)/);
   assert.match(source, /function ModelBreakdown/);
   assert.match(source, /function CostPulse/);
   assert.match(source, /label=\{tr\("usage\.usagedashboard\.dashboardDensity"\)\}/);
@@ -122,7 +125,8 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
       < source.indexOf('className="usage-provider-view-intro"'),
     "provider summary follows the provider cards",
   );
-  assert.match(source, /new ResizeObserver/);
+  assert.match(source, /responsive: true/);
+  assert.doesNotMatch(source, /new ResizeObserver/);
   assert.doesNotMatch(source, /role="(?:tab|radio)"/);
   assert.doesNotMatch(source, /usage-dashboard-sidebar/);
   assert.match(quota, /loading: boolean/);
@@ -131,8 +135,16 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   assert.match(quota, /quotaListeners\.size === 1/);
   assert.equal(quota.match(/setInterval/g)?.length, 1, "quota polling has one shared timer");
   assert.doesNotMatch(api, /usageQuotas:[\s\S]{0,120}\.catch\(/);
-  assert.match(registration, /component: UsageDashboard/);
+  assert.match(registration, /component: UsageSettings/);
+  assert.match(registration, /host\.surfaces\.register\([\s\S]*?component: UsageDashboard/);
   assert.match(registration, /host\.widgets\.registerPlugin\(USAGE_WIDGET_PLUGIN\)/);
+  assert.doesNotMatch(source, /data-settings-item="usage\.dashboard"/);
+  assert.match(settingsSource, /data-settings-item="usage\.appearance"/);
+  assert.match(settingsSource, /data-settings-item="usage\.charts"/);
+  assert.match(settingsSource, /data-settings-item="usage\.statistics"/);
+  assert.match(settingsSource, /data-settings-item="usage\.costs"/);
+  assert.match(settingsSource, /setProviderCostProfile/);
+  assert.match(settingsSource, /Subscription/);
   assert.doesNotMatch(styles, /\.settings-page-usage > \.settings-nav \{ display: flex; \}/);
   assert.match(styles, /\.settings-mobile-page \.settings-nav \{ display: none; \}/);
   assert.match(styles, /--usage-bg: var\(--bg\)/);
