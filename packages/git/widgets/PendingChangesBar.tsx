@@ -198,11 +198,6 @@ export default function PendingChangesBar() {
     return () => { cancelled = true; };
   }, [changeKey, projectId, selected.dirtyPaths, selected.paths, sessionId, status]);
 
-  // The spawn/turn-start dock owns this exact above-composer activity slot.
-  // Hide stale edited-file chrome before that transient status appears so the
-  // two glass docks never stack or overlap during runtime startup.
-  if (spawning || awaitingTurn) return null;
-
   const count = selected.paths.length;
   const title = count === 1
     ? tr("pendingchangesbar.editedOneFile")
@@ -286,6 +281,12 @@ export default function PendingChangesBar() {
       />
     );
   }
+
+  // Live run activity always wins, even if the spawn marker has not cleared
+  // yet. Only the idle edited-files summary yields to the transient
+  // Spawning/Starting dock, so startup chrome never stacks while activity
+  // remains visible as soon as the turn is working.
+  if (spawning || awaitingTurn) return null;
 
   if (selected.paths.length === 0) return null;
 
