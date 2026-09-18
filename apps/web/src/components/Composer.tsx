@@ -1384,6 +1384,7 @@ export default function Composer({
   const send = useCallback((
     override?: string,
     deliveryOverride?: "steer" | "queue" | "interrupt",
+    hiddenUserMessage = false,
   ) => {
     if (creatingSession || sendPending) return;
     if (session?.status === "epoch-pending" && session.runtimeControl === "borrowed") return;
@@ -1553,7 +1554,7 @@ export default function Composer({
     // canonical `user/message` still establishes the fact and replaces this row
     // the moment it lands. A queued prompt is excluded because it belongs to
     // the queue list, and a shell command produces no user turn at all.
-    const echoId = command === null && delivery !== "queue"
+    const echoId = command === null && delivery !== "queue" && !hiddenUserMessage
       ? beginPendingSend({
         sessionId: target,
         text: t,
@@ -1613,6 +1614,7 @@ export default function Composer({
             ...(selectedNativeCommand ? { command: selectedNativeCommand } : {}),
             ...(atts.length > 0 ? { attachments: atts } : {}),
             ...(delivery ? { delivery } : {}),
+            ...(hiddenUserMessage ? { hiddenUserMessage: true } : {}),
             dismissPending: true,
             ...(wire !== undefined ? { agentProfileId: wire } : {}),
             reliabilityScope: deliveryScope,
@@ -1802,6 +1804,18 @@ export default function Composer({
     catalogHarnessId, routeCatalog.harnessName, runtimeFeatures?.capabilities.steering,
     draftExecution, profiles, activeProject?.defaults?.harness,
   ]);
+
+  const retryFailedSend = useCallback(() => {
+    const draft = (inputRef.current?.getText() ?? text).trim();
+    const lastUser = [...model.messages].reverse().find((message) => message.kind === "user");
+    const lastAttachments = lastUser?.kind === "user" ? lastUser.attachments ?? [] : [];
+    const sameAttachments = lastAttachments.length === attachments.length
+      && lastAttachments.every((attachment, index) => attachment.id === attachments[index]?.id);
+    const alreadyVisible = lastUser?.kind === "user"
+      && (lastUser.raw ?? lastUser.text).trim() === draft
+      && sameAttachments;
+    send(undefined, undefined, alreadyVisible);
+  }, [attachments, model.messages, send, text]);
 
   const applyCompletion = useCallback((item: AutocompleteOption) => {
     const token = acTokenRef.current;
@@ -2329,7 +2343,7 @@ export default function Composer({
           tone="warning"
           className="composer-send-failure"
           role="alert"
-          actions={<Button size="sm" onClick={() => send()}>{tr("common.retry")}</Button>}
+          actions={<Button size="sm" onClick={retryFailedSend}>{tr("common.retry")}</Button>}
         >{tr("composer.sendUnavailableDraftPreserved")}</Notice>
       )}
       {/* Widget-areas (WA4): the uncommitted-changes bar area, above the box. */}
