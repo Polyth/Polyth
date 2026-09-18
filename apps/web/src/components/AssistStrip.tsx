@@ -4,6 +4,7 @@
 // Tapping the chip fills the composer and NEVER sends.
 import { useState } from "react";
 import { useStore } from "../store.ts";
+import { assistFreshnessSeq } from "@polyth/session/next-action";
 import { requestComposerInsert } from "../composerInsert.ts";
 import { tr } from "../i18n/index.ts";
 
@@ -13,14 +14,14 @@ const dismissed = new Set<string>();
 export default function AssistStrip() {
   const sessionId = useStore((s) => s.activeSessionId);
   const assist = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId)?.assist);
-  const lastSeq = useStore((s) => {
+  const freshnessSeq = useStore((s) => {
     const evs = s.activeSessionId ? s.events[s.activeSessionId] : undefined;
-    return evs && evs.length > 0 ? evs[evs.length - 1]!.seq : 0;
+    return assistFreshnessSeq(evs ?? []);
   });
   const [, bump] = useState(0);
 
   if (!sessionId || !assist) return null;
-  if (assist.atSeq !== lastSeq) return null; // stale: the session moved on
+  if (assist.atSeq !== freshnessSeq) return null; // stale: the conversation moved on
   const key = `${sessionId}:${assist.atSeq}`;
   if (dismissed.has(key)) return null;
 
