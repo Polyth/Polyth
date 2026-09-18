@@ -1586,6 +1586,7 @@ export const bg: AppMessages = {
   "settings.widgetspage.undo": "Отмяна",
   "settingsview.about": "Относно",
   "settingsview.access": "Достъп",
+  "settingsview.users": "Потребители",
   "settingsview.appearance": "Външен вид",
   "settingsview.backToSettings": "Обратно към настройките",
   "settingsview.behavior": "Поведение",
