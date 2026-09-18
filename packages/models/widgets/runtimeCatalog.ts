@@ -119,12 +119,13 @@ export function peekHarnessRoster(options: Pick<SnapshotRequest, "projectId" | "
 export function readHarnessRoster(options: Pick<SnapshotRequest, "projectId" | "spaceId">): Promise<HarnessRosterItem[]> {
   const key = rosterKey(options);
   const persistentKey = rosterPresentationKey(options);
+  const requestRevision = revision;
   const query = options.projectId ? `?projectId=${encodeURIComponent(options.projectId)}` : "";
   return rosterCache.read(key, async () => {
     const persisted = persistedRosters.peek(persistentKey);
     if (persisted) return persisted;
     const rows = await api.get<HarnessRosterItem[]>(`/api/harnesses/roster${query}`);
-    persistedRosters.write(persistentKey, rows);
+    if (revision === requestRevision) persistedRosters.write(persistentKey, rows);
     return rows;
   });
 }
@@ -153,7 +154,11 @@ const rememberHarnessSnapshots = (options: SnapshotRequest, rows: HarnessSnapsho
   }
   for (const key of keys) persistedHarnesses.write(key, cached);
 };
+const reusablePersistedSnapshots = (rows: HarnessSnapshot[]): boolean =>
+  rows.every((row) => !["starting", "degraded", "offline", "unknown"].includes(row.availability.state));
+
 export function readHarnessSnapshots(options: SnapshotRequest): Promise<HarnessSnapshot[]> {
+  const requestRevision = revision;
   const query = new URLSearchParams();
   if (options.projectId) query.set("projectId", options.projectId);
   // cwd fences browser reuse only. The server derives and validates the path
@@ -163,9 +168,9 @@ export function readHarnessSnapshots(options: SnapshotRequest): Promise<HarnessS
   if (options.detail) query.set("detail", "1");
   if (!options.force) return harnessCache.read(snapshotRequestKey(options), async () => {
     const persisted = persistedHarnesses.peek(snapshotPresentationKey(options));
-    if (persisted) return persisted;
+    if (persisted && reusablePersistedSnapshots(persisted)) return persisted;
     const rows = await api.get<HarnessSnapshot[]>(`/api/harnesses/snapshots?${query}`);
-    rememberHarnessSnapshots(options, rows);
+    if (revision === requestRevision) rememberHarnessSnapshots(options, rows);
     return rows;
   });
   // Fetch first: invalidating before the forced response arrives lets
