@@ -3,7 +3,7 @@
 // Chat surface) plus the pure visibility rules the hosts and the keep-alive
 // layer must agree on. createElement-based so DOM-free tests can import it.
 import { createElement, type JSX, type ReactNode } from "react";
-import type { WorkbenchSurfacePlacement } from "@polyth/web-sdk";
+import type { SurfaceComponentProps, WorkbenchSurfacePlacement } from "@polyth/web-sdk";
 import Main from "../Main.tsx";
 import StatusBar from "../StatusBar.tsx";
 import ViewErrorBoundary from "../ViewErrorBoundary.ts";
@@ -35,7 +35,7 @@ export interface WorkbenchSurfaceInfo {
   capabilityId: string;
   presentation?: WorkspacePanePresentation;
   placement?: WorkbenchSurfacePlacement;
-  component: (props?: { active?: boolean }) => ReactNode;
+  component: (props?: SurfaceComponentProps) => ReactNode;
   keepAlive: boolean;
   /** Contextual panels (no workspace presentation) keep their panel chrome. */
   contextual: boolean;
