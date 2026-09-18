@@ -7,6 +7,7 @@
 // generated at all. One flight per session bounds token spend.
 import type { SessionAssist } from "@polyth/contracts";
 import {
+  isAssistConversationActivity,
   recentCompletedConversationContext,
   renderConversationContext,
   type ConversationExchange,
@@ -79,29 +80,10 @@ export function capWords(text: string, max: number): string {
   return words.length <= max ? words.join(" ") : `${words.slice(0, max).join(" ")}…`;
 }
 
-/** An assist is fresh only while the log has not grown past the seq it was keyed to. */
-export function isFresh(assist: { atSeq: number } | undefined, latestSeq: number): boolean {
-  return !!assist && assist.atSeq === latestSeq;
-}
-
-const ASSIST_CONVERSATION_ACTIVITY_PREFIXES = [
-  "user/",
-  "assistant/",
-  "turn/",
-  "tool/",
-  "permission/",
-  "question/",
-  "secret/",
-  "queue/",
-] as const;
-
-/** Runtime telemetry and metadata may legitimately arrive just after
- * turn/stopped. Only real conversation/session activity should cancel the
- * pending quiet-window generation. */
-export function isAssistConversationActivity(event: Pick<SessionEvent, "type">): boolean {
-  return ASSIST_CONVERSATION_ACTIVITY_PREFIXES.some((prefix) => event.type.startsWith(prefix))
-    || event.type === "session/rewound"
-    || event.type === "session/rewind-cleared";
+/** Fresh while no conversation activity has advanced past the raw log tail
+ * the assist was generated against. Passive bookkeeping may have newer seqs. */
+export function isFresh(assist: { atSeq: number } | undefined, latestConversationSeq: number): boolean {
+  return !!assist && assist.atSeq >= latestConversationSeq;
 }
 
 export function buildAssistPrompt(transcript: string): string {
@@ -319,27 +301,38 @@ export function createAssistService(deps: {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const inFlight = new Set<string>();
 
+  const stablePassiveTail = async (sessionId: string, afterSeq: number): Promise<number | null> => {
+    let cursor = afterSeq;
+    // A provider can trickle usage/title metadata immediately after stop. Read
+    // through a few such races without spending tokens or hiding the result.
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const trailing = await deps.eventsAfter(sessionId, cursor);
+      if (trailing.some(isAssistConversationActivity)) return null;
+      cursor = trailing.at(-1)?.seq ?? cursor;
+      if ((await deps.latestSeq(sessionId)) === cursor) return cursor;
+    }
+    return null;
+  };
+
   const fire = async (sessionId: string, seqAtSchedule: number) => {
     timers.delete(sessionId);
     if (inFlight.has(sessionId)) return; // one flight per session
     if (!deps.settings().enabled) return; // switch may have flipped while waiting
     inFlight.add(sessionId);
     try {
-      // Providers can append passive usage/title metadata after turn/stopped.
-      // Let that settle without treating it as renewed conversation activity,
-      // then anchor the generated assist to the real current log tail.
-      const trailing = await deps.eventsAfter(sessionId, seqAtSchedule);
-      if (trailing.some(isAssistConversationActivity)) return;
-      const atSeq = trailing[trailing.length - 1]?.seq ?? seqAtSchedule;
-      // Close the read race before spending tokens.
-      if ((await deps.latestSeq(sessionId)) !== atSeq) return;
+      // Providers can append passive usage/title/goal/isolation bookkeeping
+      // after turn/stopped. Only actual conversation movement cancels assist.
+      const atSeq = await stablePassiveTail(sessionId, seqAtSchedule);
+      if (atSeq === null) return;
       const transcript = await deps.transcript(sessionId);
       if (!transcript.trim()) return;
       const parsed = parseAssistReply(await deps.complete(sessionId, buildAssistPrompt(transcript)));
       if (!parsed) return;
-      // Once generation starts, any event wins over the slow model result.
-      if ((await deps.latestSeq(sessionId)) !== atSeq) return;
-      await deps.save(sessionId, { ...parsed, atSeq, generatedAt: now() });
+      // Passive events that arrive while the model runs are equally harmless;
+      // advance the raw-log anchor so route/UI freshness remains stable.
+      const finalAtSeq = await stablePassiveTail(sessionId, atSeq);
+      if (finalAtSeq === null) return;
+      await deps.save(sessionId, { ...parsed, atSeq: finalAtSeq, generatedAt: now() });
     } catch (err) {
       deps.onError?.(sessionId, err);
     } finally {
