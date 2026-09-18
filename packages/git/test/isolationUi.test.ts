@@ -111,7 +111,7 @@ test("header badge is passive status only with no mutation controls", async () =
       tr("isolation.continueWorking"),
       tr("isolation.discard"),
       tr("isolation.resolveWithAgent"),
-      tr("isolation.discardWorkspace"),
+      tr("sidebar.sessionlist.deleteSession"),
     ]) {
       assert.equal(mounted.container.textContent?.includes(label), false);
     }
@@ -120,15 +120,18 @@ test("header badge is passive status only with no mutation controls", async () =
   }
 });
 
-test("changes-ready shows integrate, review and delete in overflow without a continue action", async () => {
+test("changes-ready deletes the isolated session without invoking discard/rebind", async () => {
   const originalStatus = api.isolationStatus;
+  const originalDelete = api.deleteSession;
   const originalDiscard = api.isolationDiscard;
   const isolation: SessionIsolation = { ...base, state: "merge-ready" };
   api.isolationStatus = async () => ({
     isolation, effectiveState: isolation.state, suggestion: readySuggestion,
     actions: { canReview: true, canMerge: true, canKeep: true, canResolve: false, canDiscard: true, canRecover: false, canAbandon: false },
   });
+  let deleted = 0;
   let discarded = 0;
+  api.deleteSession = async () => { deleted++; return { ok: true as const }; };
   api.isolationDiscard = async (id) => { discarded++; return projection(id, isolation); };
   const mounted = await mount(projection("ready-ui", isolation));
   try {
@@ -143,18 +146,21 @@ test("changes-ready shows integrate, review and delete in overflow without a con
     assert.ok(more);
     await act(async () => { more!.click(); await wait(); });
     const deleteEntry = [...document.querySelectorAll('[role="menuitem"]')]
-      .find((entry) => entry.textContent === tr("isolation.discardWorkspace"));
+      .find((entry) => entry.textContent === tr("sidebar.sessionlist.deleteSession"));
     assert.ok(deleteEntry);
     await act(async () => { (deleteEntry as HTMLButtonElement).click(); await wait(); });
-    assert.ok(document.body.textContent?.includes(tr("isolation.discardTitle")));
-    const confirm = buttons(document.body).find((b) => b.textContent === tr("isolation.discard"));
+    assert.ok(document.body.textContent?.includes(tr("sidebar.sessionlist.deleteSession")));
+    const confirm = buttons(document.body).find((b) => b.textContent === tr("common.delete"));
     assert.ok(confirm);
     await act(async () => { confirm!.click(); await wait(); });
-    assert.equal(discarded, 1);
+    assert.equal(deleted, 1);
+    assert.equal(discarded, 0);
+    assert.equal(mounted.container.querySelector(".isolation-card"), null);
   } finally {
     await act(async () => { document.querySelectorAll(".dialog-backdrop, [role=dialog]").forEach((node) => node.remove()); });
     await mounted.close();
     api.isolationStatus = originalStatus;
+    api.deleteSession = originalDelete;
     api.isolationDiscard = originalDiscard;
   }
 });
