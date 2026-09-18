@@ -1586,6 +1586,7 @@ export const zhCN: AppMessages = {
   "settings.widgetspage.undo": "撤销",
   "settingsview.about": "关于",
   "settingsview.access": "使用权",
+  "settingsview.users": "用户",
   "settingsview.appearance": "外观",
   "settingsview.backToSettings": "返回设置",
   "settingsview.behavior": "行为",
