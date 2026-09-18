@@ -10,6 +10,8 @@ import {
   type PointerEvent,
   type ReactNode,
 } from "react";
+import Chart from "chart.js/auto";
+import type { ChartConfiguration } from "chart.js";
 import { fmtTokens } from "../../../../apps/web/src/format.ts";
 import { getLocale, tr } from "../../../../apps/web/src/i18n/index.ts";
 import { Icon } from "../../../../apps/web/src/icons.tsx";
@@ -397,135 +399,133 @@ function SectionHeading({
   );
 }
 
+const chartPalette = (element: Element): string[] => {
+  const style = getComputedStyle(element);
+  return ["--accent", "--green", "--blue", "--purple", "--amber"].map(
+    (token) => style.getPropertyValue(token).trim() || style.getPropertyValue("--text").trim(),
+  );
+};
+
+function UsageSeriesChart({
+  labels,
+  series,
+  metric,
+  chartStyle,
+  formatAxis,
+}: {
+  labels: string[];
+  series: UsageChartSeries[];
+  metric: UsageChartMetric;
+  chartStyle: "bar" | "line";
+  formatAxis: (value: number) => string;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const style = getComputedStyle(canvas);
+    const colors = chartPalette(canvas);
+    const textColor = style.getPropertyValue("--muted").trim();
+    const gridColor = style.getPropertyValue("--border-soft").trim();
+    const reduceMotion = typeof matchMedia === "function"
+      && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const config = {
+      type: chartStyle,
+      data: {
+        labels,
+        datasets: series.map((item, index) => ({
+          label: item.label,
+          data: item.values,
+          backgroundColor: colors[index % colors.length],
+          borderColor: colors[index % colors.length],
+          borderWidth: chartStyle === "line" ? 2 : 0,
+          borderRadius: chartStyle === "bar" ? 4 : undefined,
+          pointRadius: chartStyle === "line" ? 1.5 : 0,
+          pointHoverRadius: chartStyle === "line" ? 4 : 0,
+          tension: chartStyle === "line" ? .32 : 0,
+          fill: false,
+        })),
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: reduceMotion ? false : { duration: 220 },
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (context: { dataset: { label?: string }; parsed: { y: number | null } }) =>
+                `${context.dataset.label ?? ""}: ${formatAxis(context.parsed.y ?? 0)}`,
+            },
+          },
+        },
+        scales: {
+          x: {
+            stacked: chartStyle === "bar",
+            border: { display: false },
+            grid: { display: false },
+            ticks: { color: textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 6 },
+          },
+          y: {
+            stacked: chartStyle === "bar",
+            beginAtZero: true,
+            border: { display: false },
+            grid: { color: gridColor },
+            ticks: {
+              color: textColor,
+              maxTicksLimit: 5,
+              callback: (value: string | number) => formatAxis(Number(value)),
+            },
+          },
+        },
+      },
+    } as ChartConfiguration;
+    const chart = new Chart(canvas, config);
+    return () => chart.destroy();
+  }, [chartStyle, formatAxis, labels, metric, series]);
+
+  return <canvas ref={canvasRef} aria-hidden="true" />;
+}
+
 function CohortChart({
   labels,
   series,
   metric,
+  chartStyle,
   emptyTitle,
   emptyText,
 }: {
   labels: string[];
   series: UsageChartSeries[];
   metric: UsageChartMetric;
+  chartStyle: "bar" | "line";
   emptyTitle: string;
   emptyText: string;
 }) {
-  const chartRef = useRef<HTMLDivElement>(null);
-  const [chartSize, setChartSize] = useState({ width: 720, height: 236 });
-  useEffect(() => {
-    const element = chartRef.current;
-    if (!element) return;
-    const updateSize = () => {
-      const bounds = element.getBoundingClientRect();
-      const next = {
-        width: Math.max(280, Math.round(bounds.width)),
-        height: Math.max(170, Math.round(bounds.height)),
-      };
-      setChartSize((current) =>
-        current.width === next.width && current.height === next.height ? current : next);
-    };
-    updateSize();
-    if (typeof ResizeObserver === "undefined") {
-      window.addEventListener("resize", updateSize);
-      return () => window.removeEventListener("resize", updateSize);
-    }
-    const observer = new ResizeObserver(updateSize);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-  const { width, height } = chartSize;
-  const top = 12;
-  const bottom = 32;
-  const left = 54;
-  const right = 8;
-  const chartWidth = width - left - right;
-  const chartHeight = height - top - bottom;
-  const allValues = series.flatMap((item) => item.values);
-  const bucketTotals = aggregateSeries(series, labels.length);
-  const maximum = Math.max(1, ...bucketTotals);
-  const bucketWidth = labels.length > 0 ? chartWidth / labels.length : chartWidth;
-  const barWidth = Math.min(32, Math.max(2, bucketWidth * .68));
-  const barX = (index: number) => left + bucketWidth * index + (bucketWidth - barWidth) / 2;
-  const pointY = (value: number) => top + chartHeight - value / maximum * chartHeight;
-  const populated = allValues.some((value) => value > 0);
-  const metricLabel = metric === "cost" ? tr("usage.usagedashboard.cost") : metric === "tokens" ? tr("usage.usagedashboard.tokens") : tr("usage.usagedashboard.sessions");
+  const populated = series.some((item) => item.values.some((value) => value > 0));
+  const metricLabel = metric === "cost"
+    ? tr("usage.usagedashboard.cost")
+    : metric === "tokens"
+      ? tr("usage.usagedashboard.tokens")
+      : tr("usage.usagedashboard.sessions");
   const formatAxis = (value: number) => metric === "cost"
     ? formatChartMoney(value)
     : metric === "tokens"
       ? fmtTokens(Math.round(value))
       : String(Math.round(value));
-  const maximumLabelCount = Math.min(6, Math.max(2, Math.floor(chartWidth / 88)));
-  const renderedLabelCount = Math.min(labels.length, maximumLabelCount);
-  const visibleLabelIndexes = new Set(
-    renderedLabelCount <= 1
-      ? [0]
-      : Array.from(
-          { length: renderedLabelCount },
-          (_, index) => Math.round(index * (labels.length - 1) / (renderedLabelCount - 1)),
-        ),
-  );
 
   return (
-    <div className="usage-cohort-chart" ref={chartRef}>
+    <div className="usage-cohort-chart">
       {populated && (
-        <svg viewBox={`0 0 ${width} ${height}`} role="img">
-          <title>{tr("usage.usagedashboard.valueFromFullSessionTotals", { metric: metricLabel })}</title>
-          <desc>
-            {tr("usage.usagedashboard.eachSessionAppearsOnceInThe", { metric: metricLabel.toLowerCase() })}
-          </desc>
-          {[0, .25, .5, .75, 1].map((fraction) => {
-            const y = top + chartHeight * fraction;
-            const value = maximum * (1 - fraction);
-            return (
-              <g key={fraction}>
-                <line className="usage-chart-gridline" x1={left} x2={width - right} y1={y} y2={y} />
-                <text className="usage-chart-y-label" x={left - 9} y={y + 3} textAnchor="end">
-                  {formatAxis(value)}
-                </text>
-              </g>
-            );
-          })}
-          {labels.map((label, pointIndex) => {
-            let stackedValue = 0;
-            return series.map((item, seriesIndex) => {
-              const value = item.values[pointIndex] ?? 0;
-              const bottomValue = stackedValue;
-              stackedValue += value;
-              if (value <= 0) return null;
-              const y = pointY(stackedValue);
-              return (
-                <rect
-                  key={`${item.providerId}-${pointIndex}`}
-                  className="usage-chart-bar"
-                  x={barX(pointIndex)}
-                  y={y}
-                  width={barWidth}
-                  height={Math.max(1, pointY(bottomValue) - y)}
-                  rx="2"
-                  fill={seriesAccent(seriesIndex)}
-                >
-                  <title>{tr("usage.usagedashboard.valueValueFromSessionsWith", { label: item.label, value: formatAxis(value), bucket: label })}</title>
-                </rect>
-              );
-            });
-          })}
-          {labels.map((label, index) => {
-            if (!visibleLabelIndexes.has(index)) return null;
-            const first = index === 0;
-            const last = index === labels.length - 1;
-            return (
-              <text
-                className="usage-chart-x-label"
-                key={`${label}-${index}`}
-                x={first ? left : last ? width - right : barX(index) + barWidth / 2}
-                y={height - 5}
-                textAnchor={first ? "start" : last ? "end" : "middle"}
-              >
-                {label}
-              </text>
-            );
-          })}
-        </svg>
+        <UsageSeriesChart
+          labels={labels}
+          series={series}
+          metric={metric}
+          chartStyle={chartStyle}
+          formatAxis={formatAxis}
+        />
       )}
       {populated && (
         <table className="sr-only">
@@ -563,12 +563,19 @@ function SessionCohorts({
   data,
   visibleProviderIds,
   hiddenCount,
+  metric,
+  chartStyle,
+  showLegend,
+  onMetricChange,
 }: {
   data: ReturnType<typeof buildUsageDashboardData>;
   visibleProviderIds: ReadonlySet<string>;
   hiddenCount: number;
+  metric: UsageChartMetric;
+  chartStyle: "bar" | "line";
+  showLegend: boolean;
+  onMetricChange: (metric: UsageChartMetric) => void;
 }) {
-  const [metric, setMetric] = useState<UsageChartMetric>("tokens");
   const visibleSeries = data.chart[metric].filter((item) => visibleProviderIds.has(item.providerId));
   const series = collapseChartSeries(visibleSeries);
   const hiddenActivity = hiddenCount > 0 && data.chart[metric].some(
@@ -589,7 +596,7 @@ function SessionCohorts({
               id: item,
               label: item === "tokens" ? tr("usage.usagedashboard.tokens") : item === "cost" ? tr("usage.usagedashboard.cost") : tr("usage.usagedashboard.sessions"),
             }))}
-            onChange={(value) => setMetric(value as UsageChartMetric)}
+            onChange={(value) => onMetricChange(value as UsageChartMetric)}
           />
         )}
       />
@@ -597,6 +604,7 @@ function SessionCohorts({
         labels={data.chart.labels}
         series={series}
         metric={metric}
+        chartStyle={chartStyle}
         emptyTitle={hiddenActivity ? tr("usage.usagedashboard.allActivityIsHidden") : tr("usage.usagedashboard.noSessionsLastActiveIn")}
         emptyText={hiddenActivity
           ? tr("usage.usagedashboard.showAProviderToIncludeIts")
@@ -605,17 +613,19 @@ function SessionCohorts({
       <p className="usage-chart-method">
         {tr("usage.usagedashboard.eachSessionAppearsOnceInBucket")}
       </p>
-      <div className="usage-chart-legend">
-        {series.map((item, index) => (
-          <span key={item.providerId}>
-            <i style={{ background: seriesAccent(index) }} />
-            {item.providerId === "__other__"
-              ? <span className="usage-other-provider" aria-hidden="true">+</span>
-              : <ProviderLogo providerID={item.providerId} providerName={item.label} className="usage-legend-logo" />}
-            {item.label}
-          </span>
-        ))}
-      </div>
+      {showLegend && (
+        <div className="usage-chart-legend">
+          {series.map((item, index) => (
+            <span key={item.providerId}>
+              <i style={{ background: seriesAccent(index) }} />
+              {item.providerId === "__other__"
+                ? <span className="usage-other-provider" aria-hidden="true">+</span>
+                : <ProviderLogo providerID={item.providerId} providerName={item.label} className="usage-legend-logo" />}
+              {item.label}
+            </span>
+          ))}
+        </div>
+      )}
     </article>
   );
 }
@@ -627,14 +637,51 @@ interface SpendEntry {
   providerId?: string;
 }
 
+function UsageDoughnutChart({ entries }: { entries: SpendEntry[] }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || entries.length === 0) return;
+    const colors = chartPalette(canvas);
+    const reduceMotion = typeof matchMedia === "function"
+      && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const config = {
+      type: "doughnut",
+      data: {
+        labels: entries.map((entry) => entry.label),
+        datasets: [{
+          data: entries.map((entry) => entry.cost),
+          backgroundColor: entries.map((_, index) => colors[index % colors.length]),
+          borderWidth: 0,
+          hoverOffset: 3,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: "72%",
+        animation: reduceMotion ? false : { duration: 220 },
+        plugins: { legend: { display: false } },
+      },
+    } as ChartConfiguration;
+    const chart = new Chart(canvas, config);
+    return () => chart.destroy();
+  }, [entries]);
+
+  return <canvas ref={canvasRef} aria-hidden="true" />;
+}
+
 function ProviderSpendDonut({
   providers,
   onViewProviders,
   hiddenSpend,
+  showLegend,
 }: {
   providers: UsageProviderSummary[];
   onViewProviders: () => void;
   hiddenSpend: boolean;
+  showLegend: boolean;
 }) {
   const withSpend = providers.filter((provider) => provider.cost > 0);
   const total = withSpend.reduce((sum, provider) => sum + provider.cost, 0);
@@ -661,47 +708,34 @@ function ProviderSpendDonut({
         description={tr("usage.usagedashboard.whereWorkspaceSpendIsGoing")}
         aside={<IconButton icon={ChevronRightIcon} label={tr("usage.usagedashboard.viewProviderDetails")} onClick={onViewProviders} />}
       />
-      <div className="usage-spend-content">
+      <div className={`usage-spend-content${showLegend ? "" : " no-legend"}`}>
         <div className="usage-spend-donut" role="img" aria-label={tr("usage.usagedashboard.providerSpendTotalingValue", { total: formatMoney(total) })}>
-          <svg viewBox="0 0 120 120" aria-hidden="true">
-            <circle className="usage-spend-track" cx="60" cy="60" r="45" pathLength="100" />
-            {arcs.map(({ entry, share, offset: arcOffset, accent }) => (
-              <circle
-                className="usage-spend-arc"
-                key={entry.id}
-                cx="60"
-                cy="60"
-                r="45"
-                pathLength="100"
-                stroke={accent}
-                strokeDasharray={`${share * 100} ${100 - share * 100}`}
-                strokeDashoffset={-arcOffset}
-              />
-            ))}
-          </svg>
+          {featured.length > 0 && <UsageDoughnutChart entries={featured} />}
           <div><span>{tr("usage.usagedashboard.totalSpend")}</span><strong>{formatMoney(total)}</strong></div>
         </div>
-        <div className="usage-spend-legend">
-          {arcs.map(({ entry, share, accent }) => (
-            <div key={entry.id}>
-              {entry.providerId
-                ? <ProviderLogo providerID={entry.providerId} providerName={entry.label} className="usage-legend-logo" />
-                : <span className="usage-other-provider" aria-hidden="true">+</span>}
-              <i style={{ background: accent }} />
-              <span>{entry.label}</span>
-              <strong>{formatMoney(entry.cost)}</strong>
-              <small>{Math.round(share * 100)}%</small>
-            </div>
-          ))}
-          {arcs.length === 0 && (
-            <div className="usage-inline-empty" role="status">
-              <strong>{hiddenSpend ? tr("usage.usagedashboard.allSpendIsHidden") : tr("usage.usagedashboard.noSpendRecorded")}</strong>
-              <span>{hiddenSpend
-                ? tr("usage.usagedashboard.showAProviderToIncludeSpend")
-                : tr("usage.usagedashboard.costAppearsWhenTheActive")}</span>
-            </div>
-          )}
-        </div>
+        {showLegend && (
+          <div className="usage-spend-legend">
+            {arcs.map(({ entry, share, accent }) => (
+              <div key={entry.id}>
+                {entry.providerId
+                  ? <ProviderLogo providerID={entry.providerId} providerName={entry.label} className="usage-legend-logo" />
+                  : <span className="usage-other-provider" aria-hidden="true">+</span>}
+                <i style={{ background: accent }} />
+                <span>{entry.label}</span>
+                <strong>{formatMoney(entry.cost)}</strong>
+                <small>{Math.round(share * 100)}%</small>
+              </div>
+            ))}
+            {arcs.length === 0 && (
+              <div className="usage-inline-empty" role="status">
+                <strong>{hiddenSpend ? tr("usage.usagedashboard.allSpendIsHidden") : tr("usage.usagedashboard.noSpendRecorded")}</strong>
+                <span>{hiddenSpend
+                  ? tr("usage.usagedashboard.showAProviderToIncludeSpend")
+                  : tr("usage.usagedashboard.costAppearsWhenTheActive")}</span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </article>
   );
@@ -926,8 +960,9 @@ function ProviderDetails({
   onRefresh: (providerId: string) => void | Promise<void>;
   quotaBusy: boolean;
 }) {
+  const prefs = useUsagePrefs();
   return (
-    <div className="usage-provider-view" data-settings-item="usage.providers">
+    <div className="usage-provider-view">
       {providers.length > 0 ? <SortableBlocks
         className="usage-provider-detail-grid"
         order={order}
@@ -937,6 +972,7 @@ function ProviderDetails({
           const preferenceId = providerPreferenceId(provider);
           const hidden = hiddenProviders.includes(preferenceId);
           const pinned = pinnedProviders.includes(preferenceId);
+          const costProfile = prefs.providerCosts[preferenceId] ?? { billing: "api" as const, monthlyCost: null };
           return {
             id: provider.id,
             label: provider.label,
@@ -948,11 +984,16 @@ function ProviderDetails({
                   providerName={provider.label}
                   className="usage-provider-mark usage-provider-mark-large"
                 />
-                <div>
+                <div className="usage-provider-title">
                   <h3>{provider.label}</h3>
                   <p title={provider.snapshot?.accountLabel ?? provider.id}>{provider.snapshot?.accountLabel ?? provider.id}</p>
                 </div>
-                <ProviderStatus provider={provider} />
+                <div className="usage-provider-badges">
+                  <span className={`usage-billing-pill ${costProfile.billing}`}>
+                    {costProfile.billing === "subscription" ? "Subscription" : "API usage"}
+                  </span>
+                  <ProviderStatus provider={provider} />
+                </div>
                 <IconButton
                   icon={PinIcon}
                   size="sm"
@@ -970,10 +1011,16 @@ function ProviderDetails({
                   <span>{provider.snapshot.error.message}</span>
                 </div>
               )}
-              <div className="usage-provider-detail-stats">
-                <div><span>{tr("usage.usagedashboard.spend")}</span><strong>{formatMoney(provider.cost)}</strong></div>
+              <div className={`usage-provider-detail-stats${costProfile.billing === "subscription" ? " has-plan" : ""}`}>
+                <div><span>{costProfile.billing === "subscription" ? "Spent" : tr("usage.usagedashboard.spend")}</span><strong>{formatMoney(provider.cost)}</strong></div>
                 <div><span>{tr("usage.usagedashboard.tokens")}</span><strong>{fmtTokens(provider.tokens)}</strong></div>
                 <div><span>{tr("usage.usagedashboard.sessions")}</span><strong>{provider.sessions.toLocaleString(getLocale())}</strong></div>
+                {costProfile.billing === "subscription" && (
+                  <div className="usage-provider-plan-stat">
+                    <span>Plan</span>
+                    <strong>{costProfile.monthlyCost === null ? "Set price" : `${formatMoney(costProfile.monthlyCost)}/mo`}</strong>
+                  </div>
+                )}
               </div>
               <div className="usage-provider-windows">
                 {provider.snapshot?.windows.map((quota) => {
@@ -1068,18 +1115,13 @@ export function UsageDashboard(): ReactNode {
     error: quotaError,
   } = useQuotaSnapshots();
   const prefs = useUsagePrefs();
-  const { view, layout, rangeDays } = prefs.dashboard;
-  const dashboardRef = useRef<HTMLDivElement>(null);
+  const { view, layout, rangeDays, chartStyle, chartMetric, showChartLegend } = prefs.dashboard;
   const setView = (next: "overview" | "providers") =>
     setUsageDashboardPrefs({ view: next });
   const setLayout = (next: "expanded" | "compact") =>
     setUsageDashboardPrefs({ layout: next });
   const setRangeDays = (next: UsageRangeDays) =>
     setUsageDashboardPrefs({ rangeDays: next });
-  useEffect(() => {
-    const pane = dashboardRef.current?.closest<HTMLElement>(".settings-pane-body");
-    if (pane) pane.scrollTop = 0;
-  }, [view]);
   const [refreshing, setRefreshing] = useState(false);
   const [editing, setEditing] = useState(false);
   const data = useMemo(
@@ -1122,7 +1164,15 @@ export function UsageDashboard(): ReactNode {
       id: "cohorts",
       label: tr("usage.usagedashboard.sessionCohortsByLatestTurn"),
       className: "usage-block-wide",
-      content: <SessionCohorts data={data} visibleProviderIds={visibleProviderIds} hiddenCount={hiddenCount} />,
+      content: <SessionCohorts
+        data={data}
+        visibleProviderIds={visibleProviderIds}
+        hiddenCount={hiddenCount}
+        metric={chartMetric}
+        chartStyle={chartStyle}
+        showLegend={showChartLegend}
+        onMetricChange={(metric) => setUsageDashboardPrefs({ chartMetric: metric })}
+      />,
     },
     {
       id: "cost-context",
@@ -1134,7 +1184,12 @@ export function UsageDashboard(): ReactNode {
       id: "provider-spend",
       label: tr("usage.usagedashboard.costByProvider"),
       className: "usage-block-half",
-      content: <ProviderSpendDonut providers={visibleProviders} hiddenSpend={data.providers.some((provider) => !visibleProviderIds.has(provider.id) && provider.cost > 0)} onViewProviders={() => setView("providers")} />,
+      content: <ProviderSpendDonut
+        providers={visibleProviders}
+        hiddenSpend={data.providers.some((provider) => !visibleProviderIds.has(provider.id) && provider.cost > 0)}
+        showLegend={showChartLegend}
+        onViewProviders={() => setView("providers")}
+      />,
     },
     {
       id: "models",
@@ -1163,10 +1218,8 @@ export function UsageDashboard(): ReactNode {
   return (
     <div
       className={`usage-dashboard usage-layout-${layout}`}
-      data-settings-item="usage.dashboard"
       data-layout={layout}
       aria-busy={quotaBusy}
-      ref={dashboardRef}
     >
       <div className="usage-dashboard-toolbar">
         <Tabs
