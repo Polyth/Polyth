@@ -62,18 +62,13 @@ test("background and glass controls are wired into Appearance and the held-Shift
   );
   assert.match(
     styles,
-    /html\[data-background\]:not\(\[data-background="none"\]\) body:not\(\.desktop-app\)\s*\{[^}]*background-image:[\s\S]*?var\(--app-background-image\)[^}]*background-size:\s*cover;/s,
-    "the browser document canvas paints the selected background through any bottom PWA slack",
+    /html\[data-background\]:not\(\[data-background="none"\]\) body,\s*html\[data-background\]:not\(\[data-background="none"\]\) \.app\s*\{[^}]*background-color:\s*transparent;[^}]*background-image:\s*none;/s,
+    "normal web keeps one root-owned workspace background",
   );
   assert.match(
     styles,
-    /html\[data-background\]:not\(\[data-background="none"\]\) \.app\s*\{[^}]*background-color:\s*transparent;[^}]*background-image:\s*none;/s,
-    "the app surface does not cover the document-owned workspace background",
-  );
-  assert.match(
-    styles,
-    /html, body, #root\s*\{[^}]*min-height:\s*100vh;[^}]*min-height:\s*100dvh;/s,
-    "the root chain cannot end above the dynamic viewport",
+    /@supports \(-webkit-touch-callout: none\)\s*\{[\s\S]*?@media \(display-mode: standalone\)\s*\{[\s\S]*?\.app\s*\{[^}]*height:\s*100vh;[^}]*\}[\s\S]*?html\[data-background\]:not\(\[data-background="none"\]\) \.app\s*\{[^}]*background-image:[\s\S]*?var\(--app-background-image\)[^}]*background-size:\s*cover;/s,
+    "iOS standalone switches back to the full layout viewport and paints the image on the app itself",
   );
   assert.match(
     styles,
