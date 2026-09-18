@@ -265,7 +265,7 @@ export function createProjectService(
     name?: string,
     spaceId?: string,
     composition?: ProjectComposition,
-    id = randomUUID(),
+    id: string = randomUUID(),
   ): Promise<Project> => {
     const parsedComposition = composition === undefined ? undefined : parseProjectComposition(composition);
     const abs = resolve(path);
@@ -292,7 +292,7 @@ export function createProjectService(
     remote: ProjectRemote,
     name?: string,
     spaceId?: string,
-    id = randomUUID(),
+    id: string = randomUUID(),
   ): Promise<Project> => {
     if (!path.startsWith("/")) {
       throw Object.assign(new Error("remote path must be absolute"), { code: "invalid-input" });
@@ -342,8 +342,8 @@ export function createProjectService(
         const project = find(id);
         return project ? publicProject(project) : undefined;
       },
-      add: (path, name, composition) => add(path, name, spaceId, composition),
-      async create(path, name, composition) {
+      add: (path: string, name?: string, composition?: ProjectComposition) => add(path, name, spaceId, composition),
+      async create(path: string, name?: string, composition?: ProjectComposition) {
         if (composition !== undefined) parseProjectComposition(composition);
         const abs = resolve(path);
         mkdirSync(abs, { recursive: true });
