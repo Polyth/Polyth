@@ -53,6 +53,17 @@ final class PolythNavigationPlugin: CAPPlugin, CAPBridgedPlugin {
 }
 
 final class PolythRootBridgeViewController: CAPBridgeViewController {
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        // The web app owns safe-area spacing. Clear any UIKit/plug-in inset so
+        // the WKWebView canvas itself reaches behind the status bar and the
+        // selected workspace background can paint there; controls still use
+        // CSS --safe-top to stay below the Dynamic Island/notch.
+        webView?.scrollView.contentInsetAdjustmentBehavior = .never
+        webView?.scrollView.contentInset = .zero
+        webView?.scrollView.scrollIndicatorInsets = .zero
+    }
+
     override func capacitorDidLoad() {
         super.capacitorDidLoad()
         bridge?.registerPluginInstance(PolythLinkPlugin())

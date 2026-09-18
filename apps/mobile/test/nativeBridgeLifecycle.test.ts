@@ -39,15 +39,18 @@ test("Android back keeps one enabled dispatcher and opts into predictive back", 
 });
 
 test("native shell leaves safe-area painting to the web app", async () => {
-  const [config, index] = await Promise.all([
+  const [config, index, scene] = await Promise.all([
     readFile(new URL("../capacitor.config.ts", import.meta.url), "utf8"),
     readFile(new URL("../../web/src/index.html", import.meta.url), "utf8"),
+    readFile(new URL("../ios/App/App/SceneDelegate.swift", import.meta.url), "utf8"),
   ]);
 
   assert.match(config, /ios:\s*\{[\s\S]*?contentInset:\s*"never"/,
     "WKWebView must not insert a native top gutter above the selected workspace background");
   assert.match(config, /SystemBars:\s*\{[\s\S]*?insetsHandling:\s*"disable"/,
     "Capacitor SystemBars must not double-consume insets owned by the SafeArea plugin");
+  assert.match(scene, /contentInsetAdjustmentBehavior\s*=\s*\.never/);
+  assert.match(scene, /contentInset\s*=\s*\.zero/);
   assert.match(index, /viewport-fit=cover/,
     "the web viewport must remain edge-to-edge so CSS safe-area tokens can position controls");
 });
