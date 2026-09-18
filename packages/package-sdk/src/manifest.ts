@@ -150,9 +150,9 @@ export type ParseManifestSuccess = { ok: true; manifest: PackageManifest };
 export type ParseManifestResult = ParseManifestSuccess | ParseManifestFailure;
 
 const err = (code: string, message: string): ParseManifestFailure => ({ ok: false, code, message });
-const fail = (code: string, message: string): never => {
+function fail(code: string, message: string): never {
   throw Object.assign(new Error(message), { code });
-};
+}
 
 const PACKAGE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const CONTRIB_ID = /^[a-z][a-z0-9._-]{0,63}$/;
