@@ -1,15 +1,11 @@
-// F9 routes: idle-assist settings (the hard token-spend switch), the freshness-
-// checked assist read, and chat→note distillation. The assist itself lives on
-// the projection; this route answers 404 once conversation activity moves past it.
-import type { SessionAssist, SessionProjection, SpaceContext } from "@polyth/contracts";
+// Explicit utility-model routes: prompt improvement, next-action suggestion,
+// chat→note distillation, and compact task briefing. Passive idle recap routes
+// belong to the optional recap package.
+import type { SessionProjection, SpaceContext } from "@polyth/contracts";
 import type { RouteHandler } from "../http.ts";
-import { isFresh, type AssistSettingsService } from "../assist.ts";
 
 export function assistRoutes(deps: {
-  enabled?: () => boolean;
-  settings: AssistSettingsService;
   projection(sessionId: string): Promise<SessionProjection | undefined>;
-  latestSeq(sessionId: string): Promise<number>;
   /** Small-model chat→note distillation; absent = honest 503. */
   distill?: (space: SpaceContext, sessionId: string) => Promise<{ title: string; body: string }>;
   /** Small-model summary of the latest user prompt for mobile task chrome. */
@@ -21,17 +17,6 @@ export function assistRoutes(deps: {
 }): RouteHandler {
   return async (rc) => {
     const { path, method, json } = rc;
-
-    if (path === "/api/settings/assist" && method === "GET") {
-      if (deps.enabled && !deps.enabled()) return false;
-      json(200, deps.settings.get());
-      return true;
-    }
-    if (path === "/api/settings/assist" && method === "PUT") {
-      if (deps.enabled && !deps.enabled()) return false;
-      json(200, deps.settings.put(await rc.body()));
-      return true;
-    }
 
     let m = path.match(/^\/api\/projects\/([^/]+)\/assist\/prompt$/);
     if (m && method === "POST") {
@@ -49,22 +34,6 @@ export function assistRoutes(deps: {
           message: error instanceof Error ? error.message : String(error),
         });
       }
-      return true;
-    }
-
-    m = path.match(/^\/api\/sessions\/([^/]+)\/assist$/);
-    if (m && method === "GET") {
-      if (deps.enabled && !deps.enabled()) return false;
-      const sessionId = decodeURIComponent(m[1]!);
-      const proj = await deps.projection(sessionId);
-      if (!proj) { json(404, { error: "not-found", message: "unknown session" }); return true; }
-      const assist = proj.assist as SessionAssist | undefined;
-      if (!assist) { json(404, { error: "not-found", message: "no assist generated yet" }); return true; }
-      if (!isFresh(assist, await deps.latestSeq(sessionId))) {
-        json(404, { error: "stale", message: "the session moved past this recap" });
-        return true;
-      }
-      json(200, assist);
       return true;
     }
 
