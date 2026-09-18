@@ -14,7 +14,7 @@ import exampleFeature from "../../../packages/example-feature/src/serverEntry.ts
 import files from "../../../packages/files/src/serverEntry.ts";
 import editor from "../../../packages/editor/src/serverEntry.ts";
 import fusion from "../../../packages/fusion/src/serverEntry.ts";
-import git from "../../../packages/git/src/serverEntry.ts";
+import git from "../../../packages/git/src/sourceControlServerEntry.ts";
 import gitlab from "../../../packages/gitlab/src/serverEntry.ts";
 import github from "../../../packages/github/src/serverEntry.ts";
 import goals from "../../../packages/goals/src/serverEntry.ts";
@@ -25,6 +25,7 @@ import markets from "../../../packages/markets/src/serverEntry.ts";
 import models from "../../../packages/models/src/serverEntry.ts";
 import multirun from "../../../packages/multirun/src/serverEntry.ts";
 import permissions from "../../../packages/permissions/src/serverEntry.ts";
+import personalCoach from "../../../packages/personal-coach/src/serverEntry.ts";
 import plugins from "../../../packages/plugins/src/serverEntry.ts";
 import schedule from "../../../packages/schedule/src/serverEntry.ts";
 import secureSafe from "../../../packages/secure-safe/src/serverEntry.ts";
@@ -59,11 +60,61 @@ import sessionImport from "../../../packages/session-import/src/serverEntry.ts";
 
 type Descriptor = Omit<PackageDescriptorDto, "id">;
 
+type CompositionMetadata = Pick<PackageDescriptorDto, "category" | "projectAffinity">;
+
+const compositionMetadata: Record<string, CompositionMetadata> = {
+  "backend-acp": { category: "system", projectAffinity: {} },
+  "backend-claude": { category: "system", projectAffinity: {} },
+  "backend-codex": { category: "system", projectAffinity: {} },
+  "backend-commandcode": { category: "system", projectAffinity: {} },
+  "backend-cursor": { category: "system", projectAffinity: {} },
+  "backend-fx": { category: "system", projectAffinity: {} },
+  "backend-grok": { category: "system", projectAffinity: {} },
+  "backend-omp": { category: "system", projectAffinity: {} },
+  "backend-pi": { category: "system", projectAffinity: {} },
+  "backend-opencode": { category: "system", projectAffinity: {} },
+  browser: { category: "research", projectAffinity: { directions: ["engineering", "research"], recommended: true } },
+  "chat-workspace": { category: "research", projectAffinity: { directions: ["engineering", "research"], recommended: true } },
+  commands: { category: "workspace", projectAffinity: {} },
+  "custom-action": { category: "operations", projectAffinity: { directions: ["engineering", "operations"] } },
+  dictation: { category: "workspace", projectAffinity: {} },
+  editor: { category: "engineering", projectAffinity: { directions: ["engineering", "research"], recommended: true } },
+  "example-feature": { category: "system", projectAffinity: {} },
+  files: { category: "workspace", projectAffinity: { recommended: true } },
+  fusion: { category: "research", projectAffinity: { directions: ["engineering", "research"] } },
+  git: { category: "engineering", projectAffinity: { directions: ["engineering"], recommended: true } },
+  gitlab: { category: "engineering", projectAffinity: { directions: ["engineering", "operations"] } },
+  github: { category: "engineering", projectAffinity: { directions: ["engineering", "operations"] } },
+  goals: { category: "workspace", projectAffinity: { recommended: true } },
+  handoff: { category: "operations", projectAffinity: { directions: ["engineering", "operations"] } },
+  "harness-runtime": { category: "system", projectAffinity: {} },
+  "home-assistant": { category: "home", projectAffinity: { directions: ["home", "operations"], recommended: true } },
+  hotkeys: { category: "system", projectAffinity: {} },
+  knowledge: { category: "workspace", projectAffinity: { recommended: true } },
+  markets: { category: "finance", projectAffinity: { directions: ["finance"], recommended: true } },
+  models: { category: "system", projectAffinity: {} },
+  multirun: { category: "engineering", projectAffinity: { directions: ["engineering", "research"] } },
+  opencode: { category: "system", projectAffinity: {} },
+  permissions: { category: "system", projectAffinity: {} },
+  "personal-coach": { category: "wellbeing", projectAffinity: { directions: ["wellbeing"], recommended: true } },
+  plugins: { category: "system", projectAffinity: {} },
+  schedule: { category: "operations", projectAffinity: { directions: ["wellbeing", "finance", "home", "operations"], recommended: true } },
+  "secure-safe": { category: "workspace", projectAffinity: {} },
+  "session-import": { category: "workspace", projectAffinity: {} },
+  ssh: { category: "engineering", projectAffinity: { directions: ["engineering", "operations"] } },
+  "task-trackers": { category: "operations", projectAffinity: { directions: ["engineering", "operations"], recommended: true } },
+  terminal: { category: "engineering", projectAffinity: { directions: ["engineering", "operations"], recommended: true } },
+  tunnel: { category: "system", projectAffinity: {} },
+  usage: { category: "workspace", projectAffinity: {} },
+  walkthrough: { category: "workspace", projectAffinity: {} },
+  workflow: { category: "operations", projectAffinity: { directions: ["engineering", "research", "operations"], recommended: true } },
+};
+
 const entry = (
   id: string,
   descriptor: Descriptor,
   factory: ServerPackageFactory,
-): ServerPackageRegistration => ({ id, descriptor: { id, ...descriptor }, factory });
+): ServerPackageRegistration => ({ id, descriptor: { id, ...descriptor, ...(compositionMetadata[id] ?? {}) }, factory });
 
 export const desktopServerPackages = [
   entry("backend-acp", {"name": "ACP harnesses", "description": "Shared Agent Client Protocol transport and runtime", "core": false, "enabled": true, "icon": "network", "hasSettings": false}, backendAcp),
@@ -76,14 +127,14 @@ export const desktopServerPackages = [
   entry("backend-omp", {"name": "OMP harness", "description": "oh-my-pi through its native ACP transport", "core": false, "enabled": true, "icon": "command", "hasSettings": false}, backendOmp),
   entry("backend-pi", {"name": "Pi harness", "description": "Detect Pi and report native RPC integration readiness", "core": false, "enabled": true, "icon": "command", "hasSettings": false}, backendPi),
   entry("backend-opencode", {"name": "OpenCode harness", "description": "Managed OpenCode HTTP and SSE runtime", "core": true, "enabled": true, "icon": "terminal", "hasSettings": false}, backendOpencode),
-  entry("browser", { name: "Browser", description: "A shared internal browser for users, agents, and element context.", core: false, enabled: true, settingsGroup: "Engineering", icon: "globe", hasSettings: false }, browser),
+  entry("browser", { name: "Browser", description: "A shared internal browser for users, agents, and element context.", core: false, enabled: true, settingsGroup: "Engineering", icon: "globe", hasSettings: true }, browser),
   entry("chat-workspace", { name: "Chat Workspace", description: "Use the AI chats you already have, directly alongside your work.", core: false, enabled: true, settingsGroup: "Workspace", icon: "chat", hasSettings: true }, chatWorkspace),
   entry("commands", { name: "Commands", description: "Reusable project command definitions.", core: false, enabled: true, settingsGroup: "Engineering", icon: "command", hasSettings: true }, commands),
   entry("custom-action", { name: "Custom Action", description: "Configurable icon widgets that run project commands.", core: false, enabled: true, settingsGroup: "Customize", icon: "play", hasSettings: false }, customAction),
   entry("dictation", { name: "Voice & Dictation", description: "Speech-to-text dictation and spoken replies.", core: false, enabled: true, settingsGroup: "Workspace", icon: "mic", hasSettings: true }, dictation),
   entry("editor", { name: "Editor", description: "Text and code editing runtime for the workbench.", core: true, enabled: true, icon: "edit", hasSettings: false }, editor),
   entry("example-feature", { name: "Example Feature", description: "Proof-of-concept package registered via package discovery.", core: false, enabled: true, settingsGroup: "Customize", icon: "flask", hasSettings: false }, exampleFeature),
-  entry("files", { name: "Files", description: "Workspace file access and attachments.", core: true, enabled: true, icon: "files", hasSettings: false }, files),
+  entry("files", { name: "Files", description: "Workspace file access and attachments.", core: true, enabled: true, icon: "files", hasSettings: true }, files),
   entry("fusion", { name: "Fusion", description: "Synthesize multiple model responses.", core: false, enabled: true, settingsGroup: "Engineering", icon: "combine", hasSettings: false }, fusion),
   entry("git", { name: "Git", description: "Source control status, diffs, commits, and worktrees.", core: false, enabled: true, settingsGroup: "Engineering", icon: "git", hasSettings: true }, git),
   entry("gitlab", { name: "GitLab", description: "GitLab issues, merge requests and pipelines.", core: false, enabled: true, settingsGroup: "Engineering", icon: "gitlab", hasSettings: false }, gitlab),
@@ -99,8 +150,9 @@ export const desktopServerPackages = [
   entry("multirun", { name: "Multirun", description: "Run prompts across multiple models.", core: false, enabled: true, settingsGroup: "Engineering", icon: "layers", hasSettings: false }, multirun),
   entry("opencode", {"name": "OpenCode", "description": "OpenCode-native roles and runtime configuration surfaces.", "core": true, "enabled": true, "icon": "braces", "hasSettings": false}, opencode),
   entry("permissions", { name: "Permissions", description: "Tool permission review and policy enforcement.", core: true, enabled: true, icon: "shield", hasSettings: false }, permissions),
+  entry("personal-coach", { name: "Personal Coach", description: "Durable goals, commitments, routines, and lightweight coaching state.", core: false, enabled: true, settingsGroup: "Workspace", icon: "coach", hasSettings: true }, personalCoach),
   entry("plugins", { name: "Plugins", description: "Managed plugin installation and configuration.", core: false, enabled: true, settingsGroup: "Customize", icon: "plugin", hasSettings: true }, plugins),
-  entry("schedule", { name: "Schedule", description: "Schedule recurring and one-time agent tasks.", core: false, enabled: true, settingsGroup: "Engineering", icon: "schedule", hasSettings: false }, schedule),
+  entry("schedule", { name: "Planner", description: "Plan prompts to run once or on a repeating cadence.", core: false, enabled: true, settingsGroup: "Engineering", icon: "schedule", hasSettings: false }, schedule),
   entry("secure-safe", { name: "Secure Safe", description: "Write-only credential handles and secret policy.", core: false, enabled: true, settingsGroup: "Engineering", icon: "lock", hasSettings: true }, secureSafe),
   entry("session-import", {"name": "Session Import", "description": "Import a native conversation as a canonical Snapshot", "core": false, "enabled": true, "icon": "import", "hasSettings": false}, sessionImport),
   entry("ssh", { name: "SSH Remotes", description: "SSH connections and remote projects whose agent runs on the host.", core: false, enabled: true, settingsGroup: "Engineering", icon: "server", hasSettings: true }, ssh),
