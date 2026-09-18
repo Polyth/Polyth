@@ -45,6 +45,7 @@ let lastProject: string | null | undefined;
 let branchFetchedFor: string | null = null;
 let runtimeCatalogHydrated = false;
 let runtimeCatalogInvalidationSubscribed = false;
+let runtimeCatalogGeneration = 0;
 let runtimeCatalogPolicy: "browser" | "pending" | "project" | "interaction" = "browser";
 let nativeProxyProbe: Promise<void> | null = null;
 let nativeProxyProbeFailures = 0;
@@ -367,9 +368,16 @@ export function init(): Promise<void> {
   if (!runtimeCatalogInvalidationSubscribed) {
     runtimeCatalogInvalidationSubscribed = true;
     subscribeRuntimeCatalogInvalidations(() => {
+      runtimeCatalogGeneration++;
       if (!runtimeCatalogHydrated) return;
-      void refreshModels();
-      void refreshAgents();
+      if (modelsFetchInFlight) {
+        modelRetryRequested = true;
+        modelFetchAbort?.abort();
+      } else {
+        void refreshModels();
+      }
+      if (agentsFetchInFlight) agentsRetryRequested = true;
+      else void refreshAgents();
     });
   }
   // UX-ONBOARDING boot: project, model, and agent hydration launch
@@ -582,11 +590,16 @@ let modelsFetchInFlight = false;
 async function refreshModels(projectId = store.getState().activeProjectId ?? undefined): Promise<void> {
   if (!projectId || modelsFetchInFlight) return;
   modelsFetchInFlight = true;
+  const requestGeneration = runtimeCatalogGeneration;
   const controller = new AbortController();
   modelFetchAbort = controller;
   const timeout = setTimeout(() => controller.abort(), MODEL_REQUEST_TIMEOUT_MS);
   try {
     const models = await api.listModels(controller.signal);
+    if (requestGeneration !== runtimeCatalogGeneration) {
+      modelRetryRequested = true;
+      return;
+    }
     store.setModels(models);
     if (models.length > 0) {
       rememberPersistedRuntimeModels(projectId, models);
@@ -629,18 +642,28 @@ async function refreshRuntimeDiagnostics(): Promise<void> {
 }
 
 let agentsFetchInFlight = false;
+let agentsRetryRequested = false;
 
 async function refreshAgents(projectId = store.getState().activeProjectId ?? undefined): Promise<void> {
   if (!projectId || agentsFetchInFlight) return;
   agentsFetchInFlight = true;
+  const requestGeneration = runtimeCatalogGeneration;
   try {
     const agents = await api.listAgents();
+    if (requestGeneration !== runtimeCatalogGeneration) {
+      agentsRetryRequested = true;
+      return;
+    }
     store.setAgents(agents);
     rememberPersistedRuntimeAgents(projectId, agents);
   } catch (err) {
     console.error("list agents failed", err);
   } finally {
     agentsFetchInFlight = false;
+    if (agentsRetryRequested) {
+      agentsRetryRequested = false;
+      void refreshAgents();
+    }
   }
 }
 
