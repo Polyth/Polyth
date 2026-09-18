@@ -56,6 +56,12 @@ test("persisted metadata paints synchronously across restart while stale data re
   };
   createCatalogCache<string[]>(10, 2, () => now, storage).write("space/project/cursor", ["cached"]);
 
+  now = 105;
+  const warmRestart = createCatalogCache<string[]>(10, 2, () => now, storage);
+  assert.equal(warmRestart.someFresh(), true, "fresh persisted metadata can suppress reload discovery");
+  assert.equal(warmRestart.someFresh((key) => key.endsWith("/cursor")), true);
+  assert.equal(warmRestart.someFresh((key) => key.endsWith("/codex")), false);
+
   now = 111;
   const restarted = createCatalogCache<string[]>(10, 2, () => now, storage);
   assert.equal(restarted.peek("space/project/cursor"), undefined, "expired data is not authoritative");
