@@ -221,6 +221,7 @@ const GENERIC_PACKAGE_IMPORTERS = new Set([
   "composer/discovery.ts",
   "i18n/index.ts",
   "i18n/types.ts",
+  "init.ts",
   "packages/registry.ts",
   "packages/sandbox/extensionCommands.tsx",
   "profiles.ts",
