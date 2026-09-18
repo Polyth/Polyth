@@ -74,7 +74,7 @@ function providerGroups(models: readonly ModelDescriptor[]): ProviderGroup[] {
         models: [],
       };
       byId.set(model.providerID, group);
-    } else if (group.name === group.id && model.providerName?.trim()) {
+    } else if (model.providerName?.trim()) {
       group.name = model.providerName.trim();
     }
     group.models.push(model);
