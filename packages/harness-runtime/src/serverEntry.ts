@@ -139,10 +139,6 @@ export function harnessRoutes(host: ServerPackageHost): RouteHandler {
         const visibility = () => host.services.require(
             serverServiceKey<HarnessModelVisibilityService>("models.visibility"),
         );
-        const invalidateModelCatalog = () => host.services.get(
-            serverServiceKey<() => void>("models.invalidate-catalog"),
-        )?.();
-
         let visibilityMatch = request.path.match(/^\/api\/harnesses\/([^/]+)\/model-visibility$/);
         if (visibilityMatch && request.method === "GET") {
             const harnessId = decodeURIComponent(visibilityMatch[1]!);
@@ -157,7 +153,6 @@ export function harnessRoutes(host: ServerPackageHost): RouteHandler {
             requireHarness(harnessId);
             const input = await request.body();
             const state = await visibility().setHarnessProviderEnabled(harnessId, providerID, input.enabled !== false);
-            invalidateModelCatalog();
             request.json(200, { ok: true, ...state });
             return true;
         }
@@ -167,7 +162,6 @@ export function harnessRoutes(host: ServerPackageHost): RouteHandler {
             requireHarness(harnessId);
             const input = await request.body();
             const state = await visibility().setHarnessModelEnabled(harnessId, String(input.key ?? ""), input.enabled !== false);
-            invalidateModelCatalog();
             request.json(200, { ok: true, ...state });
             return true;
         }
