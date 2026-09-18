@@ -88,6 +88,10 @@ test("catalog invalidation does not rewarm every runtime", () => {
   const widgets = entry();
   assert.match(widgets, /host\.store\.subscribe\(warmCatalogs\)/);
   assert.doesNotMatch(widgets, /subscribeRuntimeCatalogs/);
+  assert.match(widgets, /runtimeCatalogRefreshDelay\(projectId\)/);
+  assert.match(widgets, /window\.setTimeout/);
+  assert.doesNotMatch(widgets, /window\.setInterval\(\(\) => \{[\s\S]*resetRuntimeCatalogMemory/);
+  assert.match(widgets, /invalidateRuntimeCatalogs\(\)/);
 });
 
 test("ordinary window focus does not force harness discovery", () => {
