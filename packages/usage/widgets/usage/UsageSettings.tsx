@@ -217,11 +217,11 @@ export default function UsageSettings(): ReactNode {
                           inputMode="decimal"
                           min="0"
                           step="0.01"
-                          value={profile.monthlyCost ?? ""}
+                          defaultValue={profile.monthlyCost ?? ""}
                           aria-label={`${provider.label} monthly subscription cost`}
                           placeholder="0.00"
-                          onChange={(event) => {
-                            const value = event.target.value.trim();
+                          onBlur={(event) => {
+                            const value = event.currentTarget.value.trim();
                             setProviderCostProfile(provider.id, {
                               monthlyCost: value === "" ? null : Number(value),
                             });
