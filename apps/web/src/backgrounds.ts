@@ -7,6 +7,7 @@ export const BACKGROUND_PRESETS = [
     description: "Theme color only",
     image: "none",
     preview: "linear-gradient(145deg, #17191d, #30343b)",
+    systemBar: null,
   },
   {
     id: "signal-bloom",
@@ -14,6 +15,7 @@ export const BACKGROUND_PRESETS = [
     description: "Teal current · violet haze",
     image: "radial-gradient(circle at 14% 8%, rgba(55, 235, 195, .72) 0, rgba(55, 235, 195, 0) 34%), radial-gradient(circle at 86% 14%, rgba(116, 89, 255, .82) 0, rgba(116, 89, 255, 0) 39%), radial-gradient(circle at 68% 92%, rgba(242, 88, 142, .62) 0, rgba(242, 88, 142, 0) 41%), linear-gradient(145deg, #06191a 0%, #11152c 48%, #271329 100%)",
     preview: "radial-gradient(circle at 14% 8%, #37ebc3 0, transparent 38%), radial-gradient(circle at 86% 14%, #7459ff 0, transparent 42%), radial-gradient(circle at 68% 92%, #f2588e 0, transparent 44%), linear-gradient(#11152c, #11152c)",
+    systemBar: { dark: "#173a3b", light: "#dcebe7" },
   },
   {
     id: "blue-hour",
@@ -21,6 +23,7 @@ export const BACKGROUND_PRESETS = [
     description: "Cobalt dusk · cyan horizon",
     image: "radial-gradient(circle at 76% 18%, rgba(68, 218, 255, .7) 0, rgba(68, 218, 255, 0) 34%), radial-gradient(circle at 18% 74%, rgba(64, 91, 255, .74) 0, rgba(64, 91, 255, 0) 42%), linear-gradient(135deg, #05111f 0%, #0d2340 48%, #152d50 100%)",
     preview: "radial-gradient(circle at 76% 18%, #44daff 0, transparent 38%), radial-gradient(circle at 18% 74%, #405bff 0, transparent 46%), linear-gradient(#0d2340, #0d2340)",
+    systemBar: { dark: "#16364a", light: "#dce8f1" },
   },
   {
     id: "ember-veil",
@@ -28,6 +31,7 @@ export const BACKGROUND_PRESETS = [
     description: "Copper light · plum shadow",
     image: "radial-gradient(circle at 18% 16%, rgba(255, 174, 91, .76) 0, rgba(255, 174, 91, 0) 36%), radial-gradient(circle at 83% 74%, rgba(190, 69, 135, .67) 0, rgba(190, 69, 135, 0) 43%), linear-gradient(140deg, #26120e 0%, #321826 48%, #171226 100%)",
     preview: "radial-gradient(circle at 18% 16%, #ffae5b 0, transparent 40%), radial-gradient(circle at 83% 74%, #be4587 0, transparent 46%), linear-gradient(#321826, #321826)",
+    systemBar: { dark: "#4a2d31", light: "#f0e3dc" },
   },
   {
     id: "moss-circuit",
@@ -35,6 +39,7 @@ export const BACKGROUND_PRESETS = [
     description: "Fern glow · mineral gold",
     image: "radial-gradient(circle at 22% 14%, rgba(103, 229, 156, .67) 0, rgba(103, 229, 156, 0) 37%), radial-gradient(circle at 78% 82%, rgba(227, 175, 74, .58) 0, rgba(227, 175, 74, 0) 40%), linear-gradient(145deg, #071713 0%, #14251d 50%, #272014 100%)",
     preview: "radial-gradient(circle at 22% 14%, #67e59c 0, transparent 41%), radial-gradient(circle at 78% 82%, #e3af4a 0, transparent 44%), linear-gradient(#14251d, #14251d)",
+    systemBar: { dark: "#243a2f", light: "#e2eadf" },
   },
   {
     id: "paper-prism",
@@ -42,6 +47,7 @@ export const BACKGROUND_PRESETS = [
     description: "Ice blue · soft coral",
     image: "radial-gradient(circle at 12% 12%, rgba(95, 210, 226, .7) 0, rgba(95, 210, 226, 0) 37%), radial-gradient(circle at 86% 20%, rgba(159, 130, 239, .58) 0, rgba(159, 130, 239, 0) 38%), radial-gradient(circle at 62% 92%, rgba(242, 144, 131, .64) 0, rgba(242, 144, 131, 0) 42%), linear-gradient(145deg, #eaf7f5 0%, #eceafb 52%, #faeee9 100%)",
     preview: "radial-gradient(circle at 12% 12%, #5fd2e2 0, transparent 41%), radial-gradient(circle at 86% 20%, #9f82ef 0, transparent 42%), radial-gradient(circle at 62% 92%, #f29083 0, transparent 45%), linear-gradient(#eceafb, #eceafb)",
+    systemBar: { dark: "#43595f", light: "#e3eef1" },
   },
 ] as const;
 
@@ -103,10 +109,31 @@ export function backgroundCssImage(value: BackgroundState): string {
   return BACKGROUND_PRESETS.find(({ id }) => id === value.id)?.image ?? "none";
 }
 
+export function backgroundSystemBarColor(
+  value: BackgroundState,
+  appearance: "dark" | "light",
+): string | null {
+  if (value.id === "custom") return null;
+  const preset = BACKGROUND_PRESETS.find(({ id }) => id === value.id);
+  return preset?.systemBar?.[appearance] ?? null;
+}
+
 export function applyBackgroundToDom(value = state): void {
   if (typeof document === "undefined") return;
-  document.documentElement.dataset.background = value.id;
-  document.documentElement.style.setProperty("--app-background-image", backgroundCssImage(value));
+  const html = document.documentElement;
+  html.dataset.background = value.id;
+  html.style.setProperty("--app-background-image", backgroundCssImage(value));
+
+  // iOS 26 standalone PWAs can expose a system-owned strip above the web
+  // viewport. DOM cannot paint into it, so make the browser-owned fallback
+  // color follow the selected workspace atmosphere instead of theme white.
+  const appearance = html.dataset.appearance === "light" ? "light" : "dark";
+  const themeFallback = getComputedStyle(html).getPropertyValue("--bg").trim();
+  const systemBar = backgroundSystemBarColor(value, appearance) || themeFallback;
+  if (systemBar) {
+    document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+      ?.setAttribute("content", systemBar);
+  }
 }
 
 function commit(next: BackgroundState): boolean {
@@ -163,4 +190,9 @@ export function readBackgroundFile(file: File): Promise<string> {
     };
     reader.readAsDataURL(file);
   });
+}
+
+
+if (typeof window !== "undefined") {
+  window.addEventListener("polyth:theme", () => applyBackgroundToDom());
 }

@@ -5,6 +5,7 @@ import {
   BACKGROUND_PRESETS,
   DEFAULT_BACKGROUND_ID,
   backgroundCssImage,
+  backgroundSystemBarColor,
   parseBackgroundState,
   validateBackgroundFile,
 } from "../src/backgrounds.ts";
@@ -16,6 +17,13 @@ test("background presets are unique and malformed preferences fall back safely",
   assert.equal(parseBackgroundState(JSON.stringify({ id: "unknown" })).id, DEFAULT_BACKGROUND_ID);
   assert.equal(parseBackgroundState(JSON.stringify({ id: "none" })).id, "none");
   assert.equal(parseBackgroundState(JSON.stringify({ id: "custom", customImage: "javascript:alert(1)" })).id, DEFAULT_BACKGROUND_ID);
+});
+
+test("workspace presets expose light/dark system-bar fallbacks", () => {
+  const paper = parseBackgroundState(JSON.stringify({ id: "paper-prism" }));
+  assert.equal(backgroundSystemBarColor(paper, "light"), "#e3eef1");
+  assert.equal(backgroundSystemBarColor(paper, "dark"), "#43595f");
+  assert.equal(backgroundSystemBarColor(parseBackgroundState(JSON.stringify({ id: "none" })), "light"), null);
 });
 
 test("custom backgrounds accept bounded raster data only", () => {
@@ -64,10 +72,19 @@ test("background and glass controls are wired into Appearance and the held-Shift
   );
   assert.match(index, /apple-mobile-web-app-status-bar-style" content="black-translucent"/,
     "the initial standalone iOS shell is edge-to-edge");
+  assert.match(index, /polyth\.background\.v1/,
+    "the installed web app seeds its system-owned status strip from the saved workspace background before first paint");
+  for (const preset of BACKGROUND_PRESETS) {
+    if (!preset.systemBar) continue;
+    assert.match(index, new RegExp(preset.systemBar.dark.replace("#", "#")));
+    assert.match(index, new RegExp(preset.systemBar.light.replace("#", "#")));
+  }
   assert.match(theme, /apple-mobile-web-app-status-bar-style[^;]+[\s\S]*?setAttribute\("content", "black-translucent"\)/,
     "light-theme changes must not restore an opaque iOS status-bar band");
   assert.doesNotMatch(theme, /apple-mobile-web-app-status-bar-style[^;]+[\s\S]*?\?\s*"black-translucent"\s*:\s*"default"/,
     "status-bar translucency must not depend on dark appearance");
   assert.match(styles, /backdrop-filter:\s*blur\(var\(--material-glass-blur\)\)\s*saturate\(var\(--material-glass-saturation\)\)/);
+  assert.match(await read("../src/backgrounds.ts"), /backgroundSystemBarColor[\s\S]*?meta\[name="theme-color"\]/,
+    "runtime background changes retint browser-owned chrome too");
   assert.doesNotMatch(styles, /prefers-reduced-motion:\s*no-preference[\s\S]{0,1200}data-glass/);
 });
