@@ -1770,7 +1770,7 @@ export async function boot(opts: BootOptions = {}) {
         storage,
         signal,
         requestPermission: requestAgentToolPermission
-          ? (input) => requestAgentToolPermission(input)
+          ? (input) => requestAgentToolPermission!(input)
           : undefined,
       });
     },
@@ -2356,7 +2356,7 @@ export async function boot(opts: BootOptions = {}) {
   const manualSuggestion = createManualSuggestionService({
     latestSeq: (sessionId) => store.latestSeq(sessionId),
     events: (sessionId) => store.events(sessionId),
-    complete: assistComplete,
+    complete: (sessionId, prompt, userId) => assistComplete(sessionId, prompt, 1_024, userId),
   });
   assist = createAssistService({
     settings: () => assistSettings.get(),
