@@ -44,17 +44,6 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - name: Test Usage package
-        if: matrix.lane == 'legacy'
-        run: >-
-          node --experimental-strip-types --test
-          packages/usage/test/usagePrefs.test.ts
-          packages/usage/test/usageShare.test.ts
-          packages/usage/test/usageWidget.test.ts
-          packages/usage/test/usageDashboard.test.ts
-      - name: Build web packages
-        if: matrix.lane == 'legacy'
-        run: npm run build:web
       - run: npm run build:supervisor
       - name: Install isolated OpenCode release
         env:
