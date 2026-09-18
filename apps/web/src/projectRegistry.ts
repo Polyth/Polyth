@@ -177,9 +177,12 @@ export function resolveActiveProjectId(
 export function shouldRefreshProjectsOnSyncOpen(
   state: ProjectRegistryState,
   activeProjectId: string | null,
+  expectedProjectId: string | null = null,
 ): boolean {
   if (state.status === "failed") return true;
-  return state.status === "ready" && state.projects.length > 0 && activeProjectId === null;
+  if (state.status !== "ready") return false;
+  if (state.projects.length === 0) return expectedProjectId !== null;
+  return activeProjectId === null;
 }
 
 /** After a delete or an external refresh: keep the current active project when
