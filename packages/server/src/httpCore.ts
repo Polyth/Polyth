@@ -686,6 +686,7 @@ async function dispatchHttp(
           ...(operationId ? { clientOperationId: operationId } : {}),
           ...(validCommand ? { command: validCommand } : {}),
           ...(b.autoTitle === true ? { autoTitle: true } : {}),
+          ...(b.hiddenUserMessage === true ? { hiddenUserMessage: true } : {}),
           // sanitized + existence-checked inside the session service (F2)
           ...(Array.isArray(b.attachments) ? { attachments: b.attachments as never } : {}),
           ...(b.model ? { model: b.model as { providerID: string; modelID: string } } : {}),
