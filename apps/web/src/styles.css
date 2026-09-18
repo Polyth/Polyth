@@ -10,7 +10,13 @@
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-corner { background: transparent; }
 
-html, body, #root { width: 100%; min-width: 0; height: 100%; }
+html, body, #root {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
 html {
   overflow-x: hidden;
   overscroll-behavior: none;
@@ -13527,7 +13533,7 @@ html[data-background="none"] .app {
   background-image: none;
 }
 html[data-background]:not([data-background="none"]) {
-  background-color: var(--bg);
+  background-color: var(--app-system-bar-color, var(--bg));
   background-image:
     linear-gradient(color-mix(in srgb, var(--bg) 76%, transparent), color-mix(in srgb, var(--bg) 76%, transparent)),
     var(--app-background-image);
@@ -13535,7 +13541,20 @@ html[data-background]:not([data-background="none"]) {
   background-repeat: no-repeat;
   background-size: cover;
 }
-html[data-background]:not([data-background="none"]) body,
+/* iOS standalone PWAs can leave document-canvas space below a 100dvh app
+   frame. Paint the browser document canvas with the same workspace background
+   rather than relying on transparent body pixels to expose the root canvas. */
+html[data-background]:not([data-background="none"]) body:not(.desktop-app) {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background-color: var(--app-system-bar-color, var(--bg));
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--bg) 76%, transparent), color-mix(in srgb, var(--bg) 76%, transparent)),
+    var(--app-background-image);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
 html[data-background]:not([data-background="none"]) .app {
   background-color: transparent;
   background-image: none;
