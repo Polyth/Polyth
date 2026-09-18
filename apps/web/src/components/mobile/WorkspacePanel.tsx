@@ -17,7 +17,7 @@ import {
   projectPresentationEventProjectId,
 } from "../../projectPresentationSync.ts";
 import { railIconFor, widgetIconFor } from "../../railIcons.ts";
-import { useStore } from "../../store.ts";
+import { useStore, workspaceProjectId } from "../../store.ts";
 import { getWidget, useWidgetCatalog } from "../../widgets/catalog.ts";
 import {
   setWidgetConfig,
@@ -132,7 +132,7 @@ function insertionIndex(target: HTMLElement, itemIndex: number, x: number, y: nu
 }
 
 export default function WorkspacePanel({ onClose }: { onClose: () => void }) {
-  const projectId = useStore((state) => state.activeProjectId);
+  const projectId = useStore(workspaceProjectId);
   const sessionId = useStore((state) => state.activeSessionId);
   const capabilities = useResolvedCapabilities();
   const widgets = useWidgetCatalog();
