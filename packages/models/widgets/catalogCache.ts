@@ -51,6 +51,11 @@ export function createCatalogCache<T>(
       }
       return false;
     },
+    expiresIn(key: string): number | undefined {
+      const entry = entries.get(key);
+      if (entry?.value === undefined) return undefined;
+      return Math.max(0, entry.expiresAt - now());
+    },
     write(key: string, value: T): T {
       entries.delete(key);
       entries.set(key, { value, expiresAt: now() + ttlMs });
