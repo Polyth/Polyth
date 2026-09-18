@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Window as HappyWindow } from "happy-dom";
 import {
   fetchWebBuildId,
   installBuildFreshnessWatcher,
@@ -8,6 +7,16 @@ import {
 } from "../src/buildFreshness.ts";
 
 const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+class FakeWindow extends EventTarget {
+  readonly location = { reload() {} };
+  setTimeout = globalThis.setTimeout.bind(globalThis);
+  clearTimeout = globalThis.clearTimeout.bind(globalThis);
+}
+
+class FakeDocument extends EventTarget {
+  visibilityState: DocumentVisibilityState = "visible";
+}
 
 test("build id parsing is strict", () => {
   assert.equal(parseWebBuildId({ build: "abc" }), "abc");
@@ -34,12 +43,13 @@ test("server build id is fetched without cache", async () => {
 });
 
 test("matching build stays mounted and a resumed stale PWA reloads once", async () => {
-  const dom = new HappyWindow({ url: "https://polyth.test/p/project/s/session" });
+  const fakeWindow = new FakeWindow();
+  const fakeDocument = new FakeDocument();
   let serverBuild = "build-a";
   let reloads = 0;
   const dispose = installBuildFreshnessWatcher("build-a", {
-    windowRef: dom as unknown as Window,
-    documentRef: dom.document as unknown as Document,
+    windowRef: fakeWindow as unknown as Window,
+    documentRef: fakeDocument as unknown as Document,
     minCheckIntervalMs: 0,
     retryDelaysMs: [],
     reload: () => { reloads++; },
@@ -53,25 +63,25 @@ test("matching build stays mounted and a resumed stale PWA reloads once", async 
   assert.equal(reloads, 0);
 
   serverBuild = "build-b";
-  dom.dispatchEvent(new dom.Event("pageshow"));
+  fakeWindow.dispatchEvent(new Event("pageshow"));
   await settle();
   assert.equal(reloads, 1);
 
-  dom.dispatchEvent(new dom.Event("focus"));
+  fakeWindow.dispatchEvent(new Event("focus"));
   await settle();
   assert.equal(reloads, 1, "one stale resume issues exactly one reload");
 
   dispose();
-  dom.close();
 });
 
 test("resume check retries a transient server restart", async () => {
-  const dom = new HappyWindow({ url: "https://polyth.test/" });
+  const fakeWindow = new FakeWindow();
+  const fakeDocument = new FakeDocument();
   let calls = 0;
   let reloads = 0;
   const dispose = installBuildFreshnessWatcher("old-build", {
-    windowRef: dom as unknown as Window,
-    documentRef: dom.document as unknown as Document,
+    windowRef: fakeWindow as unknown as Window,
+    documentRef: fakeDocument as unknown as Document,
     minCheckIntervalMs: 0,
     retryDelaysMs: [1],
     reload: () => { reloads++; },
@@ -90,5 +100,4 @@ test("resume check retries a transient server restart", async () => {
   assert.equal(reloads, 1);
 
   dispose();
-  dom.close();
 });
