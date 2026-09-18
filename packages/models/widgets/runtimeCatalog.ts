@@ -276,8 +276,15 @@ const persistentKeyProjectId = (key: string): string | undefined => {
     return undefined;
   }
 };
-const hasFreshPersistedCatalogs = (projectId?: string): boolean =>
-  persistedCatalogs.someFresh((key) => !projectId || persistentKeyProjectId(key) === projectId);
+const hasFreshPersistedCatalogs = (projectId?: string): boolean => {
+  const roster = persistedRosters.peek(rosterPresentationKey({ projectId }))
+    ?? (!projectId ? persistedRosters.peek(rosterPresentationKey({})) : undefined);
+  if (!roster) return false;
+  const enabled = roster.filter((row) => row.policy.enabled);
+  return enabled.every((row) => persistedCatalogs.someFresh((key, catalog) =>
+    (!projectId || persistentKeyProjectId(key) === projectId)
+    && catalog.harnessId === row.identity.id));
+};
 
 /** Warm every enabled harness catalog once, then reuse that successful metadata
  * across page reloads for a day. A project-less bootstrap may skip when a fresh
@@ -287,11 +294,21 @@ export const preloadRuntimeCatalogs = async (
 ): Promise<void> => {
   if (!options.spaceId && hasFreshPersistedCatalogs(options.projectId)) return;
   const preloadRevision = revision;
-  const [roster] = await Promise.all([
+  const [roster, snapshots] = await Promise.all([
     readHarnessRoster(options),
     readHarnessSnapshots(options),
   ]);
   if (revision !== preloadRevision) return;
+  // The process-free roster has no context of its own. Alias it under the
+  // authoritative context returned by the matching snapshot so HarnessTabs can
+  // survive a reload without a separate roster request.
+  const context = snapshots[0]?.context;
+  if (context) {
+    persistedRosters.write(rosterPresentationKey({
+      projectId: context.projectId,
+      spaceId: context.spaceId,
+    }), roster);
+  }
   await Promise.allSettled([
     // Warm Auto as its own route too; the server chooses among the detailed
     // snapshots without committing that choice to any canonical session.
