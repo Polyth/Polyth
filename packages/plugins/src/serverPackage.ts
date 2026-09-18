@@ -177,6 +177,21 @@ export interface ServerServiceRegistry {
 export const serverServiceKey = <T>(name: string): CapabilityKey<T> =>
   cap<T>(`polyth.service.${name}`);
 
+export interface ServerTurnCompletedEvent {
+  sessionId: string;
+  assistantText: string;
+  userId?: string;
+}
+
+export interface ServerTurnCompletionBus {
+  subscribe(
+    listener: (event: ServerTurnCompletedEvent) => void | Promise<void>,
+  ): Disposable;
+}
+
+export const SERVER_TURN_COMPLETION_BUS =
+  serverServiceKey<ServerTurnCompletionBus>("session.turn-completed");
+
 /** Server-owned login surface exposed to controlled browser packages.
  *
  * The returned origin is a network reachability exception only. It is present
