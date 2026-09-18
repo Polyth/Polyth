@@ -265,13 +265,15 @@ test("missing source offers no Keep action; published recovery stays visible and
     assert.match(mounted.container.textContent ?? "", new RegExp(tr("isolation.missingWorkspace"), "u"));
     assert.ok(mounted.container.textContent?.includes(base.worktreePath));
     assert.equal(buttons(mounted.container).some((button) => button.textContent === tr("isolation.continueWorking") && !button.disabled), false);
+    assert.ok(buttons(mounted.container).some((button) =>
+      button.textContent === tr("sidebar.sessionlist.deleteSession") && !button.disabled));
     await mounted.close();
     for (const state of ["unowned", "corrupt"] as const) {
       isolation = { ...base, state };
       mounted = await mount(projection(state, isolation));
       assert.ok(mounted.container.textContent?.includes(tr("isolation.ownershipUnverified")));
       assert.ok(mounted.container.textContent?.includes(base.worktreePath));
-      for (const label of ["isolation.continueWorking", "isolation.resolveWithAgent"] as const) {
+      for (const label of ["isolation.continueWorking", "isolation.resolveWithAgent", "sidebar.sessionlist.deleteSession"] as const) {
         assert.equal(buttons(mounted.container).some((button) => button.textContent === tr(label) && !button.disabled), false);
       }
       assert.equal(buttons(mounted.container).some((button) => button.textContent === tr("isolation.integrateInto", { branch: base.targetBranch }) && !button.disabled), false);
@@ -340,6 +342,7 @@ test("a failed authoritative status request never enables stale conflict actions
       "isolation.resolveWithAgent",
       "isolation.discard",
       "isolation.reviewConflicts",
+      "sidebar.sessionlist.deleteSession",
     ] as const) {
       assert.equal(enabledLabels.has(tr(label, label === "isolation.integrateInto" ? { branch: base.targetBranch } : undefined)), false);
     }
