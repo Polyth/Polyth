@@ -76,16 +76,17 @@ export function noteModelUsed(key: string): void {
   commit(recordRecent(prefs, key));
 }
 
-export function setModelProviderExpanded(providerId: string, expanded: boolean): void {
-  commit(setProviderExpanded(prefs, providerId, expanded));
+export function setModelProviderExpanded(providerId: string, expanded: boolean, harnessId?: string): void {
+  commit(setProviderExpanded(prefs, providerId, expanded, harnessId));
 }
 
 export function reorderModelProviders(
   providerIds: readonly string[],
   draggedId: string,
   targetId: string,
+  harnessId?: string,
 ): void {
-  commit(reorderProvider(prefs, providerIds, draggedId, targetId));
+  commit(reorderProvider(prefs, providerIds, draggedId, targetId, harnessId));
 }
 
 export function useModelPrefs(): ModelPrefs {
