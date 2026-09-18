@@ -2,8 +2,8 @@
 // quiet, generate a <=20-word recap and ONE suggested follow-up. Passive
 // post-turn telemetry/metadata is allowed to settle during the quiet window;
 // conversation activity cancels it. The saved result is then keyed to the
-// actual log tail (never the event log itself), so any later event makes the
-// visible assist stale. Hard settings switch: disabled means nothing is
+// actual log tail (never the event log itself); only later conversation
+// activity makes the visible assist stale. Hard settings switch: disabled means nothing is
 // generated at all. One flight per session bounds token spend.
 import type { SessionAssist } from "@polyth/contracts";
 import {
