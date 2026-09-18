@@ -220,8 +220,10 @@ test("restart paints persisted Auto models and executable harnesses before reval
     "a page restart reuses the fresh daily catalog instead of probing harnesses again");
   await readHarnessRoster({ projectId: "warm", spaceId: "space-a" });
   await readHarnessSnapshots({ projectId: "warm", spaceId: "space-a" });
+  await readHarnessRoster({ projectId: "warm" });
+  await readHarnessSnapshots({ projectId: "warm" });
   assert.equal(requests.length, requestsBeforeRestart,
-    "the restored harness tabs reuse the scoped roster and availability snapshot");
+    "picker and harness settings reuse the scoped roster and availability snapshot");
 
   assert.equal(peekHarnessSnapshots({ projectId: "warm", spaceId: "space-a" })?.[0]?.identity.id, "codex",
     "last-known executable harnesses survive the in-memory restart boundary");
