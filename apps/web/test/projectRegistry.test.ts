@@ -132,10 +132,16 @@ test("sync reconnect retries a failed or unselected registry, not an in-flight b
   const ready = publishListSuccess(beginListRequest(failed, 2), 2, 0, [project("one")]).state;
   assert.equal(shouldRefreshProjectsOnSyncOpen(ready, null), true);
   assert.equal(shouldRefreshProjectsOnSyncOpen(ready, "one"), false);
-  assert.equal(shouldRefreshProjectsOnSyncOpen(publishListSuccess(
+  const readyEmpty = publishListSuccess(
     beginListRequest(initialProjectRegistry(), 1),
     1,
     0,
     [],
-  ).state, null), false);
+  ).state;
+  assert.equal(shouldRefreshProjectsOnSyncOpen(readyEmpty, null), false);
+  assert.equal(
+    shouldRefreshProjectsOnSyncOpen(readyEmpty, null, "project-from-route"),
+    true,
+    "ready-empty contradicts an explicit project selection and must retry",
+  );
 });
