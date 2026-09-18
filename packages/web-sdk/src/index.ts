@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ChangeEvent, ComponentType, InputHTMLAttributes, KeyboardEvent, ReactNode } from "react";
+import type { ButtonHTMLAttributes, ChangeEvent, ComponentType, FocusEvent, InputHTMLAttributes, KeyboardEvent, ReactNode } from "react";
 import type {
   DraftExecutionConfig,
   JsonObject,
@@ -465,7 +465,7 @@ export interface HandoffTargetRegistration {
  */
 export type WebUiComponent<Props extends object = Record<string, unknown>> = ComponentType<Props>;
 export interface WebButtonProps extends Pick<ButtonHTMLAttributes<HTMLButtonElement>, "type"> { children?: ReactNode; className?: string; size?: "sm" | "md" | "lg"; variant?: "primary" | "ghost" | "quiet" | "danger"; busy?: boolean; disabled?: boolean; title?: string; "aria-label"?: string; iconStart?: () => ReactNode; onClick?: () => void; "aria-pressed"?: boolean; }
-export interface WebInputProps extends Pick<InputHTMLAttributes<HTMLInputElement>, "autoComplete" | "required" | "type"> { value?: string; placeholder?: string; className?: string; disabled?: boolean; "aria-label"?: string; onChange?: (event: ChangeEvent<HTMLInputElement>) => void; onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void; }
+export interface WebInputProps extends Pick<InputHTMLAttributes<HTMLInputElement>, "autoComplete" | "required" | "type"> { value?: string; placeholder?: string; className?: string; disabled?: boolean; "aria-label"?: string; onChange?: (event: ChangeEvent<HTMLInputElement>) => void; onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void; onBlur?: (event: FocusEvent<HTMLInputElement>) => void; }
 export interface WebEmptyStateProps { title: string; description?: string; actionLabel?: string; onAction?: () => void; }
 
 export interface ConversationSeed {
