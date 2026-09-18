@@ -4205,8 +4205,14 @@ body[data-glass="clear"] .prompt-nav-panel { --prompt-nav-panel-blur: 22px; }
   position: fixed; z-index: var(--z-popover); display: flex; align-items: center; gap: 2px;
   max-width: calc(100vw - var(--space-4)); padding: var(--space-1); background: var(--material-glass); border: 1px solid var(--material-glass-border);
   border-radius: var(--radius-control); box-shadow: var(--material-glass-highlight), var(--material-glass-shadow);
+  /* Transcript sits under this toolbar. Floor the user fill/edge so Clear
+     stays glassier than Matte without letting body text punch through. */
+  --selection-menu-glass-fill: calc(88% + var(--material-glass-fill) * 0.22);
+  --selection-menu-glass-edge: calc(72% + var(--material-glass-edge) * 0.5);
+  --selection-menu-glass-blur: calc(var(--material-glass-blur) * 3.2);
 }
-.selection-menu-flash { font-size: var(--font-meta); color: var(--muted); padding: 2px var(--control-pad-x-sm); white-space: nowrap; }
+.selection-menu .ui-btn--ghost { color: var(--text); }
+.selection-menu-flash { font-size: var(--font-meta); color: var(--text); padding: 2px var(--control-pad-x-sm); white-space: nowrap; }
 .timeline-earlier {
   display: flex; gap: 8px; justify-content: center; align-items: center;
   padding: 4px 0 8px; border-bottom: 1px dashed var(--border-soft); margin-bottom: 4px;
@@ -13608,14 +13614,15 @@ body:not([data-glass="off"]) .header-profile { border: 0; background: transparen
       -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
       backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
     }
-    /* Selection actions overlap transcript text: strengthen the tint and blur
-       without discarding the user's glass fill/edge or opaque fallbacks. */
+    /* Selection actions overlap transcript text: use the stronger overlay
+       material and the local fill/edge/blur floors so user transparency still
+       changes the look without discarding opaque fallbacks. */
     body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .selection-menu {
       background: radial-gradient(140% 140% at 50% 50%,
-        color-mix(in srgb, var(--material-glass) calc((100% + var(--material-glass-fill)) / 2), transparent) 0%,
-        color-mix(in srgb, var(--material-glass) calc((100% + var(--material-glass-edge)) / 2), transparent) 100%);
-      -webkit-backdrop-filter: blur(calc(var(--material-glass-blur) + 12px)) saturate(var(--material-glass-saturation)) !important;
-      backdrop-filter: blur(calc(var(--material-glass-blur) + 12px)) saturate(var(--material-glass-saturation)) !important;
+        color-mix(in srgb, var(--material-glass-strong) var(--selection-menu-glass-fill), transparent) 0%,
+        color-mix(in srgb, var(--material-glass-strong) var(--selection-menu-glass-edge), transparent) 100%);
+      -webkit-backdrop-filter: blur(var(--selection-menu-glass-blur)) saturate(var(--material-glass-saturation)) !important;
+      backdrop-filter: blur(var(--selection-menu-glass-blur)) saturate(var(--material-glass-saturation)) !important;
     }
     /* Prompt previews sit directly over conversation text and need stronger
        optical separation than ordinary menus, especially in Clear glass. */
