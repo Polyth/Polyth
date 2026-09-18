@@ -79,3 +79,24 @@ test("reference-only grants never become Space membership", (t) => {
   assert.equal(store.roleOf("usr_alice", "spc_personal"), undefined);
   assert.deepEqual(store.spacesFor("usr_alice"), []);
 });
+
+
+test("Space admins cannot create, change, or remove owners", (t) => {
+  const { store } = fixture(t);
+  const shared = store.createSpace({ name: "Shared", ownerId: "usr_owner" });
+  store.addMember("usr_owner", shared.id, "usr_alice", "admin");
+
+  assert.throws(
+    () => store.addMember("usr_alice", shared.id, "usr_alice", "owner"),
+    { code: "forbidden" },
+  );
+  assert.throws(
+    () => store.removeMember("usr_alice", shared.id, "usr_owner"),
+    { code: "forbidden" },
+  );
+
+  store.addMember("usr_owner", shared.id, "usr_alice", "owner");
+  assert.equal(store.roleOf("usr_alice", shared.id), "owner");
+  store.addMember("usr_owner", shared.id, "usr_alice", "member");
+  assert.equal(store.roleOf("usr_alice", shared.id), "member");
+});
