@@ -85,7 +85,10 @@ test("spawning is an above-composer activity status and never replaces the compo
   assert.match(surface, /ProviderLogo providerID=\{harnessId\}[\s\S]*model=\{harnessLabel\}/);
   assert.match(pendingChanges, /const spawning = useStore\(isActiveSessionSpawning\)/);
   assert.match(pendingChanges, /const awaitingTurn = pendingSends\.length > 0 && !working/);
-  assert.match(pendingChanges, /if \(spawning \|\| awaitingTurn\) return null/);
+  const liveActivity = pendingChanges.indexOf("if (working) {");
+  const hideEditedFiles = pendingChanges.indexOf("if (spawning || awaitingTurn) return null;");
+  assert.ok(liveActivity >= 0 && hideEditedFiles > liveActivity,
+    "live agent activity must win before edited-files suppression");
   assert.match(composer, /immediateFollowUpDelivery/);
   assert.match(composer, /beginPendingSend\(\{/);
   assert.doesNotMatch(composer, /if \(creatingSession\)\s*\{\s*return/);
