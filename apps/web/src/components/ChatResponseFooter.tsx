@@ -1,10 +1,10 @@
 import { useRef, useState } from "react";
-import type { SessionEvent } from "@polyth/contracts";
+import type { AttachmentRef, SessionEvent } from "@polyth/contracts";
 import { resolveModelPresentation } from "@polyth/contracts/model-presentation";
 import { seedMultiRunPrompt } from "@polyth/multirun/prompt-seed";
 import { api } from "@polyth/session/web-api";
 import { fmtCost, fmtTokens } from "../format.ts";
-import { requestComposerReplace } from "../composerInsert.ts";
+import { sendMessage } from "../init.ts";
 import {
   assistantTime,
   normalizedDuration,
@@ -119,7 +119,7 @@ export default function ChatResponseFooter({
   statusText?: string;
   turn?: RenderModel["turn"];
   segmentStartedAt?: number;
-  regeneratePrompt?: string;
+  regeneratePrompt?: { text: string; attachments?: AttachmentRef[] };
 }) {
   const session = useStore((state) =>
     state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null);
@@ -236,7 +236,14 @@ export default function ChatResponseFooter({
           <ChatActionButton
             icon={RefreshIcon}
             label={tr("timeline.regenerateThisAssistantAnswer")}
-            onClick={() => requestComposerReplace(regeneratePrompt)}
+            onClick={() => {
+              if (!session) return;
+              void sendMessage(regeneratePrompt.text, undefined, undefined, {
+                targetSessionId: session.id,
+                hiddenUserMessage: true,
+                ...(regeneratePrompt.attachments?.length ? { attachments: regeneratePrompt.attachments } : {}),
+              });
+            }}
           />
         )}
         <SlotHost
