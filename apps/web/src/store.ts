@@ -1402,10 +1402,16 @@ export function clearUiError(): void {
  *  before OpenCode's slower semantic title lands). Keeps it durable across
  *  event-cache eviction and projection refreshes. */
 function preserveTitle(cur: SessionProjection, inc: SessionProjection): SessionProjection {
-  if (!isPlaceholderTitle(cur.title, cur.id) && isPlaceholderTitle(inc.title, inc.id)) {
-    return { ...inc, title: cur.title };
+  // Session ownership is immutable. A malformed/partial live projection must
+  // never detach an already-known session from its project: that makes every
+  // workspace surface (Files/Git/Terminal/Browser) appear project-less while
+  // Chat can still render the cached session title.
+  const projectId = normalizedProjectId(inc.projectId) ?? normalizedProjectId(cur.projectId);
+  const base = projectId && projectId !== inc.projectId ? { ...inc, projectId } : inc;
+  if (!isPlaceholderTitle(cur.title, cur.id) && isPlaceholderTitle(base.title, base.id)) {
+    return { ...base, title: cur.title };
   }
-  return inc;
+  return base;
 }
 
 export function upsertSession(p: SessionProjection): void {
