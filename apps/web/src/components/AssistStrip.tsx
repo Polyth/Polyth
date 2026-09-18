@@ -1,6 +1,6 @@
 // F9 idle assist: recap under the last message + ONE suggestion chip. The
-// assist rides the session projection; it renders only while fresh (the log
-// tail still matches assist.atSeq — any new event hides it immediately).
+// assist rides the session projection; passive bookkeeping may advance the
+// log, but newer conversation activity hides it immediately.
 // Tapping the chip fills the composer and NEVER sends.
 import { useState } from "react";
 import { useStore } from "../store.ts";
