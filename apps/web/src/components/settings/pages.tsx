@@ -15,9 +15,7 @@ import { disablePush, enablePush, pushSubscription, pushUnsupportedReason } from
 import { api } from "@polyth/session/web-api";
 import { confirmAlert } from "../../alerts.ts";
 import { EmptyState, PageHead, Row, Seg, Toggle } from "./parts.tsx";
-import { refreshProfiles, useProfiles } from "../../profiles.ts";
 import { removeProject } from "../../init.ts";
-import AgentProfileForm from "../AgentProfileForm.tsx";
 import ProjectFolderDialog from "../ProjectFolderDialog.tsx";
 import { parseMcpServersJson, type McpImportResult } from "../../mcpImport.ts";
 import {
@@ -26,7 +24,6 @@ import {
 } from "../../theme.ts";
 import type { AssistSettingsDto } from "@polyth/session/web-api";
 import type {
-  AgentProfile,
   HarnessSelection,
   HarnessSnapshot,
   McpServerDto,
@@ -1066,44 +1063,6 @@ export function ProjectsPage() {
       {picking && <ProjectFolderDialog onClose={() => setPicking(false)} />}
     </>
   );
-}
-
-/** Polyth execution presets. Native harness roles live inside their harness
- * detail page; profiles may reference one, but are never presented as roles. */
-export function ProfilesPage() {
-  const profiles = useProfiles();
-  const [editing, setEditing] = useState<AgentProfile | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [repairsFor, setRepairsFor] = useState<Record<string, string>>({});
-  const checkProfile = async (profile: AgentProfile) => {
-    const result = await api.validateProfile(profile.id).catch(() => null);
-    setRepairsFor((current) => ({
-      ...current,
-      [profile.id]: !result ? "Check failed" : !result.checked ? "Harness unavailable — not checked" : result.valid ? "Valid ✓" : result.repairs.map((repair) => repair.reason).join("; "),
-    }));
-  };
-  return <>
-    <PageHead title="Profiles" blurb="Bundle a harness, model, native role, thinking level, and feature choices for repeatable execution." />
-    <div className="stat-label stat-label-row" data-settings-item="profiles.list">
-      <span>{profiles.length} profile{profiles.length === 1 ? "" : "s"}</span>
-      <span className="header-spacer" />
-      <Button size="sm" onClick={() => setCreating(true)}>New profile</Button>
-    </div>
-    {profiles.length === 0 && <EmptyState title="No profiles yet" body="Create a profile for execution choices you use together." />}
-    {profiles.map((profile) => <div key={profile.id} className="set-row">
-      <div className="set-row-text">
-        <div className="set-row-label"><span className="profile-avatar" style={{ background: profile.color ?? "var(--blue)" }} />{profile.name}</div>
-        <div className="set-row-hint mono">{profile.harnessId ?? "Legacy harness"} · {profile.providerID}/{profile.modelID}{profile.agent ? ` · ${profile.agent}` : ""}{profile.thinking ? ` · Think ${profile.thinking}` : ""}</div>
-        {repairsFor[profile.id] && <div className="set-row-hint">{repairsFor[profile.id]}</div>}
-      </div>
-      <div className="set-row-control">
-        <Button size="sm" onClick={() => void checkProfile(profile)}>Validate</Button>
-        <Button size="sm" onClick={() => setEditing(profile)}>Edit</Button>
-        <Button size="sm" variant="danger" onClick={() => { void confirmAlert(`Delete profile ${profile.name}?`, { title: "Delete profile", confirmLabel: tr("common.delete") }).then((ok) => { if (ok) void api.deleteProfile(profile.id).then(() => refreshProfiles()); }); }}>Delete</Button>
-      </div>
-    </div>)}
-    {(editing || creating) && <AgentProfileForm {...(editing ? { existing: editing } : {})} onClose={() => { setEditing(null); setCreating(false); }} />}
-  </>;
 }
 
 function McpServerForm({ existing, onDone }: { existing?: McpServerDto; onDone: () => void }) {
