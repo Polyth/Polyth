@@ -42,7 +42,10 @@ export default function UsageSettings(): ReactNode {
   const projectId = useStore((state) => state.activeProjectId);
   const { snapshots } = useQuotaSnapshots();
   const prefs = useUsagePrefs();
-  const projectSessions = sessions.filter((session) => session.projectId === projectId);
+  const projectSessions = useMemo(
+    () => sessions.filter((session) => session.projectId === projectId),
+    [projectId, sessions],
+  );
   const data = useMemo(
     () => buildUsageDashboardData(projectSessions, snapshots, prefs.dashboard.rangeDays),
     [projectSessions, snapshots, prefs.dashboard.rangeDays],
