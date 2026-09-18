@@ -1,6 +1,6 @@
 import type { JsonObject, RouteHandler, SessionEvent } from "@polyth/contracts";
 import type {
-  ContributionInvocation,
+  ContributionInvocationDraft,
   ContributionInvocationKind,
   PackageJsonObject,
 } from "@polyth/package-sdk";
@@ -29,9 +29,9 @@ import { assertOauthTxMatchesActive, consumeOauthTx, oauthRedirectOrigin } from 
 import { notFound, optionalSecretVault, secretVault } from "./pluginRouteShared.ts";
 import { withInitialPermissionReview } from "./managedPluginReview.ts";
 
-const fail = (code: string, message: string): never => {
+function fail(code: string, message: string): never {
   throw Object.assign(new Error(message), { code });
-};
+}
 
 const invocationKinds = new Set<ContributionInvocationKind>([
   "composer-action",
@@ -169,7 +169,7 @@ async function buildInvocation(input: {
   sessionId?: string;
   projectId?: string;
   host: ServerPackageHost;
-}): Promise<Omit<ContributionInvocation, "invocationId" | "lease" | "expiresAt" | "spaceId">> {
+}): Promise<ContributionInvocationDraft> {
   const contribution = contributionOf(input.manifest, input.kind, input.contributionId);
   if (!contribution) fail("not-found", "extension contribution is not declared");
   const base = {
