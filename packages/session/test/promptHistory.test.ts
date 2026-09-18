@@ -38,6 +38,8 @@ test("prompt history is a scoped view over composer submissions with stable newe
   await store.append("sB", "user/message", { text: "from B" });
   await store.append("sOther", "user/message", { text: "other space" });
   await store.append("sA", "user/message", { text: "hidden conflict", githubConflictResolution: true });
+  await store.append("sA", "user/message", { text: "hidden retry", hiddenUserMessage: true });
+  await store.append("sA", "user/message", { text: "hidden auto-resume", autoResume: true });
   await store.append("sA", "user/message", { text: "continue" });
   await store.append("sA", "user/message", { text: "continue" });
 
