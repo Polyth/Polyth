@@ -67,8 +67,18 @@ test("background and glass controls are wired into Appearance and the held-Shift
   );
   assert.match(
     styles,
-    /@supports \(-webkit-touch-callout: none\)\s*\{[\s\S]*?@media \(display-mode: standalone\)\s*\{[\s\S]*?\.app\s*\{[^}]*height:\s*100vh;[^}]*\}[\s\S]*?html\[data-background\]:not\(\[data-background="none"\]\) \.app\s*\{[^}]*background-image:[\s\S]*?var\(--app-background-image\)[^}]*background-size:\s*cover;/s,
-    "iOS standalone switches back to the full layout viewport and paints the image on the app itself",
+    /html, body, #root\s*\{[^}]*min-height:\s*100vh;[^}]*min-height:\s*100dvh;/s,
+    "the root chain cannot end above the dynamic viewport",
+  );
+  assert.match(
+    styles,
+    /@supports \(-webkit-touch-callout: none\)\s*\{[\s\S]*?@media \(display-mode: standalone\)\s*\{[\s\S]*?\.app\s*\{[^}]*height:\s*100dvh;[^}]*\}[\s\S]*?html\[data-background\]:not\(\[data-background="none"\]\) \.app\s*\{[^}]*background-image:[\s\S]*?var\(--app-background-image\)[^}]*background-size:\s*cover;/s,
+    "iOS standalone keeps full dynamic-viewport layout while the app paints the edge-to-edge background",
+  );
+  assert.doesNotMatch(
+    styles,
+    /@supports \(-webkit-touch-callout: none\)[\s\S]*?@media \(display-mode: standalone\)[\s\S]*?\.app\s*\{[^}]*height:\s*100vh;/s,
+    "iOS standalone must not shrink the app to 100vh and clip the composer",
   );
   assert.match(
     styles,

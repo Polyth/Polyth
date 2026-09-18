@@ -10,7 +10,13 @@
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-corner { background: transparent; }
 
-html, body, #root { width: 100%; min-width: 0; height: 100%; }
+html, body, #root {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
 html {
   overflow-x: hidden;
   overscroll-behavior: none;
@@ -13541,16 +13547,15 @@ html[data-background]:not([data-background="none"]) .app {
   background-image: none;
 }
 
-/* WebKit standalone + viewport-fit=cover has a long-standing geometry bug:
-   100dvh can stop above the Home-indicator canvas when the translucent status
-   bar mode is active. iOS standalone historically behaved correctly with the
-   layout viewport (100vh), so use that only for the installed web app and let
-   the app itself own the selected background. Layout remains 100dvh everywhere
-   else, including normal Safari, Android, and the native shell. */
+/* iOS standalone needs the dynamic viewport for layout. Forcing 100vh on
+   current WebKit shortens the flex frame by the Home-indicator band, which
+   clips the composer even though the document canvas continues below it.
+   Keep the app at 100dvh and let it own the selected background so the image
+   still paints under the translucent status bar without changing layout. */
 @supports (-webkit-touch-callout: none) {
   @media (display-mode: standalone) {
     .app {
-      height: 100vh;
+      height: 100dvh;
     }
     html[data-background]:not([data-background="none"]) .app {
       background-color: var(--bg);
