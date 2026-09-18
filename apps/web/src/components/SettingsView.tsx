@@ -23,6 +23,7 @@ import {
 import ViewErrorBoundary from "./ViewErrorBoundary.ts";
 import SessionsPage from "./settings/SessionsPage.tsx";
 import AccessPage from "./settings/AccessPage.tsx";
+import UsersPage from "./settings/UsersPage.tsx";
 import PackagesPage from "./settings/PackagesPage.tsx";
 import { PackageGlyph } from "./settings/packageIcons.tsx";
 import PackageTourOverlay from "./PackageTourOverlay.tsx";
@@ -86,6 +87,7 @@ const BUILTIN: PageDef[] = [
   { id: "profiles", label: "Profiles", group: "Engineering", render: () => <ProfilesPage /> },
   { id: "behavior", label: tr("settingsview.behavior"), group: "Engineering", render: () => <BehaviorPage /> },
   { id: "packages", label: tr("settingsview.packages"), group: "Customize", icon: "package", render: () => <PackagesPage /> },
+  { id: "users", label: tr("settingsview.users"), group: "System", icon: "user", render: () => <UsersPage /> },
   { id: "access", label: tr("settingsview.access"), group: "System", nav: false, render: () => <AccessPage /> },
   { id: "about", label: tr("settingsview.about"), group: "System", nav: false, render: () => <AboutPage /> },
 ];
@@ -106,6 +108,7 @@ const SETTINGS_ICON_BY_PAGE: Readonly<Record<string, string>> = {
   shortcuts: "keyboard",
   projects: "files",
   profiles: "user",
+  users: "user",
   behavior: "brain",
   packages: "package",
   desktop: "settings",
