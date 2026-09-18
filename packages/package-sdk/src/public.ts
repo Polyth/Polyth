@@ -23,6 +23,7 @@ export {
   type ContributionCompletion,
   type ContributionInvocation,
   type ContributionInvocationBase,
+  type ContributionInvocationDraft,
   type ContributionInvocationKind,
   type ContributionResult,
   type ExternalResource,
