@@ -22,7 +22,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { ModelDescriptor, ModelRef } from "@polyth/contracts";
-import { isFavorite, modelKey, orderProviders } from "@polyth/models";
+import { isFavorite, modelKey, orderProviders, providerPreferenceKey } from "@polyth/models";
 import {
   reorderModelFavorites,
   noteModelUsed,
@@ -216,6 +216,7 @@ export default function ModelPicker({
   const models = useMemo(() => pickerCatalogModels(catalogModels, harnessId), [catalogModels, harnessId]);
   const flatCatalog = flatModelCatalog(models, harnessId);
   const prefs = useModelPrefs();
+  const preferenceHarnessId = harnessId ?? unanimousHarnessId(models) ?? "opencode";
   const phone = useShellMode() === "phone";
   const [open, setOpen] = useState(false);
   const [pickerState, dispatchPicker] = useReducer(
@@ -281,8 +282,8 @@ export default function ModelPicker({
       provider.models.push(model);
       byId.set(model.providerID, provider);
     }
-    return orderProviders([...byId.values()], prefs);
-  }, [filtered, prefs, flatCatalog]);
+    return orderProviders([...byId.values()], prefs, preferenceHarnessId);
+  }, [filtered, prefs, flatCatalog, preferenceHarnessId]);
   const providerIds = providers.map((provider) => provider.id);
   const favorites = useMemo(() => {
     if (flatCatalog) return [];
@@ -306,12 +307,12 @@ export default function ModelPicker({
   const isExpanded = (providerId: string) => providerIsExpanded({
     query: pickerState.query,
     sessionOverride: pickerState.expansion[providerId],
-    persistedExpanded: expandedProviders.has(providerId),
+    persistedExpanded: expandedProviders.has(providerPreferenceKey(preferenceHarnessId, providerId)),
     selectedProvider: providerId === selectedModel?.providerID,
   });
   const setExpanded = (providerId: string, expanded: boolean) => {
     dispatchPicker({ type: "set-expanded", providerId, expanded });
-    setModelProviderExpanded(providerId, expanded);
+    setModelProviderExpanded(providerId, expanded, preferenceHarnessId);
   };
 
   // Flattened keyboard-navigable rows (favorites, recents, then every expanded
@@ -596,7 +597,7 @@ export default function ModelPicker({
   const moveProvider = (providerId: string, delta: number) => {
     const index = providerIds.indexOf(providerId);
     const target = providerIds[index + delta];
-    if (target) reorderModelProviders(providerIds, providerId, target);
+    if (target) reorderModelProviders(providerIds, providerId, target, preferenceHarnessId);
   };
 
   const row = (model: ModelDescriptor, group: "favorites" | "recent" | "provider") => {
@@ -823,7 +824,7 @@ export default function ModelPicker({
                       onDragOver={allowDrop}
                       onDrop={(event) => {
                         const dragged = dragId(event, "provider");
-                        if (dragged) reorderModelProviders(providerIds, dragged, provider.id);
+                        if (dragged) reorderModelProviders(providerIds, dragged, provider.id, preferenceHarnessId);
                         setDragging(null);
                       }}
                       onDragEnd={() => setDragging(null)}
