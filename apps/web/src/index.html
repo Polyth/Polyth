@@ -14,6 +14,23 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <script>
+      try {
+        const bg = JSON.parse(localStorage.getItem("polyth.background.v1") || "null");
+        const settings = JSON.parse(localStorage.getItem("polyth.productSettings.v1") || "null");
+        const light = settings?.appearanceMode === "light"
+          || (settings?.appearanceMode !== "dark" && matchMedia("(prefers-color-scheme: light)").matches);
+        const systemBars = {
+          "signal-bloom": { dark: "#173a3b", light: "#dcebe7" },
+          "blue-hour": { dark: "#16364a", light: "#dce8f1" },
+          "ember-veil": { dark: "#4a2d31", light: "#f0e3dc" },
+          "moss-circuit": { dark: "#243a2f", light: "#e2eadf" },
+          "paper-prism": { dark: "#43595f", light: "#e3eef1" },
+        };
+        const systemBar = systemBars[bg?.id]?.[light ? "light" : "dark"];
+        if (systemBar) document.querySelector('meta[name="theme-color"]')?.setAttribute("content", systemBar);
+      } catch {}
+    </script>
     <title>Polyth</title>
     <!-- Root-absolute asset URLs (EXT-SEAMS-V3): this shell is also served as
          the SPA fallback for nested routes like /p/:projectId/s/:sessionId, so
