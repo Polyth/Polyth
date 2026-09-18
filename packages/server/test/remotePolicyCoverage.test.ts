@@ -59,7 +59,13 @@ function stubHost(storageDir: string): ServerPackageHost {
     root: { provide() { return { dispose() {} }; } } as ServerPackageHost["root"],
     projects: { list: async () => [], get: async () => undefined, add: async () => { throw new Error("unused"); }, create: async () => { throw new Error("unused"); }, remove: async () => {} },
     sessions: {} as ServerPackageHost["sessions"],
-    store: {} as ServerPackageHost["store"],
+    store: {
+      profileList: async () => [],
+      profileGet: async () => undefined,
+      profileCreate: async () => { throw new Error("unused"); },
+      profileUpdate: async () => { throw new Error("unused"); },
+      profileRemove: async () => false,
+    } as unknown as ServerPackageHost["store"],
     broadcast: { event() {}, projection() {} },
     runtimes: { forProject: async () => ({}) as never },
     services: {

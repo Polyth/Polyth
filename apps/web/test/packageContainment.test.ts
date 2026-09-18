@@ -100,6 +100,7 @@ const GENERIC_SHELL_IMPORTS = new Set([
   "components/mobile/Sheet.tsx",
   "components/MoveControls.tsx",
   "components/Picker.tsx",
+  "components/ProjectGlyph.tsx",
   "components/settings/parts.tsx",
   "components/ui/Button.tsx",
   "components/ui/Icon.tsx",
@@ -212,12 +213,17 @@ const GENERIC_PACKAGE_IMPORTERS = new Set([
   // shell's autocomplete; reimplementing that rule here would let the two
   // disagree. Imports the browser-safe `@polyth/commands/catalog` only.
   "composer/discovery.ts",
+  "composer/extensionCommandGate.ts",
   "components/ContextRail.tsx",
+  "components/ChatResponseFooter.tsx",
   "components/Header.tsx",
   "components/Timeline.tsx",
   "composer/discovery.ts",
   "i18n/index.ts",
   "i18n/types.ts",
+  "init.ts",
+  "packages/registry.ts",
+  "packages/sandbox/extensionCommands.tsx",
   "profiles.ts",
   "shell.ts",
 ]);

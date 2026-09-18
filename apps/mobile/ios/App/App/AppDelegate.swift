@@ -1060,7 +1060,7 @@ final class PolythPushPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCen
                 self.forget(item)
                 if self.foregroundMapping == "\(connectionId)\u{0}\(item.accountId)" { self.foregroundMapping = nil }
             }
-            if let data = try? self.secureGet(Self.pendingKey), let data,
+            if let data = try? self.secureGet(Self.pendingKey),
                let pending = try? JSONDecoder().decode(PendingOpen.self, from: data), pending.connectionId == connectionId {
                 self.secureRemove(Self.pendingKey)
             }
@@ -1138,7 +1138,7 @@ final class PolythPushPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCen
         guard requireBundled(call) else { return }
         queue.async {
             defer { self.secureRemove(Self.pendingKey) }
-            guard let data = try? self.secureGet(Self.pendingKey), let data,
+            guard let data = try? self.secureGet(Self.pendingKey),
                   let pending = try? JSONDecoder().decode(PendingOpen.self, from: data),
                   self.opaque(pending.connectionId), self.opaque(pending.accountId), self.notificationID(pending.notificationId) != nil else { call.resolve([:]); return }
             call.resolve(["connectionId": pending.connectionId, "accountId": pending.accountId, "notificationId": pending.notificationId.lowercased()])

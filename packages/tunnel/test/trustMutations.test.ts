@@ -51,12 +51,14 @@ test("revoke A leaves B connected and failed host trust mutation is not success"
   const a = store.commitDevice({
     endpointId: "aa".repeat(32),
     label: "Phone A",
+    ownerUserId: SPACE.userId,
     grants: grantsForProfile("interact"),
     pairedVia: "polyth-link",
   });
   const b = store.commitDevice({
     endpointId: "bb".repeat(32),
     label: "Phone B",
+    ownerUserId: SPACE.userId,
     grants: grantsForProfile("interact"),
     pairedVia: "polyth-link",
   });
@@ -131,6 +133,7 @@ test("revoke A leaves B connected and failed host trust mutation is not success"
   store.commitDevice({
     endpointId: "cc".repeat(32),
     label: "Fail",
+    ownerUserId: SPACE.userId,
     grants: grantsForProfile("observe"),
     pairedVia: "polyth-link",
   });
@@ -160,12 +163,14 @@ test("grant update A does not notify B and restore permits reconnect metadata", 
   const a = store.commitDevice({
     endpointId: "aa".repeat(32),
     label: "Phone A",
+    ownerUserId: SPACE.userId,
     grants: grantsForProfile("developer"),
     pairedVia: "polyth-link",
   });
   const b = store.commitDevice({
     endpointId: "bb".repeat(32),
     label: "Phone B",
+    ownerUserId: SPACE.userId,
     grants: grantsForProfile("developer"),
     pairedVia: "polyth-link",
   });

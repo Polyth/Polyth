@@ -34,13 +34,13 @@ test("desktop packaging covers each supported updater target", async () => {
   assert.equal(pkg.build.mac.entitlementsInherit, pkg.build.mac.entitlements);
   assert.equal(
     pkg.build.mac.x64ArchFiles,
-    "{**/node_modules/{esbuild,@esbuild/*,node-pty/prebuilds/*}/**,**/Resources/opencode/darwin-*/opencode,**/Resources/chromium/**}",
+    "{**/node_modules/{esbuild,@esbuild/*,node-pty/prebuilds/*}/**,**/Resources/opencode/darwin-*/opencode,**/Resources/chromium/**,**/Resources/polyth-link/**}",
   );
   assert.deepEqual(pkg.build.win.target, ["nsis"]);
   assert.deepEqual(pkg.build.publish, {
     provider: "github",
-    owner: "otto-assistant",
-    repo: "polyth",
+    owner: "Polyth",
+    repo: "Polyth",
     releaseType: "release",
   });
   assert.equal(pkg.build.extraResources.some(({ to }) => to === "opencode"), true);

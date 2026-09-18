@@ -13,9 +13,6 @@ on:
           - macos
           - linux
           - windows
-  push:
-    tags:
-      - "v*"
 
 concurrency:
   group: desktop-release-${{ github.workflow }}-${{ github.ref }}
