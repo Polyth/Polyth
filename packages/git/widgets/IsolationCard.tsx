@@ -309,7 +309,7 @@ export function IsolationCard() {
               busy={busy === "discard"}
               onClick={() => setConfirmingDiscard(true)}
             >
-              {tr("isolation.discard")}
+              {tr("sidebar.sessionlist.deleteSession")}
             </Button>
           )}
           {recovering && actions?.canRecover === true && (
