@@ -28,7 +28,10 @@
           "paper-prism": { dark: "#43595f", light: "#e3eef1" },
         };
         const systemBar = systemBars[bg?.id]?.[light ? "light" : "dark"];
-        if (systemBar) document.querySelector('meta[name="theme-color"]')?.setAttribute("content", systemBar);
+        if (systemBar) {
+          document.documentElement.style.setProperty("--app-system-bar-color", systemBar);
+          document.querySelector('meta[name="theme-color"]')?.setAttribute("content", systemBar);
+        }
       } catch {}
     </script>
     <title>Polyth</title>
