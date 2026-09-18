@@ -6,7 +6,7 @@
  * the built-in Packages page. */
 const BUILTIN_SETTINGS_PAGE_IDS: ReadonlySet<string> = new Set([
   "general", "appearance", "chat", "notifications", "sessions", "shortcuts",
-  "projects", "behavior", "packages", "access", "about",
+  "projects", "behavior", "packages", "users", "access", "about",
 ]);
 
 /** Backend package names that alias to a different UI package. Mirrors the
