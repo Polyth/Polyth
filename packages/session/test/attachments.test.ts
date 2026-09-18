@@ -30,17 +30,22 @@ test("queue round-trip preserves attachments; text-only rows stay clean", async 
   const store = tmpStore();
   const withAtt = (await store.enqueue("s1", "look at these", "queue", refs)).item;
   await store.enqueue("s1", "plain", "queue");
+  const hidden = (await store.enqueue("s1", "retry", "queue", undefined, undefined, undefined, true)).item;
 
   assert.deepEqual(withAtt.attachments, refs);
+  assert.equal(hidden.hiddenUserMessage, true);
   const listed = await store.queueList("s1");
-  assert.equal(listed.length, 2);
+  assert.equal(listed.length, 3);
   assert.deepEqual(listed[0]?.attachments, refs);
   assert.equal(listed[1]?.attachments, undefined);
+  assert.equal(listed[2]?.hiddenUserMessage, true);
 
   const head = await dispatchHead(store, "s1");
   assert.deepEqual(head?.attachments, refs);
   const next = await dispatchHead(store, "s1");
   assert.equal(next?.attachments, undefined);
+  const retried = await dispatchHead(store, "s1");
+  assert.equal(retried?.hiddenUserMessage, true);
   await store.close();
 });
 
