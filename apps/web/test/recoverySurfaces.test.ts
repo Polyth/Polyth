@@ -64,6 +64,9 @@ test("recovery surfaces preserve drafts and never auto-send a failed turn", asyn
   assert.match(composer, /<Notice[\s\S]*?className="composer-send-failure"[\s\S]*?role="alert"/);
   assert.match(composer, /failedSend\?\.kind === "unavailable"/);
   assert.doesNotMatch(composer, /failedSend(?:\?\.)?kind === "unknown"/);
+  assert.match(composer, /const retryFailedSend = useCallback\([\s\S]*?alreadyVisible[\s\S]*?send\(undefined, undefined, alreadyVisible\)/);
+  assert.match(composer, /delivery !== "queue" && !hiddenUserMessage/);
+  assert.match(composer, /hiddenUserMessage \? \{ hiddenUserMessage: true \} : \{\}/);
   // An uncertain outcome is not surfaced as a retryable composer notice: the
   // mutation may already have applied, so offering replay would risk a duplicate.
   assert.doesNotMatch(composer, /sendDisabled = [\s\S]{0,200}failedSend/);
