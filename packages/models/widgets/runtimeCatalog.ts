@@ -37,11 +37,17 @@ const persistedHarnesses = createCatalogCache<HarnessSnapshot[]>(DAILY_CACHE_MS,
 const persistedRosters = createCatalogCache<HarnessRosterItem[]>(DAILY_CACHE_MS, 64, Date.now, persistentStorage("polyth.runtimeRosters.v1"));
 const persistedGlobalModels = createCatalogCache<ModelDescriptor[]>(DAILY_CACHE_MS, 64, Date.now, persistentStorage("polyth.runtimeGlobalModels.v1"));
 const persistedGlobalAgents = createCatalogCache<AgentDescriptor[]>(DAILY_CACHE_MS, 64, Date.now, persistentStorage("polyth.runtimeGlobalAgents.v1"));
+const persistedWarmScopes = createCatalogCache<true>(DAILY_CACHE_MS, 64, Date.now, persistentStorage("polyth.runtimeWarmScopes.v1"));
 let revision = 0;
 const listeners = new Set<() => void>();
+const invalidationListeners = new Set<() => void>();
 export function subscribeRuntimeCatalogs(listener: () => void): () => void {
   listeners.add(listener);
   return () => { listeners.delete(listener); };
+}
+export function subscribeRuntimeCatalogInvalidations(listener: () => void): () => void {
+  invalidationListeners.add(listener);
+  return () => { invalidationListeners.delete(listener); };
 }
 export function resetRuntimeCatalogMemory(notify = true): void {
   catalogCache.clear();
@@ -56,6 +62,8 @@ export function invalidateRuntimeCatalogs(notify = true): void {
   persistedRosters.clear();
   persistedGlobalModels.clear();
   persistedGlobalAgents.clear();
+  persistedWarmScopes.clear();
+  for (const listener of invalidationListeners) listener();
   resetRuntimeCatalogMemory(notify);
 }
 type SnapshotRequest = { projectId?: string | null; spaceId?: string; cwd?: string; harnessId?: string; force?: boolean; detail?: boolean };
@@ -93,6 +101,9 @@ export function peekPersistedRuntimeAgents(projectId: string): AgentDescriptor[]
 }
 export function rememberPersistedRuntimeAgents(projectId: string, agents: AgentDescriptor[]): void {
   persistedGlobalAgents.write(globalCatalogPresentationKey(projectId), agents);
+}
+export function runtimeCatalogRefreshDelay(projectId: string): number | undefined {
+  return persistedWarmScopes.expiresIn(globalCatalogPresentationKey(projectId));
 }
 const snapshotPresentationKey = (options: SnapshotRequest) => JSON.stringify([
   activeBrowserAccountId(), options.spaceId ?? "page", options.projectId ?? "", options.cwd ?? "project-root",
@@ -271,23 +282,10 @@ const readPreviewCatalog = (projectId?: string, harnessId?: string, spaceId?: st
   });
 };
 
-const persistentKeyProjectId = (key: string): string | undefined => {
-  try {
-    const value = JSON.parse(key) as unknown;
-    return Array.isArray(value) && typeof value[2] === "string" ? value[2] : undefined;
-  } catch {
-    return undefined;
-  }
-};
-const hasFreshPersistedCatalogs = (projectId?: string): boolean => {
-  const roster = persistedRosters.peek(rosterPresentationKey({ projectId }))
-    ?? (!projectId ? persistedRosters.peek(rosterPresentationKey({})) : undefined);
-  if (!roster) return false;
-  const enabled = roster.filter((row) => row.policy.enabled);
-  return enabled.every((row) => persistedCatalogs.someFresh((key, catalog) =>
-    (!projectId || persistentKeyProjectId(key) === projectId)
-    && catalog.harnessId === row.identity.id));
-};
+const hasFreshPersistedCatalogs = (projectId?: string): boolean =>
+  projectId
+    ? persistedWarmScopes.peek(globalCatalogPresentationKey(projectId)) === true
+    : persistedWarmScopes.someFresh();
 
 /** Warm every enabled harness catalog once, then reuse that successful metadata
  * across page reloads for a day. A project-less bootstrap may skip when a fresh
@@ -313,7 +311,7 @@ export const preloadRuntimeCatalogs = async (
       spaceId: context.spaceId,
     }), roster);
   }
-  await Promise.allSettled([
+  const results = await Promise.allSettled([
     // Warm Auto as its own route too; the server chooses among the detailed
     // snapshots without committing that choice to any canonical session.
     readPreviewCatalog(options.projectId, undefined, options.spaceId),
@@ -321,6 +319,9 @@ export const preloadRuntimeCatalogs = async (
       .filter((row) => row.policy.enabled)
       .map((row) => readPreviewCatalog(options.projectId, row.identity.id, options.spaceId)),
   ]);
+  if (revision !== preloadRevision || results.some((result) => result.status === "rejected")) return;
+  const warmProjectId = context?.projectId ?? options.projectId;
+  if (warmProjectId) persistedWarmScopes.write(globalCatalogPresentationKey(warmProjectId), true);
 };
 
 export function useCatalogRevision(): number {
