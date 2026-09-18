@@ -2,10 +2,15 @@ import type { ProjectComposition } from "@polyth/contracts/project-composition";
 import { whenPackagesSettled } from "./packages/registry.ts";
 import { listProjectContextRecommendedWidgetIds } from "./packages/projectContext.ts";
 import { projectPackageAffinity } from "./packages/projectRelevance.ts";
+import { listCapabilities } from "./capabilities.ts";
+import { seedCapabilityLayoutForProject } from "./capabilityLayout.ts";
 import { getWorkbenchProjectId, activateWorkbenchProfile } from "./workbench/store.ts";
 import { listWorkbenchProfiles } from "./workbench/profiles.ts";
 import { setWidgetVisible, updateWidgetLayoutForProject } from "./widgets/widgetLayout.ts";
-import { selectInitialWorkbenchProfile } from "./projectCompositionPlan.ts";
+import {
+  initialCapabilityPlacementOverrides,
+  selectInitialWorkbenchProfile,
+} from "./projectCompositionPlan.ts";
 
 export { selectInitialWorkbenchProfile } from "./projectCompositionPlan.ts";
 
@@ -16,6 +21,19 @@ export async function seedInitialProjectWorkspace(
   composition: ProjectComposition,
 ): Promise<void> {
   await whenPackagesSettled();
+
+  const capabilityPlacements = initialCapabilityPlacementOverrides(
+    composition,
+    listCapabilities().map((capability) => ({
+      id: capability.id,
+      ownerPackageId: capability.ownerPackageId,
+      projectAffinity: capability.projectAffinity,
+      standardTier: capability.standardTier,
+      standardRank: capability.standardRank,
+    })),
+    projectPackageAffinity,
+  );
+  seedCapabilityLayoutForProject(projectId, capabilityPlacements);
 
   const recommended = listProjectContextRecommendedWidgetIds(projectId);
   if (recommended.length > 0) {

@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { WorkbenchProfileDefinition } from "@polyth/web-sdk";
-import { projectSetupRecovery, selectInitialWorkbenchProfile } from "../src/projectCompositionPlan.ts";
+import {
+  initialCapabilityPlacementOverrides,
+  projectSetupRecovery,
+  selectInitialWorkbenchProfile,
+} from "../src/projectCompositionPlan.ts";
 
 const profile = (id: string, order: number, directions: string[], recommended = true): WorkbenchProfileDefinition => ({
   id, label: id, description: id, order, ownerPackageId: id,
@@ -80,4 +84,42 @@ test("setup recovery never traps an unresolved project and never abandons an uns
   assert.deepEqual(projectSetupRecovery(true, true), {
     canExit: true, canRetry: true, exitKind: "open-anyway",
   });
+});
+
+test("typed projects keep recommended tools in place and demote secondary package capabilities", () => {
+  const composition = { version: 1, directions: ["engineering"], packageOverrides: {} } as const;
+  const affinities = (owner: string) => ({
+    git: { directions: ["engineering"] as const, recommended: true },
+    usage: {},
+    files: { recommended: true },
+  } as const)[owner as "git" | "usage" | "files"];
+
+  assert.deepEqual(initialCapabilityPlacementOverrides(composition as never, [
+    { id: "session", standardTier: "primary", standardRank: 0 },
+    { id: "files", ownerPackageId: "files", standardTier: "primary", standardRank: 1 },
+    { id: "git", ownerPackageId: "git", standardTier: "more", standardRank: 4 },
+    { id: "usage", ownerPackageId: "usage", standardTier: "more", standardRank: 15 },
+    { id: "events", standardTier: "technical", standardRank: 33 },
+  ], affinities), {
+    usage: { tier: "technical", rank: 15 },
+  });
+});
+
+test("explicit include keeps a secondary package in its normal rail", () => {
+  const composition = {
+    version: 1,
+    directions: ["engineering"],
+    packageOverrides: { usage: "include" },
+  } as const;
+  assert.deepEqual(initialCapabilityPlacementOverrides(composition as never, [
+    { id: "usage", ownerPackageId: "usage", standardTier: "more", standardRank: 15 },
+  ], () => ({})), {});
+});
+
+test("general projects preserve the global capability arrangement", () => {
+  assert.deepEqual(initialCapabilityPlacementOverrides(
+    { version: 1, directions: [], packageOverrides: {} },
+    [{ id: "usage", ownerPackageId: "usage", standardTier: "more", standardRank: 15 }],
+    () => ({}),
+  ), {});
 });

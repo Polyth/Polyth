@@ -4,7 +4,7 @@ import { setNextProjectComposition } from "@polyth/session/web-api";
 import ProjectFolderDialog from "./ProjectFolderDialog.tsx";
 import ProjectCompositionEditor, { emptyProjectComposition } from "./ProjectCompositionEditor.tsx";
 import Dialog from "./a11y/Dialog.tsx";
-import { Button } from "./ui/index.ts";
+import { Button, Spinner } from "./ui/index.ts";
 import { getState } from "../store.ts";
 import { updateProjectAppearance } from "../init.ts";
 import { tr } from "../i18n/index.ts";
@@ -95,10 +95,10 @@ export default function ProjectSetupFlowDialog({ onClose }: { onClose: () => voi
 
   if (stage === "finalizing") {
     return (
-      <Dialog title={tr("projectcomposition.preparingWorkspace")} onClose={() => {}} size="sm" className="project-setup-flow-dialog">
+      <Dialog title={tr("projectcomposition.preparingWorkspace")} onClose={() => {}} size="md" className="project-setup-flow-dialog project-setup-flow-dialog-compact">
         <div className="project-setup-progress" role="status" aria-live="polite">
-          <div className="project-setup-spinner" aria-hidden="true" />
-          <div><strong>{tr("projectcomposition.applyingSetup")}</strong><p>{tr("projectcomposition.settingsWorkspaceHint")}</p></div>
+          <Spinner size="md" />
+          <div><strong>{tr("projectcomposition.applyingSetup")}</strong><p>{tr("projectcomposition.applyingSetupHint")}</p></div>
         </div>
       </Dialog>
     );
@@ -107,7 +107,7 @@ export default function ProjectSetupFlowDialog({ onClose }: { onClose: () => voi
   if (stage === "error") {
     const recovery = projectSetupRecovery(compositionPersisted, project !== null);
     return (
-      <Dialog title={tr("projectcomposition.finishSetup")} onClose={recovery.canExit ? cancel : () => {}} size="sm" className="project-setup-flow-dialog">
+      <Dialog title={tr("projectcomposition.finishSetup")} onClose={recovery.canExit ? cancel : () => {}} size="md" className="project-setup-flow-dialog project-setup-flow-dialog-compact">
         <div className="project-setup-error" role="alert">{error || tr("projectcomposition.setupFailed")}</div>
         <div className="project-setup-actions">
           {recovery.exitKind && <Button variant="ghost" onClick={cancel}>{recovery.exitKind === "open-anyway" ? tr("projectcomposition.openAnyway") : tr("common.close")}</Button>}
@@ -122,7 +122,7 @@ export default function ProjectSetupFlowDialog({ onClose }: { onClose: () => voi
       <div className="project-setup-intro">
         <span className="project-setup-step">{tr("projectcomposition.workspace")}</span>
         <h2>{tr("projectcomposition.setupHeadline")}</h2>
-        <p>{tr("projectcomposition.purposeHint")}</p>
+        <p>{tr("projectcomposition.setupHint")}</p>
       </div>
       <ProjectCompositionEditor value={composition} onChange={setComposition} />
       <div className="project-setup-actions">

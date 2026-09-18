@@ -149,6 +149,28 @@ export function subscribeCapabilityLayout(listener: () => void): () => void {
   return () => { listeners.delete(listener); };
 }
 
+/** Seed a freshly-created project's navigation once. Existing placement
+ * customization is authoritative and is never replaced. */
+export function seedCapabilityLayoutForProject(
+  projectId: string,
+  placements: Record<string, PlacementOverride>,
+): boolean {
+  if (projectId !== activeProjectId || Object.keys(state.placements).length > 0) return false;
+
+  const next: Record<string, PlacementOverride> = {};
+  for (const [id, placement] of Object.entries(placements)) {
+    if (Object.keys(next).length >= MAX_PLACEMENT_OVERRIDES) break;
+    if (!isTier(placement.tier) || !Number.isFinite(placement.rank)) continue;
+    next[id] = { tier: placement.tier, rank: placement.rank };
+  }
+  if (Object.keys(next).length === 0) return false;
+
+  state = { version: 1, placements: next };
+  write(projectId, state);
+  emit();
+  return true;
+}
+
 export function setPlacementOverride(id: string, placement: PlacementOverride | null): void {
   const placements = { ...state.placements };
   if (placement === null) {

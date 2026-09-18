@@ -191,12 +191,15 @@ async function hydrate(projectId: string, generation: number): Promise<void> {
 
     const dto = parseServerSettings(rawDto);
     const server = dto.settings;
+    const currentLocal = readProjectPresentationSettings(projectId);
     const merged: Record<string, unknown> = { ...local, ...server };
     const dirty = dirtyByProject.get(projectId);
     // A real edit made while the initial request was in flight wins for that
-    // key; untouched local records are only fallbacks for new setting keys.
+    // key. Re-read local state here: the snapshot captured before the request
+    // cannot contain edits made while the server response was pending.
     for (const key of dirty ?? []) {
-      if (Object.prototype.hasOwnProperty.call(local, key)) merged[key] = local[key];
+      if (Object.prototype.hasOwnProperty.call(currentLocal, key)) merged[key] = currentLocal[key];
+      else delete merged[key];
     }
     const normalized = orderedSettings(merged);
     writeProjectPresentationSettings(projectId, normalized);

@@ -27,9 +27,13 @@ test("project presentation state hydrates from the server and saves later edits"
   let activeProjectId: string | null = "p1";
   const listeners = new Set<() => void>();
   let releaseP3: ((value: ProjectPresentationSettingsDto) => void) | undefined;
+  let releaseP5: ((value: ProjectPresentationSettingsDto) => void) | undefined;
   api.projectPresentationSettings = async (projectId) => {
     if (projectId === "p3") {
       return new Promise<ProjectPresentationSettingsDto>((resolve) => { releaseP3 = resolve; });
+    }
+    if (projectId === "p5") {
+      return new Promise<ProjectPresentationSettingsDto>((resolve) => { releaseP5 = resolve; });
     }
     return {
       revision: projectId === "p1" ? 4 : 7,
@@ -77,6 +81,24 @@ test("project presentation state hydrates from the server and saves later edits"
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(values.get("polyth.workspaceMode.v1.p2"), "widgets");
     assert.equal(values.get("polyth.workspaceMode.v1.p1"), "chat");
+
+    // A project-local edit made after hydration starts must beat the late
+    // server snapshot. New-project capability seeding exercises this path.
+    activeProjectId = "p5";
+    for (const listener of listeners) listener();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const seededCapabilityLayout = {
+      version: 1,
+      placements: { usage: { tier: "technical", rank: 15 } },
+    };
+    values.set("polyth.capabilityLayout.v1.p5", JSON.stringify(seededCapabilityLayout));
+    sync.markProjectPresentationChanged("p5", "capabilityLayout");
+    releaseP5!({ revision: 0, updatedAt: 12, settings: {} });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(
+      JSON.parse(values.get("polyth.capabilityLayout.v1.p5")!),
+      seededCapabilityLayout,
+    );
 
     // A late response from a project that is no longer active must not
     // overwrite the newly selected project's local records.
