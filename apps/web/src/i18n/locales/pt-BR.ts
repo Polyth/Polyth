@@ -1586,6 +1586,7 @@ export const ptBR: AppMessages = {
   "settings.widgetspage.undo": "Desfazer",
   "settingsview.about": "Sobre",
   "settingsview.access": "Acesso",
+  "settingsview.users": "Usuários",
   "settingsview.appearance": "Aparência",
   "settingsview.backToSettings": "Voltar às configurações",
   "settingsview.behavior": "Comportamento",
