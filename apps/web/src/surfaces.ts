@@ -80,6 +80,9 @@ export function paneDockEdge(
 export interface RailSurfaceComponentProps {
   /** Omitted by legacy/plugin callers; the host always supplies it. */
   active?: boolean;
+  /** Canonical shell-owned project/session identity. */
+  projectId?: string | null;
+  sessionId?: string | null;
 }
 
 export interface RailSurface {
