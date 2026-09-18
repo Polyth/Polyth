@@ -272,15 +272,25 @@ export default function ModelPicker({
 
   const providers = useMemo(() => {
     if (flatCatalog) return [];
-    const byId = new Map<string, { id: string; name: string; models: ModelDescriptor[] }>();
+    const byId = new Map<string, {
+      id: string;
+      providerID: string;
+      harnessId: string;
+      name: string;
+      models: ModelDescriptor[];
+    }>();
     for (const model of filtered) {
-      const provider = byId.get(model.providerID) ?? {
-        id: model.providerID,
+      const providerHarnessId = model.harnessId ?? harnessId ?? "opencode";
+      const preferenceId = providerPreferenceKey(providerHarnessId, model.providerID);
+      const provider = byId.get(preferenceId) ?? {
+        id: preferenceId,
+        providerID: model.providerID,
+        harnessId: providerHarnessId,
         name: model.providerName ?? model.providerID,
         models: [],
       };
       provider.models.push(model);
-      byId.set(model.providerID, provider);
+      byId.set(preferenceId, provider);
     }
     return orderProviders([...byId.values()], prefs, preferenceHarnessId);
   }, [filtered, prefs, flatCatalog, preferenceHarnessId]);
@@ -304,11 +314,14 @@ export default function ModelPicker({
     () => new Set(prefs.expandedProviders),
     [prefs.expandedProviders],
   );
+  const selectedProviderPreferenceId = selectedModel
+    ? providerPreferenceKey(selectedModel.harnessId ?? harnessId ?? "opencode", selectedModel.providerID)
+    : undefined;
   const isExpanded = (providerId: string) => providerIsExpanded({
     query: pickerState.query,
     sessionOverride: pickerState.expansion[providerId],
     persistedExpanded: expandedProviders.has(providerPreferenceKey(preferenceHarnessId, providerId)),
-    selectedProvider: providerId === selectedModel?.providerID,
+    selectedProvider: providerId === selectedProviderPreferenceId,
   });
   const setExpanded = (providerId: string, expanded: boolean) => {
     dispatchPicker({ type: "set-expanded", providerId, expanded });
@@ -838,7 +851,7 @@ export default function ModelPicker({
                         >
                           <span className="model-provider-grip" aria-hidden="true">⠿</span>
                           <ProviderLogo
-                            providerID={provider.id}
+                            providerID={provider.providerID}
                             providerName={provider.name}
                             harnessId={unanimousHarnessId(provider.models)}
                             className="model-provider-logo"
