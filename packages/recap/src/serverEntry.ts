@@ -1,29 +1,126 @@
+import { join } from "node:path";
+import { deriveMessages } from "@polyth/session";
+import { assistFreshnessSeq } from "@polyth/session/next-action";
 import {
-  serverServiceKey,
+  localOnlyRemoteAccess,
+  SERVER_TURN_COMPLETION_BUS,
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
-import type { RecapEngineService, RecapLifecycleService } from "./index.ts";
+import {
+  createRecapService,
+  createRecapSettings,
+  isFresh,
+} from "./recap.ts";
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
-  let active = false;
-  const lifecycle: RecapLifecycleService = {
-    active: () => active,
+  // Keep the former file path so existing quiet-time preferences migrate
+  // without a one-off data rewrite. Package lifecycle is now the sole switch.
+  const settings = createRecapSettings({ file: join(host.storageDir, "assist.json") });
+
+  const transcript = async (sessionId: string): Promise<string> => {
+    const messages = deriveMessages(await host.store.events(sessionId));
+    const lines: string[] = [];
+    for (const message of messages.slice(-40)) {
+      if (message.role === "tool") continue;
+      const text = message.parts
+        .filter((part): part is { type: "text"; text: string } => part.type === "text")
+        .map((part) => part.text)
+        .join("\n")
+        .trim();
+      if (text) lines.push(`${message.role === "user" ? "User" : "Assistant"}: ${text}`);
+    }
+    return lines.join("\n\n").slice(-16_000);
   };
 
-  host.services.provide(serverServiceKey<RecapLifecycleService>("recap.lifecycle"), lifecycle);
+  const recap = createRecapService({
+    settings: () => settings.get(),
+    latestSeq: async (sessionId) => assistFreshnessSeq(await host.store.events(sessionId)),
+    eventsAfter: (sessionId, afterSeq) => host.store.events(sessionId, afterSeq),
+    transcript,
+    complete: async (sessionId, prompt, userId) => {
+      const projection = await host.store.projection(sessionId);
+      if (!projection) {
+        throw Object.assign(new Error("unknown session"), { code: "not-found" });
+      }
+      const binding = await host.resolveSessionRuntime(sessionId);
+      const model = host.smallModel(userId);
+      const runtime = model?.harnessId
+        ? await host.runtimes.forProject(projection.projectId, binding.cwd, model.harnessId)
+        : binding.rt;
+      const result = await host.smallModelComplete(runtime, {
+        cwd: binding.cwd,
+        prompt,
+        ...(model ? { model } : binding.model ? { model: binding.model } : {}),
+        maxOutputTokens: 1_024,
+        timeoutMs: 90_000,
+        purpose: "recap",
+      });
+      return result.text;
+    },
+    save: async (sessionId, assist) => {
+      if (!host.store.patchProjection) return;
+      const next = await host.store.patchProjection(sessionId, (current) => ({
+        ...current,
+        assist,
+        updatedAt: Date.now(),
+      }));
+      if (next) host.broadcast.projection(next);
+    },
+    onError: (sessionId, error) =>
+      console.error(`[polyth] recap generation failed for ${sessionId}`, error),
+  });
 
-  const engine = (): RecapEngineService | undefined =>
-    host.services.get(serverServiceKey<RecapEngineService>("recap.engine"));
+  let turnSubscription: { dispose(): void } | undefined;
+
+  const routes = async (rc: Parameters<NonNullable<ServerPackage["routes"]>>[0]) => {
+    const { path, method, json } = rc;
+    if (path === "/api/settings/assist" && method === "GET") {
+      json(200, settings.get());
+      return true;
+    }
+    if (path === "/api/settings/assist" && method === "PUT") {
+      json(200, settings.put(await rc.body()));
+      return true;
+    }
+
+    const match = path.match(/^\/api\/sessions\/([^/]+)\/assist$/);
+    if (match && method === "GET") {
+      const sessionId = decodeURIComponent(match[1]!);
+      const projection = await host.store.projection(sessionId);
+      if (!projection) {
+        json(404, { error: "not-found", message: "unknown session" });
+        return true;
+      }
+      const assist = projection.assist;
+      if (!assist) {
+        json(404, { error: "not-found", message: "no recap generated yet" });
+        return true;
+      }
+      const latestSeq = assistFreshnessSeq(await host.store.events(sessionId));
+      if (!isFresh(assist, latestSeq)) {
+        json(404, { error: "stale", message: "the session moved past this recap" });
+        return true;
+      }
+      json(200, assist);
+      return true;
+    }
+    return false;
+  };
 
   return {
+    remoteAccess: localOnlyRemoteAccess(["recap"]),
+    routes,
     onEnable() {
-      active = true;
-      engine()?.activate();
+      turnSubscription?.dispose();
+      turnSubscription = host.services.require(SERVER_TURN_COMPLETION_BUS).subscribe(
+        ({ sessionId, userId }) => recap.onTurnCompleted(sessionId, userId),
+      );
     },
     onDisable() {
-      active = false;
-      engine()?.stop();
+      turnSubscription?.dispose();
+      turnSubscription = undefined;
+      recap.stop();
     },
   };
 }
