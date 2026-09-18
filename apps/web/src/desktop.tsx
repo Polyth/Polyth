@@ -55,6 +55,12 @@ function WindowControls() {
     };
   }, [api]);
 
+  useEffect(() => {
+    if (windowState.maximized) document.body.dataset.desktopMaximized = "true";
+    else delete document.body.dataset.desktopMaximized;
+    return () => { delete document.body.dataset.desktopMaximized; };
+  }, [windowState.maximized]);
+
   return (
     <div
       className={`desktop-window-controls desktop-window-controls-${settings.controlsPosition}`}

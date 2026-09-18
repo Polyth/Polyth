@@ -327,7 +327,7 @@ export default function Header() {
   const chatSurface = workspaceMode === "chat" && view === "session";
   const occupancy = useHeaderOccupancy(mode === "wide" && session !== null);
   useResizeFocusHandoff(mode);
-  const switchWorkspaceMode = (next: "chat" | "widgets") => {
+  const switchWorkspaceMode = (next: "chat" | "widgets" | "edit") => {
     closeWorkspacePane();
     setActiveView("session");
     setWorkspaceMode(next);
@@ -382,7 +382,8 @@ export default function Header() {
           <SpaceSwitcher />
           {(!compact || !chatSurface) && <div className="workspace-mode-switch" role="group" aria-label={tr("header.workspaceView")}>
             <button className={workspaceMode === "chat" ? "active" : ""} aria-pressed={workspaceMode === "chat"} onClick={() => switchWorkspaceMode("chat")}>{tr("header.chat")}</button>
-            <button className={workspaceMode !== "chat" ? "active" : ""} aria-pressed={workspaceMode !== "chat"} onClick={() => switchWorkspaceMode("widgets")}>{tr("header.canvas")}</button>
+            <button className={workspaceMode === "widgets" ? "active" : ""} aria-pressed={workspaceMode === "widgets"} onClick={() => switchWorkspaceMode("widgets")}>{tr("header.canvas")}</button>
+            <button className={workspaceMode === "edit" ? "active" : ""} aria-pressed={workspaceMode === "edit"} onClick={() => switchWorkspaceMode(workspaceMode === "edit" ? "widgets" : "edit")}>{workspaceMode === "edit" ? tr("common.done") : tr("common.edit")}</button>
           </div>}
           {workspaceMode === "chat" && !compact && <><span className="header-divider" aria-hidden="true" /><CapabilityNav /></>}
         </div>

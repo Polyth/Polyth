@@ -101,6 +101,35 @@ test("chat top rail is configured directly without a More tools overflow", async
   assert.doesNotMatch(source, /CapabilityMenu/);
 });
 
+test("canvas widget chrome stays hidden until workspace edit mode", async () => {
+  const canvas = await readFile(new URL("../src/widgets/WidgetCanvas.tsx", import.meta.url), "utf8");
+  const header = await readFile(new URL("../src/components/Header.tsx", import.meta.url), "utf8");
+  const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.doesNotMatch(canvas, /className=\{`widget-card editing/);
+  assert.match(canvas, /canvasEditing = editing \|\| workspaceMode === "edit"/);
+  assert.match(canvas, /editing=\{canvasEditing\}/);
+  assert.match(canvas, /\{editing && \(/);
+  assert.match(header, /switchWorkspaceMode\(workspaceMode === "edit" \? "widgets" : "edit"\)/);
+  assert.match(header, /tr\("common\.edit"\)/);
+  assert.match(header, /tr\("common\.done"\)/);
+  assert.match(app, /document\.body\.dataset\.uiEditing = "true"/);
+  assert.match(styles, /\.widget-drag\s*\{[^}]*display:\s*none/s);
+  assert.match(styles, /\.widget-resize-handle\s*\{[^}]*display:\s*none/s);
+  assert.match(styles, /\.widget-card\.editing \.widget-resize-handle/);
+  assert.match(styles, /\.widget-card\.editing \.widget-drag/);
+});
+
+test("desktop shell clips the frameless window to the sheet radius", async () => {
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  const desktop = await readFile(new URL("../src/desktop.tsx", import.meta.url), "utf8");
+  assert.match(styles, /html:has\(body\.desktop-app\)/);
+  assert.match(styles, /body\.desktop-app\s*\{[^}]*border-radius:\s*var\(--radius-sheet\)/s);
+  assert.match(styles, /body\.desktop-app \.app\s*\{[^}]*border-radius:\s*var\(--radius-sheet\)/s);
+  assert.match(styles, /body\.desktop-app\[data-desktop-maximized="true"\] \.app/);
+  assert.match(desktop, /dataset\.desktopMaximized/);
+});
+
 test("canvas widget settings live on the widget, not a settings customizer", async () => {
   const canvas = await readFile(new URL("../src/widgets/WidgetCanvas.tsx", import.meta.url), "utf8");
   const chat = await readFile(new URL("../src/components/settings/pages.tsx", import.meta.url), "utf8");

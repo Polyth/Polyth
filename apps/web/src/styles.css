@@ -139,6 +139,35 @@ body.desktop-app .header a,
 body.desktop-app .desktop-window-controls {
   -webkit-app-region: no-drag;
 }
+html:has(body.desktop-app),
+body.desktop-app,
+body.desktop-app #root {
+  background-color: transparent;
+  background-image: none;
+}
+body.desktop-app {
+  border-radius: var(--radius-sheet);
+  overflow: hidden;
+}
+body.desktop-app .app {
+  border-radius: var(--radius-sheet);
+  overflow: hidden;
+  background-color: var(--bg);
+  box-shadow: 0 0 0 1px var(--border-soft);
+}
+body.desktop-app .desktop-window-controls-right {
+  border-top-right-radius: var(--radius-sheet);
+}
+body.desktop-app .desktop-window-controls-left {
+  border-top-left-radius: var(--radius-sheet);
+}
+body.desktop-app[data-desktop-maximized="true"],
+body.desktop-app[data-desktop-maximized="true"] #root,
+body.desktop-app[data-desktop-maximized="true"] .app,
+body.desktop-app[data-desktop-maximized="true"] .desktop-window-controls-right,
+body.desktop-app[data-desktop-maximized="true"] .desktop-window-controls-left {
+  border-radius: 0;
+}
 body.desktop-app[data-desktop-controls-position="left"] .header {
   padding-left: 116px;
 }
@@ -268,18 +297,19 @@ body[data-shift-held] :focus-visible {
   box-shadow: none;
 }
 
-/* Edit triggers have no resting footprint. A hovered Shift zone promotes its
-   trigger back into normal flow, so it uses adjacent flexible space instead
-   of painting over an existing action. */
+/* Edit triggers have no resting footprint. Hidden by default so coarse
+   pointers, hybrid tablets, and Electron shells cannot leak pencils before
+   Shift/edit mode. A hovered Shift zone promotes its trigger back into
+   normal flow instead of painting over an existing action. */
 .customize-zone { position: relative; }
 .customize-zone > .zone-edit-button { position: absolute; }
+.zone-customize-trigger {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
 @media (hover: hover) and (pointer: fine) {
-  .zone-customize-trigger {
-    visibility: hidden;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity var(--motion-fast) var(--motion-ease);
-  }
   body[data-shift-held] .customize-zone:hover,
   body[data-ui-editing] .customize-zone {
     border-radius: var(--radius-control);
@@ -5085,9 +5115,10 @@ color: var(--text-dim);
 .widget-card-body .timeline { padding: 16px; }
 .widget-card-body .composer { padding-inline: 10px; }
 .widget-resize-handle {
-  position: absolute; right: 2px; bottom: 2px; z-index: 3; width: 24px; height: 24px; padding: 0;
+  display: none; position: absolute; right: 2px; bottom: 2px; z-index: 3; width: 24px; height: 24px; padding: 0;
   border: none; background: transparent; color: var(--accent); cursor: nwse-resize;
 }
+.widget-card.editing .widget-resize-handle { display: grid; place-items: center; }
 .widget-chat { min-height: 0; flex: 1; display: flex; flex-direction: column; }
 .widget-chat-empty { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--space-3); padding: var(--space-4); overflow: auto; text-align: center; color: var(--muted); }
 .widget-quick-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px; }
@@ -5760,7 +5791,9 @@ html[dir="rtl"] input[type="number"] {
 .widget-card-head-draggable:active { cursor: grabbing; }
 .widget-card-head-dragging { user-select: none; }
 .widget-card-head strong { font-size: 12px; letter-spacing: -.01em; }
-.widget-drag { display: inline; color: var(--faint); letter-spacing: -2px; cursor: grab; }
+.widget-drag { display: none; color: var(--faint); letter-spacing: -2px; cursor: grab; }
+.widget-card.editing .widget-drag { display: inline; }
+.widget-card:not(.editing) .widget-card-more { display: none; }
 .widget-card-menu-shell { position: relative; margin-left: auto; }
 .widget-instance-settings { min-height: 100%; display: flex; flex-direction: column; gap: 12px; padding: 12px; }
 .widget-instance-settings > header { display: flex; align-items: center; gap: 8px; }
@@ -13481,6 +13514,20 @@ html[data-background]:not([data-background="none"]) body,
 html[data-background]:not([data-background="none"]) .app {
   background-color: transparent;
   background-image: none;
+}
+html:has(body.desktop-app),
+html:has(body.desktop-app)[data-background]:not([data-background="none"]) {
+  background-color: transparent;
+  background-image: none;
+}
+html:has(body.desktop-app)[data-background]:not([data-background="none"]) .app {
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--bg) 76%, transparent), color-mix(in srgb, var(--bg) 76%, transparent)),
+    var(--app-background-image);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
 }
 html[data-background]:not([data-background="none"]) .stage::before { background: transparent; }
 html[data-background]:not([data-background="none"]) .rail.rail-workspace:not(.rail-fullscreen) {

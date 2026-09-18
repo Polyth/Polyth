@@ -64,6 +64,9 @@ if (startupLowResourceMode) {
   process.env.POLYTH_TERM_REPLAY_BYTES ??= String(64 * 1024);
   process.env.POLYTH_MAX_TERMINALS ??= "4";
 }
+if (process.platform === "linux") {
+  app.commandLine.appendSwitch("enable-transparent-visuals");
+}
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let settings: DesktopSettings;
@@ -421,9 +424,16 @@ const createWindow = async (): Promise<void> => {
     minWidth: 760,
     minHeight: 520,
     frame: false,
+    roundedCorners: true,
     show: false,
     title: "Polyth",
-    backgroundColor: "#121110",
+    // Linux CSD does not round a frameless window. A transparent host lets
+    // renderer CSS clip .app to --radius-sheet. Other platforms keep an
+    // opaque color so the first paint matches the shell. Disable the native
+    // shadow on Linux so it cannot paint a square halo around the clip.
+    transparent: process.platform === "linux",
+    hasShadow: process.platform !== "linux",
+    backgroundColor: process.platform === "linux" ? "#00000000" : "#121110",
     icon: appIconPath(),
     webPreferences: {
       preload: join(import.meta.dirname, "preload.cjs"),

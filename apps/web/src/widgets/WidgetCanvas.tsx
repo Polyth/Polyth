@@ -49,6 +49,7 @@ import "./builtinWidgets.tsx";
 import { tr } from "../i18n/index.ts";
 import { getDragWidget, WIDGET_MIME } from "../dnd.ts";
 import WidgetGlyph from "../components/WidgetGlyph.tsx";
+import { useWorkspaceMode } from "./workspaceMode.ts";
 
 const GRID_GAP = 10;
 const GRID_ROW = 36;
@@ -162,6 +163,7 @@ function WidgetCard({
   sessionId,
   selected,
   onSelect,
+  editing,
 }: {
   instanceId: string;
   widget: WidgetDef;
@@ -170,6 +172,7 @@ function WidgetCard({
   sessionId: string | null;
   selected?: boolean;
   onSelect?: (id: string) => void;
+  editing: boolean;
 }) {
   const layout = useWidgetLayout();
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -186,7 +189,7 @@ function WidgetCard({
   }, []);
 
   const startMove = (event: PointerEvent<HTMLElement>) => {
-    if (event.button !== 0) return;
+    if (!editing || event.button !== 0) return;
     event.preventDefault();
     const dragTarget = event.currentTarget;
     const canvas = dragTarget.closest<HTMLElement>(".widget-canvas-grid");
@@ -280,14 +283,17 @@ function WidgetCard({
   };
 
   return (
-    <section className={`widget-card editing${selected ? " selected" : ""}`} style={positionStyle(placement)} data-widget-id={instanceId} onClick={() => onSelect?.(instanceId)}>
-      <header className="widget-card-head widget-card-head-draggable" onPointerDown={startMove}>
-        <button
-          className="widget-drag"
-          aria-label={tr("widgets.widgetcanvas.moveValue", { value: placement.title ?? widget.title })}
-          title={tr("widgets.widgetcanvas.dragToMove")}
-        >⠿</button>
+    <section className={`widget-card${editing ? " editing" : ""}${selected ? " selected" : ""}`} style={positionStyle(placement)} data-widget-id={instanceId} onClick={() => onSelect?.(instanceId)}>
+      <header className={`widget-card-head${editing ? " widget-card-head-draggable" : ""}`} onPointerDown={editing ? startMove : undefined}>
+        {editing && (
+          <button
+            className="widget-drag"
+            aria-label={tr("widgets.widgetcanvas.moveValue", { value: placement.title ?? widget.title })}
+            title={tr("widgets.widgetcanvas.dragToMove")}
+          >⠿</button>
+        )}
         <strong>{placement.title ?? widget.title}</strong>
+        {editing && (
         <div className="widget-card-menu-shell" onPointerDown={(event) => event.stopPropagation()}>
           <Menu
             label={tr("widgets.widgetcanvas.moreOptionsForValue", { title: widget.title })}
@@ -329,6 +335,7 @@ function WidgetCard({
             )}
           </Menu>
         </div>
+        )}
       </header>
       <div className="widget-card-body">
         {settingsOpen ? (
@@ -354,7 +361,7 @@ function WidgetCard({
               ? widget.settingsRender({
                   projectId,
                   sessionId,
-                  editing: true,
+                  editing,
                   widgetId: widget.id,
                   instanceId,
                   config,
@@ -369,7 +376,7 @@ function WidgetCard({
             {widget.render({
               projectId,
               sessionId,
-              editing: true,
+              editing,
               instanceId,
               config,
               updateConfig,
@@ -377,7 +384,7 @@ function WidgetCard({
           </ViewErrorBoundary>
         )}
       </div>
-      {widget.resizable !== false && (
+      {editing && widget.resizable !== false && (
         <button
           className="widget-resize-handle"
           aria-label={tr("widgets.widgetcanvas.resizeValueUseArrowKeys", { title: widget.title })}
@@ -472,6 +479,8 @@ export default function WidgetCanvas({
   onDropSlot?: (id: string) => void;
   editing?: boolean;
 } = {}) {
+  const workspaceMode = useWorkspaceMode();
+  const canvasEditing = editing || workspaceMode === "edit";
   const widgets = useWidgetCatalog();
   const canvasWidgets = useMemo(
     // Buttons belong to their shell surface. Never let a mini-widget turn into
@@ -502,7 +511,7 @@ export default function WidgetCanvas({
   }, [layout]);
 
   return (
-    <div className="widget-workspace customize-zone">
+    <div className={`widget-workspace customize-zone${canvasEditing ? " editing" : ""}`}>
       <div className="widget-canvas-grid" data-widget-surface="workspace-canvas"
         onDragOver={(event) => {
           if (event.dataTransfer.types.includes(WIDGET_MIME)) event.preventDefault();
@@ -523,6 +532,7 @@ export default function WidgetCanvas({
             sessionId={sessionId}
             selected={selectedId === instanceId}
             onSelect={onSelect}
+            editing={canvasEditing}
           />
         ))}
         {cards.length === 0 && (
@@ -532,14 +542,14 @@ export default function WidgetCanvas({
         )}
         <SlotHost
           slot="workspace.canvas"
-          context={{ editing: true, visibleWidgetIds: cards.map((card) => card.instanceId) }}
+          context={{ editing: canvasEditing, visibleWidgetIds: cards.map((card) => card.instanceId) }}
           customizable
         />
       </div>
       {/* Shift-key customization mode: the customize trigger is the canvas's
           LAST item; the menu applies add/remove instantly. */}
       <Button
-        className={`widget-menu-trigger zone-customize-trigger${editing || menuOpen ? " force-visible" : ""}`}
+        className={`widget-menu-trigger zone-customize-trigger${canvasEditing || menuOpen ? " force-visible" : ""}`}
         size="sm"
         iconStart={AddIcon}
         aria-label={tr("widgets.widgetcanvas.addWidgets")}
