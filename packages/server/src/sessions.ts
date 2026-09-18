@@ -151,6 +151,7 @@ export interface QueueStore {
     attachments?: AttachmentRef[],
     clientOperationId?: string,
     command?: QueueItemDto["command"],
+    hiddenUserMessage?: boolean,
   ): Promise<{ item: QueueItemDto; created: boolean }>;
   queueList(sessionId: string): Promise<QueueItemDto[]>;
   queueEdit(sessionId: string, queueId: string, text: string): Promise<QueueItemDto | undefined>;
@@ -4465,10 +4466,12 @@ export function createSessionService(deps: {
   const enqueueMessage = async (
     sessionId: string, text: string, delivery: DeliveryMode, fallbackReason?: string,
     attachments?: AttachmentRef[], command?: QueueItemDto["command"], sourceOperationId?: string, clientOperationId?: string,
-    clientRequestFingerprint?: string,
+    clientRequestFingerprint?: string, hiddenUserMessage?: boolean,
   ): Promise<SendResult> => {
     if (!deps.queue) throw Object.assign(new Error("delivery queue unavailable"), { code: "unsupported" });
-    const admission = await deps.queue.enqueue(sessionId, text, delivery, attachments, clientOperationId, command);
+    const admission = await deps.queue.enqueue(
+      sessionId, text, delivery, attachments, clientOperationId, command, hiddenUserMessage,
+    );
     const item = admission.item;
     if (!admission.created) return { queueId: item.id, queued: true };
     if (fallbackReason) {
@@ -4478,6 +4481,7 @@ export function createSessionService(deps: {
       queueId: item.id, text, delivery,
       ...(attachments?.length ? { attachments: attachments as unknown as JsonObject[] } : {}),
       ...(command ? { command: command as unknown as JsonObject } : {}),
+      ...(hiddenUserMessage ? { hiddenUserMessage: true } : {}),
       ...(sourceOperationId ? { sourceOperationId } : {}),
       ...(clientOperationId && clientRequestFingerprint ? { clientRequestFingerprint } : {}),
     }, { ignorable: true });
@@ -4683,6 +4687,7 @@ export function createSessionService(deps: {
           text: reserved.reservation.queueItem.text,
           ...(queuedAttachments?.length ? { attachments: queuedAttachments } : {}),
           ...(reserved.reservation.queueItem.command ? { command: reserved.reservation.queueItem.command } : {}),
+          ...(reserved.reservation.queueItem.hiddenUserMessage ? { hiddenUserMessage: true } : {}),
         }, {
           operation: reserved.reservation.operation,
           queueId: reserved.reservation.queueItem.id,
@@ -4874,10 +4879,12 @@ export function createSessionService(deps: {
           ...(decoration?.pinnedSourceSeqs ?? []),
         ])]
       : [];
+    const hiddenUserMessage = input.hiddenUserMessage === true || input.autoResume === true;
     const messageData: JsonObject = {
       text, ...(raw !== text ? { raw } : {}),
       ...(reserved ? { queueId: reserved.queueId } : {}),
       ...(input.githubConflictResolution === true ? { githubConflictResolution: true } : {}),
+      ...(hiddenUserMessage ? { hiddenUserMessage: true } : {}),
       ...(input.attachments ? { attachments: input.attachments as unknown as JsonObject[] } : {}),
       ...(input.command ? { command: input.command as unknown as JsonObject } : {}),
       ...(recoveryContext ? { recoveryContext } : {}),
@@ -5088,7 +5095,7 @@ export function createSessionService(deps: {
             input.command,
             undefined,
             input.clientOperationId,
-            clientRequestFingerprint,
+            clientRequestFingerprint, input.hiddenUserMessage === true || input.autoResume === true
           );
         }
         rt = await ensureWired(sessionId, current);
@@ -5133,7 +5140,7 @@ export function createSessionService(deps: {
           input.command,
           undefined,
           input.clientOperationId,
-          clientRequestFingerprint,
+          clientRequestFingerprint, input.hiddenUserMessage === true || input.autoResume === true
         );
       }
       return admitTurnCore(sessionId, current, rt, input, reserved, clientRequestFingerprint);
@@ -6730,6 +6737,7 @@ export function createSessionService(deps: {
 
     async send(sessionId, input: UserTurnInput): Promise<SendResult> {
       const execute = async (): Promise<SendResult> => {
+      const hiddenUserMessage = input.hiddenUserMessage === true || input.autoResume === true;
       const clientRequestFingerprint = input.clientOperationId
         ? fingerprintClientAdmission(input)
         : undefined;
@@ -6825,7 +6833,7 @@ export function createSessionService(deps: {
           delivery === "steer" || delivery === "interrupt" ? delivery : "queue",
           "mutation-active",
           input.attachments,
-          input.command,
+          input.command, hiddenUserMessage
         );
       };
       if (input.harness) {
@@ -6854,7 +6862,7 @@ export function createSessionService(deps: {
             input.command,
             undefined,
             input.clientOperationId,
-            clientRequestFingerprint,
+            clientRequestFingerprint, hiddenUserMessage
           );
         }
       }
@@ -6961,7 +6969,7 @@ export function createSessionService(deps: {
         input.command,
         undefined,
         input.clientOperationId,
-        clientRequestFingerprint,
+        clientRequestFingerprint, hiddenUserMessage
       );
       const blockedReason = recoverEpoch || replaceUnknown
         ? undefined
@@ -7124,7 +7132,7 @@ export function createSessionService(deps: {
             input.command,
             undefined,
             input.clientOperationId,
-            clientRequestFingerprint,
+            clientRequestFingerprint, hiddenUserMessage
           );
         }
         if (delivery === "normal") {
@@ -7138,7 +7146,7 @@ export function createSessionService(deps: {
             input.command,
             undefined,
             input.clientOperationId,
-            clientRequestFingerprint,
+            clientRequestFingerprint, hiddenUserMessage
           );
         }
         if (delivery === "steer") {
@@ -7151,7 +7159,7 @@ export function createSessionService(deps: {
               "steer",
               "native-command-next-turn",
               input.attachments,
-              input.command,
+              input.command, hiddenUserMessage
             );
           }
           const caps = await rt.capabilities().catch(() => null);
@@ -7165,14 +7173,18 @@ export function createSessionService(deps: {
             // Steering is text-only in the runtime seam; attachments would be
             // silently dropped mid-turn, so they queue for the next turn instead.
             if (input.attachments?.length) {
-              return enqueueMessage(sessionId, input.text, "steer", "steer-attachments", input.attachments, input.command);
+              return enqueueMessage(sessionId, input.text, "steer", "steer-attachments", input.attachments, input.command, hiddenUserMessage);
             }
             const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
               sessionId,
               mutationKind: "turn-steer",
               intentEvent: {
                 type: "user/message",
-                data: { text: input.text, delivery: "steer" },
+                data: {
+                  text: input.text,
+                  delivery: "steer",
+                  ...(hiddenUserMessage ? { hiddenUserMessage: true } : {}),
+                },
               },
             }));
             const outcome = await runPreparedOperation<Record<string, never>, boolean>(
@@ -7204,7 +7216,7 @@ export function createSessionService(deps: {
                 "steer-rejected",
                 undefined,
                 input.command,
-                prepared.operation.operationId,
+                prepared.operation.operationId, hiddenUserMessage
               );
             }
             if (outcome.kind === "unknown") {
@@ -7230,7 +7242,7 @@ export function createSessionService(deps: {
             "interrupt",
             input.attachments,
             undefined,
-            input.command,
+            input.command, hiddenUserMessage
           );
           const item = admission.item;
           const rest = await deps.queue.queueList(sessionId);
@@ -7240,6 +7252,7 @@ export function createSessionService(deps: {
             queueId: item.id, text: input.text, delivery,
             ...(input.attachments?.length ? { attachments: input.attachments as unknown as JsonObject[] } : {}),
             ...(input.command ? { command: input.command as unknown as JsonObject } : {}),
+            ...(hiddenUserMessage ? { hiddenUserMessage: true } : {}),
           }, { ignorable: true });
           const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
             sessionId,
@@ -7296,7 +7309,7 @@ export function createSessionService(deps: {
             input.command,
             undefined,
             input.clientOperationId,
-            clientRequestFingerprint,
+            clientRequestFingerprint, hiddenUserMessage
           );
           void dispatchQueue(sessionId);
           return res;
@@ -7366,6 +7379,7 @@ export function createSessionService(deps: {
         text: nextText,
         ...(item.attachments?.length ? { attachments: item.attachments } : {}),
         ...(item.command && nextText === item.text ? { command: item.command } : {}),
+        ...(item.hiddenUserMessage && nextText === item.text ? { hiddenUserMessage: true } : {}),
         delivery: "interrupt",
         dismissPending: true,
       });
