@@ -133,8 +133,8 @@ export interface Broadcaster {
   notification?(record: NotificationRecord, recipient?: { userId: string; spaceId: string }): void;
   pluginChanged?(packageId: string): void;
   packageChanged?(pkg: PackageDescriptorDto): void;
-  /** Server-persisted client preferences changed on another device. */
-  clientSettingsChanged?(settings: ClientSettingsDto): void;
+  /** Server-persisted client preferences changed for one authenticated account. */
+  clientSettingsChanged?(userId: string, settings: ClientSettingsDto): void;
   /** One repository's worktree topology changed — created or removed by this
    *  server, or discovered to have changed underneath it (an agent, a shell,
    *  another app). Carries only the affected project so a client refetches
