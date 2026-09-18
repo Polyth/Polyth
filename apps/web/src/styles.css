@@ -3235,6 +3235,68 @@ html[data-density="compact"] .set-row { padding: 6px 0; }
 .set-row-label { font-size: var(--font-label); color: var(--text); }
 .set-row-hint { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); margin-top: 3px; }
 .set-row-control { display: flex; align-items: center; gap: var(--space-2); min-width: 0; max-width: 56%; flex-shrink: 1; }
+
+/* Users settings: one obvious management surface instead of account controls
+   mixed into personal authentication settings. */
+.users-page { display: flex; flex-direction: column; gap: var(--space-3); padding-bottom: var(--space-5); }
+.users-page-toolbar {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-4);
+  padding: var(--space-3) 0 var(--space-2);
+}
+.users-page-summary { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.users-page-summary strong { font-size: var(--font-heading); color: var(--text); }
+.users-page-summary span { font-size: var(--font-meta); line-height: var(--font-meta-lh); color: var(--muted); }
+.users-page-filter { width: min(360px, 100%); }
+.users-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.user-card {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(230px, .8fr) auto;
+  align-items: center; gap: var(--space-4); min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--hair); border-radius: var(--radius-card);
+  background: var(--elevated);
+}
+.user-card-main { display: flex; align-items: center; min-width: 0; gap: var(--space-3); }
+.user-avatar {
+  display: grid; place-items: center; flex: 0 0 auto;
+  width: 38px; height: 38px; border-radius: var(--radius-round);
+  background: var(--raised); border: 1px solid var(--hair);
+  font-size: var(--font-label); font-weight: 650; color: var(--text);
+}
+.user-card-identity { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.user-card-name { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1); min-width: 0; }
+.user-card-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-card-id {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--mono); font-size: var(--font-meta); color: var(--faint);
+}
+.user-card-access { display: flex; align-items: center; justify-content: flex-end; min-width: 0; gap: var(--space-3); }
+.user-card-access-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
+.user-card-access-label { font-size: var(--font-label); color: var(--text); }
+.user-card-access-hint { font-size: var(--font-meta); line-height: var(--font-meta-lh); color: var(--muted); }
+.user-card-access > .picker { width: min(210px, 100%); flex: 0 1 210px; }
+.user-card-actions { display: flex; align-items: center; justify-content: flex-end; }
+.users-dialog-form { display: flex; flex-direction: column; gap: var(--space-4); }
+.users-dialog-intro { font-size: var(--font-label); line-height: 1.55; color: var(--muted); }
+.users-field { display: flex; flex-direction: column; gap: var(--space-2); color: var(--text); font-size: var(--font-label); }
+.users-field > small { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.users-field > .picker { width: 100%; }
+.users-field-confirm { padding-top: var(--space-3); border-top: 1px solid var(--hair); }
+
+@media (max-width: 960px) {
+  .user-card { grid-template-columns: minmax(0, 1fr) minmax(210px, .8fr); }
+  .user-card-actions { grid-column: 2; }
+}
+@media (max-width: 700px) {
+  .users-page-toolbar { align-items: stretch; flex-direction: column; gap: var(--space-3); }
+  .users-page-toolbar > .ui-btn { width: 100%; min-height: var(--tap); }
+  .users-page-filter { width: 100%; }
+  .user-card { grid-template-columns: 1fr; gap: var(--space-3); padding: var(--space-3); }
+  .user-card-access { align-items: stretch; flex-direction: column; }
+  .user-card-access > .picker { width: 100%; max-width: none; flex-basis: auto; }
+  .user-card-actions { grid-column: 1; justify-content: stretch; }
+  .user-card-actions > .ui-btn { width: 100%; min-height: var(--tap); }
+}
+
 .set-add-form { display: flex; gap: 6px; align-items: center; margin: 10px 0 4px; }
 .set-add-form input { flex: 1; min-width: 0; font-size: var(--font-input); padding: 5px 8px; }
 .set-usage-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 10px 0; }
