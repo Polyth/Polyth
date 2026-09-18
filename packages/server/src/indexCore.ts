@@ -20,7 +20,6 @@ import {
   deriveMessages,
   unrestoredCompactionSeq,
 } from "@polyth/session";
-import { assistFreshnessSeq } from "@polyth/session/next-action";
 import {
   CAP,
   SERVER_CAPABILITY_IDS,
@@ -56,6 +55,7 @@ import {
   discoverServerPackages,
   PairedSocketRegistry,
   SERVER_APPLICATION_SURFACE,
+  SERVER_TURN_COMPLETION_BUS,
   serverServiceKey,
   type HttpServerContext,
   type ServerPackageFactory,
@@ -112,13 +112,10 @@ import { createVoiceSettings } from "./voice.ts";
 import {
   buildNotePrompt,
   buildPromptImprovementPrompt,
-  createAssistService,
-  createAssistSettings,
   createManualSuggestionService,
   parseNoteReply,
   PROMPT_IMPROVEMENT_OUTPUT_MAX_CHARS,
   sanitizeNextActionReply,
-  type AssistService,
 } from "./assist.ts";
 import { assistRoutes } from "./routes/assist.ts";
 import { promptHistoryRoutes } from "./routes/promptHistory.ts";
@@ -1576,9 +1573,6 @@ export async function boot(opts: BootOptions = {}) {
   // --- goals workflow package (listens on the turn seam, never touches the
   // loop). The service itself lives in @polyth/goals and is resolved lazily.
   let trackWorkflow: TrackWorkflow | null = null;
-  // F9 idle assist: created after `sessions` (it needs the runtime resolver);
-  // the turn hook below only pings it, so a late assignment is safe.
-  let assist: AssistService | null = null;
   const goalService = () => svc<TrackWorkflowDeps["goals"]>("goals");
   const ensureGoalState = async (sessionId: string) => {
     const goals = goalService();
@@ -1996,6 +1990,36 @@ export async function boot(opts: BootOptions = {}) {
     (userId ? smallModelPreference(clientSettings.get(userId).settings) : undefined)
     ?? smallModel();
 
+  const turnCompletedListeners = new Set<
+    (event: { sessionId: string; assistantText: string; userId?: string }) => void | Promise<void>
+  >();
+  services.provide(SERVER_TURN_COMPLETION_BUS, {
+    subscribe(listener) {
+      turnCompletedListeners.add(listener);
+      return { dispose: () => { turnCompletedListeners.delete(listener); } };
+    },
+  });
+  const publishTurnCompleted = async (sessionId: string, assistantText: string): Promise<void> => {
+    if (turnCompletedListeners.size === 0) return;
+    let userId: string | undefined;
+    try {
+      const projection = await store.projection(sessionId);
+      userId = projection?.spaceId
+        ? (await notifications.recipientForSession(sessionId, { spaceId: projection.spaceId }))?.userId
+        : undefined;
+    } catch (error) {
+      console.warn("[polyth] turn completion account lookup failed", error);
+    }
+    const event = { sessionId, assistantText, ...(userId ? { userId } : {}) };
+    for (const listener of [...turnCompletedListeners]) {
+      try {
+        await listener(event);
+      } catch (error) {
+        console.error("[polyth] package turn completion listener failed", error);
+      }
+    }
+  };
+
   const packageSpaces = () =>
     spaceGateway.store.allSpaces().map((space) => ({
       spaceId: space.id,
@@ -2277,7 +2301,7 @@ export async function boot(opts: BootOptions = {}) {
             }
           }
         })().catch((err: unknown) => console.error("[polyth] goal/track completion failed", err));
-        assist?.onTurnCompleted(sessionId);
+        void publishTurnCompleted(sessionId, text);
         const isolation = svc<{ onTurnCompleted(sessionId: string, events: readonly import("@polyth/contracts").SessionEvent[]): Promise<unknown> }>("isolation");
         if (isolation) {
           void store.events(sessionId)
@@ -2305,13 +2329,8 @@ export async function boot(opts: BootOptions = {}) {
     );
   root.provide(CAP.sessions, sessions);
 
-  // --- F9 idle assist: after N quiet seconds past turn/stopped, a small-model
-  // recap + ONE suggestion lands on the projection (never the event log) keyed
-  // to a settled raw tail; only newer conversation activity makes it stale.
-  // Passive telemetry/title/goal/isolation bookkeeping is ignored. Hard off by default.
-  const assistSettings = createAssistSettings({ file: `${dataDir}/assist.json` });
-  const assistLatestSeq = async (sessionId: string): Promise<number> =>
-    assistFreshnessSeq(await store.events(sessionId));
+  // Shared utility-model helpers used by explicit composer/note/task actions.
+  // Passive idle recap generation belongs to the optional recap package.
   const assistTranscript = async (sessionId: string): Promise<string> => {
     const msgs = deriveMessages(await store.events(sessionId));
     const lines: string[] = [];
@@ -2332,16 +2351,9 @@ export async function boot(opts: BootOptions = {}) {
   ): Promise<string> => {
     const proj = await store.projection(sessionId);
     const project = proj ? await projects.get(proj.projectId) : null;
-    // Background idle assist has no request actor, so recover the immutable
-    // creator account stored for this session. Otherwise Settings → Small
-    // Model was silently ignored and non-OpenCode sessions often had no usable
-    // utility model at all.
-    const ownerUserId = userId ?? (proj?.spaceId
-      ? (await notifications.recipientForSession(sessionId, { spaceId: proj.spaceId }))?.userId
-      : undefined);
-    // Prefer the configured small model, then the session's own known-good
-    // model. Direct provider transport is tried first with a session fallback.
-    const route = smallModelExecutionRoute(resolveSmallModel(ownerUserId), proj);
+    // Prefer the requester's configured small model, then the session's own
+    // known-good model. Direct provider transport is tried first with a session fallback.
+    const route = smallModelExecutionRoute(resolveSmallModel(userId), proj);
     const rt = await runtimes.forProject(proj?.projectId ?? "__default__", project?.path, route.harnessId);
     const { text } = await smallModels.complete(rt, {
       cwd: project?.path ?? process.cwd(),
@@ -2358,22 +2370,6 @@ export async function boot(opts: BootOptions = {}) {
     events: (sessionId) => store.events(sessionId),
     complete: assistComplete,
   });
-  assist = createAssistService({
-    settings: () => assistSettings.get(),
-    latestSeq: (sessionId) => store.latestSeq(sessionId),
-    eventsAfter: (sessionId, afterSeq) => store.events(sessionId, afterSeq),
-    transcript: assistTranscript,
-    complete: assistComplete,
-    save: async (sessionId, a) => {
-      const current = await store.projection(sessionId);
-      if (!current) return;
-      const next = { ...current, assist: a, updatedAt: Date.now() };
-      await store.upsertProjection(next);
-      broadcast.projection(next);
-    },
-    onError: (sessionId, err) => console.error(`[polyth] assist generation failed for ${sessionId}`, err),
-  });
-
   // --- spec-driven track orchestration: a genuinely cross-cutting workflow
   // (knowledge tracks + goals + schedule + git + terminal + sessions), so the
   // composition root wires it from package-published services and publishes
@@ -2500,9 +2496,7 @@ export async function boot(opts: BootOptions = {}) {
     contextRoutes(spaceServices),
     orgRoutes({ spaces: spaceServices, store }),
     assistRoutes({
-      settings: assistSettings,
       projection: (sessionId) => store.projection(sessionId),
-      latestSeq: assistLatestSeq,
       suggestion: (space, sessionId, draft) => manualSuggestion.generate(sessionId, draft, space.userId),
       improve: async (space, projectId, draft) => {
         const project = await spaceServices(space).projects.get(projectId);
@@ -2710,7 +2704,6 @@ export async function boot(opts: BootOptions = {}) {
       // through the registry. Every call is idempotent.
       svc<{ stop(): void }>("schedule")?.stop();
       svc<{ stop(): void }>("usage")?.stop();
-      assist?.stop();
       svc<{ close(): void }>("knowledge")?.close();
       await svc<{ closeAll(): Promise<void> }>("browser")?.closeAll().catch(() => {});
       await svc<{ closeAll(): Promise<void> }>("terminal")?.closeAll().catch(() => {});

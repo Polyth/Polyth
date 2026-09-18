@@ -301,9 +301,9 @@ deliberately not a session until first Send.
 **Decision.** When a user returns after hours/days, the product answers four
 questions — where am I, what did the agent do, is it done, is it waiting —
 from state that already exists, surfaced in a consistent order. No new
-AI-summary feature is designed (the F9 `AssistStrip` recap already exists,
-is off by default, freshness-checked, and stays the only summarization
-mechanism; Phase 3 does not change its defaults).
+AI-summary feature is designed (the F9 `recap` package already exists,
+is disabled by default, freshness-checked, and stays the only passive summarization
+mechanism; Phase 3 does not add another one).
 
 The continuity contract, per surface:
 
@@ -722,8 +722,8 @@ work is reusing existing routes).
 
 - No second command palette, starters system, notification pipeline, search
   backend, or slot/capability registry.
-- No AI-generated session summaries beyond the existing off-by-default F9
-  assist; no new model calls for UX chrome.
+- No AI-generated session summaries beyond the existing disabled-by-default F9
+  `recap` package; no additional model calls for UX chrome.
 - No App Store / Play Store distribution work, push-relay backend, React
   Native/Flutter, or on-device OpenCode for iOS/Android.
 - No account system, cross-device preference sync, or multi-user inboxes.

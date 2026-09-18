@@ -1,7 +1,6 @@
 import { useRef, useState } from "react";
 import type { AttachmentRef, SessionEvent } from "@polyth/contracts";
 import { resolveModelPresentation } from "@polyth/contracts/model-presentation";
-import { seedMultiRunPrompt } from "@polyth/multirun/prompt-seed";
 import { api } from "@polyth/session/web-api";
 import { fmtCost, fmtTokens } from "../format.ts";
 import { sendMessage } from "../init.ts";
@@ -14,7 +13,7 @@ import {
   type ActionAnnounceAnchor,
 } from "../messageActions.ts";
 import type { AssistantMsg, RenderModel } from "../reduce.ts";
-import { applyEvent, openWorkspacePane, setUiError, startNewSession, useStore } from "../store.ts";
+import { applyEvent, setUiError, startNewSession, useStore } from "../store.ts";
 import { useUiSettings } from "../uiPrefs.ts";
 import { copyText } from "../utils.ts";
 import { tr } from "../i18n/index.ts";
@@ -154,7 +153,7 @@ export default function ChatResponseFooter({
   const actionLabel = (id: (typeof prefs.responseActions)[number]) =>
     id === "pin" && pinned ? tr("timeline.unpinFromContext") : RESPONSE_ACTION_LABEL[id];
   const actionDisabled = (id: (typeof prefs.responseActions)[number]) =>
-    (id === "pin" && pinBusy) || ((id === "plan" || id === "session") && !projectId);
+    (id === "pin" && pinBusy) || (id === "session" && !projectId);
   const runAction = (id: (typeof prefs.responseActions)[number]) => {
     if (id === "copy") {
       void copyText(m.text).then((ok) =>
@@ -166,18 +165,6 @@ export default function ChatResponseFooter({
         downloadAnswerImage(m.text, modelName) ? tr("timeline.answerImageSaved") : tr("timeline.couldnTSaveAnswerImage"),
         actionAnchor,
       );
-      return;
-    }
-    if (id === "plan") {
-      if (!projectId) return;
-      void api.knowledgeCreate({
-        projectId,
-        kind: "plan",
-        title: tr("timeline.valuePlanValue", { modelName, value: timeShort(assistantTime(m)) }),
-        body: m.text,
-        ...(session ? { sourceSessionId: session.id } : {}),
-      }).then(() => announce?.(tr("timeline.answerSavedAsAPlan"), actionAnchor))
-        .catch((error) => setUiError(error instanceof Error ? error.message : String(error)));
       return;
     }
     if (id === "pin") {
@@ -193,8 +180,9 @@ export default function ChatResponseFooter({
       if (projectId) startNewSession(projectId, { draft: m.text });
       return;
     }
-    seedMultiRunPrompt(m.text);
-    openWorkspacePane("multirun");
+    // Package-owned actions (for example Multi-run) render through
+    // session.message.actions and never execute from the shell.
+    return;
   };
 
   return (
@@ -222,7 +210,7 @@ export default function ChatResponseFooter({
             onClick={() => setMetadataOpen((open) => !open)}
           />
         </span>
-        {prefs.responseActions.map((id) => (
+        {prefs.responseActions.filter((id) => id !== "multirun" && id !== "plan").map((id) => (
           <ChatActionButton
             key={id}
             icon={RESPONSE_ACTION_ICON[id]}
@@ -269,7 +257,10 @@ export default function ChatResponseFooter({
             messageId: String(m.eventSeq),
             messageRole: "assistant",
             messageText: m.text,
+            messageModelName: modelName,
             eventSeq: m.eventSeq,
+            responseActions: prefs.responseActions,
+            announce: (text: string) => announce?.(text, actionAnchor),
           }}
         />
         {statusText && (

@@ -16,7 +16,7 @@
       "name": "Multirun",
       "description": "Run prompts across multiple models.",
       "core": false,
-      "enabled": true,
+      "enabled": false,
       "settingsGroup": "Engineering",
       "icon": "layers",
       "hasSettings": false,

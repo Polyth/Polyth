@@ -1,6 +1,6 @@
 // The simpler settings pages: General, Appearance, Chat, Notifications,
 // Behavior, Projects, Agents, MCP, and About.
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import {
   applyProjectUpsert,
   setUiError,
@@ -22,7 +22,6 @@ import {
   PRESET_THEMES, addCustomTheme, applyTheme, loadCustomThemes, parseThemeJson,
   reapplyTheme, removeCustomTheme, resolveTheme, type AppearanceMode, type ThemeSpec,
 } from "../../theme.ts";
-import type { AssistSettingsDto } from "@polyth/session/web-api";
 import type {
   HarnessSelection,
   HarnessSnapshot,
@@ -43,6 +42,7 @@ import { Button, Checkbox, Dialog, IconButton, Popover, Select, Textarea, TextIn
 import { useShellMode } from "../../responsiveShell.ts";
 import { DeleteIcon } from "../ui/icons.ts";
 import { BackgroundPicker } from "../BackgroundPicker.tsx";
+import { isPackageEnabled, subscribePackages } from "../../packages/registry.ts";
 import {
   disableNativePushForCurrentAccount,
   enableNativePushForCurrentAccount,
@@ -464,18 +464,20 @@ export function AppearancePage() {
 export function ChatPage() {
   const ui = useUiSettings();
   const settings = useStore((s) => s.settings);
+  const packageActionState = useSyncExternalStore(
+    subscribePackages,
+    () => `${isPackageEnabled("knowledge") ? "1" : "0"}:${isPackageEnabled("multirun") ? "1" : "0"}`,
+    () => "0:0",
+  );
+  const [knowledgeEnabled, multirunEnabled] = packageActionState.split(":").map((value) => value === "1");
+  const visibleResponseActionIds = RESPONSE_ACTION_IDS.filter((id) =>
+    (id !== "plan" || knowledgeEnabled) && (id !== "multirun" || multirunEnabled));
   const [limitEdit, setLimitEdit] = useState(String(ui.promptHistoryLimit));
   useEffect(() => { setLimitEdit(String(ui.promptHistoryLimit)); }, [ui.promptHistoryLimit]);
   const commitHistoryLimit = () => {
     const next = clampPromptHistoryLimit(limitEdit, ui.promptHistoryLimit);
     setLimitEdit(String(next));
     if (next !== ui.promptHistoryLimit) setUiSettings({ promptHistoryLimit: next });
-  };
-  // F9 hard switch lives server-side: disabled means nothing is generated at all
-  const [assist, setAssist] = useState<AssistSettingsDto | null>(null);
-  useEffect(() => { void api.assistSettings().then(setAssist).catch(() => setAssist(null)); }, []);
-  const saveAssist = (patch: Partial<AssistSettingsDto>) => {
-    void api.assistSettingsSave(patch).then(setAssist).catch(() => {});
   };
   const metricLabels: Record<HeaderMetricId, string> = { tokens: "Tokens", messages: "Messages", duration: "Duration", cost: "Cost" };
   const actionLabels: Record<ResponseActionId, string> = { copy: "Copy", image: "Save image", plan: "Save as plan", pin: "Pin to content", session: "Start new session", multirun: "Start multirun" };
@@ -519,7 +521,7 @@ export function ChatPage() {
         <div className="settings-check-list">{HEADER_METRIC_IDS.map((id) => <label key={id}><Checkbox label={metricLabels[id]} checked={ui.headerMetrics.includes(id)} onChange={() => toggleOrdered(ui.headerMetrics, id, (headerMetrics) => setUiSettings({ headerMetrics }))} /></label>)}</div>
       </Row>
       <Row label="Answer quick actions" hint="Choose the buttons shown on agent answers. They appear in this order." itemId="chat.responseActions">
-        <div className="settings-check-list">{RESPONSE_ACTION_IDS.map((id) => <label key={id}><Checkbox label={actionLabels[id]} checked={ui.responseActions.includes(id)} onChange={() => toggleOrdered(ui.responseActions, id, (responseActions) => setUiSettings({ responseActions }))} /></label>)}</div>
+        <div className="settings-check-list">{visibleResponseActionIds.map((id) => <label key={id}><Checkbox label={actionLabels[id]} checked={ui.responseActions.includes(id)} onChange={() => toggleOrdered(ui.responseActions, id, (responseActions) => setUiSettings({ responseActions }))} /></label>)}</div>
       </Row>
       <Row label={tr("settings.pages.copyFormat")} hint={tr("settings.pages.chooseThePayloadUsedByTheSingle")} itemId="chat.copyFormat">
         <Seg
@@ -567,29 +569,6 @@ export function ChatPage() {
           />
         </div>
       </Row>
-      {assist && (
-        <Row
-          label={tr("settings.pages.idleRecapSuggestion")}
-          hint={tr("settings.pages.afterASessionGoesQuietTheSmall")}
-          itemId="chat.assist"
-        >
-          <Toggle on={assist.enabled} onChange={(enabled) => saveAssist({ enabled })} label={tr("settings.pages.idleRecap")} />
-        </Row>
-      )}
-      {assist?.enabled && (
-        <Row label={tr("settings.pages.quietTime")} hint={tr("settings.pages.secondsOfInactivityAfterAReplyBefore")}>
-          <div className="editor-font-control">
-            <TextInput
-              uiSize="sm"
-              type="number" min={10} max={3600} value={assist.idleSeconds}
-              aria-label={tr("settings.pages.assistQuietTimeInSeconds")}
-              onChange={(e) => setAssist({ ...assist, idleSeconds: Number(e.target.value) })}
-              onBlur={(e) => saveAssist({ idleSeconds: Number(e.target.value) })}
-            />
-            <span className="muted">{tr("settings.pages.s")}</span>
-          </div>
-        </Row>
-      )}
     </>
   );
 }
