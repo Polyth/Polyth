@@ -246,10 +246,16 @@ export default function ChatResponseFooter({
               // follow-up. Rewind to the source prompt first; the replacement
               // send then branches the runtime from that exact prefix.
               void api.rewind(session.id, regeneratePrompt.eventSeq)
-                .then(() => sendMessage(regeneratePrompt.text, undefined, undefined, {
-                  targetSessionId: session.id,
-                  ...(regeneratePrompt.attachments?.length ? { attachments: regeneratePrompt.attachments } : {}),
-                }))
+                .then((marker) => {
+                  // Synchronize the local render prefix before replacement.
+                  // Waiting for WS re-delivery leaves stale rows mounted while
+                  // fresh-turn geometry is already changing under the scroller.
+                  applyEvent(marker);
+                  return sendMessage(regeneratePrompt.text, undefined, undefined, {
+                    targetSessionId: session.id,
+                    ...(regeneratePrompt.attachments?.length ? { attachments: regeneratePrompt.attachments } : {}),
+                  });
+                })
                 .catch((error) => setUiError(error instanceof Error ? error.message : String(error)))
                 .finally(() => setRegenerateBusy(false));
             }}
