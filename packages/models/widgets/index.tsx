@@ -3,8 +3,10 @@ import "./mobilePicker.css";
 import { defineWebPackage } from "@polyth/web-sdk";
 import ModelsPage from "./ModelsPage.tsx";
 import {
+  invalidateRuntimeCatalogs,
   preloadRuntimeCatalogs,
   resetRuntimeCatalogMemory,
+  runtimeCatalogRefreshDelay,
 } from "./runtimeCatalog.ts";
 
 const DAILY_CACHE_MS = 24 * 60 * 60_000;
@@ -14,6 +16,8 @@ export default defineWebPackage((host) => () => {
   let warmScope: string | undefined;
   let warmGeneration = 0;
   let bootstrapWarm: Promise<void> | undefined;
+  let dailyRefresh: number | undefined;
+  let scheduleDailyRefresh = () => {};
   const warmCatalogs = () => {
     if (!active) return;
     // Desktop publishes this before package boot completes. While its async
@@ -33,6 +37,7 @@ export default defineWebPackage((host) => () => {
       bootstrapWarm = run;
       void run.finally(() => {
         if (bootstrapWarm === run) bootstrapWarm = undefined;
+        scheduleDailyRefresh();
       });
       return;
     }
@@ -44,21 +49,33 @@ export default defineWebPackage((host) => () => {
       await priorBootstrap;
       if (!active || generation !== warmGeneration) return;
       await preloadRuntimeCatalogs({ projectId });
+      scheduleDailyRefresh();
     })().catch(() => {});
   };
-  const dailyRefresh = window.setInterval(() => {
-    resetRuntimeCatalogMemory();
-    warmScope = undefined;
-    warmCatalogs();
-  }, DAILY_CACHE_MS);
+  scheduleDailyRefresh = () => {
+    if (dailyRefresh !== undefined) window.clearTimeout(dailyRefresh);
+    if (!active) return;
+    const projectId = host.store.getSnapshot().activeProjectId ?? undefined;
+    const remaining = projectId ? runtimeCatalogRefreshDelay(projectId) : undefined;
+    // No completed warm stamp yet: the in-flight warm will reschedule us.
+    // Otherwise fire at the persisted stamp's real expiry, not 24h after F5.
+    const delay = remaining === undefined ? DAILY_CACHE_MS : Math.max(1_000, remaining + 50);
+    dailyRefresh = window.setTimeout(() => {
+      dailyRefresh = undefined;
+      invalidateRuntimeCatalogs();
+      warmScope = undefined;
+      warmCatalogs();
+    }, delay);
+  };
   const onResourceMode = () => {
     warmScope = undefined;
     warmCatalogs();
   };
   window.addEventListener("polyth:desktop-performance-changed", onResourceMode);
   warmCatalogs();
+  scheduleDailyRefresh();
   const off = [
-    () => window.clearInterval(dailyRefresh),
+    () => { if (dailyRefresh !== undefined) window.clearTimeout(dailyRefresh); },
     () => window.removeEventListener("polyth:desktop-performance-changed", onResourceMode),
     host.store.subscribe(warmCatalogs),
     host.slots.register({
