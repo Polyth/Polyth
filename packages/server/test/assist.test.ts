@@ -1,12 +1,13 @@
 // F9: idle assist is a hard-switched, one-flight-per-session watcher whose
-// output lives on the projection keyed to the log tail — any new event makes
-// it stale (the route answers 404), and disabled means NOTHING is generated.
+// output lives on the projection keyed to the settled log tail. Passive
+// post-turn metadata may settle before generation; any event after generation
+// makes the result stale (the route answers 404). Disabled generates NOTHING.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { SessionAssist, SessionProjection } from "@polyth/contracts";
+import type { SessionAssist, SessionEvent, SessionProjection } from "@polyth/contracts";
 import type { SpaceContext } from "@polyth/contracts";
 import {
   buildAssistPrompt, buildNextActionPrompt, buildNotePrompt, buildPromptImprovementPrompt, capWords, createAssistService, createAssistSettings,
@@ -195,12 +196,21 @@ function serviceHarness(opts: {
   reply?: string;
 }) {
   let seq = 10;
+  const events: SessionEvent[] = [];
   const saves: Array<{ sessionId: string; assist: SessionAssist }> = [];
   const completes: string[] = [];
   const errors: unknown[] = [];
+  const bumpSeq = (type = "user/message") => {
+    seq += 1;
+    events.push({
+      id: `e${seq}`, sessionId: "s1", seq, time: Date.now(), type,
+      data: {}, v: 1,
+    });
+  };
   const svc = createAssistService({
     settings: () => ({ enabled: opts.enabled ?? true, idleSeconds: opts.idleSeconds ?? 0.01 }),
     latestSeq: async () => seq,
+    eventsAfter: async (_sessionId, afterSeq) => events.filter((event) => event.seq > afterSeq),
     transcript: async () => "User: fix the bug\n\nAssistant: fixed it",
     complete: async (_sid, prompt) => {
       completes.push(prompt);
@@ -210,7 +220,7 @@ function serviceHarness(opts: {
     save: async (sessionId, assist) => { saves.push({ sessionId, assist }); },
     onError: (_sid, err) => { errors.push(err); },
   });
-  return { svc, saves, completes, errors, bumpSeq: () => { seq += 1; }, seqNow: () => seq };
+  return { svc, saves, completes, errors, bumpSeq, seqNow: () => seq };
 }
 
 test("assist service: quiet session gets a recap keyed to the log tail", async () => {
@@ -246,6 +256,19 @@ test("assist service: a new event between schedule and fire skips generation", a
   h.svc.stop();
 });
 
+test("assist service: passive post-turn metadata settles without cancelling generation", async () => {
+  const h = serviceHarness({ idleSeconds: 0.08 });
+  h.svc.onTurnCompleted("s1");
+  await sleep(20);
+  h.bumpSeq("usage/recorded");
+  h.bumpSeq("session/metadata-changed");
+  await sleep(180);
+  assert.equal(h.completes.length, 1);
+  assert.equal(h.saves.length, 1);
+  assert.equal(h.saves[0]!.assist.atSeq, 12);
+  h.svc.stop();
+});
+
 test("assist service: a new event DURING generation discards the result", async () => {
   const h = serviceHarness({ idleSeconds: 0.02, completeDelayMs: 250 });
   h.svc.onTurnCompleted("s1");
@@ -267,6 +290,7 @@ test("assist service: unusable model output saves nothing, errors fail soft", as
   const boom = createAssistService({
     settings: () => ({ enabled: true, idleSeconds: 0.01 }),
     latestSeq: async () => 1,
+    eventsAfter: async () => [],
     transcript: async () => "x",
     complete: async () => { throw new Error("model offline"); },
     save: async () => { throw new Error("must not save"); },
