@@ -386,7 +386,7 @@ function AssistantView({
   announce?: Announce;
   statusText?: string;
   plan?: NonNullable<RenderModel["tasks"]>;
-  regeneratePrompt?: { text: string; attachments?: UserMsg["attachments"] };
+  regeneratePrompt?: { eventSeq: number; text: string; attachments?: UserMsg["attachments"] };
   turn?: RenderModel["turn"];
   /** Terminal answer of a completed turn: the only row that carries the
    *  identity panel (one per turn, rendered after the turn completes). */
@@ -842,7 +842,7 @@ function MessageView({ m, announce, statusText, plan, regeneratePrompt, turn, te
   announce?: Announce;
   statusText?: string;
   plan?: NonNullable<RenderModel["tasks"]>;
-  regeneratePrompt?: { text: string; attachments?: UserMsg["attachments"] };
+  regeneratePrompt?: { eventSeq: number; text: string; attachments?: UserMsg["attachments"] };
   turn?: RenderModel["turn"];
   terminal?: boolean;
   segmentStartedAt?: number;
@@ -2001,16 +2001,17 @@ export default function Timeline({
   // initial event page when fewer than three prompts are cached.
   const showNav = prefs.promptNavigator === "on"
     || (prefs.promptNavigator === "auto" && (prompts.length >= 3 || canLoadOlder));
-  // Regenerate resends the user prompt that produced each answer. One forward
+  // Regenerate replaces the turn from the user prompt that produced each answer. One forward
   // pass — never a reverse scan per assistant row per streaming render.
   const regenerateSources = useMemo(() => {
-    const bySeq = new Map<number, { text: string; attachments?: UserMsg["attachments"] }>();
+    const bySeq = new Map<number, { eventSeq: number; text: string; attachments?: UserMsg["attachments"] }>();
     let lastUserMessage: UserMsg | undefined;
     for (const message of visibleMessages) {
       if (message.kind === "user") lastUserMessage = message;
       else if (message.kind === "github-conflict") lastUserMessage = undefined;
       else if (message.kind === "assistant" && lastUserMessage) {
         bySeq.set(message.eventSeq, {
+          eventSeq: lastUserMessage.eventSeq,
           text: lastUserMessage.raw ?? lastUserMessage.text,
           ...(lastUserMessage.attachments?.length ? { attachments: lastUserMessage.attachments } : {}),
         });

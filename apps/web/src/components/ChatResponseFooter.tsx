@@ -119,7 +119,7 @@ export default function ChatResponseFooter({
   statusText?: string;
   turn?: RenderModel["turn"];
   segmentStartedAt?: number;
-  regeneratePrompt?: { text: string; attachments?: AttachmentRef[] };
+  regeneratePrompt?: { eventSeq: number; text: string; attachments?: AttachmentRef[] };
 }) {
   const session = useStore((state) =>
     state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null);
@@ -129,6 +129,7 @@ export default function ChatResponseFooter({
   const prefs = useUiSettings();
   const [pinBusy, setPinBusy] = useState(false);
   const [metadataOpen, setMetadataOpen] = useState(false);
+  const [regenerateBusy, setRegenerateBusy] = useState(false);
   const metadataAnchorRef = useRef<HTMLSpanElement>(null);
 
   const modelRef = turn?.model ?? m.model ?? session?.model;
@@ -236,13 +237,21 @@ export default function ChatResponseFooter({
           <ChatActionButton
             icon={RefreshIcon}
             label={tr("timeline.regenerateThisAssistantAnswer")}
+            busy={regenerateBusy}
+            disabled={regenerateBusy}
             onClick={() => {
-              if (!session) return;
-              void sendMessage(regeneratePrompt.text, undefined, undefined, {
-                targetSessionId: session.id,
-                hiddenUserMessage: true,
-                ...(regeneratePrompt.attachments?.length ? { attachments: regeneratePrompt.attachments } : {}),
-              });
+              if (!session || regenerateBusy) return;
+              setRegenerateBusy(true);
+              // Regeneration is a real history replacement, not a hidden
+              // follow-up. Rewind to the source prompt first; the replacement
+              // send then branches the runtime from that exact prefix.
+              void api.rewind(session.id, regeneratePrompt.eventSeq)
+                .then(() => sendMessage(regeneratePrompt.text, undefined, undefined, {
+                  targetSessionId: session.id,
+                  ...(regeneratePrompt.attachments?.length ? { attachments: regeneratePrompt.attachments } : {}),
+                }))
+                .catch((error) => setUiError(error instanceof Error ? error.message : String(error)))
+                .finally(() => setRegenerateBusy(false));
             }}
           />
         )}
