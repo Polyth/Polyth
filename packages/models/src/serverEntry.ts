@@ -276,11 +276,10 @@ const aggregate = async <T>(
 /** Route-local catalogs keep account/model identity scoped to the session's
  * current runtime. A provider's empty model list means native default. */
 export function runtimeCatalogRoutes(host: ServerPackageHost): RouteHandler {
-  const visibility = host.services.get(serverServiceKey<{
-    filterHarness(models: ModelDescriptor[], harnessId: string, opts?: { includeDisconnected?: boolean }): ModelDescriptor[];
-  }>("models.visibility"));
   const visibleModels = (models: ModelDescriptor[], harnessId: string): ModelDescriptor[] =>
-    visibility?.filterHarness(models, harnessId) ?? models;
+    host.services.get(serverServiceKey<{
+      filterHarness(models: ModelDescriptor[], harnessId: string, opts?: { includeDisconnected?: boolean }): ModelDescriptor[];
+    }>("models.visibility"))?.filterHarness(models, harnessId) ?? models;
 
   return async (request) => {
     const sessionId = request.url.searchParams.get("sessionId");
@@ -388,12 +387,11 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     (model) => `${model.harnessId ?? "legacy"}/${model.providerID}/${model.modelID}`,
   );
   const listModels = () => sharedCatalog?.models() ?? fallbackModels();
-  const visibility = host.services.get(serverServiceKey<{
-    filter(models: ModelDescriptor[], opts?: { includeDisconnected?: boolean }): ModelDescriptor[];
-  }>("models.visibility"));
   const listSelectableModels = async () => {
     const models = await listModels();
-    return visibility?.filter(models, { includeDisconnected: true }) ?? models;
+    return host.services.get(serverServiceKey<{
+      filter(models: ModelDescriptor[], opts?: { includeDisconnected?: boolean }): ModelDescriptor[];
+    }>("models.visibility"))?.filter(models, { includeDisconnected: true }) ?? models;
   };
   const listAgents = () => aggregate(
     host,
