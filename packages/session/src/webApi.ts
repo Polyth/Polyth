@@ -527,8 +527,8 @@ export interface VoiceSettingsDto {
   ttsConfigured: boolean;
 }
 
-// ---- idle assist (F9) ----------------------------------------------------------
-export interface AssistSettingsDto { enabled: boolean; idleSeconds: number }
+// ---- optional recap package + explicit assist actions ---------------------------
+export interface AssistSettingsDto { idleSeconds: number }
 export interface AssistDto { recap: string; suggestion: string; atSeq: number; generatedAt: number }
 export interface AssistSuggestionDto { suggestion: string; atSeq: number }
 export interface TaskBriefDto { brief: string }
@@ -1704,7 +1704,7 @@ export const api = {
       ...(opts?.keepalive ? { keepalive: true } : {}),
     }),
 
-  // ---- idle assist (F9): recap + suggestion, chat→note --------------------------
+  // ---- optional recap package + explicit suggestion/chat→note -------------------
   assistSettings: () => jfetch<AssistSettingsDto>(`/api/settings/assist`),
   assistSettingsSave: (patch: Partial<AssistSettingsDto>) =>
     jfetch<AssistSettingsDto>(`/api/settings/assist`, json("PUT", patch)),
