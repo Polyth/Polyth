@@ -7,6 +7,13 @@ const config: CapacitorConfig = {
   appName: "Polyth",
   webDir: "../web/dist",
   backgroundColor: "#07091c",
+  ios: {
+    // The web bundle owns safe-area spacing through viewport-fit=cover and
+    // --safe-* tokens. Never let WKWebView add a second native top inset:
+    // that native gutter prevents the selected workspace background from
+    // painting behind the status bar / Dynamic Island.
+    contentInset: "never",
+  },
   server: {
     hostname: "localhost",
     androidScheme: "https",
@@ -33,6 +40,12 @@ const config: CapacitorConfig = {
       launchAutoHide: false,
       backgroundColor: "#07091c",
       showSpinner: false,
+    },
+    // @capacitor-community/safe-area owns edge-to-edge inset handling. Keep
+    // Capacitor 8's parallel Android SystemBars inset shim disabled so the two
+    // systems cannot both consume the same safe area.
+    SystemBars: {
+      insetsHandling: "disable",
     },
     SafeArea: {
       statusBarStyle: SystemBarsStyle.Default,
