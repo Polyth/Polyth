@@ -56,6 +56,19 @@ test("new timeline surfaces animate without moving the measured row", () => {
   assert.doesNotMatch(css, /\.timeline > \.timeline-row-enter,\s*\n/);
 });
 
+test("idle recap remains mounted at the transcript tail with one current style contract", () => {
+  const timeline = read("../src/components/Timeline.tsx");
+  const strip = read("../src/components/AssistStrip.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(timeline, /import AssistStrip from "\.\/AssistStrip\.tsx"/);
+  assert.match(timeline, /\{model\.workflowRun && <WorkflowTimelineCard[\s\S]*<AssistStrip \/>/);
+  assert.match(strip, /assistFreshnessSeq/);
+  assert.match(strip, /freshnessSeq > assist\.atSeq/);
+  assert.equal(css.match(/\.assist-strip\s*\{/g)?.length, 1);
+  assert.match(css, /\.assist-dismiss\s*\{[^}]*width:\s*var\(--tap\);[^}]*height:\s*var\(--tap\)/s);
+});
+
 test("spawning is an above-composer activity status and never replaces the composer", () => {
   const surface = read("../src/components/workspace/builtinSurfaces.tsx");
   const composer = read("../src/components/Composer.tsx");
