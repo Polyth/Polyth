@@ -10,13 +10,7 @@
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-corner { background: transparent; }
 
-html, body, #root {
-  width: 100%;
-  min-width: 0;
-  height: 100%;
-  min-height: 100vh;
-  min-height: 100dvh;
-}
+html, body, #root { width: 100%; min-width: 0; height: 100%; }
 html {
   overflow-x: hidden;
   overscroll-behavior: none;
@@ -13541,23 +13535,36 @@ html[data-background]:not([data-background="none"]) {
   background-repeat: no-repeat;
   background-size: cover;
 }
-/* iOS standalone PWAs can leave document-canvas space below a 100dvh app
-   frame. Paint the browser document canvas with the same workspace background
-   rather than relying on transparent body pixels to expose the root canvas. */
-html[data-background]:not([data-background="none"]) body:not(.desktop-app) {
-  min-height: 100vh;
-  min-height: 100dvh;
-  background-color: var(--app-system-bar-color, var(--bg));
-  background-image:
-    linear-gradient(color-mix(in srgb, var(--bg) 76%, transparent), color-mix(in srgb, var(--bg) 76%, transparent)),
-    var(--app-background-image);
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: cover;
-}
+html[data-background]:not([data-background="none"]) body,
 html[data-background]:not([data-background="none"]) .app {
   background-color: transparent;
   background-image: none;
+}
+
+/* WebKit standalone + viewport-fit=cover has a long-standing geometry bug:
+   100dvh can stop above the Home-indicator canvas when the translucent status
+   bar mode is active. iOS standalone historically behaved correctly with the
+   layout viewport (100vh), so use that only for the installed web app and let
+   the app itself own the selected background. Layout remains 100dvh everywhere
+   else, including normal Safari, Android, and the native shell. */
+@supports (-webkit-touch-callout: none) {
+  @media (display-mode: standalone) {
+    .app {
+      height: 100vh;
+    }
+    html[data-background]:not([data-background="none"]) .app {
+      background-color: var(--bg);
+      background-image:
+        linear-gradient(
+          color-mix(in srgb, var(--bg) 76%, transparent),
+          color-mix(in srgb, var(--bg) 76%, transparent)
+        ),
+        var(--app-background-image);
+      background-position: center;
+      background-repeat: no-repeat;
+      background-size: cover;
+    }
+  }
 }
 html:has(body.desktop-app),
 html:has(body.desktop-app)[data-background]:not([data-background="none"]) {
