@@ -18,11 +18,15 @@ export function createAccounts(control: ControlPlane, passwords: PasswordService
     return actor.userId;
   };
   const get = (id: string): IdentityUser => {
-    const row = control.get<Omit<IdentityUser, 'managed'> & { managed: number }>(
-      'SELECT u.id,u.display_name AS displayName,u.managed,p.status,p.revision FROM users u JOIN principals p ON p.id=u.id WHERE u.id=?', id,
+    const row = control.get<Omit<IdentityUser, 'managed' | 'login'> & { managed: number; login: string | null }>(
+      `SELECT u.id,u.display_name AS displayName,c.login_name AS login,u.managed,p.status,p.revision
+         FROM users u JOIN principals p ON p.id=u.id
+         LEFT JOIN password_credentials c ON c.user_id=u.id
+        WHERE u.id=?`, id,
     );
     if (!row) throw controlError('not-found', 'Account not found');
-    return { ...row, managed: !!row.managed };
+    const { login, ...rest } = row;
+    return { ...rest, ...(login ? { login } : {}), managed: !!row.managed };
   };
   return {
     current(token: string): IdentityUser { return get(sessions.require(token).userId); },
