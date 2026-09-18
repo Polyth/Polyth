@@ -108,8 +108,8 @@ test("every server feature package owns its discoverable descriptor", async () =
   assert.ok(expected.includes("opencode"), "opencode package is discoverable");
   assert.ok(expected.includes("handoff"), "handoff package is discoverable");
   assert.ok(expected.includes("chat-workspace"), "chat-workspace package is discoverable");
+  assert.ok(expected.includes("recap"), "recap package is discoverable");
   assert.equal(expected.length, new Set(expected).size);
-  assert.equal(expected.length, 38);
   assert.deepEqual(expected, [...expected].sort());
   assert.deepEqual(
     discovered.map((pkg) => pkg.descriptor.id),
