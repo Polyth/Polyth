@@ -23,7 +23,7 @@ test("the conversation keeps the complete glass dock in flow and fresh-turn spac
   const surface = read("../src/components/workspace/builtinSurfaces.tsx");
   const css = read("../src/styles.css");
 
-  assert.match(surface, /className="conversation-composer-dock"[\s\S]*slot="session\.composer\.before"[\s\S]*slot="session\.footer"[\s\S]*\(spawning \|\| awaitingTurn\) && \(\s*<SessionSpawnStatus[\s\S]*<Composer \/>/);
+  assert.match(surface, /className="conversation-composer-dock"[\s\S]*slot="session\.composer\.before"[\s\S]*slot="session\.footer"[\s\S]*\(spawning \|\| awaitingTurn \|\| working\) && \(\s*<SessionActivityStatus[\s\S]*<Composer \/>/);
   assert.doesNotMatch(surface, /composerDock|publishHeight|ResizeObserver/);
   assert.match(css, /\.conversation-composer-dock\s*\{[^}]*position:\s*relative;[^}]*flex:\s*none;/s);
   assert.doesNotMatch(css, /--conversation-dock-height|margin-block-end:\s*var\(--conversation-dock-height\)/);
