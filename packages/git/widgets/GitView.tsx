@@ -21,7 +21,7 @@ import { diffStat } from "../../../apps/web/src/utils.ts";
 import { setPaneLastResource } from "../../../apps/web/src/workspace/panePrefs.ts";
 import CopyButton from "../../../apps/web/src/components/CopyButton.tsx";
 import EmptyState, { ProjectRequiredEmpty } from "../../../apps/web/src/components/EmptyState.tsx";
-import type { WebPackageHost } from "@polyth/web-sdk";
+import type { SurfaceComponentProps, WebPackageHost } from "@polyth/web-sdk";
 import { summarizeUnifiedDiff, totalDiffStats, type DiffLineStats } from "./PendingChangesBar.tsx";
 import {
   AddIcon,
@@ -334,10 +334,16 @@ function ConflictAgentBanner({
   );
 }
 
-export default function GitView({ host }: { host?: WebPackageHost } = {}) {
+export default function GitView({
+  host,
+  projectId: scopedProjectId,
+  sessionId: scopedSessionId,
+}: SurfaceComponentProps & { host?: WebPackageHost } = {}) {
   const Slot = host?.ui.Slot;
-  const projectId = useStore(workspaceProjectId);
-  const sessionId = useStore((state) => state.activeSessionId);
+  const storeProjectId = useStore(workspaceProjectId);
+  const storeSessionId = useStore((state) => state.activeSessionId);
+  const projectId = scopedProjectId === undefined ? storeProjectId : scopedProjectId;
+  const sessionId = scopedSessionId === undefined ? storeSessionId : scopedSessionId;
   const settings = useStore((state) => state.settings);
   const diffPath = useStore((state) => state.gitDiffPath);
   // This project's worktree topology revision. It moves when a worktree is
