@@ -64,8 +64,12 @@ export function pickerCatalogModels(models: readonly ModelDescriptor[], harnessI
     .map(presentModelDescriptor);
 }
 
+/** Keep small native catalogs deliberately simple. Once a harness exposes
+ * more than ten models, use the same structured picker experience as OpenCode:
+ * favorites, recents, provider accordions, and provider/favorite ordering. */
 export function flatModelCatalog(models: readonly ModelDescriptor[], harnessId?: string): boolean {
   const owner = harnessId ?? models[0]?.harnessId;
   return Boolean(owner && owner !== "opencode"
+    && models.length <= 10
     && models.every((model) => model.harnessId === owner));
 }
