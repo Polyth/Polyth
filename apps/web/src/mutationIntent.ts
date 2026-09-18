@@ -23,6 +23,7 @@ export interface DirectPromptBody {
   text: string;
   command?: { id: string; args?: string };
   autoTitle?: boolean;
+  hiddenUserMessage?: boolean;
   attachments?: AttachmentRef[];
   model?: JsonObject;
   agent?: string;
