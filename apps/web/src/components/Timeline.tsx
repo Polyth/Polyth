@@ -1468,6 +1468,10 @@ export default function Timeline({
   const readerDetached = useRef(false);
   const lastScrollTop = useRef(0);
   const touchY = useRef<number | null>(null);
+  // While a finger owns the native overflow gesture, React must not write
+  // scrollTop or resize the fresh-turn spacer. iOS WebKit can otherwise
+  // cancel the overflow gesture and leave the transcript layer unresponsive.
+  const touchActive = useRef(false);
   const scrollbarPointer = useRef(false);
   const readerIntent = useRef<{
     direction: "toward-history" | "toward-tail";
@@ -1494,6 +1498,14 @@ export default function Timeline({
   const observedPrompt = useRef({
     sessionId,
     seq: latestUserMessage?.eventSeq ?? 0,
+  });
+  // Hidden replays (regenerate/retry/auto-resume) intentionally append no
+  // visible user row. Track the false -> true edge so a live hidden replay
+  // can release geometry owned by the preceding visible prompt without
+  // treating a hydrated/session-switched hidden turn as a new interaction.
+  const observedHiddenPrompt = useRef({
+    sessionId,
+    hidden: model.lastUserMessageHidden,
   });
   // Latest-reveal state (§2.4): true while the reader holds a position away
   // from the tail, mounting the reserved Jump to latest region.
@@ -1527,6 +1539,8 @@ export default function Timeline({
     readerDetached.current = stored !== null && !stored.atBottom;
     readerIntent.current = null;
     scrollbarPointer.current = false;
+    touchActive.current = false;
+    touchY.current = null;
     expectedScrollTop.current = null;
     lastScrollTop.current = el?.scrollTop ?? 0;
     followUpSendRef.current = false;
@@ -1553,7 +1567,7 @@ export default function Timeline({
 
   const scrollToTail = useCallback(() => {
     const el = ref.current;
-    if (!el) return;
+    if (!el || touchActive.current) return;
     const target = Math.max(0, el.scrollHeight - el.clientHeight);
     if (Math.abs(el.scrollTop - target) >= 0.5) {
       expectedScrollTop.current = target;
@@ -1579,7 +1593,7 @@ export default function Timeline({
   const syncTurnSheet = useCallback((alignPrompt = false) => {
     const el = ref.current;
     const promptId = turnSheetPromptId.current;
-    if (!el || !promptId) return;
+    if (!el || !promptId || touchActive.current) return;
     // An optimistic echo anchors the sheet exactly like the canonical prompt
     // it stands in for, so the handover moves nothing.
     const prompt = [...el.querySelectorAll<HTMLElement>(".msg.user")]
@@ -1658,6 +1672,27 @@ export default function Timeline({
     syncTurnSheet(true);
   }, [sessionId, latestUserMessage?.id, latestUserMessage?.eventSeq, setTurnSheetPadding, syncTurnSheet, scrollToTail]);
 
+  // A hidden resend has no DOM prompt to own a fresh-turn sheet. Leaving the
+  // previous visible prompt as the owner makes each streamed resize mutate an
+  // unrelated spacer; on touch WebKit this can wedge the overflow scroller.
+  // Release only on a live false -> true edge so reload/session restoration
+  // keeps its saved reader anchor intact.
+  useLayoutEffect(() => {
+    const previous = observedHiddenPrompt.current;
+    if (previous.sessionId !== sessionId) {
+      observedHiddenPrompt.current = { sessionId, hidden: model.lastUserMessageHidden };
+      return;
+    }
+    const becameHidden = !previous.hidden && model.lastUserMessageHidden;
+    observedHiddenPrompt.current = { sessionId, hidden: model.lastUserMessageHidden };
+    if (!becameHidden) return;
+    turnSheetPromptId.current = null;
+    freshTurnPending.current = false;
+    followUpSendRef.current = false;
+    expectedScrollTop.current = null;
+    if (!touchActive.current) setTurnSheetPadding(0);
+  }, [sessionId, model.lastUserMessageHidden, setTurnSheetPadding]);
+
   // A submitted prompt opens its fresh-turn sheet the moment it is submitted,
   // not when admission returns. The canonical row inherits the same sheet with
   // identical geometry moments later, so the reader sees one settle, not two.
@@ -1698,6 +1733,7 @@ export default function Timeline({
     // The first model.version bump after a fresh-turn marks the end of the
     // FLIP distortion window: transforms are gone and measurements are safe.
     freshTurnPending.current = false;
+    if (touchActive.current) return;
     syncTurnSheet();
     if (atBottom.current) {
       setShowJump(false);
@@ -1710,8 +1746,9 @@ export default function Timeline({
     if (!el) return;
     const refresh = () => {
       // While fresh-turn FLIP transforms distort getBoundingClientRect(),
-      // skip scroll updates: the useLayoutEffect scroll is authoritative.
-      if (freshTurnPending.current) return;
+      // or while a finger owns native scrolling, skip geometry writes. The
+      // touch-end settle below catches up after WebKit releases the gesture.
+      if (freshTurnPending.current || touchActive.current) return;
       syncTurnSheet();
       if (atBottom.current) scrollToTail();
     };
@@ -1805,6 +1842,22 @@ export default function Timeline({
       if (now) saveTimelineAnchor(sessionId, captureTimelineAnchor(now, atBottom.current));
     }, 200);
   };
+
+  const finishTouchScroll = useCallback(() => {
+    touchY.current = null;
+    touchActive.current = false;
+    const settle = () => {
+      if (touchActive.current) return;
+      if (turnSheetPromptId.current === null && turnSheetPadding.current > 0) setTurnSheetPadding(0);
+      else syncTurnSheet();
+      if (atBottom.current) {
+        setShowJump(false);
+        scrollToTail();
+      }
+    };
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(settle);
+    else settle();
+  }, [scrollToTail, setTurnSheetPadding, syncTurnSheet]);
 
   // Debounce safety: reload and unmount flush the stable anchor immediately.
   useEffect(() => {
@@ -2318,7 +2371,10 @@ export default function Timeline({
         }}
         onPointerUpCapture={() => { scrollbarPointer.current = false; }}
         onPointerCancelCapture={() => { scrollbarPointer.current = false; }}
-        onTouchStartCapture={(event) => { touchY.current = event.touches[0]?.clientY ?? null; }}
+        onTouchStartCapture={(event) => {
+          touchActive.current = true;
+          touchY.current = event.touches[0]?.clientY ?? null;
+        }}
         onTouchMoveCapture={(event) => {
           const y = event.touches[0]?.clientY;
           if (touchY.current !== null && y !== undefined) {
@@ -2334,8 +2390,8 @@ export default function Timeline({
             }
           }
         }}
-        onTouchEndCapture={() => { touchY.current = null; }}
-        onTouchCancelCapture={() => { touchY.current = null; }}
+        onTouchEndCapture={finishTouchScroll}
+        onTouchCancelCapture={finishTouchScroll}
       >
         <SlotHost slot="session.timeline.before" context={slotSummary} customizable />
         {model.messages.length === 0 && !model.workflowRun && pendingSends.length === 0 && (
