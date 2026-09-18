@@ -47,6 +47,12 @@ jobs:
       - name: Validate Usage TypeScript
         if: matrix.lane == 'legacy'
         run: npx tsc --noEmit -p packages/usage/tsconfig.json
+      - name: Test Usage package
+        if: matrix.lane == 'legacy'
+        run: node --experimental-strip-types --test packages/usage/test/*.test.ts
+      - name: Build web packages
+        if: matrix.lane == 'legacy'
+        run: npm run build:web
       - run: npm run build:supervisor
       - name: Install isolated OpenCode release
         env:
