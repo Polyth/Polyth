@@ -149,7 +149,8 @@ export function IsolationCard() {
 
   const confirmDiscard = async () => {
     setConfirmingDiscard(false);
-    await run("discard", async () => {
+    setBusy("discard");
+    try {
       const projectId = session.projectId;
       await api.deleteSession(sessionId);
       clearRuntimeFeatures(sessionId);
@@ -159,7 +160,12 @@ export function IsolationCard() {
         current.sessions.filter((candidate) => candidate.projectId === projectId && candidate.id !== sessionId),
       );
       if (current.activeSessionId === sessionId) activateSession(null);
-    });
+    } catch (cause) {
+      setUiError(friendlyError(tr("common.error"), cause));
+      await refresh();
+    } finally {
+      setBusy(null);
+    }
   };
 
   const abandon = async () => {
