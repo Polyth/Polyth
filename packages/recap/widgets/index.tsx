@@ -11,7 +11,7 @@ export default defineWebPackage((host) => () => {
       packageId: "recap",
       label: "Recap",
       group: "Workspace",
-      icon: "history",
+      icon: "assist",
       order: 45,
       component: () => createElement(RecapSettings, { host }),
     }),
