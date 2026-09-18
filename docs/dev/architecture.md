@@ -153,9 +153,10 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
   commit messages, fusion synthesis, walkthrough generation).
 - `assist.ts` (F9) — idle assist watcher: N quiet seconds after `turn/stopped` the
   small model writes a ≤20-word recap + ONE suggested follow-up, stored on the
-  projection keyed to the log tail seq (never the event log — not model-visible
-  until the user sends it); any newer event makes it stale. Hard off-by-default
-  switch in `data/assist.json`; one flight per session. The same seam distills
+  projection keyed to a settled raw log tail (never the event log — not
+  model-visible until the user sends it). Passive post-turn bookkeeping is
+  ignored for freshness; newer conversation activity makes it stale. Hard
+  off-by-default switch in `data/assist.json`; one flight per session. The same seam distills
   chat→note drafts.
 
 ## REST surface
@@ -195,8 +196,8 @@ bridge exists), `/api/plugins` (+install), `/api/system/info`,
 standard fields forwarded, honest 503 when unconfigured), `/api/tts/summarize`
 (small-model shortening for read-aloud; 503 when no small model is wired),
 `/api/settings/assist` (GET/PUT the F9 hard switch + quiet time),
-`/api/sessions/:id/assist` (freshness-checked recap+suggestion — 404 `stale` the
-moment the log outgrows it), `/api/sessions/:id/assist/note` (small-model chat→note
+`/api/sessions/:id/assist` (freshness-checked recap+suggestion — 404 `stale`
+once conversation activity moves past it), `/api/sessions/:id/assist/note` (small-model chat→note
 DRAFT; saving goes through the normal `/api/knowledge` flow),
 `/api/auth/*` (F16: GET `status {required, authorized}` and POST `login {password}`
 are the only public `/api` paths — login mints an httpOnly SameSite=Strict
