@@ -661,7 +661,10 @@ export function applyTheme(spec: ThemeSpec): void {
   document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
     ?.setAttribute("content", spec.tokens.bg);
   document.querySelector<HTMLMetaElement>('meta[name="apple-mobile-web-app-status-bar-style"]')
-    ?.setAttribute("content", spec.appearance === "dark" ? "black-translucent" : "default");
+    // Keep standalone iOS web apps edge-to-edge in both light and dark
+    // appearances. "default" makes WebKit reserve an opaque status-bar band,
+    // which cuts the selected workspace background off at the safe-area edge.
+    ?.setAttribute("content", "black-translucent");
   window.dispatchEvent(new Event("polyth:theme"));
 }
 
