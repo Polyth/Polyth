@@ -17,7 +17,7 @@ test("commitDevice is atomic, unique on endpoint, and revoke does not resurrect 
     pairedVia: "polyth-link",
   });
   assert.equal(first.ownerUserId, "usr_owner");
-  assert.equal(first.grants.length, GRANT_PROFILE_PRESETS.interact.length);
+  assert.equal(first.grants.length, grantsForProfile("interact").length);
   assert.equal(fingerprintEndpoint(first.endpointId).includes("…"), true);
   const again = store.commitDevice({
     endpointId: first.endpointId,
