@@ -2349,6 +2349,7 @@ export async function boot(opts: BootOptions = {}) {
   assist = createAssistService({
     settings: () => assistSettings.get(),
     latestSeq: (sessionId) => store.latestSeq(sessionId),
+    eventsAfter: (sessionId, afterSeq) => store.events(sessionId, afterSeq),
     transcript: assistTranscript,
     complete: assistComplete,
     save: async (sessionId, a) => {

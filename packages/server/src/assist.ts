@@ -1,9 +1,10 @@
 // F9 small-model idle assist: after a turn completes and the session stays
-// quiet, generate a <=20-word recap and ONE suggested follow-up. The result is
-// stored on the projection keyed to the log tail seq (never the event log —
-// nothing here is model-visible unless the user actually sends the
-// suggestion), so ANY new event makes it stale. Hard settings switch: disabled
-// means nothing is generated at all. One flight per session bounds token spend.
+// quiet, generate a <=20-word recap and ONE suggested follow-up. Passive
+// post-turn telemetry/metadata is allowed to settle during the quiet window;
+// conversation activity cancels it. The saved result is then keyed to the
+// actual log tail (never the event log itself), so any later event makes the
+// visible assist stale. Hard settings switch: disabled means nothing is
+// generated at all. One flight per session bounds token spend.
 import type { SessionAssist } from "@polyth/contracts";
 import {
   recentCompletedConversationContext,
@@ -81,6 +82,26 @@ export function capWords(text: string, max: number): string {
 /** An assist is fresh only while the log has not grown past the seq it was keyed to. */
 export function isFresh(assist: { atSeq: number } | undefined, latestSeq: number): boolean {
   return !!assist && assist.atSeq === latestSeq;
+}
+
+const ASSIST_CONVERSATION_ACTIVITY_PREFIXES = [
+  "user/",
+  "assistant/",
+  "turn/",
+  "tool/",
+  "permission/",
+  "question/",
+  "secret/",
+  "queue/",
+] as const;
+
+/** Runtime telemetry and metadata may legitimately arrive just after
+ * turn/stopped. Only real conversation/session activity should cancel the
+ * pending quiet-window generation. */
+export function isAssistConversationActivity(event: Pick<SessionEvent, "type">): boolean {
+  return ASSIST_CONVERSATION_ACTIVITY_PREFIXES.some((prefix) => event.type.startsWith(prefix))
+    || event.type === "session/rewound"
+    || event.type === "session/rewind-cleared";
 }
 
 export function buildAssistPrompt(transcript: string): string {
@@ -284,6 +305,8 @@ export interface AssistService {
 export function createAssistService(deps: {
   settings: () => AssistSettings;
   latestSeq(sessionId: string): Promise<number>;
+  /** Canonical events appended after the completed-turn tail. */
+  eventsAfter(sessionId: string, afterSeq: number): Promise<SessionEvent[]>;
   transcript(sessionId: string): Promise<string>;
   /** One-shot small-model completion on the session's runtime. */
   complete(sessionId: string, prompt: string): Promise<string>;
@@ -302,15 +325,21 @@ export function createAssistService(deps: {
     if (!deps.settings().enabled) return; // switch may have flipped while waiting
     inFlight.add(sessionId);
     try {
-      // still quiet? any event since scheduling means this recap is already stale
-      if ((await deps.latestSeq(sessionId)) !== seqAtSchedule) return;
+      // Providers can append passive usage/title metadata after turn/stopped.
+      // Let that settle without treating it as renewed conversation activity,
+      // then anchor the generated assist to the real current log tail.
+      const trailing = await deps.eventsAfter(sessionId, seqAtSchedule);
+      if (trailing.some(isAssistConversationActivity)) return;
+      const atSeq = trailing[trailing.length - 1]?.seq ?? seqAtSchedule;
+      // Close the read race before spending tokens.
+      if ((await deps.latestSeq(sessionId)) !== atSeq) return;
       const transcript = await deps.transcript(sessionId);
       if (!transcript.trim()) return;
       const parsed = parseAssistReply(await deps.complete(sessionId, buildAssistPrompt(transcript)));
       if (!parsed) return;
-      // re-check after the (slow) model call so a mid-generation event wins
-      if ((await deps.latestSeq(sessionId)) !== seqAtSchedule) return;
-      await deps.save(sessionId, { ...parsed, atSeq: seqAtSchedule, generatedAt: now() });
+      // Once generation starts, any event wins over the slow model result.
+      if ((await deps.latestSeq(sessionId)) !== atSeq) return;
+      await deps.save(sessionId, { ...parsed, atSeq, generatedAt: now() });
     } catch (err) {
       deps.onError?.(sessionId, err);
     } finally {
