@@ -5,8 +5,8 @@
 // in editor/FilePane. This file implements no tab store and no second editor.
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { api, type FileEntry } from "@polyth/session/web-api";
-import { closeWorkspacePane, getState, openEditorFile, setEditorFile, useStore } from "../../../apps/web/src/store.ts";
-import EmptyState from "../../../apps/web/src/components/EmptyState.tsx";
+import { closeWorkspacePane, getState, openEditorFile, setEditorFile, useStore, workspaceProjectId } from "../../../apps/web/src/store.ts";
+import EmptyState, { ProjectRequiredEmpty } from "../../../apps/web/src/components/EmptyState.tsx";
 import { requestComposerInsert } from "../../../apps/web/src/composerInsert.ts";
 import { setDragPath } from "../../../apps/web/src/dnd.ts";
 import { MOD } from "../../../apps/web/src/format.ts";
@@ -44,8 +44,8 @@ interface CtxMenu {
 }
 
 export default function EditorView() {
-  const projectId = useStore((s) => s.activeProjectId);
-  const project = useStore((s) => s.projectRegistry.projects.find((candidate) => candidate.id === s.activeProjectId));
+  const projectId = useStore(workspaceProjectId);
+  const project = useStore((s) => s.projectRegistry.projects.find((candidate) => candidate.id === workspaceProjectId(s)));
   // Files must follow the ACTIVE SESSION's worktree, not the project root
   // (UX-FIXTURE-VISUAL P0): every files call carries the session id.
   const sessionId = useStore((s) => s.activeSessionId);
@@ -339,7 +339,14 @@ export default function EditorView() {
     });
   };
 
-  if (!projectId) return <EmptyState title={tr("editorview.noProjectSelected")} description={tr("editorview.openAProjectToBrowseAndEdit")} />;
+  if (!projectId) {
+    return (
+      <ProjectRequiredEmpty
+        title={tr("editorview.noProjectSelected")}
+        description={tr("editorview.openAProjectToBrowseAndEdit")}
+      />
+    );
+  }
 
   return (
     <div className={`editor-view mobile-${mobileStage}`}>

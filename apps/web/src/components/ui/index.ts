@@ -39,7 +39,7 @@ export {
 // the one import surface. Sheet stays the phone overlay engine; the a11y
 // Dialog module stays the modal focus/scroll-lock engine; alerts stay the
 // confirm/prompt strategy.
-export { default as EmptyState, type EmptyStateVariant } from "../EmptyState.tsx";
+export { default as EmptyState, ProjectRequiredEmpty, type EmptyStateVariant } from "../EmptyState.tsx";
 export { default as Sheet, SheetRow, SheetSection, type SheetAction, type SheetProps, type SheetSearch, type SheetRowProps } from "../mobile/Sheet.tsx";
 export { useModalSurface, useModalScrollLock } from "../a11y/Dialog.tsx";
 export { useDismissibleMenu } from "../a11y/Menu.ts";

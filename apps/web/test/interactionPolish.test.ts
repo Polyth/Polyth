@@ -232,15 +232,18 @@ test("secondary core dialogs and utility actions use shared primitives", async (
 });
 
 test("workspace fallbacks use shared actions and resize focus targets current controls", async () => {
-  const [workspaceHost, errorBoundary, header, css] = await Promise.all([
+  const [workspaceHost, projectEmpty, errorBoundary, header, css] = await Promise.all([
     read("../src/components/workspace/WorkspaceHost.ts"),
+    read("../src/components/workspace/ProjectEmptyState.ts"),
     read("../src/components/ViewErrorBoundary.ts"),
     read("../src/components/Header.tsx"),
     readWebStyles(),
   ]);
 
-  assert.match(workspaceHost, /import \{ buttonClassName \} from "\.\.\/ui\/buttonClassName\.ts"/);
-  assert.match(workspaceHost, /className: buttonClassName\(\{ variant: "primary"/);
+  assert.match(workspaceHost, /import ProjectEmptyState from "\.\/ProjectEmptyState\.ts"/);
+  assert.match(projectEmpty, /import \{ buttonClassName \} from "\.\.\/ui\/buttonClassName\.ts"/);
+  assert.match(projectEmpty, /className: buttonClassName\(\{ variant: "primary"/);
+  assert.doesNotMatch(projectEmpty, /primary-btn/);
   assert.doesNotMatch(workspaceHost, /primary-btn/);
   assert.match(errorBoundary, /import \{ buttonClassName \} from "\.\/ui\/buttonClassName\.ts"/);
   assert.match(errorBoundary, /className: buttonClassName\(\{ variant: "primary" \}\)/);

@@ -34,7 +34,7 @@ export function settingsPageFromSearch(search = ""): string | null {
 
 /** Canonical URL for the current selection ("/" when nothing is active). */
 export function formatAppUrl(projectId: string | null, sessionId: string | null): string {
-  if (!projectId) return "/";
+  if (!projectId) return sessionId ? `/?session=${encodeURIComponent(sessionId)}` : "/";
   const base = `/p/${encodeURIComponent(projectId)}`;
   return sessionId ? `${base}/s/${encodeURIComponent(sessionId)}` : base;
 }

@@ -1,7 +1,7 @@
 import { openChanges } from "../../../apps/web/src/store.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { Icon } from "../../../apps/web/src/icons.tsx";
-import { EmptyState } from "../../../apps/web/src/components/ui/index.ts";
+import { EmptyState, ProjectRequiredEmpty } from "../../../apps/web/src/components/ui/index.ts";
 import { useGitStatus } from "./gitStatusStore.ts";
 import type { GitFileEntry } from "@polyth/session/web-api";
 
@@ -44,7 +44,13 @@ export default function RecentChangesWidget({
   const status = useGitStatus(projectId, true, sessionId);
 
   if (!projectId) {
-    return <EmptyState variant="compact" title={tr("gitview.noProjectSelected")} description={tr("gitview.openAProjectToInspectItsGit")} />;
+    return (
+      <ProjectRequiredEmpty
+        variant="compact"
+        title={tr("gitview.noProjectSelected")}
+        description={tr("gitview.openAProjectToInspectItsGit")}
+      />
+    );
   }
   if (!status) {
     return (

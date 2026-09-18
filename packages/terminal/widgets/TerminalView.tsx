@@ -6,11 +6,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TerminalInfo } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
-import { useStore } from "../../../apps/web/src/store.ts";
+import { useStore, workspaceProjectId } from "../../../apps/web/src/store.ts";
 import { nextTermBackoff } from "../../../apps/web/src/utils.ts";
 import { usePaneVisible } from "../../../apps/web/src/workspace/paneVisibility.ts";
 import { createTerminalEmulator, type TerminalEmulator } from "./terminal/emulator.ts";
-import EmptyState from "../../../apps/web/src/components/EmptyState.tsx";
+import EmptyState, { ProjectRequiredEmpty } from "../../../apps/web/src/components/EmptyState.tsx";
 import TermPane from "./TermPane.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import {
@@ -57,7 +57,7 @@ function themeVar(name: string): string | undefined {
 }
 
 export default function TerminalView() {
-  const projectId = useStore((s) => s.activeProjectId);
+  const projectId = useStore(workspaceProjectId);
   const sessionId = useStore((s) => s.activeSessionId);
   const session = useStore((s) => s.sessions.find((candidate) => candidate.id === s.activeSessionId) ?? null);
   const visible = usePaneVisible();
@@ -440,7 +440,12 @@ export default function TerminalView() {
         </span>
       </div>
 
-      {!projectId && <EmptyState title={tr("terminalview.noProjectSelected")} description={tr("terminalview.openAProjectToUseTheTerminal")} />}
+      {!projectId && (
+        <ProjectRequiredEmpty
+          title={tr("terminalview.noProjectSelected")}
+          description={tr("terminalview.openAProjectToUseTheTerminal")}
+        />
+      )}
       {projectId && !tab && (
         <EmptyState
           title={tr("terminalview.noTerminalYet")}

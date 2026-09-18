@@ -147,21 +147,39 @@ export interface ActiveProjectCandidates {
   sessionProjectId?: string | null;
   /** Project id from a /p/:projectId URL. */
   urlProjectId?: string | null;
-  /** Persisted `polyth.activeProjectId`. */
+  /** Account-scoped restored navigation record. */
   savedProjectId?: string | null;
+  /** Synchronous `polyth.activeProjectId` written by activateProject. */
+  localSavedProjectId?: string | null;
 }
 
 /** Selection order: valid session deep link, valid project deep link, valid
- *  saved project id, then the first server project. Invalid candidates fall
- *  through — they never manufacture an empty first run. */
+ *  saved project id, localStorage id, then the first server project. Invalid
+ *  candidates fall through — they never manufacture an empty first run. */
 export function resolveActiveProjectId(
   projects: readonly Project[],
   candidates: ActiveProjectCandidates,
 ): string | null {
-  for (const id of [candidates.sessionProjectId, candidates.urlProjectId, candidates.savedProjectId]) {
+  for (const id of [
+    candidates.sessionProjectId,
+    candidates.urlProjectId,
+    candidates.savedProjectId,
+    candidates.localSavedProjectId,
+  ]) {
     if (id && projects.some((p) => p.id === id)) return id;
   }
   return projects[0]?.id ?? null;
+}
+
+/** After a backend blip, retry the project list when the first fetch failed or
+ *  a ready registry still has no selection. Do not retry while an in-flight
+ *  boot request owns `loading` — that would stale the original response. */
+export function shouldRefreshProjectsOnSyncOpen(
+  state: ProjectRegistryState,
+  activeProjectId: string | null,
+): boolean {
+  if (state.status === "failed") return true;
+  return state.status === "ready" && state.projects.length > 0 && activeProjectId === null;
 }
 
 /** After a delete or an external refresh: keep the current active project when

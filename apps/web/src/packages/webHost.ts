@@ -46,6 +46,7 @@ import {
   subscribeSessionEvents,
   subscribeStore,
   upsertSession,
+  workspaceProjectId,
 } from "../store.ts";
 import { listSlots, registerSlot } from "../slots.ts";
 import { notifyCapabilities, registerCapability, type CapabilityDescriptor } from "../capabilities.ts";
@@ -124,7 +125,7 @@ const snapshot = (): WebStoreSnapshot => {
   const state = getState();
   if (state === previousStoreState && previousSnapshot) return previousSnapshot;
   const next: WebStoreSnapshot = {
-    activeProjectId: state.activeProjectId,
+    activeProjectId: workspaceProjectId(state),
     activeSessionId: state.activeSessionId,
     activeView: state.activeView,
     overlay: state.overlay,

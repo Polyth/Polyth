@@ -5,6 +5,8 @@
 //   compact — inline prerequisite or no-results message.
 import type { ReactNode } from "react";
 import Button from "./ui/Button.tsx";
+import { useStore } from "../store.ts";
+import { tr } from "../i18n/index.ts";
 
 export type EmptyStateVariant = "page" | "panel" | "compact";
 
@@ -40,4 +42,42 @@ export default function EmptyState({
       )}
     </div>
   );
+}
+
+/** Keep-alive Git/Browser/Files/Terminal widgets: loading and list failure
+ *  must not look like "No project selected". Surfaces go through
+ *  ProjectEmptyState; canvas widgets reuse this compact copy. */
+export function ProjectRequiredEmpty({
+  title,
+  description,
+  variant = "page",
+}: {
+  title: string;
+  description: string;
+  variant?: EmptyStateVariant;
+}) {
+  const registry = useStore((s) => s.projectRegistry);
+  if (registry.status === "loading") {
+    return (
+      <EmptyState
+        variant={variant}
+        title={tr("workspace.workspacehost.loadingProjects")}
+        description={tr("workspace.workspacehost.checkingSavedProjects")}
+      />
+    );
+  }
+  if (registry.status === "failed") {
+    return (
+      <EmptyState
+        variant={variant}
+        title={tr("workspace.workspacehost.couldNotLoadProjects")}
+        description={registry.error}
+        actionLabel={tr("common.retry")}
+        onAction={() => {
+          window.dispatchEvent(new Event("polyth:refresh-projects"));
+        }}
+      />
+    );
+  }
+  return <EmptyState variant={variant} title={title} description={description} />;
 }

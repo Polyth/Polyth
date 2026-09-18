@@ -16,11 +16,11 @@ import {
   type DiffHunk, type ReviewComment,
 } from "../../../apps/web/src/review/anchors.ts";
 import { friendlyError } from "../../../apps/web/src/settings.ts";
-import { openWorktreeSessionDialog, setGitBranch, setGitDiffPath, setUiError, startNewSession, useStore } from "../../../apps/web/src/store.ts";
+import { openWorktreeSessionDialog, setGitBranch, setGitDiffPath, setUiError, startNewSession, useStore, workspaceProjectId } from "../../../apps/web/src/store.ts";
 import { diffStat } from "../../../apps/web/src/utils.ts";
 import { setPaneLastResource } from "../../../apps/web/src/workspace/panePrefs.ts";
 import CopyButton from "../../../apps/web/src/components/CopyButton.tsx";
-import EmptyState from "../../../apps/web/src/components/EmptyState.tsx";
+import EmptyState, { ProjectRequiredEmpty } from "../../../apps/web/src/components/EmptyState.tsx";
 import type { WebPackageHost } from "@polyth/web-sdk";
 import { summarizeUnifiedDiff, totalDiffStats, type DiffLineStats } from "./PendingChangesBar.tsx";
 import {
@@ -336,14 +336,17 @@ function ConflictAgentBanner({
 
 export default function GitView({ host }: { host?: WebPackageHost } = {}) {
   const Slot = host?.ui.Slot;
-  const projectId = useStore((state) => state.activeProjectId);
+  const projectId = useStore(workspaceProjectId);
   const sessionId = useStore((state) => state.activeSessionId);
   const settings = useStore((state) => state.settings);
   const diffPath = useStore((state) => state.gitDiffPath);
   // This project's worktree topology revision. It moves when a worktree is
   // created or removed anywhere — here, by an agent, by a shell — and nothing
   // else moves it, so another project's churn never refetches this one.
-  const worktreeTopology = useStore((state) => (state.activeProjectId && state.worktreeTopology[state.activeProjectId]) || 0);
+  const worktreeTopology = useStore((state) => {
+    const id = workspaceProjectId(state);
+    return (id && state.worktreeTopology[id]) || 0;
+  });
   const status = useGitStatus(projectId, true, sessionId);
   const prefs = useGitPrefs();
   const [tab, setTab] = useState<GitTab>("changes");
@@ -815,7 +818,14 @@ export default function GitView({ host }: { host?: WebPackageHost } = {}) {
     sync: { idle: tr("gitview.syncRepository"), busy: tr("gitview.syncRepository") },
   };
 
-  if (!projectId) return <EmptyState title={tr("gitview.noProjectSelected")} description={tr("gitview.openAProjectToInspectItsGit")} />;
+  if (!projectId) {
+    return (
+      <ProjectRequiredEmpty
+        title={tr("gitview.noProjectSelected")}
+        description={tr("gitview.openAProjectToInspectItsGit")}
+      />
+    );
+  }
 
   if (loading && !status) {
     return (

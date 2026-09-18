@@ -10,6 +10,7 @@ import {
   removeProject,
   replacementActiveId,
   resolveActiveProjectId,
+  shouldRefreshProjectsOnSyncOpen,
   upsertProject,
 } from "../src/projectRegistry.ts";
 
@@ -110,9 +111,31 @@ test("first active project selection follows the documented priority and empty f
     savedProjectId: "saved",
   }), "saved");
   assert.equal(resolveActiveProjectId(projects, { savedProjectId: "missing" }), "first");
+  assert.equal(resolveActiveProjectId(projects, {
+    savedProjectId: "missing",
+    localSavedProjectId: "url",
+  }), "url");
   assert.equal(resolveActiveProjectId([], { savedProjectId: "missing" }), null);
 
   assert.equal(replacementActiveId(projects, "url"), "url");
   assert.equal(replacementActiveId(projects, "missing"), "first");
   assert.equal(replacementActiveId([], "missing"), null);
+});
+
+test("sync reconnect retries a failed or unselected registry, not an in-flight boot", () => {
+  const loading = beginListRequest(initialProjectRegistry(), 1);
+  assert.equal(shouldRefreshProjectsOnSyncOpen(loading, null), false);
+
+  const failed = publishListFailure(loading, 1, "offline");
+  assert.equal(shouldRefreshProjectsOnSyncOpen(failed, null), true);
+
+  const ready = publishListSuccess(beginListRequest(failed, 2), 2, 0, [project("one")]).state;
+  assert.equal(shouldRefreshProjectsOnSyncOpen(ready, null), true);
+  assert.equal(shouldRefreshProjectsOnSyncOpen(ready, "one"), false);
+  assert.equal(shouldRefreshProjectsOnSyncOpen(publishListSuccess(
+    beginListRequest(initialProjectRegistry(), 1),
+    1,
+    0,
+    [],
+  ).state, null), false);
 });

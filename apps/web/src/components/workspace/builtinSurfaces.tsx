@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import Timeline from "../Timeline.tsx";
 import Composer from "../Composer.tsx";
 import QuestionCards from "../QuestionCards.tsx";
-import { focusComposer, isActiveSessionSpawning, overlaySessionProjection, setOverlay, setUiError, useActiveModel, usePendingSends, useStore } from "../../store.ts";
+import { focusComposer, isActiveSessionSpawning, overlaySessionProjection, setOverlay, setUiError, useActiveModel, usePendingSends, useStore, workspaceProjectId } from "../../store.ts";
 import { openSession, prefetchSessionTail, restoreSession } from "../../init.ts";
 import { friendlyError } from "../../settings.ts";
 import { composerBlockedByArchive, sessionSurfaceKind } from "../../sessionSurface.ts";
@@ -51,7 +51,7 @@ const NOOP_STARTER = (_prompt: string, _id?: string): void => {};
 // the composer any more.
 function SessionHero({ starterContext }: { starterContext: StarterContext }) {
   const projects = useStore((s) => s.projectRegistry.projects);
-  const projectId = useStore((s) => s.activeProjectId);
+  const projectId = useStore(workspaceProjectId);
   const project = projects.find((candidate) => candidate.id === projectId) ?? null;
   const name = project?.name || project?.path || tr("permissionbanner.thisProject");
 
@@ -290,7 +290,7 @@ function ArchivedComposerGuard({ sessionId }: { sessionId: string }) {
 function SessionSurface() {
   const workspaceMode = useWorkspaceMode();
   const spaceId = useSpaces().activeSpaceId ?? undefined;
-  const projectId = useStore((s) => s.activeProjectId);
+  const projectId = useStore(workspaceProjectId);
   const sessionId = useStore((s) => s.activeSessionId);
   const openingSessionId = useStore((s) => s.openingSessionId);
   const spawning = useStore(isActiveSessionSpawning);

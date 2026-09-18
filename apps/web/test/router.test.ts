@@ -44,5 +44,5 @@ test("formatAppUrl builds canonical urls", () => {
   assert.equal(formatAppUrl("prj_1", "ses_2"), "/p/prj_1/s/ses_2");
   assert.equal(formatAppUrl("prj_1", null), "/p/prj_1");
   assert.equal(formatAppUrl(null, null), "/");
-  assert.equal(formatAppUrl(null, "ses_2"), "/", "a session without a project has no canonical url");
+  assert.equal(formatAppUrl(null, "ses_2"), "/?session=ses_2");
 });

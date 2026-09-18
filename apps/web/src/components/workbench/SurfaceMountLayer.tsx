@@ -11,7 +11,8 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { PackageWindowContext } from "../ui/PackageWindowContext.ts";
 import { PaneVisibilityContext } from "../../workspace/paneVisibility.ts";
 import ViewErrorBoundary from "../ViewErrorBoundary.ts";
-import { useStore } from "../../store.ts";
+import { useStore, workspaceProjectId } from "../../store.ts";
+import ProjectEmptyState from "../workspace/ProjectEmptyState.ts";
 import { releaseSurfaceMountNode, surfaceMountNode } from "./surfaceMounts.ts";
 import type { WorkbenchSurfaceInfo } from "./workbenchModel.ts";
 
@@ -27,13 +28,25 @@ export interface SurfaceMountLayerProps {
   surfaces: ReadonlyMap<string, WorkbenchSurfaceInfo>;
 }
 
-function SurfaceBody({ surface, visible, projectId }: { surface: WorkbenchSurfaceInfo; visible: boolean; projectId: string | null }): ReactNode {
+function SurfaceBody({
+  surface,
+  visible,
+  projectId,
+}: {
+  surface: WorkbenchSurfaceInfo;
+  visible: boolean;
+  projectId: string | null;
+}): ReactNode {
+  const registry = useStore((s) => s.projectRegistry);
   const Body = surface.component;
+  const body = !surface.contextual && projectId === null
+    ? <ProjectEmptyState registry={registry} />
+    : <Body active={visible} />;
   return (
     <PackageWindowContext.Provider value={surface.id}>
       <PaneVisibilityContext.Provider value={visible}>
         <ViewErrorBoundary inline resetKey={`${surface.id}:${projectId ?? ""}`}>
-          <Body active={visible} />
+          {body}
         </ViewErrorBoundary>
       </PaneVisibilityContext.Provider>
     </PackageWindowContext.Provider>
@@ -41,7 +54,7 @@ function SurfaceBody({ surface, visible, projectId }: { surface: WorkbenchSurfac
 }
 
 export default function SurfaceMountLayer({ placed, visible, surfaces }: SurfaceMountLayerProps) {
-  const projectId = useStore((s) => s.activeProjectId);
+  const projectId = useStore(workspaceProjectId);
   const vaultRef = useRef<HTMLDivElement>(null);
   const previousKept = useRef<string[]>([]);
 

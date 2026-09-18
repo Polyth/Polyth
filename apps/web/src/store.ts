@@ -352,6 +352,28 @@ export function getState(): AppState {
   return state;
 }
 
+function sessionOwnedProjectId(
+  sessions: readonly SessionProjection[],
+  sessionId: string | null,
+): string | null {
+  if (!sessionId) return null;
+  const projectId = sessions.find((row) => row.id === sessionId)?.projectId;
+  return typeof projectId === "string" && projectId.length > 0 ? projectId : null;
+}
+
+function normalizedProjectId(id: string | null | undefined): string | null {
+  return typeof id === "string" && id.length > 0 ? id : null;
+}
+
+/** Workspace panes follow the explicit project, or the open chat's project when
+ *  client navigation lost `activeProjectId` while the session is still known. */
+export function workspaceProjectId(
+  snapshot: Pick<AppState, "activeProjectId" | "activeSessionId" | "sessions"> = state,
+): string | null {
+  return normalizedProjectId(snapshot.activeProjectId)
+    ?? sessionOwnedProjectId(snapshot.sessions, snapshot.activeSessionId);
+}
+
 export function subscribeStore(cb: () => void): () => void {
   listeners.add(cb);
   return () => {
@@ -368,7 +390,7 @@ export function subscribeSessionEvents(cb: (event: SessionEvent) => void): () =>
 
 function refreshTitle(): void {
   if (typeof document === "undefined") return;
-  const project = state.projectRegistry.projects.find((p) => p.id === state.activeProjectId);
+  const project = state.projectRegistry.projects.find((p) => p.id === workspaceProjectId(state));
   document.title = project?.name ? `${project.name} — ${state.settings.productName}` : state.settings.productName;
 }
 
@@ -576,6 +598,7 @@ export function setSessions(projectId: string, sessions: SessionProjection[]): v
   const others = state.sessions.filter((s) => s.projectId !== projectId);
   const nextSessions = others.length === 0 ? merged : [...others, ...merged];
   set({ sessions: nextSessions });
+  reconcileWorkspaceProjectFromSession();
   const live = new Set(nextSessions.map((session) => session.id));
   const stale = Object.keys(state.runtimeFeatures).filter((id) => !live.has(id));
   if (stale.length > 0) {
@@ -647,24 +670,46 @@ if (typeof window !== "undefined") {
   });
 }
 
-export function activateProject(id: string | null): void {
-  const project = state.projectRegistry.projects.find((candidate) => candidate.id === id);
+function bindReliabilityForProject(projectId: string | null): void {
+  const project = state.projectRegistry.projects.find((candidate) => candidate.id === projectId);
   setClientReliabilitySpace(project?.spaceId ?? "default");
-  setClientReliabilityProject(id);
-  localStorage.setItem("polyth.activeProjectId", id ?? "");
+  setClientReliabilityProject(projectId);
+  localStorage.setItem("polyth.activeProjectId", projectId ?? "");
+}
+
+/** Fill a missing client project from the open session without dropping it. */
+export function reconcileWorkspaceProjectFromSession(): void {
+  if (normalizedProjectId(state.activeProjectId)) return;
+  const owned = sessionOwnedProjectId(state.sessions, state.activeSessionId);
+  if (!owned) return;
+  bindReliabilityForProject(owned);
+  set({
+    activeProjectId: owned,
+    gitBranch: "",
+    ...projectPanePresentation(owned),
+  });
+  persistClientNavigation(owned, state.activeSessionId);
+  setWorkspaceModeProject(owned);
+  setWorkbenchProject(owned);
+}
+
+export function activateProject(id: string | null): void {
+  const nextId = normalizedProjectId(id);
+  bindReliabilityForProject(nextId);
   // Re-activating the current project must not drop the session or branch (UX-04).
-  if (id === state.activeProjectId) {
-    persistClientNavigation(id, state.activeSessionId);
+  if (nextId === normalizedProjectId(state.activeProjectId)) {
+    if (state.activeProjectId !== nextId) set({ activeProjectId: nextId });
+    persistClientNavigation(nextId, state.activeSessionId);
     return;
   }
   set({
-    activeProjectId: id, activeSessionId: null, gitBranch: "",
+    activeProjectId: nextId, activeSessionId: null, gitBranch: "",
     newSessionIntent: null,
-    ...projectPanePresentation(id),
+    ...projectPanePresentation(nextId),
   });
-  persistClientNavigation(id, null);
-  setWorkspaceModeProject(id);
-  setWorkbenchProject(id);
+  persistClientNavigation(nextId, null);
+  setWorkspaceModeProject(nextId);
+  setWorkbenchProject(nextId);
 }
 export function setActiveView(view: AppView | LegacyPaneViewId): void {
   // One-time legacy adapter: a stored/contributed "files"/"git"/"terminal"/
@@ -833,7 +878,7 @@ export function openWorkspacePane(surfaceId: string, resource?: string): boolean
   // A workspace pane is always Chat's companion. Canvas CSS must never win a
   // race and hide a pane that the command path has just opened.
   setWorkspaceMode("chat");
-  const projectId = state.activeProjectId;
+  const projectId = workspaceProjectId(state);
   const selectedResource = resource ?? (surfaceId === "git" ? undefined : projectId !== null
     ? getWorkspacePanePrefs(projectId).lastResource[surfaceId]
     : undefined);
@@ -856,7 +901,7 @@ export function openWorkspacePane(surfaceId: string, resource?: string): boolean
 export function closeWorkspacePane({ restoreFocus = true }: { restoreFocus?: boolean } = {}): void {
   const surfaceId = state.railPlugin;
   const open = paneSurfaceOf(surfaceId);
-  const projectId = state.activeProjectId;
+  const projectId = workspaceProjectId(state);
   const persisted = projectId !== null
     && surfaceId !== null
     && getWorkspacePanePrefs(projectId).openSurface === surfaceId;
@@ -993,11 +1038,23 @@ export function activateSession(id: string | null): void {
   // same rule as the visible session-navigation path: only pinned workspace
   // windows may cross the session boundary.
   if (state.paneMode !== "pinned") closeWorkspacePane();
+  const owned = id ? sessionOwnedProjectId(state.sessions, id) : null;
+  const adopt = owned !== null && normalizedProjectId(state.activeProjectId) === null;
+  if (adopt && owned) bindReliabilityForProject(owned);
   set({
     activeSessionId: id,
     ...(id !== null ? { newSessionIntent: null } : {}),
+    ...(adopt && owned ? {
+      activeProjectId: owned,
+      gitBranch: "",
+      ...projectPanePresentation(owned),
+    } : {}),
   });
   persistClientNavigation(state.activeProjectId, id);
+  if (adopt && owned) {
+    setWorkspaceModeProject(owned);
+    setWorkbenchProject(owned);
+  }
 }
 
 /** Enter the unsaved new-chat surface. The session is deliberately absent
@@ -1306,6 +1363,7 @@ export function upsertSession(p: SessionProjection): void {
   const incoming = cur ? preserveTitle(cur, p) : p;
   const sessions = i >= 0 ? state.sessions.map((s, j) => (j === i ? incoming : s)) : [...state.sessions, incoming];
   set({ sessions });
+  reconcileWorkspaceProjectFromSession();
 }
 
 /** Batched projection snapshot (WS `projections` frame): one store update —
@@ -1329,6 +1387,7 @@ export function upsertSessions(list: readonly SessionProjection[]): void {
     });
   for (const p of byId.values()) sessions.push(p);
   set({ sessions });
+  reconcileWorkspaceProjectFromSession();
 }
 
 /** First index whose seq >= target (list sorted by seq ascending). */
@@ -1501,6 +1560,7 @@ export function seedSessionCache(p: SessionProjection): void {
     ? state.events
     : { ...state.events, [p.id]: [] };
   set({ sessions, events });
+  reconcileWorkspaceProjectFromSession();
 }
 
 export function setRuntimeFeatures(

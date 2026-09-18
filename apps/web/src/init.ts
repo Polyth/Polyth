@@ -6,7 +6,7 @@ import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown } from "./form
 import { friendlyError } from "./settings.ts";
 import { formatAppUrl, parseAppUrl, settingsPageFromSearch } from "./router.ts";
 import * as store from "./store.ts";
-import { resolveActiveProjectId } from "./projectRegistry.ts";
+import { resolveActiveProjectId, shouldRefreshProjectsOnSyncOpen } from "./projectRegistry.ts";
 import type { AttachmentRef, HarnessSelection, JsonObject, ModelRef, Project, ProjectCloneInput, ProjectPatch, ResumeTurnOptions, SessionEvent, SessionProjection } from "@polyth/contracts";
 import { suggestWorktreeBranch, temporaryWorktreeBranch } from "./worktreeSessions.ts";
 import { installPushDeepLinks, registerServiceWorker } from "./push.ts";
@@ -364,7 +364,7 @@ export function init(): Promise<void> {
   void registerServiceWorker().catch((err) => console.warn("service worker registration failed", err));
   // Project presentation records are server-backed, while the existing local
   // records remain the synchronous/offline rendering path.
-  initProjectPresentationSync(store.subscribeStore, () => store.getState().activeProjectId);
+  initProjectPresentationSync(store.subscribeStore, () => store.workspaceProjectId(store.getState()));
   if (!runtimeCatalogInvalidationSubscribed) {
     runtimeCatalogInvalidationSubscribed = true;
     subscribeRuntimeCatalogInvalidations(() => {
@@ -442,7 +442,7 @@ export function init(): Promise<void> {
 
 // ---- project registry hydration (UX-ONBOARDING) ------------------------------
 
-export type ProjectRefreshReason = "initial" | "manual" | "reconcile";
+export type ProjectRefreshReason = "initial" | "manual" | "reconcile" | "reconnect";
 
 let bootRestored = false;
 let reconcileRetryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -497,6 +497,10 @@ async function restoreSelectionAfterReady(): Promise<void> {
     const initial = resolveActiveProjectId(projects, {
       urlProjectId: fromUrl.projectId ?? null,
       savedProjectId: restoredNavigation?.projectId ?? null,
+      localSavedProjectId: (() => {
+        try { return localStorage.getItem("polyth.activeProjectId") || null; }
+        catch { return null; }
+      })(),
     });
     if (initial) store.activateProject(initial);
     if (fromUrl.sessionId) {
@@ -524,17 +528,22 @@ async function restoreSelectionAfterReady(): Promise<void> {
         if (restored) store.startNewSession(initial, restored);
       }
     }
+    store.reconcileWorkspaceProjectFromSession();
     startUrlSync();
     return;
   }
 
   // Later refresh: keep the current active project when it still exists,
   // otherwise resolve a replacement (or none when the registry emptied).
-  const active = store.getState().activeProjectId;
+  const snapshot = store.getState();
+  const active = store.workspaceProjectId(snapshot);
   if (active && !projects.some((p) => p.id === active)) {
     store.activateProject(projects[0]?.id ?? null);
-  } else if (!active && projects.length > 0) {
-    store.activateProject(projects[0]!.id);
+  } else if (!snapshot.activeProjectId) {
+    store.reconcileWorkspaceProjectFromSession();
+    if (!store.getState().activeProjectId && projects.length > 0) {
+      store.activateProject(projects[0]!.id);
+    }
   }
 }
 
@@ -680,6 +689,9 @@ function startSync(): void {
   document.addEventListener("visibilitychange", () => {
     setSyncForeground(document.visibilityState !== "hidden");
   });
+  window.addEventListener("polyth:refresh-projects", () => {
+    void refreshProjects("manual");
+  });
   // Frame-batched ingestion: streaming and gap-fill bursts fold into at most
   // one store update per paint. The timeout keeps hidden/background windows
   // ingesting when requestAnimationFrame is paused.
@@ -753,11 +765,16 @@ function startSync(): void {
     // Re-pull shared settings: a broadcast may have been missed while the
     // socket was down.
     initSettingsSync();
-    initProjectPresentationSync(store.subscribeStore, () => store.getState().activeProjectId);
+    initProjectPresentationSync(store.subscribeStore, () => store.workspaceProjectId(store.getState()));
     // A reconnect after backend churn is the moment an empty model catalog
     // becomes fetchable again — heal it now instead of waiting out a backoff.
     recheckRuntimeCatalog();
-    const activeSessionId = store.getState().activeSessionId;
+    store.reconcileWorkspaceProjectFromSession();
+    const snapshot = store.getState();
+    if (shouldRefreshProjectsOnSyncOpen(snapshot.projectRegistry, store.workspaceProjectId(snapshot))) {
+      void refreshProjects("reconnect");
+    }
+    const activeSessionId = snapshot.activeSessionId;
     if (activeSessionId) void reconcileClientMutation(activeSessionId);
   });
   void initPluginBridge(sync).then(() => {

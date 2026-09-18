@@ -5,7 +5,7 @@ import {
 } from "react";
 import {
   getState, useStore, activateProject, openWorkspacePane, openWorktreeSessionDialog, setOverlay,
-  overlaySessionProjection, setSidebarOpen, setUiError, startNewSession,
+  overlaySessionProjection, setSidebarOpen, setUiError, startNewSession, workspaceProjectId,
 } from "../store.ts";
 import {
   getSyncStatus, reconnectSync, refreshSessions, removeProject, renameProject, subscribeSyncStatus,
@@ -96,7 +96,7 @@ export default function Sidebar() {
   // never claim there are no projects (UX-ONBOARDING).
   const registry = useStore((s) => s.projectRegistry);
   const projects = registry.projects;
-  const activeProjectId = useStore((s) => s.activeProjectId);
+  const activeProjectId = useStore(workspaceProjectId);
   const activeSessionId = useStore((s) => s.activeSessionId);
   const sessionsRaw = useStore((s) => s.sessions);
   const pendingSends = useStore((s) => s.pendingSends);

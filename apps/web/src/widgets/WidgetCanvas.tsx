@@ -9,7 +9,7 @@ import {
   type PointerEvent,
 } from "react";
 import type { JsonObject, JsonValue, UiSlot } from "@polyth/contracts";
-import { useStore } from "../store.ts";
+import { useStore, workspaceProjectId } from "../store.ts";
 import SlotHost from "../components/slots/SlotHost.ts";
 import ViewErrorBoundary from "../components/ViewErrorBoundary.ts";
 import { useEscape } from "../useEscape.ts";
@@ -489,7 +489,7 @@ export default function WidgetCanvas({
     [widgets],
   );
   const layout = useWidgetLayout();
-  const projectId = useStore((state) => state.activeProjectId);
+  const projectId = useStore(workspaceProjectId);
   const sessionId = useStore((state) => state.activeSessionId);
   const [menuOpen, setMenuOpen] = useState(false);
   useEscape(menuOpen, () => setMenuOpen(false));

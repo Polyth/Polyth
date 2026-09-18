@@ -25,7 +25,7 @@ import {
   type NormRect,
   type ViewportUiMode,
 } from "./browserPreview.ts";
-import { useStore } from "../../../apps/web/src/store.ts";
+import { useStore, workspaceProjectId } from "../../../apps/web/src/store.ts";
 import { usePaneVisible } from "../../../apps/web/src/workspace/paneVisibility.ts";
 import { friendlyError } from "../../../apps/web/src/settings.ts";
 import { getLocale, tr } from "../../../apps/web/src/i18n/index.ts";
@@ -37,6 +37,7 @@ import {
   CloseIcon,
   Dialog,
   EmptyState,
+  ProjectRequiredEmpty,
   ExternalLinkIcon,
   GlobeIcon,
   Icon,
@@ -90,7 +91,7 @@ function isEditableElement(element: BrowserPointedElement): boolean {
 }
 
 export default function PreviewView() {
-  const projectId = useStore((s) => s.activeProjectId);
+  const projectId = useStore(workspaceProjectId);
   const activeSessionId = useStore((s) => s.activeSessionId);
   const visible = usePaneVisible();
 
@@ -1080,7 +1081,12 @@ export default function PreviewView() {
   };
 
   if (!projectId) {
-    return <EmptyState title={tr("previewview.noProjectSelected")} description={tr("previewview.openAProjectToUseTheInternalBrowser")} />;
+    return (
+      <ProjectRequiredEmpty
+        title={tr("previewview.noProjectSelected")}
+        description={tr("previewview.openAProjectToUseTheInternalBrowser")}
+      />
+    );
   }
 
   const browserMode = !!browser && browser.status !== "closed";

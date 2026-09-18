@@ -937,3 +937,48 @@ test("compact git.recent widget covers each status and links files without mutat
   }
   assert.equal(mutations, 0, "the compact summary never mutates the repository");
 });
+
+test("GitView follows the open session project when client project id is missing", async () => {
+  const projectId = "git-session-project";
+  const sessionId = "git-session-chat";
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith("/api/git/status")) {
+      return response({
+        branch: "main", ahead: 0, behind: 0, conflicted: [], untracked: [],
+        staged: [], unstaged: [{ path: "src/app.ts", status: "modified", staged: false }],
+        isRepo: true,
+      });
+    }
+    if (url.startsWith("/api/git/branches")) return response({ current: "main", branches: [{ name: "main", current: true }] });
+    if (url.startsWith("/api/worktrees")) return response([]);
+    if (url.startsWith("/api/git/graph")) return response([]);
+    if (url.startsWith("/api/git/stashes")) return response([]);
+    if (url.startsWith("/api/git/diff")) return response({ path: "src/app.ts", diff: "@@ -1 +1 @@\n-old\n+new" });
+    throw new Error(`Unexpected request: ${url}`);
+  };
+
+  seedSessionCache({
+    id: sessionId,
+    projectId,
+    title: "Open chat",
+    status: "idle",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+  activateProject(null);
+  activateSession(sessionId);
+  assert.equal(getState().activeProjectId, projectId);
+  assert.equal(getState().activeSessionId, sessionId);
+
+  const view = await mounted(createElement(GitView));
+  try {
+    await act(async () => { await delay(40); });
+    assert.doesNotMatch(view.container.textContent ?? "", /No project selected/);
+    assert.ok(view.container.querySelector(".git-file-main"), "session project git status is shown");
+  } finally {
+    await view.unmount();
+    activateSession(null);
+    activateProject(null);
+  }
+});

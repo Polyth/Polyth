@@ -9,6 +9,7 @@ import {
   useActiveModel,
   usePendingSends,
   useStore,
+  workspaceProjectId,
 } from "../../../apps/web/src/store.ts";
 import { friendlyError } from "../../../apps/web/src/settings.ts";
 import { fmtDuration } from "../../../apps/web/src/format.ts";
@@ -105,9 +106,9 @@ export default function PendingChangesBar() {
   const session = overlaySessionProjection(sessionRecord, pendingSends) ?? null;
   const pendingSend = pendingSends[pendingSends.length - 1];
   const models = useStore((state) => state.models);
-  const projectId = useStore((state) => state.activeProjectId);
+  const projectId = useStore(workspaceProjectId);
   const repoRoot = useStore((state) => {
-    const id = state.activeProjectId;
+    const id = workspaceProjectId(state);
     if (!id) return null;
     return state.projectRegistry.projects.find((project) => project.id === id)?.path ?? null;
   });

@@ -24,6 +24,7 @@ import {
   useActiveModel,
   usePendingSends,
   useStore,
+  workspaceProjectId,
 } from "../store.ts";
 import {
   sendMessage,
@@ -210,7 +211,7 @@ function useComposerLocation(session: SessionProjection | null): {
   newSessionTarget: NewSessionTarget;
 } {
   const projects = useStore((state) => state.projectRegistry.projects);
-  const projectId = useStore((state) => state.activeProjectId);
+  const projectId = useStore(workspaceProjectId);
   // Re-read the branch/worktree choices when this project's worktrees change
   // anywhere — the Git UI, an agent, a shell.
   const worktreeTopology = useStore((state) => (projectId && state.worktreeTopology[projectId]) || 0);
@@ -509,7 +510,7 @@ export default function Composer({
   const [newSessionAutoApprove, setNewSessionAutoApprove] = useState(false);
   const [newSessionGoal, setNewSessionGoal] = useState(false);
   const creatingSession = useStore(isActiveSessionSpawning);
-  const activeProjectId = useStore((s) => s.activeProjectId);
+  const activeProjectId = useStore(workspaceProjectId);
   const [draftExecution, setDraftExecution] = useState<DraftExecutionConfig>(() =>
     activeProjectId ? readDraftExecutionConfig(activeProjectId) : emptyDraftExecutionConfig());
   useEffect(() => {
@@ -524,7 +525,7 @@ export default function Composer({
   const globalModels = useStore((s) => s.models);
   const globalAgents = useStore((s) => s.agents);
   const activeProject = useStore((s) =>
-    s.projectRegistry.projects.find((candidate) => candidate.id === s.activeProjectId));
+    s.projectRegistry.projects.find((candidate) => candidate.id === workspaceProjectId(s)));
   const settings = useStore((s) => s.settings);
   const sessionDefaults = useSessionDefaults();
   const sessionRecord = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);

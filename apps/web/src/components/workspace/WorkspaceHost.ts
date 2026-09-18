@@ -11,12 +11,10 @@
 // import this file to test gating, fallback, empty states, and failure
 // isolation through a real React root.
 import { createElement, useSyncExternalStore, type ReactNode } from "react";
-import { closeAllModules, setOverlay, useStore } from "../../store.ts";
-import { refreshProjects } from "../../init.ts";
-import type { ProjectRegistryState } from "../../projectRegistry.ts";
+import { closeAllModules, useStore, workspaceProjectId } from "../../store.ts";
 import ViewErrorBoundary from "../ViewErrorBoundary.ts";
 import ModuleView from "../ui/ModuleView.ts";
-import { buttonClassName } from "../ui/buttonClassName.ts";
+import ProjectEmptyState from "./ProjectEmptyState.ts";
 import {
   listWorkspaceSurfaces,
   resolveWorkspaceSurface,
@@ -57,68 +55,6 @@ export function surfaceResetKey(
   return `${surface.id}#${instanceIdOf(surface)}:${projectId ?? ""}:${sessionId ?? ""}`;
 }
 
-/** Project-registry-aware empty state. Loading and failure never masquerade as
- *  a successful empty project list. */
-function ProjectEmptyState({ registry }: { registry: ProjectRegistryState }): ReactNode {
-  if (registry.status === "loading") {
-    return createElement(
-      "div",
-      { className: "stage" },
-      createElement(
-        "div",
-        { className: "hero hero-project-loading" },
-        createElement("div", { className: "hero-mark" }, "p"),
-        createElement("h2", null, tr("workspace.workspacehost.loadingProjects")),
-        createElement("p", { className: "hero-sub" }, tr("workspace.workspacehost.checkingSavedProjects")),
-        createElement("button", {
-          type: "button",
-          className: buttonClassName({ variant: "primary", className: "hero-open-project" }),
-          disabled: true,
-        }, createElement("span", { className: "ui-btn-label" }, tr("workspace.workspacehost.chooseFolder"))),
-      ),
-    );
-  }
-  if (registry.status === "failed") {
-    return createElement(
-      "div",
-      { className: "stage" },
-      createElement(
-        "div",
-        { className: "hero hero-project-failed" },
-        createElement("div", { className: "hero-mark" }, "p"),
-        createElement("h2", null, tr("workspace.workspacehost.couldNotLoadProjects")),
-        createElement("p", { className: "hero-sub" }, tr("workspace.workspacehost.projectListUnavailable")),
-        createElement("button", {
-          type: "button",
-          className: buttonClassName({ variant: "primary", className: "hero-retry-projects" }),
-          onClick: () => { void refreshProjects("manual"); },
-        }, createElement("span", { className: "ui-btn-label" }, tr("common.retry"))),
-        createElement("p", { className: "hero-status mono", role: "status" }, registry.error),
-      ),
-    );
-  }
-  return createElement(
-    "div",
-    { className: "stage" },
-    createElement(
-      "div",
-      { className: "hero" },
-      createElement("div", { className: "hero-mark" }, "p"),
-      createElement("h2", null, tr("workspace.workspacehost.bringWorkIntoFocus")),
-      createElement(
-        "p",
-        { className: "hero-sub" },
-        tr("workspace.workspacehost.openLocalProject"),
-      ),
-      createElement("button", {
-        type: "button",
-        className: buttonClassName({ variant: "primary", className: "hero-open-project" }),
-        onClick: () => setOverlay("project-picker"),
-      }, createElement("span", { className: "ui-btn-label" }, tr("workspace.workspacehost.chooseFolder"))),
-    ),
-  );
-}
-
 /** Standard session empty state for surfaces that require an open session. */
 function SessionEmptyState({ title }: { title: string }): ReactNode {
   return createElement(
@@ -147,7 +83,7 @@ function NoSurfaceEmptyState(): ReactNode {
 
 export default function WorkspaceHost(): ReactNode {
   useWorkspaceSurfaceVersion();
-  const projectId = useStore((s) => s.activeProjectId);
+  const projectId = useStore(workspaceProjectId);
   const sessionId = useStore((s) => s.activeSessionId);
   const view = useStore((s) => s.activeView);
   const registry = useStore((s) => s.projectRegistry);

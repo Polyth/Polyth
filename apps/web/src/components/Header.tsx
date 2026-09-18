@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type DragEvent } from "react";
 import { formatCombo } from "@polyth/hotkeys";
 import {
-  closeWorkspacePane, getState, setActiveView, useStore,
+  closeWorkspacePane, getState, setActiveView, useStore, workspaceProjectId,
   openSettingsPage, setOverlay, setRailPlugin, setSidebarOpen,
   toggleWorkspacePane,
 } from "../store.ts";
@@ -316,7 +316,7 @@ function UserMenu({ githubUser }: { githubUser: GithubStatusDto["user"] }) {
 
 export default function Header() {
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
-  const project = useStore((s) => s.projectRegistry.projects.find((p) => p.id === s.activeProjectId) ?? null);
+  const project = useStore((s) => s.projectRegistry.projects.find((p) => p.id === workspaceProjectId(s)) ?? null);
   const view = useStore((s) => s.activeView);
   const workspaceMode = useWorkspaceMode();
   const [githubUser, setGithubUser] = useState<GithubStatusDto["user"]>(null);
