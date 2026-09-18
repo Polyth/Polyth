@@ -103,7 +103,7 @@ export const desktopServerPackages = [
   entry("opencode", {"name": "OpenCode", "description": "OpenCode-native roles and runtime configuration surfaces.", "core": true, "enabled": true, "icon": "braces", "hasSettings": false}, opencode),
   entry("permissions", { name: "Permissions", description: "Tool permission review and policy enforcement.", core: true, enabled: true, icon: "shield", hasSettings: false }, permissions),
   entry("plugins", { name: "Plugins", description: "Managed plugin installation and configuration.", core: false, enabled: true, settingsGroup: "Customize", icon: "plugin", hasSettings: true }, plugins),
-  entry("recap", { name: "Recap", description: "Idle session recap and grounded next-step suggestion.", core: false, enabled: false, settingsGroup: "Workspace", icon: "history", hasSettings: true, category: "workspace", projectAffinity: {} }, recap),
+  entry("recap", { name: "Recap", description: "Idle session recap and grounded next-step suggestion.", core: false, enabled: false, settingsGroup: "Workspace", icon: "assist", hasSettings: true, category: "workspace", projectAffinity: {} }, recap),
   entry("schedule", { name: "Schedule", description: "Schedule recurring and one-time agent tasks.", core: false, enabled: true, settingsGroup: "Engineering", icon: "schedule", hasSettings: false }, schedule),
   entry("secure-safe", { name: "Secure Safe", description: "Write-only credential handles and secret policy.", core: false, enabled: true, settingsGroup: "Engineering", icon: "lock", hasSettings: true }, secureSafe),
   entry("session-import", {"name": "Session Import", "description": "Import a native conversation as a canonical Snapshot", "core": false, "enabled": true, "icon": "import", "hasSettings": false}, sessionImport),
