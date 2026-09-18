@@ -17,6 +17,15 @@ Companion docs: `docs/dev/architecture.md` (the system as built),
 
 ---
 
+## Unreleased — recap package extraction and opt-in advanced features
+
+### Changed
+
+- Idle **Recap** is now a real optional package instead of core chat behavior. It owns its server generation lifecycle, settings/read routes, timeline contribution, package settings page, scoped styles, and tests. Package disablement cancels pending timers and prevents in-flight recap work from publishing.
+- A neutral server turn-completion bus replaces the recap-specific core hook, keeping canonical session delivery independent from the optional feature.
+- **Recap, Fusion, Knowledge, Multi-run, Personal Coach, and Walkthrough are disabled by default** for fresh package state. Home Assistant was already opt-in and remains disabled by default. Existing persisted package choices continue to win over defaults.
+- Recap quiet-time data keeps using the existing `assist.json` path for migration compatibility, while package enablement is now the only feature on/off switch.
+
 ## Unreleased — project picker: inline "add project" sources
 
 ### Changed — alternative project sources are disclosed in place, not stacked dialogs
