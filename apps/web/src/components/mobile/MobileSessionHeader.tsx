@@ -27,7 +27,7 @@ import {
   prefetchSessionTail,
   refreshSessions,
 } from "../../init.ts";
-import { setRailPlugin, setSidebarOpen, startNewSession, useActiveModel, useStore } from "../../store.ts";
+import { setRailPlugin, setSidebarOpen, startNewSession, useActiveModel, useStore, workspaceProjectId } from "../../store.ts";
 import { useResolvedCapabilities } from "../../capabilities.ts";
 import {
   hideMobileWorkspaceHome,
@@ -261,7 +261,7 @@ export function Tools({ onClose }: { onClose: () => void }) {
 
 /** Phone navigation is intentionally a small overlay, not a second application header. */
 export default function MobileSessionHeader() {
-  const projectId = useStore((state) => state.activeProjectId);
+  const projectId = useStore(workspaceProjectId);
   const sidebarOpen = useStore((state) => state.sidebarOpen);
   const events = useStore((state) => state.events);
   const sessions = useStore((state) => state.sessions);
