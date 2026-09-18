@@ -121,6 +121,12 @@ export type ContributionInvocation =
   | ResourceInvocation
   | UiContributionInvocation;
 
+type StripInvocationLease<T> = T extends unknown
+  ? Omit<T, "invocationId" | "lease" | "expiresAt" | "spaceId">
+  : never;
+
+export type ContributionInvocationDraft = StripInvocationLease<ContributionInvocation>;
+
 export interface ContributionResult {
   resources?: ExternalResource[];
   context?: StructuredContext[];
@@ -140,9 +146,9 @@ export interface ContributionCompletion {
   error?: { message: string };
 }
 
-const invalid = (message: string): never => {
+function invalid(message: string): never {
   throw Object.assign(new Error(message), { code: "INVALID_REQUEST" });
-};
+}
 
 const asRecord = (value: unknown, message: string): Record<string, unknown> => {
   if (!value || typeof value !== "object" || Array.isArray(value)) invalid(message);
