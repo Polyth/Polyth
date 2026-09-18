@@ -83,7 +83,7 @@ export default function QueuedMessageList({
     && (!item.hiddenUserMessage || item.heldForReview));
   const resumable = visibleItems.find((item) => !item.heldForReview) ?? null;
   const queuePaused = resumable !== null
-    && queuePausedAfterUserInterrupt(events ?? [], items);
+    && queuePausedAfterUserInterrupt(events ?? [], visibleItems);
   if (visibleItems.length === 0) return null;
 
   const persistOrder = async (next: QueueItemDto[], movedId: string) => {
