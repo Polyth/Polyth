@@ -80,10 +80,17 @@ test("persisted metadata paints synchronously across restart while stale data re
   assert.equal(saved, null, "auth/settings invalidation removes persisted presentation data");
 });
 
-test("native catalogs are flat and OpenCode hides disconnected providers", () => {
+test("large native catalogs use the structured picker and OpenCode hides disconnected providers", () => {
   const codex = { harnessId: "codex", providerID: "openai", modelID: "luna", name: "Luna" };
-  assert.equal(flatModelCatalog([codex]), true);
-  assert.equal(flatModelCatalog([{ ...codex, harnessId: "claude" }]), true);
+  const codexModels = (count: number) => Array.from({ length: count }, (_, index) => ({
+    ...codex,
+    modelID: `model-${index + 1}`,
+    name: `Model ${index + 1}`,
+  }));
+
+  assert.equal(flatModelCatalog(codexModels(10)), true, "ten native models keep the compact picker");
+  assert.equal(flatModelCatalog(codexModels(11)), false, "eleven native models get favorites, recents, and provider accordions");
+  assert.equal(flatModelCatalog(codexModels(11).map((model) => ({ ...model, harnessId: "claude" }))), false);
   assert.equal(flatModelCatalog([{ ...codex, harnessId: "opencode" }]), false);
   assert.equal(pickerModelMatches(codex, { providerID: "openai", modelID: "luna" }), true);
   assert.equal(pickerModelMatches(codex, { harnessId: "opencode", providerID: "openai", modelID: "luna" }), false);
