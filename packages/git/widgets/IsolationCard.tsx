@@ -73,8 +73,8 @@ export function IsolationCard() {
   );
   const isolation = isolationOf(session);
   const [status, setStatus] = useState<IsolationStatusDto | null>(null);
-  const [busy, setBusy] = useState<"merge" | "resolve" | "recover" | "discard" | "abandon" | null>(null);
-  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  const [busy, setBusy] = useState<"merge" | "resolve" | "recover" | "delete" | "abandon" | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const statusRequest = useRef(0);
 
   const refresh = useCallback(async () => {
@@ -97,7 +97,7 @@ export function IsolationCard() {
   }, [refresh]);
 
   useEffect(() => {
-    setConfirmingDiscard(false);
+    setConfirmingDelete(false);
   }, [sessionId]);
 
   if (!sessionId || !session || !isolation) {
@@ -125,16 +125,16 @@ export function IsolationCard() {
     canReview: fallbackActions.canReview,
     canMerge: fallbackActions.canMerge,
     canResolve: fallbackActions.canResolve,
-    canDiscard: fallbackActions.canDiscard,
     canRecover: fallbackActions.needsRecovery,
     canAbandon: false,
   } : undefined);
   const ready = actions?.canMerge === true;
+  const canDelete = status !== null && !working && !recovering && !ownershipUnverified;
   if (!conflict && !unavailable && !dirtyBlocked && !destinationUnavailable && !ready && !recovering) return null;
 
   const warn = conflict || unavailable || dirtyBlocked || destinationUnavailable;
 
-  const run = async (kind: "merge" | "resolve" | "recover" | "discard" | "abandon", action: () => Promise<void>) => {
+  const run = async (kind: "merge" | "resolve" | "recover" | "abandon", action: () => Promise<void>) => {
     setBusy(kind);
     try {
       await action();
@@ -147,9 +147,9 @@ export function IsolationCard() {
     }
   };
 
-  const confirmDiscard = async () => {
-    setConfirmingDiscard(false);
-    setBusy("discard");
+  const confirmDelete = async () => {
+    setConfirmingDelete(false);
+    setBusy("delete");
     try {
       const projectId = session.projectId;
       await api.deleteSession(sessionId);
@@ -225,14 +225,14 @@ export function IsolationCard() {
   // Destructive endings live behind the overflow whenever a better action is
   // on the card. They stay in the open only when they are the only way out.
   const overflow: MenuEntry[] = [];
-  if (actions?.canDiscard === true && !unavailable && !recovering) {
+  if (canDelete && !unavailable) {
     overflow.push({
-      id: "discard",
+      id: "delete",
       label: tr("sidebar.sessionlist.deleteSession"),
       icon: DeleteIcon,
       danger: true,
       disabled: busy !== null || working,
-      onSelect: () => setConfirmingDiscard(true),
+      onSelect: () => setConfirmingDelete(true),
     });
   }
   if (recovering && actions?.canAbandon === true) {
@@ -306,14 +306,14 @@ export function IsolationCard() {
               {conflict ? tr("isolation.reviewConflicts") : tr("isolation.reviewChanges")}
             </Button>
           ) : null}
-          {unavailable && actions?.canDiscard === true && (
+          {unavailable && canDelete && (
             <Button
               size="sm"
               variant="danger"
               className="isolation-card-primary"
               disabled={busy !== null || working}
-              busy={busy === "discard"}
-              onClick={() => setConfirmingDiscard(true)}
+              busy={busy === "delete"}
+              onClick={() => setConfirmingDelete(true)}
             >
               {tr("sidebar.sessionlist.deleteSession")}
             </Button>
@@ -363,19 +363,19 @@ export function IsolationCard() {
           )}
         </div>
       </section>
-      {confirmingDiscard && (
+      {confirmingDelete && (
         <Dialog
           title={tr("sidebar.sessionlist.deleteSession")}
-          onClose={() => setConfirmingDiscard(false)}
+          onClose={() => setConfirmingDelete(false)}
           footer={(
             <>
-              <Button size="sm" onClick={() => setConfirmingDiscard(false)}>{tr("common.cancel")}</Button>
+              <Button size="sm" onClick={() => setConfirmingDelete(false)}>{tr("common.cancel")}</Button>
               <Button
                 size="sm"
                 variant="danger"
                 disabled={busy !== null}
-                busy={busy === "discard"}
-                onClick={() => { void confirmDiscard(); }}
+                busy={busy === "delete"}
+                onClick={() => { void confirmDelete(); }}
               >
                 {tr("common.delete")}
               </Button>
