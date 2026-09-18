@@ -13,7 +13,8 @@ test("desktop bundles every discovered server package with its manifest descript
       polyth?: { serverEntry?: string; descriptor?: Record<string, unknown> };
     };
     if (!manifest.polyth?.serverEntry || !manifest.polyth.descriptor) return null;
-    return { id, descriptor: { id, ...manifest.polyth.descriptor } };
+    const { category: _category, projectAffinity: _projectAffinity, ...runtimeDescriptor } = manifest.polyth.descriptor;
+    return { id, descriptor: { id, ...runtimeDescriptor } };
   }));
 
   assert.deepEqual(
