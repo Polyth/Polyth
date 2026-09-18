@@ -17,8 +17,9 @@ export const BINANCE_CRYPTO_ASSETS = [
   { symbol: "BCH/USDT", pair: "BCHUSDT", name: "Bitcoin Cash" },
 ] as const;
 
-const assetBySymbol = new Map(BINANCE_CRYPTO_ASSETS.map((asset) => [asset.symbol, asset]));
-const assetByPair = new Map(BINANCE_CRYPTO_ASSETS.map((asset) => [asset.pair, asset]));
+type BinanceAsset = (typeof BINANCE_CRYPTO_ASSETS)[number];
+const assetBySymbol = new Map<string, BinanceAsset>(BINANCE_CRYPTO_ASSETS.map((asset) => [asset.symbol, asset]));
+const assetByPair = new Map<string, BinanceAsset>(BINANCE_CRYPTO_ASSETS.map((asset) => [asset.pair, asset]));
 const RANGE: Record<MarketRange, { interval: string; limit: number }> = {
   "1D": { interval: "5m", limit: 288 },
   "5D": { interval: "15m", limit: 480 },
@@ -35,15 +36,16 @@ export interface BinanceProviderOptions {
   now?: () => number;
 }
 
-const miss = (message: string): never => {
+function miss(message: string): never {
   throw Object.assign(new Error(message), { code: "not-found" });
-};
+}
 
 const assetFor = (symbol: string) => assetBySymbol.get(symbol) ?? miss(`binance: unsupported crypto symbol ${symbol}`);
 
 function quoteFromTicker(raw: unknown, fallbackAsOf: number): MarketQuote | undefined {
   const row = record(raw);
-  const pair = typeof row?.symbol === "string" ? row.symbol.toUpperCase() : "";
+  if (!row) return undefined;
+  const pair = typeof row.symbol === "string" ? row.symbol.toUpperCase() : "";
   const asset = assetByPair.get(pair);
   const price = numeric(row?.lastPrice);
   if (!asset || price === undefined) return undefined;
