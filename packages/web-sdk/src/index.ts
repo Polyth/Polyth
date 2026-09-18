@@ -103,6 +103,10 @@ export interface SurfaceContext {
 
 export interface SurfaceComponentProps {
   active?: boolean;
+  /** Canonical shell-owned workspace scope. Package surfaces must prefer these
+   * ids over importing or reconstructing navigation state themselves. */
+  projectId?: string | null;
+  sessionId?: string | null;
 }
 
 export type WorkspacePaneDock = "side" | "bottom";
