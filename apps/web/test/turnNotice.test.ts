@@ -2,14 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { transientTurnNoticeKey } from "../src/turnNotice.ts";
 
-test("ordinary failed and aborted turn notices are keyed to their session and turn", () => {
+test("only failed turns get a transient notice key", () => {
   assert.equal(
     transientTurnNoticeKey("session-a", { turnId: "turn-1", status: "failed" }),
     "session-a:turn-1:failed",
   );
   assert.equal(
     transientTurnNoticeKey("session-a", { turnId: "turn-2", status: "aborted" }),
-    "session-a:turn-2:aborted",
+    null,
   );
   assert.equal(
     transientTurnNoticeKey("session-a", { turnId: "turn-3", status: "stopped" }),
