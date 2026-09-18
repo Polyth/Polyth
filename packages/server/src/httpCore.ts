@@ -760,10 +760,11 @@ async function dispatchHttp(
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/fork$/);
       if (m && method === "POST") {
+        const sessionId = m[1]!;
         const b = await loadBody();
-        const forked = await space().sessions.fork(m[1]!, b.atSeq === undefined ? undefined : Number(b.atSeq));
+        const forked = await space().sessions.fork(sessionId, b.atSeq === undefined ? undefined : Number(b.atSeq));
         await recordNotificationRecipient(deps.notificationRecipients
-          ? () => deps.notificationRecipients!.forked(m[1]!, forked.id, space().ctx)
+          ? () => deps.notificationRecipients!.forked(sessionId, forked.id, space().ctx)
           : undefined);
         return json(res, 200, forked);
       }
