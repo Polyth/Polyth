@@ -15,7 +15,7 @@
       "core": false,
       "enabled": false,
       "settingsGroup": "Workspace",
-      "icon": "history",
+      "icon": "assist",
       "hasSettings": true,
       "category": "workspace",
       "projectAffinity": {}
