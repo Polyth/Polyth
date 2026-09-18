@@ -1076,6 +1076,10 @@ export interface UserTurnInput {
   command?: { id: string; args?: string };
   /** Keep this model-visible prompt out of ordinary user chat bubbles. */
   githubConflictResolution?: boolean;
+  /** Model-visible retry/regeneration of an already-visible prompt. The
+   * canonical event remains durable for runtime continuity, but chat/prompt
+   * recall must not render it as a second user submission. */
+  hiddenUserMessage?: boolean;
   /** Accept OpenCode's generated title for this first prompt when the session
    *  still has a placeholder title. The client owns the user preference; the
    *  server owns the append + projection update. */
@@ -1097,7 +1101,7 @@ export interface UserTurnInput {
    *  conflated (UX-COMPOSER-DISC). */
   agentProfileId?: string | null;
   /** Set by the server's rate-limit auto-resume when it re-sends the last user
-   *  message. Tags the persisted user/message so the UI can mark it. */
+   * message. Auto-resumes are hidden repeats in ordinary chat surfaces. */
   autoResume?: boolean;
 }
 
@@ -4220,11 +4224,13 @@ export interface QueueItemDto {
   attachments?: AttachmentRef[];
   /** Preserved so a deferred native command cannot degrade into prompt text. */
   command?: { id: string; args?: string };
+  /** Preserve retry/regeneration presentation semantics through deferred delivery. */
+  hiddenUserMessage?: boolean;
   /** A fenced prior-epoch admission is a draft for explicit review, never dispatchable. */
   heldForReview?: boolean;
 }
 
-export interface QueueEnqueuedData { queueId: string; text: string; delivery: string }
+export interface QueueEnqueuedData { queueId: string; text: string; delivery: string; hiddenUserMessage?: boolean }
 export interface QueueDispatchedData { queueId: string }
 export interface QueueEditedData { queueId: string; text: string }
 export interface QueueReorderedData { ids: string[] }
