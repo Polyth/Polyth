@@ -30,9 +30,9 @@ export interface NasdaqProviderOptions {
 }
 
 const date = (value: Date): string => value.toISOString().slice(0, 10);
-const miss = (message: string): never => {
+function miss(message: string): never {
   throw Object.assign(new Error(message), { code: "not-found" });
-};
+}
 const requireSupportedSymbol = (symbol: string): void => {
   if (!NASDAQ_SYMBOL.test(symbol)) miss(`nasdaq: unsupported symbol ${symbol}`);
 };
