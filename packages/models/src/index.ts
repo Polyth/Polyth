@@ -1,6 +1,6 @@
 // Model preferences: favorites, provider/model sort, search. Pure logic —
-// the web app persists the serialized form under localStorage "polyth.modelPrefs"
-// and feeds it to the picker + Settings Providers/Models page.
+// the web layer keeps a synchronous account-local cache while the canonical
+// preference object is mirrored through the server-backed client settings blob.
 
 export type ModelSort = "provider" | "name" | "recent";
 
