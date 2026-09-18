@@ -18,7 +18,7 @@ import {
 } from "../settings/registry.ts";
 import {
   AboutPage, AppearancePage, BehaviorPage, ChatPage, GeneralPage,
-  NotificationsPage, ProfilesPage, ProjectsPage,
+  NotificationsPage, ProjectsPage,
 } from "./settings/pages.tsx";
 import ViewErrorBoundary from "./ViewErrorBoundary.ts";
 import SessionsPage from "./settings/SessionsPage.tsx";
@@ -84,7 +84,6 @@ const BUILTIN: PageDef[] = [
   { id: "notifications", label: tr("settingsview.notifications"), group: "Workspace", render: () => <NotificationsPage /> },
   { id: "sessions", label: tr("settingsview.sessions"), group: "Workspace", render: () => <SessionsPage /> },
   { id: "projects", label: tr("settingsview.projects"), group: "Engineering", render: () => <ProjectsPage /> },
-  { id: "profiles", label: "Profiles", group: "Engineering", render: () => <ProfilesPage /> },
   { id: "behavior", label: tr("settingsview.behavior"), group: "Engineering", render: () => <BehaviorPage /> },
   { id: "packages", label: tr("settingsview.packages"), group: "Customize", icon: "package", render: () => <PackagesPage /> },
   { id: "users", label: tr("settingsview.users"), group: "System", icon: "user", render: () => <UsersPage /> },
@@ -107,7 +106,6 @@ const SETTINGS_ICON_BY_PAGE: Readonly<Record<string, string>> = {
   sessions: "layers",
   shortcuts: "keyboard",
   projects: "files",
-  profiles: "user",
   users: "user",
   behavior: "brain",
   packages: "package",
