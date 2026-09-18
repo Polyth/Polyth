@@ -6,6 +6,7 @@ import type { RouteHandler } from "../http.ts";
 import { isFresh, type AssistSettingsService } from "../assist.ts";
 
 export function assistRoutes(deps: {
+  enabled?: () => boolean;
   settings: AssistSettingsService;
   projection(sessionId: string): Promise<SessionProjection | undefined>;
   latestSeq(sessionId: string): Promise<number>;
@@ -22,10 +23,12 @@ export function assistRoutes(deps: {
     const { path, method, json } = rc;
 
     if (path === "/api/settings/assist" && method === "GET") {
+      if (deps.enabled && !deps.enabled()) return false;
       json(200, deps.settings.get());
       return true;
     }
     if (path === "/api/settings/assist" && method === "PUT") {
+      if (deps.enabled && !deps.enabled()) return false;
       json(200, deps.settings.put(await rc.body()));
       return true;
     }
@@ -51,6 +54,7 @@ export function assistRoutes(deps: {
 
     m = path.match(/^\/api\/sessions\/([^/]+)\/assist$/);
     if (m && method === "GET") {
+      if (deps.enabled && !deps.enabled()) return false;
       const sessionId = decodeURIComponent(m[1]!);
       const proj = await deps.projection(sessionId);
       if (!proj) { json(404, { error: "not-found", message: "unknown session" }); return true; }
