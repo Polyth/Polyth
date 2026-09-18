@@ -44,6 +44,9 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      - name: Validate Usage TypeScript
+        if: matrix.lane == 'legacy'
+        run: npx tsc --noEmit -p packages/usage/tsconfig.json
       - run: npm run build:supervisor
       - name: Install isolated OpenCode release
         env:
