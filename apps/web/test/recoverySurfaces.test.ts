@@ -73,7 +73,7 @@ test("recovery surfaces preserve drafts and never auto-send a failed turn", asyn
   assert.doesNotMatch(timeline, /applyComposerSeed\(sessionId, `turn-failed:\$\{turn\.turnId\}`/);
   assert.match(timeline, /sendMessage\(lastUser\.raw \?\? lastUser\.text[\s\S]{0,300}hiddenUserMessage: true/);
   assert.match(timeline, /eventSeq: lastUserMessage\.eventSeq/);
-  assert.match(responseFooter, /api\.rewind\(session\.id, regeneratePrompt\.eventSeq\)[\s\S]{0,500}sendMessage\(regeneratePrompt\.text/);
+  assert.match(responseFooter, /api\.rewind\(session\.id, regeneratePrompt\.eventSeq\)[\s\S]{0,400}\.then\(\(marker\) => \{[\s\S]{0,300}applyEvent\(marker\);[\s\S]{0,300}return sendMessage\(regeneratePrompt\.text/);
   assert.doesNotMatch(responseFooter, /sendMessage\(regeneratePrompt\.text[\s\S]{0,300}hiddenUserMessage: true/);
   assert.doesNotMatch(responseFooter, /requestComposerReplace\(regeneratePrompt/);
   assert.match(banner, /runtimeRecovery\.technicalDetails/);

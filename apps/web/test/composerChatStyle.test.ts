@@ -45,7 +45,7 @@ test("the transcript remains the bounded vertical scroll root", () => {
   assert.match(timeline, /overflow-y:\s*auto/);
   assert.match(timeline, /overscroll-behavior-y:\s*contain/);
   assert.match(timeline, /touch-action:\s*pan-y/);
-  assert.match(timeline, /-webkit-overflow-scrolling:\s*touch/);
+  assert.doesNotMatch(timeline, /-webkit-overflow-scrolling/);
 });
 
 test("new timeline surfaces animate without moving the measured row", () => {
@@ -349,4 +349,21 @@ test("mobile transcript keeps native touch ownership and hidden replays release 
   assert.match(timeline, /onTouchStartCapture=\{\(event\) => \{\s*touchActive\.current = true;/);
   assert.match(timeline, /onTouchEndCapture=\{finishTouchScroll\}/);
   assert.match(timeline, /const becameHidden = !previous\.hidden && model\.lastUserMessageHidden;[\s\S]*turnSheetPromptId\.current = null;[\s\S]*setTurnSheetPadding\(0\);/);
+});
+
+
+test("timeline vertical runway is represented by flex spacers instead of scroll-root block padding", () => {
+  const css = read("../src/styles.css");
+
+  assert.match(css, /\.timeline::before,\s*\n\.timeline::after\s*\{[^}]*content:\s*"";[^}]*flex:\s*none;/s);
+  assert.match(css, /\.timeline::before\s*\{[^}]*flex-basis:\s*var\(--timeline-pad-top\)/s);
+  assert.match(css, /\.timeline::after\s*\{[^}]*flex-basis:\s*var\(--timeline-pad-bottom\)/s);
+  assert.match(css, /--timeline-pad-bottom:\s*calc\(var\(--conversation-message-gap\) \+ var\(--conversation-group-gap\) \+ var\(--timeline-turn-sheet-space, 0px\)\)/);
+
+  const rules = [...css.matchAll(/([^{}]*\.timeline(?![-\\w])[^{}]*)\{([^{}]*)\}/g)];
+  assert.ok(rules.length > 0);
+  for (const [, selector, body] of rules) {
+    assert.doesNotMatch(body, /padding-(?:block|top|bottom)\s*:/, String(selector));
+    assert.doesNotMatch(body, /(?:^|;)\s*padding\s*:/, String(selector));
+  }
 });
