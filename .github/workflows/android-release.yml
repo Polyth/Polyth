@@ -16,9 +16,6 @@ on:
         options:
           - internal
           - production
-  push:
-    tags:
-      - "v*"
 
 concurrency:
   group: android-release-${{ github.workflow }}-${{ github.ref }}
