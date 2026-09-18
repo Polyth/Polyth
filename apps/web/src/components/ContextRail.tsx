@@ -191,6 +191,7 @@ export default function ContextRail() {
   const compact = shellMode !== "wide";
   const { rail, surfaces, open, ctx } = useRailSurfaceModel();
   const projectId = useStore(workspaceProjectId);
+  const sessionId = useStore((s) => s.activeSessionId);
   const paneMode = useStore((s) => s.paneMode);
   const panePreviousMode = useStore((s) => s.panePreviousMode);
   const resolved = useResolvedCapabilities();
@@ -936,7 +937,7 @@ export default function ContextRail() {
                 <PackageWindowContext.Provider value={s.id}>
                   <PaneVisibilityContext.Provider value={active}>
                     <ViewErrorBoundary inline resetKey={`${s.id}:${projectId ?? ""}`}>
-                      <s.component active={active} />
+                      <s.component active={active} projectId={projectId} sessionId={sessionId} />
                     </ViewErrorBoundary>
                   </PaneVisibilityContext.Provider>
                 </PackageWindowContext.Provider>
