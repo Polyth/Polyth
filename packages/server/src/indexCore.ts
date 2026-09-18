@@ -2331,9 +2331,16 @@ export async function boot(opts: BootOptions = {}) {
   ): Promise<string> => {
     const proj = await store.projection(sessionId);
     const project = proj ? await projects.get(proj.projectId) : null;
+    // Background idle assist has no request actor, so recover the immutable
+    // creator account stored for this session. Otherwise Settings → Small
+    // Model was silently ignored and non-OpenCode sessions often had no usable
+    // utility model at all.
+    const ownerUserId = userId ?? (proj?.spaceId
+      ? (await notifications.recipientForSession(sessionId, { spaceId: proj.spaceId }))?.userId
+      : undefined);
     // Prefer the configured small model, then the session's own known-good
     // model. Direct provider transport is tried first with a session fallback.
-    const route = smallModelExecutionRoute(resolveSmallModel(userId), proj);
+    const route = smallModelExecutionRoute(resolveSmallModel(ownerUserId), proj);
     const rt = await runtimes.forProject(proj?.projectId ?? "__default__", project?.path, route.harnessId);
     const { text } = await smallModels.complete(rt, {
       cwd: project?.path ?? process.cwd(),
@@ -2341,6 +2348,7 @@ export async function boot(opts: BootOptions = {}) {
       ...(route.model ? { model: route.model } : {}),
       maxOutputTokens,
       timeoutMs: 90_000,
+      purpose: "assist",
     });
     return text;
   };
