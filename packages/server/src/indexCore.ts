@@ -1551,11 +1551,13 @@ export async function boot(opts: BootOptions = {}) {
   // lists, so they are invalidated as one: a stale half is what makes "only
   // some models show up" survive until a restart.
   let invalidateModelCatalog = (): void => {};
+  let filterCatalogModels = (models: import("@polyth/contracts").ModelDescriptor[]) => models;
   openCodePool.onRestart?.(async () => { harnesses.invalidate({ harnessId: "opencode" }); invalidateModelCatalog(); });
   const runtimeCatalog = createRuntimeCatalog({
     projects,
     runtimes,
     onModelsInvalidated: () => harnesses.invalidate({ harnessId: "opencode" }),
+    filterModels: (models) => filterCatalogModels(models),
   });
   invalidateModelCatalog = () => runtimeCatalog.invalidateModels();
   services.provide(serverServiceKey<{
@@ -1687,6 +1689,8 @@ export async function boot(opts: BootOptions = {}) {
   // provider blacklists), then mirrors every toggle back to it.
   const visibility = createModelVisibilityService({ file: `${dataDir}/model-visibility.json`, applier: configApplier });
   await visibility.seed();
+  filterCatalogModels = (models) => visibility.filter(models);
+  runtimeCatalog.invalidateModels();
 
   // An empty Polyth MCP store adopts whatever OpenCode already has configured,
   // so the settings page reflects reality instead of an empty list. Adoption is
