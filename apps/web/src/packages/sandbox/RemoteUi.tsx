@@ -152,7 +152,7 @@ function RemoteNode({ node, onAction }: { node: RemoteUiNode; onAction: (action:
       );
     case "progress": {
       const max = node.max && node.max > 0 ? node.max : 1;
-      return <Progress value={(node.progress ?? 0) / max} label={node.label ?? node.title ?? tr("packages.plugins.loading")} />;
+      return <Progress value={(node.progress ?? 0) / max} label={node.label ?? node.title ?? tr("common.loading")} />;
     }
     case "spinner":
       return <Spinner label={node.label ?? node.text} />;
