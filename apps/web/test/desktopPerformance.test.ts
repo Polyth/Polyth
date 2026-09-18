@@ -33,3 +33,27 @@ test("desktop session hydration batches metadata and history with stale-while-re
   assert.match(openSession, /useCachedView/);
   assert.match(openSession, /generation !== openSessionGeneration/);
 });
+
+
+test("runtime catalog boot reuses the daily persisted aggregate instead of refetching on reload", async () => {
+  const [init, runtimeCatalog] = await Promise.all([
+    readFile(new URL("../src/init.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../../packages/models/widgets/runtimeCatalog.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(init, /const cachedModels = peekPersistedRuntimeModels\(projectId\)/);
+  assert.match(init, /cachedModels !== undefined\) store\.setModels\(cachedModels\)[\s\S]*else void refreshModels\(projectId\)/);
+  assert.match(init, /const cachedAgents = peekPersistedRuntimeAgents\(projectId\)/);
+  assert.match(init, /runtimeCatalogPolicy = "project"/);
+  assert.match(runtimeCatalog, /polyth\.runtimeGlobalModels\.v1/);
+  assert.match(runtimeCatalog, /polyth\.runtimeGlobalAgents\.v1/);
+  assert.match(runtimeCatalog, /if \(models\.length > 0\) persistedGlobalModels\.write/);
+  assert.match(runtimeCatalog, /persistedGlobalModels\.clear\(\)/);
+  assert.match(runtimeCatalog, /persistedGlobalAgents\.clear\(\)/);
+  assert.match(runtimeCatalog, /persistedWarmScopes\.clear\(\)/);
+  assert.match(init, /subscribeRuntimeCatalogInvalidations\(\(\) => \{/);
+  assert.match(init, /runtimeCatalogGeneration\+\+/);
+  assert.match(init, /modelRetryRequested = true;[\s\S]*modelFetchAbort\?\.abort\(\)/);
+  assert.match(init, /requestGeneration !== runtimeCatalogGeneration/);
+  assert.match(init, /agentsRetryRequested = true/);
+});

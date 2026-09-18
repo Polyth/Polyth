@@ -5,8 +5,8 @@ export interface CatalogCacheStorage {
 }
 
 /** Bounded metadata reuse. Identity must include the route's
- * account/Space/project/runtime scope. Optional storage is presentation-only:
- * callers still decide whether a stale value is safe to paint. */
+ * account/Space/project/runtime scope. Optional storage keeps metadata across
+ * page restarts; callers still decide whether fresh or stale data is safe. */
 export function createCatalogCache<T>(
   ttlMs = 30_000,
   limit = 64,
@@ -43,6 +43,18 @@ export function createCatalogCache<T>(
     },
     peekStale(key: string): T | undefined {
       return entries.get(key)?.value;
+    },
+    someFresh(predicate?: (key: string, value: T) => boolean): boolean {
+      for (const [key, entry] of entries) {
+        if (entry.value !== undefined && entry.expiresAt > now()
+          && (!predicate || predicate(key, entry.value))) return true;
+      }
+      return false;
+    },
+    expiresIn(key: string): number | undefined {
+      const entry = entries.get(key);
+      if (entry?.value === undefined) return undefined;
+      return Math.max(0, entry.expiresAt - now());
     },
     write(key: string, value: T): T {
       entries.delete(key);

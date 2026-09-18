@@ -30,6 +30,13 @@ import { hydrateLocalMutationIntent, reconcileLocalMutationIntent, submitDirectP
 import { isNativeMobile, isPolythLinkLoopbackOrigin, returnToMobileConnectionHub } from "@polyth/mobile/runtime";
 import { scopedDraftCacheKey } from "./draftRecord.ts";
 import { initProjectPresentationSync } from "./projectPresentationSync.ts";
+import {
+  peekPersistedRuntimeAgents,
+  peekPersistedRuntimeModels,
+  rememberPersistedRuntimeAgents,
+  rememberPersistedRuntimeModels,
+  subscribeRuntimeCatalogInvalidations,
+} from "@polyth/models/runtime-catalog";
 
 let sync: SyncClient | null = null;
 let syncStatus: SyncStatus = "disconnected";
@@ -37,6 +44,8 @@ const syncStatusListeners = new Set<() => void>();
 let lastProject: string | null | undefined;
 let branchFetchedFor: string | null = null;
 let runtimeCatalogHydrated = false;
+let runtimeCatalogInvalidationSubscribed = false;
+let runtimeCatalogGeneration = 0;
 let runtimeCatalogPolicy: "browser" | "pending" | "project" | "interaction" = "browser";
 let nativeProxyProbe: Promise<void> | null = null;
 let nativeProxyProbeFailures = 0;
@@ -92,9 +101,16 @@ function handleProjectionUpdate(incoming: SessionProjection): void {
 
 function hydrateRuntimeCatalog(): void {
   if (runtimeCatalogHydrated) return;
+  const projectId = store.getState().activeProjectId;
+  if (!projectId) return;
   runtimeCatalogHydrated = true;
-  void refreshModels();
-  void refreshAgents();
+
+  const cachedModels = peekPersistedRuntimeModels(projectId);
+  const cachedAgents = peekPersistedRuntimeAgents(projectId);
+  if (cachedModels !== undefined) store.setModels(cachedModels);
+  else void refreshModels(projectId);
+  if (cachedAgents !== undefined) store.setAgents(cachedAgents);
+  else void refreshAgents(projectId);
 }
 
 function deferRuntimeCatalogUntilInteraction(): void {
@@ -349,6 +365,21 @@ export function init(): Promise<void> {
   // Project presentation records are server-backed, while the existing local
   // records remain the synchronous/offline rendering path.
   initProjectPresentationSync(store.subscribeStore, () => store.getState().activeProjectId);
+  if (!runtimeCatalogInvalidationSubscribed) {
+    runtimeCatalogInvalidationSubscribed = true;
+    subscribeRuntimeCatalogInvalidations(() => {
+      runtimeCatalogGeneration++;
+      if (!runtimeCatalogHydrated) return;
+      if (modelsFetchInFlight) {
+        modelRetryRequested = true;
+        modelFetchAbort?.abort();
+      } else {
+        void refreshModels();
+      }
+      if (agentsFetchInFlight) agentsRetryRequested = true;
+      else void refreshAgents();
+    });
+  }
   // UX-ONBOARDING boot: project, model, and agent hydration launch
   // independently and publish as soon as each settles. Awaiting a combined
   // Promise.all/allSettled before publishing any result is forbidden — a slow
@@ -371,7 +402,10 @@ export function init(): Promise<void> {
         if (store.getState().activeProjectId) hydrateRuntimeCatalog();
       });
   } else {
-    hydrateRuntimeCatalog();
+    // Browser boot waits for the restored project identity so the persisted
+    // aggregate catalog is Space-safe and can be reused without an HTTP probe.
+    runtimeCatalogPolicy = "project";
+    if (store.getState().activeProjectId) hydrateRuntimeCatalog();
   }
   startSync();
   // Shared client preferences: pull the server copy, then mirror local edits
@@ -553,16 +587,22 @@ export function recheckRuntimeCatalog(): void {
 
 let modelsFetchInFlight = false;
 
-async function refreshModels(): Promise<void> {
-  if (modelsFetchInFlight) return;
+async function refreshModels(projectId = store.getState().activeProjectId ?? undefined): Promise<void> {
+  if (!projectId || modelsFetchInFlight) return;
   modelsFetchInFlight = true;
+  const requestGeneration = runtimeCatalogGeneration;
   const controller = new AbortController();
   modelFetchAbort = controller;
   const timeout = setTimeout(() => controller.abort(), MODEL_REQUEST_TIMEOUT_MS);
   try {
     const models = await api.listModels(controller.signal);
+    if (requestGeneration !== runtimeCatalogGeneration) {
+      modelRetryRequested = true;
+      return;
+    }
     store.setModels(models);
     if (models.length > 0) {
+      rememberPersistedRuntimeModels(projectId, models);
       if (modelRetryTimer !== undefined) clearTimeout(modelRetryTimer);
       modelRetryTimer = undefined;
       modelRetryDelay = MODEL_RETRY_BASE_MS;
@@ -601,11 +641,29 @@ async function refreshRuntimeDiagnostics(): Promise<void> {
   }
 }
 
-async function refreshAgents(): Promise<void> {
+let agentsFetchInFlight = false;
+let agentsRetryRequested = false;
+
+async function refreshAgents(projectId = store.getState().activeProjectId ?? undefined): Promise<void> {
+  if (!projectId || agentsFetchInFlight) return;
+  agentsFetchInFlight = true;
+  const requestGeneration = runtimeCatalogGeneration;
   try {
-    store.setAgents(await api.listAgents());
+    const agents = await api.listAgents();
+    if (requestGeneration !== runtimeCatalogGeneration) {
+      agentsRetryRequested = true;
+      return;
+    }
+    store.setAgents(agents);
+    rememberPersistedRuntimeAgents(projectId, agents);
   } catch (err) {
     console.error("list agents failed", err);
+  } finally {
+    agentsFetchInFlight = false;
+    if (agentsRetryRequested) {
+      agentsRetryRequested = false;
+      void refreshAgents();
+    }
   }
 }
 

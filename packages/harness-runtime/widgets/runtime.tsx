@@ -395,9 +395,11 @@ export function HarnessSettings({ host, settingsTarget }: { host: WebPackageHost
   const [terminal, setTerminal] = useState<string>();
 
   useEffect(() => {
+    if (!terminal) return;
+    // Returning from an explicit install/sign-in flow is a meaningful reason
+    // to re-probe. Ordinary window focus must not invalidate the daily cache.
     const focus = () => { void refresh(true); };
     window.addEventListener("focus", focus);
-    if (!terminal) return () => window.removeEventListener("focus", focus);
     const interval = setInterval(() => {
       void api.get<Array<{ id: string; running: boolean }>>(`/api/terminals?projectId=${encodeURIComponent(projectId ?? "")}`).then((items) => {
         if (!items.find((item) => item.id === terminal)?.running) { setTerminal(undefined); void refresh(true); }

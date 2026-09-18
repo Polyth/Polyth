@@ -27,19 +27,27 @@ const persistentStorage = (name: string): CatalogCacheStorage => {
     clear: () => { try { localStorage.removeItem(key); } catch { /* private mode */ } },
   };
 };
-// Live reads happen once per page/day. The persisted caches are deliberately
-// presentation-only: they paint the last filtered choices synchronously while
-// this process performs its one fresh discovery after startup.
+// Live reads stay page-local; successful discovery is also persisted for one
+// day so a page reload is not itself a reason to start native harness probes.
 const catalogCache = createCatalogCache<Catalog>(Infinity);
 const harnessCache = createCatalogCache<HarnessSnapshot[]>(Infinity);
 const rosterCache = createCatalogCache<HarnessRosterItem[]>(Infinity);
 const persistedCatalogs = createCatalogCache<Catalog>(DAILY_CACHE_MS, 64, Date.now, persistentStorage("polyth.runtimeCatalogs.v1"));
 const persistedHarnesses = createCatalogCache<HarnessSnapshot[]>(DAILY_CACHE_MS, 64, Date.now, persistentStorage("polyth.runtimeHarnesses.v1"));
+const persistedRosters = createCatalogCache<HarnessRosterItem[]>(DAILY_CACHE_MS, 64, Date.now, persistentStorage("polyth.runtimeRosters.v1"));
+const persistedGlobalModels = createCatalogCache<ModelDescriptor[]>(DAILY_CACHE_MS, 64, Date.now, persistentStorage("polyth.runtimeGlobalModels.v1"));
+const persistedGlobalAgents = createCatalogCache<AgentDescriptor[]>(DAILY_CACHE_MS, 64, Date.now, persistentStorage("polyth.runtimeGlobalAgents.v1"));
+const persistedWarmScopes = createCatalogCache<true>(DAILY_CACHE_MS, 64, Date.now, persistentStorage("polyth.runtimeWarmScopes.v1"));
 let revision = 0;
 const listeners = new Set<() => void>();
+const invalidationListeners = new Set<() => void>();
 export function subscribeRuntimeCatalogs(listener: () => void): () => void {
   listeners.add(listener);
   return () => { listeners.delete(listener); };
+}
+export function subscribeRuntimeCatalogInvalidations(listener: () => void): () => void {
+  invalidationListeners.add(listener);
+  return () => { invalidationListeners.delete(listener); };
 }
 export function resetRuntimeCatalogMemory(notify = true): void {
   catalogCache.clear();
@@ -51,6 +59,11 @@ export function resetRuntimeCatalogMemory(notify = true): void {
 export function invalidateRuntimeCatalogs(notify = true): void {
   persistedCatalogs.clear();
   persistedHarnesses.clear();
+  persistedRosters.clear();
+  persistedGlobalModels.clear();
+  persistedGlobalAgents.clear();
+  persistedWarmScopes.clear();
+  for (const listener of invalidationListeners) listener();
   resetRuntimeCatalogMemory(notify);
 }
 type SnapshotRequest = { projectId?: string | null; spaceId?: string; cwd?: string; harnessId?: string; force?: boolean; detail?: boolean };
@@ -65,6 +78,33 @@ const previewCatalogKey = (projectId: string | undefined, harnessId: string | un
 const rosterKey = (options: Pick<SnapshotRequest, "projectId" | "spaceId">) => JSON.stringify([
   activeBrowserAccountId(), options.spaceId ?? "page", options.projectId ?? "", revision,
 ]);
+const rosterPresentationKey = (options: Pick<SnapshotRequest, "projectId" | "spaceId">) => JSON.stringify([
+  activeBrowserAccountId(), options.spaceId ?? "page", options.projectId ?? "",
+]);
+const globalCatalogPresentationKey = (projectId: string) => JSON.stringify([
+  activeBrowserAccountId(), projectId,
+]);
+
+/** The legacy aggregate /api/models + /api/agents store is still consumed by
+ * non-picker surfaces. Keep it on the same daily invalidation boundary instead
+ * of making every page reload fan out through all runtimes again. Project id is
+ * a tenant-safe Space discriminator because projects never cross Spaces. */
+export function peekPersistedRuntimeModels(projectId: string): ModelDescriptor[] | undefined {
+  return persistedGlobalModels.peek(globalCatalogPresentationKey(projectId));
+}
+export function rememberPersistedRuntimeModels(projectId: string, models: ModelDescriptor[]): void {
+  // Never freeze a startup/unavailable empty answer for a day.
+  if (models.length > 0) persistedGlobalModels.write(globalCatalogPresentationKey(projectId), models);
+}
+export function peekPersistedRuntimeAgents(projectId: string): AgentDescriptor[] | undefined {
+  return persistedGlobalAgents.peek(globalCatalogPresentationKey(projectId));
+}
+export function rememberPersistedRuntimeAgents(projectId: string, agents: AgentDescriptor[]): void {
+  persistedGlobalAgents.write(globalCatalogPresentationKey(projectId), agents);
+}
+export function runtimeCatalogRefreshDelay(projectId: string): number | undefined {
+  return persistedWarmScopes.expiresIn(globalCatalogPresentationKey(projectId));
+}
 const snapshotPresentationKey = (options: SnapshotRequest) => JSON.stringify([
   activeBrowserAccountId(), options.spaceId ?? "page", options.projectId ?? "", options.cwd ?? "project-root",
   options.harnessId ?? "all", options.detail === true,
@@ -74,11 +114,20 @@ const previewPresentationKey = (projectId: string | undefined, harnessId: string
   `preview:${projectId ?? "default"}:${harnessId ?? "auto"}`,
 ]);
 export function peekHarnessRoster(options: Pick<SnapshotRequest, "projectId" | "spaceId">): HarnessRosterItem[] | undefined {
-  return rosterCache.peek(rosterKey(options));
+  return rosterCache.peek(rosterKey(options)) ?? persistedRosters.peekStale(rosterPresentationKey(options));
 }
 export function readHarnessRoster(options: Pick<SnapshotRequest, "projectId" | "spaceId">): Promise<HarnessRosterItem[]> {
+  const key = rosterKey(options);
+  const persistentKey = rosterPresentationKey(options);
+  const requestRevision = revision;
   const query = options.projectId ? `?projectId=${encodeURIComponent(options.projectId)}` : "";
-  return rosterCache.read(rosterKey(options), () => api.get<HarnessRosterItem[]>(`/api/harnesses/roster${query}`));
+  return rosterCache.read(key, async () => {
+    const persisted = persistedRosters.peek(persistentKey);
+    if (persisted) return persisted;
+    const rows = await api.get<HarnessRosterItem[]>(`/api/harnesses/roster${query}`);
+    if (revision === requestRevision) persistedRosters.write(persistentKey, rows);
+    return rows;
+  });
 }
 export function peekHarnessSnapshots(options: SnapshotRequest): HarnessSnapshot[] | undefined {
   return harnessCache.peek(snapshotRequestKey(options)) ?? persistedHarnesses.peekStale(snapshotPresentationKey(options));
@@ -91,17 +140,25 @@ const rememberHarnessSnapshots = (options: SnapshotRequest, rows: HarnessSnapsho
     context: row.context,
     stale: true,
     ...(row.message ? { message: row.message } : {}),
+    ...(options.detail && row.catalog ? { catalog: row.catalog } : {}),
   }));
   const keys = new Set<string>();
   if (options.projectId && options.spaceId) keys.add(snapshotPresentationKey(options));
   const context = rows[0]?.context;
   if (context) {
+    // projectId itself is Space-owned, so this project-only alias is safe for
+    // settings surfaces that do not carry the active Space id explicitly.
+    keys.add(snapshotPresentationKey({ ...options, projectId: context.projectId, spaceId: undefined }));
     keys.add(snapshotPresentationKey({ ...options, projectId: context.projectId, spaceId: context.spaceId }));
     keys.add(snapshotPresentationKey({ ...options, projectId: context.projectId, spaceId: context.spaceId, cwd: context.cwd }));
   }
   for (const key of keys) persistedHarnesses.write(key, cached);
 };
+const reusablePersistedSnapshots = (rows: HarnessSnapshot[]): boolean =>
+  rows.every((row) => !["starting", "degraded", "offline", "unknown"].includes(row.availability.state));
+
 export function readHarnessSnapshots(options: SnapshotRequest): Promise<HarnessSnapshot[]> {
+  const requestRevision = revision;
   const query = new URLSearchParams();
   if (options.projectId) query.set("projectId", options.projectId);
   // cwd fences browser reuse only. The server derives and validates the path
@@ -110,8 +167,10 @@ export function readHarnessSnapshots(options: SnapshotRequest): Promise<HarnessS
   if (options.force) query.set("force", "1");
   if (options.detail) query.set("detail", "1");
   if (!options.force) return harnessCache.read(snapshotRequestKey(options), async () => {
+    const persisted = persistedHarnesses.peek(snapshotPresentationKey(options));
+    if (persisted && reusablePersistedSnapshots(persisted)) return persisted;
     const rows = await api.get<HarnessSnapshot[]>(`/api/harnesses/snapshots?${query}`);
-    rememberHarnessSnapshots(options, rows);
+    if (revision === requestRevision) rememberHarnessSnapshots(options, rows);
     return rows;
   });
   // Fetch first: invalidating before the forced response arrives lets
@@ -177,6 +236,8 @@ const catalogFromSnapshot = (snapshot: HarnessSnapshot | undefined, harnessId?: 
 const readPreviewCatalog = (projectId?: string, harnessId?: string, spaceId?: string, cwd?: string): Promise<Catalog> => {
   const requestRevision = revision;
   const requestKey = previewCatalogKey(projectId, harnessId, spaceId, cwd);
+  const persisted = persistedCatalogs.peek(previewPresentationKey(projectId, harnessId, spaceId, cwd));
+  if (persisted) return catalogCache.read(requestKey, async () => persisted);
   return catalogCache.read(requestKey, async () => {
     const snapshots = harnessId
       ? await readHarnessSnapshots({ projectId, harnessId, spaceId, cwd, detail: true })
@@ -212,8 +273,12 @@ const readPreviewCatalog = (projectId?: string, harnessId?: string, spaceId?: st
       }
       const persistedAliases = new Set([
         previewPresentationKey(snapshot.context.projectId, resolvedHarnessId, snapshot.context.spaceId, snapshot.context.cwd),
+        previewPresentationKey(snapshot.context.projectId, resolvedHarnessId, snapshot.context.spaceId),
         ...(!harnessId
-          ? [previewPresentationKey(snapshot.context.projectId, undefined, snapshot.context.spaceId, snapshot.context.cwd)]
+          ? [
+              previewPresentationKey(snapshot.context.projectId, undefined, snapshot.context.spaceId, snapshot.context.cwd),
+              previewPresentationKey(snapshot.context.projectId, undefined, snapshot.context.spaceId),
+            ]
           : []),
       ]);
       for (const alias of persistedAliases) persistedCatalogs.write(alias, catalog);
@@ -222,16 +287,36 @@ const readPreviewCatalog = (projectId?: string, harnessId?: string, spaceId?: st
   });
 };
 
-/** Warm every enabled harness catalog during shell package bootstrap, even
- * before project restoration. Each target gets its own cache entry, and the
- * server-returned context aliases it into the Space/project scope that owns it. */
+const hasFreshPersistedCatalogs = (projectId?: string): boolean =>
+  projectId
+    ? persistedWarmScopes.peek(globalCatalogPresentationKey(projectId)) === true
+    : persistedWarmScopes.someFresh();
+
+/** Warm every enabled harness catalog once, then reuse that successful metadata
+ * across page reloads for a day. A project-less bootstrap may skip when a fresh
+ * persisted catalog exists; scoped consumers still enforce Space/cwd identity. */
 export const preloadRuntimeCatalogs = async (
   options: { projectId?: string; spaceId?: string } = {},
 ): Promise<void> => {
+  if (!options.spaceId && hasFreshPersistedCatalogs(options.projectId)) return;
   const preloadRevision = revision;
-  const roster = await readHarnessRoster(options);
+  const [roster, snapshots] = await Promise.all([
+    readHarnessRoster(options),
+    readHarnessSnapshots(options),
+  ]);
   if (revision !== preloadRevision) return;
-  await Promise.allSettled([
+  // The process-free roster has no context of its own. Alias it under the
+  // authoritative context returned by the matching snapshot so HarnessTabs can
+  // survive a reload without a separate roster request.
+  const context = snapshots[0]?.context;
+  if (context) {
+    persistedRosters.write(rosterPresentationKey({ projectId: context.projectId }), roster);
+    persistedRosters.write(rosterPresentationKey({
+      projectId: context.projectId,
+      spaceId: context.spaceId,
+    }), roster);
+  }
+  const results = await Promise.allSettled([
     // Warm Auto as its own route too; the server chooses among the detailed
     // snapshots without committing that choice to any canonical session.
     readPreviewCatalog(options.projectId, undefined, options.spaceId),
@@ -239,6 +324,9 @@ export const preloadRuntimeCatalogs = async (
       .filter((row) => row.policy.enabled)
       .map((row) => readPreviewCatalog(options.projectId, row.identity.id, options.spaceId)),
   ]);
+  if (revision !== preloadRevision || results.some((result) => result.status === "rejected")) return;
+  const warmProjectId = context?.projectId ?? options.projectId;
+  if (warmProjectId) persistedWarmScopes.write(globalCatalogPresentationKey(warmProjectId), true);
 };
 
 export function useCatalogRevision(): number {
