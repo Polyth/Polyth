@@ -35,6 +35,7 @@ import {
   peekPersistedRuntimeModels,
   rememberPersistedRuntimeAgents,
   rememberPersistedRuntimeModels,
+  subscribeRuntimeCatalogInvalidations,
 } from "@polyth/models/runtime-catalog";
 
 let sync: SyncClient | null = null;
@@ -43,6 +44,7 @@ const syncStatusListeners = new Set<() => void>();
 let lastProject: string | null | undefined;
 let branchFetchedFor: string | null = null;
 let runtimeCatalogHydrated = false;
+let runtimeCatalogInvalidationSubscribed = false;
 let runtimeCatalogPolicy: "browser" | "pending" | "project" | "interaction" = "browser";
 let nativeProxyProbe: Promise<void> | null = null;
 let nativeProxyProbeFailures = 0;
@@ -362,6 +364,14 @@ export function init(): Promise<void> {
   // Project presentation records are server-backed, while the existing local
   // records remain the synchronous/offline rendering path.
   initProjectPresentationSync(store.subscribeStore, () => store.getState().activeProjectId);
+  if (!runtimeCatalogInvalidationSubscribed) {
+    runtimeCatalogInvalidationSubscribed = true;
+    subscribeRuntimeCatalogInvalidations(() => {
+      if (!runtimeCatalogHydrated) return;
+      void refreshModels();
+      void refreshAgents();
+    });
+  }
   // UX-ONBOARDING boot: project, model, and agent hydration launch
   // independently and publish as soon as each settles. Awaiting a combined
   // Promise.all/allSettled before publishing any result is forbidden — a slow
@@ -618,14 +628,19 @@ async function refreshRuntimeDiagnostics(): Promise<void> {
   }
 }
 
+let agentsFetchInFlight = false;
+
 async function refreshAgents(projectId = store.getState().activeProjectId ?? undefined): Promise<void> {
-  if (!projectId) return;
+  if (!projectId || agentsFetchInFlight) return;
+  agentsFetchInFlight = true;
   try {
     const agents = await api.listAgents();
     store.setAgents(agents);
     rememberPersistedRuntimeAgents(projectId, agents);
   } catch (err) {
     console.error("list agents failed", err);
+  } finally {
+    agentsFetchInFlight = false;
   }
 }
 
