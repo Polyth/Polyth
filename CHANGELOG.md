@@ -178,14 +178,15 @@ commits, and the L-queue packages started landing.
 
 - Server `assist.ts`: after a configurable quiet period past `turn/stopped`,
   the small model writes a ≤20-word recap and ONE suggested follow-up. The
-  result lives on the session projection keyed to the log tail seq — never the
-  event log (it is not model-visible unless the user sends it) — so any new
-  event makes it stale. One flight per session; unusable model output and
-  errors fail soft.
+  result lives on the session projection keyed to the settled log tail — never
+  the event log (it is not model-visible unless the user sends it). Passive
+  post-turn bookkeeping (usage/title/goal/isolation metadata) does not cancel
+  or hide it; real conversation activity does. One flight per session;
+  unusable model output and errors fail soft.
 - Hard switch: `data/assist.json` via `GET/PUT /api/settings/assist`
   (off by default; disabled generates nothing at all).
-  `GET /api/sessions/:id/assist` answers 404 `stale` the moment the log
-  outgrows the recap. Toggle + quiet-time input in Settings → Chat.
+  `GET /api/sessions/:id/assist` answers 404 `stale` once conversation
+  activity moves past the recap. Toggle + quiet-time input in Settings → Chat.
 - Web: `AssistStrip` renders the fresh recap under the last message plus a
   dismissible suggestion chip; tapping fills the composer and never sends.
   Dismissals are in-memory only.
