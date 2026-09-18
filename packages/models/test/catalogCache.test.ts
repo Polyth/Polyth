@@ -61,6 +61,9 @@ test("persisted metadata paints synchronously across restart while stale data re
   assert.equal(warmRestart.someFresh(), true, "fresh persisted metadata can suppress reload discovery");
   assert.equal(warmRestart.someFresh((key) => key.endsWith("/cursor")), true);
   assert.equal(warmRestart.someFresh((key) => key.endsWith("/codex")), false);
+  assert.equal(warmRestart.expiresIn("space/project/cursor"), 5,
+    "daily refresh can be scheduled from the original successful write");
+  assert.equal(warmRestart.expiresIn("missing"), undefined);
 
   now = 111;
   const restarted = createCatalogCache<string[]>(10, 2, () => now, storage);
