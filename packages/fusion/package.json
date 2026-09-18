@@ -15,7 +15,7 @@
       "name": "Fusion",
       "description": "Synthesize multiple model responses.",
       "core": false,
-      "enabled": true,
+      "enabled": false,
       "settingsGroup": "Engineering",
       "icon": "combine",
       "hasSettings": false,
