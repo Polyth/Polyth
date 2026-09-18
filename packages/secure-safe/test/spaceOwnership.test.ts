@@ -70,8 +70,8 @@ test("Secure Safe registry stores identical handles and opaque credentials in se
 
   safeA.putOpaque!("pkgconn:spc_a:example:main", "opaque-space-a");
   safeB.putOpaque!("pkgconn:spc_b:example:main", "opaque-space-b");
-  assert.equal(registry.forSpaceId("spc_a")?.getOpaque("pkgconn:spc_a:example:main"), "opaque-space-a");
-  assert.equal(registry.forSpaceId("spc_b")?.getOpaque("pkgconn:spc_b:example:main"), "opaque-space-b");
+  assert.equal(registry.forSpaceId("spc_a")?.getOpaque?.("pkgconn:spc_a:example:main"), "opaque-space-a");
+  assert.equal(registry.forSpaceId("spc_b")?.getOpaque?.("pkgconn:spc_b:example:main"), "opaque-space-b");
   assert.equal(safeA.getOpaque("pkgconn:spc_b:example:main"), null);
   assert.equal(safeB.getOpaque("pkgconn:spc_a:example:main"), null);
 
