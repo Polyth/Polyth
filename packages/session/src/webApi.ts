@@ -527,9 +527,7 @@ export interface VoiceSettingsDto {
   ttsConfigured: boolean;
 }
 
-// ---- optional recap package + explicit assist actions ---------------------------
-export interface AssistSettingsDto { idleSeconds: number }
-export interface AssistDto { recap: string; suggestion: string; atSeq: number; generatedAt: number }
+// ---- explicit assist actions ----------------------------------------------------
 export interface AssistSuggestionDto { suggestion: string; atSeq: number }
 export interface TaskBriefDto { brief: string }
 
@@ -1704,13 +1702,7 @@ export const api = {
       ...(opts?.keepalive ? { keepalive: true } : {}),
     }),
 
-  // ---- optional recap package + explicit suggestion/chat→note -------------------
-  assistSettings: () => jfetch<AssistSettingsDto>(`/api/settings/assist`),
-  assistSettingsSave: (patch: Partial<AssistSettingsDto>) =>
-    jfetch<AssistSettingsDto>(`/api/settings/assist`, json("PUT", patch)),
-  /** 404s when nothing fresh exists — callers rely on the projection instead. */
-  assistGet: (sessionId: string) =>
-    jfetch<AssistDto>(`/api/sessions/${encodeURIComponent(sessionId)}/assist`),
+  // ---- explicit suggestion/chat→note --------------------------------------------
   /** Explicit ephemeral composer draft; it is never saved to the session. */
   assistSuggestion: (sessionId: string, draft?: string) =>
     jfetch<AssistSuggestionDto>(
