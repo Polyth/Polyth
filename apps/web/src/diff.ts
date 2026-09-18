@@ -2,6 +2,7 @@
 import type { JsonObject } from "@polyth/contracts";
 
 const MAX_DIFF_LINES = 1500;
+const MAX_DIFF_EDITS = 2048;
 
 export type DiffRowKind = "meta" | "hunk" | "add" | "del" | "ctx";
 
@@ -78,6 +79,133 @@ function diffLines(oldLines: string[], newLines: string[]): DiffOp[] {
   return ops;
 }
 
+function traceX(row: Int32Array, depth: number, diagonal: number): number {
+  const index = diagonal + depth;
+  return index >= 0 && index < row.length ? row[index]! : -1;
+}
+
+/** Myers diff with a bounded edit distance. Large source files usually differ
+ * by only a handful of lines; this keeps those edits precise without paying
+ * the quadratic memory cost of the small-file LCS implementation. */
+function boundedDiffLines(oldLines: string[], newLines: string[]): DiffOp[] | null {
+  const n = oldLines.length;
+  const m = newLines.length;
+  const maxDepth = Math.min(n + m, MAX_DIFF_EDITS);
+  if (Math.abs(n - m) > maxDepth) return null;
+
+  const trace: Int32Array[] = [];
+  for (let depth = 0; depth <= maxDepth; depth++) {
+    const current = new Int32Array(2 * depth + 1);
+    current.fill(-1);
+
+    for (let diagonal = -depth; diagonal <= depth; diagonal += 2) {
+      let x = 0;
+      if (depth > 0) {
+        const previous = trace[depth - 1]!;
+        if (diagonal === -depth) {
+          x = traceX(previous, depth - 1, diagonal + 1);
+        } else if (diagonal === depth) {
+          x = traceX(previous, depth - 1, diagonal - 1) + 1;
+        } else if (
+          traceX(previous, depth - 1, diagonal - 1)
+          < traceX(previous, depth - 1, diagonal + 1)
+        ) {
+          x = traceX(previous, depth - 1, diagonal + 1);
+        } else {
+          x = traceX(previous, depth - 1, diagonal - 1) + 1;
+        }
+      }
+
+      let y = x - diagonal;
+      while (x >= 0 && y >= 0 && x < n && y < m && oldLines[x] === newLines[y]) {
+        x++;
+        y++;
+      }
+      current[diagonal + depth] = x;
+
+      if (x < n || y < m) continue;
+      trace.push(current);
+
+      const reversed: DiffOp[] = [];
+      let bx = n;
+      let by = m;
+      for (let backDepth = depth; backDepth > 0; backDepth--) {
+        const previous = trace[backDepth - 1]!;
+        const diagonalNow = bx - by;
+        const cameFromInsertion = diagonalNow === -backDepth
+          || (diagonalNow !== backDepth
+            && traceX(previous, backDepth - 1, diagonalNow - 1)
+              < traceX(previous, backDepth - 1, diagonalNow + 1));
+        const previousDiagonal = cameFromInsertion ? diagonalNow + 1 : diagonalNow - 1;
+        const previousX = traceX(previous, backDepth - 1, previousDiagonal);
+        const previousY = previousX - previousDiagonal;
+
+        while (bx > previousX && by > previousY) {
+          bx--;
+          by--;
+          reversed.push({ tag: "eq", line: oldLines[bx]! });
+        }
+        if (cameFromInsertion) {
+          by--;
+          reversed.push({ tag: "ins", line: newLines[by]! });
+        } else {
+          bx--;
+          reversed.push({ tag: "del", line: oldLines[bx]! });
+        }
+      }
+
+      while (bx > 0 && by > 0) {
+        bx--;
+        by--;
+        reversed.push({ tag: "eq", line: oldLines[bx]! });
+      }
+      while (bx > 0) {
+        bx--;
+        reversed.push({ tag: "del", line: oldLines[bx]! });
+      }
+      while (by > 0) {
+        by--;
+        reversed.push({ tag: "ins", line: newLines[by]! });
+      }
+      return reversed.reverse();
+    }
+
+    trace.push(current);
+  }
+  return null;
+}
+
+function largeDiffLines(oldLines: string[], newLines: string[]): DiffOp[] {
+  let prefix = 0;
+  const shared = Math.min(oldLines.length, newLines.length);
+  while (prefix < shared && oldLines[prefix] === newLines[prefix]) prefix++;
+
+  let suffix = 0;
+  while (
+    suffix < oldLines.length - prefix
+    && suffix < newLines.length - prefix
+    && oldLines[oldLines.length - 1 - suffix] === newLines[newLines.length - 1 - suffix]
+  ) {
+    suffix++;
+  }
+
+  const oldMiddle = oldLines.slice(prefix, oldLines.length - suffix);
+  const newMiddle = newLines.slice(prefix, newLines.length - suffix);
+  const middle = oldMiddle.length <= MAX_DIFF_LINES && newMiddle.length <= MAX_DIFF_LINES
+    ? diffLines(oldMiddle, newMiddle)
+    : boundedDiffLines(oldMiddle, newMiddle)
+      ?? [
+        ...oldMiddle.map((line) => ({ tag: "del" as const, line })),
+        ...newMiddle.map((line) => ({ tag: "ins" as const, line })),
+      ];
+
+  return [
+    ...oldLines.slice(0, prefix).map((line) => ({ tag: "eq" as const, line })),
+    ...middle,
+    ...oldLines.slice(oldLines.length - suffix).map((line) => ({ tag: "eq" as const, line })),
+  ];
+}
+
 /** [start, end) index ranges into `ops`, one per hunk, each padded with up to
  *  `context` lines of unchanged surrounding text; overlapping ranges merge. */
 function hunkRanges(ops: DiffOp[], context: number): Array<[number, number]> {
@@ -109,22 +237,16 @@ function fileHeaders(path: string, oldText: string, newText: string): [string, s
 }
 
 /** Standard unified-diff text (`--- a/file`, `+++ b/file`, `@@ ... @@` hunks,
- *  3 lines of context). Falls back to a whole-file replace hunk for inputs too
- *  large to diff line-by-line, so callers never pay O(n*m) on huge files. */
+ *  3 lines of context). Large files use a bounded Myers diff so ordinary
+ *  localized edits stay localized instead of appearing as whole-file rewrites. */
 export function unifiedDiff(oldText: string, newText: string, path = "file"): string {
   if (oldText === newText) return "";
   const oldLines = toDiffLines(oldText);
   const newLines = toDiffLines(newText);
   const header = fileHeaders(path, oldText, newText);
-  if (oldLines.length > MAX_DIFF_LINES || newLines.length > MAX_DIFF_LINES) {
-    return [
-      ...header,
-      `@@ -${oldLines.length ? 1 : 0},${oldLines.length} +${newLines.length ? 1 : 0},${newLines.length} @@`,
-      ...oldLines.map((line) => `-${line}`),
-      ...newLines.map((line) => `+${line}`),
-    ].join("\n");
-  }
-  const ops = diffLines(oldLines, newLines);
+  const ops = oldLines.length > MAX_DIFF_LINES || newLines.length > MAX_DIFF_LINES
+    ? largeDiffLines(oldLines, newLines)
+    : diffLines(oldLines, newLines);
   const oldPrefix = new Array<number>(ops.length + 1).fill(0);
   const newPrefix = new Array<number>(ops.length + 1).fill(0);
   for (let i = 0; i < ops.length; i++) {
