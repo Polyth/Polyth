@@ -56,13 +56,14 @@ test("new timeline surfaces animate without moving the measured row", () => {
   assert.doesNotMatch(css, /\.timeline > \.timeline-row-enter,\s*\n/);
 });
 
-test("idle recap remains mounted at the transcript tail with one current style contract", () => {
+test("idle recap is package-owned and mounts at the transcript tail", () => {
   const timeline = read("../src/components/Timeline.tsx");
-  const strip = read("../src/components/AssistStrip.tsx");
-  const css = read("../src/styles.css");
+  const entry = read("../../../packages/recap/widgets/index.tsx");
+  const strip = read("../../../packages/recap/widgets/RecapStrip.tsx");
+  const css = read("../../../packages/recap/widgets/styles.css");
 
-  assert.match(timeline, /import AssistStrip from "\.\/AssistStrip\.tsx"/);
-  assert.match(timeline, /\{model\.workflowRun && <WorkflowTimelineCard[\s\S]*<AssistStrip \/>/);
+  assert.doesNotMatch(timeline, /AssistStrip/);
+  assert.match(entry, /slot: "session\.timeline\.after"/);
   assert.match(strip, /assistFreshnessSeq/);
   assert.match(strip, /freshnessSeq > assist\.atSeq/);
   assert.equal(css.match(/\.assist-strip\s*\{/g)?.length, 1);
@@ -326,14 +327,13 @@ test("a live thought reveals expanded, types out, then folds when formed", () =>
 });
 
 
-test("idle recap assist stays mounted at the transcript tail with usable chrome", () => {
-  const timeline = read("../src/components/Timeline.tsx");
-  const assist = read("../src/components/AssistStrip.tsx");
-  const css = read("../src/styles.css");
+test("recap package owns its disabled default and usable chrome", () => {
+  const manifest = JSON.parse(read("../../../packages/recap/package.json")) as {
+    polyth: { descriptor: { enabled: boolean } };
+  };
+  const css = read("../../../packages/recap/widgets/styles.css");
 
-  assert.match(timeline, /import AssistStrip from "\.\/AssistStrip\.tsx";/);
-  assert.match(timeline, /\{model\.workflowRun && <WorkflowTimelineCard run=\{model\.workflowRun\} \/>\}\s*<AssistStrip \/>/);
-  assert.match(assist, /assist\.atSeq !== lastSeq/);
+  assert.equal(manifest.polyth.descriptor.enabled, false);
   assert.match(css, /\.assist-strip\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/s);
   assert.match(css, /\.assist-chip\s*\{[^}]*min-height:\s*var\(--tap\);/s);
 });
