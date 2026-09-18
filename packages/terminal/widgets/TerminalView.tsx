@@ -5,6 +5,7 @@
 // scratch so reconnects never duplicate output (F12).
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TerminalInfo } from "@polyth/contracts";
+import type { SurfaceComponentProps } from "@polyth/web-sdk";
 import { api } from "@polyth/session/web-api";
 import { useStore, workspaceProjectId } from "../../../apps/web/src/store.ts";
 import { nextTermBackoff } from "../../../apps/web/src/utils.ts";
@@ -56,9 +57,14 @@ function themeVar(name: string): string | undefined {
   }
 }
 
-export default function TerminalView() {
-  const projectId = useStore(workspaceProjectId);
-  const sessionId = useStore((s) => s.activeSessionId);
+export default function TerminalView({
+  projectId: scopedProjectId,
+  sessionId: scopedSessionId,
+}: SurfaceComponentProps = {}) {
+  const storeProjectId = useStore(workspaceProjectId);
+  const storeSessionId = useStore((s) => s.activeSessionId);
+  const projectId = scopedProjectId === undefined ? storeProjectId : scopedProjectId;
+  const sessionId = scopedSessionId === undefined ? storeSessionId : scopedSessionId;
   const session = useStore((s) => s.sessions.find((candidate) => candidate.id === s.activeSessionId) ?? null);
   const visible = usePaneVisible();
   const [tabs, setTabs] = useState<Tab[]>([]);
