@@ -10,6 +10,8 @@ export interface BuildFreshnessOptions {
   reload?: () => void;
   retryDelaysMs?: readonly number[];
   minCheckIntervalMs?: number;
+  windowRef?: Window;
+  documentRef?: Document;
 }
 
 export function parseWebBuildId(value: unknown): string | null {
@@ -39,12 +41,14 @@ export function installBuildFreshnessWatcher(
   currentBuildId: string = __POLYTH_WEB_BUILD_ID__,
   options: BuildFreshnessOptions = {},
 ): () => void {
-  if (typeof window === "undefined" || typeof document === "undefined") return () => {};
+  const windowRef = options.windowRef ?? (typeof window !== "undefined" ? window : undefined);
+  const documentRef = options.documentRef ?? (typeof document !== "undefined" ? document : undefined);
+  if (!windowRef || !documentRef) return () => {};
 
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   if (typeof fetchImpl !== "function") return () => {};
 
-  const reload = options.reload ?? (() => window.location.reload());
+  const reload = options.reload ?? (() => windowRef.location.reload());
   const retryDelaysMs = options.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
   const minCheckIntervalMs = options.minCheckIntervalMs ?? DEFAULT_MIN_CHECK_INTERVAL_MS;
 
@@ -57,26 +61,26 @@ export function installBuildFreshnessWatcher(
 
   const clearRetry = (): void => {
     if (retryTimer !== undefined) {
-      window.clearTimeout(retryTimer);
+      windowRef.clearTimeout(retryTimer);
       retryTimer = undefined;
     }
   };
 
   const scheduleRetry = (): void => {
-    if (disposed || reloadIssued || document.visibilityState === "hidden") return;
+    if (disposed || reloadIssued || documentRef.visibilityState === "hidden") return;
     const delay = retryDelaysMs[retryIndex++];
     if (delay === undefined) return;
     clearRetry();
-    retryTimer = window.setTimeout(() => {
+    retryTimer = windowRef.setTimeout(() => {
       retryTimer = undefined;
       void check(false);
     }, delay);
   };
 
   const check = async (freshEvent: boolean): Promise<void> => {
-    if (disposed || reloadIssued || inFlight || document.visibilityState === "hidden") return;
+    if (disposed || reloadIssued || inFlight || documentRef.visibilityState === "hidden") return;
     const now = Date.now();
-    if (!freshEvent && now - lastCheckAt < minCheckIntervalMs) return;
+    if (freshEvent && now - lastCheckAt < minCheckIntervalMs) return;
     if (freshEvent) {
       retryIndex = 0;
       clearRetry();
@@ -103,22 +107,22 @@ export function installBuildFreshnessWatcher(
   };
 
   const onResume = (): void => {
-    if (document.visibilityState !== "hidden") void check(true);
+    if (documentRef.visibilityState !== "hidden") void check(true);
   };
   const onVisibility = (): void => {
-    if (document.visibilityState !== "hidden") void check(true);
+    if (documentRef.visibilityState !== "hidden") void check(true);
   };
 
-  window.addEventListener("pageshow", onResume);
-  window.addEventListener("focus", onResume);
-  document.addEventListener("visibilitychange", onVisibility);
+  windowRef.addEventListener("pageshow", onResume);
+  windowRef.addEventListener("focus", onResume);
+  documentRef.addEventListener("visibilitychange", onVisibility);
   void check(true);
 
   return () => {
     disposed = true;
     clearRetry();
-    window.removeEventListener("pageshow", onResume);
-    window.removeEventListener("focus", onResume);
-    document.removeEventListener("visibilitychange", onVisibility);
+    windowRef.removeEventListener("pageshow", onResume);
+    windowRef.removeEventListener("focus", onResume);
+    documentRef.removeEventListener("visibilitychange", onVisibility);
   };
 }
