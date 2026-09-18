@@ -369,24 +369,50 @@ type WorkspaceProjectSnapshot =
   Pick<AppState, "activeProjectId" | "activeSessionId" | "sessions">
   & Partial<Pick<AppState, "newSessionIntent" | "sessionSpawn" | "projectRegistry">>;
 
-function persistedWorkspaceProjectId(snapshot: WorkspaceProjectSnapshot): string | null {
+function readyRegistryProjectId(
+  snapshot: WorkspaceProjectSnapshot,
+  candidate: string | null | undefined,
+): string | null {
+  const id = normalizedProjectId(candidate);
   const registry = snapshot.projectRegistry;
-  if (!registry || registry.status !== "ready" || typeof localStorage === "undefined") return null;
+  if (!id || !registry || registry.status !== "ready") return null;
+  return registry.projects.some((project) => project.id === id) ? id : null;
+}
+
+function routedWorkspaceProjectId(snapshot: WorkspaceProjectSnapshot): string | null {
+  if (typeof location === "undefined") return null;
+  const match = /^\/p\/([^/]+)(?:\/|$)/.exec(location.pathname);
+  if (!match?.[1]) return null;
   try {
-    const saved = normalizedProjectId(localStorage.getItem("polyth.activeProjectId"));
-    return saved && registry.projects.some((project) => project.id === saved) ? saved : null;
+    return readyRegistryProjectId(snapshot, decodeURIComponent(match[1]));
   } catch {
     return null;
   }
 }
 
+function persistedWorkspaceProjectId(snapshot: WorkspaceProjectSnapshot): string | null {
+  if (typeof localStorage === "undefined") return null;
+  try {
+    return readyRegistryProjectId(snapshot, localStorage.getItem("polyth.activeProjectId"));
+  } catch {
+    return null;
+  }
+}
+
+function firstReadyWorkspaceProjectId(snapshot: WorkspaceProjectSnapshot): string | null {
+  const registry = snapshot.projectRegistry;
+  if (!registry || registry.status !== "ready") return null;
+  return normalizedProjectId(registry.projects[0]?.id);
+}
+
 /** Resolve the project that owns the current workspace.
  *
- * `activeProjectId` is canonical, but hydration and first-send transitions can
- * briefly leave it empty while the project is still unambiguously known from
- * the active session, new-chat intent, spawn request, or the persisted
- * selection that exists in the ready registry. Workspace panes must never
- * translate that recoverable transition into "No project selected". */
+ * `activeProjectId` is canonical, but hydration/navigation transitions can
+ * briefly leave it empty after the project registry is already ready. Preserve
+ * every unambiguous owner first, then recover from the validated route/persisted
+ * selection, and finally use the same first-project fallback as boot restore.
+ * A ready registry with projects must never render project-scoped panes as
+ * "No project selected". */
 export function workspaceProjectId(
   snapshot: WorkspaceProjectSnapshot = state,
 ): string | null {
@@ -394,7 +420,9 @@ export function workspaceProjectId(
     ?? sessionOwnedProjectId(snapshot.sessions, snapshot.activeSessionId)
     ?? normalizedProjectId(snapshot.newSessionIntent?.projectId)
     ?? normalizedProjectId(snapshot.sessionSpawn?.projectId)
-    ?? persistedWorkspaceProjectId(snapshot);
+    ?? routedWorkspaceProjectId(snapshot)
+    ?? persistedWorkspaceProjectId(snapshot)
+    ?? firstReadyWorkspaceProjectId(snapshot);
 }
 
 export function subscribeStore(cb: () => void): () => void {
