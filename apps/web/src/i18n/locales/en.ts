@@ -1589,6 +1589,7 @@ export const en = {
   "settings.widgetspage.undo": "Undo",
   "settingsview.about": "About",
   "settingsview.access": "Access",
+  "settingsview.users": "Users",
   "settingsview.appearance": "Appearance",
   "settingsview.backToSettings": "Back to Settings",
   "settingsview.behavior": "Behavior",
