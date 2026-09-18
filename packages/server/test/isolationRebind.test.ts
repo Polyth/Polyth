@@ -422,6 +422,63 @@ test("restart can discard a vanished workspace through durable authority release
   assert.ok((await git.branches(root)).branches.some((item) => item.name === beforeRestart.isolation!.worktreeBranch));
 });
 
+test("live isolated discard uses durable authority release instead of the reconnecting source transport", async () => {
+  const root = repo();
+  const initial = make(root);
+  const created = await initial.isolation.createIsolatedSession({ projectId: "p1" });
+  const before = await initial.sessions.snapshot(created.id);
+  const source = before.isolation!.worktreePath;
+  writeFileSync(join(source, "discard-me.txt"), "discard\n");
+
+  const cwds: string[] = [];
+  const liveTransportReleases: string[] = [];
+  const live = fakeRuntime(initial.ctrl, liveTransportReleases, () => cwds.at(-1) ?? root);
+  let authorityReleaseCalls = 0;
+  const sessions = createSessionService({
+    store: initial.store,
+    projects: initial.projects,
+    permissions: initial.permissions,
+    broadcast: initial.broadcast,
+    queue: initial.store,
+    worktrees: { list: (path) => git.worktrees.list(path) },
+    runtimes: {
+      forProject: async (_projectId, cwd) => {
+        if (cwd) cwds.push(cwd);
+        return live.rt;
+      },
+      releaseSessionExecution: async (_projection, binding) => {
+        authorityReleaseCalls += 1;
+        return {
+          kind: "confirmed",
+          value: {
+            authorityId: binding.authorityId,
+            generation: binding.generation,
+            backendSessionId: binding.backendSessionId!,
+          },
+        };
+      },
+    },
+  });
+  await sessions.events(created.id, 0);
+  live.rt.releaseExecution = async () => {
+    throw new Error("fetch failed: OpenCode is reconnecting");
+  };
+  const isolation = createIsolationService({
+    git,
+    sessions,
+    projects: initial.projects,
+    append: async () => undefined,
+    closeWorkspaceProcesses: async () => undefined,
+  });
+
+  const discarded = await isolation.discard(created.id);
+  assert.equal(authorityReleaseCalls, 1);
+  assert.deepEqual(liveTransportReleases, []);
+  assert.equal(discarded.isolation, undefined);
+  assert.equal(discarded.worktreePath, undefined);
+  assert.equal(existsSync(source), false);
+});
+
 test("ordinary rebind never authority-fences another session on a shared runtime", async () => {
   const root = repo();
   const initial = make(root);
