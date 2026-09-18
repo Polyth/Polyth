@@ -1,6 +1,6 @@
 // Server-owned provider/model visibility (WP: Providers & Models settings).
-// The canonical toggle state lives in data/model-visibility.json; every change
-// is mirrored into the backend config (opencode.json disabled_providers +
+// OpenCode's canonical toggle state lives in data/model-visibility.json and is
+// mirrored into its backend config (opencode.json disabled_providers +
 // provider.<id>.blacklist) through the adapter's applier so OpenCode stays the
 // source of truth. On first boot the store seeds FROM that config, so
 // visibility already curated in OpenCode shows up in Polyth immediately.
@@ -38,12 +38,17 @@ export interface AddedProvider {
 }
 
 export interface VisibilityState {
-  /** Provider ids hidden entirely. */
+  /** OpenCode provider ids hidden entirely. */
   disabledProviders: string[];
-  /** "providerID/modelID" keys disabled inside an otherwise-enabled provider. */
+  /** OpenCode "providerID/modelID" keys disabled inside an otherwise-enabled provider. */
   disabledModels: string[];
-  /** Providers explicitly added via the picker — shown even with zero models. */
+  /** OpenCode providers explicitly added via the picker — shown even with zero models. */
   addedProviders: AddedProvider[];
+}
+
+export interface HarnessVisibilityState {
+  disabledProviders: string[];
+  disabledModels: string[];
 }
 
 export interface ProviderCatalogModel {
@@ -102,8 +107,10 @@ export interface ModelVisibilityService {
   state(): VisibilityState;
   providerEnabled(providerID: string): boolean;
   modelEnabled(m: { providerID: string; modelID: string }): boolean;
+  harnessState(harnessId: string): HarnessVisibilityState;
   /** Models the pickers may show: enabled and (by default) connected. */
   filter(models: ModelDescriptor[], opts?: { includeDisconnected?: boolean }): ModelDescriptor[];
+  filterHarness(models: ModelDescriptor[], harnessId: string, opts?: { includeDisconnected?: boolean }): ModelDescriptor[];
   catalog(models: ModelDescriptor[]): ProviderCatalogEntry[];
   /** Candidates for the "add a provider" picker: `live` + `authMethodIds`
    *  (from the backend) minus everything catalog() already shows. */
@@ -114,6 +121,8 @@ export interface ModelVisibilityService {
   ): AvailableProvider[];
   setProviderEnabled(providerID: string, enabled: boolean): Promise<VisibilityState>;
   setModelEnabled(key: string, enabled: boolean): Promise<VisibilityState>;
+  setHarnessProviderEnabled(harnessId: string, providerID: string, enabled: boolean): Promise<HarnessVisibilityState>;
+  setHarnessModelEnabled(harnessId: string, key: string, enabled: boolean): Promise<HarnessVisibilityState>;
   /** Explicitly add a zero-model provider so it appears in catalog(); resets
    *  any stale disabled flag so a freshly-added row starts enabled. */
   addProvider(
@@ -171,9 +180,10 @@ function parseAddedProviders(v: unknown): AddedProvider[] {
   return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 
+const strings = (v: unknown): string[] =>
+  Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === "string" && x.length > 0))].sort() : [];
+
 export function parseVisibility(raw: unknown): VisibilityState {
-  const strings = (v: unknown): string[] =>
-    Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === "string" && x.length > 0))].sort() : [];
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return { disabledProviders: [], disabledModels: [], addedProviders: [] };
   }
@@ -183,6 +193,28 @@ export function parseVisibility(raw: unknown): VisibilityState {
     disabledModels: strings(o.disabledModels),
     addedProviders: parseAddedProviders(o.addedProviders),
   };
+}
+
+export function parseHarnessVisibility(raw: unknown): HarnessVisibilityState {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { disabledProviders: [], disabledModels: [] };
+  }
+  const o = raw as Record<string, unknown>;
+  return {
+    disabledProviders: strings(o.disabledProviders),
+    disabledModels: strings(o.disabledModels),
+  };
+}
+
+function parseHarnessVisibilityMap(raw: unknown): Record<string, HarnessVisibilityState> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const result: Record<string, HarnessVisibilityState> = {};
+  for (const [harnessId, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!/^[a-z][a-z0-9-]*$/.test(harnessId)) continue;
+    const parsed = parseHarnessVisibility(value);
+    if (parsed.disabledProviders.length || parsed.disabledModels.length) result[harnessId] = parsed;
+  }
+  return result;
 }
 
 /** Extract visibility from a parsed opencode.json (seeding path). */
@@ -205,10 +237,19 @@ export function visibilityFromBackendConfig(cfg: Record<string, unknown>): Visib
   return parseVisibility({ disabledProviders, disabledModels });
 }
 
-function isModelVisible(m: ModelDescriptor, state: VisibilityState): boolean {
+function isModelVisible(m: ModelDescriptor, state: Pick<VisibilityState, "disabledProviders" | "disabledModels">): boolean {
   if (state.disabledProviders.includes(m.providerID)) return false;
   return !state.disabledModels.includes(modelVisibilityKey(m));
 }
+
+const connectedModels = (
+  models: ModelDescriptor[],
+  opts: { includeDisconnected?: boolean },
+): ModelDescriptor[] => {
+  if (opts.includeDisconnected) return models;
+  const connected = models.filter((m) => m.connected !== false);
+  return connected.length > 0 ? connected : models;
+};
 
 /** Enabled models; disconnected providers are hidden unless requested.
  *  Fail-open: if filtering leaves nothing while some models exist, the
@@ -220,9 +261,7 @@ export function filterVisibleModels(
   opts: { includeDisconnected?: boolean } = {},
 ): ModelDescriptor[] {
   const enabled = models.filter((m) => isModelVisible(m, state));
-  if (opts.includeDisconnected) return enabled;
-  const connected = enabled.filter((m) => m.connected !== false);
-  return connected.length > 0 ? connected : enabled;
+  return connectedModels(enabled, opts);
 }
 
 type CatalogDraft = Omit<ProviderCatalogEntry, "status">;
@@ -504,13 +543,23 @@ export function createModelVisibilityService(opts: { file: string; applier?: Vis
 
   let loaded = false;
   let state: VisibilityState = { disabledProviders: [], disabledModels: [], addedProviders: [] };
+  let harnesses: Record<string, HarnessVisibilityState> = {};
   let configuredProviders: ConfiguredProvider[] = [];
   try {
-    state = parseVisibility(JSON.parse(readFileSync(opts.file, "utf8")));
+    const stored = JSON.parse(readFileSync(opts.file, "utf8")) as unknown;
+    state = parseVisibility(stored);
+    harnesses = parseHarnessVisibilityMap(
+      stored && typeof stored === "object" && !Array.isArray(stored)
+        ? (stored as Record<string, unknown>).harnesses
+        : undefined,
+    );
     loaded = true;
   } catch { /* no store yet — seed() may fill it from the backend config */ }
 
-  const persist = () => atomicWriteSync(opts.file, `${JSON.stringify(state, null, 2)}\n`);
+  const persist = () => {
+    const payload = Object.keys(harnesses).length ? { ...state, harnesses } : state;
+    atomicWriteSync(opts.file, `${JSON.stringify(payload, null, 2)}\n`);
+  };
 
   /** Mirror to opencode.json; a failed apply rolls the store back so Polyth
    *  and OpenCode never disagree about what is visible. */
@@ -534,10 +583,38 @@ export function createModelVisibilityService(opts: { file: string; applier?: Vis
     state: () => state,
     providerEnabled: (providerID) => !state.disabledProviders.includes(providerID),
     modelEnabled: (m) => isModelVisible({ ...m, name: m.modelID }, state),
-    filter: (models, o) => filterVisibleModels(models, state, o ?? {}),
-    catalog: (models) => buildProviderCatalog(models, state, configuredProviders),
+    harnessState: (harnessId) => parseHarnessVisibility(harnesses[harnessId]),
+    filter: (models, o) => {
+      const enabled = models.filter((model) => {
+        const harnessId = model.harnessId ?? "opencode";
+        return harnessId === "opencode"
+          ? isModelVisible(model, state)
+          : isModelVisible(model, harnesses[harnessId] ?? { disabledProviders: [], disabledModels: [] });
+      });
+      return connectedModels(enabled, o ?? {});
+    },
+    filterHarness: (models, harnessId, o) => filterVisibleModels(
+      models,
+      harnessId === "opencode"
+        ? state
+        : harnesses[harnessId] ?? { disabledProviders: [], disabledModels: [] },
+      o ?? {},
+    ),
+    catalog: (models) => buildProviderCatalog(
+      models.filter((model) => !model.harnessId || model.harnessId === "opencode"),
+      state,
+      configuredProviders,
+    ),
     available: (models, live, authMethodIds) =>
-      buildAvailableProviders(live, authMethodIds, shownProviderIds(models, state, configuredProviders)),
+      buildAvailableProviders(
+        live,
+        authMethodIds,
+        shownProviderIds(
+          models.filter((model) => !model.harnessId || model.harnessId === "opencode"),
+          state,
+          configuredProviders,
+        ),
+      ),
 
     async seed(): Promise<void> {
       if (!opts.applier) return;
@@ -616,6 +693,51 @@ export function createModelVisibilityService(opts: { file: string; applier?: Vis
       if (enabled) set.delete(key);
       else set.add(key);
       return commit({ ...state, disabledModels: [...set] });
+    },
+
+    async setHarnessProviderEnabled(harnessId, providerID, enabled) {
+      if (!/^[a-z][a-z0-9-]*$/.test(harnessId)) throw err("invalid-input", "valid harness id required");
+      if (!providerID) throw err("invalid-input", "provider id required");
+      const before = harnesses;
+      const current = parseHarnessVisibility(harnesses[harnessId]);
+      const disabled = new Set(current.disabledProviders);
+      if (enabled) disabled.delete(providerID);
+      else disabled.add(providerID);
+      const next = parseHarnessVisibility({ ...current, disabledProviders: [...disabled] });
+      const updated = { ...harnesses };
+      if (next.disabledProviders.length || next.disabledModels.length) updated[harnessId] = next;
+      else delete updated[harnessId];
+      harnesses = updated;
+      try {
+        persist();
+      } catch (error) {
+        harnesses = before;
+        throw error;
+      }
+      return next;
+    },
+
+    async setHarnessModelEnabled(harnessId, key, enabled) {
+      if (!/^[a-z][a-z0-9-]*$/.test(harnessId)) throw err("invalid-input", "valid harness id required");
+      const i = key.indexOf("/");
+      if (i <= 0 || i === key.length - 1) throw err("invalid-input", `model key must be "providerID/modelID", got "${key}"`);
+      const before = harnesses;
+      const current = parseHarnessVisibility(harnesses[harnessId]);
+      const disabled = new Set(current.disabledModels);
+      if (enabled) disabled.delete(key);
+      else disabled.add(key);
+      const next = parseHarnessVisibility({ ...current, disabledModels: [...disabled] });
+      const updated = { ...harnesses };
+      if (next.disabledProviders.length || next.disabledModels.length) updated[harnessId] = next;
+      else delete updated[harnessId];
+      harnesses = updated;
+      try {
+        persist();
+      } catch (error) {
+        harnesses = before;
+        throw error;
+      }
+      return next;
     },
 
     addProvider(providerID, name, origin?: ProviderOrigin, meta?: {
