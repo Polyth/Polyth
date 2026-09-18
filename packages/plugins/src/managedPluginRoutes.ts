@@ -3,6 +3,7 @@ import type {
   ContributionInvocationDraft,
   ContributionInvocationKind,
   PackageJsonObject,
+  PackageJsonValue,
 } from "@polyth/package-sdk";
 import type { PackageManifest, PackageManifestV2 } from "@polyth/package-sdk/manifest";
 import type { PluginRegistry } from "./managedRegistry.ts";
@@ -136,7 +137,7 @@ function canonicalTool(event: SessionEvent): {
   callId: string;
   name: string;
   input?: PackageJsonObject;
-  output?: unknown;
+  output?: PackageJsonValue;
   error?: string;
 } {
   if (event.type !== "tool/call" && event.type !== "tool/result" && event.type !== "tool/error") {
@@ -148,7 +149,7 @@ function canonicalTool(event: SessionEvent): {
   if (!callId || !name) fail("invalid-input", "canonical tool target is incomplete");
   const input = boundedObject(data.input, 16 * 1024);
   const output = event.type === "tool/result" && data.output !== undefined
-    ? JSON.parse(JSON.stringify(data.output))
+    ? JSON.parse(JSON.stringify(data.output)) as PackageJsonValue
     : undefined;
   return {
     callId,
