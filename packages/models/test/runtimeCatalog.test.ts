@@ -212,7 +212,11 @@ test("restart paints persisted Auto models and executable harnesses before reval
   pending.get("cursor")!(snapshot("cursor", "persisted-cursor", "warm"));
   await warming;
   await readHarnessSnapshots({ projectId: "warm", spaceId: "space-a" });
+  const requestsBeforeRestart = requests.length;
   resetRuntimeCatalogMemory(false);
+  await preloadRuntimeCatalogs();
+  assert.equal(requests.length, requestsBeforeRestart,
+    "a page restart reuses the fresh daily catalog instead of probing harnesses again");
 
   assert.equal(peekHarnessSnapshots({ projectId: "warm", spaceId: "space-a" })?.[0]?.identity.id, "codex",
     "last-known executable harnesses survive the in-memory restart boundary");
@@ -232,6 +236,8 @@ test("restart paints persisted Auto models and executable harnesses before reval
   try {
     await act(async () => { root.render(createElement(Harness)); });
     assert.equal(paints[0], "persisted-auto", "the first post-restart paint does not wait for discovery");
+    assert.equal(requests.length, requestsBeforeRestart,
+      "mounting the picker route after reload does not revalidate a fresh persisted catalog");
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();
