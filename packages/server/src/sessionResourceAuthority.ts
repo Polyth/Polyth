@@ -216,7 +216,10 @@ export function canonicalSessionService(
     requireMutation();
     const project = await projects.get(input.projectId);
     if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
-    const sessionId = randomUUID();
+    // Isolation allocates the session id before creating its managed worktree.
+    // Preserve that internal identity so the resource row, projection, marker,
+    // and branch all describe the same canonical session.
+    const sessionId = input.id?.trim() || randomUUID();
     const operationId = randomUUID();
     security.resources.begin({
       operationId,

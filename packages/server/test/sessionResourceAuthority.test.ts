@@ -195,6 +195,16 @@ test("session create preallocates the canonical id and activates only the durabl
   assert.equal(f.domain.projections.has(ref.id), true);
 });
 
+test("session create preserves a preallocated internal session id", async t => {
+  const f = fixture(t);
+  const sessions = canonicalSessionService(f.ctx("usr_owner", "owner"), f.base, f.projects);
+  const id = randomUUID();
+  const ref = await sessions.create({ projectId: "prj_one", id });
+  assert.equal(ref.id, id);
+  assert.equal(f.domain.projections.has(id), true);
+  assert.equal(f.security.resources.resource(id)?.lifecycle, "active");
+});
+
 test("runtime startup failure still activates a durable failed/reconciling session resource", async t => {
   const f = fixture(t);
   f.domain.setFailCreateAfterProjection(true);
