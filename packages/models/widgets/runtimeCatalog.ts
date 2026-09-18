@@ -134,6 +134,9 @@ const rememberHarnessSnapshots = (options: SnapshotRequest, rows: HarnessSnapsho
   if (options.projectId && options.spaceId) keys.add(snapshotPresentationKey(options));
   const context = rows[0]?.context;
   if (context) {
+    // projectId itself is Space-owned, so this project-only alias is safe for
+    // settings surfaces that do not carry the active Space id explicitly.
+    keys.add(snapshotPresentationKey({ ...options, projectId: context.projectId, spaceId: undefined }));
     keys.add(snapshotPresentationKey({ ...options, projectId: context.projectId, spaceId: context.spaceId }));
     keys.add(snapshotPresentationKey({ ...options, projectId: context.projectId, spaceId: context.spaceId, cwd: context.cwd }));
   }
@@ -304,6 +307,7 @@ export const preloadRuntimeCatalogs = async (
   // survive a reload without a separate roster request.
   const context = snapshots[0]?.context;
   if (context) {
+    persistedRosters.write(rosterPresentationKey({ projectId: context.projectId }), roster);
     persistedRosters.write(rosterPresentationKey({
       projectId: context.projectId,
       spaceId: context.spaceId,
