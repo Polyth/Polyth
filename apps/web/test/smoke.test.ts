@@ -186,6 +186,21 @@ test("uncertainty and fenced turn-submit mark the nearest unmarked user message"
   assert.equal((model.messages[0] as { uncertain?: boolean }).uncertain, true);
 });
 
+test("hidden repeated prompts stay out of chat and do not taint the visible prompt", () => {
+  let model = buildModel([
+    ev("user/message", { text: "original" }),
+    ev("user/message", { text: "original", hiddenUserMessage: true }),
+  ]);
+  assert.equal(model.messages.length, 1);
+  assert.equal((model.messages[0] as { kind: string; text: string }).text, "original");
+
+  model = reduceEvent(model, ev("mutation/uncertainty-recorded", { mutationKind: "turn-submit" }));
+  assert.equal((model.messages[0] as { uncertain?: boolean }).uncertain, undefined);
+
+  model = reduceEvent(model, ev("user/message", { text: "original", autoResume: true }));
+  assert.equal(model.messages.length, 1);
+});
+
 test("tool call → result fills the card; call → error marks it failed", () => {
   const m = buildModel([
     ev("tool/call", { callId: "c1", tool: "read_file", input: { path: "a.ts" } }),
