@@ -40,6 +40,7 @@ import {
   IconButton,
   PinIcon,
   RefreshIcon,
+  SettingsIcon,
   TabPanel,
   Tabs,
 } from "../../../../apps/web/src/components/ui/index.ts";
@@ -411,13 +412,11 @@ function UsageSeriesChart({
   series,
   metric,
   chartStyle,
-  formatAxis,
 }: {
   labels: string[];
   series: UsageChartSeries[];
   metric: UsageChartMetric;
   chartStyle: "bar" | "line";
-  formatAxis: (value: number) => string;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -430,6 +429,11 @@ function UsageSeriesChart({
     const gridColor = style.getPropertyValue("--border-soft").trim();
     const reduceMotion = typeof matchMedia === "function"
       && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const formatAxis = (value: number) => metric === "cost"
+      ? formatChartMoney(value)
+      : metric === "tokens"
+        ? fmtTokens(Math.round(value))
+        : String(Math.round(value));
     const config = {
       type: chartStyle,
       data: {
@@ -484,7 +488,7 @@ function UsageSeriesChart({
     } as ChartConfiguration;
     const chart = new Chart(canvas, config);
     return () => chart.destroy();
-  }, [chartStyle, formatAxis, labels, metric, series]);
+  }, [chartStyle, labels, metric, series]);
 
   return <canvas ref={canvasRef} aria-hidden="true" />;
 }
@@ -524,7 +528,6 @@ function CohortChart({
           series={series}
           metric={metric}
           chartStyle={chartStyle}
-          formatAxis={formatAxis}
         />
       )}
       {populated && (
@@ -1145,6 +1148,7 @@ export function UsageDashboard(): ReactNode {
   const sessionSeries = aggregateSeries(data.chart.sessions, data.chart.labels.length);
   const averageSessionCost = data.totals.sessions > 0 ? data.totals.cost / data.totals.sessions : 0;
   const addProvider = () => window.dispatchEvent(new CustomEvent("polyth:settings-page", { detail: "models" }));
+  const openUsageSettings = () => window.dispatchEvent(new CustomEvent("polyth:settings-page", { detail: "usage" }));
   const refreshAll = async () => {
     if (refreshing || quotaLoading) return;
     setRefreshing(true);
@@ -1262,6 +1266,12 @@ export function UsageDashboard(): ReactNode {
             label={editing ? tr("usage.usagedashboard.editLayoutDone") : tr("usage.usagedashboard.editLayout")}
             title={editing ? tr("usage.usagedashboard.editLayoutDone") : tr("usage.usagedashboard.editLayoutHint")}
             onClick={() => setEditing((current) => !current)}
+          />
+          <IconButton
+            icon={SettingsIcon}
+            label="Usage settings"
+            title="Usage settings"
+            onClick={openUsageSettings}
           />
           <IconButton
             icon={RefreshIcon}
