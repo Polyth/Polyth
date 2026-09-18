@@ -89,3 +89,11 @@ test("catalog invalidation does not rewarm every runtime", () => {
   assert.match(widgets, /host\.store\.subscribe\(warmCatalogs\)/);
   assert.doesNotMatch(widgets, /subscribeRuntimeCatalogs/);
 });
+
+test("ordinary window focus does not force harness discovery", () => {
+  const runtime = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../../harness-runtime/widgets/runtime.tsx"),
+    "utf8",
+  );
+  assert.match(runtime, /if \(!terminal\) return;[\s\S]*window\.addEventListener\("focus", focus\)/);
+});
