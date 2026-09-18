@@ -1428,6 +1428,8 @@ export interface SendOptions {
    *  selects a profile, `null` explicitly clears the session's stored one,
    *  omitted inherits it (UX-COMPOSER-DISC). */
   agentProfileId?: string | null;
+  /** Retry/regeneration of an already-visible prompt: model-visible, chat-hidden. */
+  hiddenUserMessage?: boolean;
   /** Composer pills (F2); validated + persisted server-side before the model sees them. */
   attachments?: AttachmentRef[];
   /** Exact native command selected by the composer catalog. */
@@ -1456,6 +1458,7 @@ export async function sendMessage(text: string, model?: JsonObject, agent?: stri
     const delivery = opts?.delivery;
     const body = {
       text, model, agent, ...(autoTitle ? { autoTitle: true } : {}),
+      ...(opts?.hiddenUserMessage ? { hiddenUserMessage: true } : {}),
       ...(opts?.command ? { command: opts.command } : {}),
       ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
       ...(opts?.harness ? { harness: opts.harness } : {}),
