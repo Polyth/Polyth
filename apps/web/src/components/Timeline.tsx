@@ -6,7 +6,7 @@ import { fmtDuration } from "../format.ts";
 import { groupActivity, mergeThinking, promptIndex, loadDraft, type ActivityGroup, type ActivityItem } from "../utils.ts";
 import { executionPresentation, reasoningHead, reasoningTail } from "../execution.ts";
 import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
-import { cancelResume, forkSession, loadOlderEvents, resumeNow } from "../init.ts";
+import { cancelResume, forkSession, loadOlderEvents, resumeNow, sendMessage } from "../init.ts";
 import { resumeOptionsForModel } from "../rateLimitRecovery.ts";
 import { useSpaces } from "../spaces.ts";
 import { markSessionPerformance } from "../sessionPerformance.ts";
@@ -1951,12 +1951,17 @@ export default function Timeline({
   // Regenerate resends the user prompt that produced each answer. One forward
   // pass — never a reverse scan per assistant row per streaming render.
   const regenerateSources = useMemo(() => {
-    const bySeq = new Map<number, string>();
-    let lastUserText: string | undefined;
+    const bySeq = new Map<number, { text: string; attachments?: UserMsg["attachments"] }>();
+    let lastUserMessage: UserMsg | undefined;
     for (const message of visibleMessages) {
-      if (message.kind === "user") lastUserText = message.text;
-      else if (message.kind === "github-conflict") lastUserText = undefined;
-      else if (message.kind === "assistant" && lastUserText !== undefined) bySeq.set(message.eventSeq, lastUserText);
+      if (message.kind === "user") lastUserMessage = message;
+      else if (message.kind === "github-conflict") lastUserMessage = undefined;
+      else if (message.kind === "assistant" && lastUserMessage) {
+        bySeq.set(message.eventSeq, {
+          text: lastUserMessage.raw ?? lastUserMessage.text,
+          ...(lastUserMessage.attachments?.length ? { attachments: lastUserMessage.attachments } : {}),
+        });
+      }
     }
     return bySeq;
   }, [visibleMessages]);
@@ -1975,12 +1980,11 @@ export default function Timeline({
       lastUser && sessionId ? {
         label: tr("common.retry"),
         run: () => {
-          const draft = {
-            text: lastUser.raw ?? lastUser.text,
+          void sendMessage(lastUser.raw ?? lastUser.text, undefined, undefined, {
+            targetSessionId: sessionId,
+            hiddenUserMessage: true,
             ...(lastUser.attachments?.length ? { attachments: lastUser.attachments } : {}),
-          };
-          applyComposerSeed(sessionId, `turn-failed:${turn.turnId}`, draft);
-          requestComposerReplace(draft.text);
+          });
         },
       } : null,
       transientTurnKey,
