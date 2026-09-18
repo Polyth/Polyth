@@ -25,6 +25,7 @@ import markets from "../../../packages/markets/src/serverEntry.ts";
 import models from "../../../packages/models/src/serverEntry.ts";
 import multirun from "../../../packages/multirun/src/serverEntry.ts";
 import permissions from "../../../packages/permissions/src/serverEntry.ts";
+import personalCoach from "../../../packages/personal-coach/src/serverEntry.ts";
 import plugins from "../../../packages/plugins/src/serverEntry.ts";
 import schedule from "../../../packages/schedule/src/serverEntry.ts";
 import secureSafe from "../../../packages/secure-safe/src/serverEntry.ts";
@@ -76,14 +77,14 @@ export const desktopServerPackages = [
   entry("backend-omp", {"name": "OMP harness", "description": "oh-my-pi through its native ACP transport", "core": false, "enabled": true, "icon": "command", "hasSettings": false}, backendOmp),
   entry("backend-pi", {"name": "Pi harness", "description": "Detect Pi and report native RPC integration readiness", "core": false, "enabled": true, "icon": "command", "hasSettings": false}, backendPi),
   entry("backend-opencode", {"name": "OpenCode harness", "description": "Managed OpenCode HTTP and SSE runtime", "core": true, "enabled": true, "icon": "terminal", "hasSettings": false}, backendOpencode),
-  entry("browser", { name: "Browser", description: "A shared internal browser for users, agents, and element context.", core: false, enabled: true, settingsGroup: "Engineering", icon: "globe", hasSettings: false }, browser),
+  entry("browser", { name: "Browser", description: "A shared internal browser for users, agents, and element context.", core: false, enabled: true, settingsGroup: "Engineering", icon: "globe", hasSettings: true }, browser),
   entry("chat-workspace", { name: "Chat Workspace", description: "Use the AI chats you already have, directly alongside your work.", core: false, enabled: true, settingsGroup: "Workspace", icon: "chat", hasSettings: true }, chatWorkspace),
   entry("commands", { name: "Commands", description: "Reusable project command definitions.", core: false, enabled: true, settingsGroup: "Engineering", icon: "command", hasSettings: true }, commands),
   entry("custom-action", { name: "Custom Action", description: "Configurable icon widgets that run project commands.", core: false, enabled: true, settingsGroup: "Customize", icon: "play", hasSettings: false }, customAction),
   entry("dictation", { name: "Voice & Dictation", description: "Speech-to-text dictation and spoken replies.", core: false, enabled: true, settingsGroup: "Workspace", icon: "mic", hasSettings: true }, dictation),
   entry("editor", { name: "Editor", description: "Text and code editing runtime for the workbench.", core: true, enabled: true, icon: "edit", hasSettings: false }, editor),
   entry("example-feature", { name: "Example Feature", description: "Proof-of-concept package registered via package discovery.", core: false, enabled: true, settingsGroup: "Customize", icon: "flask", hasSettings: false }, exampleFeature),
-  entry("files", { name: "Files", description: "Workspace file access and attachments.", core: true, enabled: true, icon: "files", hasSettings: false }, files),
+  entry("files", { name: "Files", description: "Workspace file access and attachments.", core: true, enabled: true, icon: "files", hasSettings: true }, files),
   entry("fusion", { name: "Fusion", description: "Synthesize multiple model responses.", core: false, enabled: true, settingsGroup: "Engineering", icon: "combine", hasSettings: false }, fusion),
   entry("git", { name: "Git", description: "Source control status, diffs, commits, and worktrees.", core: false, enabled: true, settingsGroup: "Engineering", icon: "git", hasSettings: true }, git),
   entry("gitlab", { name: "GitLab", description: "GitLab issues, merge requests and pipelines.", core: false, enabled: true, settingsGroup: "Engineering", icon: "gitlab", hasSettings: false }, gitlab),
@@ -99,8 +100,9 @@ export const desktopServerPackages = [
   entry("multirun", { name: "Multirun", description: "Run prompts across multiple models.", core: false, enabled: true, settingsGroup: "Engineering", icon: "layers", hasSettings: false }, multirun),
   entry("opencode", {"name": "OpenCode", "description": "OpenCode-native roles and runtime configuration surfaces.", "core": true, "enabled": true, "icon": "braces", "hasSettings": false}, opencode),
   entry("permissions", { name: "Permissions", description: "Tool permission review and policy enforcement.", core: true, enabled: true, icon: "shield", hasSettings: false }, permissions),
+  entry("personal-coach", { name: "Personal Coach", description: "Durable goals, commitments, routines, and lightweight coaching state.", core: false, enabled: true, settingsGroup: "Workspace", icon: "coach", hasSettings: true }, personalCoach),
   entry("plugins", { name: "Plugins", description: "Managed plugin installation and configuration.", core: false, enabled: true, settingsGroup: "Customize", icon: "plugin", hasSettings: true }, plugins),
-  entry("schedule", { name: "Schedule", description: "Schedule recurring and one-time agent tasks.", core: false, enabled: true, settingsGroup: "Engineering", icon: "schedule", hasSettings: false }, schedule),
+  entry("schedule", { name: "Planner", description: "Plan prompts to run once or on a repeating cadence.", core: false, enabled: true, settingsGroup: "Engineering", icon: "schedule", hasSettings: false }, schedule),
   entry("secure-safe", { name: "Secure Safe", description: "Write-only credential handles and secret policy.", core: false, enabled: true, settingsGroup: "Engineering", icon: "lock", hasSettings: true }, secureSafe),
   entry("session-import", {"name": "Session Import", "description": "Import a native conversation as a canonical Snapshot", "core": false, "enabled": true, "icon": "import", "hasSettings": false}, sessionImport),
   entry("ssh", { name: "SSH Remotes", description: "SSH connections and remote projects whose agent runs on the host.", core: false, enabled: true, settingsGroup: "Engineering", icon: "server", hasSettings: true }, ssh),
