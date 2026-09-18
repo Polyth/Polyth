@@ -34,6 +34,27 @@ test("every phone view uses the same three-segment shell bar", async () => {
   assert.equal(shell.match(/window\.addEventListener\("keydown", onKey\)/g)?.length, 1);
 });
 
+test("mobile workspace hosts resolve project scope from the active session", async () => {
+  const [mobileHeader, workspacePanel, contextRail] = await Promise.all([
+    read("../src/components/mobile/MobileSessionHeader.tsx"),
+    read("../src/components/mobile/WorkspacePanel.tsx"),
+    read("../src/components/ContextRail.tsx"),
+  ]);
+
+  for (const source of [mobileHeader, workspacePanel, contextRail]) {
+    assert.match(source, /workspaceProjectId/);
+    assert.doesNotMatch(
+      source,
+      /useStore\(\([^)]*\)\s*=>\s*[^)]*activeProjectId/,
+      "mobile workspace chrome must never bypass the session-aware project resolver",
+    );
+  }
+
+  assert.equal((contextRail.match(/useStore\(workspaceProjectId\)/g) ?? []).length, 2);
+  assert.equal((workspacePanel.match(/useStore\(workspaceProjectId\)/g) ?? []).length, 1);
+  assert.equal((mobileHeader.match(/useStore\(workspaceProjectId\)/g) ?? []).length, 1);
+});
+
 test("compact project drawer is above its scrim", async () => {
   const css = await readWebStyles();
   const drawerStart = css.indexOf("/* Project/session drawer:");
