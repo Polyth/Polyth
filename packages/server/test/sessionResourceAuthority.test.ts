@@ -86,6 +86,22 @@ function fixture(t: test.TestContext) {
       } as SessionEvent]);
       return child;
     },
+    insertRetiredSpaceLeftover(): SessionProjection {
+      const leftover = {
+        ...projection(randomUUID()),
+        projectId: "prj_retired",
+        spaceId: "spc_retired",
+      } as SessionProjection;
+      projections.set(leftover.id, leftover);
+      histories.set(leftover.id, []);
+      return leftover;
+    },
+    insertUnadoptedTopLevel(): SessionProjection {
+      const row = projection(randomUUID());
+      projections.set(row.id, row);
+      histories.set(row.id, []);
+      return row;
+    },
   };
 
   const base = {
@@ -250,6 +266,32 @@ test("a missing resource for a forked child fails closed instead of inventing it
   const orphan = f.domain.insertForkOrphan(parent.id);
   await assert.rejects(sessions.list("prj_one"), { code: "recovery-required" });
   assert.equal(f.security.resources.resource(orphan.id), undefined);
+});
+
+test("a leftover session from a retired Space does not fail closed the current list", async t => {
+  const f = fixture(t);
+  const sessions = canonicalSessionService(f.ctx("usr_owner", "owner"), f.base, f.projects);
+  const live = await sessions.create({ projectId: "prj_one" });
+  const leftover = f.domain.insertRetiredSpaceLeftover();
+
+  const listed = await sessions.list();
+  assert.deepEqual(listed.map((row) => row.id), [live.id]);
+  assert.equal(f.security.resources.resource(leftover.id), undefined);
+  await assert.rejects(sessions.snapshot(leftover.id), { code: "not-found" });
+});
+
+test("an unadopted top-level session in this Space is admitted from its project resource", async t => {
+  const f = fixture(t);
+  const sessions = canonicalSessionService(f.ctx("usr_owner", "owner"), f.base, f.projects);
+  const row = f.domain.insertUnadoptedTopLevel();
+
+  const listed = await sessions.list("prj_one");
+  assert.equal(listed.some((item) => item.id === row.id), true);
+  const resource = f.security.resources.resource(row.id);
+  assert.equal(resource?.kind, "session");
+  assert.equal(resource?.lifecycle, "active");
+  assert.equal(resource?.parentId, "prj_one");
+  assert.equal((await sessions.snapshot(row.id)).id, row.id);
 });
 
 test("viewer can read admitted sessions but cannot create or mutate them", async t => {

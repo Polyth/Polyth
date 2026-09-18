@@ -247,6 +247,20 @@ test("pending tool calls transition to running without duplicating the execution
   assert.equal(executions[0]?.time, started.time, "running duration starts at the lifecycle transition");
 });
 
+test("assistant/message adopts a streamed row when the final partId differs", () => {
+  const model = buildModel([
+    ev("turn/started", { turnId: "t1" }),
+    ev("assistant/chunk", { partId: "t1:stream:0:1", text: "Hey! Ready to work. What's the task?" }),
+    ev("assistant/message", { partId: "assistant-uuid:0", text: "Hey! Ready to work. What's the task?" }),
+    ev("turn/stopped", { turnId: "t1", reason: "completed" }),
+  ]);
+  const assistants = model.messages.filter((message) => message.kind === "assistant");
+  assert.equal(assistants.length, 1);
+  assert.equal(assistants[0]?.finalized, true);
+  assert.equal(assistants[0]?.partId, "assistant-uuid:0");
+  assert.equal(assistants[0]?.text, "Hey! Ready to work. What's the task?");
+});
+
 test("turn/stopped finalizes orphaned pending/running tools without inventing output", () => {
   const aborted = buildModel([
     ev("turn/started", { turnId: "t1" }),
@@ -338,6 +352,19 @@ test("turn/stopped leaves already-settled tools untouched", () => {
 });
 
 
+test("cursor StrReplace and claude file_path results populate session edited paths", () => {
+  const model = buildModel([
+    ev("tool/call", { callId: "sr", tool: "StrReplace", input: { path: "apps/web/src/pendingChanges.ts" } }),
+    ev("tool/result", { callId: "sr", tool: "StrReplace", output: "ok" }),
+    ev("tool/call", { callId: "w", tool: "Write", input: { file_path: "src/claude.ts" } }),
+    ev("tool/result", { callId: "w", tool: "tool", output: "ok" }),
+  ]);
+  assert.deepEqual(sessionEditedPaths(model.messages), [
+    "apps/web/src/pendingChanges.ts",
+    "src/claude.ts",
+  ]);
+});
+
 test("edit tool results derive changed files and a new prompt clears the turn summary", () => {
   const model = buildModel([
     ev("tool/call", { callId: "read", tool: "read_file", input: { path: "src/read.ts" } }),
@@ -402,6 +429,21 @@ test("pending-change source lists session tool paths independently of leftover g
     "src/a.ts",
     "src/b.ts",
   ]);
+  assert.deepEqual(extractChangedFiles("StrReplace", { path: "apps/web/src/pendingChanges.ts" }), [
+    "apps/web/src/pendingChanges.ts",
+  ]);
+  assert.deepEqual(extractChangedFiles("Write", { file_path: "src/claude.ts" }), ["src/claude.ts"]);
+  assert.deepEqual(extractChangedFiles("Delete", { path: "src/gone.ts" }), ["src/gone.ts"]);
+  assert.deepEqual(extractChangedFiles("NotebookEdit", { target: "notes.ipynb" }), ["notes.ipynb"]);
+  assert.deepEqual(extractChangedFiles("edit", { changes: [{ path: "src/codex.ts" }] }), ["src/codex.ts"]);
+  assert.deepEqual(extractChangedFiles("read_file", { file_path: "src/skip.ts" }), []);
+  assert.deepEqual(extractChangedFiles("TodoWrite", { path: "todos.md" }), []);
+  assert.deepEqual(extractChangedFiles("other", {
+    filePath: "src/acp.ts",
+    oldString: "a",
+    newString: "b",
+  }), ["src/acp.ts"]);
+  assert.deepEqual(extractChangedFiles("other", { path: "src/skip.ts" }), []);
   const dirty = {
     branch: "main",
     ahead: 0,

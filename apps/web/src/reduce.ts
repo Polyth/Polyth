@@ -524,6 +524,27 @@ function pushAssistant(m: RenderModel, msg: AssistantMsg): void {
   const idx = messageIndex(m);
   if (!idx.assistants.has(msg.partId)) idx.assistants.set(msg.partId, msg);
 }
+/** Claude (and similar) can stream a row under one partId and then finalize
+ *  the same answer under another. Adopt the live row so replay does not keep
+ *  an unfinalized copy plus a second caret-less bubble. */
+function findUnfinalizedAssistantPrefix(model: RenderModel, text: string | undefined): AssistantMsg | undefined {
+  if (text === undefined) return undefined;
+  for (let i = model.messages.length - 1; i >= 0; i--) {
+    const msg = model.messages[i];
+    if (!msg || msg.kind !== "assistant") continue;
+    if (msg.finalized) return undefined;
+    return text.startsWith(msg.text) ? msg : undefined;
+  }
+  return undefined;
+}
+function adoptAssistantPart(model: RenderModel, msg: AssistantMsg, partId: string): void {
+  const idx = messageIndex(model);
+  if (msg.partId !== partId) {
+    idx.assistants.delete(msg.partId);
+    msg.partId = partId;
+  }
+  if (!idx.assistants.has(partId)) idx.assistants.set(partId, msg);
+}
 function pushTool(m: RenderModel, msg: ToolMsg): void {
   m.messages.push(msg);
   const idx = messageIndex(m);
@@ -681,7 +702,12 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
     }
     case "assistant/message": {
       const partId = str(d, "partId") ?? "";
+      const text = str(d, "text");
       let m = findAssistant(model, partId);
+      if (!m) {
+        m = findUnfinalizedAssistantPrefix(model, text);
+        if (m) adoptAssistantPart(model, m, partId);
+      }
       if (!m) {
         m = {
           kind: "assistant",
@@ -711,7 +737,6 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       m.eventSeq = ev.seq;
       m.finalized = true;
       m.completedAt = ev.time; // semantic completion time, not first chunk
-      const text = str(d, "text");
       if (text !== undefined) m.text = text;
       const reasoning = str(d, "reasoning");
       if (reasoning !== undefined) m.reasoning = reasoning;

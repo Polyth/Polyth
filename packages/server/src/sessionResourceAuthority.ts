@@ -15,6 +15,7 @@ const recovery = (): Error => Object.assign(
   new Error("Session domain state does not match the canonical resource authority"),
   { code: "recovery-required" },
 );
+const notFound = (): Error => Object.assign(new Error("session not found"), { code: "not-found" });
 const forbidden = (): Error => Object.assign(
   new Error("Space member access is required to modify sessions"),
   { code: "forbidden" },
@@ -147,7 +148,14 @@ export function canonicalSessionService(
 
   const adoptDerivedImportedChild = async (projection: SessionProjection): Promise<void> => {
     if (resource(projection.id)) return;
-    if (!projection.parentId) throw recovery();
+    if (!projection.parentId) {
+      // Top-level domain rows from before canonical resources, or leftovers
+      // whose project left this Space, must not fail closed the whole list.
+      const project = security.resources.active(projection.projectId, scope);
+      if (!project || project.kind !== "project") throw notFound();
+      adoptCreated(projection);
+      return;
+    }
     const parent = resource(projection.parentId);
     if (!parent || parent.kind !== "session" || parent.orgId !== org.id || parent.spaceId !== ctx.spaceId
       || (parent.lifecycle !== "active" && parent.lifecycle !== "archived")) throw recovery();
@@ -156,11 +164,23 @@ export function canonicalSessionService(
     adoptCreated(projection, parent.ownerPrincipalId);
   };
 
+  const admitProjection = async (projection: SessionProjection): Promise<SessionProjection | undefined> => {
+    if (projection.spaceId !== undefined && projection.spaceId !== ctx.spaceId) return undefined;
+    try {
+      await adoptDerivedImportedChild(projection);
+      reconcileReadable(projection);
+      return projection;
+    } catch (cause) {
+      if ((cause as { code?: unknown } | null)?.code === "not-found") return undefined;
+      throw cause;
+    }
+  };
+
   const readProjection = async (id: string): Promise<SessionProjection> => {
     const projection = await base.snapshot(id);
-    await adoptDerivedImportedChild(projection);
-    reconcileReadable(projection);
-    return projection;
+    const admitted = await admitProjection(projection);
+    if (!admitted) throw notFound();
+    return admitted;
   };
 
   const reconcileMissingDeletes = async (): Promise<void> => {
@@ -338,12 +358,12 @@ export function canonicalSessionService(
 
   const reconciledList = async (projectId?: string): Promise<SessionProjection[]> => {
     await reconcileMissingDeletes();
-    const rows = await base.list(projectId);
-    for (const projection of rows) {
-      await adoptDerivedImportedChild(projection);
-      reconcileReadable(projection);
+    const visible: SessionProjection[] = [];
+    for (const projection of await base.list(projectId)) {
+      const admitted = await admitProjection(projection);
+      if (admitted) visible.push(admitted);
     }
-    return rows;
+    return visible;
   };
 
   return new Proxy(base, {
@@ -364,12 +384,12 @@ export function canonicalSessionService(
       if (property === "sync") {
         return async (projectId: string) => {
           await reconcileMissingDeletes();
-          const rows = await target.sync(projectId);
-          for (const projection of rows) {
-            await adoptDerivedImportedChild(projection);
-            reconcileReadable(projection);
+          const visible: SessionProjection[] = [];
+          for (const projection of await target.sync(projectId)) {
+            const admitted = await admitProjection(projection);
+            if (admitted) visible.push(admitted);
           }
-          return rows;
+          return visible;
         };
       }
       if (property === "importBackendSessions" && target.importBackendSessions) {

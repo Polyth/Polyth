@@ -82,6 +82,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
     let streamMessageOrdinal = -1;
     let streamEventOrdinal = 0;
     const streamPartIds = new Map<number, string>();
+    const finalizedStreamPartIds = new Set<string>();
     const nativeCommands: RuntimeCommandDescriptor[] = [];
     const permissions = new Map<string, {
         resolve(result: PermissionResult): void;
@@ -116,6 +117,13 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
         const partId = `${active}:stream:${ordinal}:${index}`;
         streamPartIds.set(index, partId);
         return partId;
+    };
+    const streamTextPartIds = (): string[] => [...streamPartIds.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([, partId]) => partId);
+    const resetStreamParts = () => {
+        streamPartIds.clear();
+        finalizedStreamPartIds.clear();
     };
     async function* prompts(): AsyncGenerator<SDKUserMessage> { while (connected) {
         if (!inputs.length)
@@ -314,7 +322,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                         };
                         if (event.type === "message_start") {
                             streamMessageOrdinal += 1;
-                            streamPartIds.clear();
+                            resetStreamParts();
                             if (typeof event.message?.model === "string" && event.message.model) {
                                 nativeModel = { providerID: "anthropic", modelID: event.message.model };
                             }
@@ -344,13 +352,29 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                         if (message.message.model) nativeModel = { providerID: "anthropic", modelID: message.message.model };
                         markAccepted();
                         const body = message.message.content;
+                        const textBlocks: Array<{ index: number; text: string }> = [];
                         for (let i = 0; i < body.length; i++) {
                             const block = body[i]!;
-                            const key = block.type === "text" ? (streamPartIds.get(i) ?? `${message.uuid}:${i}`) : `${message.uuid}:${i}`;
-                            if (block.type === "text")
-                                emit({ type: "assistant/message", partId: key, text: block.text }, key);
+                            if (block.type === "text") textBlocks.push({ index: i, text: block.text });
                             if (block.type === "tool_use")
                                 emit({ type: "tool/started", callId: block.id, tool: block.name, input: block.input as JsonObject }, block.id + ":start");
+                        }
+                        // The CLI emits one assistant message per completed content
+                        // block while streaming. That snapshot often contains only
+                        // the text block, so body index 0 is not the Anthropic
+                        // stream index (thinking/redacted thinking usually landed
+                        // at 0). Pair text blocks with streamed text part IDs in
+                        // order, otherwise the timeline keeps the live row and
+                        // appends a second finalized copy of the same answer.
+                        const streamed = streamTextPartIds();
+                        const reuseAll = textBlocks.length > 0 && textBlocks.length === streamed.length;
+                        for (const [n, block] of textBlocks.entries()) {
+                            const streamedId = reuseAll
+                                ? streamed[n]
+                                : streamed.find((id) => !finalizedStreamPartIds.has(id));
+                            const key = streamedId ?? `${message.uuid}:${block.index}`;
+                            if (streamedId) finalizedStreamPartIds.add(streamedId);
+                            emit({ type: "assistant/message", partId: key, text: block.text }, key);
                         }
                     }
                     if (message.type === "user" && Array.isArray(message.message.content))
@@ -546,7 +570,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
             active = operationId;
             streamMessageOrdinal = -1;
             streamEventOrdinal = 0;
-            streamPartIds.clear();
+            resetStreamParts();
             order++;
             return new Promise(resolve => { admission = () => resolve({ kind: "confirmed", value: { admissionId: operationId }, receipt: operationId }); inputs.push({ type: "user", uuid: operationId as SDKUserMessage["uuid"], session_id: nativeId, parent_tool_use_id: null, message: { role: "user", content: content as SDKUserMessage["message"]["content"] } }); wake?.(); });
         },

@@ -1,9 +1,32 @@
 import type { JsonObject } from "@polyth/contracts";
 import type { GitStatus } from "@polyth/session/web-api";
 
-const WRITE_TOOL = /(^|[./:_-])(apply[_-]?patch|create[_-]?file|delete[_-]?file|edit|multiedit|patch|write)([./:_-]|$)/i;
-const PATH_KEY = /^(changedFiles|file|filePath|filename|files|path|paths|target)$/i;
+/** File-mutating names used by Cursor, Claude, Codex and ACP (`StrReplace`, `Write`, `edit`). */
+function isFileMutatingTool(tool: string): boolean {
+  const value = tool.toLowerCase();
+  if (!value) return false;
+  if (/(?:^|[./:_-])(?:task|subagent)(?:[./:_-]|$)/.test(value)) return false;
+  if (/read/.test(value) && !/write|edit|replace|patch/.test(value)) return false;
+  if (/(?:grep|glob|ripgrep|(?:^|[./:_-])search(?:[./:_-]|$))/.test(value) && !/replace/.test(value)) return false;
+  return /apply[_-]?patch|create[_-]?file|delete[_-]?file|multiedit|edit|patch|replace|(?:^|[./:_-])(?:write|save|delete|unlink|move|rename)(?:[./:_-]|$)/.test(value);
+}
+const PATH_KEY = /^(changedFiles|file|file_?path|filename|files|path|paths|target|old_?path|new_?path)$/i;
+const MUTATION_KEY = /^(old_?string|new_?string|patch|patch_?text|changes)$/i;
 const PATCH_FILE = /^\*{3} (?:Add|Delete|Update) File:\s*(.+)$/gm;
+
+function hasMutationFields(value: JsonObject): boolean {
+  for (const [key, child] of Object.entries(value)) {
+    if (MUTATION_KEY.test(key)) return true;
+    if (Array.isArray(child)) {
+      for (const item of child) {
+        if (item && typeof item === "object" && hasMutationFields(item as JsonObject)) return true;
+      }
+    } else if (child && typeof child === "object") {
+      if (hasMutationFields(child as JsonObject)) return true;
+    }
+  }
+  return false;
+}
 
 function usablePath(value: string): string | null {
   const path = value.trim().replaceAll("\\", "/").replace(/^\.\//, "");
@@ -56,7 +79,10 @@ function collectPathFields(value: JsonObject, out: Set<string>): void {
 
 /** Extract file writes only from edit-like tools; read/search paths do not count. */
 export function extractChangedFiles(tool: string, input: JsonObject, metadata?: JsonObject): string[] {
-  if (!WRITE_TOOL.test(tool)) return [];
+  const namedWrite = isFileMutatingTool(tool);
+  const genericWrite = /^(?:other|tool)$/i.test(tool)
+    && (hasMutationFields(input) || (metadata !== undefined && hasMutationFields(metadata)));
+  if (!namedWrite && !genericWrite) return [];
   const paths = new Set<string>();
   collectPathFields(input, paths);
   if (metadata) collectPathFields(metadata, paths);

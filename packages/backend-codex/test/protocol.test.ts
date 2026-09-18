@@ -679,3 +679,92 @@ test("Codex ContextWindowExceeded maps to unknown without inventing invalid-inpu
     const stopped = events.findLast((event) => event.type === "turn/stopped");
     assert.equal(stopped?.code, "unknown");
 });
+
+const startCodexTurn = async () => {
+    const f = fakeRpc();
+    f.handle(async (method) => {
+        if (method === "thread/start") return { thread: { id: "native" } };
+        if (method === "turn/start") return { turn: { id: "limited" } };
+        return {};
+    });
+    const rt = await createCodexRuntime(context, f.rpc);
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    await rt.startTurnOperation!({ sessionId: "canonical", text: "task" }, "submit");
+    return { f, rt, events };
+};
+
+test("Codex usageLimitExceeded carries quota retry with exhausted-window reset", async () => {
+    const { f, events } = await startCodexTurn();
+    f.emit("account/rateLimits/updated", {
+        rateLimits: {
+            primary: { usedPercent: 40, resetsAt: 2_000_000_000 },
+            secondary: { usedPercent: 100, resetsAt: 3_000_000_000 },
+        },
+    });
+    f.emit("turn/completed", {
+        threadId: "native",
+        turn: {
+            id: "limited",
+            status: "failed",
+            error: { message: "You've hit your usage limit.", codexErrorInfo: "usageLimitExceeded" },
+        },
+    });
+    const stopped = events.findLast((event) => event.type === "turn/stopped");
+    assert.equal(stopped?.code, "quota-exhausted");
+    assert.equal(stopped?.retry?.scope, "quota");
+    assert.equal(stopped?.retry?.provider, "openai");
+    assert.equal(stopped?.retry?.resetAt, 3_000_000_000_000);
+});
+
+test("Codex usage-limit error notice is not a stop and classifies a sparse turn error", async () => {
+    const { f, events } = await startCodexTurn();
+    f.emit("account/rateLimits/updated", {
+        rateLimits: { primary: { usedPercent: 100, resetsAt: 2_100_000_000 } },
+    });
+    f.emit("error", {
+        threadId: "native",
+        turnId: "limited",
+        willRetry: false,
+        error: { message: "You've hit your usage limit.", codexErrorInfo: "usageLimitExceeded" },
+    });
+    assert.equal(events.filter((event) => event.type === "turn/stopped").length, 0);
+    f.emit("turn/completed", {
+        threadId: "native",
+        turn: { id: "limited", status: "failed", error: { message: "failed" } },
+    });
+    const stopped = events.findLast((event) => event.type === "turn/stopped");
+    assert.equal(stopped?.code, "quota-exhausted");
+    assert.equal(stopped?.retry?.resetAt, 2_100_000_000_000);
+    assert.equal(stopped?.retry?.provider, "openai");
+});
+
+test("Codex usage-limit copy still plans a resume without a discriminant", async () => {
+    const { f, events } = await startCodexTurn();
+    f.emit("turn/completed", {
+        threadId: "native",
+        turn: { id: "limited", status: "failed", error: { message: "You've hit your usage limit." } },
+    });
+    const stopped = events.findLast((event) => event.type === "turn/stopped");
+    assert.equal(stopped?.code, "quota-exhausted");
+    assert.equal(stopped?.retry?.scope, "quota");
+    assert.equal(stopped?.retry?.provider, "openai");
+});
+
+test("Codex snapshot rateLimitReachedType classifies an opaque failed turn", async () => {
+    const { f, events } = await startCodexTurn();
+    f.emit("account/rateLimits/updated", {
+        rateLimits: {
+            rateLimitReachedType: "workspace_member_usage_limit_reached",
+            secondary: { usedPercent: 100, resetsAt: 2_200_000_000 },
+        },
+    });
+    f.emit("turn/completed", {
+        threadId: "native",
+        turn: { id: "limited", status: "failed", error: { message: "failed" } },
+    });
+    const stopped = events.findLast((event) => event.type === "turn/stopped");
+    assert.equal(stopped?.code, "quota-exhausted");
+    assert.equal(stopped?.retry?.resetAt, 2_200_000_000_000);
+});

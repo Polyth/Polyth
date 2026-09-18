@@ -269,7 +269,7 @@ export function registerPolythSessionControl(host: ServerPackageHost) {
       };
 
       if (action === "session.list") {
-        const sessions = (await scoped.sessions.list())
+        const sessions = (await scoped.sessions.list(targetProjectId))
           .filter((session) => session.projectId === targetProjectId)
           .sort((a, b) => b.updatedAt - a.updatedAt)
           .map(publicSession);

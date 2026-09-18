@@ -294,6 +294,74 @@ const timestampMs = (value: unknown): number | undefined =>
     typeof value === "number" && Number.isFinite(value) && value > 0
         ? value < 1e12 ? value * 1000 : value
         : undefined;
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+    Boolean(value) && typeof value === "object" && !Array.isArray(value);
+type CodexFailure = { error: string; code: RuntimeErrorCode; retry?: RateLimitRetryHint };
+type RateLimitWindow = { resetsAt?: unknown; usedPercent?: unknown };
+type RateLimitSnapshot = {
+    primary?: RateLimitWindow | null;
+    secondary?: RateLimitWindow | null;
+    individualLimit?: { remainingPercent?: unknown; resetsAt?: unknown } | null;
+    rateLimitReachedType?: string | null;
+};
+const CODEX_LIMIT_PROVIDER = "openai";
+const limitRetry = (scope: RateLimitRetryHint["scope"], resetAt?: number): RateLimitRetryHint => ({
+    scope,
+    provider: CODEX_LIMIT_PROVIDER,
+    ...(resetAt ? { resetAt } : {}),
+});
+const rateLimitWindows = (snapshot: RateLimitSnapshot): Array<{ usedPercent: number; resetAt?: number }> => {
+    const rows: Array<{ usedPercent: number; resetAt?: number }> = [];
+    for (const window of [snapshot.primary, snapshot.secondary]) {
+        if (!isRecord(window)) continue;
+        rows.push({
+            usedPercent: typeof window.usedPercent === "number" && Number.isFinite(window.usedPercent)
+                ? window.usedPercent
+                : 0,
+            resetAt: timestampMs(window.resetsAt),
+        });
+    }
+    if (isRecord(snapshot.individualLimit)) {
+        const remaining = snapshot.individualLimit.remainingPercent;
+        rows.push({
+            usedPercent: typeof remaining === "number" && Number.isFinite(remaining)
+                ? Math.max(0, 100 - remaining)
+                : 0,
+            resetAt: timestampMs(snapshot.individualLimit.resetsAt),
+        });
+    }
+    return rows;
+};
+/** Wait until every exhausted Codex window has reset; otherwise the soonest future reset. */
+const resetAtFromSnapshot = (snapshot: RateLimitSnapshot | undefined, now: number): number | undefined => {
+    if (!snapshot) return undefined;
+    const future = rateLimitWindows(snapshot).filter((row): row is { usedPercent: number; resetAt: number } =>
+        typeof row.resetAt === "number" && row.resetAt > now);
+    const exhausted = future.filter((row) => row.usedPercent >= 100);
+    if (exhausted.length) return Math.max(...exhausted.map((row) => row.resetAt));
+    if (future.length) return Math.min(...future.map((row) => row.resetAt));
+    return undefined;
+};
+const reachedTypeFailure = (snapshot: RateLimitSnapshot | undefined, error: string, resetAt?: number): CodexFailure | undefined => {
+    const reached = snapshot?.rateLimitReachedType;
+    if (typeof reached !== "string" || !reached) return undefined;
+    if (reached === "rate_limit_reached") {
+        return { error, code: "rate-limited", retry: limitRetry("rate", resetAt) };
+    }
+    if (reached.includes("usage_limit") || reached.includes("credits_depleted")) {
+        return { error, code: "quota-exhausted", retry: limitRetry("quota", resetAt) };
+    }
+    return undefined;
+};
+const errorKind = (info: unknown): string => {
+    if (typeof info === "string") return info;
+    if (!isRecord(info)) return "";
+    const named = info.type ?? info.kind ?? info.code;
+    if (typeof named === "string" && named) return named;
+    const [first] = Object.keys(info);
+    return first ?? "";
+};
+const kindKey = (kind: string): string => kind.replace(/[_-]/g, "").toLowerCase();
 const usageBreakdown = (value: unknown): TokenUsage | undefined => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
     const row = value as Record<string, unknown>;
@@ -308,36 +376,36 @@ const usageBreakdown = (value: unknown): TokenUsage | undefined => {
 const classifyFailure = (
     turn: Turn,
     resetAt?: number,
-): { error: string; code: RuntimeErrorCode; retry?: RateLimitRetryHint } => {
+): CodexFailure => {
     const error = turn.error?.message?.trim() || "Codex turn failed";
     const info = turn.error?.codexErrorInfo;
-    const kind = typeof info === "string"
-        ? info
-        : info && typeof info === "object" && !Array.isArray(info)
-            ? String((info as { type?: unknown; kind?: unknown; code?: unknown }).type
-                ?? (info as { kind?: unknown }).kind
-                ?? (info as { code?: unknown }).code ?? "")
-            : "";
+    const kind = errorKind(info);
     if (kind) {
-        switch (kind) {
-            case "Unauthorized":
+        switch (kindKey(kind)) {
+            case "unauthorized":
                 return { error, code: "auth-expired" };
-            case "rate_limit":
-            case "RateLimitExceeded":
-                return { error, code: "rate-limited", retry: { scope: "rate", ...(resetAt ? { resetAt } : {}) } };
-            case "UsageLimitExceeded":
-                return { error, code: "quota-exhausted", retry: { scope: "quota", ...(resetAt ? { resetAt } : {}) } };
-            case "ContextWindowExceeded":
-            case "BadRequest":
-            case "SandboxError":
-            case "InternalServerError":
-            case "Other":
+            case "ratelimit":
+            case "ratelimitexceeded":
+                return { error, code: "rate-limited", retry: limitRetry("rate", resetAt) };
+            case "usagelimitexceeded":
+            case "sessionbudgetexceeded":
+                return { error, code: "quota-exhausted", retry: limitRetry("quota", resetAt) };
+            case "contextwindowexceeded":
+            case "badrequest":
+            case "sandboxerror":
+            case "internalservererror":
+            case "other":
+            case "cyberpolicy":
+            case "misalignmentpolicyviolation":
+            case "threadrollbackfailed":
+            case "activeturnnotsteerable":
                 return { error, code: "unknown" };
-            case "ResponseTooManyFailedAttempts":
-            case "ResponseStreamDisconnected":
-            case "ResponseStreamConnectionFailed":
-            case "HttpConnectionFailed":
-                return { error, code: "overloaded", retry: { scope: "overloaded" } };
+            case "serveroverloaded":
+            case "responsetoomanyfailedattempts":
+            case "responsestreamdisconnected":
+            case "responsestreamconnectionfailed":
+            case "httpconnectionfailed":
+                return { error, code: "overloaded", retry: limitRetry("overloaded") };
             default:
                 break;
         }
@@ -349,20 +417,37 @@ const classifyFailure = (
     if (matches(/auth|unauthori[sz]ed|credential|token.?expired/)) {
         return { error, code: "auth-expired" };
     }
-    if (matches(/quota|insufficient.?quota/)) {
-        return { error, code: "quota-exhausted", retry: { scope: "quota", ...(resetAt ? { resetAt } : {}) } };
+    if (matches(/quota|insufficient.?quota|usage.?limit/)) {
+        return { error, code: "quota-exhausted", retry: limitRetry("quota", resetAt) };
     }
     if (matches(/rate.?limit|too.?many.?requests/)) {
-        return { error, code: "rate-limited", retry: { scope: "rate", ...(resetAt ? { resetAt } : {}) } };
+        return { error, code: "rate-limited", retry: limitRetry("rate", resetAt) };
     }
     if (matches(/overload|capacity|temporarily.?unavailable/)) {
-        return { error, code: "overloaded", retry: { scope: "overloaded" } };
+        return { error, code: "overloaded", retry: limitRetry("overloaded") };
     }
     return { error, code: "unknown" };
 };
-const stopped = (turn: Turn, resetAt?: number): RuntimeEvent => {
+const withReset = (failure: CodexFailure, resetAt?: number): CodexFailure => {
+    if (!failure.retry || !resetAt || failure.retry.resetAt) return failure;
+    return { ...failure, retry: { ...failure.retry, resetAt } };
+};
+const stopped = (
+    turn: Turn,
+    resetAt?: number,
+    snapshot?: RateLimitSnapshot,
+    pending?: CodexFailure,
+): RuntimeEvent => {
     if (turn.status === "failed") {
-        const failure = classifyFailure(turn, resetAt);
+        let failure = classifyFailure(turn, resetAt);
+        if (failure.code === "unknown" && pending && pending.code !== "unknown") {
+            failure = withReset({ ...pending, error: failure.error }, resetAt);
+        }
+        if (failure.code === "unknown") {
+            const reached = reachedTypeFailure(snapshot, failure.error, resetAt);
+            if (reached) failure = reached;
+        }
+        failure = withReset(failure, resetAt);
         return { type: "turn/stopped", turnId: turn.id, reason: "error", ...failure };
     }
     return {
@@ -402,7 +487,8 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
     let connected = true;
     let order = 0;
     let reconciliationOrdinal = 0;
-    let lastRateLimitResetAt: number | undefined;
+    let lastRateLimits: RateLimitSnapshot | undefined;
+    let pendingFailure: { turnId: string; failure: CodexFailure } | undefined;
     let lastUsageCumulative: TokenUsage | undefined;
     let lastUsageDigest = "";
     let lastUsageTurnId = "";
@@ -435,13 +521,24 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
         cb({ type: "stream-disconnected", authorityId: endpoint.authorityId, generation: endpoint.generation }); });
     rpc.onNotification((method, params) => {
         if (method === "account/rateLimits/updated") {
-            const primary = params.rateLimits?.primary;
-            const resetAt = timestampMs(primary?.resetsAt);
-            if (resetAt) lastRateLimitResetAt = resetAt;
+            if (isRecord(params.rateLimits)) lastRateLimits = params.rateLimits as RateLimitSnapshot;
             return;
         }
         if (params.threadId !== nativeId)
             return;
+        if (method === "error") {
+            const resetAt = resetAtFromSnapshot(lastRateLimits, Date.now());
+            const turnId = typeof params.turnId === "string" ? params.turnId : "";
+            pendingFailure = {
+                turnId,
+                failure: classifyFailure({
+                    id: turnId,
+                    status: "failed",
+                    error: isRecord(params.error) ? params.error as Turn["error"] : { message: String(params.error ?? "") },
+                }, resetAt),
+            };
+            return;
+        }
         if (method === "thread/name/updated") {
             const title = typeof params.threadName === "string" ? params.threadName.trim() : "";
             if (title && !/^codex session$/i.test(title) && !/^new session/i.test(title)) {
@@ -494,13 +591,12 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
             lastUsageTurnId = "";
             lastUsageCumulative = undefined;
             order++;
-            const resetAt = lastRateLimitResetAt && lastRateLimitResetAt > Date.now()
-                ? lastRateLimitResetAt
+            const resetAt = resetAtFromSnapshot(lastRateLimits, Date.now());
+            const pending = pendingFailure && pendingFailure.turnId === params.turn.id
+                ? pendingFailure.failure
                 : undefined;
-            const event = stopped(params.turn, resetAt);
-            if (event.type === "turn/stopped" && (event.code === "rate-limited" || event.code === "quota-exhausted")) {
-                lastRateLimitResetAt = undefined;
-            }
+            const event = stopped(params.turn, resetAt, lastRateLimits, pending);
+            pendingFailure = undefined;
             emit(event, params.turn.id + ":stop");
         }
         if (method === "item/agentMessage/delta")
@@ -914,7 +1010,14 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
                         events.push({ entityKey: item.id, revision: digest(event), events: [event] });
                 }
                 if (turn.status !== "inProgress") {
-                    const event = stopped(turn, lastRateLimitResetAt);
+                    const event = stopped(
+                        turn,
+                        resetAtFromSnapshot(lastRateLimits, Date.now()),
+                        lastRateLimits,
+                        pendingFailure && pendingFailure.turnId === turn.id
+                            ? pendingFailure.failure
+                            : undefined,
+                    );
                     events.push({ entityKey: turn.id + ":stop", revision: digest(event), events: [event] });
                 }
             }
