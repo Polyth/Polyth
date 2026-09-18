@@ -58,6 +58,7 @@ test("harness recovery registers above the composer, not inside execution", asyn
 test("recovery surfaces preserve drafts and never auto-send a failed turn", async () => {
   const composer = await readFile(new URL("../src/components/Composer.tsx", import.meta.url), "utf8");
   const timeline = await readFile(new URL("../src/components/Timeline.tsx", import.meta.url), "utf8");
+  const responseFooter = await readFile(new URL("../src/components/ChatResponseFooter.tsx", import.meta.url), "utf8");
   const banner = await readFile(new URL("../src/components/RuntimeEpochBanner.tsx", import.meta.url), "utf8");
 
   assert.match(composer, /<Notice[\s\S]*?className="composer-send-failure"[\s\S]*?role="alert"/);
@@ -66,9 +67,10 @@ test("recovery surfaces preserve drafts and never auto-send a failed turn", asyn
   // An uncertain outcome is not surfaced as a retryable composer notice: the
   // mutation may already have applied, so offering replay would risk a duplicate.
   assert.doesNotMatch(composer, /sendDisabled = [\s\S]{0,200}failedSend/);
-  assert.match(timeline, /applyComposerSeed\(sessionId, `turn-failed:\$\{turn\.turnId\}`/);
-  assert.match(timeline, /requestComposerReplace\(draft\.text\)/);
-  assert.doesNotMatch(timeline, /sendMessage\(lastUser/);
+  assert.doesNotMatch(timeline, /applyComposerSeed\(sessionId, `turn-failed:\$\{turn\.turnId\}`/);
+  assert.match(timeline, /sendMessage\(lastUser\.raw \?\? lastUser\.text[\s\S]{0,300}hiddenUserMessage: true/);
+  assert.match(responseFooter, /sendMessage\(regeneratePrompt\.text[\s\S]{0,300}hiddenUserMessage: true/);
+  assert.doesNotMatch(responseFooter, /requestComposerReplace\(regeneratePrompt/);
   assert.match(banner, /runtimeRecovery\.technicalDetails/);
   assert.match(banner, /uncertainRecoveryWarning/);
   assert.doesNotMatch(banner, /runtimeRecovery\.ownedBody/);
