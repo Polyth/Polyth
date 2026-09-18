@@ -15,7 +15,7 @@
       "name": "Knowledge",
       "description": "Project notes, plans, and reusable context.",
       "core": false,
-      "enabled": true,
+      "enabled": false,
       "settingsGroup": "Workspace",
       "icon": "knowledge",
       "hasSettings": false,
