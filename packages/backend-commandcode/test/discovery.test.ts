@@ -32,6 +32,21 @@ test("Command Code model parser ignores headings, ANSI decoration and duplicates
   assert.equal(models[0]?.modelID, "Qwen/Qwen3.8-Max");
 });
 
+test("Command Code model parser accepts live rows with descriptions", () => {
+  const models = parseCommandCodeModelList(`Open Source
+  deepseek/deepseek-v4-flash  DeepSeek V4 Flash — fast hybrid-attention reasoning
+- \`Qwen/Qwen3.8-Max\`  Qwen 3.8 Max — autonomous coding
+OpenAI
+  gpt-6-astra    GPT-6 Astra — long-horizon agent work
+providers.json needs attention — malformed provider skipped
+`);
+  assert.deepEqual(models.map((model) => model.modelID), [
+    "deepseek/deepseek-v4-flash",
+    "Qwen/Qwen3.8-Max",
+    "gpt-6-astra",
+  ]);
+});
+
 test("Command Code agent parser exposes metadata without copying the system-prompt body", () => {
   const agent = parseCommandCodeAgentFile("reviewer.md", `---\nname: code-reviewer\ndescription: "Review diffs for bugs"\nmodel: moonshotai/kimi-k3\nreasoningEffort: high\n---\nSECRET PRIVATE SYSTEM PROMPT\n`);
   assert.deepEqual(agent, {
