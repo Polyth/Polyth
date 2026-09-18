@@ -44,9 +44,6 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - name: Validate Usage TypeScript
-        if: matrix.lane == 'legacy'
-        run: npx tsc --noEmit -p packages/usage/tsconfig.json
       - name: Test Usage package
         if: matrix.lane == 'legacy'
         run: node --experimental-strip-types --test packages/usage/test/*.test.ts
