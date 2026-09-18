@@ -386,7 +386,7 @@ function AssistantView({
   announce?: Announce;
   statusText?: string;
   plan?: NonNullable<RenderModel["tasks"]>;
-  regeneratePrompt?: string;
+  regeneratePrompt?: { text: string; attachments?: UserMsg["attachments"] };
   turn?: RenderModel["turn"];
   /** Terminal answer of a completed turn: the only row that carries the
    *  identity panel (one per turn, rendered after the turn completes). */
