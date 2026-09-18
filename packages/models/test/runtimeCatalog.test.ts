@@ -36,6 +36,7 @@ const {
   invalidateRuntimeCatalogs,
   peekHarnessSnapshots,
   preloadRuntimeCatalogs,
+  readHarnessRoster,
   readHarnessSnapshots,
   resetRuntimeCatalogMemory,
   useRuntimeCatalog,
@@ -217,6 +218,10 @@ test("restart paints persisted Auto models and executable harnesses before reval
   await preloadRuntimeCatalogs();
   assert.equal(requests.length, requestsBeforeRestart,
     "a page restart reuses the fresh daily catalog instead of probing harnesses again");
+  await readHarnessRoster({ projectId: "warm", spaceId: "space-a" });
+  await readHarnessSnapshots({ projectId: "warm", spaceId: "space-a" });
+  assert.equal(requests.length, requestsBeforeRestart,
+    "the restored harness tabs reuse the scoped roster and availability snapshot");
 
   assert.equal(peekHarnessSnapshots({ projectId: "warm", spaceId: "space-a" })?.[0]?.identity.id, "codex",
     "last-known executable harnesses survive the in-memory restart boundary");
