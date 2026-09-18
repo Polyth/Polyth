@@ -53,3 +53,31 @@ test("Source Control refreshes on project change, not on every store notificatio
   assert.match(packageEntry, /subscribeSourceControlProfiles\(\(\) => refreshActive\(true\)\)/);
   assert.doesNotMatch(packageEntry, /host\.store\.subscribe\(refreshActive\)/);
 });
+
+test("Source Control keeps nested chrome quiet and follows the transparency preference", () => {
+  assert.match(
+    polish,
+    /\.git-page \.git-pane-toolbar\s*\{[\s\S]*?display:\s*grid;[\s\S]*?background:\s*transparent;/,
+  );
+  assert.match(
+    polish,
+    /@container git-page \(max-width: 620px\)[\s\S]*?\.git-page \.git-pane-actions\s*\{[\s\S]*?flex-basis:\s*auto;/,
+  );
+  assert.match(
+    polish,
+    /\.git-page > \.source-tabs,[\s\S]*?background:\s*transparent;/,
+  );
+  assert.match(
+    polish,
+    /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\) \.git-page \.git-commit-composer\s*\{[\s\S]*?var\(--material-glass-fill\)[\s\S]*?backdrop-filter:/,
+  );
+  assert.match(
+    polish,
+    /body\[data-glass="off"\] \.git-page \.git-commit-composer,[\s\S]*?backdrop-filter:\s*none !important;/,
+  );
+  assert.match(
+    gitView,
+    /className="git-commit-msg"[\s\S]{0,140}?minRows=\{1\}[\s\S]{0,140}?maxRows=\{4\}/,
+  );
+});
+

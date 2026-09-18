@@ -1202,8 +1202,8 @@ export default function GitView({
             <section className="git-commit-composer" aria-label={tr("gitview.commitStagedChanges")}>
               <Textarea
                 className="git-commit-msg"
-                minRows={2}
-                maxRows={6}
+                minRows={1}
+                maxRows={4}
                 autoGrow
                 aria-label={tr("gitview.commitMessage")}
                 placeholder={tr("gitview.commitMessage")}

@@ -168,26 +168,33 @@
 }
 
 .git-page .git-pane-toolbar {
-  gap: var(--space-3);
-  min-height: var(--control-h-lg);
-  padding: var(--space-2) var(--space-3);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content max-content;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: calc(var(--control-h) + var(--space-2));
+  padding: var(--space-1) var(--space-2);
   border-bottom: 1px solid var(--hair);
-  background: var(--panel);
+  background: transparent;
 }
 
 .git-page .git-pane-toolbar > div:first-child {
-  flex: 1 1 auto;
-  min-width: 9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
 }
 
 .git-page .git-pane-toolbar > .diff-stat {
-  flex: none;
-  margin-inline-start: auto;
+  margin-inline-start: 0;
   font-variant-numeric: tabular-nums;
 }
 
 .git-page .git-pane-actions {
-  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  width: auto;
+  flex: none;
   flex-basis: auto;
   margin-inline-start: 0;
   gap: var(--space-1);
@@ -244,11 +251,12 @@
   }
 
   .git-page .git-pane-toolbar {
-    align-items: flex-start;
+    align-items: center;
   }
 
   .git-page .git-pane-actions {
-    flex-basis: 100%;
+    width: auto;
+    flex-basis: auto;
     margin-inline-start: 0;
   }
 }
@@ -319,3 +327,162 @@
     transition: none;
   }
 }
+
+/* Premium source-control composition. The outer ModuleView owns the window
+   material; nested Git chrome stays quiet and only the commit dock elevates. */
+.git-page > .source-tabs,
+.git-page .git-master-detail,
+.git-page .git-master-pane,
+.git-page .git-detail-pane,
+.git-page .git-pane-toolbar,
+.git-page .git-change-groups {
+  background: transparent;
+  box-shadow: none;
+}
+
+.git-page > .source-tabs {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.git-page .git-master-detail {
+  box-shadow: none;
+}
+
+.git-page .source-sync-btn {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.git-page .source-sync-btn:hover:not(:disabled),
+.git-page .source-sync-btn:active:not(:disabled) {
+  border-color: transparent;
+  background: var(--surface-overlay-hover);
+}
+
+.git-page .git-pane-toolbar > div:first-child strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 650;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-page .git-pane-toolbar > div:first-child .muted {
+  overflow: hidden;
+  color: var(--faint);
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-page .git-change-group {
+  border-bottom-color: color-mix(in srgb, var(--hair) 72%, transparent);
+}
+
+.git-page .git-commit-composer {
+  margin-top: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-card);
+  background: var(--elevated);
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.git-page .git-commit-composer:focus-within {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px var(--focus-wash);
+}
+
+.git-page .git-commit-composer .git-commit-msg {
+  min-height: calc(var(--font-input) * 1.45 + var(--space-3));
+  padding: var(--space-2) 0;
+}
+
+.git-page .git-commit-rail {
+  min-height: var(--control-h-sm);
+  padding-top: var(--space-2);
+}
+
+.git-page .git-commit-branch {
+  border: 1px solid var(--hair);
+  background: transparent;
+}
+
+body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .git-page .git-commit-composer {
+  border-color: color-mix(in srgb, var(--material-glass-border) var(--material-glass-edge), transparent);
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--material-glass) var(--material-glass-fill), transparent),
+      color-mix(in srgb, var(--material-glass) var(--material-glass-edge), transparent)
+    );
+  box-shadow: var(--material-glass-highlight);
+  -webkit-backdrop-filter: blur(calc(var(--material-glass-blur) * .65)) saturate(var(--material-glass-saturation));
+  backdrop-filter: blur(calc(var(--material-glass-blur) * .65)) saturate(var(--material-glass-saturation));
+}
+
+body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .git-page .git-commit-composer:focus-within {
+  box-shadow: var(--material-glass-highlight), 0 0 0 3px var(--focus-wash);
+}
+
+body[data-glass="off"] .git-page .git-commit-composer,
+body[data-desktop-low-resource="true"] .git-page .git-commit-composer {
+  background: var(--elevated);
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+@container git-page (max-width: 700px) {
+  .git-page > .source-tabs {
+    position: relative;
+    top: auto;
+    z-index: 1;
+    background: transparent;
+  }
+
+  .git-page .git-master-detail {
+    border: 0;
+    border-radius: 0;
+  }
+
+  .git-page .git-master-pane {
+    border-right: 0;
+  }
+
+  .git-page .git-pane-toolbar,
+  .git-page .git-change-groups {
+    padding-inline: 0;
+  }
+
+  .git-page .git-commit-composer {
+    padding: var(--space-2);
+  }
+
+  .git-page .git-commit-rail {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .git-page .git-commit-heading {
+    flex: 1 1 100%;
+  }
+
+  .git-page .git-commit-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+    gap: var(--space-1);
+  }
+
+  .git-page .git-commit-actions > * {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
