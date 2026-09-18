@@ -365,13 +365,36 @@ function normalizedProjectId(id: string | null | undefined): string | null {
   return typeof id === "string" && id.length > 0 ? id : null;
 }
 
-/** Workspace panes follow the explicit project, or the open chat's project when
- *  client navigation lost `activeProjectId` while the session is still known. */
+type WorkspaceProjectSnapshot =
+  Pick<AppState, "activeProjectId" | "activeSessionId" | "sessions">
+  & Partial<Pick<AppState, "newSessionIntent" | "sessionSpawn" | "projectRegistry">>;
+
+function persistedWorkspaceProjectId(snapshot: WorkspaceProjectSnapshot): string | null {
+  const registry = snapshot.projectRegistry;
+  if (!registry || registry.status !== "ready" || typeof localStorage === "undefined") return null;
+  try {
+    const saved = normalizedProjectId(localStorage.getItem("polyth.activeProjectId"));
+    return saved && registry.projects.some((project) => project.id === saved) ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Resolve the project that owns the current workspace.
+ *
+ * `activeProjectId` is canonical, but hydration and first-send transitions can
+ * briefly leave it empty while the project is still unambiguously known from
+ * the active session, new-chat intent, spawn request, or the persisted
+ * selection that exists in the ready registry. Workspace panes must never
+ * translate that recoverable transition into "No project selected". */
 export function workspaceProjectId(
-  snapshot: Pick<AppState, "activeProjectId" | "activeSessionId" | "sessions"> = state,
+  snapshot: WorkspaceProjectSnapshot = state,
 ): string | null {
   return normalizedProjectId(snapshot.activeProjectId)
-    ?? sessionOwnedProjectId(snapshot.sessions, snapshot.activeSessionId);
+    ?? sessionOwnedProjectId(snapshot.sessions, snapshot.activeSessionId)
+    ?? normalizedProjectId(snapshot.newSessionIntent?.projectId)
+    ?? normalizedProjectId(snapshot.sessionSpawn?.projectId)
+    ?? persistedWorkspaceProjectId(snapshot);
 }
 
 export function subscribeStore(cb: () => void): () => void {
@@ -510,6 +533,10 @@ export function publishProjectList(ticket: ProjectListTicket, projects: Project[
     setClientReliabilitySpace(active?.spaceId ?? "default");
     setClientReliabilityProject(state.activeProjectId);
     set({ projectRegistry: result.state });
+    // Project-list hydration can finish before the async navigation record.
+    // Heal from the synchronous persisted/new-chat/session context immediately
+    // so project-scoped workspace panes never observe a false ready-empty scope.
+    reconcileWorkspaceProjectFromSession();
   }
   return result.outcome;
 }
@@ -677,10 +704,12 @@ function bindReliabilityForProject(projectId: string | null): void {
   localStorage.setItem("polyth.activeProjectId", projectId ?? "");
 }
 
-/** Fill a missing client project from the open session without dropping it. */
+/** Fill a missing canonical project from any unambiguous workspace owner.
+ * Kept under the historical export name because reconnect/open callers already
+ * use it; the resolver now also covers new-chat, spawn and persisted hydration. */
 export function reconcileWorkspaceProjectFromSession(): void {
   if (normalizedProjectId(state.activeProjectId)) return;
-  const owned = sessionOwnedProjectId(state.sessions, state.activeSessionId);
+  const owned = workspaceProjectId(state);
   if (!owned) return;
   bindReliabilityForProject(owned);
   set({
