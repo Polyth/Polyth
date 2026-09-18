@@ -17,6 +17,7 @@ export {
   loadServerPackage,
   localOnlyRemoteAccess,
   SERVER_APPLICATION_SURFACE,
+  SERVER_TURN_COMPLETION_BUS,
   serverServiceKey,
   type AppendEventOptions,
   type DiscoveredServerPackage,
@@ -30,6 +31,8 @@ export {
   type ServerPackageHost,
   type ServerRuntimePool,
   type ServerServiceRegistry,
+  type ServerTurnCompletedEvent,
+  type ServerTurnCompletionBus,
   type SessionRuntimeBinding,
 } from "./serverPackage.ts";
 export {
