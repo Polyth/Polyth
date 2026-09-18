@@ -7910,6 +7910,9 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
 /* ---- fresh-session screen: three zones (§2) ----------------------------- */
 .stage-new {
   --dock-bg: var(--bg);
+  /* The fresh-session surface must not repaint the app canvas. Keeping this
+     transparent lets the selected workspace background continue into New Chat. */
+  background: transparent;
   align-items: stretch;
   justify-content: flex-start;
   padding: 0;
