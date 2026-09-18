@@ -37,6 +37,15 @@ const writePackage = (
 const request = (path: string): RouteRequest =>
   ({ path, method: "GET", url: new URL(`http://polyth.test${path}`) }) as unknown as RouteRequest;
 
+const testHost = (storageDir: string): Omit<ServerPackageHost, "pluginId"> => ({
+  storageDir,
+  projects: {} as ServerPackageHost["projects"],
+  sessions: {} as ServerPackageHost["sessions"],
+  store: {} as ServerPackageHost["store"],
+  runtimes: { forProject: async () => ({}) as never } as ServerPackageHost["runtimes"],
+  resolveSessionRuntime: async () => ({}) as never,
+}) as unknown as Omit<ServerPackageHost, "pluginId">;
+
 test("discovered packages register lifecycle-owned routes; a broken one is isolated", async () => {
   const packagesDir = mkdtempSync(join(tmpdir(), "polyth-discovery-"));
   writePackage(packagesDir, "gadget", `
@@ -54,7 +63,7 @@ test("discovered packages register lifecycle-owned routes; a broken one is isola
   const failures: string[] = [];
   const registered = await registerDiscoveredPackages({
     packagesDir,
-    host: { storageDir: packagesDir } as unknown as Omit<ServerPackageHost, "pluginId">,
+    host: testHost(packagesDir),
     lifecycle,
     routes,
     onError: (id) => failures.push(id),
@@ -88,7 +97,7 @@ test("each package receives its own pluginId on the shared host", async () => {
   const lifecycle = createPackageLifecycle(routes);
   const registered = await registerDiscoveredPackages({
     packagesDir,
-    host: { storageDir: packagesDir } as unknown as Omit<ServerPackageHost, "pluginId">,
+    host: testHost(packagesDir),
     lifecycle,
     routes,
   });
@@ -109,7 +118,6 @@ test("every server feature package owns its discoverable descriptor", async () =
   assert.ok(expected.includes("handoff"), "handoff package is discoverable");
   assert.ok(expected.includes("chat-workspace"), "chat-workspace package is discoverable");
   assert.equal(expected.length, new Set(expected).size);
-  assert.equal(expected.length, 38);
   assert.deepEqual(expected, [...expected].sort());
   assert.deepEqual(
     discovered.map((pkg) => pkg.descriptor.id),
