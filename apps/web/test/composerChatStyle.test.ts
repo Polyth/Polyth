@@ -59,6 +59,7 @@ test("new timeline surfaces animate without moving the measured row", () => {
 test("spawning is an above-composer activity status and never replaces the composer", () => {
   const surface = read("../src/components/workspace/builtinSurfaces.tsx");
   const composer = read("../src/components/Composer.tsx");
+  const pendingChanges = read("../../../packages/git/widgets/PendingChangesBar.tsx");
 
   assert.match(surface, /function SessionSpawnStatus\(\{[\s\S]*spawningAgent[\s\S]*<AgentStatusDock/);
   // A submitted prompt owns the same zone until its turn is real; the dock
@@ -69,6 +70,9 @@ test("spawning is an above-composer activity status and never replaces the compo
   assert.match(surface, /spawning \|\| pendingSends\.length > 0/);
   assert.match(surface, /pendingModel/);
   assert.match(surface, /ProviderLogo providerID=\{harnessId\}[\s\S]*model=\{harnessLabel\}/);
+  assert.match(pendingChanges, /const spawning = useStore\(isActiveSessionSpawning\)/);
+  assert.match(pendingChanges, /const awaitingTurn = pendingSends\.length > 0 && !working/);
+  assert.match(pendingChanges, /if \(spawning \|\| awaitingTurn\) return null/);
   assert.match(composer, /immediateFollowUpDelivery/);
   assert.match(composer, /beginPendingSend\(\{/);
   assert.doesNotMatch(composer, /if \(creatingSession\)\s*\{\s*return/);
