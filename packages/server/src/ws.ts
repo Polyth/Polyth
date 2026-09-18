@@ -774,11 +774,15 @@ export function createWsGateway(
         send(ws, { type: "worktrees/changed", projectId });
       }
     },
-    clientSettingsChanged(settings: ClientSettingsDto) {
+    clientSettingsChanged(userId: string, settings: ClientSettingsDto) {
       if (closed) return;
       for (const [ws, sub] of clients) {
         const live = currentPrincipal(ws, sub);
         if (!live || !isLocalUiPrincipal(live)) continue;
+        if (spaces) {
+          const account = currentNotificationAccount(ws, sub);
+          if (!account || account.userId !== userId) continue;
+        }
         send(ws, { type: "client-settings/changed", settings });
       }
     },
