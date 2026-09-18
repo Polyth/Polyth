@@ -63,13 +63,20 @@ test("matching build stays mounted and a resumed stale PWA reloads once", async 
   assert.equal(reloads, 0);
 
   serverBuild = "build-b";
-  fakeWindow.dispatchEvent(new Event("pageshow"));
+  fakeDocument.visibilityState = "hidden";
+  fakeDocument.dispatchEvent(new Event("visibilitychange"));
   await settle();
-  assert.equal(reloads, 1);
+  assert.equal(reloads, 0, "background transition never reloads the hidden app");
 
+  fakeDocument.visibilityState = "visible";
+  fakeDocument.dispatchEvent(new Event("visibilitychange"));
+  await settle();
+  assert.equal(reloads, 1, "iOS resume reloads the stale PWA");
+
+  fakeWindow.dispatchEvent(new Event("pageshow"));
   fakeWindow.dispatchEvent(new Event("focus"));
   await settle();
-  assert.equal(reloads, 1, "one stale resume issues exactly one reload");
+  assert.equal(reloads, 1, "resume fallbacks cannot issue a second reload");
 
   dispose();
 });
