@@ -4,6 +4,7 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { api, errorCodeOf, type BrowserNavigateResponse, type BrowserSessionDto } from "@polyth/session/web-api";
 import type { BrowserContextCaptureInput } from "@polyth/contracts";
+import type { SurfaceComponentProps } from "@polyth/web-sdk";
 import { attachBrowserContext, newAttachmentId } from "../../../apps/web/src/attachments.ts";
 import {
   BROWSER_DEVICE_PRESETS,
@@ -90,9 +91,14 @@ function isEditableElement(element: BrowserPointedElement): boolean {
   return element.role === "textbox";
 }
 
-export default function PreviewView() {
-  const projectId = useStore(workspaceProjectId);
-  const activeSessionId = useStore((s) => s.activeSessionId);
+export default function PreviewView({
+  projectId: scopedProjectId,
+  sessionId: scopedSessionId,
+}: SurfaceComponentProps = {}) {
+  const storeProjectId = useStore(workspaceProjectId);
+  const storeSessionId = useStore((s) => s.activeSessionId);
+  const projectId = scopedProjectId === undefined ? storeProjectId : scopedProjectId;
+  const activeSessionId = scopedSessionId === undefined ? storeSessionId : scopedSessionId;
   const visible = usePaneVisible();
 
   const [urlInput, setUrlInput] = useState("");
