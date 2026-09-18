@@ -313,6 +313,8 @@ export interface RenderModel {
   subagents: SubagentState | null;
   /** Edit-tool paths from the current/last turn; cleared by the next prompt. */
   changedFiles: string[];
+  /** The latest canonical user/message was intentionally omitted from chat. */
+  lastUserMessageHidden: boolean;
   /** Active rewind marker. `draft` is replay-derived from the target
    *  `user/message` (raw ?? text + attachments); `restoredText` only appears
    *  when an old marker carried it (compat). */
@@ -342,6 +344,7 @@ export function emptyModel(): RenderModel {
     tasks: null,
     subagents: null,
     changedFiles: [],
+    lastUserMessageHidden: false,
     rewind: null,
     fork: null,
     version: 0,
@@ -630,7 +633,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
     }
     case "mutation/uncertainty-recorded":
     case "mutation/fenced": {
-      if (str(d, "mutationKind") !== "turn-submit") break;
+      if (str(d, "mutationKind") !== "turn-submit" || model.lastUserMessageHidden) break;
       for (let i = model.messages.length - 1; i >= 0; i -= 1) {
         const msg = model.messages[i];
         if (msg?.kind === "user" && !msg.uncertain) {
@@ -645,7 +648,11 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       const text = stripRecoveryContextBlocks(str(d, "text") ?? "");
       const rawValue = str(d, "raw");
       const raw = rawValue === undefined ? undefined : stripRecoveryContextBlocks(rawValue);
-      if (d.githubConflictResolution !== true) {
+      const hiddenUserMessage = d.githubConflictResolution === true
+        || d.hiddenUserMessage === true
+        || d.autoResume === true;
+      model.lastUserMessageHidden = hiddenUserMessage;
+      if (!hiddenUserMessage) {
         const msg: UserMsg = { kind: "user", id: ev.id, eventSeq: ev.seq, text, time: ev.time };
         if (raw !== undefined && raw !== text) msg.raw = raw;
         // Attachment pills on the message (F2): keep only well-formed refs.
