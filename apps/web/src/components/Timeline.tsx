@@ -59,7 +59,6 @@ import {
   timelineFollowState,
 } from "../timelineFollow.ts";
 import AttachmentPills from "./AttachmentPills.tsx";
-import AssistStrip from "./AssistStrip.tsx";
 import CopyButton from "./CopyButton.tsx";
 import SelectionMenu from "./SelectionMenu.tsx";
 import SlotHost, { useSlotVersion } from "./slots/SlotHost.ts";
@@ -2474,7 +2473,6 @@ export default function Timeline({
           />
         )}
         {model.workflowRun && <WorkflowTimelineCard run={model.workflowRun} />}
-        <AssistStrip />
         {/* The dock confirmation sits OUTSIDE the collapsible tail: it must be
             visible even while the reverted items stay folded away. */}
         {confirmRestore && model.rewind && undoneRows.length > 0 && (

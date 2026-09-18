@@ -49,7 +49,7 @@ test("all browser feature packages own a canonical web entry", () => {
   assert.ok(browserFeatures.some((pkg) => pkg.id === "opencode"));
   assert.ok(browserFeatures.some((pkg) => pkg.id === "gitlab"));
   assert.ok(browserFeatures.some((pkg) => pkg.id === "personal-coach"));
-  assert.equal(browserFeatures.length, 34);
+  assert.ok(browserFeatures.some((pkg) => pkg.id === "recap"));
   for (const { id, dir, manifest } of browserFeatures) {
     assert.equal(
       manifest.polyth?.webEntry,

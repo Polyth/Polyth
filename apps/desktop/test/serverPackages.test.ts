@@ -24,3 +24,20 @@ test("desktop bundles every discovered server package with its manifest descript
   );
   assert.ok(desktopServerPackages.every(({ factory }) => typeof factory === "function"));
 });
+
+
+test("optional advanced packages stay disabled by default", () => {
+  const expectedDisabled = new Set([
+    "fusion",
+    "home-assistant",
+    "knowledge",
+    "multirun",
+    "personal-coach",
+    "recap",
+    "walkthrough",
+  ]);
+  const byId = new Map(desktopServerPackages.map((item) => [item.id, item.descriptor]));
+  for (const id of expectedDisabled) {
+    assert.equal(byId.get(id)?.enabled, false, `${id} must be opt-in`);
+  }
+});
