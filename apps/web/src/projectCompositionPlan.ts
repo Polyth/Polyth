@@ -44,12 +44,17 @@ export function initialCapabilityPlacementOverrides(
 
     const ownerAffinity = packageAffinity(owner);
     const contributionAffinity = capability.projectAffinity;
-    if (ownerAffinity === undefined && contributionAffinity === undefined) continue;
-
-    const recommended = contributionAffinity?.recommended ?? ownerAffinity?.recommended;
     const matches = matchesProjectAffinity(composition, ownerAffinity)
       && matchesProjectAffinity(composition, contributionAffinity);
-    if (recommended === true && matches) continue;
+    const directionScoped = (ownerAffinity?.directions?.length ?? 0) > 0
+      || (contributionAffinity?.directions?.length ?? 0) > 0;
+    const globallyRecommended = (contributionAffinity?.recommended ?? ownerAffinity?.recommended) === true;
+
+    // An explicit direction match is enough to keep the package in its normal
+    // place. Universal packages need an explicit recommendation to occupy the
+    // visible rails of every typed project; otherwise they remain discoverable
+    // under Technical instead of adding permanent chrome.
+    if (matches && (directionScoped || globallyRecommended)) continue;
 
     placements[capability.id] = { tier: "technical", rank: capability.standardRank };
   }

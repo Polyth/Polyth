@@ -92,12 +92,14 @@ test("typed projects keep recommended tools in place and demote secondary packag
     git: { directions: ["engineering"] as const, recommended: true },
     usage: {},
     files: { recommended: true },
-  } as const)[owner as "git" | "usage" | "files"];
+    github: { directions: ["engineering", "operations"] as const },
+  } as const)[owner as "git" | "usage" | "files" | "github"];
 
   assert.deepEqual(initialCapabilityPlacementOverrides(composition as never, [
     { id: "session", standardTier: "primary", standardRank: 0 },
     { id: "files", ownerPackageId: "files", standardTier: "primary", standardRank: 1 },
     { id: "git", ownerPackageId: "git", standardTier: "more", standardRank: 4 },
+    { id: "github", ownerPackageId: "github", standardTier: "more", standardRank: 16 },
     { id: "usage", ownerPackageId: "usage", standardTier: "more", standardRank: 15 },
     { id: "events", standardTier: "technical", standardRank: 33 },
   ], affinities), {
@@ -122,4 +124,14 @@ test("general projects preserve the global capability arrangement", () => {
     [{ id: "usage", ownerPackageId: "usage", standardTier: "more", standardRank: 15 }],
     () => ({}),
   ), {});
+});
+
+test("typed projects demote package capabilities with no project affinity metadata", () => {
+  assert.deepEqual(initialCapabilityPlacementOverrides(
+    { version: 1, directions: ["finance"], packageOverrides: {} },
+    [{ id: "legacy-extra", ownerPackageId: "legacy-extra", standardTier: "more", standardRank: 19 }],
+    () => undefined,
+  ), {
+    "legacy-extra": { tier: "technical", rank: 19 },
+  });
 });
