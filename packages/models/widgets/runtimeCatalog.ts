@@ -35,6 +35,8 @@ const rosterCache = createCatalogCache<HarnessRosterItem[]>(Infinity);
 const persistedCatalogs = createCatalogCache<Catalog>(DAILY_CACHE_MS, 64, Date.now, persistentStorage("polyth.runtimeCatalogs.v1"));
 const persistedHarnesses = createCatalogCache<HarnessSnapshot[]>(DAILY_CACHE_MS, 64, Date.now, persistentStorage("polyth.runtimeHarnesses.v1"));
 const persistedRosters = createCatalogCache<HarnessRosterItem[]>(DAILY_CACHE_MS, 64, Date.now, persistentStorage("polyth.runtimeRosters.v1"));
+const persistedGlobalModels = createCatalogCache<ModelDescriptor[]>(DAILY_CACHE_MS, 64, Date.now, persistentStorage("polyth.runtimeGlobalModels.v1"));
+const persistedGlobalAgents = createCatalogCache<AgentDescriptor[]>(DAILY_CACHE_MS, 64, Date.now, persistentStorage("polyth.runtimeGlobalAgents.v1"));
 let revision = 0;
 const listeners = new Set<() => void>();
 export function subscribeRuntimeCatalogs(listener: () => void): () => void {
@@ -52,6 +54,8 @@ export function invalidateRuntimeCatalogs(notify = true): void {
   persistedCatalogs.clear();
   persistedHarnesses.clear();
   persistedRosters.clear();
+  persistedGlobalModels.clear();
+  persistedGlobalAgents.clear();
   resetRuntimeCatalogMemory(notify);
 }
 type SnapshotRequest = { projectId?: string | null; spaceId?: string; cwd?: string; harnessId?: string; force?: boolean; detail?: boolean };
@@ -69,6 +73,27 @@ const rosterKey = (options: Pick<SnapshotRequest, "projectId" | "spaceId">) => J
 const rosterPresentationKey = (options: Pick<SnapshotRequest, "projectId" | "spaceId">) => JSON.stringify([
   activeBrowserAccountId(), options.spaceId ?? "page", options.projectId ?? "",
 ]);
+const globalCatalogPresentationKey = (projectId: string) => JSON.stringify([
+  activeBrowserAccountId(), projectId,
+]);
+
+/** The legacy aggregate /api/models + /api/agents store is still consumed by
+ * non-picker surfaces. Keep it on the same daily invalidation boundary instead
+ * of making every page reload fan out through all runtimes again. Project id is
+ * a tenant-safe Space discriminator because projects never cross Spaces. */
+export function peekPersistedRuntimeModels(projectId: string): ModelDescriptor[] | undefined {
+  return persistedGlobalModels.peek(globalCatalogPresentationKey(projectId));
+}
+export function rememberPersistedRuntimeModels(projectId: string, models: ModelDescriptor[]): void {
+  // Never freeze a startup/unavailable empty answer for a day.
+  if (models.length > 0) persistedGlobalModels.write(globalCatalogPresentationKey(projectId), models);
+}
+export function peekPersistedRuntimeAgents(projectId: string): AgentDescriptor[] | undefined {
+  return persistedGlobalAgents.peek(globalCatalogPresentationKey(projectId));
+}
+export function rememberPersistedRuntimeAgents(projectId: string, agents: AgentDescriptor[]): void {
+  persistedGlobalAgents.write(globalCatalogPresentationKey(projectId), agents);
+}
 const snapshotPresentationKey = (options: SnapshotRequest) => JSON.stringify([
   activeBrowserAccountId(), options.spaceId ?? "page", options.projectId ?? "", options.cwd ?? "project-root",
   options.harnessId ?? "all", options.detail === true,
