@@ -30,11 +30,13 @@ test("custom backgrounds accept bounded raster data only", () => {
 
 test("background and glass controls are wired into Appearance and the held-Shift corner", async () => {
   const read = (relative: string) => readFile(new URL(relative, import.meta.url), "utf8");
-  const [app, pages, picker, styles] = await Promise.all([
+  const [app, pages, picker, styles, theme, index] = await Promise.all([
     read("../src/App.tsx"),
     read("../src/components/settings/pages.tsx"),
     read("../src/components/BackgroundPicker.tsx"),
     read("../src/styles.css"),
+    read("../src/theme.ts"),
+    read("../src/index.html"),
   ]);
   assert.match(app, /<BackgroundQuickPicker \/>/);
   assert.match(pages, /data-settings-item="appearance\.background"[\s\S]*<BackgroundPicker \/>/);
@@ -60,6 +62,12 @@ test("background and glass controls are wired into Appearance and the held-Shift
     /\.stage-new\s*\{[^}]*background:\s*transparent;/s,
     "New Chat must not cover the selected workspace background with an opaque stage",
   );
+  assert.match(index, /apple-mobile-web-app-status-bar-style" content="black-translucent"/,
+    "the initial standalone iOS shell is edge-to-edge");
+  assert.match(theme, /apple-mobile-web-app-status-bar-style[^;]+[\s\S]*?setAttribute\("content", "black-translucent"\)/,
+    "light-theme changes must not restore an opaque iOS status-bar band");
+  assert.doesNotMatch(theme, /apple-mobile-web-app-status-bar-style[^;]+[\s\S]*?\?\s*"black-translucent"\s*:\s*"default"/,
+    "status-bar translucency must not depend on dark appearance");
   assert.match(styles, /backdrop-filter:\s*blur\(var\(--material-glass-blur\)\)\s*saturate\(var\(--material-glass-saturation\)\)/);
   assert.doesNotMatch(styles, /prefers-reduced-motion:\s*no-preference[\s\S]{0,1200}data-glass/);
 });
