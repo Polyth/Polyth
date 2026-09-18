@@ -75,6 +75,7 @@ test("the next turn/started clears a stale limit", () => {
   ]);
   assert.equal(model.turn?.status, "working");
   assert.equal(model.turn?.limit, undefined);
+  assert.equal(model.messages.filter((message) => message.kind === "user").length, 1);
 });
 
 test("rate-limit recovery keeps model and harness identities separate", () => {
