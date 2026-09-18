@@ -100,11 +100,15 @@ export function parsePromptHistoryCandidate(row: PromptHistoryCandidateRow): Pro
     text?: unknown;
     attachments?: unknown;
     githubConflictResolution?: unknown;
+    hiddenUserMessage?: unknown;
+    autoResume?: unknown;
   };
   let text = "";
   let attachments: AttachmentRef[] = [];
   if (row.type === "user/message") {
-    if (payload.githubConflictResolution === true) return null;
+    if (payload.githubConflictResolution === true
+      || payload.hiddenUserMessage === true
+      || payload.autoResume === true) return null;
     text = promptTextFromEventData(payload);
     attachments = parseStoredAttachments(payload.attachments);
   } else if (row.type === "tool/call") {
