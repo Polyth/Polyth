@@ -257,7 +257,7 @@ const connectedModels = (
  *  backend forgot to report credentials. */
 export function filterVisibleModels(
   models: ModelDescriptor[],
-  state: VisibilityState,
+  state: Pick<VisibilityState, "disabledProviders" | "disabledModels">,
   opts: { includeDisconnected?: boolean } = {},
 ): ModelDescriptor[] {
   const enabled = models.filter((m) => isModelVisible(m, state));
