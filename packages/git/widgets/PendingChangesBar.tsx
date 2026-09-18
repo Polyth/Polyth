@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useGitStatus, refreshGitStatus } from "./gitStatusStore.ts";
 import { selectPendingChanges, sessionEditedPaths } from "../../../apps/web/src/pendingChanges.ts";
 import {
+  isActiveSessionSpawning,
   openChanges,
   overlaySessionProjection,
   setUiError,
@@ -100,6 +101,7 @@ export default function PendingChangesBar() {
   const sessionRecord = useStore((state) =>
     state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null);
   const pendingSends = usePendingSends(sessionRecord?.id ?? null);
+  const spawning = useStore(isActiveSessionSpawning);
   const session = overlaySessionProjection(sessionRecord, pendingSends) ?? null;
   const pendingSend = pendingSends[pendingSends.length - 1];
   const models = useStore((state) => state.models);
@@ -117,6 +119,7 @@ export default function PendingChangesBar() {
     return session?.worktreePath ? session.id : null;
   });
   const working = model.turn?.status === "working";
+  const awaitingTurn = pendingSends.length > 0 && !working;
   const status = useGitStatus(projectId, working, sessionId);
   const selected = useMemo(
     () => selectPendingChanges(status, sessionEditedPaths(model.messages), repoRoot),
@@ -194,6 +197,11 @@ export default function PendingChangesBar() {
     });
     return () => { cancelled = true; };
   }, [changeKey, projectId, selected.dirtyPaths, selected.paths, sessionId, status]);
+
+  // The spawn/turn-start dock owns this exact above-composer activity slot.
+  // Hide stale edited-file chrome before that transient status appears so the
+  // two glass docks never stack or overlap during runtime startup.
+  if (spawning || awaitingTurn) return null;
 
   const count = selected.paths.length;
   const title = count === 1
