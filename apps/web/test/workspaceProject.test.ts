@@ -14,7 +14,9 @@ Object.defineProperty(globalThis, "location", { value: dom.location, configurabl
 const {
   activateProject,
   activateSession,
+  beginProjectListRequest,
   getState,
+  publishProjectList,
   upsertSession,
   workspaceProjectId,
 } = await import("../src/store.ts");
@@ -44,6 +46,40 @@ test("workspace panes follow the open session when client project id is missing"
     activeSessionId: "s1",
     sessions: [session("other", "p1")],
   }), null);
+});
+
+test("workspace panes keep project scope during new-chat and first-send transitions", () => {
+  assert.equal(workspaceProjectId({
+    activeProjectId: null,
+    activeSessionId: null,
+    sessions: [],
+    newSessionIntent: { projectId: "p-new", draft: "" },
+  }), "p-new");
+  assert.equal(workspaceProjectId({
+    activeProjectId: null,
+    activeSessionId: null,
+    sessions: [],
+    sessionSpawn: { requestId: 1, projectId: "p-spawn", sessionId: null },
+  }), "p-spawn");
+});
+
+test("ready project hydration restores the persisted project synchronously", () => {
+  activateSession(null);
+  activateProject(null);
+  localStorage.setItem("polyth.activeProjectId", "p-restored");
+
+  const ticket = beginProjectListRequest();
+  assert.equal(publishProjectList(ticket, [{
+    id: "p-restored",
+    path: "/work/p-restored",
+    name: "Restored",
+    createdAt: 1,
+  }]), "published");
+
+  assert.equal(workspaceProjectId(getState()), "p-restored");
+  assert.equal(getState().activeProjectId, "p-restored");
+
+  activateProject(null);
 });
 
 test("activating a known session restores its project without dropping the chat", () => {
