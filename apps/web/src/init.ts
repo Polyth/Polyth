@@ -446,6 +446,39 @@ export type ProjectRefreshReason = "initial" | "manual" | "reconcile" | "reconne
 
 let bootRestored = false;
 let reconcileRetryTimer: ReturnType<typeof setTimeout> | undefined;
+let projectRecoveryTimer: ReturnType<typeof setTimeout> | undefined;
+let projectRecoveryAttempt = 0;
+const PROJECT_RECOVERY_DELAYS_MS = [250, 750, 2_000, 5_000] as const;
+
+function projectRecoveryHint(): string | null {
+  const snapshot = store.getState();
+  const contextual = store.workspaceProjectId(snapshot);
+  if (contextual) return contextual;
+  const routed = parseAppUrl(location.pathname, location.search).projectId;
+  if (routed) return routed;
+  try { return localStorage.getItem("polyth.activeProjectId") || null; }
+  catch { return null; }
+}
+
+function scheduleProjectRecovery(): boolean {
+  if (projectRecoveryTimer !== undefined) return true;
+  const delay = PROJECT_RECOVERY_DELAYS_MS[projectRecoveryAttempt];
+  if (delay === undefined) return false;
+  projectRecoveryAttempt += 1;
+  projectRecoveryTimer = setTimeout(() => {
+    projectRecoveryTimer = undefined;
+    void refreshProjects("reconnect");
+  }, delay);
+  return true;
+}
+
+function clearProjectRecovery(): void {
+  projectRecoveryAttempt = 0;
+  if (projectRecoveryTimer !== undefined) {
+    clearTimeout(projectRecoveryTimer);
+    projectRecoveryTimer = undefined;
+  }
+}
 
 /** Generation-safe project refresh: increment the request id and capture the
  *  mutationVersion (store ticket), publish only when the response is still
@@ -456,6 +489,13 @@ export async function refreshProjects(reason: ProjectRefreshReason = "manual"): 
   const ticket = store.beginProjectListRequest();
   try {
     const projects = await api.listProjects();
+    // A selected/deep-linked project and an empty project list contradict each
+    // other during server/Space startup reconciliation. Do not publish the
+    // transient empty snapshot as canonical truth: it would turn every
+    // project-scoped pane into "No project selected" and boot URL sync would
+    // erase the only route evidence. Retry with a short bounded backoff.
+    if (projects.length === 0 && projectRecoveryHint() !== null && scheduleProjectRecovery()) return;
+    if (projects.length > 0) clearProjectRecovery();
     const outcome = store.publishProjectList(ticket, projects);
     if (outcome === "superseded-by-mutation") {
       void refreshProjects("reconcile");
@@ -491,7 +531,6 @@ async function restoreSelectionAfterReady(): Promise<void> {
   const projects = registry.projects;
 
   if (!bootRestored) {
-    bootRestored = true;
     const fromUrl = parseAppUrl(location.pathname, location.search);
     const localSavedProjectId = (() => {
       try { return localStorage.getItem("polyth.activeProjectId") || null; }
@@ -509,6 +548,12 @@ async function restoreSelectionAfterReady(): Promise<void> {
     if (immediate) store.activateProject(immediate);
 
     const restoredNavigation = await store.hydrateClientNavigation();
+    const expectedProjectId = fromUrl.projectId
+      ?? restoredNavigation?.projectId
+      ?? localSavedProjectId;
+    if (projects.length === 0 && expectedProjectId && scheduleProjectRecovery()) return;
+    bootRestored = true;
+
     const initial = resolveActiveProjectId(projects, {
       urlProjectId: fromUrl.projectId ?? null,
       savedProjectId: restoredNavigation?.projectId ?? null,
@@ -783,7 +828,11 @@ function startSync(): void {
     recheckRuntimeCatalog();
     store.reconcileWorkspaceProjectFromSession();
     const snapshot = store.getState();
-    if (shouldRefreshProjectsOnSyncOpen(snapshot.projectRegistry, store.workspaceProjectId(snapshot))) {
+    if (shouldRefreshProjectsOnSyncOpen(
+      snapshot.projectRegistry,
+      store.workspaceProjectId(snapshot),
+      projectRecoveryHint(),
+    )) {
       void refreshProjects("reconnect");
     }
     const activeSessionId = snapshot.activeSessionId;
