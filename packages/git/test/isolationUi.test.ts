@@ -483,16 +483,16 @@ test("discard confirmation closes when the session changes", async () => {
     assert.ok(more);
     await act(async () => { more!.click(); await wait(); });
     const deleteEntry = [...document.querySelectorAll('[role="menuitem"]')]
-      .find((entry) => entry.textContent === tr("isolation.discardWorkspace"));
+      .find((entry) => entry.textContent === tr("sidebar.sessionlist.deleteSession"));
     assert.ok(deleteEntry);
     await act(async () => { (deleteEntry as HTMLButtonElement).click(); await wait(); });
-    assert.ok(document.body.textContent?.includes(tr("isolation.discardTitle")));
+    assert.ok(document.body.textContent?.includes(tr("sidebar.sessionlist.deleteSession")));
     await act(async () => {
       seedSessionCache(projection("discard-session-b", isolation));
       activateSession("discard-session-b");
       await wait();
     });
-    assert.equal(document.body.textContent?.includes(tr("isolation.discardTitle")), false);
+    assert.equal(document.body.textContent?.includes(tr("sidebar.sessionlist.deleteSession")), false);
   } finally {
     await act(async () => { document.querySelectorAll(".dialog-backdrop, [role=dialog]").forEach((node) => node.remove()); });
     await mounted.close();
