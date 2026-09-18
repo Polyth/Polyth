@@ -125,7 +125,8 @@ test("Usage surface keeps the Polyth shell while settings configure presentation
       < source.indexOf('className="usage-provider-view-intro"'),
     "provider summary follows the provider cards",
   );
-  assert.match(source, /new ResizeObserver/);
+  assert.match(source, /responsive: true/);
+  assert.doesNotMatch(source, /new ResizeObserver/);
   assert.doesNotMatch(source, /role="(?:tab|radio)"/);
   assert.doesNotMatch(source, /usage-dashboard-sidebar/);
   assert.match(quota, /loading: boolean/);
