@@ -842,7 +842,7 @@ function MessageView({ m, announce, statusText, plan, regeneratePrompt, turn, te
   announce?: Announce;
   statusText?: string;
   plan?: NonNullable<RenderModel["tasks"]>;
-  regeneratePrompt?: string;
+  regeneratePrompt?: { text: string; attachments?: UserMsg["attachments"] };
   turn?: RenderModel["turn"];
   terminal?: boolean;
   segmentStartedAt?: number;
