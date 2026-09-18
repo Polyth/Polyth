@@ -4,12 +4,32 @@ import assert from "node:assert/strict";
 import type { SessionProjection, SpaceContext } from "@polyth/contracts";
 import {
   buildNextActionPrompt,
+  buildNotePrompt,
   buildPromptImprovementPrompt,
   createManualSuggestionService,
+  parseNoteReply,
   sanitizeNextActionReply,
 } from "../src/assist.ts";
 import { assistRoutes } from "../src/routes/assist.ts";
 import type { RouteRequest } from "../src/http.ts";
+
+test("explicit assist helpers keep prompt and note transforms bounded", () => {
+  const next = buildNextActionPrompt([
+    { user: "Fix the retry path", assistant: "I found the missing await.", attachments: [], userSeq: 1, assistantSeq: 2 },
+  ]);
+  assert.match(next, /RECENT CONVERSATION:\nUser: Fix the retry path/);
+  assert.match(next, /Assistant: I found the missing await/);
+  assert.equal(sanitizeNextActionReply("\`\`\`\nSuggestion: Add a regression test.\n\`\`\`"), "Add a regression test.");
+  assert.equal(sanitizeNextActionReply(`"${"x".repeat(900)}"`).length, 800);
+
+  const improved = buildPromptImprovementPrompt("  fix retry  ");
+  assert.match(improved, /USER PROMPT:\nfix retry$/);
+  assert.match(improved, /Do not invent requirements/);
+
+  assert.match(buildNotePrompt("T"), /project note/);
+  assert.deepEqual(parseNoteReply("Title here\n\nBody line"), { title: "Title here", body: "Body line" });
+  assert.deepEqual(parseNoteReply("only-title"), { title: "only-title", body: "" });
+});
 
 const completedExchangeEvents = () => [
   { id: "e1", sessionId: "s1", seq: 1, time: 1, type: "user/message", data: { text: "older prompt" }, v: 1 },
