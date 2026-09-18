@@ -4,10 +4,8 @@ import assert from "node:assert/strict";
 import type { SessionProjection, SpaceContext } from "@polyth/contracts";
 import {
   buildNextActionPrompt,
-  buildNotePrompt,
   buildPromptImprovementPrompt,
   createManualSuggestionService,
-  parseNoteReply,
   sanitizeNextActionReply,
 } from "../src/assist.ts";
 import { assistRoutes } from "../src/routes/assist.ts";
