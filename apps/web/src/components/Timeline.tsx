@@ -1964,16 +1964,14 @@ export default function Timeline({
   const lastPromptBoundary = [...model.messages].reverse()
     .find((message) => message.kind === "user" || message.kind === "github-conflict");
   const lastUser = lastPromptBoundary?.kind === "user" ? lastPromptBoundary : undefined;
-  // Ordinary turn failures use the one host-owned transient surface. Rate
-  // limits stay inline because their resume/cancel state outlives a toast.
+  // Ordinary turn failures use the one host-owned transient surface. User
+  // aborts are intentional and stay silent; rate limits remain inline because
+  // their resume/cancel state outlives a toast.
   useEffect(() => {
-    if (!transientTurnKey || !turn) return;
-    // Send-now / steer-fallback aborts the current turn on purpose. The next
-    // prompt is already on screen; a "turn aborted" toast is a false error.
-    if (turn.status === "aborted" && pendingSends.length > 0) return;
+    if (!transientTurnKey || !turn || turn.status !== "failed") return;
     setUiError(
-      turn.status === "aborted" ? tr("timeline.turnAborted") : tr("timeline.lastTurnFailed"),
-      turn.status === "failed" && lastUser && sessionId ? {
+      tr("timeline.lastTurnFailed"),
+      lastUser && sessionId ? {
         label: tr("common.retry"),
         run: () => {
           const draft = {
@@ -1986,7 +1984,7 @@ export default function Timeline({
       } : null,
       transientTurnKey,
     );
-  }, [transientTurnKey, turn, lastUser, sessionId, pendingSends.length]);
+  }, [transientTurnKey, turn, lastUser, sessionId]);
   useEffect(() => {
     const el = ref.current;
     const update = () => {
