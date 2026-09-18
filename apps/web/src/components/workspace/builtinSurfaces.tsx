@@ -27,7 +27,7 @@ import { tapFeedback } from "../../haptics.ts";
 import { dismissKeyboard } from "../../mobileViewport.ts";
 import { useSheetTrigger } from "../mobile/sheetTrigger.ts";
 import { HeroWidget, HeroWidgetMenu } from "../mobile/HeroWidgets.tsx";
-import { ago, displaySessionTitle, fmtDuration, isPlaceholderTitle } from "../../format.ts";
+import { ago, displaySessionTitle, isPlaceholderTitle } from "../../format.ts";
 import {
   noteStarterUsed,
   starterContextFrom,
@@ -41,8 +41,6 @@ import { tr } from "../../i18n/index.ts";
 import { AgentStatusDock, Button } from "../ui/index.ts";
 import { resolveSessionStatus } from "../../sessionStatus.ts";
 import ProviderLogo from "../../../../../packages/models/widgets/ProviderLogo.tsx";
-import { resolveModelPresentation } from "@polyth/contracts/model-presentation";
-import { toggleSessionStatusPopover } from "../../sessionStatusPopover.ts";
 
 const NOOP_STARTER = (_prompt: string, _id?: string): void => {};
 
@@ -222,110 +220,40 @@ function SessionLoading() {
   );
 }
 
-/** One owner for the complete above-composer activity lifecycle.
- * Pending/creation startup, canonical session work, and the live turn all
- * render through this component. Git contributes edited-file state only; it
- * must never own the agent activity surface. */
-function SessionActivityStatus({ spawning }: { spawning: boolean }) {
-  const sessionRecord = useStore((state) =>
-    state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null);
-  const pendingSends = usePendingSends(sessionRecord?.id ?? null);
-  const pendingSend = pendingSends[pendingSends.length - 1];
+/** First-send/runtime startup belongs in the same above-composer activity
+ * zone as an active run. It owns only the pre-working handoff; as soon as the
+ * session becomes working, the git widget live agent-status dock takes over
+ * and this transient surface disappears even if spawn bookkeeping lags. */
+function SessionSpawnStatus({ spawning, resolvedHarnessId, pendingModel }: {
+  spawning: boolean;
+  resolvedHarnessId?: string;
+  pendingModel?: { providerID: string; modelID: string };
+}) {
   const spawn = useStore((state) => state.sessionSpawn);
-  const model = useActiveModel();
   const models = useStore((state) => state.models);
-  const working = model.turn?.status === "working" || sessionRecord?.status === "working";
-  const awaitingTurn = pendingSends.length > 0 && !working;
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    if (!working) return;
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [working, model.turn?.startedAt]);
-
-  if (!working) {
-    if (!spawning && !awaitingTurn) return null;
-    const status = spawning
-      ? tr("workspace.builtinsurfaces.spawningAgent")
-      : tr("workspace.builtinsurfaces.startingTurn");
-    const harnessId = (spawning ? spawn?.harnessId : undefined) ?? sessionRecord?.resolvedHarnessId;
-    const harnessName = (spawning ? spawn?.harnessName?.trim() : undefined) || harnessId
-      ?.split(/[-_]+/)
-      .filter(Boolean)
-      .map((part) => part[0]!.toUpperCase() + part.slice(1))
-      .join(" ")
-      || tr("timeline.agent");
-    const pendingModel = pendingSend?.model;
-    const pendingLabel = pendingModel
-      ? models.find((item) => item.providerID === pendingModel.providerID && item.modelID === pendingModel.modelID)?.name
-        ?? `${pendingModel.providerID}/${pendingModel.modelID}`
-      : undefined;
-    const harnessLabel = pendingLabel ?? `${harnessName} harness`;
-    return (
-      <AgentStatusDock
-        icon={harnessId
-          ? <ProviderLogo providerID={harnessId} providerName={harnessName} size="regular" />
-          : <Icon.session />}
-        model={harnessLabel}
-        status={status}
-        label={`${harnessLabel}: ${status}`}
-      />
-    );
-  }
-
-  const replacingTurn = pendingSend?.delivery === "interrupt";
-  const modelRef = pendingSend?.model ?? model.turn?.model ?? sessionRecord?.model;
-  const runtimeHarnessId = model.turn?.harnessId ?? sessionRecord?.resolvedHarnessId;
-  const presentation = modelRef
-    ? resolveModelPresentation(modelRef, models, runtimeHarnessId)
-    : { descriptor: undefined, name: tr("composer.auto") };
-  const descriptor = presentation.descriptor;
-  const activeTask = model.tasks?.items.find((item) => item.status === "active");
-  const activeSubagent = model.subagents?.agents.find((agent) => /^(?:working|running|active)$/i.test(agent.status));
-  const activeTool = [...model.messages].reverse().find((message) =>
-    message.kind === "tool" && (message.status === "pending" || message.status === "running"));
-  const latestAssistant = [...model.messages].reverse().find((message) => message.kind === "assistant");
-  const activityLabels = tr("workspace.builtinsurfaces.activityItems").split("|");
-  const toolDetail = activeTool?.kind === "tool"
-    ? ["description", "command", "filePath", "path", "query", "pattern", "url"]
-        .map((key) => activeTool.input[key])
-        .find((value): value is string => typeof value === "string" && value.trim() !== "")
+  const status = spawning
+    ? tr("workspace.builtinsurfaces.spawningAgent")
+    : tr("workspace.builtinsurfaces.startingTurn");
+  const harnessId = (spawning ? spawn?.harnessId : undefined) ?? resolvedHarnessId;
+  const harnessName = (spawning ? spawn?.harnessName?.trim() : undefined) || harnessId
+    ?.split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) => part[0]!.toUpperCase() + part.slice(1))
+    .join(" ")
+    || tr("timeline.agent");
+  const pendingLabel = pendingModel
+    ? models.find((item) => item.providerID === pendingModel.providerID && item.modelID === pendingModel.modelID)?.name
+      ?? `${pendingModel.providerID}/${pendingModel.modelID}`
     : undefined;
-  const conciseToolDetail = toolDetail && /[\\/]/.test(toolDetail)
-    ? toolDetail.replaceAll("\\", "/").split("/").filter(Boolean).at(-1)
-    : toolDetail;
-  const toolName = activeTool?.kind === "tool"
-    ? activeTool.title ?? activeTool.tool.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
-    : undefined;
-  const action = replacingTurn
-    ? tr("workspace.builtinsurfaces.startingTurn")
-    : activeTask?.text
-      ?? activeSubagent?.currentTask
-      ?? (toolName
-        ? `${toolName}${conciseToolDetail ? ` · ${conciseToolDetail}` : ""}`
-        : latestAssistant?.kind === "assistant" && latestAssistant.reasoning && !latestAssistant.text
-          ? tr("timeline.thinking")
-          : activityLabels[latestAssistant?.kind === "assistant" && latestAssistant.text ? 2 : 0]
-            ?? tr("workspace.builtinsurfaces.working"));
-  const elapsed = replacingTurn || model.turn?.startedAt === undefined
-    ? null
-    : fmtDuration(now - model.turn.startedAt);
-
+  const harnessLabel = pendingLabel ?? `${harnessName} harness`;
   return (
     <AgentStatusDock
-      icon={<ProviderLogo
-        providerID={descriptor?.providerID ?? modelRef?.providerID}
-        providerName={descriptor?.providerName}
-        harnessId={descriptor?.harnessId ?? runtimeHarnessId}
-        size="regular"
-      />}
-      model={presentation.name}
-      status={action}
-      elapsed={elapsed}
-      label={action}
-      onClick={() => toggleSessionStatusPopover()}
+      icon={harnessId
+        ? <ProviderLogo providerID={harnessId} providerName={harnessName} size="regular" />
+        : <Icon.session />}
+      model={harnessLabel}
+      status={status}
+      label={`${harnessLabel}: ${status}`}
     />
   );
 }
@@ -437,8 +365,14 @@ function SessionSurface() {
             <SlotHost slot="session.composer.before" context={composerBeforeContext} customizable />
             <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />
             <SlotHost slot="session.footer" context={{ projectId, sessionId, editing: false }} customizable />
-            {(spawning || awaitingTurn || working) && (
-              <SessionActivityStatus spawning={spawning} />
+            {!working && (spawning || awaitingTurn) && (
+              <SessionSpawnStatus
+                spawning={spawning}
+                {...(session?.resolvedHarnessId ? { resolvedHarnessId: session.resolvedHarnessId } : {})}
+                {...(pendingSends[pendingSends.length - 1]?.model
+                  ? { pendingModel: pendingSends[pendingSends.length - 1]!.model }
+                  : {})}
+              />
             )}
             <Composer />
           </div>}
