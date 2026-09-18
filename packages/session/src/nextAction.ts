@@ -1,26 +1,40 @@
 import type { SessionEvent } from "@polyth/contracts";
 import { effectiveHistory, recoveredUserText } from "./history.ts";
 
+const ASSIST_CONVERSATION_ACTIVITY_PREFIXES = [
+  "user/",
+  "assistant/",
+  "turn/",
+  "tool/",
+  "permission/",
+  "question/",
+  "secret/",
+  "queue/",
+] as const;
+
+/** True when an event represents conversation/session activity rather than
+ * passive post-turn bookkeeping such as usage, title, goal, or isolation
+ * metadata. Unknown non-ignorable events are conservative activity. */
+export function isAssistConversationActivity(
+  event: Pick<SessionEvent, "type" | "ignorable">,
+): boolean {
+  if (!event.ignorable) return true;
+  return ASSIST_CONVERSATION_ACTIVITY_PREFIXES.some((prefix) => event.type.startsWith(prefix))
+    || event.type === "session/rewound"
+    || event.type === "session/rewind-cleared";
+}
+
 /**
  * Stable revision for idle recap/suggestion freshness.
  *
- * Post-turn bookkeeping is deliberately ignored: usage, goal/isolation
- * updates, title metadata, compaction markers, and other ignorable system
- * events must not make a freshly completed conversation look active again.
- * Real conversation movement still invalidates immediately through visible
- * events, turn lifecycle, and explicit rewind operations.
+ * Post-turn bookkeeping is deliberately ignored. Real conversation movement
+ * still invalidates immediately through visible events, turn lifecycle, and
+ * explicit rewind operations.
  */
 export function assistFreshnessSeq(events: readonly SessionEvent[]): number {
   let latest = 0;
   for (const event of events) {
-    const interactiveIgnorable =
-      event.type.startsWith("turn/")
-      || event.type.startsWith("permission/")
-      || event.type.startsWith("question/")
-      || event.type.startsWith("secret/")
-      || event.type === "session/rewound"
-      || event.type === "session/rewind-cleared";
-    if (!event.ignorable || interactiveIgnorable) latest = Math.max(latest, event.seq);
+    if (isAssistConversationActivity(event)) latest = Math.max(latest, event.seq);
   }
   return latest;
 }
