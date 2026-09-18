@@ -276,6 +276,12 @@ const aggregate = async <T>(
 /** Route-local catalogs keep account/model identity scoped to the session's
  * current runtime. A provider's empty model list means native default. */
 export function runtimeCatalogRoutes(host: ServerPackageHost): RouteHandler {
+  const visibility = host.services.get(serverServiceKey<{
+    filterHarness(models: ModelDescriptor[], harnessId: string, opts?: { includeDisconnected?: boolean }): ModelDescriptor[];
+  }>("models.visibility"));
+  const visibleModels = (models: ModelDescriptor[], harnessId: string): ModelDescriptor[] =>
+    visibility?.filterHarness(models, harnessId) ?? models;
+
   return async (request) => {
     const sessionId = request.url.searchParams.get("sessionId");
     if (request.path !== "/api/runtime-catalog" || !sessionId || request.method !== "GET") return false;
@@ -311,10 +317,11 @@ export function runtimeCatalogRoutes(host: ServerPackageHost): RouteHandler {
         remote: Boolean(project.remote),
       }, { harnessId, detail: true });
       if (!snapshot) throw runtimeError;
-      const models = (snapshot.catalog?.models ?? []).map((model) => ({
+      const rawModels = (snapshot.catalog?.models ?? []).map((model) => ({
         ...model,
         harnessId: model.harnessId ?? harnessId,
       }));
+      const models = visibleModels(rawModels, harnessId);
       const agents = (snapshot.catalog?.agents ?? snapshot.catalog?.roles ?? []).map((agent) => ({
         ...agent,
         harnessId: agent.harnessId ?? harnessId,
@@ -335,7 +342,7 @@ export function runtimeCatalogRoutes(host: ServerPackageHost): RouteHandler {
         capabilities: snapshot.capabilities
           ?? registry.get(harnessId)?.staticFeatures,
         discovery,
-        nativeDefault: !unavailable && models.length === 0,
+        nativeDefault: !unavailable && rawModels.length === 0,
         harnessId,
       });
       return true;
@@ -348,7 +355,8 @@ export function runtimeCatalogRoutes(host: ServerPackageHost): RouteHandler {
       runtime.agents().catch(() => []),
       runtime.capabilities(),
     ]);
-    const models = (modelResult.ok ? modelResult.value : []).map((model) => ({ ...model, ...(runtime.harnessId ? { harnessId: runtime.harnessId } : {}) }));
+    const rawModels = (modelResult.ok ? modelResult.value : []).map((model) => ({ ...model, ...(runtime.harnessId ? { harnessId: runtime.harnessId } : {}) }));
+    const models = runtime.harnessId ? visibleModels(rawModels, runtime.harnessId) : rawModels;
     const agents = rawAgents.map((agent) => ({ ...agent, ...(runtime.harnessId ? { harnessId: runtime.harnessId } : {}) }));
     const discovery: ModelDiscoveryState = !modelResult.ok
       ? { state: "unavailable", reason: modelResult.reason }
@@ -358,7 +366,7 @@ export function runtimeCatalogRoutes(host: ServerPackageHost): RouteHandler {
       agents,
       capabilities,
       discovery,
-      nativeDefault: modelResult.ok && models.length === 0,
+      nativeDefault: modelResult.ok && rawModels.length === 0,
       harnessId: runtime.harnessId,
     }); return true;
   };
