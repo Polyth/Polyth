@@ -76,7 +76,7 @@ export function smallModelExecutionRoute(
 const promptForFallback = (options: SmallModelCompleteOptions): string =>
   options.systemPrompt ? `${options.systemPrompt}\n\n${options.prompt}` : options.prompt;
 
-const fail = (options: SmallModelCompleteOptions, stage: string, error: unknown): never => {
+function fail(options: SmallModelCompleteOptions, stage: string, error: unknown): never {
   if (options.purpose) {
     console.error("[polyth] small-model generation failed", JSON.stringify({
       purpose: options.purpose,
@@ -89,7 +89,7 @@ const fail = (options: SmallModelCompleteOptions, stage: string, error: unknown)
     }));
   }
   throw error;
-};
+}
 
 export function createSmallModelService(store: RuntimeMutationStore): SmallModelService {
   const modelsFor = (runtime: AgentRuntime): Promise<ModelDescriptor[]> => runtime.models().catch(() => []);

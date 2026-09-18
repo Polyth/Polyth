@@ -16,9 +16,6 @@ on:
         options:
           - internal
           - production
-  push:
-    tags:
-      - "v*"
 
 concurrency:
   group: android-release-${{ github.workflow }}-${{ github.ref }}
@@ -35,9 +32,9 @@ jobs:
     needs: quality-gate
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -63,7 +60,7 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"

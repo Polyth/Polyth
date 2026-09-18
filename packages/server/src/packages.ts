@@ -12,7 +12,7 @@ export interface PackageRegistry {
 
 /** Shell-owned package descriptors only. Feature descriptors are discovered
  * from each package's polyth.descriptor manifest block at boot. */
-export const BUILTIN_PACKAGES = [
+export const BUILTIN_PACKAGES: readonly PackageDescriptorDto[] = [
   { id: "session", name: "Session Runtime", description: "Durable session events and projections.", core: true, enabled: true, icon: "history", hasSettings: false },
   { id: "projects", name: "Projects", description: "Project and workspace management.", core: true, enabled: true, settingsGroup: "Engineering", icon: "files", hasSettings: true },
   { id: "behavior", name: "Behavior", description: "Agent behavior instructions.", core: true, enabled: true, settingsGroup: "Engineering", icon: "brain", hasSettings: true },
@@ -25,7 +25,7 @@ export const BUILTIN_PACKAGES = [
   { id: "about", name: "About", description: "Application version and system information.", core: true, enabled: true, settingsGroup: "System", icon: "info", hasSettings: true },
   { id: "mcp", name: "MCP", description: "Model Context Protocol server configuration.", core: false, enabled: true, settingsGroup: "Engineering", icon: "server", hasSettings: false },
   { id: "integrations", name: "Integrations", description: "External service integrations.", core: false, enabled: true, settingsGroup: "Workspace", icon: "link", hasSettings: true },
-] as const satisfies readonly PackageDescriptorDto[];
+];
 
 type EnabledState = Record<string, boolean>;
 

@@ -15,7 +15,7 @@ export function withInitialPermissionReview(
   if (plugin.runtimeKind !== "sandboxed" || plugin.enabled || plugin.permissions.review) return plugin;
   const manifest = registry.canonicalManifest(plugin.id);
   const missing = missingGrants(readGrants(storage, plugin.id), manifest.capabilities ?? []);
-  const missingNames = new Set(missing.map((item) => item.name));
+  const missingNames = new Set<string>(missing.map((item) => item.name));
   const capabilities = plugin.permissions.requested.filter((item) => missingNames.has(item.name));
   const connections = currentConnectionReviewItems(
     manifest.connections ?? [],

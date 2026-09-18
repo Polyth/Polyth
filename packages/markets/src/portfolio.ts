@@ -45,9 +45,9 @@ export interface MarketPortfolioSnapshot {
 export const DEFAULT_PORTFOLIO: MarketPortfolio = { version: 1, holdings: [] };
 const MAX_HOLDINGS = 100;
 
-const fail = (message: string): never => {
+function fail(message: string): never {
   throw Object.assign(new Error(message), { code: "invalid-input" });
-};
+}
 
 export function parsePortfolio(value: unknown): MarketPortfolio {
   if (!value || typeof value !== "object" || Array.isArray(value)) fail("portfolio must be an object");

@@ -192,7 +192,8 @@ function packageStore(host: ServerPackageHost): ServerPackageHost["store"] {
         if (typeof value !== "function") return value;
         return async (sessionId: string, ...rest: unknown[]) => {
           await guard(sessionId);
-          return value.call(target, sessionId, ...rest);
+          const method = value as (sessionId: string, ...args: unknown[]) => unknown;
+          return method.call(target, sessionId, ...rest);
         };
       }
       if (property === "patchProjection") {
@@ -201,7 +202,8 @@ function packageStore(host: ServerPackageHost): ServerPackageHost["store"] {
         return async (sessionId: string, ...rest: unknown[]) => {
           const projection = await guard(sessionId);
           if (projection.status === "archived") throw archived();
-          return value.call(target, sessionId, ...rest);
+          const method = value as (sessionId: string, ...args: unknown[]) => unknown;
+          return method.call(target, sessionId, ...rest);
         };
       }
       if (BLOCKED_STORE_MUTATIONS.has(property)) {

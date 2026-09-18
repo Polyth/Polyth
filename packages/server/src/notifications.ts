@@ -171,7 +171,7 @@ export function createNotificationStore(opts: {
   };
 
   return {
-    list: (first?: NotificationAccount | number, second = 0) => serialized(() => {
+    list: (first?: NotificationAccount | number, second: number = 0) => serialized(() => {
       const account = typeof first === "number" || first === undefined ? LEGACY_TEST_ACCOUNT : first;
       const after = typeof first === "number" ? first : second;
       if (!authorized(account)) return { items: [], unread: 0 };

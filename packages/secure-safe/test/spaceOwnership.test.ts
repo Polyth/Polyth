@@ -65,13 +65,13 @@ test("Secure Safe registry stores identical handles and opaque credentials in se
   assert.notEqual(entryA.id, entryB.id);
   assert.equal(safeA.list().length, 1);
   assert.equal(safeB.list().length, 1);
-  assert.equal(safeA.redact("secret-space-a secret-space-b"), "[redacted] secret-space-b");
-  assert.equal(safeB.redact("secret-space-a secret-space-b"), "secret-space-a [redacted]");
+  assert.equal(safeA.redact!("secret-space-a secret-space-b"), "[redacted] secret-space-b");
+  assert.equal(safeB.redact!("secret-space-a secret-space-b"), "secret-space-a [redacted]");
 
-  safeA.putOpaque("pkgconn:spc_a:example:main", "opaque-space-a");
-  safeB.putOpaque("pkgconn:spc_b:example:main", "opaque-space-b");
-  assert.equal(registry.forSpaceId("spc_a")?.getOpaque("pkgconn:spc_a:example:main"), "opaque-space-a");
-  assert.equal(registry.forSpaceId("spc_b")?.getOpaque("pkgconn:spc_b:example:main"), "opaque-space-b");
+  safeA.putOpaque!("pkgconn:spc_a:example:main", "opaque-space-a");
+  safeB.putOpaque!("pkgconn:spc_b:example:main", "opaque-space-b");
+  assert.equal(registry.forSpaceId("spc_a")?.getOpaque?.("pkgconn:spc_a:example:main"), "opaque-space-a");
+  assert.equal(registry.forSpaceId("spc_b")?.getOpaque?.("pkgconn:spc_b:example:main"), "opaque-space-b");
   assert.equal(safeA.getOpaque("pkgconn:spc_b:example:main"), null);
   assert.equal(safeB.getOpaque("pkgconn:spc_a:example:main"), null);
 

@@ -25,9 +25,9 @@ export const DEFAULT_WATCHLISTS: MarketWatchlists = {
   items: [{ id: "default", name: "Watchlist", symbols: ["SPY", "QQQ"] }],
 };
 
-const fail = (message: string): never => {
+function fail(message: string): never {
   throw Object.assign(new Error(message), { code: "invalid-input" });
-};
+}
 
 export function parseWatchlists(value: unknown): MarketWatchlists {
   if (!value || typeof value !== "object" || Array.isArray(value)) fail("watchlists must be an object");
