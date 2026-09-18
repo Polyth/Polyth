@@ -237,6 +237,7 @@ export interface Store extends SessionPersistence {
     attachments?: AttachmentRef[],
     clientOperationId?: string,
     command?: QueueItemDto["command"],
+    hiddenUserMessage?: boolean,
   ): Promise<QueueEnqueueResult>;
   queueList(sessionId: string): Promise<QueueItemDto[]>;
   /** Updates text, clears native command/review state; delivery, attachments, position, and timestamps stay unchanged. */
@@ -860,6 +861,12 @@ export function createStore(dbPath: string): Store {
     // v13: native command identity survives deferred queue admission.
     () => {
       sqliteExec("ALTER TABLE session_queue ADD COLUMN command TEXT");
+    },
+    // v14: retries/regenerations retain their chat-hidden presentation when queued.
+    () => {
+      sqliteExec(`ALTER TABLE session_queue
+        ADD COLUMN hidden_user_message INTEGER NOT NULL DEFAULT 0
+        CHECK (hidden_user_message IN (0, 1))`);
     },
   ];
   for (let v = getVersion(); v < MIGRATIONS.length; v++) {
@@ -2069,6 +2076,7 @@ export function createStore(dbPath: string): Store {
     created_at: number;
     attachments: string | null;
     command: string | null;
+    hidden_user_message: number;
     reservation_operation_id: string | null;
     held_for_review: number;
   }
@@ -2109,6 +2117,7 @@ export function createStore(dbPath: string): Store {
       createdAt: Number(r.created_at),
       ...(attachments ? { attachments } : {}),
       ...(command ? { command } : {}),
+      ...(r.hidden_user_message === 1 ? { hiddenUserMessage: true } : {}),
       ...(r.held_for_review === 1 ? { heldForReview: true } : {}),
     };
   };
@@ -2120,6 +2129,7 @@ export function createStore(dbPath: string): Store {
     attachments?: AttachmentRef[],
     clientOperationId?: string,
     command?: QueueItemDto["command"],
+    hiddenUserMessage?: boolean,
   ): Promise<QueueEnqueueResult> {
     const queueId = clientOperationId ?? randomUUID();
     const createdAt = Date.now();
@@ -2134,7 +2144,8 @@ export function createStore(dbPath: string): Store {
             && existing.text === text
             && existing.delivery === delivery
             && (existing.attachments ?? null) === (attachments?.length ? JSON.stringify(attachments) : null)
-            && (existing.command ?? null) === serializedCommand;
+            && (existing.command ?? null) === serializedCommand
+            && existing.hidden_user_message === (hiddenUserMessage ? 1 : 0);
           if (!same) throw Object.assign(new Error("client operation id is already bound to another queue admission"), { code: "client-operation-conflict" });
           return { item: rowToQueueItem(existing), created: false };
         }
@@ -2142,7 +2153,7 @@ export function createStore(dbPath: string): Store {
       const row = prep("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM session_queue WHERE session_id = ?")
         .get(sessionId) as { next: number };
       prep(
-        "INSERT INTO session_queue (queue_id, session_id, position, text, delivery, created_at, attachments, command) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO session_queue (queue_id, session_id, position, text, delivery, created_at, attachments, command, hidden_user_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
       ).run(
         queueId,
         sessionId,
@@ -2152,12 +2163,14 @@ export function createStore(dbPath: string): Store {
         createdAt,
         attachments?.length ? JSON.stringify(attachments) : null,
         serializedCommand,
+        hiddenUserMessage ? 1 : 0,
       );
       return {
         item: {
           id: queueId, sessionId, position: Number(row.next), text, delivery, createdAt,
           ...(attachments?.length ? { attachments } : {}),
           ...(command ? { command } : {}),
+          ...(hiddenUserMessage ? { hiddenUserMessage: true } : {}),
         } satisfies QueueItemDto,
         created: true,
       };
@@ -2173,7 +2186,7 @@ export function createStore(dbPath: string): Store {
 
   function queueEdit(sessionId: string, queueId: string, text: string): Promise<QueueItemDto | undefined> {
     const result = prep(
-      `UPDATE session_queue SET text = ?, command = NULL, held_for_review = 0
+      `UPDATE session_queue SET text = ?, command = NULL, hidden_user_message = 0, held_for_review = 0
        WHERE session_id = ? AND queue_id = ? AND reservation_operation_id IS NULL`,
     )
       .run(text, sessionId, queueId);
@@ -2282,6 +2295,8 @@ export function createStore(dbPath: string): Store {
       delivery?: unknown;
       attachments?: unknown;
       command?: unknown;
+      hiddenUserMessage?: unknown;
+      autoResume?: unknown;
     };
     const text = typeof data.raw === "string"
       ? data.raw
@@ -2294,8 +2309,8 @@ export function createStore(dbPath: string): Store {
     prep(
       `INSERT INTO session_queue (
         queue_id, session_id, position, text, delivery, created_at,
-        attachments, command, reservation_operation_id, held_for_review
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 1)`,
+        attachments, command, hidden_user_message, reservation_operation_id, held_for_review
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1)`,
     ).run(
       queueId,
       operation.sessionId,
@@ -2312,6 +2327,7 @@ export function createStore(dbPath: string): Store {
         && typeof (data.command as { id?: unknown }).id === "string"
         ? JSON.stringify(data.command)
         : null,
+      data.hiddenUserMessage === true || data.autoResume === true ? 1 : 0,
     );
     const held = prep("SELECT * FROM session_queue WHERE queue_id = ?")
       .get(queueId) as unknown as QueueRow;
