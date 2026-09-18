@@ -1163,7 +1163,7 @@ fn write_client_storage_record(root: &Path, key: &str, value: &str) -> Result<()
             std::fs::remove_file(entry.path()).map_err(|_| LinkError::PairingStorageFailed)?;
             continue;
         }
-        if name.to_str().map_or(true, |name| !client_storage_key_valid(name)) {
+        if name.to_str().is_none_or(|name| !client_storage_key_valid(name)) {
             continue;
         }
         let metadata = std::fs::symlink_metadata(entry.path()).map_err(|_| LinkError::PairingStorageFailed)?;

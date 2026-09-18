@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { GRANT_PROFILE_PRESETS } from "@polyth/contracts";
+import { GRANT_PROFILE_PRESETS, REMOTE_CAPABILITY } from "@polyth/contracts";
 import { createTunnelStore, fingerprintEndpoint, grantsForProfile } from "../src/index.ts";
 
 const db = () => join(mkdtempSync(join(tmpdir(), "polyth-tunnel-")), "tunnel.db");
@@ -17,7 +17,8 @@ test("commitDevice is atomic, unique on endpoint, and revoke does not resurrect 
     pairedVia: "polyth-link",
   });
   assert.equal(first.ownerUserId, "usr_owner");
-  assert.equal(first.grants.length, GRANT_PROFILE_PRESETS.interact.length);
+  assert.equal(first.grants.length, GRANT_PROFILE_PRESETS.interact.length + 1);
+  assert.equal(first.grants.includes(REMOTE_CAPABILITY.dictationUse), true);
   assert.equal(fingerprintEndpoint(first.endpointId).includes("…"), true);
   const again = store.commitDevice({
     endpointId: first.endpointId,

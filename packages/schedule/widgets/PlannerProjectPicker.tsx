@@ -5,10 +5,10 @@ import { useShellMode } from "../../../apps/web/src/responsiveShell.ts";
 import {
   CheckIcon,
   Icon,
+  ProjectGlyph,
   ResponsiveOverlay,
   TextInput,
 } from "../../../apps/web/src/components/ui/index.ts";
-import ProjectGlyph from "../../../apps/web/src/components/ProjectGlyph.tsx";
 
 export function PlannerProjectMark({ project }: { project: Project }): ReactNode {
   return (

@@ -50,12 +50,14 @@ test("revoke A leaves B connected and failed host trust mutation is not success"
   const events = new TunnelEventBus();
   const a = store.commitDevice({
     endpointId: "aa".repeat(32),
+    ownerUserId: SPACE.userId,
     label: "Phone A",
     grants: grantsForProfile("interact"),
     pairedVia: "polyth-link",
   });
   const b = store.commitDevice({
     endpointId: "bb".repeat(32),
+    ownerUserId: SPACE.userId,
     label: "Phone B",
     grants: grantsForProfile("interact"),
     pairedVia: "polyth-link",
@@ -130,11 +132,12 @@ test("revoke A leaves B connected and failed host trust mutation is not success"
 
   store.commitDevice({
     endpointId: "cc".repeat(32),
+    ownerUserId: SPACE.userId,
     label: "Fail",
     grants: grantsForProfile("observe"),
     pairedVia: "polyth-link",
   });
-  const failDevice = store.list().find((item) => item.label === "Fail")!;
+  const failDevice = store.list(SPACE.userId).find((item) => item.label === "Fail")!;
   const hostFail = tunnelRoutes({
     store,
     events,
@@ -159,12 +162,14 @@ test("grant update A does not notify B and restore permits reconnect metadata", 
   const events = new TunnelEventBus();
   const a = store.commitDevice({
     endpointId: "aa".repeat(32),
+    ownerUserId: SPACE.userId,
     label: "Phone A",
     grants: grantsForProfile("developer"),
     pairedVia: "polyth-link",
   });
   const b = store.commitDevice({
     endpointId: "bb".repeat(32),
+    ownerUserId: SPACE.userId,
     label: "Phone B",
     grants: grantsForProfile("developer"),
     pairedVia: "polyth-link",
