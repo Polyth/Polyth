@@ -6977,7 +6977,7 @@ export function createSessionService(deps: {
         undefined,
         input.clientOperationId,
         clientRequestFingerprint,
-            hiddenUserMessage,
+        hiddenUserMessage,
       );
       const blockedReason = recoverEpoch || replaceUnknown
         ? undefined
@@ -7270,7 +7270,8 @@ export function createSessionService(deps: {
             "interrupt",
             input.attachments,
             undefined,
-            input.command, hiddenUserMessage
+            input.command,
+            hiddenUserMessage,
           );
           const item = admission.item;
           const rest = await deps.queue.queueList(sessionId);
