@@ -14,6 +14,11 @@ const dist = join(here, "dist");
 const repositoryRoot = resolve(here, "../..");
 const packagesDir = resolve(repositoryRoot, "packages");
 const projectIcons = join(here, "src", "assets", "project-icons");
+const sourceDateEpoch = Number(process.env.SOURCE_DATE_EPOCH ?? "");
+const buildId = process.env.POLYTH_WEB_BUILD_ID?.trim()
+  || (Number.isFinite(sourceDateEpoch) && sourceDateEpoch > 0
+    ? Math.round(sourceDateEpoch * 1000).toString(36)
+    : Date.now().toString(36));
 const webPackages = await discoverWebPackages(packagesDir);
 const packageManifests = await Promise.all(webPackages.map(async (pkg) => {
   const parsed = JSON.parse(
@@ -86,6 +91,10 @@ const appResult = await build({
   entryPoints: shellEntries,
   metafile: true,
   outdir: dist,
+  define: {
+    ...browserBuildOptions.define,
+    __POLYTH_WEB_BUILD_ID__: JSON.stringify(buildId),
+  },
   plugins: [uiFontScalePlugin],
 });
 await writeFile(
@@ -93,6 +102,10 @@ await writeFile(
   `${JSON.stringify({
     packages: packageManifests.map(({ id, module, styles }) => ({ id, module, styles })),
   })}\n`,
+);
+await writeFile(
+  join(dist, "build-id.json"),
+  `${JSON.stringify({ build: buildId })}\n`,
 );
 // ---- modulepreload injection --------------------------------------------
 // Cold boot is a 3-level module waterfall (main.js → chunks → bootstrap
