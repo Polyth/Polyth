@@ -1714,6 +1714,7 @@ width: 100%; justify-content: center;
 /* Usage settings: configuration only; the live dashboard stays on the Usage surface. */
 .usage-settings-page {
   width: min(100%, 920px);
+  container: usage-settings / inline-size;
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
@@ -1851,7 +1852,7 @@ width: 100%; justify-content: center;
   font-size: var(--font-meta);
 }
 
-@media (max-width: 720px) {
+@container usage-settings (max-width: 720px) {
   .usage-settings-block-grid {
     grid-template-columns: 1fr;
   }
