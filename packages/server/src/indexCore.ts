@@ -20,6 +20,7 @@ import {
   deriveMessages,
   unrestoredCompactionSeq,
 } from "@polyth/session";
+import { assistFreshnessSeq } from "@polyth/session/next-action";
 import {
   CAP,
   SERVER_CAPABILITY_IDS,
@@ -2308,6 +2309,8 @@ export async function boot(opts: BootOptions = {}) {
   // recap + ONE suggestion lands on the projection (never the event log) keyed
   // to the log tail seq — any newer event makes it stale. Hard off by default.
   const assistSettings = createAssistSettings({ file: `${dataDir}/assist.json` });
+  const assistLatestSeq = async (sessionId: string): Promise<number> =>
+    assistFreshnessSeq(await store.events(sessionId));
   const assistTranscript = async (sessionId: string): Promise<string> => {
     const msgs = deriveMessages(await store.events(sessionId));
     const lines: string[] = [];
@@ -2490,7 +2493,7 @@ export async function boot(opts: BootOptions = {}) {
     assistRoutes({
       settings: assistSettings,
       projection: (sessionId) => store.projection(sessionId),
-      latestSeq: (sessionId) => store.latestSeq(sessionId),
+      latestSeq: assistLatestSeq,
       suggestion: (space, sessionId, draft) => manualSuggestion.generate(sessionId, draft, space.userId),
       improve: async (space, projectId, draft) => {
         const project = await spaceServices(space).projects.get(projectId);
