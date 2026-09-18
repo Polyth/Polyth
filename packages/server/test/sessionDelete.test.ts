@@ -294,6 +294,71 @@ test("owned isolation cleanup receives verified execution release before canonic
   assert.equal(await store.projection(id), undefined);
 });
 
+test("attached reconnecting isolation runtime cannot block durable hard delete", async () => {
+  const fake = fakeRuntime();
+  const id = "isolation-delete-reconnecting";
+  const worktreePath = join(tmpdir(), "polyth-delete-reconnecting-isolation");
+  const binding = {
+    canonicalSessionId: id,
+    backendSessionId: `be_${id}`,
+    authorityId: "owned:isolation-delete-reconnecting",
+    generation: 7,
+    continuity: "verified" as const,
+    location: { directory: worktreePath },
+  };
+  let durableReleaseCalls = 0;
+  let liveReleaseCalls = 0;
+  let cleanupReached = false;
+  const runtimePool: RuntimePool = {
+    forProject: async () => fake.rt,
+    releaseSessionExecution: async (_projection, actual) => {
+      durableReleaseCalls += 1;
+      assert.deepEqual(actual, binding);
+      return { kind: "confirmed", value: binding };
+    },
+    retireSession: async () => {},
+  };
+  fake.rt.releaseExecution = async () => {
+    liveReleaseCalls += 1;
+    throw new Error("fetch failed: OpenCode is reconnecting. Try again in a moment.");
+  };
+  const { sessions, store } = makeService(
+    fake,
+    async () => fake.rt,
+    async ({ releaseExecution }) => {
+      await releaseExecution(worktreePath);
+      cleanupReached = true;
+    },
+    runtimePool,
+  );
+  await store.upsertProjection({
+    id, projectId: "p1", title: "T", status: "idle", createdAt: 1, updatedAt: 1,
+    backendSessionId: binding.backendSessionId,
+    worktreePath,
+    runtimeBinding: {
+      backendSessionId: binding.backendSessionId,
+      authorityId: binding.authorityId,
+      generation: binding.generation,
+      continuity: binding.continuity,
+      protocol: "legacy",
+      location: binding.location,
+    },
+    isolation: {
+      kind: "git-worktree", worktreePath, worktreeBranch: "polyth/isolate/delete",
+      targetBranch: "main", targetPath: "/target", originPath: "/target",
+      baseCommit: "base", createdAt: "2026-09-18T00:00:00.000Z", state: "active",
+    },
+  });
+
+  await sessions.events(id, 0);
+  await sessions.delete!(id);
+
+  assert.equal(durableReleaseCalls, 1);
+  assert.equal(liveReleaseCalls, 0, "hard delete must not depend on a reconnecting live transport");
+  assert.equal(cleanupReached, true);
+  assert.equal(await store.projection(id), undefined);
+});
+
 test("isolation deletion preserves the session when release proof names another authority", async () => {
   const fake = fakeRuntime();
   const id = "isolation-delete-stale-release";
