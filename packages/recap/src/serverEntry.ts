@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import type { RouteHandler, SessionProjection } from "@polyth/contracts";
 import { deriveMessages } from "@polyth/session";
 import { assistFreshnessSeq } from "@polyth/session/next-action";
 import {
@@ -12,6 +13,46 @@ import {
   createRecapSettings,
   isFresh,
 } from "./recap.ts";
+
+export function recapRoutes(deps: {
+  settings: { get(): { idleSeconds: number }; put(patch: Record<string, unknown>): { idleSeconds: number } };
+  projection(sessionId: string): Promise<SessionProjection | undefined>;
+  latestConversationSeq(sessionId: string): Promise<number>;
+}): RouteHandler {
+  return async (rc) => {
+    const { path, method, json } = rc;
+    if (path === "/api/settings/assist" && method === "GET") {
+      json(200, deps.settings.get());
+      return true;
+    }
+    if (path === "/api/settings/assist" && method === "PUT") {
+      json(200, deps.settings.put(await rc.body()));
+      return true;
+    }
+
+    const match = path.match(/^\/api\/sessions\/([^/]+)\/assist$/);
+    if (match && method === "GET") {
+      const sessionId = decodeURIComponent(match[1]!);
+      const projection = await deps.projection(sessionId);
+      if (!projection) {
+        json(404, { error: "not-found", message: "unknown session" });
+        return true;
+      }
+      const assist = projection.assist;
+      if (!assist) {
+        json(404, { error: "not-found", message: "no recap generated yet" });
+        return true;
+      }
+      if (!isFresh(assist, await deps.latestConversationSeq(sessionId))) {
+        json(404, { error: "stale", message: "the session moved past this recap" });
+        return true;
+      }
+      json(200, assist);
+      return true;
+    }
+    return false;
+  };
+}
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   // Keep the former file path so existing quiet-time preferences migrate
@@ -73,40 +114,12 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
 
   let turnSubscription: { dispose(): void } | undefined;
 
-  const routes = async (rc: Parameters<NonNullable<ServerPackage["routes"]>>[0]) => {
-    const { path, method, json } = rc;
-    if (path === "/api/settings/assist" && method === "GET") {
-      json(200, settings.get());
-      return true;
-    }
-    if (path === "/api/settings/assist" && method === "PUT") {
-      json(200, settings.put(await rc.body()));
-      return true;
-    }
-
-    const match = path.match(/^\/api\/sessions\/([^/]+)\/assist$/);
-    if (match && method === "GET") {
-      const sessionId = decodeURIComponent(match[1]!);
-      const projection = await host.store.projection(sessionId);
-      if (!projection) {
-        json(404, { error: "not-found", message: "unknown session" });
-        return true;
-      }
-      const assist = projection.assist;
-      if (!assist) {
-        json(404, { error: "not-found", message: "no recap generated yet" });
-        return true;
-      }
-      const latestSeq = assistFreshnessSeq(await host.store.events(sessionId));
-      if (!isFresh(assist, latestSeq)) {
-        json(404, { error: "stale", message: "the session moved past this recap" });
-        return true;
-      }
-      json(200, assist);
-      return true;
-    }
-    return false;
-  };
+  const routes = recapRoutes({
+    settings,
+    projection: (sessionId) => host.store.projection(sessionId),
+    latestConversationSeq: async (sessionId) =>
+      assistFreshnessSeq(await host.store.events(sessionId)),
+  });
 
   return {
     remoteAccess: localOnlyRemoteAccess(["recap"]),
