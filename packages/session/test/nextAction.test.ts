@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { SessionEvent } from "@polyth/contracts";
 import {
+  assistFreshnessSeq,
   latestCompletedExchange,
   recentCompletedConversationContext,
   renderConversationContext,
@@ -18,6 +19,33 @@ const user = (text: string, extra: Record<string, unknown> = {}) => ev("user/mes
 const assistant = (text: string) => ev("assistant/message", { text });
 const turn = (turnId: string) => [ev("turn/started", { turnId }, true)];
 const done = (turnId: string) => ev("turn/stopped", { turnId, reason: "completed" }, true);
+
+test("assist freshness ignores post-turn bookkeeping but tracks real conversation movement", () => {
+  reset();
+  const events = [
+    user("fix it"),
+    ...turn("t1"),
+    assistant("fixed"),
+    done("t1"),
+  ];
+  const completedSeq = events.at(-1)!.seq;
+
+  events.push(
+    ev("usage/recorded", { tokens: { input: 1, output: 1 } }, true),
+    ev("goal/audit", { verdict: "done" }, true),
+    ev("session/metadata-changed", { title: "Fixed it" }, true),
+    ev("isolation/status", { state: "merge-ready" }, true),
+  );
+  assert.equal(assistFreshnessSeq(events), completedSeq);
+
+  const nextTurn = ev("turn/started", { turnId: "t2" }, true);
+  events.push(nextTurn);
+  assert.equal(assistFreshnessSeq(events), nextTurn.seq);
+
+  const visible = user("one more thing");
+  events.push(visible);
+  assert.equal(assistFreshnessSeq(events), visible.seq);
+});
 
 test("context keeps the recent completed exchanges, oldest first", () => {
   reset();
