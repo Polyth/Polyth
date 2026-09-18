@@ -1,7 +1,6 @@
 import { useRef, useState } from "react";
 import type { AttachmentRef, SessionEvent } from "@polyth/contracts";
 import { resolveModelPresentation } from "@polyth/contracts/model-presentation";
-import { seedMultiRunPrompt } from "@polyth/multirun/prompt-seed";
 import { api } from "@polyth/session/web-api";
 import { fmtCost, fmtTokens } from "../format.ts";
 import { sendMessage } from "../init.ts";
@@ -14,7 +13,7 @@ import {
   type ActionAnnounceAnchor,
 } from "../messageActions.ts";
 import type { AssistantMsg, RenderModel } from "../reduce.ts";
-import { applyEvent, openWorkspacePane, setUiError, startNewSession, useStore } from "../store.ts";
+import { applyEvent, setUiError, startNewSession, useStore } from "../store.ts";
 import { useUiSettings } from "../uiPrefs.ts";
 import { copyText } from "../utils.ts";
 import { tr } from "../i18n/index.ts";
@@ -193,8 +192,9 @@ export default function ChatResponseFooter({
       if (projectId) startNewSession(projectId, { draft: m.text });
       return;
     }
-    seedMultiRunPrompt(m.text);
-    openWorkspacePane("multirun");
+    // Package-owned actions (for example Multi-run) render through
+    // session.message.actions and never execute from the shell.
+    return;
   };
 
   return (
@@ -222,7 +222,7 @@ export default function ChatResponseFooter({
             onClick={() => setMetadataOpen((open) => !open)}
           />
         </span>
-        {prefs.responseActions.map((id) => (
+        {prefs.responseActions.filter((id) => id !== "multirun").map((id) => (
           <ChatActionButton
             key={id}
             icon={RESPONSE_ACTION_ICON[id]}
@@ -270,6 +270,7 @@ export default function ChatResponseFooter({
             messageRole: "assistant",
             messageText: m.text,
             eventSeq: m.eventSeq,
+            responseActions: prefs.responseActions,
           }}
         />
         {statusText && (
