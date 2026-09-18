@@ -1445,7 +1445,7 @@ export interface SessionAssist {
    *  conversation. "No suggestion" is a legitimate result, so it is modelled
    *  as an absent field rather than an empty call to action. */
   suggestion?: string;
-  /** Log seq the assist was generated against; any newer event makes it stale. */
+  /** Raw log seq the assist settled against; only newer conversation activity makes it stale. */
   atSeq: number;
   generatedAt: number;
 }
