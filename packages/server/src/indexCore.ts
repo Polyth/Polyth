@@ -2000,6 +2000,7 @@ export async function boot(opts: BootOptions = {}) {
     },
   });
   const publishTurnCompleted = async (sessionId: string, assistantText: string): Promise<void> => {
+    if (turnCompletedListeners.size === 0) return;
     let userId: string | undefined;
     try {
       const projection = await store.projection(sessionId);
