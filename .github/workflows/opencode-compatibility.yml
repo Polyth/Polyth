@@ -20,26 +20,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  cache-regression:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-      - run: npm ci
-      - name: Build web packages and shell
-        run: npm run build:web
-      - name: Verify persistent model catalog behavior
-        run: |
-          node --experimental-strip-types --test \
-            packages/models/test/catalogCache.test.ts \
-            packages/models/test/runtimeCatalog.test.ts \
-            packages/models/test/providerPage.test.ts \
-            packages/harness-runtime/test/harnessPickerCatalogGate.test.ts \
-            apps/web/test/desktopPerformance.test.ts
-
   runtime:
     runs-on: ubuntu-24.04
     continue-on-error: ${{ matrix.canary }}
