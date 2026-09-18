@@ -201,11 +201,11 @@ function serviceHarness(opts: {
   const saves: Array<{ sessionId: string; assist: SessionAssist }> = [];
   const completes: string[] = [];
   const errors: unknown[] = [];
-  const bumpSeq = (type = "user/message") => {
+  const bumpSeq = (type = "user/message", ignorable = false) => {
     seq += 1;
     events.push({
       id: `e${seq}`, sessionId: "s1", seq, time: Date.now(), type,
-      data: {}, v: 1,
+      data: {}, v: 1, ...(ignorable ? { ignorable: true } : {}),
     });
   };
   const svc = createAssistService({
@@ -261,8 +261,8 @@ test("assist service: passive post-turn metadata settles without cancelling gene
   const h = serviceHarness({ idleSeconds: 0.08 });
   h.svc.onTurnCompleted("s1");
   await sleep(20);
-  h.bumpSeq("usage/recorded");
-  h.bumpSeq("session/metadata-changed");
+  h.bumpSeq("usage/recorded", true);
+  h.bumpSeq("session/metadata-changed", true);
   await sleep(180);
   assert.equal(h.completes.length, 1);
   assert.equal(h.saves.length, 1);
@@ -274,8 +274,8 @@ test("assist service: passive metadata DURING generation is absorbed into the fr
   const h = serviceHarness({ idleSeconds: 0.02, completeDelayMs: 250 });
   h.svc.onTurnCompleted("s1");
   await sleep(120);
-  h.bumpSeq("usage/recorded");
-  h.bumpSeq("goal/audit");
+  h.bumpSeq("usage/recorded", true);
+  h.bumpSeq("goal/audit", true);
   await sleep(400);
   assert.equal(h.completes.length, 1);
   assert.equal(h.saves.length, 1);
