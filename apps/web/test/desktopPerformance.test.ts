@@ -52,5 +52,8 @@ test("runtime catalog boot reuses the daily persisted aggregate instead of refet
   assert.match(runtimeCatalog, /persistedGlobalAgents\.clear\(\)/);
   assert.match(runtimeCatalog, /persistedWarmScopes\.clear\(\)/);
   assert.match(init, /subscribeRuntimeCatalogInvalidations\(\(\) => \{/);
-  assert.match(init, /void refreshModels\(\);[\s\S]*void refreshAgents\(\);/);
+  assert.match(init, /runtimeCatalogGeneration\+\+/);
+  assert.match(init, /modelRetryRequested = true;[\s\S]*modelFetchAbort\?\.abort\(\)/);
+  assert.match(init, /requestGeneration !== runtimeCatalogGeneration/);
+  assert.match(init, /agentsRetryRequested = true/);
 });
