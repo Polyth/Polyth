@@ -1586,7 +1586,6 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   height: var(--tap);
   display: inline-grid;
   place-items: center;
-  margin: calc((var(--tap) - var(--control-h-sm)) / -2) 0;
   padding: 0;
   border: 0;
   border-radius: var(--radius-control);
