@@ -5095,7 +5095,8 @@ export function createSessionService(deps: {
             input.command,
             undefined,
             input.clientOperationId,
-            clientRequestFingerprint, input.hiddenUserMessage === true || input.autoResume === true
+            clientRequestFingerprint,
+            input.hiddenUserMessage === true || input.autoResume === true,
           );
         }
         rt = await ensureWired(sessionId, current);
@@ -5140,7 +5141,8 @@ export function createSessionService(deps: {
           input.command,
           undefined,
           input.clientOperationId,
-          clientRequestFingerprint, input.hiddenUserMessage === true || input.autoResume === true
+          clientRequestFingerprint,
+            input.hiddenUserMessage === true || input.autoResume === true,
         );
       }
       return admitTurnCore(sessionId, current, rt, input, reserved, clientRequestFingerprint);
@@ -6833,7 +6835,11 @@ export function createSessionService(deps: {
           delivery === "steer" || delivery === "interrupt" ? delivery : "queue",
           "mutation-active",
           input.attachments,
-          input.command, hiddenUserMessage
+          input.command,
+          undefined,
+          undefined,
+          undefined,
+          hiddenUserMessage,
         );
       };
       if (input.harness) {
@@ -6862,7 +6868,8 @@ export function createSessionService(deps: {
             input.command,
             undefined,
             input.clientOperationId,
-            clientRequestFingerprint, hiddenUserMessage
+            clientRequestFingerprint,
+            hiddenUserMessage,
           );
         }
       }
@@ -6969,7 +6976,8 @@ export function createSessionService(deps: {
         input.command,
         undefined,
         input.clientOperationId,
-        clientRequestFingerprint, hiddenUserMessage
+        clientRequestFingerprint,
+            hiddenUserMessage,
       );
       const blockedReason = recoverEpoch || replaceUnknown
         ? undefined
@@ -7132,7 +7140,8 @@ export function createSessionService(deps: {
             input.command,
             undefined,
             input.clientOperationId,
-            clientRequestFingerprint, hiddenUserMessage
+            clientRequestFingerprint,
+            hiddenUserMessage,
           );
         }
         if (delivery === "normal") {
@@ -7146,7 +7155,8 @@ export function createSessionService(deps: {
             input.command,
             undefined,
             input.clientOperationId,
-            clientRequestFingerprint, hiddenUserMessage
+            clientRequestFingerprint,
+            hiddenUserMessage,
           );
         }
         if (delivery === "steer") {
@@ -7159,7 +7169,11 @@ export function createSessionService(deps: {
               "steer",
               "native-command-next-turn",
               input.attachments,
-              input.command, hiddenUserMessage
+              input.command,
+              undefined,
+              undefined,
+              undefined,
+              hiddenUserMessage,
             );
           }
           const caps = await rt.capabilities().catch(() => null);
@@ -7173,7 +7187,18 @@ export function createSessionService(deps: {
             // Steering is text-only in the runtime seam; attachments would be
             // silently dropped mid-turn, so they queue for the next turn instead.
             if (input.attachments?.length) {
-              return enqueueMessage(sessionId, input.text, "steer", "steer-attachments", input.attachments, input.command, hiddenUserMessage);
+              return enqueueMessage(
+                sessionId,
+                input.text,
+                "steer",
+                "steer-attachments",
+                input.attachments,
+                input.command,
+                undefined,
+                undefined,
+                undefined,
+                hiddenUserMessage,
+              );
             }
             const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
               sessionId,
@@ -7216,7 +7241,10 @@ export function createSessionService(deps: {
                 "steer-rejected",
                 undefined,
                 input.command,
-                prepared.operation.operationId, hiddenUserMessage
+                prepared.operation.operationId,
+                undefined,
+                undefined,
+                hiddenUserMessage,
               );
             }
             if (outcome.kind === "unknown") {
@@ -7309,7 +7337,8 @@ export function createSessionService(deps: {
             input.command,
             undefined,
             input.clientOperationId,
-            clientRequestFingerprint, hiddenUserMessage
+            clientRequestFingerprint,
+            hiddenUserMessage,
           );
           void dispatchQueue(sessionId);
           return res;
