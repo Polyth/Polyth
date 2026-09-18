@@ -493,16 +493,28 @@ async function restoreSelectionAfterReady(): Promise<void> {
   if (!bootRestored) {
     bootRestored = true;
     const fromUrl = parseAppUrl(location.pathname, location.search);
+    const localSavedProjectId = (() => {
+      try { return localStorage.getItem("polyth.activeProjectId") || null; }
+      catch { return null; }
+    })();
+
+    // Do not leave a ready project registry project-less while waiting for
+    // native/account-scoped persistence. The URL/local synchronous selection
+    // is already authoritative enough to mount Git/Terminal/Files/Browser;
+    // account-scoped navigation can refine the choice when it arrives.
+    const immediate = resolveActiveProjectId(projects, {
+      urlProjectId: fromUrl.projectId ?? null,
+      localSavedProjectId,
+    });
+    if (immediate) store.activateProject(immediate);
+
     const restoredNavigation = await store.hydrateClientNavigation();
     const initial = resolveActiveProjectId(projects, {
       urlProjectId: fromUrl.projectId ?? null,
       savedProjectId: restoredNavigation?.projectId ?? null,
-      localSavedProjectId: (() => {
-        try { return localStorage.getItem("polyth.activeProjectId") || null; }
-        catch { return null; }
-      })(),
+      localSavedProjectId,
     });
-    if (initial) store.activateProject(initial);
+    if (initial && initial !== store.getState().activeProjectId) store.activateProject(initial);
     if (fromUrl.sessionId) {
       // A valid session deep link resolves its owning project and wins.
       // Boot restoration must not close the restored workspace pane.
