@@ -62,8 +62,18 @@ test("background and glass controls are wired into Appearance and the held-Shift
   );
   assert.match(
     styles,
-    /html\[data-background\]:not\(\[data-background="none"\]\) body,\s*html\[data-background\]:not\(\[data-background="none"\]\) \.app\s*\{[^}]*background-color:\s*transparent;[^}]*background-image:\s*none;/s,
-    "the app canvas lets the root background continue through the safe area",
+    /html\[data-background\]:not\(\[data-background="none"\]\) body:not\(\.desktop-app\)\s*\{[^}]*background-image:[\s\S]*?var\(--app-background-image\)[^}]*background-size:\s*cover;/s,
+    "the browser document canvas paints the selected background through any bottom PWA slack",
+  );
+  assert.match(
+    styles,
+    /html\[data-background\]:not\(\[data-background="none"\]\) \.app\s*\{[^}]*background-color:\s*transparent;[^}]*background-image:\s*none;/s,
+    "the app surface does not cover the document-owned workspace background",
+  );
+  assert.match(
+    styles,
+    /html, body, #root\s*\{[^}]*min-height:\s*100vh;[^}]*min-height:\s*100dvh;/s,
+    "the root chain cannot end above the dynamic viewport",
   );
   assert.match(
     styles,
@@ -74,6 +84,8 @@ test("background and glass controls are wired into Appearance and the held-Shift
     "the initial standalone iOS shell is edge-to-edge");
   assert.match(index, /polyth\.background\.v1/,
     "the installed web app seeds its system-owned status strip from the saved workspace background before first paint");
+  assert.match(index, /--app-system-bar-color/,
+    "the initial PWA paint publishes the workspace tint to the document canvas");
   for (const preset of BACKGROUND_PRESETS) {
     if (!preset.systemBar) continue;
     assert.match(index, new RegExp(preset.systemBar.dark.replace("#", "#")));
@@ -84,7 +96,7 @@ test("background and glass controls are wired into Appearance and the held-Shift
   assert.doesNotMatch(theme, /apple-mobile-web-app-status-bar-style[^;]+[\s\S]*?\?\s*"black-translucent"\s*:\s*"default"/,
     "status-bar translucency must not depend on dark appearance");
   assert.match(styles, /backdrop-filter:\s*blur\(var\(--material-glass-blur\)\)\s*saturate\(var\(--material-glass-saturation\)\)/);
-  assert.match(await read("../src/backgrounds.ts"), /backgroundSystemBarColor[\s\S]*?meta\[name="theme-color"\]/,
-    "runtime background changes retint browser-owned chrome too");
+  assert.match(await read("../src/backgrounds.ts"), /--app-system-bar-color[\s\S]*?meta\[name="theme-color"\]/,
+    "runtime background changes keep both document-canvas tint and browser-owned chrome in sync");
   assert.doesNotMatch(styles, /prefers-reduced-motion:\s*no-preference[\s\S]{0,1200}data-glass/);
 });

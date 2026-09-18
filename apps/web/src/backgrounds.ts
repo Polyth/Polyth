@@ -131,6 +131,7 @@ export function applyBackgroundToDom(value = state): void {
   const themeFallback = getComputedStyle(html).getPropertyValue("--bg").trim();
   const systemBar = backgroundSystemBarColor(value, appearance) || themeFallback;
   if (systemBar) {
+    html.style.setProperty("--app-system-bar-color", systemBar);
     document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
       ?.setAttribute("content", systemBar);
   }
