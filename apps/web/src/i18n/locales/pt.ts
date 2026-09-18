@@ -1586,6 +1586,7 @@ export const pt: AppMessages = {
   "settings.widgetspage.undo": "Desfazer",
   "settingsview.about": "Sobre",
   "settingsview.access": "Acesso",
+  "settingsview.users": "Utilizadores",
   "settingsview.appearance": "Aspeto",
   "settingsview.backToSettings": "Voltar às definições",
   "settingsview.behavior": "Comportamento",
