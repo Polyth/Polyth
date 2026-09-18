@@ -6600,13 +6600,16 @@ export function createSessionService(deps: {
         });
       }
       if (worktree?.branch?.startsWith("polyth/isolate/")) {
-        const expectedBranch = `polyth/isolate/${sessionId.replaceAll("-", "").slice(0, 12)}`;
         const isolation = input.isolation;
-        if (!isolation
+        // Branch naming and marker ownership belong to the Git isolation
+        // service. The public session-create route cannot supply either `id`
+        // or `isolation`, so requiring both here preserves the ordinary-session
+        // boundary without duplicating the managed branch-name derivation.
+        if (!input.id
+          || !isolation
           || isolation.kind !== "git-worktree"
           || resolve(isolation.worktreePath) !== resolve(worktree.path)
-          || isolation.worktreeBranch !== worktree.branch
-          || worktree.branch !== expectedBranch) {
+          || isolation.worktreeBranch !== worktree.branch) {
           throw Object.assign(new Error("managed isolation worktrees cannot host ordinary sessions"), {
             code: "invalid-input",
           });
