@@ -49,7 +49,9 @@ packages/session (node:sqlite WAL: events + projections + queue/org/profiles)
 | `session` | Append-only event store. `append` allocates monotonic per-session `seq` transactionally; projections (`SessionProjection`) are updated alongside; also owns queue items, folders, labels, projection-only session pins, agent profiles, and transcript text search (`searchEventText`). `deriveMessages` turns the log into model history (skips `ignorable`). |
 | `backend-opencode` | The only OpenCode integration point. Spawns/attaches `opencode serve`, translates its SSE into `RuntimeEvent`s, maps canonical session ids ↔ backend ids, applies behavior/MCP config (`createConfigApplier`), imports pre-existing OpenCode sessions, snapshots task/subagent state as revisioned events. |
 | `permissions` | Monotonic fail-closed rule engine; scopes user/project/session; deny beats allow; "always" persists a rule at the chosen scope. |
-| `goals` | Objective attach/audit loop: small-model auditor verdicts (`keep`/`done`/`stuck`), budgets, auto-continuation, pause/resume; rehydrates from the event log after restart. |\n| `recap` | Optional idle-session recap + grounded next-step suggestion. Disabled by default; owns its generation lifecycle, quiet-time settings, freshness-checked read route, and timeline/settings UI. |\n| `personal-coach` | Optional durable goals, commitments, routines, and coaching state. Disabled by default. |
+| `goals` | Objective attach/audit loop: small-model auditor verdicts (`keep`/`done`/`stuck`), budgets, auto-continuation, pause/resume; rehydrates from the event log after restart. |
+| `recap` | Optional idle-session recap + grounded next-step suggestion. Disabled by default; owns its generation lifecycle, quiet-time settings, freshness-checked read route, and timeline/settings UI. |
+| `personal-coach` | Optional durable goals, commitments, routines, and coaching state. Disabled by default. |
 | `files` | Path-jailed file service: tree/stat/read (revision = mtime+size), revision-guarded `write` (stale `baseRevision` → `conflict`), binary-overwrite refusal, mkdir/rename/delete/upload, scored file search (shared with palette + mentions). Explorer + file `ResourceProvider`; does not own CodeMirror. |
 | `editor` | Sole CodeMirror 6 owner: one `EditorView` per visible group, `EditorState` retained per tab, honest language grammars (JS/JSX/TS/TSX/JSON/YAML/Markdown). Registers Authoring and Development workbench profiles. |
 | `git` | Porcelain wrapper: status/diff/show/stage/unstage/discard/commit/log/graph/branches/checkout/stash/fetch/pull/push/worktrees, diffHead/diffRange for review flows. Session-scoped Git routes resolve an owned worktree cwd server-side. |
@@ -199,9 +201,8 @@ bridge exists), `/api/plugins` (+install), `/api/system/info`,
 (proxy to the configured OpenAI-compatible `/audio/speech`, buffered audio back, only
 standard fields forwarded, honest 503 when unconfigured), `/api/tts/summarize`
 (small-model shortening for read-aloud; 503 when no small model is wired),
-`/api/settings/assist` (GET/PUT the F9 hard switch + quiet time),
-`/api/sessions/:id/assist` (freshness-checked recap+suggestion — 404 `stale`
-once conversation activity moves past it), `/api/sessions/:id/assist/note` (small-model chat→note
+`/api/settings/assist` (Recap-package quiet-time settings; route exists only while Recap is enabled),
+`/api/sessions/:id/assist` (Recap-package freshness-checked recap+suggestion — 404 `stale` once conversation activity moves past it), `/api/sessions/:id/assist/note` (small-model chat→note
 DRAFT; saving goes through the normal `/api/knowledge` flow),
 `/api/auth/*` (F16: GET `status {required, authorized}` and POST `login {password}`
 are the only public `/api` paths — login mints an httpOnly SameSite=Strict
