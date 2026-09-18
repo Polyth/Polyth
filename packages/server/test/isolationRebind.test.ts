@@ -216,6 +216,42 @@ const make = (root: string) => {
   return { sessions, isolation, cwds, released, closed, ctrl, fake, project, store, projects, permissions, broadcast };
 };
 
+test("canonical isolation creation does not duplicate Git managed-branch naming", async () => {
+  const root = repo();
+  const { sessions } = make(root);
+  const worktreePath = mkdtempSync(join(tmpdir(), "polyth-iso-contract-"));
+  dirs.push(worktreePath);
+  rmSync(worktreePath, { recursive: true, force: true });
+  const branch = "polyth/isolate/git-owned-contract";
+  await git.worktrees.create(root, { branch, path: worktreePath, base: "HEAD", newBranchOnly: true });
+
+  await assert.rejects(
+    () => sessions.create({ projectId: "p1", worktreePath }),
+    /Managed isolation workspaces belong to their canonical session/,
+  );
+
+  const id = "11111111-1111-4111-8111-111111111111";
+  const isolation: SessionIsolation = {
+    kind: "git-worktree",
+    state: "active",
+    createdAt: new Date().toISOString(),
+    worktreePath,
+    worktreeBranch: branch,
+    targetPath: resolve(root),
+    targetBranch: "main",
+    originPath: resolve(root),
+    baseCommit: runGit(root, "rev-parse", "HEAD"),
+  };
+  const created = await sessions.create({
+    id,
+    projectId: "p1",
+    worktreePath,
+    isolation,
+  });
+  assert.equal(created.id, id);
+  assert.equal((await sessions.snapshot(id)).isolation?.worktreeBranch, branch);
+});
+
 test("merge into project root rebinds runtime cwd to the repository", async () => {
   const root = repo();
   const { isolation, sessions, cwds } = make(root);
