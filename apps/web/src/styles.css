@@ -4526,25 +4526,6 @@ body[data-glass="clear"] .prompt-nav-panel { --prompt-nav-panel-blur: 22px; }
 .import-session-all { border-style: dashed; }
 .import-session-all .ui-checkbox-text { flex-direction: row; gap: 8px; align-items: baseline; }
 
-/* ---- F9: idle assist strip (recap + one suggestion chip) */
-.assist-strip { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 2px; padding: 0 4px; }
-.assist-recap { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; color: var(--muted); }
-.assist-tag {
-  flex: none; padding: 1px 7px; border-radius: var(--radius-round); font-size: var(--font-meta); font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.04em; border: 1px solid var(--border); color: var(--muted);
-}
-.assist-recap-text { min-width: 0; }
-.assist-dismiss {
-  flex: none; border: none; background: none; color: var(--muted); cursor: pointer;
-  font-size: 14px; line-height: 1; padding: 0 4px; border-radius: var(--radius-control);
-}
-.assist-dismiss:hover { color: var(--text); background: var(--sunken); }
-.assist-chip {
-  align-self: flex-start; max-width: 100%; text-align: left; cursor: pointer;
-  padding: 5px 12px; border-radius: var(--radius-round); font-size: 12.5px;
-  border: 1px dashed var(--hair-strong); background: var(--elevated); color: var(--text);
-}
-.assist-chip:hover { border-color: var(--accent); color: var(--accent); }
 @media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
 /* Project/session drawer: fixed, above the workspace, never consumes
      layout width. Closed = fully translated out, hidden, inert (JS). */
