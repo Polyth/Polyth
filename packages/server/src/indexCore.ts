@@ -1579,6 +1579,7 @@ export async function boot(opts: BootOptions = {}) {
   // F9 idle assist: created after `sessions` (it needs the runtime resolver);
   // the turn hook below only pings it, so a late assignment is safe.
   let assist: AssistService | null = null;
+  const recapActive = () => svc<{ active(): boolean }>("recap.lifecycle")?.active() === true;
   const goalService = () => svc<TrackWorkflowDeps["goals"]>("goals");
   const ensureGoalState = async (sessionId: string) => {
     const goals = goalService();
@@ -2277,7 +2278,7 @@ export async function boot(opts: BootOptions = {}) {
             }
           }
         })().catch((err: unknown) => console.error("[polyth] goal/track completion failed", err));
-        assist?.onTurnCompleted(sessionId);
+        if (recapActive()) assist?.onTurnCompleted(sessionId);
         const isolation = svc<{ onTurnCompleted(sessionId: string, events: readonly import("@polyth/contracts").SessionEvent[]): Promise<unknown> }>("isolation");
         if (isolation) {
           void store.events(sessionId)
@@ -2359,7 +2360,10 @@ export async function boot(opts: BootOptions = {}) {
     complete: assistComplete,
   });
   assist = createAssistService({
-    settings: () => assistSettings.get(),
+    settings: () => {
+      const settings = assistSettings.get();
+      return { ...settings, enabled: recapActive() && settings.enabled };
+    },
     latestSeq: (sessionId) => store.latestSeq(sessionId),
     eventsAfter: (sessionId, afterSeq) => store.events(sessionId, afterSeq),
     transcript: assistTranscript,
@@ -2372,6 +2376,10 @@ export async function boot(opts: BootOptions = {}) {
       broadcast.projection(next);
     },
     onError: (sessionId, err) => console.error(`[polyth] assist generation failed for ${sessionId}`, err),
+  });
+  provideService("recap.engine", {
+    activate: () => { assistSettings.put({ enabled: true }); },
+    stop: () => assist?.stop(),
   });
 
   // --- spec-driven track orchestration: a genuinely cross-cutting workflow
@@ -2500,6 +2508,7 @@ export async function boot(opts: BootOptions = {}) {
     contextRoutes(spaceServices),
     orgRoutes({ spaces: spaceServices, store }),
     assistRoutes({
+      enabled: recapActive,
       settings: assistSettings,
       projection: (sessionId) => store.projection(sessionId),
       latestSeq: assistLatestSeq,
