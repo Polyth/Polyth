@@ -17,6 +17,15 @@ The task and these invariants define the intended behavior. Current source, expo
 
 Historical plans, handoffs, parity rows, old test counts and provider capability tables are context, not current completion evidence. See [known documentation drift](docs/agents/known-drift.md). Never infer support from a name, interface, flag, SDK marketing claim or generated file. Report **source-inspected / tested / live-verified / device-verified / unknown** accurately.
 
+## Context and documentation hygiene
+
+- Keep `AGENTS.md` a compact stable navigation and invariant layer, not a transcript, task log or documentation dump. Durable domain detail belongs in the owning docs/skill and is loaded only when the current task needs it.
+- Documentation freshness is part of completion. When behavior, architecture, public contracts, configuration, workflows, verification commands, UX contracts or agent routing change, update the owning documentation/task-map/evidence in the same change. Do not leave a known-wrong active document behind.
+- Fresh documentation does **not** mean eager context loading. Route by task and path; read the smallest relevant sections, current code and evidence, then expand only for a dependency, ambiguity, risk or failed check. Never inject the whole docs tree merely because it is current.
+- Persist durable project knowledge, not session noise. Reusable decisions, invariants, conventions and gotchas may be harvested into the appropriate canonical document or ADR with source/provenance; per-turn reasoning, transient progress and stale summaries must not become permanent startup context.
+- If a durable statement cannot yet be verified, mark its scope/uncertainty explicitly or record it as historical/drift context rather than presenting it as current truth. Prefer correcting or superseding active guidance over accumulating contradictory rules.
+- For changes spanning multiple domains, update only the affected owners and navigation pointers. Avoid duplicated rule bodies: one canonical statement, linked from the relevant routers/adapters.
+
 ## Architecture invariants
 
 - Polyth owns canonical sessions, event history, queue, project/worktree and Space identity. Native provider threads are subordinate runtime legs. Persist model-visible facts before runtime delivery/UI display using the existing event path; pure UI preferences stay out of history. Unknown events must not crash old reducers.
@@ -42,4 +51,4 @@ Use [verified command ownership](docs/agents/commands.md) and [risk-based verifi
 
 Do not install dependencies, publish, sign, push, migrate live data, run paid provider turns, kill an existing server or change credentials without task authorization. Test servers need isolated data and ports; no hardcoded private host is required. Do not disable security or weaken/exclude tests to manufacture green results.
 
-Completion includes the requested behavior, scoped changes, relevant checks and truthful remaining limits. Say what ran, exact outcomes and what did not run. Update affected navigation/evidence when contracts move. Delegate only when supported and beneficial; no mandatory model IDs or fictional independent verification.
+Completion includes the requested behavior, scoped changes, relevant checks, documentation impact and truthful remaining limits. Say what ran, exact outcomes and what did not run. Update affected navigation/evidence when contracts move. Delegate only when supported and beneficial; no mandatory model IDs or fictional independent verification.
