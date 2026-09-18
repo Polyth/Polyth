@@ -47,6 +47,51 @@ test("client settings: opaque blob round-trips with a monotonic revision", () =>
   assert.equal(reopened.get().revision, 2);
   assert.deepEqual(reopened.get().settings, { product: { density: "balanced" } });
 });
+test("client settings route persists and broadcasts only the authenticated account", async () => {
+  const dir = tmp();
+  const clientSettings = createClientSettings({ file: join(dir, "client-settings.json") });
+  const broadcasts: Array<{ userId: string; revision: number }> = [];
+  const routes = settingsRoutes({
+    behavior: {} as never,
+    mcp: {} as never,
+    systemInfo: () => ({
+      version: "test",
+      applicationUrl: "http://127.0.0.1:1",
+      tunnelUrl: null,
+      dataDirLabel: "data",
+      capabilities: [],
+    }),
+    clientSettings,
+    broadcastClientSettings: (userId, state) => broadcasts.push({ userId, revision: state.revision }),
+  });
+  const space = { ...spaceOf(dir), userId: "usr_alice" };
+  let code = 0;
+  let response: unknown;
+  const rc = {
+    req: {} as never,
+    res: {} as never,
+    url: new URL("http://polyth.test/api/settings/client"),
+    path: "/api/settings/client",
+    method: "PUT",
+    ingress: { kind: "public-http", listenerId: "public", loopback: true, secure: true },
+    principal: { kind: "local-user", trustedLoopback: true },
+    space,
+    requireCapability() {},
+    body: async () => ({ settings: { modelPrefs: { favorites: ["codex::openai/gpt-5"] } } }),
+    json(nextCode: number, nextBody: unknown) { code = nextCode; response = nextBody; },
+  } as unknown as RouteRequest;
+
+  assert.equal(await routes(rc), true);
+  assert.equal(code, 200);
+  assert.deepEqual(broadcasts, [{ userId: "usr_alice", revision: 1 }]);
+  assert.deepEqual(
+    clientSettings.get("usr_alice").settings,
+    { modelPrefs: { favorites: ["codex::openai/gpt-5"] } },
+  );
+  assert.deepEqual(clientSettings.get("usr_owner").settings, {});
+  assert.equal((response as { revision: number }).revision, 1);
+});
+
 test("client settings: non-objects and oversized payloads are rejected", () => {
   const svc = createClientSettings({ file: join(tmp(), "client-settings.json") });
   for (const bad of [null, "string", 42, ["a"], true]) {

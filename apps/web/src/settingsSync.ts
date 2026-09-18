@@ -1,15 +1,22 @@
 // Server-backed client preferences. Product settings (theme, density, interface
-// scale, …) and UI preferences travel together as one blob so every device that
-// talks to this server paints the same way. Local storage stays the fast path;
-// this module mirrors it to `/api/settings/client` and applies any change that
-// lands from another device over the WS gateway.
+// scale, …), UI preferences, session defaults, and model-picker preferences
+// travel together as one account-owned blob so every client that talks to this
+// server inherits the same choices. Local storage stays the synchronous cache;
+// this module mirrors it to `/api/settings/client` and applies any newer server
+// snapshot received on boot, reconnect, or the WS gateway.
 //
 // Echo handling is value-based: a push only fires when the serialized blob
 // actually differs from what the server last confirmed, so re-applying an
-// inbound snapshot (which re-enters updateSettings/setUiSettings) can never
-// loop back into another push.
+// inbound snapshot (which re-enters local preference stores) cannot loop back
+// into another push.
 import { api } from "@polyth/session/web-api";
 import type { ClientSettingsDto } from "@polyth/contracts";
+import { parseModelPrefs } from "@polyth/models";
+import {
+  getModelPrefs,
+  replaceModelPrefs,
+  subscribeModelPrefs,
+} from "@polyth/models/web-prefs";
 import { normalizeSettings } from "./settings.ts";
 import { getState, subscribeStore, updateSettings } from "./store.ts";
 import { getUiSettings, parseUiSettings, setUiSettings, subscribeUiSettings } from "./uiPrefs.ts";
@@ -35,20 +42,34 @@ interface SettingsBlob {
   // generation (commit messages, next-action, task brief) uses the model the
   // user picked in Settings, and so the picks follow them across devices.
   sessionDefaults: ReturnType<typeof getSessionDefaults>;
+  // Model-picker preferences are account-owned server state. Favorites already
+  // carry harness-qualified model keys; provider order/accordion state for every
+  // harness travels in the same canonical preference object.
+  modelPrefs: ReturnType<typeof getModelPrefs>;
 }
 
 function currentBlob(): SettingsBlob {
-  return { product: getState().settings, ui: getUiSettings(), sessionDefaults: getSessionDefaults() };
+  return {
+    product: getState().settings,
+    ui: getUiSettings(),
+    sessionDefaults: getSessionDefaults(),
+    modelPrefs: getModelPrefs(),
+  };
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Apply a server snapshot locally without bouncing it straight back. */
+/** Apply a newer server snapshot locally without bouncing it straight back. */
 function applyRemote(dto: ClientSettingsDto): void {
   if (dto.revision <= localRevision) return;
-  const incoming = dto.settings as { product?: unknown; ui?: unknown; sessionDefaults?: unknown };
+  const incoming = dto.settings as {
+    product?: unknown;
+    ui?: unknown;
+    sessionDefaults?: unknown;
+    modelPrefs?: unknown;
+  };
   applying = true;
   try {
     if (isObject(incoming.product)) updateSettings(normalizeSettings(incoming.product));
@@ -56,11 +77,27 @@ function applyRemote(dto: ClientSettingsDto): void {
     if (isObject(incoming.sessionDefaults)) {
       setSessionDefaults(parseSessionDefaults(JSON.stringify(incoming.sessionDefaults)));
     }
+    if (isObject(incoming.modelPrefs)) {
+      replaceModelPrefs(parseModelPrefs(JSON.stringify(incoming.modelPrefs)));
+    }
   } finally {
     applying = false;
   }
   localRevision = dto.revision;
   lastSyncedJson = JSON.stringify(currentBlob());
+}
+
+/** Reconcile a server snapshot and preserve two important migration/retry cases:
+ *  - older server records without modelPrefs are backfilled from the existing
+ *    account-local cache exactly like a first server seed;
+ *  - an unchanged server revision after a failed/offline push retries any local
+ *    blob that still differs from the last confirmed server state. */
+function reconcileRemote(dto: ClientSettingsDto): void {
+  const incoming = dto.settings as { modelPrefs?: unknown };
+  const serverHasModelPrefs = isObject(incoming.modelPrefs);
+  applyRemote(dto);
+  if (!serverHasModelPrefs) lastSyncedJson = "";
+  if (JSON.stringify(currentBlob()) !== lastSyncedJson) schedulePush();
 }
 
 function push(opts?: { keepalive?: boolean }): void {
@@ -75,8 +112,8 @@ function push(opts?: { keepalive?: boolean }): void {
       if (dto.revision > localRevision) localRevision = dto.revision;
     })
     .catch(() => {
-      // Offline or server rejected the write — the local record still stands
-      // and the next change (or reconnect) retries.
+      // Offline or server rejected the write — the local record still stands.
+      // initSettingsSync() compares it again on reconnect and retries.
     });
 }
 
@@ -93,9 +130,9 @@ export function flushSettingsSync(): void {
   push({ keepalive: true });
 }
 
-/** WS gateway frame: another device changed the shared settings. */
+/** WS gateway frame: another client changed the shared settings. */
 export function applyRemoteClientSettings(dto: ClientSettingsDto): void {
-  applyRemote(dto);
+  reconcileRemote(dto);
 }
 
 /** Pull the server copy once, then keep it in step with local edits. Safe to
@@ -107,15 +144,21 @@ export function initSettingsSync(): void {
     subscribeStore(schedulePush);
     subscribeUiSettings(schedulePush);
     subscribeSessionDefaults(schedulePush);
+    subscribeModelPrefs(schedulePush);
     if (typeof window !== "undefined") window.addEventListener("pagehide", flushSettingsSync);
   }
   void api.clientSettings()
     .then((dto) => {
-      if (dto.revision > 0) applyRemote(dto);
-      // Server never written yet: seed it from this device's local record.
-      else { localRevision = 0; schedulePush(); }
+      if (dto.revision > 0) reconcileRemote(dto);
+      // Server never written yet: seed it from this client's local records,
+      // including any pre-server model preference state.
+      else {
+        localRevision = 0;
+        schedulePush();
+      }
     })
     .catch(() => {
-      // No server reachable — local storage keeps driving the UI.
+      // No server reachable — local caches keep driving the UI. A reconnect
+      // calls initSettingsSync() again and retries any unsynced blob.
     });
 }

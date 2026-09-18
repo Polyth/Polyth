@@ -1,6 +1,6 @@
 // Model preferences: favorites, provider/model sort, search. Pure logic —
-// the web app persists the serialized form under localStorage "polyth.modelPrefs"
-// and feeds it to the picker + Settings Providers/Models page.
+// the web layer keeps a synchronous account-local cache while the canonical
+// preference object is mirrored through the server-backed client settings blob.
 
 export type ModelSort = "provider" | "name" | "recent";
 
@@ -8,8 +8,8 @@ export interface ModelPrefs {
   favorites: string[];      // "providerID/modelID" keys, insertion order
   sort: ModelSort;
   recents: string[];        // most-recent-first "providerID/modelID" keys
-  providerOrder: string[];
-  expandedProviders: string[];
+  providerOrder: string[];     // harness-qualified "harness::provider" keys
+  expandedProviders: string[]; // harness-qualified "harness::provider" keys
 }
 
 export interface ModelLike {
@@ -22,6 +22,8 @@ export interface ModelLike {
 export const MODEL_PREFS_KEY = "polyth.modelPrefs";
 
 export const modelKey = (m: ModelLike): string => `${m.harnessId ? `${m.harnessId}::` : ""}${m.providerID}/${m.modelID}`;
+export const providerPreferenceKey = (harnessId: string | undefined, providerId: string): string =>
+  providerId.includes("::") ? providerId : `${harnessId || "opencode"}::${providerId}`;
 
 export function defaultModelPrefs(): ModelPrefs {
   return { favorites: [], sort: "provider", recents: [], providerOrder: [], expandedProviders: [] };
@@ -34,13 +36,17 @@ export function parseModelPrefs(raw: string | null): ModelPrefs {
     // Favorites predate harness support and were exclusively populated by
     // OpenCode's provider catalog. Their origin is therefore known.
     const modelKeys = (v: unknown): string[] => strs(v).map((key) => key.includes("::") ? key : `opencode::${key}`);
+    // Provider preferences predate multi-harness picker parity and therefore
+    // belong to OpenCode when they have no explicit harness qualifier.
+    const providerKeys = (v: unknown): string[] => strs(v).map((key) =>
+      key.includes("::") ? key : providerPreferenceKey("opencode", key));
     const sort: ModelSort = data.sort === "name" || data.sort === "recent" ? data.sort : "provider";
     return {
       favorites: [...new Set(modelKeys(data.favorites))],
       sort,
       recents: [...new Set(modelKeys(data.recents))].slice(0, 20),
-      providerOrder: [...new Set(strs(data.providerOrder))].slice(0, 100),
-      expandedProviders: [...new Set(strs(data.expandedProviders))].slice(0, 100),
+      providerOrder: [...new Set(providerKeys(data.providerOrder))].slice(0, 100),
+      expandedProviders: [...new Set(providerKeys(data.expandedProviders))].slice(0, 100),
     };
   } catch {
     return defaultModelPrefs();
@@ -77,12 +83,18 @@ export function recordRecent(p: ModelPrefs, key: string): ModelPrefs {
   return { ...p, recents: [key, ...p.recents.filter((k) => k !== key)].slice(0, 20) };
 }
 
-export function setProviderExpanded(p: ModelPrefs, providerId: string, expanded: boolean): ModelPrefs {
+export function setProviderExpanded(
+  p: ModelPrefs,
+  providerId: string,
+  expanded: boolean,
+  harnessId?: string,
+): ModelPrefs {
+  const key = providerPreferenceKey(harnessId, providerId);
   return {
     ...p,
     expandedProviders: expanded
-      ? [...p.expandedProviders.filter((id) => id !== providerId), providerId]
-      : p.expandedProviders.filter((id) => id !== providerId),
+      ? [...p.expandedProviders.filter((id) => id !== key), key]
+      : p.expandedProviders.filter((id) => id !== key),
   };
 }
 
@@ -91,20 +103,24 @@ export function reorderProvider(
   providerIds: readonly string[],
   draggedId: string,
   targetId: string,
+  harnessId?: string,
 ): ModelPrefs {
+  const visibleKeys = providerIds.map((id) => providerPreferenceKey(harnessId, id));
+  const draggedKey = providerPreferenceKey(harnessId, draggedId);
+  const targetKey = providerPreferenceKey(harnessId, targetId);
   const ordered = [
-    ...p.providerOrder.filter((id) => providerIds.includes(id)),
-    ...providerIds.filter((id) => !p.providerOrder.includes(id)),
+    ...p.providerOrder.filter((id) => visibleKeys.includes(id)),
+    ...visibleKeys.filter((id) => !p.providerOrder.includes(id)),
   ];
-  const from = ordered.indexOf(draggedId);
-  const to = ordered.indexOf(targetId);
+  const from = ordered.indexOf(draggedKey);
+  const to = ordered.indexOf(targetKey);
   if (from < 0 || to < 0 || from === to) return p;
   const next = [...ordered];
   const [dragged] = next.splice(from, 1);
   if (!dragged) return p;
   next.splice(to, 0, dragged);
   const reordered = [...next];
-  const visible = new Set(providerIds);
+  const visible = new Set(visibleKeys);
   let cursor = 0;
   const providerOrder = p.providerOrder.map((id) =>
     visible.has(id) ? reordered[cursor++]! : id);
@@ -112,13 +128,17 @@ export function reorderProvider(
   return { ...p, providerOrder };
 }
 
-export function orderProviders<T extends { id: string }>(providers: readonly T[], p: ModelPrefs): T[] {
+export function orderProviders<T extends { id: string }>(
+  providers: readonly T[],
+  p: ModelPrefs,
+  harnessId?: string,
+): T[] {
   const rank = new Map(p.providerOrder.map((id, index) => [id, index]));
   return providers
     .map((provider, index) => ({ provider, index }))
     .sort((a, b) =>
-      (rank.get(a.provider.id) ?? Number.MAX_SAFE_INTEGER)
-      - (rank.get(b.provider.id) ?? Number.MAX_SAFE_INTEGER)
+      (rank.get(providerPreferenceKey(harnessId, a.provider.id)) ?? Number.MAX_SAFE_INTEGER)
+      - (rank.get(providerPreferenceKey(harnessId, b.provider.id)) ?? Number.MAX_SAFE_INTEGER)
       || a.index - b.index)
     .map(({ provider }) => provider);
 }

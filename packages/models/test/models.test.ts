@@ -5,6 +5,7 @@ import {
   filterModels,
   isFavorite,
   modelKey,
+  orderProviders,
   parseModelPrefs,
   planFavoriteMigration,
   recordRecent,
@@ -40,8 +41,8 @@ test("model providers are collapsed by default and expansion/order persist", () 
   const expanded = setProviderExpanded(initial, "anthropic", true);
   const reordered = reorderProvider(expanded, ["openai", "anthropic", "google"], "google", "openai");
   const parsed = parseModelPrefs(serializeModelPrefs(reordered));
-  assert.deepEqual(parsed.expandedProviders, ["anthropic"]);
-  assert.deepEqual(parsed.providerOrder, ["google", "openai", "anthropic"]);
+  assert.deepEqual(parsed.expandedProviders, ["opencode::anthropic"]);
+  assert.deepEqual(parsed.providerOrder, ["opencode::google", "opencode::openai", "opencode::anthropic"]);
 });
 
 test("provider auth interactive methods are the declared oauth/api methods", () => {
@@ -226,6 +227,36 @@ test("authoritative model keys remain distinct across harnesses", () => {
   assert.equal(modelKey({ ...MODELS[0]!, harnessId: "codex" }), "codex::openai/gpt-5");
   const parsed = parseModelPrefs(JSON.stringify({ favorites: ["codex::openai/gpt-5"] }));
   assert.deepEqual(parsed.favorites, ["codex::openai/gpt-5"]);
+});
+
+test("provider order and accordion state remain distinct across harnesses", () => {
+  let prefs = defaultModelPrefs();
+  prefs = setProviderExpanded(prefs, "openai", true, "codex");
+  prefs = reorderProvider(
+    prefs,
+    ["openai", "anthropic"],
+    "anthropic",
+    "openai",
+    "codex",
+  );
+
+  assert.deepEqual(prefs.expandedProviders, ["codex::openai"]);
+  assert.deepEqual(prefs.providerOrder, ["codex::anthropic", "codex::openai"]);
+  assert.deepEqual(
+    orderProviders([{ id: "openai" }, { id: "anthropic" }], prefs, "codex").map((provider) => provider.id),
+    ["anthropic", "openai"],
+  );
+  assert.deepEqual(
+    orderProviders([{ id: "openai" }, { id: "anthropic" }], prefs, "opencode").map((provider) => provider.id),
+    ["openai", "anthropic"],
+  );
+
+  const migrated = parseModelPrefs(JSON.stringify({
+    providerOrder: ["openai", "anthropic"],
+    expandedProviders: ["openai"],
+  }));
+  assert.deepEqual(migrated.providerOrder, ["opencode::openai", "opencode::anthropic"]);
+  assert.deepEqual(migrated.expandedProviders, ["opencode::openai"]);
 });
 
 test("favorite and recent updates are immutable and preserve ordering", () => {

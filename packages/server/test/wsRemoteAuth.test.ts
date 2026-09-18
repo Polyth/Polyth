@@ -123,7 +123,7 @@ test("notification permission and local-only package events", async () => {
       title: "T", body: "done", ts: 1, read: false,
     });
     gateway.packageChanged({ id: "tunnel", enabled: true } as never);
-    gateway.clientSettingsChanged({ revision: 1, settings: {} } as never);
+    gateway.clientSettingsChanged("usr_owner", { revision: 1, settings: {} } as never);
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(messages.some((item) => (item as { type?: string }).type === "notification/added"), false);
     assert.equal(messages.some((item) => (item as { type?: string }).type === "package/changed"), false);

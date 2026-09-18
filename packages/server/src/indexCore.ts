@@ -533,7 +533,7 @@ export async function boot(opts: BootOptions = {}) {
     notification: (n, recipient) => live?.notification?.(n, recipient),
     pluginChanged: (packageId) => live?.pluginChanged?.(packageId),
     packageChanged: (pkg) => live?.packageChanged?.(pkg),
-    clientSettingsChanged: (settings) => live?.clientSettingsChanged?.(settings),
+    clientSettingsChanged: (userId, settings) => live?.clientSettingsChanged?.(userId, settings),
     worktreesChanged: (projectId) => live?.worktreesChanged?.(projectId),
   };
   const packageRegistry = createPackageRegistry({
@@ -2439,7 +2439,7 @@ export async function boot(opts: BootOptions = {}) {
   const settingsRoute = settingsRoutes({
     behavior, mcp,
     clientSettings,
-    broadcastClientSettings: (state) => broadcast.clientSettingsChanged?.(state),
+    broadcastClientSettings: (userId, state) => broadcast.clientSettingsChanged?.(userId, state),
     saveRole: async (name, role) => {
       await configApplier.applyAgent(name, role);
       const current = (await runtimeCatalog.agents()).find((agent) =>

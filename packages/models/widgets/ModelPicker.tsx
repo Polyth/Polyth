@@ -22,7 +22,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { ModelDescriptor, ModelRef } from "@polyth/contracts";
-import { isFavorite, modelKey, orderProviders } from "@polyth/models";
+import { isFavorite, modelKey, orderProviders, providerPreferenceKey } from "@polyth/models";
 import {
   reorderModelFavorites,
   noteModelUsed,
@@ -216,6 +216,7 @@ export default function ModelPicker({
   const models = useMemo(() => pickerCatalogModels(catalogModels, harnessId), [catalogModels, harnessId]);
   const flatCatalog = flatModelCatalog(models, harnessId);
   const prefs = useModelPrefs();
+  const preferenceHarnessId = harnessId ?? unanimousHarnessId(models) ?? "opencode";
   const phone = useShellMode() === "phone";
   const [open, setOpen] = useState(false);
   const [pickerState, dispatchPicker] = useReducer(
@@ -271,18 +272,28 @@ export default function ModelPicker({
 
   const providers = useMemo(() => {
     if (flatCatalog) return [];
-    const byId = new Map<string, { id: string; name: string; models: ModelDescriptor[] }>();
+    const byId = new Map<string, {
+      id: string;
+      providerID: string;
+      harnessId: string;
+      name: string;
+      models: ModelDescriptor[];
+    }>();
     for (const model of filtered) {
-      const provider = byId.get(model.providerID) ?? {
-        id: model.providerID,
+      const providerHarnessId = model.harnessId ?? harnessId ?? "opencode";
+      const preferenceId = providerPreferenceKey(providerHarnessId, model.providerID);
+      const provider = byId.get(preferenceId) ?? {
+        id: preferenceId,
+        providerID: model.providerID,
+        harnessId: providerHarnessId,
         name: model.providerName ?? model.providerID,
         models: [],
       };
       provider.models.push(model);
-      byId.set(model.providerID, provider);
+      byId.set(preferenceId, provider);
     }
-    return orderProviders([...byId.values()], prefs);
-  }, [filtered, prefs, flatCatalog]);
+    return orderProviders([...byId.values()], prefs, preferenceHarnessId);
+  }, [filtered, prefs, flatCatalog, preferenceHarnessId]);
   const providerIds = providers.map((provider) => provider.id);
   const favorites = useMemo(() => {
     if (flatCatalog) return [];
@@ -303,15 +314,18 @@ export default function ModelPicker({
     () => new Set(prefs.expandedProviders),
     [prefs.expandedProviders],
   );
+  const selectedProviderPreferenceId = selectedModel
+    ? providerPreferenceKey(selectedModel.harnessId ?? harnessId ?? "opencode", selectedModel.providerID)
+    : undefined;
   const isExpanded = (providerId: string) => providerIsExpanded({
     query: pickerState.query,
     sessionOverride: pickerState.expansion[providerId],
-    persistedExpanded: expandedProviders.has(providerId),
-    selectedProvider: providerId === selectedModel?.providerID,
+    persistedExpanded: expandedProviders.has(providerPreferenceKey(preferenceHarnessId, providerId)),
+    selectedProvider: providerId === selectedProviderPreferenceId,
   });
   const setExpanded = (providerId: string, expanded: boolean) => {
     dispatchPicker({ type: "set-expanded", providerId, expanded });
-    setModelProviderExpanded(providerId, expanded);
+    setModelProviderExpanded(providerId, expanded, preferenceHarnessId);
   };
 
   // Flattened keyboard-navigable rows (favorites, recents, then every expanded
@@ -596,7 +610,7 @@ export default function ModelPicker({
   const moveProvider = (providerId: string, delta: number) => {
     const index = providerIds.indexOf(providerId);
     const target = providerIds[index + delta];
-    if (target) reorderModelProviders(providerIds, providerId, target);
+    if (target) reorderModelProviders(providerIds, providerId, target, preferenceHarnessId);
   };
 
   const row = (model: ModelDescriptor, group: "favorites" | "recent" | "provider") => {
@@ -823,7 +837,7 @@ export default function ModelPicker({
                       onDragOver={allowDrop}
                       onDrop={(event) => {
                         const dragged = dragId(event, "provider");
-                        if (dragged) reorderModelProviders(providerIds, dragged, provider.id);
+                        if (dragged) reorderModelProviders(providerIds, dragged, provider.id, preferenceHarnessId);
                         setDragging(null);
                       }}
                       onDragEnd={() => setDragging(null)}
@@ -837,7 +851,7 @@ export default function ModelPicker({
                         >
                           <span className="model-provider-grip" aria-hidden="true">⠿</span>
                           <ProviderLogo
-                            providerID={provider.id}
+                            providerID={provider.providerID}
                             providerName={provider.name}
                             harnessId={unanimousHarnessId(provider.models)}
                             className="model-provider-logo"

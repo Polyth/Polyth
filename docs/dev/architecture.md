@@ -65,7 +65,7 @@ packages/session (node:sqlite WAL: events + projections + queue/org/profiles)
 | `usage` | Provider-neutral quota adapter contract: jittered polling, in-flight dedup, backoff, bounded last-good persistence, secret redaction, pace/prediction from multi-sample history. Real providers plug in via `data/quota-providers.json` (`createHttpQuotaProvider`): HTTP endpoint + bearer credential referenced by env-var name, so tokens never sit in config or reach the browser. |
 | `browser` | Shared user/agent Chromium context per canonical session, generic package-tool permissions, background activity, optional workspace reveal, user takeover, paced CDP frames, Space-scoped access and redacted durable audit. See [Browser](browser.md). |
 | `dictation` | Server streaming dictation protocol: lifecycle via REST, PCM chunks via `/ws` with acks + `(id,seq)` dedupe + replay-from-last-ack, `SttAdapter` seam plus `createWhisperSttAdapter` (finalize-once WAV upload to any OpenAI-compatible `/audio/transcriptions` endpoint); the service takes an adapter *provider* so capability follows live settings. |
-| `models` | Model preference logic: favorites, provider/name/recent sort, search (shared by picker + settings). |
+| `models` | Model preference logic: favorites, provider/name/recent sort, search (shared by picker + settings). The complete account preference object is server-backed through `/api/settings/client`; browser storage is only a synchronous cache/migration seed. |
 | `hotkeys` | Keymap model: default bindings, user overrides, conflict detection, sequence matching. |
 | `plugins` | Installed-plugin registry (install/enable/disable from dir sources, trust classes, contribution manifests). |
 | `server` | Composition root + everything HTTP/WS: see below. |
@@ -372,11 +372,13 @@ user text.
   `polyth:theme` event.
 - Preferences: `settings.ts` (`polyth.settings`), `uiPrefs.ts` (including
   `polyth.editorPrefs`), `sidebarPrefs.ts`,
-  `modelPrefs.ts`, `prefs.ts` (personas/enabled plugins), `usagePrefs.ts`
+  `prefs.ts` (personas/enabled plugins), `usagePrefs.ts`
   (`polyth.usagePrefs`: F13 quota-card model-family grouping helper plus
   per-provider visibility and collapsed-group persistence), `drafts.ts`
-  (`polyth.draft.<sessionId>`) — all browser-local. Server-owned settings go through
-  `/api/settings/*` routes.
+  (`polyth.draft.<sessionId>`) — browser-local. `modelPrefs.ts` keeps a
+  synchronous account-local cache but is canonically mirrored in
+  `/api/settings/client` with the other server-owned client preferences.
+  Server-owned settings go through `/api/settings/*` routes.
 - `attachments.ts` (F2) — pending composer pills per session
   (`polyth.draft.att.<sessionId>`; the draft store owns text + pills): stat-verified
   project-file/range refs, `_inbox/` uploads for drops/pastes and annotated browser

@@ -107,6 +107,14 @@ test("client settings round-trip through the server and apply on inbound frames"
   assert.match(settingsSync, /sessionDefaults:\s*getSessionDefaults\(\)/);
   assert.match(settingsSync, /setSessionDefaults\(parseSessionDefaults\(JSON\.stringify\(incoming\.sessionDefaults\)\)\)/);
 
+  // Model-picker state is part of the same server-owned account blob. Existing
+  // local prefs only seed an older/empty server record; after that the server
+  // snapshot is authoritative on boot/reconnect and changes are subscribed.
+  assert.match(settingsSync, /modelPrefs:\s*getModelPrefs\(\)/);
+  assert.match(settingsSync, /replaceModelPrefs\(parseModelPrefs\(JSON\.stringify\(incoming\.modelPrefs\)\)\)/);
+  assert.match(settingsSync, /subscribeModelPrefs\(schedulePush\)/);
+  assert.match(settingsSync, /if \(!serverHasModelPrefs\) lastSyncedJson = "";/);
+  assert.match(settingsSync, /if \(JSON\.stringify\(currentBlob\(\)\) !== lastSyncedJson\) schedulePush\(\);/);
 });
 
 test("settings flush uses a keepalive write", async () => {
