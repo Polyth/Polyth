@@ -132,7 +132,7 @@ export function createRecapService(deps: {
 }): RecapService {
   const now = deps.now ?? Date.now;
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
-  const inFlight = new Set<string>();
+  const inFlight = new Map<string, number>();
   let epoch = 0;
 
   const stablePassiveTail = async (sessionId: string, afterSeq: number): Promise<number | null> => {
@@ -154,7 +154,7 @@ export function createRecapService(deps: {
   ) => {
     timers.delete(sessionId);
     if (scheduledEpoch !== epoch || inFlight.has(sessionId)) return;
-    inFlight.add(sessionId);
+    inFlight.set(sessionId, scheduledEpoch);
     try {
       const atSeq = await stablePassiveTail(sessionId, seqAtSchedule);
       if (atSeq === null || scheduledEpoch !== epoch) return;
@@ -170,7 +170,7 @@ export function createRecapService(deps: {
     } catch (err) {
       deps.onError?.(sessionId, err);
     } finally {
-      inFlight.delete(sessionId);
+      if (inFlight.get(sessionId) === scheduledEpoch) inFlight.delete(sessionId);
     }
   };
 
@@ -193,6 +193,7 @@ export function createRecapService(deps: {
       epoch += 1;
       for (const timer of timers.values()) clearTimeout(timer);
       timers.clear();
+      inFlight.clear();
     },
   };
 }
