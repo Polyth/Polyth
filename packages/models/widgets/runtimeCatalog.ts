@@ -53,10 +53,10 @@ export function invalidateRuntimeCatalogs(notify = true): void {
   persistedHarnesses.clear();
   resetRuntimeCatalogMemory(notify);
 }
-type SnapshotRequest = { projectId?: string | null; spaceId?: string; cwd?: string; harnessId?: string; force?: boolean; detail?: boolean };
+type SnapshotRequest = { projectId?: string | null; spaceId?: string; cwd?: string; harnessId?: string; force?: boolean; detail?: boolean; allModels?: boolean };
 const snapshotRequestKey = (options: SnapshotRequest) => JSON.stringify([
   activeBrowserAccountId(), options.spaceId ?? "page", options.projectId ?? "", options.cwd ?? "project-root",
-  options.harnessId ?? "all", options.detail === true, revision,
+  options.harnessId ?? "all", options.detail === true, options.allModels === true, revision,
 ]);
 const previewCatalogKey = (projectId: string | undefined, harnessId: string | undefined, spaceId?: string, cwd?: string) => JSON.stringify([
   activeBrowserAccountId(), spaceId ?? "page", projectId ?? "default", cwd ?? "project-root",
@@ -109,6 +109,7 @@ export function readHarnessSnapshots(options: SnapshotRequest): Promise<HarnessS
   if (options.harnessId) query.set("harnessId", options.harnessId);
   if (options.force) query.set("force", "1");
   if (options.detail) query.set("detail", "1");
+  if (options.allModels) query.set("allModels", "1");
   if (!options.force) return harnessCache.read(snapshotRequestKey(options), async () => {
     const rows = await api.get<HarnessSnapshot[]>(`/api/harnesses/snapshots?${query}`);
     rememberHarnessSnapshots(options, rows);
