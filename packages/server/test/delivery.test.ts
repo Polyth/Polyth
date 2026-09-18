@@ -201,6 +201,32 @@ test("idle send starts a normal turn; active send queues; FIFO dispatch on stop"
   await store.close();
 });
 
+test("hidden repeated prompt stays hidden through durable queue dispatch", async () => {
+  const fake = fakeRuntime();
+  const { sessions, store } = makeService(fake);
+  const { id } = await sessions.create({ projectId: "p1", title: "Hidden retry" });
+
+  await sessions.send(id, { text: "first" });
+  await flush();
+  const queued = await sessions.send(id, {
+    text: "first",
+    delivery: "queue",
+    hiddenUserMessage: true,
+  });
+  assert.equal(queued.queued, true);
+  assert.equal((await store.queueList(id))[0]?.hiddenUserMessage, true);
+
+  fake.emit(id, { type: "turn/stopped", reason: "completed" });
+  await flush();
+
+  assert.deepEqual(fake.startedTexts, ["first", "first"]);
+  const users = (await store.events(id)).filter((event) => event.type === "user/message");
+  assert.equal(users.length, 2);
+  assert.equal((users[0]!.data as { hiddenUserMessage?: boolean }).hiddenUserMessage, undefined);
+  assert.equal((users[1]!.data as { hiddenUserMessage?: boolean }).hiddenUserMessage, true);
+  await store.close();
+});
+
 test("aborted idle turn admits the next queued message without an abort flag reset", { timeout: 5000 }, async () => {
   const fake = fakeRuntime();
   const { sessions, store } = makeService(fake);
