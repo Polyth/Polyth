@@ -3,6 +3,7 @@
 // capture strings at import time, so they must run after the merge.
 import { ensureLocale, getLocaleSnapshot } from "./i18n/index.ts";
 import { prefetchAuthStatus } from "./authPrefetch.ts";
+import { installBuildFreshnessWatcher } from "./buildFreshness.ts";
 import { prepareMobileLaunch } from "@polyth/mobile/runtime";
 import "./styles.css";
 import "./moduleContent.css";
@@ -14,6 +15,10 @@ import "./workspacePanelEditor.css";
 import "./motion.css";
 import "./mobileViewport.css";
 import "./chatMotion.ts";
+
+// Installed before async boot so an iOS standalone PWA that resumes an old
+// frozen WebView can replace itself with the server's freshly rebuilt shell.
+installBuildFreshnessWatcher();
 
 // Auth and locale start in parallel. The app graph itself waits for auth
 // prefetch so a remembered multi-user session restores its browser-local
