@@ -103,10 +103,6 @@ await writeFile(
     packages: packageManifests.map(({ id, module, styles }) => ({ id, module, styles })),
   })}\n`,
 );
-await writeFile(
-  join(dist, "build-id.json"),
-  `${JSON.stringify({ build: buildId })}\n`,
-);
 // ---- modulepreload injection --------------------------------------------
 // Cold boot is a 3-level module waterfall (main.js → chunks → bootstrap
 // dynamic chunk → its chunks) plus the importmap-ed React entries. Preload
@@ -175,3 +171,10 @@ await Promise.all([
   copyFile(join(here, "icon-192.png"), join(dist, "icon-192.png")),
   copyFile(join(here, "icon-512.png"), join(dist, "icon-512.png")),
 ]);
+
+// Publish the generation marker last. A client that observes this build id can
+// safely reload knowing every shell/package/static artifact for it is ready.
+await writeFile(
+  join(dist, "build-id.json"),
+  `${JSON.stringify({ build: buildId })}\n`,
+);
