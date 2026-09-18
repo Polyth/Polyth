@@ -22,7 +22,6 @@ import {
   PRESET_THEMES, addCustomTheme, applyTheme, loadCustomThemes, parseThemeJson,
   reapplyTheme, removeCustomTheme, resolveTheme, type AppearanceMode, type ThemeSpec,
 } from "../../theme.ts";
-import type { AssistSettingsDto } from "@polyth/session/web-api";
 import type {
   HarnessSelection,
   HarnessSnapshot,
@@ -471,12 +470,6 @@ export function ChatPage() {
     setLimitEdit(String(next));
     if (next !== ui.promptHistoryLimit) setUiSettings({ promptHistoryLimit: next });
   };
-  // F9 hard switch lives server-side: disabled means nothing is generated at all
-  const [assist, setAssist] = useState<AssistSettingsDto | null>(null);
-  useEffect(() => { void api.assistSettings().then(setAssist).catch(() => setAssist(null)); }, []);
-  const saveAssist = (patch: Partial<AssistSettingsDto>) => {
-    void api.assistSettingsSave(patch).then(setAssist).catch(() => {});
-  };
   const metricLabels: Record<HeaderMetricId, string> = { tokens: "Tokens", messages: "Messages", duration: "Duration", cost: "Cost" };
   const actionLabels: Record<ResponseActionId, string> = { copy: "Copy", image: "Save image", plan: "Save as plan", pin: "Pin to content", session: "Start new session", multirun: "Start multirun" };
   const toggleOrdered = <T extends string>(current: readonly T[], id: T, update: (value: T[]) => void) => {
@@ -567,29 +560,6 @@ export function ChatPage() {
           />
         </div>
       </Row>
-      {assist && (
-        <Row
-          label={tr("settings.pages.idleRecapSuggestion")}
-          hint={tr("settings.pages.afterASessionGoesQuietTheSmall")}
-          itemId="chat.assist"
-        >
-          <Toggle on={assist.enabled} onChange={(enabled) => saveAssist({ enabled })} label={tr("settings.pages.idleRecap")} />
-        </Row>
-      )}
-      {assist?.enabled && (
-        <Row label={tr("settings.pages.quietTime")} hint={tr("settings.pages.secondsOfInactivityAfterAReplyBefore")}>
-          <div className="editor-font-control">
-            <TextInput
-              uiSize="sm"
-              type="number" min={10} max={3600} value={assist.idleSeconds}
-              aria-label={tr("settings.pages.assistQuietTimeInSeconds")}
-              onChange={(e) => setAssist({ ...assist, idleSeconds: Number(e.target.value) })}
-              onBlur={(e) => saveAssist({ idleSeconds: Number(e.target.value) })}
-            />
-            <span className="muted">{tr("settings.pages.s")}</span>
-          </div>
-        </Row>
-      )}
     </>
   );
 }
