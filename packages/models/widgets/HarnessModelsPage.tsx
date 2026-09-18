@@ -21,6 +21,7 @@ import {
   invalidateRuntimeCatalogs,
 } from "./runtimeCatalog.ts";
 import {
+  setModelProviderExpanded,
   toggleModelFavorite,
   useModelPrefs,
 } from "./modelPrefs.ts";
@@ -41,6 +42,24 @@ interface ProviderGroup {
 
 const api = createApiTransport();
 
+const PROVIDER_NAMES: Readonly<Record<string, string>> = {
+  anthropic: "Anthropic",
+  "command-code": "Command Code",
+  cursor: "Cursor",
+  deepseek: "DeepSeek",
+  gemini: "Gemini",
+  google: "Google",
+  moonshotai: "Moonshot AI",
+  openai: "OpenAI",
+  qwen: "Qwen",
+  zai: "Z.AI",
+};
+
+const providerDisplayName = (id: string, name?: string): string =>
+  name?.trim()
+  || PROVIDER_NAMES[id.toLowerCase()]
+  || id.replace(/[-_]+/g, " ").replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+
 const modelVisibilityKey = (model: ModelDescriptor): string =>
   `${model.providerID}/${model.modelID}`;
 
@@ -51,7 +70,7 @@ function providerGroups(models: readonly ModelDescriptor[]): ProviderGroup[] {
     if (!group) {
       group = {
         id: model.providerID,
-        name: model.providerName?.trim() || model.providerID,
+        name: providerDisplayName(model.providerID, model.providerName),
         models: [],
       };
       byId.set(model.providerID, group);
@@ -88,7 +107,6 @@ export default function HarnessModelsPage({
     () => snapshot?.catalog?.models ?? [],
   );
   const [visibility, setVisibility] = useState<HarnessVisibilityDto | null>(null);
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [queries, setQueries] = useState<Record<string, string>>({});
   const [busyKey, setBusyKey] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -229,7 +247,8 @@ export default function HarnessModelsPage({
       {visibility && groups.map((provider) => {
         const on = providerEnabled(provider.id);
         const enabledCount = provider.models.filter((model) => modelEnabled(model)).length;
-        const open = expanded.has(provider.id);
+        const expansionKey = `${harnessId}::${provider.id}`;
+        const open = prefs.expandedProviders.includes(expansionKey);
         const query = queries[provider.id] ?? "";
         const normalized = query.trim().toLowerCase();
         const shown = normalized
@@ -247,12 +266,7 @@ export default function HarnessModelsPage({
               aria-label={open
                 ? tr("settings.modelspage.collapseValue", { value: provider.name })
                 : tr("settings.modelspage.expandValue", { value: provider.name })}
-              onClick={() => setExpanded((current) => {
-                const next = new Set(current);
-                if (next.has(provider.id)) next.delete(provider.id);
-                else next.add(provider.id);
-                return next;
-              })}
+              onClick={() => setModelProviderExpanded(expansionKey, !open)}
             >
               <span className={`provider-chevron ${open ? "open" : ""}`} aria-hidden="true">›</span>
               <ProviderLogo providerID={provider.id} providerName={provider.name} className="set-provider-logo" />
