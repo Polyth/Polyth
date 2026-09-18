@@ -267,6 +267,65 @@ test("toggles persist and mirror into the backend config", async () => {
   assert.deepEqual(applied, { disabledProviders: [], blacklists: {} });
 });
 
+test("OpenCode visibility never hides the same provider in another harness", async () => {
+  const svc = createModelVisibilityService({ file: join(tmp(), "v.json") });
+  await svc.setProviderEnabled("openai", false);
+  const mixed: ModelDescriptor[] = [
+    { harnessId: "opencode", providerID: "openai", modelID: "gpt", name: "GPT", connected: true },
+    { harnessId: "commandcode", providerID: "openai", modelID: "gpt", name: "GPT", connected: true },
+  ];
+
+  assert.deepEqual(
+    svc.filter(mixed, { includeDisconnected: true }).map((model) => model.harnessId),
+    ["commandcode"],
+  );
+});
+
+test("native harness visibility is isolated, persisted, and never mirrored into opencode config", async () => {
+  const dir = tmp();
+  let applies = 0;
+  const file = join(dir, "model-visibility.json");
+  const svc = createModelVisibilityService({
+    file,
+    applier: {
+      readConfig: async () => ({}),
+      applyProviderVisibility: async () => { applies++; },
+    },
+  });
+  await svc.seed();
+
+  await svc.setHarnessProviderEnabled("pi", "anthropic", false);
+  await svc.setHarnessModelEnabled("commandcode", "openai/gpt-x", false);
+
+  assert.equal(applies, 0);
+  assert.deepEqual(svc.harnessState("pi"), {
+    disabledProviders: ["anthropic"],
+    disabledModels: [],
+  });
+  assert.deepEqual(svc.harnessState("commandcode"), {
+    disabledProviders: [],
+    disabledModels: ["openai/gpt-x"],
+  });
+
+  const piModels: ModelDescriptor[] = [
+    { harnessId: "pi", providerID: "anthropic", modelID: "claude", name: "Claude", connected: true },
+    { harnessId: "pi", providerID: "openai", modelID: "gpt", name: "GPT", connected: true },
+  ];
+  assert.deepEqual(
+    svc.filterHarness(piModels, "pi", { includeDisconnected: true }).map((model) => model.providerID),
+    ["openai"],
+  );
+
+  const onDisk = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+  assert.deepEqual((onDisk.harnesses as Record<string, unknown>).pi, {
+    disabledProviders: ["anthropic"],
+    disabledModels: [],
+  });
+
+  const again = createModelVisibilityService({ file });
+  assert.deepEqual(again.harnessState("commandcode").disabledModels, ["openai/gpt-x"]);
+});
+
 test("a failed backend apply rolls the toggle back", async () => {
   const dir = tmp();
   const svc = createModelVisibilityService({

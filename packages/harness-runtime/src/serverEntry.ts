@@ -13,6 +13,7 @@ import type {
     HarnessSelection,
     HarnessSnapshot,
     JsonValue,
+    ModelDescriptor,
     RouteHandler,
 } from "@polyth/contracts";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
@@ -20,6 +21,18 @@ import { createHarnessRegistry, type HarnessPreferences, harnessError } from "./
 import { promptPrefixDiagnostics } from "./promptPrefixDiagnostics.ts";
 
 const MAX_HARNESS_SYSTEM_PROMPT = 64 * 1024;
+
+type HarnessModelVisibilityState = {
+    disabledProviders: string[];
+    disabledModels: string[];
+};
+type HarnessModelVisibilityService = {
+    harnessState(harnessId: string): HarnessModelVisibilityState;
+    filterHarness(models: ModelDescriptor[], harnessId: string, opts?: { includeDisconnected?: boolean }): ModelDescriptor[];
+    setHarnessProviderEnabled(harnessId: string, providerID: string, enabled: boolean): Promise<HarnessModelVisibilityState>;
+    setHarnessModelEnabled(harnessId: string, key: string, enabled: boolean): Promise<HarnessModelVisibilityState>;
+};
+
 type StoredHarnessPreference = {
     enabled?: boolean;
     priority?: number;
@@ -117,6 +130,42 @@ export function harnessRoutes(host: ServerPackageHost): RouteHandler {
                 throw harnessError("not-found", "project not found");
             return { space: request.space, spaceId: request.space.spaceId, projectId: project?.id ?? "__default__", cwd: project?.path ?? process.cwd(), remote: Boolean(project?.remote) };
         };
+        const requireHarness = (harnessId: string) => {
+            if (!registry.providers().some((provider) => provider.descriptor.id === harnessId))
+                throw harnessError("not-found", "harness not found");
+            if (harnessId === "opencode")
+                throw harnessError("unsupported", "OpenCode model visibility is managed by its Providers & Models settings");
+        };
+        const visibility = () => host.services.require(
+            serverServiceKey<HarnessModelVisibilityService>("models.visibility"),
+        );
+        let visibilityMatch = request.path.match(/^\/api\/harnesses\/([^/]+)\/model-visibility$/);
+        if (visibilityMatch && request.method === "GET") {
+            const harnessId = decodeURIComponent(visibilityMatch[1]!);
+            requireHarness(harnessId);
+            request.json(200, { ok: true, ...visibility().harnessState(harnessId) });
+            return true;
+        }
+        visibilityMatch = request.path.match(/^\/api\/harnesses\/([^/]+)\/providers\/([^/]+)\/enabled$/);
+        if (visibilityMatch && request.method === "POST") {
+            const harnessId = decodeURIComponent(visibilityMatch[1]!);
+            const providerID = decodeURIComponent(visibilityMatch[2]!);
+            requireHarness(harnessId);
+            const input = await request.body();
+            const state = await visibility().setHarnessProviderEnabled(harnessId, providerID, input.enabled !== false);
+            request.json(200, { ok: true, ...state });
+            return true;
+        }
+        visibilityMatch = request.path.match(/^\/api\/harnesses\/([^/]+)\/models\/enabled$/);
+        if (visibilityMatch && request.method === "POST") {
+            const harnessId = decodeURIComponent(visibilityMatch[1]!);
+            requireHarness(harnessId);
+            const input = await request.body();
+            const state = await visibility().setHarnessModelEnabled(harnessId, String(input.key ?? ""), input.enabled !== false);
+            request.json(200, { ok: true, ...state });
+            return true;
+        }
+
         if (request.path === "/api/harnesses/roster" && request.method === "GET") {
             request.json(200, await registry.roster(await contextForRequest()));
             return true;
@@ -139,11 +188,29 @@ export function harnessRoutes(host: ServerPackageHost): RouteHandler {
                     return true;
                 }
             }
-            request.json(200, await registry.snapshots(context, {
+            const snapshots = await registry.snapshots(context, {
                 ...(harnessId ? { harnessId } : {}),
                 detail,
                 force,
-            }));
+            });
+            const modelVisibility = host.services.get(
+                serverServiceKey<HarnessModelVisibilityService>("models.visibility"),
+            );
+            const allModels = request.url.searchParams.get("allModels") === "1";
+            request.json(200, !modelVisibility || allModels
+                ? snapshots
+                : snapshots.map((snapshot) => snapshot.catalog?.models
+                    ? {
+                        ...snapshot,
+                        catalog: {
+                            ...snapshot.catalog,
+                            models: modelVisibility.filterHarness(
+                                snapshot.catalog.models,
+                                snapshot.identity.id,
+                            ),
+                        },
+                    }
+                    : snapshot));
             return true;
         }
         if (request.path === "/api/harnesses" && request.method === "GET") {

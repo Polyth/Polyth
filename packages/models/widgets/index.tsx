@@ -1,7 +1,9 @@
 import "./styles.css";
 import "./mobilePicker.css";
+import type { HarnessSnapshot } from "@polyth/contracts";
 import { defineWebPackage } from "@polyth/web-sdk";
 import ModelsPage from "./ModelsPage.tsx";
+import HarnessModelsPage, { HARNESS_MODEL_SETTINGS_MIN_MODELS } from "./HarnessModelsPage.tsx";
 import {
   preloadRuntimeCatalogs,
   resetRuntimeCatalogMemory,
@@ -67,6 +69,29 @@ export default defineWebPackage((host) => () => {
       order: 10,
       meta: { harnessId: "opencode", sectionId: "providers-models", label: "Providers & Models" },
       render: (context) => context.harnessId === "opencode" && context.sectionId === "providers-models" ? <ModelsPage /> : null,
+    }),
+    host.slots.register({
+      id: "models.large-harness-catalog",
+      slot: "settings.harness.detail",
+      order: 10,
+      meta: {
+        harnessId: "*",
+        sectionId: "providers-models",
+        label: "Providers & Models",
+        minModels: HARNESS_MODEL_SETTINGS_MIN_MODELS,
+        excludeHarnessIds: ["opencode"],
+      },
+      render: (context) => {
+        const harnessId = typeof context.harnessId === "string" ? context.harnessId : "";
+        if (!harnessId || harnessId === "opencode" || context.sectionId !== "providers-models") return null;
+        const snapshot = context.snapshot as HarnessSnapshot | undefined;
+        if ((snapshot?.catalog?.models?.length ?? 0) < HARNESS_MODEL_SETTINGS_MIN_MODELS) return null;
+        return <HarnessModelsPage
+          harnessId={harnessId}
+          snapshot={snapshot}
+          projectId={typeof context.projectId === "string" ? context.projectId : undefined}
+        />;
+      },
     }),
     host.capabilities.register({
       id: "models-agents",

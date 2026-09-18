@@ -42,7 +42,7 @@ function useHarnesses(projectId?: string | null, spaceId?: string, harnessId?: s
     try {
       let rows = await readHarnessSnapshots({ projectId, spaceId, force });
       if (harnessId) {
-        const selected = await readHarnessSnapshots({ projectId, spaceId, harnessId, detail: true });
+        const selected = await readHarnessSnapshots({ projectId, spaceId, harnessId, detail: true, allModels: true });
         rows = rows.map((row) => selected.find((item) => item.identity.id === row.identity.id) ?? row);
       }
       if (seq !== requestSeq.current) return;
@@ -431,7 +431,11 @@ export function HarnessSettings({ host, settingsTarget }: { host: WebPackageHost
   const toggle = (id: string, enabled: boolean) => void saveOrder(ordered.map((row) => row.identity.id === id ? { ...row, policy: { ...row.policy, enabled } } : row));
   const openDetail = (id: string, section = "overview") => { setDetailId(id); setSectionId(section); };
   const detail = rows.find((row) => row.identity.id === detailId);
-  const sectionsFor = (id: string) => configurationSections(host.slots.list("settings.harness.detail"), id);
+  const sectionsFor = (id: string) => configurationSections(
+    host.slots.list("settings.harness.detail"),
+    id,
+    rows.find((row) => row.identity.id === id),
+  );
   const contributed = detail ? sectionsFor(detail.identity.id) : [];
   const pendingSection = contributed.find((section) => section.handlesPendingChanges);
   const activeSection = sectionId === "overview" || contributed.some((section) => section.id === sectionId) ? sectionId : "overview";

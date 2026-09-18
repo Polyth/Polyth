@@ -276,6 +276,11 @@ const aggregate = async <T>(
 /** Route-local catalogs keep account/model identity scoped to the session's
  * current runtime. A provider's empty model list means native default. */
 export function runtimeCatalogRoutes(host: ServerPackageHost): RouteHandler {
+  const visibleModels = (models: ModelDescriptor[], harnessId: string): ModelDescriptor[] =>
+    host.services.get(serverServiceKey<{
+      filterHarness(models: ModelDescriptor[], harnessId: string, opts?: { includeDisconnected?: boolean }): ModelDescriptor[];
+    }>("models.visibility"))?.filterHarness(models, harnessId) ?? models;
+
   return async (request) => {
     const sessionId = request.url.searchParams.get("sessionId");
     if (request.path !== "/api/runtime-catalog" || !sessionId || request.method !== "GET") return false;
@@ -311,10 +316,11 @@ export function runtimeCatalogRoutes(host: ServerPackageHost): RouteHandler {
         remote: Boolean(project.remote),
       }, { harnessId, detail: true });
       if (!snapshot) throw runtimeError;
-      const models = (snapshot.catalog?.models ?? []).map((model) => ({
+      const rawModels = (snapshot.catalog?.models ?? []).map((model) => ({
         ...model,
         harnessId: model.harnessId ?? harnessId,
       }));
+      const models = visibleModels(rawModels, harnessId);
       const agents = (snapshot.catalog?.agents ?? snapshot.catalog?.roles ?? []).map((agent) => ({
         ...agent,
         harnessId: agent.harnessId ?? harnessId,
@@ -335,7 +341,7 @@ export function runtimeCatalogRoutes(host: ServerPackageHost): RouteHandler {
         capabilities: snapshot.capabilities
           ?? registry.get(harnessId)?.staticFeatures,
         discovery,
-        nativeDefault: !unavailable && models.length === 0,
+        nativeDefault: !unavailable && rawModels.length === 0,
         harnessId,
       });
       return true;
@@ -348,7 +354,8 @@ export function runtimeCatalogRoutes(host: ServerPackageHost): RouteHandler {
       runtime.agents().catch(() => []),
       runtime.capabilities(),
     ]);
-    const models = (modelResult.ok ? modelResult.value : []).map((model) => ({ ...model, ...(runtime.harnessId ? { harnessId: runtime.harnessId } : {}) }));
+    const rawModels = (modelResult.ok ? modelResult.value : []).map((model) => ({ ...model, ...(runtime.harnessId ? { harnessId: runtime.harnessId } : {}) }));
+    const models = runtime.harnessId ? visibleModels(rawModels, runtime.harnessId) : rawModels;
     const agents = rawAgents.map((agent) => ({ ...agent, ...(runtime.harnessId ? { harnessId: runtime.harnessId } : {}) }));
     const discovery: ModelDiscoveryState = !modelResult.ok
       ? { state: "unavailable", reason: modelResult.reason }
@@ -358,7 +365,7 @@ export function runtimeCatalogRoutes(host: ServerPackageHost): RouteHandler {
       agents,
       capabilities,
       discovery,
-      nativeDefault: modelResult.ok && models.length === 0,
+      nativeDefault: modelResult.ok && rawModels.length === 0,
       harnessId: runtime.harnessId,
     }); return true;
   };
@@ -380,6 +387,12 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     (model) => `${model.harnessId ?? "legacy"}/${model.providerID}/${model.modelID}`,
   );
   const listModels = () => sharedCatalog?.models() ?? fallbackModels();
+  const listSelectableModels = async () => {
+    const models = await listModels();
+    return host.services.get(serverServiceKey<{
+      filter(models: ModelDescriptor[], opts?: { includeDisconnected?: boolean }): ModelDescriptor[];
+    }>("models.visibility"))?.filter(models, { includeDisconnected: true }) ?? models;
+  };
   const listAgents = () => aggregate(
     host,
     async (projectId) => {
@@ -401,7 +414,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   // unscoped path. Composer selection resolves presets into explicit execution
   // configuration before the scoped session facade strips the private id.
   legacyStore.profileGet = async () => undefined;
-  const profiles = profileRoutes({ store: ownedProfiles, listModels, listAgents });
+  const profiles = profileRoutes({ store: ownedProfiles, listModels: listSelectableModels, listAgents });
   const custom = customProviderRoutes(host, listModels);
   return {
     remoteAccess: localOnlyRemoteAccess(["agent-profiles", "runtime-catalog"]),

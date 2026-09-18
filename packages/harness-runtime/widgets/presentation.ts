@@ -98,8 +98,24 @@ export function summaryFacts(row: HarnessSnapshot): CapabilityFact[] {
     ...runtimeFacts(row).filter((fact) => fact.id === "resume")];
 }
 
-export function configurationSections(items: Array<{ id: string; order: number; meta?: Readonly<Record<string, unknown>> }>, harnessId: string) {
-  return items.filter((item) => item.meta?.harnessId === harnessId || item.meta?.harnessId === "*")
+export function configurationSections(
+  items: Array<{ id: string; order: number; meta?: Readonly<Record<string, unknown>> }>,
+  harnessId: string,
+  snapshot?: HarnessSnapshot,
+) {
+  return items.filter((item) => {
+    const meta = item.meta;
+    if (meta?.harnessId !== harnessId && meta?.harnessId !== "*") return false;
+    const excluded = Array.isArray(meta?.excludeHarnessIds)
+      ? meta.excludeHarnessIds.filter((value): value is string => typeof value === "string")
+      : [];
+    if (excluded.includes(harnessId)) return false;
+    const minModels = typeof meta?.minModels === "number" && Number.isInteger(meta.minModels)
+      ? meta.minModels
+      : undefined;
+    if (minModels !== undefined && (snapshot?.catalog?.models?.length ?? 0) < minModels) return false;
+    return true;
+  })
     .map((item) => ({ id: String(item.meta?.sectionId ?? item.id), label: String(item.meta?.label ?? item.id), order: item.order, ...(item.meta?.handlesPendingChanges === true ? { handlesPendingChanges: true } : {}) }))
     .toSorted((a, b) => a.order - b.order || a.id.localeCompare(b.id));
 }
