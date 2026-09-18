@@ -38,7 +38,6 @@ const POLYTH_LINK_CONTRACT_FILES = [
   "apps/mobile/test/connectionUi.test.ts",
   "apps/desktop/test/configuration.test.ts",
   "apps/desktop/test/serverPackages.test.ts",
-  "apps/web/test/packageContainment.test.ts",
 ];
 
 /** Known baseline-red tests on current master; keep the exclusion list explicit. */
