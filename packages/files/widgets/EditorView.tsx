@@ -5,6 +5,7 @@
 // in editor/FilePane. This file implements no tab store and no second editor.
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { api, type FileEntry } from "@polyth/session/web-api";
+import type { SurfaceComponentProps } from "@polyth/web-sdk";
 import { closeWorkspacePane, getState, openEditorFile, setEditorFile, useStore, workspaceProjectId } from "../../../apps/web/src/store.ts";
 import EmptyState, { ProjectRequiredEmpty } from "../../../apps/web/src/components/EmptyState.tsx";
 import { requestComposerInsert } from "../../../apps/web/src/composerInsert.ts";
@@ -43,13 +44,18 @@ interface CtxMenu {
   entry: FileEntry | null;
 }
 
-export default function EditorView() {
-  const projectId = useStore(workspaceProjectId);
-  const project = useStore((s) => s.projectRegistry.projects.find((candidate) => candidate.id === workspaceProjectId(s)));
+export default function EditorView({
+  projectId: scopedProjectId,
+  sessionId: scopedSessionId,
+}: SurfaceComponentProps = {}) {
+  const storeProjectId = useStore(workspaceProjectId);
+  const storeSessionId = useStore((s) => s.activeSessionId);
+  const projectId = scopedProjectId === undefined ? storeProjectId : scopedProjectId;
+  const project = useStore((s) => s.projectRegistry.projects.find((candidate) => candidate.id === projectId));
   // Files must follow the ACTIVE SESSION's worktree, not the project root
   // (UX-FIXTURE-VISUAL P0): every files call carries the session id.
-  const sessionId = useStore((s) => s.activeSessionId);
-  const session = useStore((s) => s.sessions.find((candidate) => candidate.id === s.activeSessionId));
+  const sessionId = scopedSessionId === undefined ? storeSessionId : scopedSessionId;
+  const session = useStore((s) => s.sessions.find((candidate) => candidate.id === sessionId));
   const sid = sessionId ?? undefined;
   const filePath = useStore((s) => s.editorFile);
   const visible = usePaneVisible();
