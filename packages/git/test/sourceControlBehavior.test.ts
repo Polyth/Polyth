@@ -307,6 +307,56 @@ function labeledButton(container: Element, label: string): HTMLButtonElement | u
   );
 }
 
+test("projection working state shows live activity before turn-start hydration", async () => {
+  const projectId = "projection-working-activity-project";
+  const sessionId = "projection-working-activity-session";
+  const repoRoot = "/tmp/projection-working-activity";
+
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith("/api/git/status")) {
+      return response({
+        branch: "main", ahead: 0, behind: 0, conflicted: [], staged: [],
+        unstaged: [], untracked: [], isRepo: true,
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  };
+
+  activateProject(projectId);
+  applyProjectAdded({
+    id: projectId,
+    path: repoRoot,
+    name: "projection activity",
+    createdAt: 1,
+  });
+  setModels([{ providerID: "openai", modelID: "luna", name: "Luna", providerName: "OpenAI" }]);
+  seedSessionCache({
+    id: sessionId,
+    projectId,
+    title: "projection activity",
+    status: "working",
+    model: { providerID: "openai", modelID: "luna" },
+    createdAt: 1,
+    updatedAt: 2,
+  });
+  activateSession(sessionId);
+
+  const view = await mounted(createElement(PendingChangesBar));
+  try {
+    await act(async () => { await delay(40); });
+    const activity = view.container.querySelector(".agent-status-dock");
+    assert.ok(activity, "projection working status keeps agent activity visible before turn/started arrives");
+    assert.match(activity.textContent ?? "", /Luna/);
+    assert.equal(view.container.querySelector(".pending-changes-bar"), null);
+  } finally {
+    await view.unmount();
+    setModels([]);
+    activateSession(null);
+    activateProject(null);
+  }
+});
+
 test("edited-files bubble expands to a card, lists a preview, reviews a file, and undoes via gitDiscard", async () => {
   const projectId = "edited-files-card-project";
   const sessionId = "edited-files-card-session";
