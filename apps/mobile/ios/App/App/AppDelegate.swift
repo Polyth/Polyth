@@ -1060,7 +1060,7 @@ final class PolythPushPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCen
                 self.forget(item)
                 if self.foregroundMapping == "\(connectionId)\u{0}\(item.accountId)" { self.foregroundMapping = nil }
             }
-            if let data = try? self.secureGet(Self.pendingKey), let data,
+            if let data = try? self.secureGet(Self.pendingKey),
                let pending = try? JSONDecoder().decode(PendingOpen.self, from: data), pending.connectionId == connectionId {
                 self.secureRemove(Self.pendingKey)
             }

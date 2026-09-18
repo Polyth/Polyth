@@ -21,28 +21,6 @@ on:
       - "apps/desktop/src/**"
       - "apps/desktop/test/**"
       - ".github/workflows/polyth-link.yml"
-  push:
-    branches:
-      - master
-    paths:
-      - "crates/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "rust-toolchain.toml"
-      - "packages/tunnel/**"
-      - "packages/pairing-qr/**"
-      - "packages/server/**"
-      - "packages/contracts/**"
-      - "packages/plugins/**"
-      - "packages/terminal/**"
-      - "apps/mobile/src/runtime.ts"
-      - "apps/mobile/src/ConnectionScreen.tsx"
-      - "apps/mobile/src/nativeBridge.ts"
-      - "apps/mobile/test/**"
-      - "apps/desktop/build.ts"
-      - "apps/desktop/src/**"
-      - "apps/desktop/test/**"
-      - ".github/workflows/polyth-link.yml"
   workflow_dispatch:
 
 concurrency:
