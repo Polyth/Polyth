@@ -178,6 +178,36 @@ test("moveQueuedItem preserves metadata while assigning the new positions", () =
 test("empty composer steering selects the newest ordinary queued message", () => {
   assert.equal(latestSteerableQueuedItem(items)?.id, "q2");
   assert.equal(latestSteerableQueuedItem(items.filter((item) => item.heldForReview)), null);
+  assert.equal(latestSteerableQueuedItem([
+    ...items,
+    { id: "q4", sessionId: "s1", position: 3, text: "hidden retry", delivery: "queue", createdAt: 40, hiddenUserMessage: true },
+  ])?.id, "q2");
+});
+
+test("hidden queued retries do not duplicate prompt text in chat", async () => {
+  const originalFetch = globalThis.fetch;
+  const hiddenItems: QueueItemDto[] = [
+    { id: "h1", sessionId: "s1", position: 0, text: "repeat me", delivery: "queue", createdAt: 1, hiddenUserMessage: true },
+    { id: "h2", sessionId: "s1", position: 1, text: "sensitive repeated prompt", delivery: "queue", createdAt: 2, hiddenUserMessage: true, heldForReview: true },
+  ];
+  globalThis.fetch = (async () => response(hiddenItems)) as unknown as typeof fetch;
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  let observed: QueueItemDto[] = [];
+  try {
+    await act(async () => root.render(createElement(QueuedMessageList, {
+      sessionId: "s1",
+      onItemsChange: (_sessionId: string, next: QueueItemDto[]) => { observed = next; },
+    })));
+    assert.equal(observed.length, 2, "hidden retries remain durable queue items");
+    assert.equal(container.querySelectorAll(".queue-chip").length, 1, "ordinary hidden retry has no chat chip");
+    assert.equal(container.textContent?.includes("repeat me"), false);
+    assert.equal(container.textContent?.includes("sensitive repeated prompt"), false);
+    assert.match(container.textContent ?? "", /Held for review/);
+  } finally {
+    await act(async () => root.unmount());
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("queued messages hand editing to the composer and drag-reorder through the persisted API", async () => {
