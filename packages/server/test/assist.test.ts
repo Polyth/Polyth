@@ -1,7 +1,7 @@
 // F9: idle assist is a hard-switched, one-flight-per-session watcher whose
 // output lives on the projection keyed to the settled log tail. Passive
-// post-turn metadata may settle before generation; any event after generation
-// makes the result stale (the route answers 404). Disabled generates NOTHING.
+// post-turn bookkeeping may settle before or during generation; only real
+// conversation activity makes the result stale. Disabled generates NOTHING.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -52,7 +52,8 @@ test("pure helpers: word cap, freshness, reply parsing", () => {
 
   assert.equal(isFresh(undefined, 5), false);
   assert.equal(isFresh({ atSeq: 5 }, 5), true);
-  assert.equal(isFresh({ atSeq: 5 }, 6), false); // any new event = stale
+  assert.equal(isFresh({ atSeq: 7 }, 5), true); // later raw bookkeeping does not matter
+  assert.equal(isFresh({ atSeq: 5 }, 6), false); // newer conversation activity = stale
 
   const labeled = parseAssistReply("Recap: refactored the queue store.\nSuggestion: Add a migration test.");
   assert.deepEqual(labeled, { recap: "refactored the queue store.", suggestion: "Add a migration test." });
@@ -263,6 +264,19 @@ test("assist service: passive post-turn metadata settles without cancelling gene
   h.bumpSeq("usage/recorded");
   h.bumpSeq("session/metadata-changed");
   await sleep(180);
+  assert.equal(h.completes.length, 1);
+  assert.equal(h.saves.length, 1);
+  assert.equal(h.saves[0]!.assist.atSeq, 12);
+  h.svc.stop();
+});
+
+test("assist service: passive metadata DURING generation is absorbed into the freshness anchor", async () => {
+  const h = serviceHarness({ idleSeconds: 0.02, completeDelayMs: 250 });
+  h.svc.onTurnCompleted("s1");
+  await sleep(120);
+  h.bumpSeq("usage/recorded");
+  h.bumpSeq("goal/audit");
+  await sleep(400);
   assert.equal(h.completes.length, 1);
   assert.equal(h.saves.length, 1);
   assert.equal(h.saves[0]!.assist.atSeq, 12);
