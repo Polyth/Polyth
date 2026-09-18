@@ -304,3 +304,16 @@ test("a live thought reveals expanded, types out, then folds when formed", () =>
   assert.match(timeline, /function reasoningSeen\(text: string\): boolean/);
   assert.match(timeline, /if \(fresh && !typing\) revealedReasoning\.add\(source\);/);
 });
+
+
+test("idle recap assist stays mounted at the transcript tail with usable chrome", () => {
+  const timeline = read("../src/components/Timeline.tsx");
+  const assist = read("../src/components/AssistStrip.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(timeline, /import AssistStrip from "\.\/AssistStrip\.tsx";/);
+  assert.match(timeline, /\{model\.workflowRun && <WorkflowTimelineCard run=\{model\.workflowRun\} \/>\}\s*<AssistStrip \/>/);
+  assert.match(assist, /assist\.atSeq !== lastSeq/);
+  assert.match(css, /\.assist-strip\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/s);
+  assert.match(css, /\.assist-chip\s*\{[^}]*min-height:\s*var\(--tap\);/s);
+});
