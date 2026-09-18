@@ -1,8 +1,12 @@
-export interface RecapLifecycleService {
-  active(): boolean;
-}
-
-export interface RecapEngineService {
-  activate(): void;
-  stop(): void;
-}
+export {
+  buildRecapPrompt,
+  capWords,
+  createRecapService,
+  createRecapSettings,
+  isFresh,
+  parseRecapReply,
+  RECAP_MAX_WORDS,
+  type RecapService,
+  type RecapSettings,
+  type RecapSettingsService,
+} from "./recap.ts";
