@@ -1,6 +1,6 @@
 // F9 routes: idle-assist settings (the hard token-spend switch), the freshness-
 // checked assist read, and chat→note distillation. The assist itself lives on
-// the projection; this route answers 404 the moment the log outgrows it.
+// the projection; this route answers 404 once conversation activity moves past it.
 import type { SessionAssist, SessionProjection, SpaceContext } from "@polyth/contracts";
 import type { RouteHandler } from "../http.ts";
 import { isFresh, type AssistSettingsService } from "../assist.ts";
