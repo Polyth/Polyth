@@ -85,11 +85,14 @@ export function createRuntimeCatalog(deps: {
   projects: ProjectService;
   runtimes: RuntimePool;
   onModelsInvalidated?(): void;
+  filterModels?(models: ModelDescriptor[]): ModelDescriptor[];
 }): RuntimeCatalog {
   let models: ModelDescriptor[] | undefined;
   let agents: AgentDescriptor[] | undefined;
   let pending: Promise<CatalogSnapshot> | undefined;
   let modelEpoch = 0;
+  const visibleModels = (items: ModelDescriptor[]): ModelDescriptor[] =>
+    deps.filterModels?.(items) ?? items;
 
   const loadFallback = (): Promise<CatalogSnapshot> => aggregateRuntimes(
     deps,
@@ -123,7 +126,7 @@ export function createRuntimeCatalog(deps: {
       snapshot.agents.map((agent) => [agent.harnessId, agent.name]),
     ]),
   ).then(({ items }) => ({
-    models: dedupeModels(items.flatMap((item) => item.models)),
+    models: visibleModels(dedupeModels(items.flatMap((item) => item.models))),
     agents: dedupeAgents(items.flatMap((item) => item.agents)),
     modelsOk: items.some((item) => item.modelsOk),
     agentsOk: items.some((item) => item.agentsOk),
@@ -155,7 +158,8 @@ export function createRuntimeCatalog(deps: {
       }));
       const fulfilled = detailed.flatMap((result) =>
         result.status === "fulfilled" ? [result.value] : []);
-      const data = snapshotCatalog(fulfilled);
+      const discovered = snapshotCatalog(fulfilled);
+      const data = { ...discovered, models: visibleModels(discovered.models) };
       const complete = enabled.length === 0
         || (fulfilled.length === enabled.length && fulfilled.every(authoritativeDetail));
       // A non-empty partial snapshot is useful and safe to keep as a fallback.
