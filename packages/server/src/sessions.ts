@@ -8259,9 +8259,13 @@ export function createSessionService(deps: {
             const exclusiveIsolationSource = projection.isolation?.kind === "git-worktree"
               && resolve(projection.isolation.worktreePath) === resolve(binding.location.directory)
               && !siblingUsesSource;
-            let outcome = !oldRuntime && exclusiveIsolationSource
+            let outcome = exclusiveIsolationSource
               ? await runtimes.releaseSessionExecution?.(projection, binding, operationId)
               : undefined;
+            if (outcome?.kind === "rejected"
+              && (outcome.code === "unsupported" || outcome.code === "not-found")) {
+              outcome = undefined;
+            }
             if (!outcome) {
               const attached = await runtimeAttachedForRelease(sessionId, projection, previousCwd);
               oldRuntime = attached.runtime;
