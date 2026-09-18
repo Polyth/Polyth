@@ -2307,7 +2307,8 @@ export async function boot(opts: BootOptions = {}) {
 
   // --- F9 idle assist: after N quiet seconds past turn/stopped, a small-model
   // recap + ONE suggestion lands on the projection (never the event log) keyed
-  // to the log tail seq — any newer event makes it stale. Hard off by default.
+  // to a settled raw tail; only newer conversation activity makes it stale.
+  // Passive telemetry/title/goal/isolation bookkeeping is ignored. Hard off by default.
   const assistSettings = createAssistSettings({ file: `${dataDir}/assist.json` });
   const assistLatestSeq = async (sessionId: string): Promise<number> =>
     assistFreshnessSeq(await store.events(sessionId));
