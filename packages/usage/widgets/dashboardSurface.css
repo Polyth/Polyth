@@ -270,6 +270,10 @@
   font: 650 var(--font-label)/1.2 var(--mono);
 }
 
+.usage-provider-detail-stats.has-plan {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .usage-provider-windows {
   gap: var(--space-3);
 }
