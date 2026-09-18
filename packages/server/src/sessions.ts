@@ -7907,9 +7907,14 @@ export function createSessionService(deps: {
                   String(binding.generation),
                   binding.backendSessionId,
                 ].join(":");
-                const outcome = rt?.releaseExecution
-                  ? await boundedRuntimeAwait(rt.releaseExecution(binding, operationId), operationId)
-                  : await runtimes.releaseSessionExecution?.(proj, binding, operationId);
+                let outcome = await runtimes.releaseSessionExecution?.(proj, binding, operationId);
+                if (outcome?.kind === "rejected"
+                  && (outcome.code === "unsupported" || outcome.code === "not-found")) {
+                  outcome = undefined;
+                }
+                if (!outcome && rt?.releaseExecution) {
+                  outcome = await boundedRuntimeAwait(rt.releaseExecution(binding, operationId), operationId);
+                }
                 if (!outcome) {
                   throw Object.assign(new Error("the current harness cannot prove workspace release"), {
                     code: "unsupported",
