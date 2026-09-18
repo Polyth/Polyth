@@ -1586,6 +1586,7 @@ export const uk: AppMessages = {
   "settings.widgetspage.undo": "Скасувати",
   "settingsview.about": "Про застосунок",
   "settingsview.access": "Доступ",
+  "settingsview.users": "Користувачі",
   "settingsview.appearance": "Зовнішній вигляд",
   "settingsview.backToSettings": "Назад до налаштувань",
   "settingsview.behavior": "Поведінка",
