@@ -5,9 +5,9 @@ import type { ControlPlane } from "@polyth/control-plane";
 
 const PROFILE_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$/;
 const USER_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$/;
-const recovery = (): never => {
+function recovery(): never {
   throw Object.assign(new Error("Agent Profile ownership requires operator recovery"), { code: "recovery-required" });
-};
+}
 
 function regularFile(path: string): boolean {
   try {
