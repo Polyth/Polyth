@@ -69,26 +69,29 @@ test("idle recap remains mounted at the transcript tail with one current style c
   assert.match(css, /\.assist-dismiss\s*\{[^}]*width:\s*var\(--tap\);[^}]*height:\s*var\(--tap\)/s);
 });
 
-test("spawning is an above-composer activity status and never replaces the composer", () => {
+test("session activity owns spawning, starting, and working while edited files yield", () => {
   const surface = read("../src/components/workspace/builtinSurfaces.tsx");
   const composer = read("../src/components/Composer.tsx");
   const pendingChanges = read("../../../packages/git/widgets/PendingChangesBar.tsx");
 
-  assert.match(surface, /function SessionSpawnStatus\(\{[\s\S]*spawningAgent[\s\S]*<AgentStatusDock/);
-  // A submitted prompt owns the same zone until its turn is real; the dock
-  // stays a passive status (no onClick) in both cases.
-  assert.match(surface, /startingTurn[\s\S]*<AgentStatusDock/);
-  assert.match(surface, /const pendingSends = usePendingSends\(sessionId\)/);
-  assert.match(surface, /awaitingTurn = pendingSends\.length > 0 && model\.turn\?\.status !== "working"/);
-  assert.match(surface, /spawning \|\| pendingSends\.length > 0/);
-  assert.match(surface, /pendingModel/);
-  assert.match(surface, /ProviderLogo providerID=\{harnessId\}[\s\S]*model=\{harnessLabel\}/);
+  assert.match(surface, /function SessionActivityStatus\(\{ spawning \}/);
+  assert.match(surface, /spawningAgent[\s\S]*startingTurn[\s\S]*<AgentStatusDock/);
+  assert.match(surface, /model\.turn\?\.status === "working" \|\| sessionRecord\?\.status === "working"/);
+  assert.match(surface, /activeTask\?\.text/);
+  assert.match(surface, /activeSubagent\?\.currentTask/);
+  assert.match(surface, /toggleSessionStatusPopover/);
+  assert.match(surface, /\(spawning \|\| awaitingTurn \|\| working\) && \(\s*<SessionActivityStatus/);
+  assert.match(
+    surface,
+    /slot="session\.footer"[\s\S]*<SessionActivityStatus[\s\S]*<Composer \/>/,
+    "edited files render before the single activity owner, which replaces them while active",
+  );
+
   assert.match(pendingChanges, /const spawning = useStore\(isActiveSessionSpawning\)/);
-  assert.match(pendingChanges, /const awaitingTurn = pendingSends\.length > 0 && !working/);
-  const liveActivity = pendingChanges.indexOf("if (working) {");
-  const hideEditedFiles = pendingChanges.indexOf("if (spawning || awaitingTurn) return null;");
-  assert.ok(liveActivity >= 0 && hideEditedFiles > liveActivity,
-    "live agent activity must win before edited-files suppression");
+  assert.match(pendingChanges, /model\.turn\?\.status === "working" \|\| sessionRecord\?\.status === "working"/);
+  assert.match(pendingChanges, /if \(working \|\| spawning \|\| awaitingTurn\) return null/);
+  assert.doesNotMatch(pendingChanges, /AgentStatusDock|activeTask|activeSubagent|toggleSessionStatusPopover/);
+
   assert.match(composer, /immediateFollowUpDelivery/);
   assert.match(composer, /beginPendingSend\(\{/);
   assert.doesNotMatch(composer, /if \(creatingSession\)\s*\{\s*return/);
@@ -286,14 +289,14 @@ test("task plans collapse like other agent actions", () => {
   assert.match(css, /\.task-list li\.active\s*\{[^}]*background:\s*var\(--accent-wash\)/s);
 });
 
-test("task plans remain represented by the status surfaces", () => {
-  const pendingChanges = read("../../../packages/git/widgets/PendingChangesBar.tsx");
-  assert.match(pendingChanges, /const activeTask = model\.tasks\?\.items\.find/);
-  assert.match(pendingChanges, /activeTask\?\.text/);
-  assert.match(pendingChanges, /pendingSend\?\.model/);
-  assert.match(pendingChanges, /replacingTurn/);
-  assert.match(pendingChanges, /toggleSessionStatusPopover\(event\.currentTarget\)/);
-  assert.doesNotMatch(pendingChanges, /openWorkspacePane\("events"\)/);
+test("task plans remain represented by the session activity surface", () => {
+  const surface = read("../src/components/workspace/builtinSurfaces.tsx");
+  assert.match(surface, /const activeTask = model\.tasks\?\.items\.find/);
+  assert.match(surface, /activeTask\?\.text/);
+  assert.match(surface, /pendingSend\?\.model/);
+  assert.match(surface, /replacingTurn/);
+  assert.match(surface, /toggleSessionStatusPopover/);
+  assert.doesNotMatch(surface, /openWorkspacePane\("events"\)/);
 });
 
 test("todowrite details use the same task presentation instead of raw input", () => {
