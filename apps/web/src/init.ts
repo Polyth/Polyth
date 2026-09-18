@@ -30,6 +30,12 @@ import { hydrateLocalMutationIntent, reconcileLocalMutationIntent, submitDirectP
 import { isNativeMobile, isPolythLinkLoopbackOrigin, returnToMobileConnectionHub } from "@polyth/mobile/runtime";
 import { scopedDraftCacheKey } from "./draftRecord.ts";
 import { initProjectPresentationSync } from "./projectPresentationSync.ts";
+import {
+  peekPersistedRuntimeAgents,
+  peekPersistedRuntimeModels,
+  rememberPersistedRuntimeAgents,
+  rememberPersistedRuntimeModels,
+} from "@polyth/models/runtime-catalog";
 
 let sync: SyncClient | null = null;
 let syncStatus: SyncStatus = "disconnected";
@@ -92,9 +98,16 @@ function handleProjectionUpdate(incoming: SessionProjection): void {
 
 function hydrateRuntimeCatalog(): void {
   if (runtimeCatalogHydrated) return;
+  const projectId = store.getState().activeProjectId;
+  if (!projectId) return;
   runtimeCatalogHydrated = true;
-  void refreshModels();
-  void refreshAgents();
+
+  const cachedModels = peekPersistedRuntimeModels(projectId);
+  const cachedAgents = peekPersistedRuntimeAgents(projectId);
+  if (cachedModels !== undefined) store.setModels(cachedModels);
+  else void refreshModels(projectId);
+  if (cachedAgents !== undefined) store.setAgents(cachedAgents);
+  else void refreshAgents(projectId);
 }
 
 function deferRuntimeCatalogUntilInteraction(): void {
@@ -371,7 +384,10 @@ export function init(): Promise<void> {
         if (store.getState().activeProjectId) hydrateRuntimeCatalog();
       });
   } else {
-    hydrateRuntimeCatalog();
+    // Browser boot waits for the restored project identity so the persisted
+    // aggregate catalog is Space-safe and can be reused without an HTTP probe.
+    runtimeCatalogPolicy = "project";
+    if (store.getState().activeProjectId) hydrateRuntimeCatalog();
   }
   startSync();
   // Shared client preferences: pull the server copy, then mirror local edits
@@ -553,8 +569,8 @@ export function recheckRuntimeCatalog(): void {
 
 let modelsFetchInFlight = false;
 
-async function refreshModels(): Promise<void> {
-  if (modelsFetchInFlight) return;
+async function refreshModels(projectId = store.getState().activeProjectId ?? undefined): Promise<void> {
+  if (!projectId || modelsFetchInFlight) return;
   modelsFetchInFlight = true;
   const controller = new AbortController();
   modelFetchAbort = controller;
@@ -563,6 +579,7 @@ async function refreshModels(): Promise<void> {
     const models = await api.listModels(controller.signal);
     store.setModels(models);
     if (models.length > 0) {
+      rememberPersistedRuntimeModels(projectId, models);
       if (modelRetryTimer !== undefined) clearTimeout(modelRetryTimer);
       modelRetryTimer = undefined;
       modelRetryDelay = MODEL_RETRY_BASE_MS;
@@ -601,9 +618,12 @@ async function refreshRuntimeDiagnostics(): Promise<void> {
   }
 }
 
-async function refreshAgents(): Promise<void> {
+async function refreshAgents(projectId = store.getState().activeProjectId ?? undefined): Promise<void> {
+  if (!projectId) return;
   try {
-    store.setAgents(await api.listAgents());
+    const agents = await api.listAgents();
+    store.setAgents(agents);
+    rememberPersistedRuntimeAgents(projectId, agents);
   } catch (err) {
     console.error("list agents failed", err);
   }
