@@ -37,6 +37,8 @@ export type {
   ProviderCapabilities,
   ProviderConfiguration,
   ProviderNetworkBroker,
+  ProviderNetworkRequest,
+  ProviderNetworkResponse,
   ProviderPurpose,
   ProviderSecretBroker,
   ProviderTransactionStart,
