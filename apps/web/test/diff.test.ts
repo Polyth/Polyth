@@ -45,6 +45,24 @@ test("unifiedDiff separates two distant changes into two hunks", () => {
   assert.equal(hunkCount, 2);
 });
 
+test("unifiedDiff keeps distant edits in a large file localized", () => {
+  const oldLines = Array.from({ length: 9_000 }, (_, i) => `line ${i}`);
+  const newLines = [...oldLines];
+  newLines[100] = "changed 100";
+  newLines[8_900] = "changed 8900";
+  const oldText = `${oldLines.join("\n")}\n`;
+  const newText = `${newLines.join("\n")}\n`;
+  const diff = unifiedDiff(oldText, newText, "large.ts");
+
+  assert.deepEqual(fileDiffStat(diff), { add: 2, del: 2 });
+  assert.equal(diff.split("\n").filter((line) => line.startsWith("@@")).length, 2);
+  assert.deepEqual(revertUnifiedDiff(newText, diff), {
+    ok: true,
+    action: "write",
+    content: oldText,
+  });
+});
+
 test("parseDiffRows assigns old and new source line numbers", () => {
   const rows = parseDiffRows([
     "--- a/foo.ts",
