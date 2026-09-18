@@ -49,12 +49,14 @@ test("revoke A leaves B connected and failed host trust mutation is not success"
   const store = createTunnelStore(join(tmp(), "tunnel.db"));
   const events = new TunnelEventBus();
   const a = store.commitDevice({
+    ownerUserId: SPACE.userId,
     endpointId: "aa".repeat(32),
     label: "Phone A",
     grants: grantsForProfile("interact"),
     pairedVia: "polyth-link",
   });
   const b = store.commitDevice({
+    ownerUserId: SPACE.userId,
     endpointId: "bb".repeat(32),
     label: "Phone B",
     grants: grantsForProfile("interact"),
@@ -129,6 +131,7 @@ test("revoke A leaves B connected and failed host trust mutation is not success"
   assert.equal(hostCalls.some((call) => call.method === "trust.revoke" && call.params.deviceId === a.id), true);
 
   store.commitDevice({
+    ownerUserId: SPACE.userId,
     endpointId: "cc".repeat(32),
     label: "Fail",
     grants: grantsForProfile("observe"),
@@ -158,12 +161,14 @@ test("grant update A does not notify B and restore permits reconnect metadata", 
   const store = createTunnelStore(join(tmp(), "tunnel.db"));
   const events = new TunnelEventBus();
   const a = store.commitDevice({
+    ownerUserId: SPACE.userId,
     endpointId: "aa".repeat(32),
     label: "Phone A",
     grants: grantsForProfile("developer"),
     pairedVia: "polyth-link",
   });
   const b = store.commitDevice({
+    ownerUserId: SPACE.userId,
     endpointId: "bb".repeat(32),
     label: "Phone B",
     grants: grantsForProfile("developer"),

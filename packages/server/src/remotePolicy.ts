@@ -122,7 +122,7 @@ export function validateRemoteAccessPolicy(
 
 export const CORE_REMOTE_ACCESS: RemoteAccessPolicy = {
   routeScopes: [
-    "agents", "auth", "core", "folders", "health", "labels", "models", "notifications",
+    "agents", "auth", "core", "folders", "health", "labels", "models", "native-push", "notifications",
     "packages", "projects", "providers", "runtime", "search", "sessions", "settings",
     "spaces",
   ],

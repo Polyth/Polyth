@@ -1,8 +1,9 @@
 import type { JsonObject, RouteHandler, SessionEvent } from "@polyth/contracts";
 import type {
-  ContributionInvocation,
+  ContributionInvocationDraft,
   ContributionInvocationKind,
   PackageJsonObject,
+  PackageJsonValue,
 } from "@polyth/package-sdk";
 import type { PackageManifest, PackageManifestV2 } from "@polyth/package-sdk/manifest";
 import type { PluginRegistry } from "./managedRegistry.ts";
@@ -29,9 +30,9 @@ import { assertOauthTxMatchesActive, consumeOauthTx, oauthRedirectOrigin } from 
 import { notFound, optionalSecretVault, secretVault } from "./pluginRouteShared.ts";
 import { withInitialPermissionReview } from "./managedPluginReview.ts";
 
-const fail = (code: string, message: string): never => {
+function fail(code: string, message: string): never {
   throw Object.assign(new Error(message), { code });
-};
+}
 
 const invocationKinds = new Set<ContributionInvocationKind>([
   "composer-action",
@@ -136,7 +137,7 @@ function canonicalTool(event: SessionEvent): {
   callId: string;
   name: string;
   input?: PackageJsonObject;
-  output?: unknown;
+  output?: PackageJsonValue;
   error?: string;
 } {
   if (event.type !== "tool/call" && event.type !== "tool/result" && event.type !== "tool/error") {
@@ -148,7 +149,7 @@ function canonicalTool(event: SessionEvent): {
   if (!callId || !name) fail("invalid-input", "canonical tool target is incomplete");
   const input = boundedObject(data.input, 16 * 1024);
   const output = event.type === "tool/result" && data.output !== undefined
-    ? JSON.parse(JSON.stringify(data.output))
+    ? JSON.parse(JSON.stringify(data.output)) as PackageJsonValue
     : undefined;
   return {
     callId,
@@ -169,7 +170,7 @@ async function buildInvocation(input: {
   sessionId?: string;
   projectId?: string;
   host: ServerPackageHost;
-}): Promise<Omit<ContributionInvocation, "invocationId" | "lease" | "expiresAt" | "spaceId">> {
+}): Promise<ContributionInvocationDraft> {
   const contribution = contributionOf(input.manifest, input.kind, input.contributionId);
   if (!contribution) fail("not-found", "extension contribution is not declared");
   const base = {

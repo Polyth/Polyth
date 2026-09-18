@@ -3,6 +3,7 @@ import {
   parseContributionCompletion,
   type ContributionCompletion,
   type ContributionInvocation,
+  type ContributionInvocationDraft,
   type ContributionInvocationKind,
 } from "@polyth/package-sdk";
 
@@ -34,7 +35,7 @@ interface LeaseRecord extends InvocationLeaseIdentity {
 }
 
 export interface InvocationLeaseStore {
-  issue(identity: InvocationLeaseIdentity, invocation: Omit<ContributionInvocation, "invocationId" | "lease" | "expiresAt" | "spaceId">): ContributionInvocation;
+  issue(identity: InvocationLeaseIdentity, invocation: ContributionInvocationDraft): ContributionInvocation;
   authorize(input: InvocationLeaseIdentity & { invocationId: string; lease: string }): Readonly<LeaseRecord>;
   complete(identity: InvocationLeaseIdentity, completion: ContributionCompletion): Readonly<LeaseRecord>;
   revokePackage(packageId: string): void;
