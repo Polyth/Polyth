@@ -519,6 +519,9 @@ export interface WebPackageHost {
   };
   sessions: {
     upsert(session: SessionProjection): void;
+    get(sessionId: string): SessionProjection | undefined;
+    events(sessionId: string): readonly SessionEvent[];
+    subscribe(listener: () => void): Unregister;
     /** Observe newly ingested canonical events. Events are delivered after
      * the host store accepts them and are never a substitute for durable
      * session history. Package UI uses this for presentation-only reactions
