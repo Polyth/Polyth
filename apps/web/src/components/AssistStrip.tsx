@@ -21,7 +21,7 @@ export default function AssistStrip() {
   const [, bump] = useState(0);
 
   if (!sessionId || !assist) return null;
-  if (assist.atSeq !== freshnessSeq) return null; // stale: the conversation moved on
+  if (freshnessSeq > assist.atSeq) return null; // stale: the conversation moved on
   const key = `${sessionId}:${assist.atSeq}`;
   if (dismissed.has(key)) return null;
 
