@@ -32,16 +32,18 @@ function SurfaceBody({
   surface,
   visible,
   projectId,
+  sessionId,
 }: {
   surface: WorkbenchSurfaceInfo;
   visible: boolean;
   projectId: string | null;
+  sessionId: string | null;
 }): ReactNode {
   const registry = useStore((s) => s.projectRegistry);
   const Body = surface.component;
   const body = !surface.contextual && projectId === null
     ? <ProjectEmptyState registry={registry} />
-    : <Body active={visible} />;
+    : <Body active={visible} projectId={projectId} sessionId={sessionId} />;
   return (
     <PackageWindowContext.Provider value={surface.id}>
       <PaneVisibilityContext.Provider value={visible}>
@@ -55,6 +57,7 @@ function SurfaceBody({
 
 export default function SurfaceMountLayer({ placed, visible, surfaces }: SurfaceMountLayerProps) {
   const projectId = useStore(workspaceProjectId);
+  const sessionId = useStore((s) => s.activeSessionId);
   const vaultRef = useRef<HTMLDivElement>(null);
   const previousKept = useRef<string[]>([]);
 
@@ -84,7 +87,7 @@ export default function SurfaceMountLayer({ placed, visible, surfaces }: Surface
     <>
       <div ref={vaultRef} className="wb-surface-vault" hidden inert aria-hidden="true" />
       {kept.map((surface) => createPortal(
-        <SurfaceBody surface={surface} visible={visible.has(surface.id)} projectId={projectId} />,
+        <SurfaceBody surface={surface} visible={visible.has(surface.id)} projectId={projectId} sessionId={sessionId} />,
         surfaceMountNode(surface.id),
         surface.id,
       ))}
