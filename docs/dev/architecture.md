@@ -19,7 +19,7 @@ One-minute map for a new agent; everything after this section is the deep refere
   `capabilities.ts`, `settings/registry.ts`)
   and renders contributions through `SlotHost`/surface hosts — never edit
   `App.tsx`/`Main.tsx` for a feature. Full guide: `docs/dev/ui.md`.
-- **Feature packages** (one directory each under `packages/`): permissions, goals, files, editor, git, commands, terminal, multirun, fusion, walkthrough, schedule, knowledge, github, usage, browser, dictation, models, hotkeys, plugins, ssh, secure-safe, home-assistant, task-trackers, workflow, example-feature.
+- **Feature packages** (one directory each under `packages/`): permissions, goals, files, editor, git, commands, terminal, multirun, fusion, walkthrough, schedule, knowledge, github, usage, browser, dictation, models, hotkeys, plugins, ssh, secure-safe, home-assistant, personal-coach, recap, task-trackers, workflow, example-feature.
 - **Conventions:** erasable TS on Node >= 22.14 (type stripping; no
   enums/namespaces/parameter properties), explicit `.ts` on local imports,
   `@polyth/*` workspace imports, `node --test` + `node:assert`. Full rules: `/AGENTS.md`. Feature workflow: `docs/dev/README.md`. Feature status: `docs/parity/polyth-parity.yaml`.
@@ -50,6 +50,8 @@ packages/session (node:sqlite WAL: events + projections + queue/org/profiles)
 | `backend-opencode` | The only OpenCode integration point. Spawns/attaches `opencode serve`, translates its SSE into `RuntimeEvent`s, maps canonical session ids ↔ backend ids, applies behavior/MCP config (`createConfigApplier`), imports pre-existing OpenCode sessions, snapshots task/subagent state as revisioned events. |
 | `permissions` | Monotonic fail-closed rule engine; scopes user/project/session; deny beats allow; "always" persists a rule at the chosen scope. |
 | `goals` | Objective attach/audit loop: small-model auditor verdicts (`keep`/`done`/`stuck`), budgets, auto-continuation, pause/resume; rehydrates from the event log after restart. |
+| `recap` | Optional idle-session recap + grounded next-step suggestion. Disabled by default; owns its generation lifecycle, quiet-time settings, freshness-checked read route, and timeline/settings UI. |
+| `personal-coach` | Optional durable goals, commitments, routines, and coaching state. Disabled by default. |
 | `files` | Path-jailed file service: tree/stat/read (revision = mtime+size), revision-guarded `write` (stale `baseRevision` → `conflict`), binary-overwrite refusal, mkdir/rename/delete/upload, scored file search (shared with palette + mentions). Explorer + file `ResourceProvider`; does not own CodeMirror. |
 | `editor` | Sole CodeMirror 6 owner: one `EditorView` per visible group, `EditorState` retained per tab, honest language grammars (JS/JSX/TS/TSX/JSON/YAML/Markdown). Registers Authoring and Development workbench profiles. |
 | `git` | Porcelain wrapper: status/diff/show/stage/unstage/discard/commit/log/graph/branches/checkout/stash/fetch/pull/push/worktrees, diffHead/diffRange for review flows. Session-scoped Git routes resolve an owned worktree cwd server-side. |
@@ -69,6 +71,8 @@ packages/session (node:sqlite WAL: events + projections + queue/org/profiles)
 | `hotkeys` | Keymap model: default bindings, user overrides, conflict detection, sequence matching. |
 | `plugins` | Installed-plugin registry (install/enable/disable from dir sources, trust classes, contribution manifests). |
 | `server` | Composition root + everything HTTP/WS: see below. |
+
+Fresh installs default `recap`, `fusion`, `home-assistant`, `knowledge`, `multirun`, `personal-coach`, and `walkthrough` to disabled. Persisted package choices remain authoritative after an upgrade.
 
 `apps/web` is the host shell of the single React UI implementation: React 19,
 bundled by `apps/web/build.ts` (esbuild), served statically by the server with
@@ -135,8 +139,7 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
   agent control (`/api/agent`: complete discoverable session control plus backend
   session browse/import), snippets, profiles
   (agent profiles + model/agent aggregation), settings (behavior/MCP/plugins/system info),
-  voice (engine settings + TTS proxy + summarize), assist (F9 settings + recap
-  read + chat→note), auth (F16 status/login/logout/logout-all/device sessions),
+  voice (engine settings + TTS proxy + summarize), assist (explicit prompt/suggestion/chat→note/task-brief actions; idle recap settings/read live in `packages/recap`), auth (F16 status/login/logout/logout-all/device sessions),
   autoAccept (F18 per-session policy GET/PATCH), push (F18 key/subscribe/test), goals.
 - `behavior.ts` / `mcp.ts` — server-owned behavior instructions (`behavior.md`) and MCP
   server config (`mcp.json`), applied to OpenCode through the adapter's config applier.
@@ -151,13 +154,13 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
   but nothing structurally prevents it.
 - `oneshot.ts` — single-turn utility completion on a runtime (used by goals auditor,
   commit messages, fusion synthesis, walkthrough generation).
-- `assist.ts` (F9) — idle assist watcher: N quiet seconds after `turn/stopped` the
-  small model writes a ≤20-word recap + ONE suggested follow-up, stored on the
-  projection keyed to a settled raw log tail (never the event log — not
-  model-visible until the user sends it). Passive post-turn bookkeeping is
-  ignored for freshness; newer conversation activity makes it stale. Hard
-  off-by-default switch in `data/assist.json`; one flight per session. The same seam distills
-  chat→note drafts.
+- `assist.ts` — explicit small-model composer suggestion, prompt-rewrite, and
+  chat→note helpers. It does not schedule background model work.
+- `packages/recap` (F9) — optional, disabled-by-default idle watcher. While the
+  package is enabled it subscribes to the neutral server turn-completion bus,
+  waits for the configured quiet period, then writes a ≤20-word recap + at most
+  one grounded follow-up to the projection. Disabling the package unsubscribes
+  the watcher and clears pending timers.
 
 ## REST surface
 
@@ -195,9 +198,8 @@ bridge exists), `/api/plugins` (+install), `/api/system/info`,
 (proxy to the configured OpenAI-compatible `/audio/speech`, buffered audio back, only
 standard fields forwarded, honest 503 when unconfigured), `/api/tts/summarize`
 (small-model shortening for read-aloud; 503 when no small model is wired),
-`/api/settings/assist` (GET/PUT the F9 hard switch + quiet time),
-`/api/sessions/:id/assist` (freshness-checked recap+suggestion — 404 `stale`
-once conversation activity moves past it), `/api/sessions/:id/assist/note` (small-model chat→note
+`/api/settings/assist` (Recap-package quiet-time settings; route exists only while Recap is enabled),
+`/api/sessions/:id/assist` (Recap-package freshness-checked recap+suggestion — 404 `stale` once conversation activity moves past it), `/api/sessions/:id/assist/note` (small-model chat→note
 DRAFT; saving goes through the normal `/api/knowledge` flow),
 `/api/auth/*` (F16: GET `status {required, authorized}` and POST `login {password}`
 are the only public `/api` paths — login mints an httpOnly SameSite=Strict
@@ -341,8 +343,7 @@ ignored by the web reducer (never crash).
   issue/PR as the composer draft; merge is gated on `mergeable` + explicit
   confirm; `PrCreatePanel` in GitView prefills via describe but never
   auto-submits),
-  `AssistStrip` (F9: fresh recap under the last message + a dismissible
-  suggestion chip that fills the composer and never sends),
+  `packages/recap/widgets/RecapStrip` (F9: package-owned fresh recap under the last message + a dismissible suggestion chip that fills the composer and never sends),
   `ScheduleView`, `GoalsView`/`GoalStrip`, `TracksPanel` (Knowledge package
   contribution through `workspace.right.tabs`), `MultiRunView`, `FusionView`,
   `WalkthroughView`/`GeneratedWalkthrough`, `PreviewView` (iframe + browser driving,
