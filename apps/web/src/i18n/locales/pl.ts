@@ -1586,6 +1586,7 @@ export const pl: AppMessages = {
   "settings.widgetspage.undo": "Anulować",
   "settingsview.about": "O aplikacji",
   "settingsview.access": "Dostęp",
+  "settingsview.users": "Użytkownicy",
   "settingsview.appearance": "Wygląd",
   "settingsview.backToSettings": "Powrót do ustawień",
   "settingsview.behavior": "Zachowanie",
