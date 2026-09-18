@@ -55,6 +55,11 @@ test("background and glass controls are wired into Appearance and the held-Shift
     /html\[data-background\]:not\(\[data-background="none"\]\) body,\s*html\[data-background\]:not\(\[data-background="none"\]\) \.app\s*\{[^}]*background-color:\s*transparent;[^}]*background-image:\s*none;/s,
     "the app canvas lets the root background continue through the safe area",
   );
+  assert.match(
+    styles,
+    /\.stage-new\s*\{[^}]*background:\s*transparent;/s,
+    "New Chat must not cover the selected workspace background with an opaque stage",
+  );
   assert.match(styles, /backdrop-filter:\s*blur\(var\(--material-glass-blur\)\)\s*saturate\(var\(--material-glass-saturation\)\)/);
   assert.doesNotMatch(styles, /prefers-reduced-motion:\s*no-preference[\s\S]{0,1200}data-glass/);
 });
