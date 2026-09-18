@@ -23,7 +23,7 @@ export const MODEL_PREFS_KEY = "polyth.modelPrefs";
 
 export const modelKey = (m: ModelLike): string => `${m.harnessId ? `${m.harnessId}::` : ""}${m.providerID}/${m.modelID}`;
 export const providerPreferenceKey = (harnessId: string | undefined, providerId: string): string =>
-  `${harnessId || "opencode"}::${providerId}`;
+  providerId.includes("::") ? providerId : `${harnessId || "opencode"}::${providerId}`;
 
 export function defaultModelPrefs(): ModelPrefs {
   return { favorites: [], sort: "provider", recents: [], providerOrder: [], expandedProviders: [] };
