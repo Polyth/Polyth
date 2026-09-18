@@ -1,6 +1,30 @@
 import type { SessionEvent } from "@polyth/contracts";
 import { effectiveHistory, recoveredUserText } from "./history.ts";
 
+/**
+ * Stable revision for idle recap/suggestion freshness.
+ *
+ * Post-turn bookkeeping is deliberately ignored: usage, goal/isolation
+ * updates, title metadata, compaction markers, and other ignorable system
+ * events must not make a freshly completed conversation look active again.
+ * Real conversation movement still invalidates immediately through visible
+ * events, turn lifecycle, and explicit rewind operations.
+ */
+export function assistFreshnessSeq(events: readonly SessionEvent[]): number {
+  let latest = 0;
+  for (const event of events) {
+    const interactiveIgnorable =
+      event.type.startsWith("turn/")
+      || event.type.startsWith("permission/")
+      || event.type.startsWith("question/")
+      || event.type.startsWith("secret/")
+      || event.type === "session/rewound"
+      || event.type === "session/rewind-cleared";
+    if (!event.ignorable || interactiveIgnorable) latest = Math.max(latest, event.seq);
+  }
+  return latest;
+}
+
 /** The two textual messages that form the latest finished user → assistant turn. */
 export interface CompletedExchange {
   user: string;
