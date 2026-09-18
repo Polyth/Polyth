@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { HarnessSnapshot, ModelDescriptor } from "@polyth/contracts";
 import { isFavorite, modelKey } from "@polyth/models";
 import { createApiTransport } from "@polyth/web-sdk";
@@ -109,6 +109,7 @@ export default function HarnessModelsPage({
   const [visibility, setVisibility] = useState<HarnessVisibilityDto | null>(null);
   const [queries, setQueries] = useState<Record<string, string>>({});
   const [busyKey, setBusyKey] = useState("");
+  const busyRef = useRef(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
 
@@ -153,8 +154,9 @@ export default function HarnessModelsPage({
     optimistic: (state: HarnessVisibilityDto) => HarnessVisibilityDto,
     run: () => Promise<HarnessVisibilityDto>,
   ) => {
-    if (!visibility || busyKey) return;
+    if (!visibility || busyRef.current) return;
     const before = visibility;
+    busyRef.current = true;
     setBusyKey(key);
     setError("");
     setVisibility(optimistic(before));
@@ -164,6 +166,7 @@ export default function HarnessModelsPage({
       setVisibility(before);
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
+      busyRef.current = false;
       setBusyKey("");
     }
   };
