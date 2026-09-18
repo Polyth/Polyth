@@ -120,7 +120,7 @@ test("header badge is passive status only with no mutation controls", async () =
   }
 });
 
-test("changes-ready shows integrate, review, continue and delete in overflow", async () => {
+test("changes-ready shows integrate, review and delete in overflow without a continue action", async () => {
   const originalStatus = api.isolationStatus;
   const originalDiscard = api.isolationDiscard;
   const isolation: SessionIsolation = { ...base, state: "merge-ready" };
@@ -137,11 +137,9 @@ test("changes-ready shows integrate, review, continue and delete in overflow", a
     assert.ok(text.includes(tr("isolation.basedOn", { branch: base.targetBranch })));
     const integrate = buttons(mounted.container).find((b) => b.textContent === tr("isolation.integrateInto", { branch: base.targetBranch }));
     const review = buttons(mounted.container).find((b) => b.textContent === tr("isolation.reviewChanges"));
-    const keep = buttons(mounted.container).find((b) => b.textContent === tr("isolation.continueWorking"));
     const more = named(mounted.container, tr("common.more"));
     assert.ok(integrate && !integrate.disabled);
     assert.ok(review && !review.disabled);
-    assert.ok(keep && !keep.disabled);
     assert.ok(more);
     await act(async () => { more!.click(); await wait(); });
     const deleteEntry = [...document.querySelectorAll('[role="menuitem"]')]
@@ -161,37 +159,20 @@ test("changes-ready shows integrate, review, continue and delete in overflow", a
   }
 });
 
-test("continue working calls isolationKeep and hides dismissed card", async () => {
+test("changes-ready never exposes the isolation keep mutation as Continue working", async () => {
   const originalStatus = api.isolationStatus;
   const originalKeep = api.isolationKeep;
-  let isolation: SessionIsolation = { ...base, state: "merge-ready" };
-  let suggestion: IsolationStatusDto["suggestion"] = readySuggestion;
+  const isolation: SessionIsolation = { ...base, state: "merge-ready" };
   api.isolationStatus = async () => ({
-    isolation, effectiveState: isolation.state, suggestion,
-    actions: {
-      canReview: suggestion?.eligible === true,
-      canMerge: suggestion?.eligible === true,
-      canKeep: suggestion?.eligible === true,
-      canResolve: false,
-      canDiscard: true,
-      canRecover: false,
-      canAbandon: false,
-    },
+    isolation, effectiveState: isolation.state, suggestion: readySuggestion,
+    actions: { canReview: true, canMerge: true, canKeep: true, canResolve: false, canDiscard: true, canRecover: false, canAbandon: false },
   });
   let kept = 0;
-  api.isolationKeep = async (id) => {
-    kept++;
-    isolation = { ...base, state: "active", dismissedRevision: "rev" };
-    suggestion = { eligible: false, hasChanges: true, targetBranch: "main", targetDirty: false, revision: "rev", reason: "dismissed" };
-    return projection(id, isolation);
-  };
+  api.isolationKeep = async (id) => { kept++; return projection(id, isolation); };
   const mounted = await mount(projection("keep-ui", isolation));
   try {
-    const keep = buttons(mounted.container).find((b) => b.textContent === tr("isolation.continueWorking"));
-    assert.ok(keep);
-    await act(async () => { keep!.click(); await wait(); });
-    assert.equal(kept, 1);
-    assert.equal(mounted.container.querySelector(".isolation-card"), null);
+    assert.equal(buttons(mounted.container).some((b) => b.textContent === tr("isolation.continueWorking")), false);
+    assert.equal(kept, 0);
   } finally {
     await mounted.close();
     api.isolationStatus = originalStatus;
@@ -215,7 +196,7 @@ test("dirty target explains blocked integration without review changes", async (
     assert.equal(buttons(mounted.container).some((b) => b.textContent === tr("isolation.integrateInto", { branch: base.targetBranch }) && !b.disabled), false);
     assert.equal(buttons(mounted.container).some((b) => b.textContent === tr("isolation.reviewChanges")), false);
     assert.ok(buttons(mounted.container).some((b) => b.textContent === tr("gitview.checkAgain")));
-    assert.ok(buttons(mounted.container).some((b) => b.textContent === tr("isolation.continueWorking") && !b.disabled));
+    assert.equal(buttons(mounted.container).some((b) => b.textContent === tr("isolation.continueWorking")), false);
   } finally {
     await mounted.close();
     api.isolationStatus = originalStatus;
