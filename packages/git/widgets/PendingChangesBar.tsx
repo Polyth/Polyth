@@ -4,6 +4,7 @@ import { selectPendingChanges, sessionEditedPaths } from "../../../apps/web/src/
 import {
   isActiveSessionSpawning,
   openChanges,
+  overlaySessionProjection,
   setUiError,
   useActiveModel,
   usePendingSends,
@@ -11,9 +12,14 @@ import {
   workspaceProjectId,
 } from "../../../apps/web/src/store.ts";
 import { friendlyError } from "../../../apps/web/src/settings.ts";
+import { fmtDuration } from "../../../apps/web/src/format.ts";
+import { resolveModelPresentation } from "@polyth/contracts/model-presentation";
 import { api } from "@polyth/session/web-api";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import { toggleSessionStatusPopover } from "../../../apps/web/src/sessionStatusPopover.ts";
+import ProviderLogo from "../../models/widgets/ProviderLogo.tsx";
 import {
+  AgentStatusDock,
   Button,
   ChevronDownIcon,
   ChevronUpIcon,
@@ -97,6 +103,9 @@ export default function PendingChangesBar() {
     state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null);
   const pendingSends = usePendingSends(sessionRecord?.id ?? null);
   const spawning = useStore(isActiveSessionSpawning);
+  const session = overlaySessionProjection(sessionRecord, pendingSends) ?? null;
+  const pendingSend = pendingSends[pendingSends.length - 1];
+  const models = useStore((state) => state.models);
   const projectId = useStore(workspaceProjectId);
   const repoRoot = useStore((state) => {
     const id = workspaceProjectId(state);
@@ -122,6 +131,15 @@ export default function PendingChangesBar() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [filesExpanded, setFilesExpanded] = useState(false);
   const [undoing, setUndoing] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!working) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [working, model.turn?.startedAt]);
+
   useEffect(() => {
     setFilesExpanded(false);
   }, [changeKey]);
@@ -199,10 +217,76 @@ export default function PendingChangesBar() {
       ? tr("pendingchangesbar.showMoreFile")
       : tr("pendingchangesbar.showMoreFilesValue", { count: overflow });
 
-  // SessionSurface owns Spawning, Starting, and live agent activity. This
-  // widget contributes only the idle edited-files summary, so it yields for
-  // the entire active lifecycle and can never overlap the activity dock.
-  if (working || spawning || awaitingTurn) return null;
+  if (working) {
+    const replacingTurn = pendingSend?.delivery === "interrupt";
+    const modelRef = pendingSend?.model ?? model.turn?.model ?? session?.model;
+    const runtimeHarnessId = model.turn?.harnessId ?? session?.resolvedHarnessId;
+    // ACP runtimes such as Cursor can omit the model from `turn/started` when
+    // native Auto is active. Otherwise use the same harness-aware, human
+    // presentation as completed response footers.
+    const presentation = modelRef
+      ? resolveModelPresentation(modelRef, models, runtimeHarnessId)
+      : { descriptor: undefined, name: tr("composer.auto") };
+    const descriptor = presentation.descriptor;
+    const modelName = presentation.name;
+    const activeTask = model.tasks?.items.find((item) => item.status === "active");
+    const activeSubagent = model.subagents?.agents.find((agent) => /^(?:working|running|active)$/i.test(agent.status));
+    const activeTool = [...model.messages].reverse().find((message) =>
+      message.kind === "tool" && (message.status === "pending" || message.status === "running"));
+    const latestAssistant = [...model.messages].reverse().find((message) => message.kind === "assistant");
+    const activityLabels = tr("workspace.builtinsurfaces.activityItems").split("|");
+    const toolDetail = activeTool?.kind === "tool"
+      ? ["description", "command", "filePath", "path", "query", "pattern", "url"]
+          .map((key) => activeTool.input[key])
+          .find((value): value is string => typeof value === "string" && value.trim() !== "")
+      : undefined;
+    const conciseToolDetail = toolDetail && /[\\/]/.test(toolDetail)
+      ? toolDetail.replaceAll("\\", "/").split("/").filter(Boolean).at(-1)
+      : toolDetail;
+    const toolName = activeTool?.kind === "tool"
+      ? activeTool.title ?? activeTool.tool.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
+      : undefined;
+    const action = replacingTurn
+      ? tr("workspace.builtinsurfaces.startingTurn")
+      : activeTask?.text
+        ?? activeSubagent?.currentTask
+        ?? (toolName
+          ? `${toolName}${conciseToolDetail ? ` · ${conciseToolDetail}` : ""}`
+          : latestAssistant?.kind === "assistant" && latestAssistant.reasoning && !latestAssistant.text
+            ? tr("timeline.thinking")
+            : activityLabels[latestAssistant?.kind === "assistant" && latestAssistant.text ? 2 : 0]
+              ?? tr("workspace.builtinsurfaces.working"));
+    const elapsed = replacingTurn || model.turn?.startedAt === undefined
+      ? null
+      : fmtDuration(now - model.turn.startedAt);
+    return (
+      <AgentStatusDock
+        icon={<ProviderLogo
+          providerID={descriptor?.providerID ?? modelRef?.providerID}
+          providerName={descriptor?.providerName}
+          harnessId={descriptor?.harnessId ?? runtimeHarnessId}
+          size="regular"
+        />}
+        model={modelName}
+        status={action}
+        elapsed={elapsed}
+        files={count > 0 ? bubbleCount : null}
+        additions={totals?.additions}
+        deletions={totals?.deletions}
+        label={tr("pendingchangesbar.openActiveRunDetailsValue", { action })}
+        diffLabel={tr("pendingchangesbar.valueAdditionsValueDeletions", {
+          additions: totals?.additions ?? 0,
+          deletions: totals?.deletions ?? 0,
+        })}
+        onClick={(event) => toggleSessionStatusPopover(event.currentTarget)}
+      />
+    );
+  }
+
+  // The startup dock owns the pre-working handoff. Projection status is part
+  // of "working" so the live activity dock wins as soon as the server marks
+  // the session active, even if turn/started or spawn cleanup arrives later.
+  if (spawning || awaitingTurn) return null;
 
   if (selected.paths.length === 0) return null;
 
