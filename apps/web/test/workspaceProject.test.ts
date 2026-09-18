@@ -135,6 +135,26 @@ test("activating a known session restores its project without dropping the chat"
   activateProject(null);
 });
 
+test("a malformed live projection cannot detach a known session from its project", () => {
+  activateSession(null);
+  activateProject(null);
+  upsertSession(session("s-owned", "p-owned"));
+  activateSession("s-owned");
+
+  upsertSession({
+    ...session("s-owned", ""),
+    title: "Updated title",
+    updatedAt: 2,
+  });
+
+  const current = getState().sessions.find((item) => item.id === "s-owned");
+  assert.equal(current?.projectId, "p-owned");
+  assert.equal(workspaceProjectId(getState()), "p-owned");
+
+  activateSession(null);
+  activateProject(null);
+});
+
 test("a session projection heals a missing project after the chat is already open", () => {
   activateProject(null);
   activateSession("s-late");
