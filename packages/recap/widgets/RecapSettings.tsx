@@ -1,22 +1,21 @@
 import { useEffect, useState } from "react";
 import { createApiTransport, type WebPackageHost } from "@polyth/web-sdk";
 
-interface AssistSettings {
-  enabled: boolean;
+interface RecapSettings {
   idleSeconds: number;
 }
 
 const api = createApiTransport();
 
 export default function RecapSettings({ host }: { host: WebPackageHost }) {
-  const [settings, setSettings] = useState<AssistSettings | null>(null);
+  const [settings, setSettings] = useState<RecapSettings | null>(null);
   const [value, setValue] = useState("120");
   const tr = host.ui.locale.translate;
   const TextInput = host.ui.components.TextInput;
 
   useEffect(() => {
     let live = true;
-    void api.get<AssistSettings>("/api/settings/assist")
+    void api.get<RecapSettings>("/api/settings/assist")
       .then((next) => {
         if (!live) return;
         setSettings(next);
@@ -33,7 +32,7 @@ export default function RecapSettings({ host }: { host: WebPackageHost }) {
       setValue(String(settings.idleSeconds));
       return;
     }
-    void api.put<AssistSettings>("/api/settings/assist", { idleSeconds: parsed })
+    void api.put<RecapSettings>("/api/settings/assist", { idleSeconds: parsed })
       .then((next) => {
         setSettings(next);
         setValue(String(next.idleSeconds));
@@ -61,6 +60,7 @@ export default function RecapSettings({ host }: { host: WebPackageHost }) {
             onKeyDown={(event) => {
               if (event.key === "Enter") save();
             }}
+            onBlur={save}
           />
           <span>{tr("settings.pages.s")}</span>
         </div>
