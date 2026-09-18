@@ -388,6 +388,13 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     (model) => `${model.harnessId ?? "legacy"}/${model.providerID}/${model.modelID}`,
   );
   const listModels = () => sharedCatalog?.models() ?? fallbackModels();
+  const visibility = host.services.get(serverServiceKey<{
+    filter(models: ModelDescriptor[], opts?: { includeDisconnected?: boolean }): ModelDescriptor[];
+  }>("models.visibility"));
+  const listSelectableModels = async () => {
+    const models = await listModels();
+    return visibility?.filter(models, { includeDisconnected: true }) ?? models;
+  };
   const listAgents = () => aggregate(
     host,
     async (projectId) => {
@@ -409,7 +416,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   // unscoped path. Composer selection resolves presets into explicit execution
   // configuration before the scoped session facade strips the private id.
   legacyStore.profileGet = async () => undefined;
-  const profiles = profileRoutes({ store: ownedProfiles, listModels, listAgents });
+  const profiles = profileRoutes({ store: ownedProfiles, listModels: listSelectableModels, listAgents });
   const custom = customProviderRoutes(host, listModels);
   return {
     remoteAccess: localOnlyRemoteAccess(["agent-profiles", "runtime-catalog"]),
