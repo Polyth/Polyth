@@ -1,3 +1,9 @@
+.project-setup-flow-dialog,
+.folder-dialog {
+  position: relative;
+  isolation: isolate;
+}
+
 .project-setup-flow-dialog {
   width: min(720px, calc(100vw - 48px));
   gap: 0;
@@ -6,6 +12,28 @@
 
 .project-setup-flow-dialog-compact {
   width: min(520px, calc(100vw - 48px));
+}
+
+.project-setup-flow-dialog::before,
+.folder-dialog::before {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background:
+    radial-gradient(75% 52% at 7% 0%,
+      color-mix(in srgb, var(--accent) 10%, transparent),
+      transparent 72%),
+    radial-gradient(52% 36% at 96% 10%,
+      color-mix(in srgb, var(--accent) 5%, transparent),
+      transparent 76%);
+  content: "";
+  pointer-events: none;
+}
+
+.project-setup-flow-dialog > *,
+.folder-dialog > * {
+  position: relative;
+  z-index: 1;
 }
 
 .project-setup-intro {
@@ -20,9 +48,10 @@
 
 .project-setup-intro h2 {
   margin: 0;
+  color: var(--text);
   font-size: var(--font-heading);
-  line-height: 1.25;
-  letter-spacing: -0.015em;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
   overflow-wrap: anywhere;
 }
 
@@ -36,10 +65,15 @@
 }
 
 .project-setup-step {
-  color: var(--faint);
+  width: max-content;
+  padding: 3px var(--space-2);
+  border: 1px solid color-mix(in srgb, var(--accent-line) 70%, transparent);
+  border-radius: var(--radius-round);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--accent);
   font-size: var(--font-meta);
   font-weight: 700;
-  letter-spacing: .08em;
+  letter-spacing: .045em;
   text-transform: uppercase;
 }
 
@@ -59,7 +93,7 @@
   margin: 0;
   padding: var(--space-3) var(--space-5) var(--space-4);
   border-top: 1px solid var(--hair);
-  background: color-mix(in srgb, var(--material-glass-strong) 92%, transparent);
+  background: transparent;
 }
 
 .project-setup-progress {
@@ -86,7 +120,7 @@
   padding: var(--space-3) var(--space-4);
   border: 1px solid color-mix(in srgb, var(--red) 18%, var(--hair));
   border-radius: var(--radius-card);
-  background: color-mix(in srgb, var(--red) 8%, var(--surface-overlay));
+  background: var(--red-wash);
   color: var(--text);
   font-size: var(--font-meta);
   line-height: var(--font-meta-lh);
@@ -98,7 +132,41 @@
   padding-top: var(--space-4);
 }
 
+/* Source picker: keep controls on the same preference-aware material instead
+   of dropping opaque rectangles inside a transparent mobile dialog. */
+body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) :is(
+  .folder-dialog .folder-list,
+  .folder-dialog .folder-path,
+  .folder-dialog .folder-source-panel
+) {
+  border-color: var(--material-glass-border);
+  background: linear-gradient(145deg,
+    color-mix(in srgb, var(--material-glass) var(--material-glass-control-fill), transparent),
+    color-mix(in srgb, var(--material-glass) var(--material-glass-control-edge), transparent));
+  box-shadow: var(--material-glass-highlight);
+}
+
+body[data-glass="off"] :is(
+  .folder-dialog .folder-list,
+  .folder-dialog .folder-path
+),
+body[data-desktop-low-resource="true"] :is(
+  .folder-dialog .folder-list,
+  .folder-dialog .folder-path
+) {
+  background: var(--sunken);
+}
+
 @media (max-width: 700px) {
+  /* Full-screen onboarding is itself the material. A dark scrim underneath it
+     would make Clear and Matte visually indistinguishable. */
+  body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) :is(
+    .dialog-backdrop:has(.project-setup-flow-dialog),
+    .dialog-backdrop:has(.folder-dialog)
+  ) {
+    background: transparent;
+  }
+
   .project-setup-flow-dialog.dialog-panel,
   .project-setup-flow-dialog-compact.dialog-panel {
     width: 100%;
@@ -108,17 +176,53 @@
     border-radius: 0;
   }
 
+  .project-setup-flow-dialog::before,
+  .folder-dialog::before {
+    background:
+      radial-gradient(92% 44% at 4% 0%,
+        color-mix(in srgb, var(--accent) 11%, transparent),
+        transparent 72%),
+      radial-gradient(70% 36% at 100% 4%,
+        color-mix(in srgb, var(--accent) 5%, transparent),
+        transparent 78%);
+  }
+
   .project-setup-intro {
-    padding: max(var(--space-4), var(--safe-top)) var(--space-4) var(--space-3);
+    gap: var(--space-2);
+    padding:
+      max(var(--space-3), var(--safe-top))
+      max(var(--space-3), var(--safe-right))
+      var(--space-3)
+      max(var(--space-3), var(--safe-left));
+    border-bottom-color: color-mix(in srgb, var(--material-glass-border) 72%, transparent);
+  }
+
+  .project-setup-intro h2 {
+    max-width: 18ch;
+    font-size: var(--font-heading);
+  }
+
+  .project-setup-intro p {
+    max-width: 46ch;
   }
 
   .project-setup-flow-dialog > .project-composition-editor {
-    padding: var(--space-3) var(--space-4) var(--space-4);
+    padding:
+      var(--space-3)
+      max(var(--space-3), var(--safe-right))
+      var(--space-4)
+      max(var(--space-3), var(--safe-left));
     -webkit-overflow-scrolling: touch;
   }
 
   .project-setup-actions {
-    padding: var(--space-3) var(--space-4) max(var(--space-4), var(--safe-bottom));
+    gap: var(--space-2);
+    padding:
+      var(--space-2)
+      max(var(--space-3), var(--safe-right))
+      max(var(--space-3), var(--safe-bottom))
+      max(var(--space-3), var(--safe-left));
+    border-top-color: color-mix(in srgb, var(--material-glass-border) 72%, transparent);
   }
 
   .project-setup-actions > .ui-btn {
@@ -127,5 +231,33 @@
     flex: 1;
   }
 
-  .project-setup-error { margin-inline: var(--space-4); }
+  .project-setup-error {
+    margin-inline-start: max(var(--space-3), var(--safe-left));
+    margin-inline-end: max(var(--space-3), var(--safe-right));
+  }
+
+  .folder-dialog-head {
+    padding-inline:
+      max(var(--space-3), var(--safe-left))
+      max(var(--space-3), var(--safe-right));
+  }
+
+  .folder-toolbar {
+    padding-inline:
+      max(var(--space-3), var(--safe-left))
+      max(var(--space-3), var(--safe-right));
+  }
+
+  .folder-dialog .folder-list {
+    margin-inline-start: max(var(--space-2), var(--safe-left));
+    margin-inline-end: max(var(--space-2), var(--safe-right));
+    border-radius: var(--radius-card);
+  }
+
+  .folder-sources,
+  .folder-foot {
+    padding-inline:
+      max(var(--space-3), var(--safe-left))
+      max(var(--space-3), var(--safe-right));
+  }
 }

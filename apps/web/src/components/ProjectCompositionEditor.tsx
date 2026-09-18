@@ -10,16 +10,31 @@ import {
 import { api } from "@polyth/session/web-api";
 import { tr, type TranslationKey } from "../i18n/index.ts";
 import { missingProjectPackageOverrides } from "../projectCompositionOverrides.ts";
-import { Button } from "./ui/index.ts";
+import {
+  Button,
+  ChartIcon,
+  CoachIcon,
+  CodeIcon,
+  FlaskIcon,
+  HomeIcon,
+  Icon,
+  LayersIcon,
+  WorkflowIcon,
+  type LucideIcon,
+} from "./ui/index.ts";
 import "./ProjectCompositionEditor.css";
 
-const DIRECTION_COPY: Record<ProjectDirection, { label: TranslationKey; description: TranslationKey }> = {
-  engineering: { label: "projectcomposition.direction.engineering", description: "projectcomposition.direction.engineeringDescription" },
-  research: { label: "projectcomposition.direction.research", description: "projectcomposition.direction.researchDescription" },
-  wellbeing: { label: "projectcomposition.direction.wellbeing", description: "projectcomposition.direction.wellbeingDescription" },
-  finance: { label: "projectcomposition.direction.finance", description: "projectcomposition.direction.financeDescription" },
-  home: { label: "projectcomposition.direction.home", description: "projectcomposition.direction.homeDescription" },
-  operations: { label: "projectcomposition.direction.operations", description: "projectcomposition.direction.operationsDescription" },
+const DIRECTION_COPY: Record<ProjectDirection, {
+  label: TranslationKey;
+  description: TranslationKey;
+  icon: LucideIcon;
+}> = {
+  engineering: { label: "projectcomposition.direction.engineering", description: "projectcomposition.direction.engineeringDescription", icon: CodeIcon },
+  research: { label: "projectcomposition.direction.research", description: "projectcomposition.direction.researchDescription", icon: FlaskIcon },
+  wellbeing: { label: "projectcomposition.direction.wellbeing", description: "projectcomposition.direction.wellbeingDescription", icon: CoachIcon },
+  finance: { label: "projectcomposition.direction.finance", description: "projectcomposition.direction.financeDescription", icon: ChartIcon },
+  home: { label: "projectcomposition.direction.home", description: "projectcomposition.direction.homeDescription", icon: HomeIcon },
+  operations: { label: "projectcomposition.direction.operations", description: "projectcomposition.direction.operationsDescription", icon: WorkflowIcon },
 };
 
 export const emptyProjectComposition = (): ProjectComposition => ({
@@ -104,14 +119,22 @@ export default function ProjectCompositionEditor({
           </div>
         </div>
         <div className="project-direction-grid">
-          <button type="button" className={`project-direction-card${value.directions.length === 0 ? " is-selected" : ""}`} aria-pressed={value.directions.length === 0} onClick={setGeneral}>
-            <strong>{tr("projectcomposition.general")}</strong><span>{tr("projectcomposition.generalDescription")}</span>
+          <button type="button" className={`project-direction-card project-direction-general${value.directions.length === 0 ? " is-selected" : ""}`} aria-pressed={value.directions.length === 0} onClick={setGeneral}>
+            <span className="project-direction-icon"><Icon icon={LayersIcon} size="lg" /></span>
+            <span className="project-direction-copy">
+              <strong>{tr("projectcomposition.general")}</strong>
+              <span>{tr("projectcomposition.generalDescription")}</span>
+            </span>
           </button>
           {PROJECT_DIRECTIONS.map((direction) => {
             const copy = DIRECTION_COPY[direction];
             const selected = value.directions.includes(direction);
             return <button key={direction} type="button" className={`project-direction-card${selected ? " is-selected" : ""}`} aria-pressed={selected} onClick={() => toggleDirection(direction)}>
-              <strong>{tr(copy.label)}</strong><span>{tr(copy.description)}</span>
+              <span className="project-direction-icon"><Icon icon={copy.icon} size="lg" /></span>
+              <span className="project-direction-copy">
+                <strong>{tr(copy.label)}</strong>
+                <span>{tr(copy.description)}</span>
+              </span>
             </button>;
           })}
         </div>

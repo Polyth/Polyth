@@ -23,9 +23,11 @@
 
 .project-composition-section-head h3 {
   margin: 0;
+  color: var(--text);
   font-size: var(--font-label);
   line-height: 1.3;
   font-weight: 650;
+  letter-spacing: -.012em;
 }
 
 .project-composition-section-head p {
@@ -47,12 +49,15 @@
   appearance: none;
   position: relative;
   min-width: 0;
-  min-height: 92px;
+  min-height: 104px;
   display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-content: start;
-  gap: var(--space-1);
+  align-items: start;
+  gap: var(--space-3);
   padding: var(--space-3);
-  border: 1px solid transparent;
+  overflow: hidden;
+  border: 1px solid var(--hair);
   border-radius: var(--radius-card);
   background: var(--surface-overlay);
   color: inherit;
@@ -61,36 +66,60 @@
   box-shadow: none;
 }
 
-.project-direction-card:first-child {
+.project-direction-card::after {
+  position: absolute;
+  inset: auto -28px -34px auto;
+  width: 88px;
+  height: 88px;
+  border-radius: var(--radius-round);
+  background: radial-gradient(circle,
+    color-mix(in srgb, var(--accent) 10%, transparent),
+    transparent 68%);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+
+.project-direction-general {
   grid-column: 1 / -1;
-  min-height: 58px;
-  grid-template-columns: max-content minmax(0, 1fr);
-  align-content: center;
-  align-items: baseline;
-  column-gap: var(--space-3);
+  min-height: 68px;
+  align-items: center;
 }
 
-@media (hover: hover) {
-  .project-direction-card:hover {
-    border-color: var(--hair);
-    background: var(--surface-overlay-hover);
-  }
-}
-
-.project-direction-card.is-selected {
-  border-color: var(--accent-line);
-  background: var(--accent-wash);
+.project-direction-icon {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: calc(var(--control-h-sm) + var(--space-1));
+  height: calc(var(--control-h-sm) + var(--space-1));
+  flex: none;
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  color: var(--muted);
   box-shadow: var(--inset-hi);
 }
 
-.project-direction-card strong {
+.project-direction-copy {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  align-content: start;
+  gap: 3px;
   min-width: 0;
+}
+
+.project-direction-copy strong {
+  min-width: 0;
+  color: var(--text);
   font-size: var(--font-label);
   line-height: 1.3;
   font-weight: 650;
 }
 
-.project-direction-card span {
+.project-direction-copy > span {
   min-width: 0;
   color: var(--muted);
   font-size: var(--font-meta);
@@ -98,7 +127,30 @@
   overflow-wrap: anywhere;
 }
 
-.project-direction-card.is-selected span { color: var(--text-dim); }
+@media (hover: hover) {
+  .project-direction-card:hover {
+    border-color: var(--hair-strong);
+    background: var(--surface-overlay-hover);
+  }
+}
+
+.project-direction-card.is-selected {
+  border-color: var(--accent-line);
+  background: var(--accent-wash);
+  box-shadow: var(--inset-hi), 0 8px 24px color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.project-direction-card.is-selected::after { opacity: 1; }
+
+.project-direction-card.is-selected .project-direction-icon {
+  border-color: color-mix(in srgb, var(--accent-line) 80%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+.project-direction-card.is-selected .project-direction-copy > span {
+  color: var(--text-dim);
+}
 
 .project-composition-review {
   gap: var(--space-3);
@@ -217,36 +269,106 @@
 }
 
 .project-composition-editor.is-compact { gap: var(--space-4); }
-.project-composition-editor.is-compact .project-direction-card { min-height: 76px; }
-.project-composition-editor.is-compact .project-direction-card:first-child { min-height: 52px; }
 
-@container project-composition (max-width: 620px) {
-  .project-direction-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .project-direction-card:first-child { grid-column: 1 / -1; }
+/* Nested setup controls use the same cut-glass material as Polyth chrome.
+   No second backdrop blur: the parent dialog owns translucency. */
+body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) :is(
+  .project-direction-card:not(.is-selected),
+  .project-composition-review,
+  .project-package-choice,
+  .project-composition-chips span
+) {
+  border-color: var(--material-glass-border);
+  background: linear-gradient(145deg,
+    color-mix(in srgb, var(--material-glass) var(--material-glass-control-fill), transparent),
+    color-mix(in srgb, var(--material-glass) var(--material-glass-control-edge), transparent));
+  box-shadow: var(--material-glass-highlight);
 }
 
-@container project-composition (max-width: 500px) {
+body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .project-direction-card.is-selected {
+  background:
+    linear-gradient(145deg,
+      color-mix(in srgb, var(--accent) 14%, transparent),
+      color-mix(in srgb, var(--accent) 5%, transparent)),
+    linear-gradient(145deg,
+      color-mix(in srgb, var(--material-glass) var(--material-glass-control-fill), transparent),
+      color-mix(in srgb, var(--material-glass) var(--material-glass-control-edge), transparent));
+}
+
+body[data-glass="off"] :is(
+  .project-direction-card:not(.is-selected),
+  .project-composition-review,
+  .project-package-choice,
+  .project-composition-chips span
+),
+body[data-desktop-low-resource="true"] :is(
+  .project-direction-card:not(.is-selected),
+  .project-composition-review,
+  .project-package-choice,
+  .project-composition-chips span
+) {
+  background: var(--elevated);
+}
+
+body[data-glass="off"] .project-direction-card.is-selected,
+body[data-desktop-low-resource="true"] .project-direction-card.is-selected {
+  background: color-mix(in srgb, var(--accent) 12%, var(--elevated));
+}
+
+@container project-composition (max-width: 620px) {
+  .project-direction-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .project-direction-general { grid-column: 1 / -1; }
+
+  .project-direction-card {
+    min-height: 112px;
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+  }
+
+  .project-direction-general {
+    min-height: 70px;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--space-3);
+  }
+
+  .project-direction-icon {
+    width: var(--control-h-sm);
+    height: var(--control-h-sm);
+  }
+}
+
+@container project-composition (max-width: 360px) {
   .project-direction-grid { grid-template-columns: 1fr; }
 
   .project-direction-card,
-  .project-composition-editor.is-compact .project-direction-card { min-height: 72px; }
-
-  .project-direction-card:first-child,
-  .project-composition-editor.is-compact .project-direction-card:first-child {
-    grid-column: auto;
-    min-height: 64px;
-    grid-template-columns: 1fr;
-    align-content: start;
-    gap: var(--space-1);
+  .project-direction-general {
+    min-height: 72px;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
   }
+}
 
+@container project-composition (max-width: 500px) {
   .project-composition-section-head {
     gap: var(--space-2);
     flex-wrap: wrap;
   }
 
-  .project-composition-review { padding: var(--space-3); }
-  .project-composition-recommended { display: grid; }
+  .project-composition-review {
+    padding: var(--space-3) 0 0;
+    border-width: 1px 0 0;
+    border-radius: 0;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  .project-composition-recommended {
+    display: grid;
+  }
+
   .project-composition-kicker { padding-top: 0; }
 
   .project-package-row {
