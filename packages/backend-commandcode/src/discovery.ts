@@ -154,11 +154,11 @@ const humanizeModel = (id: string): string => {
 };
 
 const modelToken = (line: string): string | undefined => {
-  const cleaned = line.replace(ANSI, "").trim().replace(/^[•*+\-]\s*/, "").replace(/^`|`$/g, "");
-  if (!cleaned || /\s/.test(cleaned)) return undefined;
-  if (cleaned.length > 160 || !/[0-9/_.-]/.test(cleaned)) return undefined;
-  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(cleaned)) return undefined;
-  return cleaned;
+  const cleaned = line.replace(ANSI, "").trim().replace(/^[•*+\-]\s*/, "");
+  const candidate = /^`?([A-Za-z0-9][A-Za-z0-9._/-]*)`?(?=\s|$)/.exec(cleaned)?.[1];
+  if (!candidate) return undefined;
+  if (candidate.length > 160 || !/[0-9/_-]/.test(candidate)) return undefined;
+  return candidate;
 };
 
 /** Parse the official `command-code --list-models` copy-pasteable id list.
