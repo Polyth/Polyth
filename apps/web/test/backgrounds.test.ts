@@ -84,7 +84,7 @@ test("background and glass controls are wired into Appearance and the held-Shift
   assert.doesNotMatch(theme, /apple-mobile-web-app-status-bar-style[^;]+[\s\S]*?\?\s*"black-translucent"\s*:\s*"default"/,
     "status-bar translucency must not depend on dark appearance");
   assert.match(styles, /backdrop-filter:\s*blur\(var\(--material-glass-blur\)\)\s*saturate\(var\(--material-glass-saturation\)\)/);
-  assert.match(await read("../src/backgrounds.ts"), /meta\[name="theme-color"\][\s\S]*?backgroundSystemBarColor/,
+  assert.match(await read("../src/backgrounds.ts"), /backgroundSystemBarColor[\s\S]*?meta\[name="theme-color"\]/,
     "runtime background changes retint browser-owned chrome too");
   assert.doesNotMatch(styles, /prefers-reduced-motion:\s*no-preference[\s\S]{0,1200}data-glass/);
 });
