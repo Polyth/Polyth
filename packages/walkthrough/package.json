@@ -15,7 +15,7 @@
       "name": "Walkthrough",
       "description": "Generate and review code walkthroughs.",
       "core": false,
-      "enabled": true,
+      "enabled": false,
       "settingsGroup": "Engineering",
       "icon": "route",
       "hasSettings": false,
