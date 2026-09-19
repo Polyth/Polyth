@@ -1,0 +1,437 @@
+.usage-analytics-block {
+  min-width: 0;
+  min-height: 0;
+  container: usage-analytics-block / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--material-glass-border) 58%, transparent);
+  border-radius: var(--radius-card);
+  background: var(--material-glass-medium);
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
+  color: var(--text);
+}
+
+.usage-analytics-block-head {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.usage-analytics-block-head > div {
+  min-width: 0;
+}
+
+.usage-analytics-block-head h3 {
+  margin: 0;
+  color: var(--text);
+  font: 650 var(--font-label)/1.25 var(--ui-font-family);
+}
+
+.usage-analytics-block-head span,
+.usage-analytics-block-head small {
+  color: var(--muted);
+  font: var(--font-meta)/var(--font-meta-lh) var(--ui-font-family);
+}
+
+.usage-analytics-state {
+  min-height: 86px;
+  display: grid;
+  place-items: center;
+  padding: var(--space-3);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  text-align: center;
+}
+
+.usage-analytics-state.error,
+.usage-analytics-block .bad {
+  color: var(--red);
+}
+
+.usage-analytics-block .good {
+  color: var(--green);
+}
+
+.usage-analytics-block .warn {
+  color: var(--amber);
+}
+
+.usage-analytics-block .neutral {
+  color: var(--muted);
+}
+
+.usage-summary-kpis {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.usage-summary-kpi {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "label delta"
+    "value value"
+    "hint hint";
+  align-items: baseline;
+  gap: 2px var(--space-1);
+  padding-inline-end: var(--space-2);
+  border-inline-end: 1px solid var(--border-soft);
+}
+
+.usage-summary-kpi:last-child {
+  padding-inline-end: 0;
+  border-inline-end: 0;
+}
+
+.usage-summary-kpi > span:first-child {
+  grid-area: label;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-summary-kpi strong {
+  grid-area: value;
+  overflow: hidden;
+  font: 680 clamp(15px, 2.5cqi, 22px)/1.15 var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-summary-kpi .usage-analytics-delta {
+  grid-area: delta;
+  justify-self: end;
+  font: 600 10px/1 var(--mono);
+}
+
+.usage-summary-kpi small {
+  grid-area: hint;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-analytics-chart {
+  min-height: 150px;
+  width: 100%;
+  height: 190px;
+}
+
+.usage-efficiency-chart {
+  min-height: 220px;
+  height: 260px;
+}
+
+.usage-performance-table {
+  display: grid;
+  gap: 0;
+}
+
+.usage-performance-table > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 86px 86px;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.usage-performance-table > div:last-child {
+  border-bottom: 0;
+}
+
+.usage-performance-table .head {
+  min-height: 24px;
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.usage-performance-table strong {
+  text-align: end;
+  font: 620 var(--font-meta)/1.2 var(--mono);
+}
+
+.usage-change-list,
+.usage-subscription-value,
+.usage-reliability-grid,
+.usage-breakdown-list,
+.usage-quota-compact-list {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.usage-change-list > div,
+.usage-subscription-value > div:not(.usage-subscription-provider),
+.usage-reliability-grid > div {
+  min-width: 0;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.usage-change-list > div:last-child,
+.usage-subscription-value > div:last-child,
+.usage-reliability-grid > div:last-child {
+  border-bottom: 0;
+}
+
+.usage-change-list span,
+.usage-subscription-value span,
+.usage-reliability-grid span {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.usage-change-list strong,
+.usage-subscription-value strong,
+.usage-reliability-grid strong {
+  font: 620 var(--font-meta)/1.2 var(--mono);
+}
+
+.usage-subscription-provider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 34px;
+}
+
+.usage-analytics-provider-logo {
+  width: 22px;
+  height: 22px;
+  flex: none;
+}
+
+.usage-subscription-value > small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.usage-reliability-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 var(--space-4);
+}
+
+.usage-breakdown-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(72px, .8fr) minmax(80px, 1.6fr) minmax(62px, auto) 34px;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 30px;
+}
+
+.usage-breakdown-row > span {
+  overflow: hidden;
+  font-size: var(--font-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-breakdown-row strong,
+.usage-breakdown-row small {
+  text-align: end;
+  font: 600 10px/1.2 var(--mono);
+}
+
+.usage-breakdown-row small {
+  color: var(--muted);
+}
+
+.usage-breakdown-track,
+.usage-quota-track {
+  min-width: 0;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-overlay-hover);
+}
+
+.usage-breakdown-track i,
+.usage-quota-track i {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.usage-quota-compact-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 24px minmax(82px, .8fr) minmax(80px, 1.5fr) 40px 48px;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+}
+
+.usage-quota-name {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.usage-quota-name strong,
+.usage-quota-name small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-quota-name strong {
+  font-size: var(--font-meta);
+}
+
+.usage-quota-name small,
+.usage-quota-reset {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.usage-quota-compact-row > strong,
+.usage-quota-reset {
+  justify-self: end;
+  font-family: var(--mono);
+}
+
+.usage-analytics-widget {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  container: usage-analytics-widget / inline-size;
+}
+
+.usage-analytics-widget > .usage-analytics-block {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+@container usage-analytics-block (max-width: 760px) {
+  .usage-summary-kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .usage-summary-kpi:nth-child(3) {
+    padding-inline-end: 0;
+    border-inline-end: 0;
+  }
+
+  .usage-summary-kpi:nth-child(n + 4) {
+    padding-top: var(--space-2);
+    border-top: 1px solid var(--border-soft);
+  }
+}
+
+@container usage-analytics-block (max-width: 520px) {
+  .usage-analytics-block {
+    gap: var(--space-2);
+    padding: var(--space-2);
+  }
+
+  .usage-summary-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .usage-summary-kpi {
+    min-height: 44px;
+    padding-inline-end: var(--space-1);
+  }
+
+  .usage-summary-kpi:nth-child(2n) {
+    padding-inline-end: 0;
+    border-inline-end: 0;
+  }
+
+  .usage-summary-kpi:nth-child(3) {
+    padding-top: var(--space-2);
+    border-top: 1px solid var(--border-soft);
+    border-inline-end: 1px solid var(--border-soft);
+  }
+
+  .usage-analytics-chart {
+    min-height: 150px;
+    height: 168px !important;
+  }
+
+  .usage-efficiency-chart {
+    min-height: 190px;
+    height: 210px !important;
+  }
+
+  .usage-performance-table > div {
+    grid-template-columns: minmax(0, 1fr) 62px 62px;
+  }
+
+  .usage-breakdown-row {
+    grid-template-columns: minmax(72px, 1fr) minmax(70px, 1.4fr) minmax(56px, auto);
+  }
+
+  .usage-breakdown-row small {
+    display: none;
+  }
+
+  .usage-quota-compact-row {
+    grid-template-columns: 22px minmax(72px, 1fr) minmax(64px, 1.2fr) 38px;
+    gap: var(--space-1);
+  }
+
+  .usage-quota-reset {
+    display: none;
+  }
+
+  .usage-reliability-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@container usage-analytics-block (max-width: 340px) {
+  .usage-summary-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .usage-summary-kpi:nth-child(n + 5) {
+    display: none;
+  }
+
+  .usage-analytics-block-head > div > span {
+    display: none;
+  }
+
+  .usage-quota-compact-row {
+    grid-template-columns: minmax(0, 1fr) 42px;
+  }
+
+  .usage-quota-compact-row .usage-analytics-provider-logo,
+  .usage-quota-compact-row .usage-quota-track {
+    display: none;
+  }
+
+  .usage-breakdown-row {
+    grid-template-columns: minmax(0, 1fr) minmax(54px, auto);
+  }
+
+  .usage-breakdown-track {
+    display: none;
+  }
+}
