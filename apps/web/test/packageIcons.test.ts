@@ -26,6 +26,9 @@ test("harness package icons render the shared provider brand mark", async () => 
     await paint("antigravity");
     assert.ok(container.querySelector('.provider-logo[data-provider="antigravity"] svg'), "Antigravity harness resolves its own mark");
 
+    await paint("pi");
+    assert.ok(container.querySelector('.provider-logo[data-provider="pi"] svg'), "Pi harness resolves its own mark");
+
     // Semantic package icons keep the neutral Lucide glyph, not a brand mark.
     await paint("files");
     assert.equal(container.querySelector(".provider-logo"), null);

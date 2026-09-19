@@ -102,6 +102,7 @@ test("known providers render decorative SVG marks", async () => {
     "command-code",
     "cursor",
     "antigravity",
+    "pi",
   ];
 
   for (const providerID of providers) {
@@ -150,6 +151,7 @@ test("registered harness identities reuse the shared provider marks", async () =
     { providerID: "commandcode", providerName: "Command Code", provider: "commandcode" },
     { providerID: "cursor", providerName: "Cursor", provider: "cursor" },
     { providerID: "antigravity", providerName: "Antigravity", provider: "antigravity" },
+    { providerID: "pi", providerName: "Pi", provider: "pi" },
   ];
   for (const { provider, ...props } of harnesses) {
     const html = await render(props);
@@ -249,9 +251,26 @@ test("Antigravity keeps its own distinct brand mark", async () => {
   assert.doesNotMatch(gemini, /M21\.751 22\.607/);
 });
 
+test("Pi harness keeps its own monochrome brand mark", async () => {
+  const html = await render({ providerID: "pi", providerName: "Pi", harnessId: "pi" });
+  assert.match(html, /data-provider="pi"/);
+  assert.match(html, /provider-pi/);
+  assert.match(html, /viewBox="0 0 800 800"/);
+  assert.match(html, /M165\.29 165\.29H517\.36V400/);
+  assert.match(html, /M517\.36 400H634\.72/);
+  assert.match(html, /fill="currentColor"/);
+  assert.doesNotMatch(html, /#(?:[\da-f]{3,8})\b/i);
+
+  // The two-letter key is a full token, never a substring of another name.
+  const spicy = await render({ providerName: "Spicy AI" });
+  assert.match(spicy, /data-provider="other"/);
+  const bare = await render({ providerName: "Pi" });
+  assert.match(bare, /data-provider="pi"/);
+});
+
 test("only canonical provider keys are brand marks for package tiles", async () => {
   const { isProviderMarkKey } = await providerModule;
-  for (const key of ["cursor", "antigravity", "opencode", "claude", "commandcode", "gemini"]) {
+  for (const key of ["cursor", "antigravity", "pi", "opencode", "claude", "commandcode", "gemini"]) {
     assert.equal(isProviderMarkKey(key), true, `${key} is a canonical brand key`);
   }
   // Aliases and semantic package icons must not be mistaken for brand keys.

@@ -18,6 +18,9 @@ const PROVIDERS = [
   // it keeps a dedicated key (and data-provider) instead of collapsing into
   // the Gemini provider it serves models from.
   ["antigravity", ["antigravity"]],
+  // The Pi harness carries a dedicated two-letter identity. Short keys are
+  // resolved exactly (see resolveProviderKey), never as loose substrings.
+  ["pi", ["pi"]],
   ["copilot", ["copilot", "github"]],
   ["xai", ["xai", "grok"]],
   ["groq", ["groq"]],
@@ -35,6 +38,8 @@ const PROVIDERS = [
 ] as const;
 
 type ProviderKey = (typeof PROVIDERS)[number][0];
+
+const PROVIDER_MARK_KEYS = new Set<string>(PROVIDERS.map(([key]) => key));
 
 const strokeProps = {
   viewBox: "0 0 24 24",
@@ -55,7 +60,28 @@ const fillProps = {
 };
 
 function findProviderKey(value: string): ProviderKey | undefined {
-  return PROVIDERS.find(([, aliases]) => aliases.some((alias) => value.includes(alias)))?.[0];
+  const tokens = value.split(/\s+/);
+  return PROVIDERS.find(([, aliases]) => aliases.some((alias) =>
+    // Two-letter keys (pi) are ambiguous as substrings ("Spicy", "Pipeline");
+    // longer aliases keep matching inside hyphenated provider ids.
+    alias.length > 2 ? value.includes(alias) : tokens.includes(alias),
+  ))?.[0];
+}
+
+/** Resolve the mark for a logo request. A dedicated harness identity is an
+ *  exact match so short keys cannot be lost to an earlier alias in the id;
+ *  provider names and aliases (codex, github, opencode zen) fall through to
+ *  the fuzzy alias scan. */
+function resolveProviderKey(
+  providerID: string | undefined,
+  providerName: string | undefined,
+  harnessId: string | undefined,
+): ProviderKey | undefined {
+  const harness = harnessId?.trim().toLowerCase() ?? "";
+  const brandHarness = harness && harness !== ROUTER_HARNESS_ID ? harness : "";
+  if (brandHarness && PROVIDER_MARK_KEYS.has(brandHarness)) return brandHarness as ProviderKey;
+  const id = `${brandHarness} ${providerID ?? ""} ${providerName ?? ""}`.trim().toLowerCase() || "polyth";
+  return findProviderKey(id);
 }
 
 function SvgMark({ provider }: { provider: ProviderKey }) {
@@ -261,12 +287,21 @@ function SvgMark({ provider }: { provider: ProviderKey }) {
       </svg>
     );
   }
+  if (provider === "pi") {
+    // Official Pi agent mark, monochrome on the theme color like every other
+    // provider identity mark.
+    return (
+      <svg viewBox="0 0 800 800" fill="currentColor" aria-hidden="true" focusable="false">
+        <path d="M165.29 165.29H517.36V400H400V282.65H165.29Z" />
+        <path d="M165.29 282.65H282.65V400H400V517.36H282.65V634.72H165.29Z" />
+        <path d="M517.36 400H634.72V634.72H517.36Z" />
+      </svg>
+    );
+  }
   return null;
 }
 
 const ROUTER_HARNESS_ID = "opencode";
-
-const PROVIDER_MARK_KEYS = new Set<string>(PROVIDERS.map(([key]) => key));
 
 /** True when `value` is exactly a canonical provider mark key (not an alias or
  *  a substring). Harness package manifests reuse these keys to render the
@@ -289,10 +324,7 @@ export default function ProviderLogo({
   size?: "compact" | "regular";
   className?: string;
 }) {
-  const harness = harnessId?.trim().toLowerCase() ?? "";
-  const brandHarness = harness && harness !== ROUTER_HARNESS_ID ? harness : "";
-  const id = `${brandHarness} ${providerID ?? ""} ${providerName ?? ""}`.trim().toLowerCase() || "polyth";
-  const key = findProviderKey(id);
+  const key = resolveProviderKey(providerID, providerName, harnessId);
   const fallback = (providerName || providerID || "P").trim().slice(0, 2).toUpperCase();
   const label = providerName || providerID || "Polyth";
   return (

@@ -17,7 +17,7 @@
       "description": "Detect Pi and report native RPC integration readiness",
       "core": false,
       "enabled": true,
-      "icon": "command",
+      "icon": "pi",
       "hasSettings": false,
       "category": "system",
       "projectAffinity": {}
