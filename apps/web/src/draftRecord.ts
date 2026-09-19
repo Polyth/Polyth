@@ -178,6 +178,15 @@ export function adoptServerDraft(
 ): ScopedDraftRecord {
   const current = loadScopedDraftRecord(sessionId);
   if (current.dirty) {
+    // Session projections are broadcast for many unrelated mutations. When
+    // the draft CAS witness has not advanced, a differing server value is the
+    // unchanged base under this local edit, not evidence of another writer.
+    // An older projection must likewise never acknowledge or conflict with a
+    // newer local base.
+    if (serverUpdatedAt !== undefined && current.serverUpdatedAt !== undefined) {
+      if (serverUpdatedAt < current.serverUpdatedAt) return current;
+      if (serverUpdatedAt === current.serverUpdatedAt && text !== current.text) return current;
+    }
     if (text !== current.text) {
       return updateScopedDraftRecord(sessionId, {
         conflict: { text, ...(serverUpdatedAt !== undefined ? { serverUpdatedAt } : {}) },

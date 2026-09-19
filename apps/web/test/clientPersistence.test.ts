@@ -141,6 +141,25 @@ test("dirty draft reconciliation preserves ordering and exact acknowledgements",
   } finally { restore(); }
 });
 
+test("an unchanged server draft revision does not manufacture a cross-client conflict", () => {
+  const restore = installStorage();
+  try {
+    scope("connection-draft-base", "usr_draftbase");
+    adoptServerDraft("same-base", "", 4);
+    const local = recordLocalDraftEdit("same-base", "local-new");
+
+    const unchanged = adoptServerDraft("same-base", "", 4);
+    assert.equal(unchanged.text, "local-new");
+    assert.equal(unchanged.dirty, true);
+    assert.equal(unchanged.conflict, undefined);
+    assert.equal(unchanged.revision, local.revision, "an unrelated projection broadcast must be a no-op");
+
+    const advanced = adoptServerDraft("same-base", "remote-new", 5);
+    assert.equal(advanced.text, "local-new");
+    assert.deepEqual(advanced.conflict, { text: "remote-new", serverUpdatedAt: 5 });
+  } finally { restore(); }
+});
+
 test("only ambiguous prompt failures retain an unknown-operation hint", () => {
   assert.equal(retainLocalMutationIntentAfterError({ status: 400, code: "invalid-input" }), false);
   assert.equal(retainLocalMutationIntentAfterError({ status: 409, code: "client-operation-conflict" }), false);
