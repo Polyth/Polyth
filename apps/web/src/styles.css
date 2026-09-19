@@ -3559,13 +3559,33 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
   gap: var(--space-2);
   min-height: var(--control-h);
   padding: var(--space-2) var(--space-3);
-  background: var(--elevated);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-card);
+  /* A queued prompt is the composer's pending writing stack. It shares the
+     composer's Quiet Glass material, writing type role and corner role so the
+     user's transparency, font-size and rounding settings apply here too. */
+  background: var(--material-glass-strong);
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-composer);
   color: var(--text);
 }
 .queue-chip.dragging { opacity: 0.5; }
 .queue-chip.drag-over { border-color: var(--accent); background: var(--accent-wash); }
+/* The opaque material above is the fallback. Capable, full-resource clients
+   tint and blur it like the composer card; drag-over opts out so its accent
+   wash is not repainted by the glass gradient. */
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  @media (prefers-reduced-motion: no-preference) {
+    html:not([data-reduce-animations="true"])
+      body:not([data-glass="off"]):not([data-desktop-low-resource="true"])
+      .queue-chip:not(.drag-over) {
+      background: radial-gradient(140% 140% at 50% 50%,
+        color-mix(in srgb, var(--material-glass-strong) var(--material-glass-fill), transparent) 0%,
+        color-mix(in srgb, var(--material-glass-strong) var(--material-glass-edge), transparent) 100%);
+      -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
+      backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
+      background-clip: padding-box;
+    }
+  }
+}
 .queue-chip .queue-grip {
   flex: none;
   align-self: stretch;
@@ -3587,8 +3607,8 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--font-body);
-  line-height: 1.4;
+  font-size: var(--font-response);
+  line-height: var(--font-response-lh);
 }
 .queue-chip .queue-actions {
   flex: none;
