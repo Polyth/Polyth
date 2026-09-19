@@ -18,7 +18,9 @@ npm run build        # bundles apps/web
 npm start            # open http://127.0.0.1:4400 (spawns `opencode serve` per project)
 ```
 
-Env: `PORT` (default 4400), `POLYTH_DATA_DIR` (default `./data`). The server binds all interfaces (`*:4400`), not just localhost — anything that can reach the port can use it, and with no password configured there is no auth at all. Set `POLYTH_UI_PASSWORD` to require a login before running it on anything but a trusted machine.
+Env: `PORT` (default 4400), `POLYTH_DATA_DIR` (default `./data`), and `HOST` (default `127.0.0.1`). Canonical Polyth binds loopback by default; remote access should use Polyth Link or an explicitly configured trusted TLS proxy.
+
+For local agent/API debugging, `POLYTH_DEBUG_AGENT_ACCESS=1 npm start` lets direct loopback HTTP and WebSocket requests use the active owner context without a browser login. This mode is intentionally powerful: Polyth refuses it on non-loopback listeners, with `POLYTH_PUBLIC_ORIGIN`, or outside the `local-trusted` deployment profile. It never applies to Polyth Link ingress, and canonical identity/setup endpoints keep their normal CSRF/origin rules.
 
 ## What you can do
 
