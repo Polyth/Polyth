@@ -42,7 +42,7 @@ Every pull request and every push to `master` runs:
 - agent-knowledge structure and installer tests;
 - the shared repository quality contract from `scripts/ci/release-quality.mjs`:
   - web production build;
-  - TypeScript checks for the owned application projects;
+  - TypeScript checks for shared/core services and the mobile client; desktop platform compilation belongs to the manual desktop build lanes;
   - stable repository tests;
   - Polyth Link contract tests;
 - Rust `fmt`, `clippy`, and workspace tests.
