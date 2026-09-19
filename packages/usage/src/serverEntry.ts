@@ -91,6 +91,18 @@ export function usageRoutes(usage: UsageService, host?: ServerPackageHost): Rout
       });
       return true;
     }
+    if (analytics && path === "/api/usage/analytics" && method === "GET") {
+      try {
+        json(200, await analytics.query(space, parseUsageAnalyticsQuery(url.searchParams)));
+      } catch (cause) {
+        const invalid = (cause as { code?: string }).code === "invalid-input";
+        json(invalid ? 400 : 500, {
+          error: invalid ? "invalid-input" : "usage-analytics-failed",
+          message: cause instanceof Error ? cause.message : "Could not build usage analytics",
+        });
+      }
+      return true;
+    }
     if (host && path === "/api/usage/preferences" && method === "GET") {
       json(200, readPreferences(host, space));
       return true;
