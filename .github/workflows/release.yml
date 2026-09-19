@@ -84,10 +84,11 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
 
-      - name: Refuse an already-published release
+      - name: Prepare draft GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
         run: |
           set -euo pipefail
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -96,15 +97,22 @@ jobs:
               echo "$TAG is already published" >&2
               exit 1
             fi
-          fi
-
-          git fetch --tags --force
-          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-            TAG_SHA="$(git rev-list -n 1 "$TAG")"
-            if [ "$TAG_SHA" != "$GITHUB_SHA" ]; then
-              echo "$TAG already points to $TAG_SHA, not release commit $GITHUB_SHA" >&2
-              exit 1
+            echo "Reusing existing draft release $TAG"
+          else
+            git fetch --tags --force
+            if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+              TAG_SHA="$(git rev-list -n 1 "$TAG")"
+              if [ "$TAG_SHA" != "$GITHUB_SHA" ]; then
+                echo "$TAG already points to $TAG_SHA, not release commit $GITHUB_SHA" >&2
+                exit 1
+              fi
             fi
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Polyth $VERSION" \
+              --generate-notes \
+              --draft
           fi
 
   linux:
@@ -120,6 +128,8 @@ jobs:
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 75
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -160,7 +170,7 @@ jobs:
 
       - name: Package AppImage and updater metadata
         working-directory: apps/desktop
-        run: npx electron-builder --linux AppImage --${{ matrix.arch }} --publish never
+        run: npx electron-builder --linux AppImage --${{ matrix.arch }} --publish always
 
       - name: Smoke-test x64 AppImage
         if: matrix.arch == 'x64'
@@ -193,6 +203,7 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 75
     env:
+      GH_TOKEN: ${{ github.token }}
       WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
       WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
     steps:
@@ -243,7 +254,7 @@ jobs:
           if [ "${{ matrix.arch }}" = "arm64" ]; then
             CHANNEL_ARGS+=(--config.publish.channel=latest-arm64)
           fi
-          npx electron-builder --win nsis --${{ matrix.arch }} --publish never "${CHANNEL_ARGS[@]}"
+          npx electron-builder --win nsis --${{ matrix.arch }} --publish always "${CHANNEL_ARGS[@]}"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -261,6 +272,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 90
     env:
+      GH_TOKEN: ${{ github.token }}
       CSC_LINK: ${{ secrets.CSC_LINK }}
       CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
       APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -338,7 +350,7 @@ jobs:
 
       - name: Package signed and notarized DMG, ZIP and updater metadata
         working-directory: apps/desktop
-        run: npx electron-builder --mac dmg zip --universal --publish never
+        run: npx electron-builder --mac dmg zip --universal --publish always
 
       - uses: actions/upload-artifact@v4
         with:
@@ -517,19 +529,10 @@ jobs:
           test -n "$(find release-assets -maxdepth 1 -name '*.exe' -print -quit)"
           test -n "$(find release-assets -maxdepth 1 -name '*.AppImage' -print -quit)"
 
-      - name: Create or refresh draft GitHub Release
+      - name: Reconcile all release assets into the draft
         run: |
           set -euo pipefail
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" release-assets/* --clobber --repo "$GITHUB_REPOSITORY"
-          else
-            gh release create "$TAG" release-assets/* \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$RELEASE_SHA" \
-              --title "Polyth $VERSION" \
-              --generate-notes \
-              --draft
-          fi
+          gh release upload "$TAG" release-assets/* --clobber --repo "$GITHUB_REPOSITORY"
 
       - name: Publish public npm SDK packages
         if: inputs.publish_npm
