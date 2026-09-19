@@ -183,6 +183,13 @@ export interface AcpPromptTranslationContext {
 
 export interface AcpPromptResultTranslation {
     events?: RuntimeEvent[];
+    /** Optional profile-specific interpretation of the native stop reason. */
+    terminal?: {
+        reason: "completed" | "aborted" | "error";
+        error?: string;
+        code?: RuntimeErrorCode;
+        retry?: RateLimitRetryHint;
+    };
 }
 
 export interface AcpPromptErrorTranslation {
@@ -837,7 +844,24 @@ export function createAcpRuntime(
                     for (const event of translated?.events ?? []) emit(event);
                     active = false;
                     order++;
-                    emit({ type: "turn/stopped", turnId, reason: result.stopReason === "cancelled" ? "aborted" : "completed" });
+                    const terminal = translated?.terminal
+                        ?? (result.stopReason === "end_turn"
+                            ? { reason: "completed" as const }
+                            : result.stopReason === "cancelled"
+                                ? { reason: "aborted" as const }
+                                : {
+                                    reason: "error" as const,
+                                    error: `ACP stopped before completing the turn (${result.stopReason || "unknown"})`,
+                                    code: "unknown" as const,
+                                });
+                    emit({
+                        type: "turn/stopped",
+                        turnId,
+                        reason: terminal.reason,
+                        ...(terminal.error ? { error: terminal.error } : {}),
+                        ...(terminal.code ? { code: terminal.code } : {}),
+                        ...(terminal.retry ? { retry: terminal.retry } : {}),
+                    });
                     for (const cb of lifecycle)
                         cb({ type: "stream-connected", authorityId: rpc.authorityId, generation: rpc.generation });
                 }, (error) => {
