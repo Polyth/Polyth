@@ -1,0 +1,571 @@
+name: Release
+run-name: Release from ${{ github.ref_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      android:
+        description: Build signed Android APK/AAB
+        type: boolean
+        required: true
+        default: true
+      play_track:
+        description: Publish Android AAB to Google Play
+        type: choice
+        required: true
+        default: none
+        options:
+          - none
+          - internal
+          - production
+      npm_packages:
+        description: Build public npm SDK tarballs
+        type: boolean
+        required: true
+        default: true
+      publish_npm:
+        description: Publish public SDK packages to npm
+        type: boolean
+        required: true
+        default: false
+      draft:
+        description: Keep GitHub Release as draft (desktop auto-update stays off)
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: write
+  actions: read
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Validate release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      sha: ${{ steps.release.outputs.sha }}
+    steps:
+      - name: Require master
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/master" ]; then
+            echo "Release must be dispatched from master, not $GITHUB_REF" >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci --no-audit --no-fund
+
+      - id: release
+        name: Resolve aligned release version
+        run: |
+          set -euo pipefail
+          node scripts/release-version.mjs
+          VERSION="$(node -p "require('./package.json').version")"
+          TAG="v$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse an already-published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            IS_DRAFT="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)"
+            if [ "$IS_DRAFT" != "true" ]; then
+              echo "$TAG is already published" >&2
+              exit 1
+            fi
+          fi
+
+          git fetch --tags --force
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            TAG_SHA="$(git rev-list -n 1 "$TAG")"
+            if [ "$TAG_SHA" != "$GITHUB_SHA" ]; then
+              echo "$TAG already points to $TAG_SHA, not release commit $GITHUB_SHA" >&2
+              exit 1
+            fi
+          fi
+
+  linux:
+    name: Linux ${{ matrix.arch }} AppImage
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@1.91.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install workspace dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Install pinned Chromium
+        run: npx playwright-core install chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: 0
+
+      - name: Build desktop bundle
+        run: npm run build:desktop
+
+      - name: Stage Chromium
+        run: npm run desktop:stage-chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: 0
+          POLYTH_TARGET_PLATFORM: linux
+          POLYTH_TARGET_ARCH: ${{ matrix.arch }}
+
+      - name: Download pinned OpenCode
+        run: npm run desktop:download-opencode
+        env:
+          POLYTH_TARGET_PLATFORM: linux
+          POLYTH_TARGET_ARCH: ${{ matrix.arch }}
+
+      - name: Package AppImage and updater metadata
+        working-directory: apps/desktop
+        run: npx electron-builder --linux AppImage --${{ matrix.arch }} --publish never
+
+      - name: Smoke-test x64 AppImage
+        if: matrix.arch == 'x64'
+        run: |
+          set -euo pipefail
+          APPIMAGE="$(find apps/desktop/release -maxdepth 1 -name '*.AppImage' -print -quit)"
+          xvfb-run -a node apps/desktop/test/appimage-e2e.mjs \
+            "$APPIMAGE" \
+            "apps/desktop/release/appimage-e2e.png" \
+            "apps/desktop/release/appimage-e2e.log" \
+            "$GITHUB_WORKSPACE"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-${{ matrix.arch }}
+          retention-days: 7
+          path: |
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.blockmap
+            apps/desktop/release/latest-linux*.yml
+          if-no-files-found: error
+
+  windows:
+    name: Windows ${{ matrix.arch }} NSIS
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+    runs-on: windows-2025
+    timeout-minutes: 75
+    env:
+      WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+      WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Require Windows signing
+        shell: bash
+        run: |
+          test -n "$WIN_CSC_LINK" || { echo "WIN_CSC_LINK is required" >&2; exit 1; }
+          test -n "$WIN_CSC_KEY_PASSWORD" || { echo "WIN_CSC_KEY_PASSWORD is required" >&2; exit 1; }
+
+      - name: Install workspace dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Install pinned Chromium
+        run: npx playwright-core install chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: 0
+
+      - name: Build desktop bundle
+        run: npm run build:desktop
+
+      - name: Stage Chromium
+        run: npm run desktop:stage-chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: 0
+          POLYTH_TARGET_PLATFORM: win32
+          POLYTH_TARGET_ARCH: ${{ matrix.arch }}
+
+      - name: Download pinned OpenCode
+        run: npm run desktop:download-opencode
+        env:
+          POLYTH_TARGET_PLATFORM: win32
+          POLYTH_TARGET_ARCH: ${{ matrix.arch }}
+
+      - name: Package signed NSIS and updater metadata
+        working-directory: apps/desktop
+        shell: bash
+        run: |
+          CHANNEL_ARGS=()
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            CHANNEL_ARGS+=(--config.publish.channel=latest-arm64)
+          fi
+          npx electron-builder --win nsis --${{ matrix.arch }} --publish never "${CHANNEL_ARGS[@]}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-${{ matrix.arch }}
+          retention-days: 7
+          path: |
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.blockmap
+            apps/desktop/release/latest*.yml
+          if-no-files-found: error
+
+  macos:
+    name: macOS universal DMG + ZIP
+    needs: prepare
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Require macOS signing and notarization
+        run: |
+          for NAME in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            test -n "${!NAME}" || { echo "$NAME is required for a desktop release" >&2; exit 1; }
+          done
+
+      - name: Install workspace dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Chromium for macOS x64
+        run: npx playwright-core install chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: 0
+          PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac14
+
+      - name: Install Chromium for macOS arm64
+        run: npx playwright-core install chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: 0
+          PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac14-arm64
+
+      - name: Install both esbuild binaries
+        run: |
+          ESBUILD_VERSION="$(node -p "require('./node_modules/esbuild/package.json').version")"
+          npm install --ignore-scripts --no-save --package-lock=false --force \
+            "@esbuild/darwin-x64@$ESBUILD_VERSION" \
+            "@esbuild/darwin-arm64@$ESBUILD_VERSION"
+
+      - name: Build universal desktop bundle
+        run: npm run build:desktop
+        env:
+          POLYTH_MAC_UNIVERSAL: "1"
+
+      - name: Stage Chromium for macOS x64
+        run: npm run desktop:stage-chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: 0
+          PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac14
+          POLYTH_TARGET_PLATFORM: darwin
+          POLYTH_TARGET_ARCH: x64
+
+      - name: Stage Chromium for macOS arm64
+        run: npm run desktop:stage-chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: 0
+          PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac14-arm64
+          POLYTH_TARGET_PLATFORM: darwin
+          POLYTH_TARGET_ARCH: arm64
+
+      - name: Download OpenCode for both macOS architectures
+        run: |
+          POLYTH_TARGET_PLATFORM=darwin POLYTH_TARGET_ARCH=x64 npm run desktop:download-opencode
+          POLYTH_TARGET_PLATFORM=darwin POLYTH_TARGET_ARCH=arm64 npm run desktop:download-opencode
+
+      - name: Package signed and notarized DMG, ZIP and updater metadata
+        working-directory: apps/desktop
+        run: npx electron-builder --mac dmg zip --universal --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-universal
+          retention-days: 7
+          path: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+            apps/desktop/release/*.blockmap
+            apps/desktop/release/latest-mac.yml
+          if-no-files-found: error
+
+  android:
+    name: Android signed APK + AAB
+    if: inputs.android
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Require Android signing
+        run: |
+          for NAME in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            test -n "${!NAME}" || { echo "$NAME is required for an Android release" >&2; exit 1; }
+          done
+
+      - name: Install workspace dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Resolve aligned release version
+        run: node scripts/release-version.mjs
+
+      - name: Build web and sync Android
+        run: npm run build:mobile
+
+      - name: Decode Android keystore
+        id: keystore
+        run: |
+          set -euo pipefail
+          KEYSTORE_PATH="$RUNNER_TEMP/polyth-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          echo "path=$KEYSTORE_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Build signed APK and AAB
+        working-directory: apps/mobile/android
+        run: |
+          ./gradlew :app:assembleRelease :app:bundleRelease \
+            -PpolythVersionName="$POLYTH_VERSION" \
+            -PpolythVersionCode="$POLYTH_ANDROID_VERSION_CODE"
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ steps.keystore.outputs.path }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-android
+          retention-days: 7
+          path: |
+            apps/mobile/android/app/build/outputs/apk/release/*.apk
+            apps/mobile/android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+
+      - name: Publish AAB to Google Play
+        if: inputs.play_track != 'none'
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.polyth.mobile
+          releaseFiles: apps/mobile/android/app/build/outputs/bundle/release/*.aab
+          tracks: ${{ inputs.play_track }}
+          status: ${{ inputs.play_track == 'production' && 'draft' || 'completed' }}
+          releaseName: Polyth ${{ needs.prepare.outputs.version }}
+
+      - name: Remove decoded keystore
+        if: always()
+        run: rm -f "${{ steps.keystore.outputs.path }}"
+
+  npm:
+    name: npm SDK tarballs
+    if: inputs.npm_packages
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Validate aligned versions
+        run: node scripts/release-version.mjs
+
+      - name: Pack public SDK packages
+        run: |
+          mkdir -p release/npm
+          npm pack --workspace @polyth/contracts --pack-destination release/npm
+          npm pack --workspace @polyth/package-sdk --pack-destination release/npm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-npm
+          retention-days: 7
+          path: release/npm/*.tgz
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    if: >-
+      always()
+      && needs.prepare.result == 'success'
+      && needs.linux.result == 'success'
+      && needs.windows.result == 'success'
+      && needs.macos.result == 'success'
+      && (needs.android.result == 'success' || needs.android.result == 'skipped')
+      && (needs.npm.result == 'success' || needs.npm.result == 'skipped')
+    needs: [prepare, linux, windows, macos, android, npm]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify desktop updater assets
+        run: |
+          set -euo pipefail
+          find release-assets -maxdepth 1 -type f -printf '%f\n' | sort
+          for NAME in latest.yml latest-arm64.yml latest-mac.yml latest-linux.yml; do
+            test -f "release-assets/$NAME" || { echo "Missing updater metadata: $NAME" >&2; exit 1; }
+          done
+          test -n "$(find release-assets -maxdepth 1 -name '*.dmg' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*.zip' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*.exe' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*.AppImage' -print -quit)"
+
+      - name: Create or refresh draft GitHub Release
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-assets/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" release-assets/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$RELEASE_SHA" \
+              --title "Polyth $VERSION" \
+              --generate-notes \
+              --draft
+          fi
+
+      - name: Publish public npm SDK packages
+        if: inputs.publish_npm
+        run: |
+          set -euo pipefail
+          test -n "$NODE_AUTH_TOKEN" || { echo "NPM_TOKEN is required when publish_npm=true" >&2; exit 1; }
+
+          publish_if_missing() {
+            PACKAGE="$1"
+            FILE="$2"
+            if npm view "$PACKAGE@$VERSION" version >/dev/null 2>&1; then
+              echo "$PACKAGE@$VERSION is already published; keeping release reruns idempotent."
+            else
+              npm publish "$FILE" --access public --provenance
+            fi
+          }
+
+          CONTRACTS="$(find release-assets -maxdepth 1 -name 'polyth-contracts-*.tgz' -print -quit)"
+          SDK="$(find release-assets -maxdepth 1 -name 'polyth-package-sdk-*.tgz' -print -quit)"
+          test -n "$CONTRACTS" && test -n "$SDK"
+          publish_if_missing "@polyth/contracts" "$CONTRACTS"
+          publish_if_missing "@polyth/package-sdk" "$SDK"
+
+      - name: Publish GitHub Release
+        if: inputs.draft == false
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+
+      - name: Release summary
+        run: |
+          {
+            echo "## Polyth $VERSION"
+            echo
+            echo "- GitHub tag: `$TAG`"
+            echo "- Draft: `${{ inputs.draft }}`"
+            echo "- Desktop updater feed: GitHub Release assets"
+            echo "- Android: `${{ inputs.android }}` / Play track `${{ inputs.play_track }}`"
+            echo "- npm tarballs: `${{ inputs.npm_packages }}` / publish `${{ inputs.publish_npm }}`"
+            echo "- iOS/TestFlight: Codemagic watches the release tag"
+          } >> "$GITHUB_STEP_SUMMARY"
