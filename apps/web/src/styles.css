@@ -12951,12 +12951,15 @@ html[data-font] body :is(
 }
 
 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-  .scrim,
-  .dialog-backdrop,
-  .sheet-backdrop {
-    background: color-mix(in srgb, var(--scrim) 66%, transparent);
-    -webkit-backdrop-filter: blur(14px) saturate(.82);
-    backdrop-filter: blur(14px) saturate(.82);
+  /* The floating surface owns Quiet Glass. Keep the modal layer to a light
+     dim only: filtering the full-viewport parent creates a second backdrop
+     root, desaturates the workspace, and makes nested dialogs read muddy. */
+  body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) :is(
+    .scrim,
+    .dialog-backdrop,
+    .sheet-backdrop
+  ) {
+    background: color-mix(in srgb, var(--scrim) 42%, transparent);
   }
 }
 
