@@ -125,7 +125,7 @@ test("project appearance dialog stays compact, single-preview, and same-origin",
   const css = await readFile(new URL("../src/components/ProjectAppearanceDialog.css", import.meta.url), "utf8");
   const tsx = await readFile(new URL("../src/components/ProjectAppearanceDialogCore.tsx", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
-  assert.doesNotMatch(css, /920px|480px|(?<![\d.])6px|api\.iconify\.design|backdrop-filter|hideHeader/);
+  assert.doesNotMatch(css, /920px|480px|(?<![\d.])6px|api\.iconify\.design|backdrop-filter|hideHeader|project-appearance-dialog\.dialog-panel|project-icon-upload-row \.muted/);
   assert.match(tsx, /size="sm"/);
   assert.match(tsx, /className="project-glyph"/);
   assert.match(tsx, /className="chip"/);
@@ -137,18 +137,34 @@ test("project appearance dialog stays compact, single-preview, and same-origin",
 });
 
 test("project settings menu and child pages use canonical dialog chrome", async () => {
-  const [tsx, css] = await Promise.all([
+  const [tsx, css, styles] = await Promise.all([
     readFile(new URL("../src/components/ProjectAppearanceDialog.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/ProjectSettingsDialog.css", import.meta.url), "utf8"),
+    readFile(new URL("../src/styles.css", import.meta.url), "utf8"),
   ]);
   assert.match(tsx, /Dialog,/);
   assert.doesNotMatch(tsx, /\.\/a11y\/Dialog\.tsx/);
-  assert.match(tsx, /className="project-settings-dialog project-settings-workspace-dialog"/);
+  assert.match(tsx, /className="project-settings-dialog"/);
+  assert.doesNotMatch(tsx, /project-settings-workspace-dialog/);
   assert.match(tsx, /footer=\{/);
   assert.match(tsx, /<ProjectGlyph/);
   assert.match(tsx, /<ProjectAppearanceDialogCore[\s\S]*onBack=/);
   assert.match(css, /\.project-settings-dialog \.ui-dialog-body/);
   assert.match(css, /var\(--density-scale\)/);
-  assert.match(css, /body\[data-glass="off"\]/);
-  assert.doesNotMatch(css, /var\(--surface\)|border-radius:\s*11px|font-size:\s*1[123]px/);
+  assert.doesNotMatch(css, /data-glass|backdrop-filter|material-glass-control/);
+  assert.doesNotMatch(css, /var\(--surface\)|var\(--danger\)|border-radius:\s*11px|font-size:\s*1[123]px/);
+  assert.match(styles, /\.dialog-panel\s*\{[\s\S]*?border-radius:\s*var\(--radius-sheet\)/);
+  assert.match(
+    styles,
+    /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\) :is\([\s\S]*?\.dialog-panel,[\s\S]*?\.sheet,[\s\S]*?\.response-footer-metadata-grid,[\s\S]*?\) \{[\s\S]*?var\(--material-glass-fill\)[\s\S]*?var\(--material-glass-edge\)[\s\S]*?var\(--material-glass-saturation\)/,
+  );
+  assert.doesNotMatch(
+    styles,
+    /:is\(\.dialog-panel, \.sheet, \.response-footer-metadata-grid\)\s*\{/,
+  );
+  const backdropStart = styles.indexOf("/* The floating surface owns Quiet Glass.");
+  assert.ok(backdropStart >= 0);
+  const backdropRule = styles.slice(backdropStart, styles.indexOf("}", backdropStart) + 1);
+  assert.match(backdropRule, /background:\s*color-mix\(in srgb, var\(--scrim\) 42%, transparent\)/);
+  assert.doesNotMatch(backdropRule, /backdrop-filter/);
 });

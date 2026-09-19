@@ -10,11 +10,11 @@
   gap: var(--space-3);
   min-width: 0;
   margin-bottom: calc(var(--space-4) * var(--density-scale));
-  padding: var(--space-3);
-  border: 1px solid var(--hair);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
   border-radius: var(--radius-card);
   background: var(--surface-overlay);
-  box-shadow: var(--inset-hi);
+  box-shadow: none;
 }
 
 .project-settings-project > div {
@@ -65,13 +65,13 @@
   gap: var(--space-3);
   min-height: calc(var(--control-h-lg) + var(--space-3));
   padding: var(--space-3);
-  border: 1px solid var(--hair);
+  border: 1px solid transparent;
   border-radius: var(--radius-card);
-  background: var(--surface-overlay);
+  background: transparent;
   color: inherit;
   text-align: start;
   cursor: pointer;
-  box-shadow: var(--inset-hi);
+  box-shadow: none;
   transition:
     background var(--motion-fast) var(--motion-ease),
     border-color var(--motion-fast) var(--motion-ease),
@@ -83,9 +83,9 @@
   place-items: center;
   width: var(--control-h);
   height: var(--control-h);
-  border: 1px solid var(--hair);
+  border: 1px solid transparent;
   border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--text) 5%, transparent);
+  background: var(--surface-overlay-hover);
   color: var(--muted);
 }
 
@@ -120,9 +120,9 @@
 
 @media (hover: hover) {
   .project-settings-menu button:hover {
-    border-color: var(--hair-strong);
+    border-color: transparent;
     background: var(--surface-overlay-hover);
-    box-shadow: var(--inset-hi), var(--shadow-sm);
+    box-shadow: none;
   }
 
   .project-settings-menu button:hover .project-settings-menu-icon {
@@ -160,25 +160,10 @@
 
 .project-settings-error {
   margin-top: var(--space-3);
-  color: var(--danger);
+  color: var(--red);
   font-size: var(--font-meta);
   line-height: var(--font-meta-lh);
   overflow-wrap: anywhere;
-}
-
-body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) :is(
-  .project-settings-project,
-  .project-settings-menu button
-) {
-  border-color: var(--material-glass-border);
-  background: linear-gradient(145deg,
-    color-mix(in srgb, var(--material-glass) var(--material-glass-control-fill), transparent),
-    color-mix(in srgb, var(--material-glass) var(--material-glass-control-edge), transparent));
-}
-
-body[data-glass="off"] :is(.project-settings-project, .project-settings-menu button),
-body[data-desktop-low-resource="true"] :is(.project-settings-project, .project-settings-menu button) {
-  background: var(--elevated);
 }
 
 @media (max-width: 700px) {
