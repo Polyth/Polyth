@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import type { SpaceContext, WorkflowDto } from "@polyth/contracts";
-import { atomicWriteSync, RUNTIME_SYSTEM_PRINCIPAL_ID, type ServerPackageHost } from "@polyth/plugins";
+import type { WorkflowDto } from "@polyth/contracts";
+import { atomicWriteSync, type ServerPackageHost } from "@polyth/plugins";
 
 function recovery(message: string): never {
   throw Object.assign(new Error(message), { code: "recovery-required" });
@@ -44,17 +44,6 @@ function sameJson(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-function systemSpace(host: ServerPackageHost, spaceId: string): SpaceContext {
-  return {
-    spaceId,
-    spaceSlug: spaceId,
-    userId: RUNTIME_SYSTEM_PRINCIPAL_ID,
-    role: "owner",
-    deployment: host.deployment,
-    storageDir: "",
-  };
-}
-
 /**
  * Split the old deployment-global workflow files by canonical project Space.
  * Writes are monotonic/idempotent; a crash before legacy unlink simply repeats
@@ -94,7 +83,7 @@ export async function migrateLegacyWorkflowStorage(host: ServerPackageHost): Pro
 
   const spaces = new Set([...groupedWorkflows.keys(), ...groupedSeeds.keys()]);
   for (const spaceId of spaces) {
-    const root = host.spaceStorage(systemSpace(host, spaceId)).packageDir(host.pluginId);
+    const root = host.spaceStorage(host.systemSpaceContext(spaceId)).packageDir(host.pluginId);
     const targetWorkflows = join(root, "workflows.json");
     const targetSamples = join(root, "workflow-samples.json");
 
