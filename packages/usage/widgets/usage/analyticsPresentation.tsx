@@ -91,6 +91,11 @@ const palette = (): string[] => {
   return values.length > 0 ? values : ["currentColor"];
 };
 
+const cssToken = (name: string, fallback: string): string => {
+  if (typeof document === "undefined") return fallback;
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+};
+
 const reducedMotion = (): boolean =>
   typeof window !== "undefined"
   && (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true
@@ -230,7 +235,7 @@ function LineChart({
           x: { grid: { display: false }, ticks: { maxTicksLimit: 7 } },
           y: {
             beginAtZero: true,
-            grid: { color: "rgba(127,127,127,.12)" },
+            grid: { color: cssToken("--border-soft", "currentColor") },
             ticks: { callback: (value) => valueFormat(Number(value)) },
           },
         },
@@ -551,6 +556,12 @@ export function UsageWhatChangedBlock({ scope }: { scope: UsageAnalyticsScope })
         format: deltaLabel,
         inverse: true,
       } : null,
+      previous.contextUsedTokens.p95 ? {
+        label: "Context p95",
+        value: delta(current.contextUsedTokens.p95, previous.contextUsedTokens.p95) ?? 0,
+        format: deltaLabel,
+        inverse: true,
+      } : null,
     ];
     return candidates
       .filter((fact): fact is ChangeFact => fact !== null)
@@ -733,6 +744,46 @@ export function UsageModelEfficiencyBlock({ scope }: { scope: UsageAnalyticsScop
     <Block title="Model efficiency" meta="Bubble size = output volume · recorded/equivalent cost">
       <AnalyticsState loading={state.loading} error={state.error} empty={usable.length === 0}>
         <BubbleChart groups={usable} />
+      </AnalyticsState>
+    </Block>
+  );
+}
+
+export function UsageContextGrowthBlock({ scope }: { scope: UsageAnalyticsScope }) {
+  const query = useMemo(
+    () => queryFor(scope, "contextUsedTokens", "none", "p50", 1),
+    [scope],
+  );
+  const state = useUsageAnalytics(query);
+  const data = state.data;
+  const change = data
+    ? delta(data.summary.contextUsedTokens.p95, data.previousSummary.contextUsedTokens.p95)
+    : null;
+  const telemetryAvailable = data?.summary.contextUsedTokens.p50 !== null;
+
+  return (
+    <Block
+      title="Context growth"
+      meta={data && telemetryAvailable
+        ? <>p50 {fmtTokens(data.summary.contextUsedTokens.p50 ?? 0)} · p95 {fmtTokens(data.summary.contextUsedTokens.p95 ?? 0)} <Trend value={change} inverse /></>
+        : "Historical context occupancy"}
+    >
+      <AnalyticsState
+        loading={state.loading}
+        error={state.error}
+        empty={!data || data.summary.observations === 0 || !telemetryAvailable}
+      >
+        {data && telemetryAvailable && (
+          <>
+            <LineChart data={data} valueFormat={(value) => fmtTokens(value)} />
+            {data.summary.contextPercent.p95 !== null && (
+              <div className="usage-context-foot">
+                <span>p95 of reported context window</span>
+                <strong>{percent(data.summary.contextPercent.p95)}</strong>
+              </div>
+            )}
+          </>
+        )}
       </AnalyticsState>
     </Block>
   );
@@ -939,7 +990,8 @@ export type UsageAnalyticsWidgetKind =
   | "model-efficiency"
   | "breakdown"
   | "reliability"
-  | "cache-efficiency";
+  | "cache-efficiency"
+  | "context-growth";
 
 export function rangeFromPreset(
   preset: unknown,
@@ -1012,5 +1064,7 @@ export function UsageAnalyticsWidgetView({
       return <UsageReliabilityBlock scope={scope} />;
     case "cache-efficiency":
       return <UsageCacheEfficiencyBlock scope={scope} />;
+    case "context-growth":
+      return <UsageContextGrowthBlock scope={scope} />;
   }
 }
