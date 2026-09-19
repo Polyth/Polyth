@@ -44,8 +44,6 @@ export const pl: BrowserMessages = {
   "browser.settings.agentAutoApproveDescription": "Po włączeniu agenci mogą używać wbudowanego narzędzia Browser bez monitu o uprawnienia. Polityka pochodzenia i nawigacji nadal obowiązuje.",
   "previewview.background": "W tle",
   "previewview.autoShow": "Pokaż automatycznie",
-  "previewview.browserIdle": "Bezczynna",
-  "previewview.viewBrowser": "Wyświetl przeglądarkę",
   "previewview.browserValue": "Przeglądarka: {value}",
   "previewview.browsingDataWillBeCleared": "Przeglądanie danych zostanie wyczyszczone",
   "previewview.cancelOriginApproval": "Anuluj zatwierdzenie pochodzenia",

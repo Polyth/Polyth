@@ -44,8 +44,6 @@ export const it: BrowserMessages = {
   "browser.settings.agentAutoApproveDescription": "Quando attivato, gli agenti possono usare lo strumento Browser integrato senza richiesta di permesso. Le regole di origine e navigazione restano in vigore.",
   "previewview.background": "In background",
   "previewview.autoShow": "Mostra automaticamente",
-  "previewview.browserIdle": "Inattivo",
-  "previewview.viewBrowser": "Visualizza browser",
   "previewview.browserValue": "Browser: {value}",
   "previewview.browsingDataWillBeCleared": "I dati di navigazione saranno cancellati",
   "previewview.cancelOriginApproval": "Annulla approvazione di origine",

@@ -44,8 +44,6 @@ export const uk: BrowserMessages = {
   "browser.settings.agentAutoApproveDescription": "Коли увімкнено, агенти можуть використовувати вбудований інструмент Browser без запиту дозволу. Політика походження та навігації все одно застосовується.",
   "previewview.background": "У фоні",
   "previewview.autoShow": "Показувати автоматично",
-  "previewview.browserIdle": "Бездіяльний",
-  "previewview.viewBrowser": "Переглянути браузер",
   "previewview.browserValue": "Браузер: {value}",
   "previewview.browsingDataWillBeCleared": "Придбання даних буде очищено",
   "previewview.cancelOriginApproval": "Скасування затвердження походження",

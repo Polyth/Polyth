@@ -186,27 +186,6 @@
 .browser-current-action {
   overflow: hidden; text-overflow: ellipsis;
 }
-.browser-activity-affordance {
-  max-width: min(34ch, 100%);
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text-dim);
-  white-space: nowrap;
-}
-.browser-activity-label,
-.browser-activity-state {
-  flex: none;
-}
-.browser-activity-domain {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.browser-activity-affordance > svg {
-  width: var(--icon-sm);
-  height: var(--icon-sm);
-  flex: none;
-}
 .browser-settings-page {
   max-width: 720px;
   padding: var(--space-4);

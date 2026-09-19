@@ -4,7 +4,6 @@ import { defineWebPackage } from "@polyth/web-sdk";
 import { withSurfaceContent } from "@polyth/web-sdk/surface-content";
 import type { SessionEvent } from "@polyth/contracts";
 import PreviewView from "./PreviewView.tsx";
-import BrowserActivity from "./BrowserActivity.tsx";
 import BrowserSettingsPage from "./BrowserSettingsPage.tsx";
 import { getBrowserVisibility } from "./browserVisibility.ts";
 import { browserRequestKey, shouldAutoRevealBrowserRequest } from "./browserReveal.ts";
@@ -38,12 +37,6 @@ export default defineWebPackage((host) => () => {
         { id: "browser.agent-auto-approve", pageId: "browser", label: translate("browser.settings.agentAutoApprove"), keywords: ["browser", "auto-approve", "permission", "agent", "tool"], focusTarget: "browser.agent-auto-approve" },
         { id: "browser.visibility", pageId: "browser", label: translate("previewview.browserVisibility"), keywords: ["browser", "background", "auto-show", "visibility"], focusTarget: "browser.visibility" },
       ],
-    }),
-    host.slots.register({
-      slot: "session.header.actions",
-      id: "browser.activity",
-      order: 12,
-      render: () => createElement(BrowserActivity, { host }),
     }),
     host.surfaces.register({ id: "browser", title: translate("previewview.browser"), description: translate("previewview.openTheControlledBrowserSharedWithThe"), shortLabel: translate("previewview.browser"), capabilityId: "browser", order: 4, component: PreviewView, presentation: withSurfaceContent({ kind: "workspace", defaultRatio: 0.45, minWidth: 380, preferredMaxWidth: 760, keepAlive: true, escape: "close" }, "workspace") }),
     host.capabilities.register({ id: "browser", label: translate("previewview.browser"), plainDescription: translate("previewview.enterAnHttpSAddressAbove"), keywords: ["browser", "element picker", "agent browser", "app"], standardTier: "primary", standardRank: 2, open: () => { host.navigation.openWorkspacePane("browser"); }, available: () => true }),

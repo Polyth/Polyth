@@ -44,8 +44,6 @@ export const de: BrowserMessages = {
   "browser.settings.agentAutoApproveDescription": "Wenn aktiviert, können Agenten das Browser-Tool ohne Berechtigungsabfrage nutzen. Ursprungs- und Navigationsrichtlinien gelten weiterhin.",
   "previewview.background": "Hintergrund",
   "previewview.autoShow": "Automatisch anzeigen",
-  "previewview.browserIdle": "Inaktiv",
-  "previewview.viewBrowser": "Browser anzeigen",
   "previewview.browserValue": "Browser: {value}",
   "previewview.browsingDataWillBeCleared": "Browserdaten werden gelöscht",
   "previewview.cancelOriginApproval": "Genehmigung für die Annullierung von Ursprungserzeugnissen",

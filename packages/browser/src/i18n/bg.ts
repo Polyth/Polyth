@@ -44,8 +44,6 @@ export const bg: BrowserMessages = {
   "browser.settings.agentAutoApproveDescription": "Когато е включено, агентите могат да използват вградения инструмент Browser без заявка за разрешение. Политиката за произход и навигация остава в сила.",
   "previewview.background": "На заден план",
   "previewview.autoShow": "Автоматично показване",
-  "previewview.browserIdle": "В покой",
-  "previewview.viewBrowser": "Преглед на браузъра",
   "previewview.browserValue": "Браузър: {value}",
   "previewview.browsingDataWillBeCleared": "Данните за четенето ще бъдат изчистени",
   "previewview.cancelOriginApproval": "Отказ на одобрение на произход",

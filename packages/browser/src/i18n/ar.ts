@@ -44,8 +44,6 @@ export const ar: BrowserMessages = {
   "browser.settings.agentAutoApproveDescription": "When enabled, agents can use the in-app Browser tool without a permission prompt. Origin and navigation policy still apply.",
   "previewview.background": "Background",
   "previewview.autoShow": "Auto-show",
-  "previewview.browserIdle": "Idle",
-  "previewview.viewBrowser": "View browser",
   "previewview.browserValue": "المتصفح: {value}",
   "previewview.browsingDataWillBeCleared": "سيتم تطهير البيانات",
   "previewview.cancelOriginApproval": "الموافقة على الأصل الإنجيلي",

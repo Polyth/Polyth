@@ -44,8 +44,6 @@ export const zhCN: BrowserMessages = {
   "browser.settings.agentAutoApproveDescription": "启用后，代理可在无需权限提示的情况下使用内置 Browser 工具。来源和导航策略仍然适用。",
   "previewview.background": "后台",
   "previewview.autoShow": "自动显示",
-  "previewview.browserIdle": "空闲",
-  "previewview.viewBrowser": "查看浏览器",
   "previewview.browserValue": "浏览器： {value}",
   "previewview.browsingDataWillBeCleared": "浏览数据将被清除",
   "previewview.cancelOriginApproval": "取消原产地核准",
