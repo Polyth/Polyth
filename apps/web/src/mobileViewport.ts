@@ -179,6 +179,13 @@ export function startMobileViewport(): void {
   const onChange = () => measure();
   window.addEventListener("resize", onChange);
   window.addEventListener("orientationchange", onChange);
+  // A restored/frozen PWA can resume with different viewport geometry without
+  // delivering a resize event. Refresh the same measurement seam instead of
+  // retaining a keyboard-sized frame or a stale Safari pan offset.
+  window.addEventListener("pageshow", onChange);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") onChange();
+  });
   document.addEventListener("focusin", onChange);
   document.addEventListener("focusout", onChange);
   const visual = window.visualViewport;
