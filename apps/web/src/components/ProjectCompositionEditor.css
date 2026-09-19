@@ -270,51 +270,6 @@
 
 .project-composition-editor.is-compact { gap: var(--space-4); }
 
-/* Nested setup controls use the same cut-glass material as Polyth chrome.
-   No second backdrop blur: the parent dialog owns translucency. */
-body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) :is(
-  .project-direction-card:not(.is-selected),
-  .project-composition-review,
-  .project-package-choice,
-  .project-composition-chips span
-) {
-  border-color: var(--material-glass-border);
-  background: linear-gradient(145deg,
-    color-mix(in srgb, var(--material-glass) var(--material-glass-control-fill), transparent),
-    color-mix(in srgb, var(--material-glass) var(--material-glass-control-edge), transparent));
-  box-shadow: var(--material-glass-highlight);
-}
-
-body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .project-direction-card.is-selected {
-  background:
-    linear-gradient(145deg,
-      color-mix(in srgb, var(--accent) 14%, transparent),
-      color-mix(in srgb, var(--accent) 5%, transparent)),
-    linear-gradient(145deg,
-      color-mix(in srgb, var(--material-glass) var(--material-glass-control-fill), transparent),
-      color-mix(in srgb, var(--material-glass) var(--material-glass-control-edge), transparent));
-}
-
-body[data-glass="off"] :is(
-  .project-direction-card:not(.is-selected),
-  .project-composition-review,
-  .project-package-choice,
-  .project-composition-chips span
-),
-body[data-desktop-low-resource="true"] :is(
-  .project-direction-card:not(.is-selected),
-  .project-composition-review,
-  .project-package-choice,
-  .project-composition-chips span
-) {
-  background: var(--elevated);
-}
-
-body[data-glass="off"] .project-direction-card.is-selected,
-body[data-desktop-low-resource="true"] .project-direction-card.is-selected {
-  background: color-mix(in srgb, var(--accent) 12%, var(--elevated));
-}
-
 @container project-composition (max-width: 620px) {
   .project-direction-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
