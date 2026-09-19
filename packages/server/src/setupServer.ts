@@ -66,7 +66,8 @@ export function createSetupServer(options: SetupServerOptions): SetupServerHandl
   const shellPath = resolve(root, "index.html");
   const shell = existsSync(shellPath) ? readFileSync(shellPath, "utf8") : "";
   const scriptHashes = new Set<string>();
-  for (const [, body] of shell.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)) {
+  for (const match of shell.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)) {
+    const body = match[1] ?? "";
     if (!body.trim()) continue;
     // HTML parsing normalizes CRLF and bare CR before CSP checks script text.
     const hash = createHash("sha256").update(body.replace(/\r\n?/g, "\n")).digest("base64");
