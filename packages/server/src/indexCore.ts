@@ -6,8 +6,8 @@
 // (serverServiceKey). This file only composes infrastructure (session store,
 // runtime pool, HTTP/WS gateway) plus the few genuinely cross-cutting seams
 // (session service wiring and track workflow).
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
+import { createConnection, createServer as createNetServer } from "node:net";
 import { chmodSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -331,138 +331,142 @@ export function createRuntimeAdmissionBarrier(options?: {
   };
 }
 
-/** Hold a kernel advisory lock through a tiny child whose stdin is owned by
- * this process. A stale file is harmless: exclusivity belongs to flock's open
- * file description and is released by the kernel when the process exits. */
-export async function acquireDataDirectoryLease(dataDir: string): Promise<DataDirectoryLease> {
-  mkdirSync(dataDir, { recursive: true });
-  const canonicalDataDir = realpathSync.native(dataDir);
-  const lockPath = join(canonicalDataDir, ".polyth-writer.lock");
-  const holder: ChildProcessWithoutNullStreams = spawn(
-    "flock",
-    [
-      "--exclusive",
-      "--nonblock",
-      lockPath,
-      process.execPath,
-      "-e",
-      "process.stdout.write('locked\\n');process.stdin.resume()",
-    ],
-    {
-      stdio: ["pipe", "pipe", "pipe"],
-      // Electron exposes its own binary as process.execPath. Running that
-      // binary with -e starts another desktop instance unless Node mode is
-      // explicit, causing the nested server to contend for this same lease.
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
-    },
-  );
-  let holderInputError: Error | undefined;
-  holder.stdin.on("error", (error) => { holderInputError = error; });
+const DATA_DIRECTORY_LEASE_HOST = "127.0.0.1";
+const DATA_DIRECTORY_LEASE_PORT_BASE = 49_152;
+const DATA_DIRECTORY_LEASE_PORT_SPAN = 16_384;
+const DATA_DIRECTORY_LEASE_PREFIX = "polyth-writer-v1:";
 
-  await new Promise<void>((resolveLock, rejectLock) => {
+const dataDirectoryLeaseIdentity = (canonicalDataDir: string): string =>
+  createHash("sha256")
+    .update(process.platform === "win32" ? canonicalDataDir.toLowerCase() : canonicalDataDir)
+    .digest("hex");
+
+const dataDirectoryLeasePort = (identity: string): number =>
+  DATA_DIRECTORY_LEASE_PORT_BASE
+  + (Number.parseInt(identity.slice(0, 4), 16) % DATA_DIRECTORY_LEASE_PORT_SPAN);
+
+type DataDirectoryLeaseProbe = "same-owner" | "occupied" | "gone";
+
+const probeDataDirectoryLease = (
+  port: number,
+  identity: string,
+): Promise<DataDirectoryLeaseProbe> =>
+  new Promise((resolveProbe) => {
+    const socket = createConnection({ host: DATA_DIRECTORY_LEASE_HOST, port });
     let output = "";
-    let errorOutput = "";
     let settled = false;
-    const finish = (error?: Error) => {
+    const finish = (result: DataDirectoryLeaseProbe): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (error) rejectLock(error);
-      else resolveLock();
+      socket.destroy();
+      resolveProbe(result);
     };
-    const timer = setTimeout(() => {
-      holder.kill();
-      finish(new Error(`timed out acquiring the Polyth writer lease for ${canonicalDataDir}`));
-    }, 5_000);
-    holder.stdout.setEncoding("utf8");
-    holder.stderr.setEncoding("utf8");
-    holder.stdout.on("data", (chunk: string) => {
-      output += chunk;
-      if (output.includes("locked\n")) finish();
-    });
-    holder.stderr.on("data", (chunk: string) => {
-      if (errorOutput.length < 4_096) errorOutput += chunk;
-    });
-    holder.stdout.on("error", (error) => {
-      if (!settled) {
-        holder.kill();
-        finish(new Error(`Polyth writer lease output failed: ${error.message}`));
+    const timer = setTimeout(() => finish("occupied"), 250);
+    timer.unref?.();
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => {
+      if (output.length < 256) {
+        const text = String(chunk);
+        output += text.slice(0, 256 - output.length);
       }
+      const newline = output.indexOf("\n");
+      if (newline < 0) return;
+      finish(
+        output.slice(0, newline) === `${DATA_DIRECTORY_LEASE_PREFIX}${identity}`
+          ? "same-owner"
+          : "occupied",
+      );
     });
-    holder.stderr.on("error", (error) => {
-      if (!settled) {
-        holder.kill();
-        finish(new Error(`Polyth writer lease diagnostics failed: ${error.message}`));
-      }
+    socket.once("error", (error: NodeJS.ErrnoException) => {
+      finish(error.code === "ECONNREFUSED" ? "gone" : "occupied");
     });
-    holder.once("error", (error) => {
-      finish(new Error(`OS advisory locking is unavailable: ${error.message}`));
+    socket.once("close", () => finish("occupied"));
+  });
+
+const listenDataDirectoryLease = (
+  port: number,
+  identity: string,
+): Promise<ReturnType<typeof createNetServer>> =>
+  new Promise((resolveListen, rejectListen) => {
+    const server = createNetServer((socket) => {
+      socket.end(`${DATA_DIRECTORY_LEASE_PREFIX}${identity}\n`);
     });
-    holder.once("exit", (code) => {
-      if (!settled) {
-        finish(Object.assign(
-          new Error(
-            code === 1
-              ? `another Polyth server already owns data directory ${canonicalDataDir}`
-              : `failed to acquire the Polyth writer lease for ${canonicalDataDir}${errorOutput.trim() ? `: ${errorOutput.trim()}` : ""}`,
-          ),
-          { code: "data-directory-locked" },
-        ));
-      }
+    const onError = (error: Error): void => {
+      server.off("listening", onListening);
+      rejectListen(error);
+    };
+    const onListening = (): void => {
+      server.off("error", onError);
+      resolveListen(server);
+    };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen({
+      host: DATA_DIRECTORY_LEASE_HOST,
+      port,
+      exclusive: true,
     });
   });
 
-  let released = false;
-  const waitForHolderExit = (timeoutMs: number): Promise<void> =>
-    new Promise<void>((resolveExit, rejectExit) => {
-      if (holder.exitCode !== null || holder.signalCode !== null) {
-        resolveExit();
-        return;
-      }
-      let settled = false;
-      const finish = (error?: Error): void => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        holder.off("exit", onExit);
-        holder.off("close", onExit);
-        if (error) rejectExit(error);
-        else resolveExit();
+/** Hold a kernel-owned writer lease for the canonical data directory without
+ * relying on platform utilities. The loopback listener disappears with the
+ * process, so a crash cannot leave a stale filesystem lock behind. */
+export async function acquireDataDirectoryLease(dataDir: string): Promise<DataDirectoryLease> {
+  mkdirSync(dataDir, { recursive: true });
+  const canonicalDataDir = realpathSync.native(dataDir);
+  const identity = dataDirectoryLeaseIdentity(canonicalDataDir);
+  const port = dataDirectoryLeasePort(identity);
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const holder = await listenDataDirectoryLease(port, identity);
+      holder.unref();
+      let released = false;
+      return {
+        canonicalDataDir,
+        async release() {
+          if (released) return;
+          released = true;
+          await new Promise<void>((resolveClose) => holder.close(() => resolveClose()));
+        },
       };
-      const onExit = (): void => finish();
-      const timer = setTimeout(
-        () => finish(new Error("timed out releasing the Polyth writer lease")),
-        timeoutMs,
+    } catch (error) {
+      const systemError = error as NodeJS.ErrnoException;
+      if (systemError.code !== "EADDRINUSE") {
+        throw Object.assign(
+          new Error(`OS data-directory lease is unavailable: ${systemError.message}`),
+          { code: "data-directory-lock-unavailable" },
+        );
+      }
+
+      const probe = await probeDataDirectoryLease(port, identity);
+      if (probe === "same-owner") {
+        throw Object.assign(
+          new Error(`another Polyth server already owns data directory ${canonicalDataDir}`),
+          { code: "data-directory-locked" },
+        );
+      }
+      if (probe === "gone") {
+        await new Promise<void>((resolveRetry) => setTimeout(resolveRetry, 10));
+        continue;
+      }
+
+      throw Object.assign(
+        new Error(
+          `cannot safely acquire the Polyth writer lease for ${canonicalDataDir}: local lease port ${port} is already used by another service`,
+        ),
+        { code: "data-directory-lock-unavailable" },
       );
-      holder.once("exit", onExit);
-      holder.once("close", onExit);
-    });
-  return {
-    canonicalDataDir,
-    async release() {
-      if (released) return;
-      released = true;
-      if (holder.exitCode !== null || holder.signalCode !== null) return;
-      if (!holderInputError && !holder.stdin.destroyed && !holder.stdin.writableEnded) {
-        holder.stdin.end();
-      } else {
-        holder.kill("SIGTERM");
-      }
-      try {
-        await waitForHolderExit(5_000);
-      } catch (error) {
-        holder.kill("SIGKILL");
-        try {
-          await waitForHolderExit(5_000);
-        } catch (killError) {
-          throw new AggregateError(
-            [error, killError],
-            "Polyth writer lease process could not be confirmed exited",
-          );
-        }
-      }
-    },
-  };
+    }
+  }
+
+  throw Object.assign(
+    new Error(
+      `cannot safely acquire the Polyth writer lease for ${canonicalDataDir} after transient local port contention`,
+    ),
+    { code: "data-directory-lock-unavailable" },
+  );
 }
 
 // ---- structural views of package-owned services -----------------------------------

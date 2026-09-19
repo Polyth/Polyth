@@ -33,13 +33,22 @@ Controlled browser packaging uses the same explicit resource boundary. Before cr
 a desktop artifact, `npm --workspace @polyth/desktop run stage:chromium` copies the
 already-installed Chromium selected by the pinned `playwright-core` into
 `resources/chromium/<platform>-<arch>/` and records its version and executable path.
-The staging command never downloads a browser; release runners must provision the
-matching Playwright browser before this step. The manual GitHub application-build workflow installs the Chromium revision selected by `playwright-core` into a hermetic cache, then stages it for the requested Windows or Linux x64 artifact. Local or future signed macOS distribution tooling must provision and stage the correct architecture-specific browser resources before packaging; the staging command itself never downloads them. Packaged startup points
-`POLYTH_CHROMIUM_PATH` at that resource and reports the browser capability as
-unavailable when the resource is missing. Electron's renderer CDP is not reused:
+The staging command never downloads a browser; build/release runners provision the
+matching Playwright revision before this step. Windows and Linux stage the requested
+architecture directly; macOS stages native x64 and arm64 Chromium resources separately
+before packaging both app architectures. Packaged startup points
+`POLYTH_CHROMIUM_PATH` at that resource and fails closed if either bundled Chromium
+or bundled OpenCode is missing, rather than searching the host for a substitute.
+Electron's renderer CDP is not reused:
 connecting to the app's debugging endpoint would expose the trusted desktop renderer
 and its windows to the browser tool, while a dedicated Chromium process preserves the
 browser service's isolated context and URL policy.
+
+Local terminal launch is platform-native as well: Windows uses `COMSPEC` (falling back
+to `cmd.exe`) and Windows command-line switches, while macOS/Linux use `SHELL`
+(falling back to `/bin/sh`). Linux-only runtime containment and remote `flock`/
+`/proc` logic remains gated to Linux execution paths and is not a desktop host
+dependency on macOS or Windows.
 
 ## Release and updates
 
@@ -47,12 +56,12 @@ GitHub Actions separates smoke artifacts from real releases.
 
 `.github/workflows/build-apps.yml` is manual and unpublished:
 
-- `windows-exe`: x64 NSIS installer;
-- `linux-appimage`: x64 AppImage with packaged-app smoke;
-- `mac-dmg`: signed/notarized native x64 DMG and arm64 DMG as separate artifacts; no updater ZIP is produced by the smoke/download workflow;
+- `windows-exe`: x64 NSIS installer plus packaged-server startup smoke;
+- `linux-appimage`: x64 AppImage with full packaged-app smoke;
+- `mac-dmg`: signed/notarized native x64 DMG and arm64 DMG as separate artifacts, plus packaged-server startup smoke on the runner-native architecture; no updater ZIP is produced by the smoke/download workflow;
 - platform mobile targets and public npm SDK tarballs are available from the same manual chooser.
 
-`.github/workflows/release.yml` is also manual but may run only from `master`. It builds signed Windows x64/arm64 installers, Linux x64/arm64 AppImages, and signed/notarized native macOS x64 + arm64 DMG/ZIP pairs. The final job gathers the generated electron-builder updater metadata, creates or refreshes a draft GitHub Release, and publishes that release only after all required artifacts (and optional external publication) succeed.
+`.github/workflows/release.yml` is also manual but may run only from `master`. It builds signed Windows x64/arm64 installers, Linux x64/arm64 AppImages, and signed/notarized native macOS x64 + arm64 DMG/ZIP pairs. Before artifact handoff it launches the packaged Windows x64 app and one runner-native macOS app through the startup-smoke path, which must boot the bundled server using only packaged OpenCode/Chromium resources. The final job gathers the generated electron-builder updater metadata, creates or refreshes a draft GitHub Release, and publishes that release only after all required artifacts (and optional external publication) succeed.
 
 The electron-builder provider is `Polyth/Polyth`. `electron-updater` consumes the published GitHub Release metadata (`latest.yml`, `latest-mac.yml`, `latest-linux.yml`, plus architecture-specific channels). Automatic updates are enabled by default in Desktop settings: the app checks shortly after startup and every six hours, automatically downloads an available release when that setting is enabled, and installs the downloaded update on quit/restart. Manual check/download/install remains available when automatic updates are disabled.
 

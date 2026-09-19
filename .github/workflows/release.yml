@@ -271,6 +271,10 @@ jobs:
           fi
           npx electron-builder --win nsis --${{ matrix.arch }} --publish always "${CHANNEL_ARGS[@]}"
 
+      - name: Smoke-test packaged Windows app
+        if: matrix.arch == 'x64'
+        run: node apps/desktop/test/startup-smoke.mjs "apps/desktop/release/win-unpacked/Polyth.exe"
+
       - uses: actions/upload-artifact@v4
         with:
           name: release-windows-${{ matrix.arch }}
@@ -366,6 +370,20 @@ jobs:
       - name: Package signed x64 + arm64 DMG, ZIP and updater metadata
         working-directory: apps/desktop
         run: npx electron-builder --mac dmg zip --x64 --arm64 --publish always
+
+      - name: Smoke-test packaged macOS app
+        run: |
+          set -euo pipefail
+          NATIVE_ARCH="$(uname -m)"
+          APP_BIN=""
+          while IFS= read -r CANDIDATE; do
+            if lipo -archs "$CANDIDATE" | tr ' ' '\n' | grep -qx "$NATIVE_ARCH"; then
+              APP_BIN="$CANDIDATE"
+              break
+            fi
+          done < <(find apps/desktop/release -path '*/Polyth.app/Contents/MacOS/Polyth' -type f -print)
+          test -n "$APP_BIN" || { echo "No packaged Polyth.app matches runner architecture $NATIVE_ARCH" >&2; exit 1; }
+          node apps/desktop/test/startup-smoke.mjs "$APP_BIN"
 
       - uses: actions/upload-artifact@v4
         with:

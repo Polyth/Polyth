@@ -211,6 +211,20 @@ jobs:
         working-directory: apps/desktop
         run: npx electron-builder --mac dmg --x64 --arm64 --publish never
 
+      - name: Smoke-test packaged macOS app
+        run: |
+          set -euo pipefail
+          NATIVE_ARCH="$(uname -m)"
+          APP_BIN=""
+          while IFS= read -r CANDIDATE; do
+            if lipo -archs "$CANDIDATE" | tr ' ' '\n' | grep -qx "$NATIVE_ARCH"; then
+              APP_BIN="$CANDIDATE"
+              break
+            fi
+          done < <(find apps/desktop/release -path '*/Polyth.app/Contents/MacOS/Polyth' -type f -print)
+          test -n "$APP_BIN" || { echo "No packaged Polyth.app matches runner architecture $NATIVE_ARCH" >&2; exit 1; }
+          node apps/desktop/test/startup-smoke.mjs "$APP_BIN"
+
       - name: Upload macOS x64 DMG
         uses: actions/upload-artifact@v4
         with:
@@ -269,6 +283,9 @@ jobs:
       - name: Build NSIS installer
         working-directory: apps/desktop
         run: npx electron-builder --win nsis --x64 --publish never
+
+      - name: Smoke-test packaged Windows app
+        run: node apps/desktop/test/startup-smoke.mjs "apps/desktop/release/win-unpacked/Polyth.exe"
 
       - uses: actions/upload-artifact@v4
         with:
