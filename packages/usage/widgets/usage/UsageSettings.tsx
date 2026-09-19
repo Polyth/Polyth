@@ -7,6 +7,7 @@ import {
   moveUsageBlock,
   orderUsageBlocks,
   setBlockHidden,
+  setModelPricingProfile,
   setProviderCostProfile,
   setProviderHidden,
   setUsageDashboardPrefs,
@@ -49,6 +50,38 @@ const money = (value: number): string =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value);
+
+function RateInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number | null;
+  onChange: (value: number | null) => void;
+}) {
+  return (
+    <label className="usage-settings-price usage-settings-rate">
+      <span>{label}</span>
+      <span className="usage-settings-money-input">
+        <span aria-hidden="true">$</span>
+        <TextInput
+          type="number"
+          inputMode="decimal"
+          min="0"
+          step="0.01"
+          defaultValue={value ?? ""}
+          aria-label={label}
+          placeholder="—"
+          onBlur={(event) => {
+            const raw = event.currentTarget.value.trim();
+            onChange(raw === "" ? null : Number(raw));
+          }}
+        />
+      </span>
+    </label>
+  );
+}
 
 export default function UsageSettings(): ReactNode {
   const sessions = useStore((state) => state.sessions);
@@ -327,7 +360,7 @@ export default function UsageSettings(): ReactNode {
       <section className="usage-settings-section" data-settings-item="usage.costs">
         <div className="usage-settings-heading">
           <h3>Costs & budgets</h3>
-          <p>Recorded API cost stays telemetry. Subscription price and API budget are display metadata only.</p>
+          <p>Recorded API cost stays telemetry. Subscription price, budgets, and pricing overrides are display/calculation metadata only.</p>
         </div>
         <div className="usage-settings-provider-list">
           {data.providers.map((provider) => {
@@ -335,6 +368,8 @@ export default function UsageSettings(): ReactNode {
               billing: "api" as const,
               monthlyCost: null,
               monthlyBudget: null,
+              inputPerMillion: null,
+              outputPerMillion: null,
             };
             return (
               <div className="usage-settings-provider" key={provider.id}>
@@ -391,6 +426,18 @@ export default function UsageSettings(): ReactNode {
                       ? profile.monthlyCost === null ? "Price not set" : `${money(profile.monthlyCost)} / month`
                       : profile.monthlyBudget === null ? "No budget" : `${money(profile.monthlyBudget)} budget`}
                   </span>
+                  <div className="usage-settings-rate-grid">
+                    <RateInput
+                      label={`${provider.label} default input / 1M tokens`}
+                      value={profile.inputPerMillion}
+                      onChange={(inputPerMillion) => setProviderCostProfile(provider.id, { inputPerMillion })}
+                    />
+                    <RateInput
+                      label={`${provider.label} default output / 1M tokens`}
+                      value={profile.outputPerMillion}
+                      onChange={(outputPerMillion) => setProviderCostProfile(provider.id, { outputPerMillion })}
+                    />
+                  </div>
                 </div>
               </div>
             );
@@ -399,6 +446,44 @@ export default function UsageSettings(): ReactNode {
             <p className="usage-settings-empty">Providers appear after Polyth sees session usage or a quota feed.</p>
           )}
         </div>
+
+        {data.models.length > 0 && (
+          <div className="usage-settings-model-pricing">
+            <div className="usage-settings-heading">
+              <h4>Model pricing overrides</h4>
+              <p>
+                Optional USD / 1M input and output rates. Model rates override provider defaults only for
+                calculated API-equivalent/value; recorded API spend is never rewritten.
+              </p>
+            </div>
+            {data.models.map((model) => {
+              const pricing = prefs.modelPricing[model.id] ?? {
+                inputPerMillion: null,
+                outputPerMillion: null,
+              };
+              return (
+                <div className="usage-settings-model-row" key={model.id}>
+                  <div className="usage-settings-model-name">
+                    <strong>{model.label}</strong>
+                    <span>{model.providerLabel}</span>
+                  </div>
+                  <div className="usage-settings-rate-grid">
+                    <RateInput
+                      label={`${model.label} input / 1M tokens`}
+                      value={pricing.inputPerMillion}
+                      onChange={(inputPerMillion) => setModelPricingProfile(model.id, { inputPerMillion })}
+                    />
+                    <RateInput
+                      label={`${model.label} output / 1M tokens`}
+                      value={pricing.outputPerMillion}
+                      onChange={(outputPerMillion) => setModelPricingProfile(model.id, { outputPerMillion })}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
     </div>
   );
