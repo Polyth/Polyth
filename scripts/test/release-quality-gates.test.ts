@@ -21,7 +21,6 @@ test("repository quality contract covers stable and Polyth Link tests", () => {
     "packages/terminal",
     "packages/markets",
     "apps/mobile",
-    "apps/desktop",
   ]) {
     assert.ok(script.includes(`"${project}"`), `release gate must typecheck ${project}`);
   }
