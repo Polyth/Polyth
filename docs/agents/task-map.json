@@ -285,7 +285,7 @@
       "entrypoints": [
         "apps/desktop",
         "docs/dev/desktop.md",
-        ".github/workflows/desktop-release.yml"
+        ".github/workflows/build-apps.yml"
       ],
       "references": [
         "docs/agents/verification.md"
@@ -415,6 +415,7 @@
       "entrypoints": [
         "package.json",
         ".github/workflows/ci.yml",
+        ".github/workflows/build-apps.yml",
         "scripts/ci/select-tests.mjs",
         "Cargo.toml",
         "codemagic.yaml"
