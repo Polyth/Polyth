@@ -123,7 +123,7 @@ test("embedded Iconify metadata rejects unsupported providers", () => {
 
 test("project appearance dialog stays compact, single-preview, and same-origin", async () => {
   const css = await readFile(new URL("../src/components/ProjectAppearanceDialog.css", import.meta.url), "utf8");
-  const tsx = await readFile(new URL("../src/components/ProjectAppearanceDialog.tsx", import.meta.url), "utf8");
+  const tsx = await readFile(new URL("../src/components/ProjectAppearanceDialogCore.tsx", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.doesNotMatch(css, /920px|480px|(?<![\d.])6px|api\.iconify\.design|backdrop-filter|hideHeader/);
   assert.match(tsx, /size="sm"/);
@@ -134,4 +134,21 @@ test("project appearance dialog stays compact, single-preview, and same-origin",
   assert.match(tsx, /persistProjectIcon/);
   assert.match(tsx, /loadProjectIconSvg/);
   assert.doesNotMatch(styles, /project-appearance-body|\.project-icon-options\s*\{/);
+});
+
+test("project settings menu and child pages use canonical dialog chrome", async () => {
+  const [tsx, css] = await Promise.all([
+    readFile(new URL("../src/components/ProjectAppearanceDialog.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/ProjectSettingsDialog.css", import.meta.url), "utf8"),
+  ]);
+  assert.match(tsx, /Dialog,/);
+  assert.doesNotMatch(tsx, /\.\/a11y\/Dialog\.tsx/);
+  assert.match(tsx, /className="project-settings-dialog project-settings-workspace-dialog"/);
+  assert.match(tsx, /footer=\{/);
+  assert.match(tsx, /<ProjectGlyph/);
+  assert.match(tsx, /<ProjectAppearanceDialogCore[\s\S]*onBack=/);
+  assert.match(css, /\.project-settings-dialog \.ui-dialog-body/);
+  assert.match(css, /var\(--density-scale\)/);
+  assert.match(css, /body\[data-glass="off"\]/);
+  assert.doesNotMatch(css, /var\(--surface\)|border-radius:\s*11px|font-size:\s*1[123]px/);
 });

@@ -41,6 +41,7 @@ import CopyButton from "./CopyButton.tsx";
 import Picker from "./Picker.tsx";
 import {
   AssistIcon,
+  BackIcon,
   Button,
   CloseIcon,
   Dialog,
@@ -142,7 +143,15 @@ function IconArt({ value, initial, className, variant = "cell" }: { value: strin
   return <span className={`${className ?? ""} is-initial`} aria-hidden="true">{initial}</span>;
 }
 
-export default function ProjectAppearanceDialog({ project, onClose }: { project: Project; onClose: () => void }) {
+export default function ProjectAppearanceDialog({
+  project,
+  onBack,
+  onClose,
+}: {
+  project: Project;
+  onBack?: () => void;
+  onClose: () => void;
+}) {
   const pageSize = useShellMode() === "phone" ? 8 : 12;
   const [name, setName] = useState(project.name);
   const [icon, setIcon] = useState(() => storedProjectIconSelection(project.icon));
@@ -284,6 +293,13 @@ export default function ProjectAppearanceDialog({ project, onClose }: { project:
       )}
     >
       <div className="project-appearance-body" style={style}>
+        {onBack && (
+          <div className="project-appearance-navigation">
+            <Button size="sm" variant="ghost" iconStart={BackIcon} onClick={onBack} disabled={saving}>
+              {tr("common.back")}
+            </Button>
+          </div>
+        )}
         <div className="project-appearance-preview" aria-label="Live preview">
           <span className="project-glyph">
             <IconArt value={icon} initial={initial} variant="glyph" />

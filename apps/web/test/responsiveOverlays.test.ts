@@ -144,6 +144,89 @@ test("390px dialogs use an internally scrolling bottom sheet", { skip: !CHROME }
   assert.equal(geometry.documentScrollHeight, 720, "the document does not grow behind the sheet");
 });
 
+test("project settings preserves dialog chrome and customer appearance geometry", { skip: !CHROME }, async () => {
+  assert.ok(page);
+  const css = `${await read("../src/styles.css")}\n${await read("../src/components/ProjectSettingsDialog.css")}`;
+  const content = (density: "comfortable" | "compact", glass: "matte" | "off", radius: number) => `
+    <style>${css} :root { --corner-radius-scale: ${radius}; --ui-font-size: 18px; }</style>
+    <body data-density="${density}" data-glass="${glass}">
+      <div class="dialog-backdrop">
+        <section class="dialog-panel dialog-md ui-dialog project-settings-dialog" role="dialog">
+          <header class="ui-dialog-head">
+            <h2 class="ui-dialog-title">Project settings with a translated long title</h2>
+            <button class="ui-icon-btn" aria-label="Close">×</button>
+          </header>
+          <div class="ui-dialog-body">
+            <div class="project-settings-project">
+              <span class="project-glyph project-settings-project-glyph">P</span>
+              <div><strong>A very long project name that should truncate safely</strong><span class="project-settings-project-path">/data/projects/a/very/long/path/that/must/not/stretch/the/dialog</span></div>
+            </div>
+            <div class="project-settings-menu">
+              <button><span class="project-settings-menu-icon">A</span><span class="project-settings-menu-copy"><strong>Appearance</strong><span>Name, icon and project color.</span></span><svg width="16" height="16"></svg></button>
+              <button><span class="project-settings-menu-icon">W</span><span class="project-settings-menu-copy"><strong>Workspace</strong><span>Directions, recommendations and tool visibility.</span></span><svg width="16" height="16"></svg></button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </body>`;
+
+  await page.setViewportSize({ width: 900, height: 700 });
+  await page.setContent(content("comfortable", "matte", 1));
+  const comfortable = await page.evaluate(() => {
+    const panel = document.querySelector<HTMLElement>(".project-settings-dialog")!;
+    const body = document.querySelector<HTMLElement>(".ui-dialog-body")!;
+    const row = document.querySelector<HTMLElement>(".project-settings-menu button")!;
+    const title = document.querySelector<HTMLElement>(".project-settings-menu-copy strong")!;
+    const rect = panel.getBoundingClientRect();
+    return {
+      panelLeft: rect.left,
+      panelRight: rect.right,
+      panelOverflow: panel.scrollWidth > panel.clientWidth + 1,
+      bodyPadding: getComputedStyle(body).paddingTop,
+      rowRadius: getComputedStyle(row).borderRadius,
+      titleSize: getComputedStyle(title).fontSize,
+      headerVisible: document.querySelector<HTMLElement>(".ui-dialog-head")!.getBoundingClientRect().height > 0,
+    };
+  });
+  assert.ok(comfortable.panelLeft >= 0 && comfortable.panelRight <= 900);
+  assert.equal(comfortable.panelOverflow, false);
+  assert.equal(comfortable.bodyPadding, "16px");
+  assert.equal(comfortable.rowRadius, "10px");
+  assert.equal(comfortable.titleSize, "18px");
+  assert.equal(comfortable.headerVisible, true);
+
+  await page.setContent(content("compact", "off", .6));
+  const compact = await page.evaluate(() => ({
+    bodyPadding: getComputedStyle(document.querySelector<HTMLElement>(".ui-dialog-body")!).paddingTop,
+    rowRadius: getComputedStyle(document.querySelector<HTMLElement>(".project-settings-menu button")!).borderRadius,
+    opaqueFallback: getComputedStyle(document.querySelector<HTMLElement>(".project-settings-menu button")!).backgroundImage === "none",
+  }));
+  assert.equal(compact.bodyPadding, "12px");
+  assert.equal(compact.rowRadius, "6px");
+  assert.equal(compact.opaqueFallback, true);
+
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.setContent(content("compact", "off", .6));
+  const phone = await page.evaluate(() => {
+    const panel = document.querySelector<HTMLElement>(".project-settings-dialog")!;
+    const row = document.querySelector<HTMLElement>(".project-settings-menu button")!;
+    const rect = panel.getBoundingClientRect();
+    return {
+      left: rect.left,
+      right: rect.right,
+      bottom: rect.bottom,
+      overflow: panel.scrollWidth > panel.clientWidth + 1,
+      rowHeight: row.getBoundingClientRect().height,
+    };
+  });
+  assert.equal(phone.left, 0);
+  assert.equal(phone.right, 320);
+  assert.equal(phone.bottom, 568);
+  assert.equal(phone.overflow, false);
+  assert.ok(phone.rowHeight >= 60, "phone rows retain a generous touch target");
+  await page.setViewportSize({ width: 390, height: 720 });
+});
+
 test("390px settings fill the viewport without horizontal overflow", { skip: !CHROME }, async () => {
   assert.ok(page);
   const css = await read("../src/styles.css");

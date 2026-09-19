@@ -1,9 +1,18 @@
 import { createHash } from "node:crypto";
 import type { ChildProcess } from "node:child_process";
 import type { AgentRuntime, HarnessContext, ModelDescriptor, ModelRef, MutationOutcome, RuntimeEvent, RuntimeObservation, RuntimeSnapshot, TokenUsage } from "@polyth/contracts";
-import { composeTurnPrompt, deltaTokenUsage, resolveModelSelection } from "@polyth/harness-runtime";
+import {
+  acknowledgeCapabilityApplication,
+  captureCapabilityLaunch,
+  composeTurnPrompt,
+  deltaTokenUsage,
+  provisioningTarget,
+  releaseCapabilityLaunch,
+  resolveModelSelection,
+} from "@polyth/harness-runtime";
 import type { HarnessProcessAuthority } from "@polyth/harness-runtime/process-authority";
 import { classifyAgyPermission, parseAgyHookRequest, type AgyHookDecision, type AntigravityPermissionBridge } from "./permissions.ts";
+import { antigravityOverlays } from "./provisioner.ts";
 import { ANTIGRAVITY_CAPABILITIES, agyError, agyLaunchArgs, agyUsage, createAgyDecoder, createAgyTurn, record, sameAgyModel, text } from "./protocol.ts";
 
 type Admission = MutationOutcome<{ admissionId?: string }>;
@@ -42,6 +51,10 @@ export function createAntigravityRuntime(options: AntigravityRuntimeOptions): Ag
   let initTimer: ReturnType<typeof setTimeout> | undefined;
   let active: { id: string; turn: ReturnType<typeof createAgyTurn>; admit?: (outcome: Admission) => void; timer?: ReturnType<typeof setTimeout> } | undefined;
   let selectionPending = false;
+  let initialPromptAppended = false;
+  let stagedLaunchTarget: ReturnType<typeof provisioningTarget> | undefined;
+  let stagedRevision: string | undefined;
+  let stagedCapabilityIds: string[] | undefined;
   let previousUsage: TokenUsage | undefined;
   let usageBaselineKnown = true;
   let completedTurns: number | undefined;
@@ -163,6 +176,15 @@ export function createAntigravityRuntime(options: AntigravityRuntimeOptions): Ag
     if (!connected || stopping) return;
     connected = false;
     if (initTimer) clearTimeout(initTimer);
+    if (stagedLaunchTarget && stagedRevision && !nativeId) {
+      releaseCapabilityLaunch({
+        target: stagedLaunchTarget,
+        desiredRevision: stagedRevision,
+      });
+      stagedLaunchTarget = undefined;
+      stagedRevision = undefined;
+      stagedCapabilityIds = undefined;
+    }
     initReject?.(error);
     initReject = undefined;
     if (active) settleAdmission(unknown(active.id, error.message));
@@ -230,6 +252,22 @@ export function createAntigravityRuntime(options: AntigravityRuntimeOptions): Ag
     }
     if (nativeId) throw agyError("protocol-error", "Antigravity sent a duplicate initialization");
     nativeId = id;
+    if (stagedLaunchTarget && stagedRevision) {
+      antigravityOverlays.consumeIfRevision(context, "antigravity", stagedRevision);
+      if (stagedCapabilityIds?.length) {
+        acknowledgeCapabilityApplication({
+          target: stagedLaunchTarget,
+          desiredRevision: stagedRevision,
+          capabilityIds: stagedCapabilityIds,
+          outcome: "unverifiable",
+          reason: "Antigravity CLI initialized with the staged MCP plugin",
+          evidence: { stage: "staged", source: "init" },
+        });
+      }
+      stagedLaunchTarget = undefined;
+      stagedRevision = undefined;
+      stagedCapabilityIds = undefined;
+    }
     launchAutoApprove = autoApprove;
     for (const [key, value] of Object.entries(authority.receipts)) {
       if (key.startsWith("turn:") && value === id)
@@ -313,6 +351,17 @@ export function createAntigravityRuntime(options: AntigravityRuntimeOptions): Ag
     }
     if (!connected || stopping) throw agyError("runtime-unavailable", "Antigravity runtime is closed; reconnect the session");
     selectedModel = model; selectedAgent = agent; usageBaselineKnown = !resumeId;
+    const staged = antigravityOverlays.peek(context, "antigravity");
+    const overlay = staged?.value;
+    if (staged) {
+      stagedLaunchTarget = provisioningTarget(context, "antigravity");
+      stagedRevision = staged.desiredRevision;
+      stagedCapabilityIds = overlay?.capabilityIds ?? staged.capabilityIds;
+      captureCapabilityLaunch({
+        target: stagedLaunchTarget,
+        desiredRevision: stagedRevision,
+      });
+    }
     initialization = new Promise<void>((resolve, reject) => { initResolve = resolve; initReject = reject; });
     // Install a handler immediately; child callbacks can fail before the caller awaits.
     void initialization.catch(() => {});
@@ -325,7 +374,7 @@ export function createAntigravityRuntime(options: AntigravityRuntimeOptions): Ag
     });
     try {
       permissionBridge = await options.permissionBridge(handleHook);
-      await permissionBridge.prepare();
+      await permissionBridge.prepare(overlay?.mcpServers);
       launchAutoApprove = await currentAutoApprove();
       const args = agyLaunchArgs(model, agent, resumeId, {
         autoApprove: launchAutoApprove,
@@ -355,7 +404,18 @@ export function createAntigravityRuntime(options: AntigravityRuntimeOptions): Ag
       }) + "\n", (error) => {
         if (error) fail(agyError("runtime-unavailable", "Antigravity worker did not accept its native launch"));
       });
-    } catch (error) { fail(error instanceof Error ? error : agyError("runtime-unavailable", "Antigravity could not start")); }
+    } catch (error) {
+      if (stagedLaunchTarget && stagedRevision) {
+        releaseCapabilityLaunch({
+          target: stagedLaunchTarget,
+          desiredRevision: stagedRevision,
+        });
+        stagedLaunchTarget = undefined;
+        stagedRevision = undefined;
+        stagedCapabilityIds = undefined;
+      }
+      fail(error instanceof Error ? error : agyError("runtime-unavailable", "Antigravity could not start"));
+    }
     return initialization;
   };
   const create: NonNullable<AgentRuntime["createSessionOperation"]> = async (request, operationId) => {
@@ -406,7 +466,13 @@ export function createAntigravityRuntime(options: AntigravityRuntimeOptions): Ag
       const prompt = composeTurnPrompt(request.text, request.attachments);
       if (prompt.images.length || request.attachments?.some((ref) => ref.kind !== "browser-context"))
         return rejected("unsupported", "Antigravity stream mode accepts text only; attach a text file through Polyth's text projection");
-      const input = { event: "user", message: { content: prompt.text } };
+      let promptContent = prompt.text;
+      const staged = antigravityOverlays.peek(context, "antigravity");
+      if (!initialPromptAppended && staged?.value.promptText) {
+        initialPromptAppended = true;
+        promptContent = `${staged.value.promptText}\n\n${promptContent}`;
+      }
+      const input = { event: "user", message: { content: promptContent } };
       if (Buffer.byteLength(JSON.stringify(input)) > 4 * 1024 * 1024) return rejected("invalid-input", "Antigravity prompt exceeds the size limit");
       selectionPending = true;
       try {
@@ -444,6 +510,15 @@ export function createAntigravityRuntime(options: AntigravityRuntimeOptions): Ag
       if (!belongs(sessionId)) throw agyError("invalid-session", "Antigravity runtime belongs to another session");
       stopping = true;
       if (initTimer) clearTimeout(initTimer);
+      if (stagedLaunchTarget && stagedRevision && !nativeId) {
+        releaseCapabilityLaunch({
+          target: stagedLaunchTarget,
+          desiredRevision: stagedRevision,
+        });
+        stagedLaunchTarget = undefined;
+        stagedRevision = undefined;
+        stagedCapabilityIds = undefined;
+      }
       initReject?.(agyError("runtime-unavailable", "Antigravity was stopped"));
       if (active) settleAdmission(unknown(active.id, "Antigravity was stopped during prompt admission"));
       resolveAllPermissions({ decision: "deny", reason: "Antigravity turn was stopped" });
@@ -514,6 +589,15 @@ export function createAntigravityRuntime(options: AntigravityRuntimeOptions): Ag
     async dispose() {
       stopping = true;
       if (initTimer) clearTimeout(initTimer);
+      if (stagedLaunchTarget && stagedRevision && !nativeId) {
+        releaseCapabilityLaunch({
+          target: stagedLaunchTarget,
+          desiredRevision: stagedRevision,
+        });
+        stagedLaunchTarget = undefined;
+        stagedRevision = undefined;
+        stagedCapabilityIds = undefined;
+      }
       initReject?.(agyError("runtime-unavailable", "Antigravity runtime was disposed"));
       if (active) settleAdmission(unknown(active.id, "Antigravity runtime was disposed during admission"));
       resolveAllPermissions({ decision: "deny", reason: "Antigravity runtime was disposed" });

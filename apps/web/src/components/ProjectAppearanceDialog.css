@@ -2,12 +2,20 @@
   height: auto;
 }
 
+.project-appearance-dialog .ui-dialog-body {
+  padding: calc(var(--space-4) * var(--density-scale));
+}
+
 .project-appearance-body {
   --project-color: var(--accent);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   min-width: 0;
+}
+
+.project-appearance-navigation {
+  display: flex;
 }
 
 .project-appearance-preview {
@@ -298,6 +306,10 @@
 }
 
 @media (max-width: 700px) {
+  .project-appearance-dialog .ui-dialog-body {
+    padding: var(--space-3) var(--space-4) var(--space-4);
+  }
+
   .project-icon-toolbar {
     grid-template-columns: minmax(0, 1fr) auto;
   }

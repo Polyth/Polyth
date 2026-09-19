@@ -9,6 +9,7 @@ import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/ha
 import { createHarnessProcessAuthority } from "@polyth/harness-runtime/process-authority";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { createAntigravityPermissionBridge } from "./permissions.ts";
+import { createAntigravityProvisioner } from "./provisioner.ts";
 import { ANTIGRAVITY_CAPABILITIES, agyError, parseAgyModels } from "./protocol.ts";
 import { createAntigravityRuntime } from "./runtime.ts";
 import { ANTIGRAVITY_WORKER_SOURCE } from "./workerSource.ts";
@@ -152,6 +153,7 @@ export default function registerPackage(host: ServerPackageHost) {
       if (process.platform !== "linux") return { kind: "rejected", code: "unsupported", message: "Crash-safe cross-harness switching requires Linux; native Antigravity sessions remain available" };
       return releaseProcessExecution(file, binding, operationId);
     },
+    provisioner: createAntigravityProvisioner(),
   };
   let registration: ReturnType<HarnessRegistry["register"]> | undefined;
   return {

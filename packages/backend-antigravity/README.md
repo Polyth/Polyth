@@ -80,8 +80,11 @@ macOS/Windows retain the shared portable authority's explicit crash-fence limits
   leg before the next prompt. No Antigravity sandbox is used. An unexpected
   native soft-denial is preserved in activity; an empty `SUCCESS` after only
   proven denials becomes a failed turn instead of a silent stop. Native slash
-  commands, question replies, steering and Polyth MCP injection are not
-  implemented.
+  commands, question replies and steering are not implemented; Polyth MCP tool
+  injection (including `@polyth/browser` via `polyth_browser` and the scoped
+  `polyth-agent-tools` bridge) is supported via session-scoped Antigravity
+  plugin configuration (`.agents/plugins/polyth-agent-tools/mcp_config.json`)
+  and gated through the permission bridge.
 - A step the native CLI ends in a failure state (`ERROR`, `INVALID`, `HALTED`,
   `CANCELED`, `INTERRUPTED`) becomes a `tool/error` (or finalizes text it had
   already streamed) and never aborts the canonical turn or disconnects the

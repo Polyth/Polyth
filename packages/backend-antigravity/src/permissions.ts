@@ -1,9 +1,10 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { chmod, lstat, mkdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, realpath, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { JsonObject } from "@polyth/contracts";
 
 export type AgyHookDecision = {
   decision: "allow" | "deny";
@@ -12,8 +13,8 @@ export type AgyHookDecision = {
 
 export interface AntigravityPermissionBridge {
   readonly root: string;
-  /** Re-materialize the exact hook before every native launch. */
-  prepare(): Promise<void>;
+  /** Re-materialize the exact hook and optional MCP plugin before every native launch. */
+  prepare(mcpServers?: Record<string, JsonObject>): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -105,6 +106,9 @@ export function parseAgyHookRequest(value: unknown): AgyHookRequest | undefined 
   return { conversationId, stepIdx, tool, args };
 }
 
+export const isBrowserTool = (tool: string): boolean =>
+  tool === "polyth_browser" || /(?:^|[_:/-])polyth_browser$/.test(tool);
+
 export async function classifyAgyPermission(
   request: AgyHookRequest,
   cwd: string,
@@ -137,6 +141,19 @@ export async function classifyAgyPermission(
   if (SAFE_CONTROL_TOOLS.has(request.tool)) return { kind: "allow", permission: "read" };
   if (request.tool === "ask_question") {
     return { kind: "deny", reason: "Antigravity interactive questions are unavailable in headless mode" };
+  }
+  if (isBrowserTool(request.tool)) {
+    const action = boundedText(request.args.action);
+    const params = row(request.args.parameters);
+    const url = boundedText(params?.url);
+    const pattern = url ? `${action ?? "browser"}: ${url}` : action ?? request.tool;
+    return {
+      kind: "request",
+      permission: "browser",
+      patterns: [pattern],
+      tool: request.tool,
+      stepIdx: request.stepIdx,
+    };
   }
   const pattern = request.tool === "run_command"
     ? boundedText(request.args.CommandLine)
@@ -235,6 +252,7 @@ process.stdin.on("end", () => {
 export async function createAntigravityPermissionBridge(options: {
   root: string;
   handle(payload: unknown): Promise<AgyHookDecision>;
+  mcpServers?: Record<string, JsonObject>;
 }): Promise<AntigravityPermissionBridge> {
   const token = randomBytes(32).toString("hex");
   const endpoint = process.platform === "win32"
@@ -243,6 +261,7 @@ export async function createAntigravityPermissionBridge(options: {
   const sockets = new Set<Socket>();
   let closed = false;
   let failed = false;
+  let stagedMcpServers = options.mcpServers;
   const server = createServer((socket) => {
     sockets.add(socket);
     socket.setEncoding("utf8");
@@ -298,7 +317,11 @@ export async function createAntigravityPermissionBridge(options: {
   });
   const client = join(options.root, "polyth-hook-client.mjs");
   const hooks = join(options.root, ".agents", "hooks.json");
-  const prepare = async () => {
+  const pluginDir = join(options.root, ".agents", "plugins", "polyth-agent-tools");
+  const pluginManifest = join(pluginDir, "plugin.json");
+  const pluginMcp = join(pluginDir, "mcp_config.json");
+  const prepare = async (mcpServers?: Record<string, JsonObject>) => {
+    if (mcpServers !== undefined) stagedMcpServers = mcpServers;
     await ensurePrivateDirectory(options.root);
     await ensurePrivateDirectory(join(options.root, ".agents"));
     await writeGenerated(client, clientSource(endpoint, token));
@@ -314,6 +337,14 @@ export async function createAntigravityPermissionBridge(options: {
         }],
       },
     }, null, 2) + "\n");
+    if (stagedMcpServers && Object.keys(stagedMcpServers).length > 0) {
+      await ensurePrivateDirectory(join(options.root, ".agents", "plugins"));
+      await ensurePrivateDirectory(pluginDir);
+      await writeGenerated(pluginManifest, JSON.stringify({ name: "polyth-agent-tools" }, null, 2) + "\n");
+      await writeGenerated(pluginMcp, JSON.stringify({ mcpServers: stagedMcpServers }, null, 2) + "\n");
+    } else {
+      await rm(pluginDir, { recursive: true, force: true }).catch(() => undefined);
+    }
   };
   try {
     if (process.platform !== "win32") await chmod(endpoint, 0o600);
