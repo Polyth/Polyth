@@ -60,6 +60,7 @@ export function createAntigravityRuntime(options: AntigravityRuntimeOptions): Ag
   let completedTurns: number | undefined;
   let completedStep = -1;
   let currentMaxStep = -1;
+  let pendingNativeError: Record<string, unknown> | undefined;
   let serial = 0;
   let order = 0;
   let reconciliationOrdinal = 0;
@@ -298,17 +299,26 @@ export function createAntigravityRuntime(options: AntigravityRuntimeOptions): Ag
       const error = record(frame.polyth_error);
       throw agyError("runtime-unavailable", text(error?.message) ?? "Antigravity worker failed");
     }
+    if (frame.event === "polyth_native_error") {
+      const error = record(frame.polyth_native_error);
+      if (error) pendingNativeError = error;
+      return;
+    }
     if (frame.event !== "step_update" && frame.event !== "result") return;
     const payload = record(frame[frame.event]);
     if (!payload || !nativeId || payload.conversation_id !== nativeId)
       throw agyError("protocol-error", "Antigravity event belongs to a different conversation");
     if (frame.event === "result") {
       const turns = payload.num_turns;
-      if (typeof turns !== "number" || !Number.isSafeInteger(turns) || turns < 1)
+      if (typeof turns !== "number" || !Number.isSafeInteger(turns) || turns < 0)
         throw agyError("protocol-error", "Antigravity result has no valid turn counter");
-      if (completedTurns !== undefined && turns <= completedTurns) return;
-      if (completedTurns !== undefined && turns !== completedTurns + 1)
+      if (completedTurns !== undefined && turns < completedTurns) return;
+      if (completedTurns !== undefined && turns > completedTurns + 1)
         throw agyError("protocol-error", "Antigravity turn counter skipped an unobserved turn");
+      // API/model failures can end before AGY increments its cumulative turn
+      // count (including zero on the first prompt). A same-count SUCCESS is an
+      // old terminal snapshot; a distinct error is the current refused turn.
+      if (completedTurns !== undefined && turns === completedTurns && payload.status === "SUCCESS") return;
     }
     if (!active) return; // No prompt is outstanding; never attach ambient output.
     const current = active;
@@ -331,7 +341,11 @@ export function createAntigravityRuntime(options: AntigravityRuntimeOptions): Ag
     const monotonic = cumulative && (!previousUsage || Object.keys(cumulative).every((key) =>
       (cumulative[key as keyof TokenUsage] ?? 0) >= (previousUsage![key as keyof TokenUsage] ?? 0)));
     const usage = cumulative && usageBaselineKnown && monotonic ? deltaTokenUsage(previousUsage, cumulative) : undefined;
-    const resultEvents = current.turn.finish(payload, usage);
+    const resultEvents = current.turn.finish(
+      pendingNativeError ? { ...payload, agy_error: pendingNativeError } : payload,
+      usage,
+    );
+    pendingNativeError = undefined;
     completedTurns = payload.num_turns as number;
     completedStep = currentMaxStep;
     previousUsage = cumulative;
@@ -488,6 +502,7 @@ export function createAntigravityRuntime(options: AntigravityRuntimeOptions): Ag
         await authority.receipt(`sent:${operationId}`, nativeId);
         if (!connected || stopping) return unknown(operationId, "Antigravity disconnected while recording the prompt intent");
         return await new Promise<Admission>((resolve) => {
+          pendingNativeError = undefined;
           active = { id: operationId, turn: createAgyTurn(operationId, selectedModel), admit: resolve };
           active.timer = setTimeout(() => fail(agyError("outcome-unknown", "Antigravity did not acknowledge the prompt; it was not replayed")), options.timeoutMs ?? 15_000);
           if (autoApprove !== launchAutoApprove) expectedReinitAutoApprove = autoApprove;

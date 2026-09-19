@@ -112,6 +112,26 @@ test("an empty native SUCCESS without proven non-application keeps its native ou
     reason: "completed",
   }]);
 });
+test("a native quota error preserves its message and reset timer", () => {
+  const turn = createAgyTurn("t", model);
+  assert.deepEqual(turn.finish({
+    status: "ERROR",
+    error: "RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 2h 30m.",
+  }, undefined, 1_800_000_000_000).at(-1), {
+    type: "turn/stopped",
+    turnId: "t",
+    reason: "error",
+    error: "RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 2h 30m.",
+    code: "quota-exhausted",
+    retry: {
+      scope: "quota",
+      provider: "google",
+      retryAfterSec: 9_000,
+      resetAt: 1_800_009_000_000,
+      retryable: true,
+    },
+  });
+});
 test("a prior successful tool prevents a denial from offering an unsafe turn retry", () => {
   const turn = createAgyTurn("t", model);
   turn.step({ step_index: 1, state: "DONE", step_type: "tool", tool_name: "write_to_file", tool_info: { name: "write_to_file", output: "written" } });

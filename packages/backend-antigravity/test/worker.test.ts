@@ -14,8 +14,13 @@ const id = at >= 0 ? args[at + 1] : "native-a";
 const permission_mode = args.includes("--dangerously-skip-permissions") ? "always-proceed" : "request-review";
 process.stdout.write(JSON.stringify({ event: "init", conversation_id: id, init: { cwd: process.cwd(), model: "fixture-gemini", permission_mode } }) + "\\n");
 createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line) => {
-  JSON.parse(line);
+  const input = JSON.parse(line);
   process.stdout.write(JSON.stringify({ event: "step_update", step_update: { conversation_id: id, step_index: 0, state: "DONE", step_type: "user_input" } }) + "\\n");
+  if (input?.message?.content === "limited") {
+    process.stderr.write('AGY_ERROR: {"status":"RESOURCE_EXHAUSTED","http_status":429,"retryable":true,"message":"Individual quota reached. Resets in 2h."}\\n');
+    process.stdout.write(JSON.stringify({ event: "result", result: { conversation_id: id, status: "ERROR", response: "", error: "Agent execution terminated due to error.", num_turns: 2 } }) + "\\n");
+    return;
+  }
   process.stdout.write(JSON.stringify({ event: "result", result: { conversation_id: id, status: "SUCCESS", response: "ok", num_turns: 1 } }) + "\\n");
 });
 `;
@@ -80,6 +85,21 @@ test("owned worker replaces only the idle native leg when Auto-Approve changes",
   assert.equal(native.permission_mode, "always-proceed");
   assert.equal((await next()).event, "step_update");
   assert.equal((await next()).event, "result");
+
+  const limited = { event: "user", message: { content: "limited" } };
+  worker.stdin!.write(JSON.stringify({ event: "polyth_user", args: autoArgs, mode: "auto", input: limited }) + "\n");
+  const limitedFrames = [await next(), await next(), await next()];
+  assert.equal(limitedFrames.some((frame) => frame.event === "step_update"), true);
+  assert.deepEqual(limitedFrames.find((frame) => frame.event === "polyth_native_error"), {
+    event: "polyth_native_error",
+    polyth_native_error: {
+      status: "RESOURCE_EXHAUSTED",
+      http_status: 429,
+      retryable: true,
+      message: "Individual quota reached. Resets in 2h.",
+    },
+  });
+  assert.equal(limitedFrames.some((frame) => frame.event === "result"), true);
 
   const closed = new Promise<number | null>((resolve) => worker.once("close", resolve));
   worker.stdin!.end();

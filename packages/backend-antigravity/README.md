@@ -70,6 +70,12 @@ macOS/Windows retain the shared portable authority's explicit crash-fence limits
 - Session-cumulative token counters become per-turn deltas. On the first resumed
   turn, where the old baseline is unavailable, only observed final-step usage is
   counted. No fabricated cost, subscription price or context-window figure.
+- Native quota, rate-limit and overload failures preserve the provider message
+  and enter Polyth's normal limit-recovery flow. Reset timestamps or durations
+  reported by the CLI drive the visible countdown; otherwise Polyth uses its
+  standard bounded-backoff timer. Current structured `AGY_ERROR` diagnostics
+  are reduced to non-sensitive status/timing fields instead of persisting raw
+  stderr, which may contain credentials, authentication URLs or native prompts.
 - Text prompts and Polyth's existing text-file projection work. Native image,
   PDF, audio and URL blocks are not advertised. Unsupported input fails before
   delivery instead of disappearing silently.

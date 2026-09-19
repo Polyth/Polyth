@@ -17,6 +17,7 @@ let switching = false;
 let suppressNativeOutput = false;
 let pending;
 let buffer = "";
+let errorBuffer = "";
 let stopTimer;
 let killTimer;
 
@@ -98,11 +99,29 @@ const forwardLine = (line, reinitializing) => {
   }
   if (!suppressNativeOutput) process.stdout.write(line + "\n");
 };
+const forwardErrorLine = (line) => {
+  if (suppressNativeOutput || !line.startsWith("AGY_ERROR:")) return;
+  let parsed;
+  try { parsed = JSON.parse(line.slice("AGY_ERROR:".length).trim()); } catch { return; }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return;
+  const safe = {};
+  for (const key of [
+    "status", "code", "http_status", "grpc_code", "retryable", "message", "details",
+    "retryAfter", "retryAfterSec", "retry_after", "retryDelay", "retry_delay",
+    "resetAt", "reset_at", "resetsAt", "resets_at", "resetTime", "reset_time",
+  ]) {
+    const value = parsed[key];
+    if (typeof value === "boolean" || typeof value === "number") safe[key] = value;
+    else if (typeof value === "string" && value.length <= 8192) safe[key] = value;
+  }
+  if (Object.keys(safe).length) send({ event: "polyth_native_error", polyth_native_error: safe });
+};
 const spawnNative = (args, nextMode, reinitializing) => {
   initialized = false;
   suppressNativeOutput = false;
   mode = nextMode;
   buffer = "";
+  errorBuffer = "";
   const child = spawn(command, args, {
     cwd: process.cwd(),
     env: process.env,
@@ -122,12 +141,26 @@ const spawnNative = (args, nextMode, reinitializing) => {
       forwardLine(line, reinitializing);
     }
   });
-  child.stderr.resume();
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => {
+    errorBuffer += chunk;
+    let newline;
+    while ((newline = errorBuffer.indexOf("\n")) >= 0) {
+      const line = errorBuffer.slice(0, newline);
+      errorBuffer = errorBuffer.slice(newline + 1);
+      forwardErrorLine(line);
+    }
+    // Raw native diagnostics can contain credentials, auth URLs and prompts.
+    // Retain only enough tail to recognize one bounded structured marker.
+    if (errorBuffer.length > 64 * 1024) errorBuffer = "";
+  });
   child.once("error", () => fail("Antigravity CLI could not be started by its owned worker"));
   const pid = child.pid;
   child.once("close", () => {
     if (buffer) forwardLine(buffer, reinitializing);
     buffer = "";
+    if (errorBuffer) forwardErrorLine(errorBuffer);
+    errorBuffer = "";
     clearStopTimers();
     if (stopping) process.exit(0);
     if (!switching) {

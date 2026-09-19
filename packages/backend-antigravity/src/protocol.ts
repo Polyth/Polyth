@@ -1,6 +1,6 @@
 import { StringDecoder } from "node:string_decoder";
 import { isAbsolute } from "node:path";
-import type { ModelDescriptor, ModelRef, RuntimeCapabilities, RuntimeEvent, TokenUsage } from "@polyth/contracts";
+import type { ModelDescriptor, ModelRef, RateLimitRetryHint, RuntimeCapabilities, RuntimeErrorCode, RuntimeEvent, TokenUsage } from "@polyth/contracts";
 
 export const ANTIGRAVITY_CAPABILITIES = {
   streaming: true, permissions: true, questions: false, compaction: false,
@@ -139,6 +139,119 @@ function agyFailureText(row: Record<string, unknown>, info?: Record<string, unkn
   return undefined;
 }
 
+type AgyTurnFailure = {
+  error: string;
+  code: RuntimeErrorCode;
+  retry?: RateLimitRetryHint;
+};
+
+const AGY_QUOTA_ERROR = /\b(?:individual\s+quota|quota\s+(?:reached|exhausted|depleted)|out\s+of\s+(?:credits?|quota)|credit\s+balance|usage\s+limit)\b/i;
+const AGY_RATE_ERROR = /\b(?:rate[_\s-]?limit|too\s+many\s+requests|throttl(?:e|ed|ing)|429)\b/i;
+const AGY_OVERLOAD_ERROR = /\b(?:overload(?:ed)?|at\s+capacity|server\s+is\s+busy|temporarily\s+unavailable|503|529)\b/i;
+const AGY_RESOURCE_EXHAUSTED = /\bresource[_\s-]?exhausted\b/i;
+
+const positiveNumber = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+
+/** Parse the duration forms Antigravity uses in quota failures, for example
+ * `Resets in 2h 30m` or a structured `retry_delay: "45s"`. */
+function agyDurationSeconds(value: unknown): number | undefined {
+  if (typeof value === "number") return positiveNumber(value);
+  if (typeof value !== "string") return undefined;
+  const plain = Number(value.trim());
+  if (Number.isFinite(plain) && plain > 0) return plain;
+  let total = 0;
+  let matched = false;
+  for (const match of value.matchAll(/(\d+(?:\.\d+)?)\s*(ms|s|sec(?:ond)?s?|m|min(?:ute)?s?|h|hr|hours?|d|days?)/gi)) {
+    matched = true;
+    const amount = Number(match[1]);
+    const unit = match[2]!.toLowerCase();
+    if (unit === "ms") total += amount / 1_000;
+    else if (unit.startsWith("s")) total += amount;
+    else if (unit.startsWith("m")) total += amount * 60;
+    else if (unit.startsWith("h")) total += amount * 3_600;
+    else total += amount * 86_400;
+  }
+  return matched && total > 0 ? Math.ceil(total) : undefined;
+}
+
+function agyResetAt(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0)
+    return value > 1e12 ? value : value * 1_000;
+  if (typeof value !== "string") return undefined;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) return numeric > 1e12 ? numeric : numeric * 1_000;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function classifyAgyTurnFailure(result: Record<string, unknown>, now: number): AgyTurnFailure {
+  const nested = record(result.error);
+  const diagnostic = record(result.agy_error);
+  const resultError = text(result.error) ?? text(nested?.message);
+  const diagnosticMessage = text(diagnostic?.message) ?? text(diagnostic?.details);
+  const error = diagnosticMessage && (!resultError || /^(?:agent execution terminated|antigravity did not complete)/i.test(resultError))
+    ? diagnosticMessage
+    : resultError ?? diagnosticMessage
+    ?? "Antigravity did not complete the turn. Check the native CLI authentication, model access and permission settings.";
+  const structured = diagnostic ?? nested ?? result;
+  const classificationText = [
+    error,
+    text(diagnostic?.status),
+    text(diagnostic?.code),
+    text(diagnostic?.grpc_code),
+    positiveNumber(diagnostic?.http_status)?.toString(),
+  ].filter(Boolean).join(" ");
+  const auth = /\b(?:authentication|required|unauthenticated|unauthorized|invalid_grant|expired\s+(?:token|credential)|sign[ -]?in)\b/i.test(classificationText);
+  const modelUnavailable = /\b(?:unknown|unsupported|unavailable|invalid|unrecognized|restricted)\s+model\b|\bmodel\b[^.\n]{0,60}\bnot\s+(?:available|enabled|included|supported|permitted|authorized|accessible)\b/i.test(classificationText);
+  if (auth) return { error, code: "auth-expired" };
+  if (modelUnavailable) return { error, code: "model-unavailable" };
+
+  const scope = AGY_QUOTA_ERROR.test(classificationText) ? "quota"
+    : AGY_OVERLOAD_ERROR.test(classificationText) ? "overloaded"
+      : AGY_RATE_ERROR.test(classificationText) ? "rate"
+        : AGY_RESOURCE_EXHAUSTED.test(classificationText) ? "quota"
+        : undefined;
+  if (!scope) return { error, code: "unknown" };
+
+  let retryAfterSec: number | undefined;
+  for (const key of ["retryAfter", "retryAfterSec", "retry_after", "retry_delay", "retryDelay"]) {
+    retryAfterSec = agyDurationSeconds(structured[key]);
+    if (retryAfterSec !== undefined) break;
+  }
+  if (retryAfterSec === undefined) {
+    const duration = error.match(/(?:resets?|available\s+again|try\s+again|retry(?:\s+again)?)\s+(?:in|after)\s+((?:\d+(?:\.\d+)?\s*(?:ms|s|sec(?:ond)?s?|m|min(?:ute)?s?|h|hr|hours?|d|days?)\s*)+)/i)?.[1];
+    retryAfterSec = agyDurationSeconds(duration);
+  }
+
+  let resetAt: number | undefined;
+  for (const key of ["resetAt", "reset_at", "resetsAt", "resets_at", "resetTime", "reset_time"]) {
+    resetAt = agyResetAt(structured[key]);
+    if (resetAt !== undefined) break;
+  }
+  if (resetAt === undefined) {
+    const timestamp = error.match(/resets?\s+(?:at|on)\s+([^.,;\n]+(?:Z|[+-]\d\d:?\d\d)?)/i)?.[1];
+    resetAt = agyResetAt(timestamp);
+  }
+  if (resetAt === undefined && retryAfterSec !== undefined) resetAt = now + retryAfterSec * 1_000;
+  const explicitRetryable = typeof structured.retryable === "boolean" ? structured.retryable : undefined;
+  const retry: RateLimitRetryHint = {
+    scope,
+    provider: "google",
+    ...(retryAfterSec !== undefined ? { retryAfterSec } : {}),
+    ...(resetAt !== undefined ? { resetAt } : {}),
+    // A concrete future reset is stronger product-level retry evidence than
+    // AGY's per-request retryable bit: the latter can be false after the CLI
+    // exhausts its immediate retries even though the quota window will reopen.
+    retryable: resetAt !== undefined || retryAfterSec !== undefined ? true : explicitRetryable ?? true,
+  };
+  return {
+    error,
+    code: scope === "quota" ? "quota-exhausted" : scope === "overloaded" ? "overloaded" : "rate-limited",
+    retry,
+  };
+}
+
 /** Only public agent_response content is dialogue. Tool output and thinking stay separate. */
 export function createAgyTurn(turnId: string, model: ModelRef | undefined) {
   const messages = new Map<number, string>();
@@ -241,7 +354,7 @@ export function createAgyTurn(turnId: string, model: ModelRef | undefined) {
       if (settled) finished.add(index);
       return events;
     },
-    finish(result: Record<string, unknown>, usage?: TokenUsage): RuntimeEvent[] {
+    finish(result: Record<string, unknown>, usage?: TokenUsage, now = Date.now()): RuntimeEvent[] {
       if (terminal) return [];
       const status = text(result.status);
       if (!["SUCCESS", "ERROR", "CANCELED", "INTERRUPTED", "INVALID"].includes(status ?? ""))
@@ -279,10 +392,13 @@ export function createAgyTurn(turnId: string, model: ModelRef | undefined) {
         || (text(result.response)?.trim().length ?? 0) > 0;
       const silentPermissionDenial = status === "SUCCESS" && !hasAssistantResponse
         && failedTools > 0 && deniedTools === failedTools && successfulTools === 0;
+      const failure = status === "ERROR" || status === "INVALID"
+        ? classifyAgyTurnFailure(result, now)
+        : undefined;
       events.push({ type: "turn/stopped", turnId,
         reason: status === "SUCCESS" && !silentPermissionDenial ? "completed" : status === "CANCELED" || status === "INTERRUPTED" ? "aborted" : "error",
         ...(silentPermissionDenial ? { error: "Antigravity denied a tool instead of completing Polyth's approval flow. No mutation was confirmed; check the permission bridge and native policy, then retry.", code: "unknown" as const }
-          : status === "ERROR" || status === "INVALID" ? { error: "Antigravity did not complete the turn. Check the native CLI authentication, model access and permission settings.", code: "unknown" as const } : {}),
+          : failure ? failure : {}),
       });
       return events;
     },

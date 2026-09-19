@@ -289,6 +289,57 @@ test("a native error step with a response keeps the runtime connected and surfac
   assert.deepEqual(f.events.filter((event) => event.type === "turn/stopped").map((event) => event.reason), ["completed"]);
   assert.equal(f.launches.length, 1);
 });
+test("structured native quota errors reach the shared limit countdown path", async (t) => {
+  const f = fixture(t);
+  await f.runtime.createSessionOperation!(request, "create-a");
+  const pending = f.start(); await flush(); f.inputStep(); await pending;
+  f.send({ event: "polyth_native_error", polyth_native_error: {
+    status: "RESOURCE_EXHAUSTED",
+    http_status: 429,
+    // AGY can mark the immediate request non-retryable after exhausting its
+    // own attempts; the future reset still makes the Polyth turn resumable.
+    retryable: false,
+    message: "Individual quota reached.",
+    reset_at: 1_800_009_000,
+  } });
+  f.send({ event: "result", result: {
+    conversation_id: "native-a", status: "ERROR", response: "",
+    error: "Agent execution terminated due to error.", num_turns: 0,
+    usage: { input_tokens: 0, output_tokens: 0, thinking_tokens: 0, cache_read_tokens: 0 },
+  } });
+  await flush();
+  const stop = f.events.findLast((event) => event.type === "turn/stopped");
+  assert.deepEqual(stop, {
+    type: "turn/stopped",
+    turnId: "turn-a",
+    reason: "error",
+    error: "Individual quota reached.",
+    code: "quota-exhausted",
+    retry: {
+      scope: "quota",
+      provider: "google",
+      resetAt: 1_800_009_000_000,
+      retryable: true,
+    },
+  });
+  const repeated = f.start("turn-b", "Try after reset");
+  await flush();
+  f.send({ event: "polyth_native_error", polyth_native_error: {
+    status: "RESOURCE_EXHAUSTED", retryable: false,
+    message: "Individual quota reached.", reset_at: 1_800_009_000,
+  } });
+  f.send({ event: "result", result: {
+    conversation_id: "native-a", status: "ERROR", response: "",
+    error: "Agent execution terminated due to error.", num_turns: 0,
+    usage: { input_tokens: 0, output_tokens: 0, thinking_tokens: 0, cache_read_tokens: 0 },
+  } });
+  assert.equal((await repeated).kind, "confirmed");
+  await flush();
+  assert.deepEqual(
+    f.events.filter((event) => event.type === "turn/stopped").map((event) => event.turnId),
+    ["turn-a", "turn-b"],
+  );
+});
 test("a soft-denied tool followed by an empty SUCCESS fails instead of stopping silently", async (t) => {
   const f = fixture(t);
   await f.runtime.createSessionOperation!(request, "create-a");
