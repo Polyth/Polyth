@@ -14,6 +14,7 @@ import { fmtTokens } from "../../../../apps/web/src/format.ts";
 import { formatNumber, getLocale } from "../../../../apps/web/src/i18n/index.ts";
 import { useStore } from "../../../../apps/web/src/store.ts";
 import ProviderLogo from "../../../models/widgets/ProviderLogo.tsx";
+import UsageSettings from "./UsageSettings.tsx";
 import {
   orderUsageBlocks,
   setUsageDashboardPrefs,
@@ -30,6 +31,7 @@ import {
 } from "./dashboardData.ts";
 import { fmtQuota, useQuotaSnapshots } from "./quotaUi.tsx";
 import {
+  BackIcon,
   Button,
   ChevronRightIcon,
   IconButton,
@@ -689,6 +691,7 @@ export function UsageDashboard(): ReactNode {
   } = useQuotaSnapshots();
   const prefs = useUsagePrefs();
   const [refreshing, setRefreshing] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
   const customAnchorRef = useRef<HTMLButtonElement>(null);
 
@@ -721,11 +724,23 @@ export function UsageDashboard(): ReactNode {
     }
   };
   const quotaBusy = quotaLoading || refreshing;
-  const openUsageSettings = () =>
-    window.dispatchEvent(new CustomEvent("polyth:settings-page", { detail: "usage" }));
-
   const selectPreset = (days: UsageRangeDays): void =>
     setUsageDashboardPrefs({ rangeDays: days, rangeMode: "preset" });
+
+  if (settingsOpen) {
+    return (
+      <div className={`usage-dashboard usage-settings-mode usage-density-${prefs.dashboard.layout}`}>
+        <div className="usage-dashboard-toolbar usage-settings-toolbar">
+          <Button size="sm" variant="ghost" iconStart={BackIcon} onClick={() => setSettingsOpen(false)}>
+            Usage
+          </Button>
+        </div>
+        <div className="usage-dashboard-content">
+          <UsageSettings />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`usage-dashboard usage-density-${prefs.dashboard.layout}`}>
@@ -764,7 +779,7 @@ export function UsageDashboard(): ReactNode {
           </button>
         </div>
         <div className="usage-toolbar-actions">
-          <IconButton icon={SettingsIcon} label="Usage settings" title="Usage settings" onClick={openUsageSettings} />
+          <IconButton icon={SettingsIcon} label="Usage settings" title="Usage settings" onClick={() => setSettingsOpen(true)} />
           <IconButton
             icon={RefreshIcon}
             className={quotaBusy ? "refreshing" : undefined}
