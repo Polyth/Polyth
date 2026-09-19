@@ -17,7 +17,7 @@ export function playgroundBootstrapPrompt(hasArtifact: boolean): string {
     hasArtifact
       ? "The canonical Playground artifact already exists. Read it before editing and preserve working behavior unless the user asks to replace it."
       : "The canonical Playground artifact does not exist yet. Create it on the first relevant user request.",
-    "Keep the artifact a self-contained interactive HTML document by default: semantic HTML, inline CSS, and inline JavaScript. External HTTPS images, fonts, or libraries are allowed only when they materially improve the result.",
+    "Keep the artifact a self-contained interactive HTML document by default: semantic HTML, inline CSS, and inline JavaScript. External HTTPS images, fonts, or libraries are optional and only render when the user enables Playground network access.",
     "Make it responsive from narrow phone widths through desktop, keyboard accessible, and visually complete. Prefer real interactions and realistic content over static mock placeholders.",
     "Never read credentials, call Polyth APIs, access private/local network services, or edit unrelated project files unless the user explicitly asks.",
     "For clearly unrelated requests, behave normally and do not force them into Playground.",
@@ -113,14 +113,15 @@ function bridgeMarkup(): string {
 }
 
 export function sandboxPreviewDocument(html: string, networkEnabled = false): string {
+  const remote = networkEnabled ? " https:" : "";
   const connect = networkEnabled ? "https:" : "'none'";
   const policy = [
     "default-src 'none'",
-    "img-src data: blob: https:",
-    "media-src data: blob: https:",
-    "font-src data: https:",
-    "style-src 'unsafe-inline' https:",
-    "script-src 'unsafe-inline' 'unsafe-eval' https:",
+    "img-src data: blob:" + remote,
+    "media-src data: blob:" + remote,
+    "font-src data:" + remote,
+    "style-src 'unsafe-inline'" + remote,
+    "script-src 'unsafe-inline' 'unsafe-eval'" + remote,
     "connect-src " + connect,
     "object-src 'none'",
     "frame-src 'none'",
