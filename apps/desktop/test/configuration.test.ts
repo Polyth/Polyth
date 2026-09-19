@@ -38,7 +38,8 @@ test("desktop packaging covers each supported updater target", async () => {
     repo: "Polyth",
     releaseType: "release",
   });
-  assert.equal(pkg.build.extraResources.some(({ to }) => to === "opencode"), true);
+  assert.equal(pkg.build.extraResources.some(({ to }) => to === "opencode/${platform}-${arch}"), true);
+  assert.equal(pkg.build.extraResources.some(({ to }) => to === "chromium/${platform}-${arch}"), true);
   assert.equal(pkg.build.extraResources.some(({ to }) => to === "packages"), true);
   assert.equal(pkg.build.extraResources.some(({ to }) => to === "polyth-link"), true);
   assert.equal(pkg.build.extraResources.some(({ to }) => to === "runtime-supervisor"), true);
