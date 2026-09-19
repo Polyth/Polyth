@@ -425,7 +425,9 @@ const createWindow = async (): Promise<void> => {
     ...(bounds ? { x: bounds.x, y: bounds.y } : {}),
     minWidth: 760,
     minHeight: 520,
-    frame: false,
+    ...(process.platform === "darwin"
+      ? { titleBarStyle: "hiddenInset" as const }
+      : { frame: false }),
     roundedCorners: true,
     show: false,
     title: "Polyth",
