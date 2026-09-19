@@ -79,6 +79,24 @@ test("derives complete turn telemetry and leaves an incomplete tail replayable",
   assert.equal(turn.status, "success");
 });
 
+test("rewind markers stay replayable until the replacement turn is indexed", () => {
+  const before = deriveUsageObservations(projection(2_000), [
+    event(1, 1_000, "turn/started", { turnId: "t1" }),
+    event(2, 1_500, "turn/stopped", { turnId: "t1", reason: "completed" }),
+    event(3, 1_600, "session/rewound", { atSeq: 1 }),
+  ]);
+  assert.equal(before.safeSeq, 2);
+  assert.equal(before.pending, false);
+
+  const replacement = deriveUsageObservations(projection(3_000), [
+    event(3, 1_600, "session/rewound", { atSeq: 1 }),
+    event(4, 2_100, "turn/started", { turnId: "t2" }),
+    event(5, 2_500, "turn/stopped", { turnId: "t2", reason: "completed" }),
+  ], 2);
+  assert.equal(replacement.safeSeq, 5);
+  assert.equal(replacement.observations[0]?.regenerated, true);
+});
+
 test("persists observations as a rebuildable index and aggregates on the server", () => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-usage-"));
   const index = new UsageAnalyticsIndex(join(dir, "analytics.sqlite"));
