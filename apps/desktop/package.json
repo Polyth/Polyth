@@ -56,8 +56,8 @@
         ]
       },
       {
-        "from": "resources/chromium",
-        "to": "chromium",
+        "from": "resources/chromium/${platform}-${arch}",
+        "to": "chromium/${platform}-${arch}",
         "filter": [
           "**/*"
         ]
@@ -70,8 +70,8 @@
         ]
       },
       {
-        "from": "resources/opencode",
-        "to": "opencode",
+        "from": "resources/opencode/${platform}-${arch}",
+        "to": "opencode/${platform}-${arch}",
         "filter": [
           "**/opencode",
           "**/opencode.exe"
