@@ -6889,67 +6889,6 @@ min-width: 0;
 }
 
 
-/* Usage settings — Polyth-native analytics workbench. The data-rich page keeps
-   the shared Settings shell, theme roles, control geometry, and warm surfaces. */
-.settings-scrim:has(.settings-page-usage) { padding: 3vh max(2vw, 12px); }
-.settings-page-usage {
-  --usage-bg: var(--bg);
-  --usage-sidebar: var(--panel);
-  --usage-card: var(--elevated);
-  --usage-card-raised: var(--raised);
-  --usage-border: var(--border-soft);
-  --usage-border-strong: var(--border);
-  --usage-text: var(--text);
-  --usage-muted: var(--muted);
-  --usage-faint: var(--faint);
-  width: min(96vw, 1180px);
-  max-width: 1180px;
-  height: 94vh;
-  height: 94dvh;
-  border-color: var(--border);
-  border-radius: var(--radius-sheet);
-  background: var(--panel);
-  color: var(--text);
-  box-shadow: var(--shadow-lg);
-}
-.settings-page-usage .settings-pane { min-width: 0; background: var(--bg); }
-.settings-page-usage .settings-pane-head { display: flex; }
-.settings-page-usage .settings-pane-body {
-  height: auto;
-  padding: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-}
-.settings-page-usage button:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-@keyframes usage-spin { to { transform: rotate(360deg); } }
-@media (max-width: 700px) {
-.settings-scrim:has(.settings-page-usage) { padding: 4vh 2vw; }
-  .settings-page-usage {
-    width: min(96vw, 100%);
-    max-width: none;
-    height: 92vh;
-    height: 92dvh;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sheet);
-  }
-  .settings-page-usage .settings-mobile-back,
-  .settings-page-usage .close-btn {
-    min-height: var(--tap);
-  }
-  .settings-page-usage .close-btn { width: var(--tap); }
-}
-
-@media (pointer: coarse) {
-.settings-page-usage .settings-mobile-back,
-.settings-page-usage .close-btn {
-min-height: var(--tap);
-}
-}
-
-
 /* ==================== NTF-01 notification centre =========================== */
 /* Header bell: relative anchor for the unread badge; the badge is absent at
    zero and the accessible name always carries the exact count. */
