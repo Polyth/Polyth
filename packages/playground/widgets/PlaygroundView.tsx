@@ -276,7 +276,7 @@ export default function PlaygroundView({ host, projectId: scopedProjectId, sessi
           size="sm"
           variant={networkEnabled ? "primary" : "quiet"}
           aria-pressed={networkEnabled}
-          title="Allow the prototype to make HTTPS fetch/WebSocket requests. Local/private network remains outside the Playground contract."
+          title="Allow the prototype to make HTTPS fetch/WebSocket requests. Off is the safer default."
           onClick={() => setNetworkEnabled((value) => !value)}
         >
           Network {networkEnabled ? "on" : "off"}
