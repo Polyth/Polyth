@@ -881,6 +881,141 @@ test("owned epoch mismatch recovers in the background without a user send", asyn
       (await store.events(sessionId)).some((event) => event.type === "user/message"),
       false,
     );
+    assert.equal(submitted.length, 0);
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("owned epoch recovery auto-continues an interrupted turn without waiting for the user", async () => {
+  const endpoint: RuntimeEndpoint = {
+    authorityId: "owned:replacement",
+    continuity: "verified",
+    generation: 3,
+    url: "http://runtime.invalid",
+    location: { directory: "/project" },
+    control: { kind: "owned", instanceToken: "replacement-instance" },
+    config: { kind: "read-only" },
+    authentication: { kind: "none" },
+  };
+  const submitted: string[] = [];
+  const runtime = borrowedConfirmRuntime(endpoint, submitted);
+  const { dir, store, project, sessions } = harness(runtime, "polyth-epoch-owned-continue-");
+  const sessionId = "session-owned-continue";
+  try {
+    const projection = projectionFor(
+      project,
+      endpoint,
+      sessionId,
+      "backend-old",
+      "owned:destroyed",
+    );
+    projection.status = "working";
+    await store.upsertProjection(projection);
+    await store.append(sessionId, "user/message", { text: "finish the git fix" });
+    await store.append(sessionId, "turn/started", { turnId: "turn-cut" }, { ignorable: true });
+
+    await sessions.events(sessionId, 0);
+    await waitFor(async () => {
+      const events = await store.events(sessionId);
+      return events.some((event) =>
+        event.type === "user/message"
+        && (event.data as { autoResume?: unknown }).autoResume === true
+        && (event.data as { runtimeEpochRecovery?: unknown }).runtimeEpochRecovery !== undefined);
+    });
+
+    const events = await store.events(sessionId);
+    const stopped = events.find((event) =>
+      event.type === "turn/stopped"
+      && (event.data as { turnId?: unknown }).turnId === "turn-cut");
+    assert.ok(stopped);
+    assert.equal((stopped.data as { reason?: string }).reason, "aborted");
+    const epochMarker = events.find((event) => event.type === "runtime/epoch-replaced");
+    assert.ok(epochMarker);
+    assert.ok(stopped.seq < epochMarker.seq);
+
+    const continueMessage = events.findLast((event) =>
+      event.type === "user/message"
+      && (event.data as { autoResume?: unknown }).autoResume === true)!;
+    assert.ok(epochMarker.seq < continueMessage.seq);
+    assert.equal((continueMessage.data as { text?: string }).text, "finish the git fix");
+    assert.equal(
+      (continueMessage.data as { hiddenUserMessage?: boolean }).hiddenUserMessage,
+      true,
+    );
+    const recovery = (continueMessage.data as {
+      runtimeEpochRecovery?: { epoch?: number; markerSeq?: number };
+    }).runtimeEpochRecovery;
+    assert.equal(recovery?.epoch, 1);
+    assert.equal(recovery?.markerSeq, epochMarker.seq);
+    assert.equal(submitted.length, 1);
+    assert.match(submitted[0]!, /finish the git fix$/);
+    assert.match(submitted[0]!, /polyth-runtime-epoch-recovery/);
+
+    // A later attach must not admit a second hidden continuation for the same marker.
+    await sessions.events(sessionId, 0);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(
+      (await store.events(sessionId)).filter((event) =>
+        event.type === "user/message"
+        && (event.data as { autoResume?: unknown }).autoResume === true).length,
+      1,
+    );
+    assert.equal(submitted.length, 1);
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("owned epoch recovery auto-continues when only an active tool was cut", async () => {
+  const endpoint: RuntimeEndpoint = {
+    authorityId: "owned:replacement",
+    continuity: "verified",
+    generation: 3,
+    url: "http://runtime.invalid",
+    location: { directory: "/project" },
+    control: { kind: "owned", instanceToken: "replacement-instance" },
+    config: { kind: "read-only" },
+    authentication: { kind: "none" },
+  };
+  const submitted: string[] = [];
+  const runtime = borrowedConfirmRuntime(endpoint, submitted);
+  const { dir, store, project, sessions } = harness(runtime, "polyth-epoch-owned-tool-continue-");
+  const sessionId = "session-owned-tool-continue";
+  try {
+    const projection = projectionFor(
+      project,
+      endpoint,
+      sessionId,
+      "backend-old",
+      "owned:destroyed",
+    );
+    projection.status = "working";
+    await store.upsertProjection(projection);
+    await store.append(sessionId, "user/message", { text: "keep editing the test" });
+    await store.append(sessionId, "tool/started", {
+      callId: "tool-cut",
+      tool: "shell",
+      input: { command: "sleep 30" },
+    }, { ignorable: true });
+
+    await sessions.events(sessionId, 0);
+    await waitFor(async () => {
+      const events = await store.events(sessionId);
+      return events.some((event) =>
+        event.type === "user/message"
+        && (event.data as { autoResume?: unknown }).autoResume === true);
+    });
+
+    const events = await store.events(sessionId);
+    assert.ok(events.some((event) =>
+      event.type === "tool/error"
+      && (event.data as { callId?: unknown }).callId === "tool-cut"));
+    assert.equal(submitted.length, 1);
+    assert.match(submitted[0]!, /keep editing the test$/);
+    assert.match(submitted[0]!, /polyth-runtime-epoch-recovery/);
   } finally {
     await store.close();
     rmSync(dir, { recursive: true, force: true });

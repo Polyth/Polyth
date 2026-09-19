@@ -561,8 +561,10 @@ export function createSessionService(deps: {
   // Owned runtime identity breaks are recoverable without user action. The
   // implementation is assigned after the epoch helpers are declared; callers
   // can safely request recovery during attach/reconciliation.
+  // UnderLock returns true when an in-flight turn was interrupted and should
+  // be continued automatically after the fresh epoch is ready.
   let recoverOwnedEpochIfPending: (sessionId: string) => Promise<void> = async () => {};
-  let recoverOwnedEpochIfPendingUnderLock: (sessionId: string) => Promise<void> = async () => {};
+  let recoverOwnedEpochIfPendingUnderLock: (sessionId: string) => Promise<boolean> = async () => false;
   // Last redacted endpoint seen during normal attach/bind. debug() reads this
   // instead of calling endpoint(), which can restart a dead owned instance.
   const attachedEndpoint = new WeakMap<AgentRuntime, SessionDebugEndpointDto>();
@@ -5707,15 +5709,102 @@ export function createSessionService(deps: {
     return { projection: ready, runtime };
   };
 
+  /** Hidden continuation after owned epoch rehydration when a turn was cut mid-flight.
+   *  This admits a *new* turn with recovery context — it never replays the interrupted
+   *  mutation. Same autoResume seam as rate-limit resume. */
+  const EPOCH_CONTINUE_PROMPT =
+    "Continue from where you left off after the runtime recovery.";
+
+  const planEpochTurnContinue = async (sessionId: string): Promise<{
+    text: string;
+    attachments?: AttachmentRef[];
+    model?: ModelRef;
+  } | null> =>
+    withSessionLock(sessionId, async () => {
+      const proj = await store.projection(sessionId);
+      if (!proj || proj.status === "archived" || proj.status === "working" || proj.harnessTransition) {
+        return null;
+      }
+      if (proj.status !== "idle") return null;
+      const reconciliation = await durable.reconciliation(sessionId);
+      if (
+        reconciliation
+        && (
+          reconciliation.state === "reconciling"
+          || reconciliation.state === "blocked"
+          || reconciliation.state === "unknown"
+        )
+      ) {
+        return null;
+      }
+      const queued = deps.queue ? await deps.queue.queueList(sessionId) : [];
+      if (queued.some((item) => !item.heldForReview)) return null;
+      const events = await store.events(sessionId);
+      const marker = events.findLast((event) => event.type === "runtime/epoch-replaced");
+      if (!marker) return null;
+      const epoch = Number((marker.data as { new?: { epoch?: unknown } }).new?.epoch);
+      if (!Number.isSafeInteger(epoch) || epoch <= 0) return null;
+      const alreadyRestored = events.some((event) => {
+        if (event.type !== "user/message") return false;
+        const metadata = (event.data as {
+          runtimeEpochRecovery?: { markerSeq?: unknown; epoch?: unknown };
+        }).runtimeEpochRecovery;
+        return Number(metadata?.markerSeq) === marker.seq
+          && Number(metadata?.epoch) === epoch;
+      });
+      if (alreadyRestored) return null;
+      const last = lastUserMessage(events);
+      const text = last?.text.trim() ? last.text : EPOCH_CONTINUE_PROMPT;
+      return {
+        text,
+        ...(last?.attachments
+          ? { attachments: last.attachments as unknown as AttachmentRef[] }
+          : {}),
+        ...(proj.model ? { model: proj.model } : {}),
+      };
+    });
+
+  const runEpochTurnContinue = async (sessionId: string): Promise<void> => {
+    const plan = await planEpochTurnContinue(sessionId);
+    if (!plan) return;
+    try {
+      await service.send(sessionId, {
+        text: plan.text,
+        ...(plan.attachments ? { attachments: plan.attachments } : {}),
+        ...(plan.model ? { model: plan.model } : {}),
+        autoResume: true,
+      });
+    } catch (error) {
+      // Leave the session idle with a ready recovery plan; the user can still
+      // continue manually. Do not loop speculative retries.
+      console.error(`[polyth] epoch turn continue failed for ${sessionId}`, error);
+    }
+  };
+
   const ownedEpochRecoveryFlights = new Map<string, Promise<void>>();
-  recoverOwnedEpochIfPendingUnderLock = async (sessionId: string): Promise<void> => {
+  recoverOwnedEpochIfPendingUnderLock = async (sessionId: string): Promise<boolean> => {
     const projection = await store.projection(sessionId);
     if (
       !projection
       || projection.status !== "epoch-pending"
       || projection.runtimeControl !== "owned"
-    ) return;
+    ) {
+      return false;
+    }
+    const eventsBefore = await store.events(sessionId);
+    const interrupted = Boolean(
+      openTurnFromEvents(eventsBefore) || activeToolsFromEvents(eventsBefore).size > 0,
+    );
+    // Terminalize the cut turn before the epoch marker so admission after
+    // rehydration does not see a still-open turn in the durable log.
+    if (interrupted) {
+      await stopLocally(
+        sessionId,
+        "Runtime authority was replaced before the turn finished.",
+      );
+    }
     await recoverFreshRuntimeEpochUnderLock(sessionId);
+    return interrupted;
   };
   recoverOwnedEpochIfPending = (sessionId: string): Promise<void> => {
     const existing = ownedEpochRecoveryFlights.get(sessionId);
@@ -5723,7 +5812,11 @@ export function createSessionService(deps: {
     const flight = withSessionLock(
       sessionId,
       () => recoverOwnedEpochIfPendingUnderLock(sessionId),
-    ).catch((error) => {
+    ).then((interrupted) => {
+      if (!interrupted || deps.isShuttingDown?.()) return;
+      // Outside the session lock — mirrors rate-limit auto-resume.
+      void runEpochTurnContinue(sessionId);
+    }).catch((error) => {
       // Keep the durable pending state when a fresh runtime cannot be created;
       // a later runtime event or send can retry the same recovery path.
       console.error(`[polyth] automatic runtime epoch recovery failed for ${sessionId}`, error);
