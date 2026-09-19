@@ -81,10 +81,12 @@ test("debug agent access is explicit and restricted to direct public loopback in
     false,
   );
 
-  f.control.run(
-    "UPDATE principals SET status='suspended',auth_epoch=auth_epoch+1 WHERE id=?",
-    f.owner.userId,
-  );
+  f.control.transaction(() => {
+    f.control.run(
+      "UPDATE principals SET status='suspended',auth_epoch=auth_epoch+1 WHERE id=?",
+      f.owner.userId,
+    );
+  });
   assert.equal(f.gateway.refreshPrincipal(local.principal), null);
   assert.equal(f.gateway.resolve(f.request(), loopback).authenticated, false);
 });
