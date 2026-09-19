@@ -1,0 +1,52 @@
+name: Gemini harness
+
+on:
+  pull_request:
+    paths:
+      - "packages/backend-gemini/**"
+      - "packages/backend-acp/**"
+      - "packages/contracts/**"
+      - "packages/server/src/resume.ts"
+      - "packages/server/src/sessions.ts"
+      - "packages/server/test/rateLimitResume.test.ts"
+      - "apps/desktop/src/serverPackages.ts"
+      - "package-lock.json"
+      - ".github/workflows/gemini-harness.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gemini-harness-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install locked workspace dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build harness supervisor
+        run: npm run build:supervisor
+
+      - name: Run Gemini and shared ACP contracts
+        run: >-
+          node --experimental-strip-types --test
+          packages/backend-gemini/test/*.test.ts
+          packages/backend-acp/test/protocol.test.ts
+          packages/server/test/rateLimitResume.test.ts
+
+      - name: Build web package graph
+        run: npm run build:web
