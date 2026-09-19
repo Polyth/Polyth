@@ -26,6 +26,8 @@ async function startStaticServer(): Promise<{ server: Server; base: string }> {
   copyFileSync(SHIPPED_INDEX, join(webDist, "index.html"));
   writeFileSync(join(webDist, "main.js"), "export const boot = true;\n");
   writeFileSync(join(webDist, "main.css"), ":root { --ok: 1; }\n");
+  writeFileSync(join(webDist, "build-id.json"), JSON.stringify({ build: "test-build" }));
+  writeFileSync(join(webDist, "packages-manifest.json"), JSON.stringify({ packages: [] }));
   writeFileSync(join(webDist, "sw.js"), "// service worker\n");
   for (const file of ["manifest.json", "icon-192.png", "icon-512.png"]) {
     copyFileSync(join(SHIPPED_WEB, file), join(webDist, file));
@@ -63,6 +65,8 @@ test("refresh at /p/:projectId/s/:sessionId replays: shell + every asset boots",
     const page = await fetch(route);
     assert.equal(page.status, 200);
     assert.match(page.headers.get("content-type") ?? "", /text\/html/);
+    assert.equal(page.headers.get("cache-control"), "no-store",
+      "the mutable HTML shell must not survive a rebuild in the PWA cache");
     const html = await page.text();
     assert.match(html, /<div id="root">/);
 
@@ -89,7 +93,25 @@ test("refresh at /p/:projectId/s/:sessionId replays: shell + every asset boots",
       const mime = res.headers.get("content-type") ?? "";
       if (asset.pathname.endsWith(".js")) assert.match(mime, /javascript/, `module ${asset.pathname} got "${mime}"`);
       if (asset.pathname.endsWith(".css")) assert.match(mime, /text\/css/, `stylesheet ${asset.pathname} got "${mime}"`);
+      if (asset.pathname === "/main.js" || asset.pathname === "/main.css") {
+        assert.equal(res.headers.get("cache-control"), "no-store",
+          `mutable shell asset ${asset.pathname} must be fetched from the rebuilt generation`);
+      }
       assert.doesNotMatch(mime, /text\/html/, `asset ${asset.pathname} was answered with the HTML shell`);
+    }
+  } finally {
+    server.close();
+  }
+});
+
+
+test("build markers and package catalog are never cached across web rebuilds", async () => {
+  const { server, base } = await startStaticServer();
+  try {
+    for (const path of ["/build-id.json", "/packages-manifest.json"]) {
+      const response = await fetch(`${base}${path}`);
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("cache-control"), "no-store", path);
     }
   } finally {
     server.close();
