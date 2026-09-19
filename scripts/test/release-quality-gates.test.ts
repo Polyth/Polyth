@@ -51,8 +51,10 @@ test("master CI is automatic while build and release workflows stay manual", () 
   assert.match(release, /workflow_dispatch:/);
   assert.doesNotMatch(release, /^\s*push:/m);
   assert.match(release, /Require master/);
+  assert.match(release, /Prepare draft GitHub Release/);
   assert.match(release, /gh release create/);
   assert.match(release, /--draft/);
+  assert.match(release, /--publish always/);
   assert.match(release, /gh release edit .*--draft=false/);
   assert.match(release, /latest\.yml latest-arm64\.yml latest-mac\.yml latest-linux\.yml/);
   assert.match(release, /npm publish/);
