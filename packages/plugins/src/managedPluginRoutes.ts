@@ -8,7 +8,7 @@ import type { PackageManifest, PackageManifestV2 } from "@polyth/package-sdk/man
 import type { PluginRegistry } from "./managedRegistry.ts";
 import type { ServerPackageHost } from "./serverPackage.ts";
 import { invokePackageRpc } from "./packageRpc.ts";
-import { createInvocationLeaseStore } from "./invocationLeases.ts";
+import { createInvocationLeaseStore, type ContributionInvocationInput } from "./invocationLeases.ts";
 import {
   assertApprovedConnection,
   completeOauthFromTx,
@@ -129,7 +129,7 @@ function canonicalMessage(event: SessionEvent): {
       ...(typeof data.tool === "string" ? { toolName: data.tool.slice(0, 160) } : {}),
     };
   }
-  fail("invalid-input", "selected event is not a message action target");
+  return fail("invalid-input", "selected event is not a message action target");
 }
 
 function canonicalTool(event: SessionEvent): {
@@ -169,9 +169,9 @@ async function buildInvocation(input: {
   sessionId?: string;
   projectId?: string;
   host: ServerPackageHost;
-}): Promise<Omit<ContributionInvocation, "invocationId" | "lease" | "expiresAt" | "spaceId">> {
-  const contribution = contributionOf(input.manifest, input.kind, input.contributionId);
-  if (!contribution) fail("not-found", "extension contribution is not declared");
+}): Promise<ContributionInvocationInput> {
+  const contribution = contributionOf(input.manifest, input.kind, input.contributionId)
+    ?? fail("not-found", "extension contribution is not declared");
   const base = {
     kind: input.kind,
     contributionId: input.contributionId,
@@ -183,8 +183,8 @@ async function buildInvocation(input: {
     : {};
 
   if (input.kind === "message-action") {
-    if (!input.sessionId) fail("invalid-input", "message action requires a session");
-    const event = await canonicalEvent(input.host, input.sessionId, data.eventSeq);
+    const sessionId = input.sessionId ?? fail("invalid-input", "message action requires a session");
+    const event = await canonicalEvent(input.host, sessionId, data.eventSeq);
     const message = canonicalMessage(event);
     const roles = Array.isArray(contribution.roles) ? contribution.roles : [];
     if (roles.length && !roles.includes(message.role)) fail("invalid-input", "message role is not accepted by this action");
@@ -192,8 +192,8 @@ async function buildInvocation(input: {
   }
 
   if (input.kind === "session-action") {
-    if (!input.sessionId) fail("invalid-input", "session action requires a session");
-    const session = await input.host.sessions.snapshot(input.sessionId);
+    const sessionId = input.sessionId ?? fail("invalid-input", "session action requires a session");
+    const session = await input.host.sessions.snapshot(sessionId);
     return {
       ...base,
       kind: "session-action",
@@ -215,8 +215,8 @@ async function buildInvocation(input: {
   }
 
   if (input.kind === "tool-renderer") {
-    if (!input.sessionId) fail("invalid-input", "tool renderer requires a session");
-    const event = await canonicalEvent(input.host, input.sessionId, data.eventSeq);
+    const sessionId = input.sessionId ?? fail("invalid-input", "tool renderer requires a session");
+    const event = await canonicalEvent(input.host, sessionId, data.eventSeq);
     const tool = canonicalTool(event);
     const matcher = contribution.matcher && typeof contribution.matcher === "object"
       ? contribution.matcher as Record<string, unknown>
@@ -454,8 +454,8 @@ export function managedPluginRoutes(
             },
             ...(project ? {
               generateModel: async ({ prompt, maxOutputTokens, timeoutMs }) => {
-                const model = host.smallModel(request.space.userId);
-                if (!model) fail("HOST_UNAVAILABLE", "utility model is not configured");
+                const model = host.smallModel(request.space.userId)
+                  ?? fail("HOST_UNAVAILABLE", "utility model is not configured");
                 const runtime = await host.runtimes.forProject(project.id, project.path, model.harnessId);
                 const result = await host.smallModelComplete(runtime, {
                   cwd: project.path,
