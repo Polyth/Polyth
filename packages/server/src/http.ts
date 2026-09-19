@@ -2,7 +2,8 @@
 // in httpCore.ts; security authorities that must run before route dispatch are
 // composed here so they cannot accidentally fall through to legacy routes.
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
-import { UNTRUSTED_INGRESS_HEADERS, type RequestIngress } from "./auth.ts";
+import type { RequestIngress } from "@polyth/contracts";
+import { UNTRUSTED_INGRESS_HEADERS } from "./auth.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
 import {
   createHttpHandler as createCoreHttpHandler,
