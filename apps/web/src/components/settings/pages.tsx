@@ -38,7 +38,7 @@ import {
   resolveSessionDefaultModel,
   useSessionDefaults,
 } from "../../sessionDefaults.ts";
-import { Button, Checkbox, Dialog, IconButton, Popover, Select, Textarea, TextInput } from "../ui/index.ts";
+import { Button, Checkbox, IconButton, Popover, Select, Textarea, TextInput } from "../ui/index.ts";
 import { useShellMode } from "../../responsiveShell.ts";
 import { DeleteIcon } from "../ui/icons.ts";
 import { BackgroundPicker } from "../BackgroundPicker.tsx";

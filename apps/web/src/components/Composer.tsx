@@ -124,8 +124,6 @@ import type {
   ModelDescriptor,
   ModelRef,
   QueueItemDto,
-  RuntimeCapabilities,
-  RuntimeCommandDescriptor,
   SessionProjection,
 } from "@polyth/contracts";
 import { friendlyError, matchesSendShortcut, modKeyLabel, parseModelRef } from "../settings.ts";
@@ -150,7 +148,7 @@ import SessionContextBar, {
   type ContextChoice,
   type SessionContextBarProps,
 } from "./mobile/SessionContextBar.tsx";
-import { Button, CheckIcon, GlassDock, IconButton, Menu, MoreIcon, Notice, QueueIcon, SendIcon, StopIcon } from "./ui/index.ts";
+import { Button, CheckIcon, GlassDock, Menu, MoreIcon, Notice, QueueIcon, SendIcon, StopIcon } from "./ui/index.ts";
 import { getSendFailure, subscribeSendFailures } from "../sendFailure.ts";
 import { isNativeMobile } from "@polyth/mobile/runtime";
 import { pickNativeFiles, readNativeStagedFile, removeNativeStagedFile } from "@polyth/mobile/native";

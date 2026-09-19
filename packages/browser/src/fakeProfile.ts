@@ -1,5 +1,4 @@
 // In-memory profile driver for tests and POLYTH_FAKE_BROWSER=1.
-import type { BrowserColorScheme } from "@polyth/contracts";
 import type {
   ProfileContext,
   ProfileDriver,

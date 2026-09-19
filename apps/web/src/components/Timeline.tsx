@@ -5,7 +5,7 @@ import { renderMarkdown } from "../markdown.tsx";
 import { fmtDuration } from "../format.ts";
 import { groupActivity, mergeThinking, promptIndex, loadDraft, type ActivityGroup, type ActivityItem } from "../utils.ts";
 import { executionPresentation, reasoningHead, reasoningTail } from "../execution.ts";
-import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
+import { useUiSettings } from "../uiPrefs.ts";
 import { cancelResume, forkSession, loadOlderEvents, resumeNow, sendMessage } from "../init.ts";
 import { resumeOptionsForModel } from "../rateLimitRecovery.ts";
 import { useSpaces } from "../spaces.ts";
@@ -81,7 +81,7 @@ import WorkflowTimelineCard from "../../../../packages/workflow/widgets/Workflow
 import ModelPicker from "@polyth/models/model-picker";
 import { useRuntimeCatalog } from "@polyth/models/runtime-catalog";
 import { tr } from "../i18n/index.ts";
-import ExecutionRow, { DiffStat, useCollapsePresence } from "./ExecutionRow.tsx";
+import ExecutionRow, { useCollapsePresence } from "./ExecutionRow.tsx";
 import { Button, Notice, RunSummary, type RunSummaryState } from "./ui/index.ts";
 import type { TurnLimitState } from "../reduce.ts";
 import { transientTurnNoticeKey } from "../turnNotice.ts";

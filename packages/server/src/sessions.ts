@@ -8,27 +8,25 @@ import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { continuityWorkspace } from "./continuityWorkspace.ts";
 import type {
-  AgentProfile, AgentRuntime, AttachmentRef, AttachmentModality, AutoAcceptSetting, CanonicalEventInput, ChildSnapshotResult, ClientMutationStatusDto, ClientSettingsDto, ContextWindowState, CreateSessionInput, DeliveryMode,
+  AgentProfile, AgentRuntime, AttachmentRef, AutoAcceptSetting, CanonicalEventInput, ChildSnapshotResult, ClientMutationStatusDto, ClientSettingsDto, ContextWindowState, CreateSessionInput, DeliveryMode,
   Disposable, DurableOperation, HarnessSelection, HarnessTransition, ForkDraft, ForkResult, JsonObject, ModelRef, MutationOutcome, NotificationRecord, ResumeTurnOptions,
   PersistedRuntimeBinding,
-  InstalledPluginDto, ModelDescriptor, PackageDescriptorDto, QueueItemDto, RateLimitRetry, RateLimitRetryHint, RuntimeEvent,
+  ModelDescriptor, PackageDescriptorDto, QueueItemDto, RateLimitRetry, RateLimitRetryHint, RuntimeEvent,
   RuntimeEpochTransitionResult, TurnResumeCancelledData,
   ExecutionReleaseProof,
   RuntimeEpochFence,
-  RuntimeEndpoint, RuntimeLifecycleNotification, RuntimeMutationKind, RuntimeObservation,
+  RuntimeEndpoint, RuntimeLifecycleNotification, RuntimeObservation,
   RuntimeSessionBinding, RuntimeSnapshot,
   SecretRequestData, SecretResolvedData, SecureSafeKind, SecureSafeService,
-  RuntimeSession, SendResult, SessionDebugDto, SessionDebugEndpointDto, SessionEvent, SessionFolderDto, SessionForkedData, SessionIsolation, SessionOrganizePatch, SessionProjection, SessionRef,
+  RuntimeSession, SendResult, SessionDebugDto, SessionDebugEndpointDto, SessionEvent, SessionFolderDto, SessionForkedData, SessionOrganizePatch, SessionProjection, SessionRef,
   SessionService, SessionPersistence, UserTurnInput,
   RuntimeCapabilities,
   RuntimeCommandDescriptor,
   RuntimeFeaturesDto,
-  FeatureSupport,
 } from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
-import { isolationBlocksUserMutation, isolationNeedsRecovery, isManagedIsolationBranch, normalizeIsolation, transitionIsolation } from "@polyth/contracts";
+import { isolationBlocksUserMutation, isolationNeedsRecovery, isManagedIsolationBranch, normalizeIsolation } from "@polyth/contracts";
 import {
-  attachmentModality,
   composeProjectedPrompt,
   effectiveAttachmentSupport,
   isPlaceholderTitle,

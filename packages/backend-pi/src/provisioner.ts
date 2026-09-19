@@ -5,7 +5,6 @@ import type {
   CapabilitySecretResolver,
   HarnessCapabilityRecord,
   HarnessCapabilitySupport,
-  HarnessContext,
   HarnessProvisioner,
   HarnessProvisioningPlan,
 } from "@polyth/contracts";

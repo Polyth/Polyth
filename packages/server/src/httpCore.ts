@@ -17,14 +17,12 @@ import {
   type ResumeTurnOptions,
   type RouteHandler,
   type RouteRequest,
-  type SessionService,
 } from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
 import type { RuntimePool } from "./sessions.ts";
 import { parseTurnCommand } from "./turnCommand.ts";
 import {
   parseSpaceCookie,
-  spaceCookieHeader,
   SPACE_HEADER,
   type SpaceGateway,
 } from "./spaces.ts";

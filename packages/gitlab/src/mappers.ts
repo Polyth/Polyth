@@ -1,6 +1,5 @@
 import type { PrCheck } from "@polyth/contracts";
 import type {
-  ChangeRequest,
   ChangeRequestComment,
   ChangeRequestDetail,
   ChangeRequestFile,

@@ -7,7 +7,7 @@ import {
   BUILTIN_CAPABILITY_META, registerCapability, type CapabilityMeta,
 } from "./capabilities.ts";
 import {
-  closeWorkspacePane, getState, openSettingsPage, openWorkspacePane, setActiveView, setRailPlugin, setSidebarOpen,
+  closeWorkspacePane, getState, openWorkspacePane, setActiveView, setRailPlugin, setSidebarOpen,
   type AppState, type AppView,
 } from "./store.ts";
 import { isWorkspaceSurface, listSurfaces } from "./surfaces.ts";

@@ -7,7 +7,6 @@ import type {
   JsonObject,
   ModelRef,
   Project,
-  ProjectService,
   RouteHandler,
   SessionDebugDto,
   SessionEvent,

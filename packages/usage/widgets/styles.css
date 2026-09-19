@@ -334,6 +334,8 @@ width: 13px; height: 13px;
 .usage-range-control .ui-tab {
 min-width: 34px; font-family: var(--mono);
 }
+@keyframes usage-spin { to { transform: rotate(360deg); } }
+
 .usage-dashboard-toolbar > .ui-icon-btn.refreshing svg {
 animation: usage-spin .7s linear infinite;
 }

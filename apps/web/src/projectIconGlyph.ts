@@ -2,7 +2,6 @@ import {
   decodeSvgDataUrl,
   ensureProjectIconSvgXmlns,
   isProjectIconBundledPath,
-  isProjectIconRasterDataUrl,
   isProjectIconSvgDataUrl,
 } from "./projectIconPicker.ts";
 import { projectIconMaskBlobUrl } from "./projectIconLoader.ts";

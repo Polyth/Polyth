@@ -1,5 +1,5 @@
 import { copyFile, lstat, mkdir, readdir, rename, rm } from "node:fs/promises";
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { compare as compareSemver, valid as validSemver } from "semver";

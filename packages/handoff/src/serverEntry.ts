@@ -4,7 +4,6 @@ import type {
   RemoteAccessPolicy,
   RouteHandler,
 } from "@polyth/contracts";
-import { REMOTE_CAPABILITY } from "@polyth/contracts";
 import {
   localOnlyRemoteAccess,
   serverServiceKey,

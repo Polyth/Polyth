@@ -4,7 +4,6 @@ import {
   getAuthEntry,
   numberValue,
   objectValue,
-  readJson,
   readManagedCredential,
   removeLegacyOpenCodeGoCredential,
   stringValue,

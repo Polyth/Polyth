@@ -2,7 +2,6 @@ import type {
   ChatProfileDto,
   ChatTabDto,
   ChatTabStateDto,
-  ChatWorkspaceDto,
   JsonObject,
   RouteHandler,
   SpaceStorage,

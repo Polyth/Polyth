@@ -1,7 +1,6 @@
 // Persistent-profile Chromium driver for chat-workspace (manual-only pages).
 import { access } from "node:fs/promises";
 import { constants } from "node:fs";
-import type { BrowserColorScheme } from "@polyth/contracts";
 import { findChromiumExecutable } from "./chromium.ts";
 import type {
   NavigationKind,

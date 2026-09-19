@@ -1,0 +1,58 @@
+name: Repository cleanup audit
+
+on:
+  pull_request:
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "scripts/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/repo-cleanup-audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cleanup-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Dead files, exports and dependencies
+        shell: bash
+        run: |
+          set +e
+          npx --yes knip --reporter compact
+          echo "knip_exit=$?"
+          exit 0
+
+      - name: Unused TypeScript locals, imports and parameters
+        shell: bash
+        run: |
+          set +e
+          while IFS= read -r config; do
+            echo "::group::unused scan $config"
+            npx tsc --pretty false --noEmit --noUnusedLocals --noUnusedParameters -p "$config"
+            echo "::endgroup::"
+          done < <(find apps packages -name tsconfig.json -not -path '*/node_modules/*' | sort)
+          exit 0
+
+      - name: CSS and repository bloat audit
+        run: node scripts/ci/repo-cleanup-audit.mjs

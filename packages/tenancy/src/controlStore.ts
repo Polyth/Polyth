@@ -7,7 +7,6 @@ import {
   type SpaceMemberDto,
   type SpaceRole,
   type SpaceSummaryDto,
-  type UserDto,
 } from "@polyth/contracts";
 import { noSuchSpace, type CreateSpaceInput, type TenancyFile, type TenancyStore } from "./store.ts";
 

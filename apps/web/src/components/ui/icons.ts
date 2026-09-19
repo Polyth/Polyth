@@ -11,7 +11,6 @@ import {
   createLucideIcon,
   KeyRound,
   Pencil,
-  Repeat,
   Search,
   Sparkles,
   Square,
