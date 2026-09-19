@@ -1,5 +1,4 @@
 import {
-  useEffect,
   useId,
   useMemo,
   useRef,
@@ -7,9 +6,8 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import Chart from "chart.js/auto";
-import type { ChartConfiguration } from "chart.js";
 import type { QuotaWindowDto } from "@polyth/session/web-api";
+import type { WebPackageHost } from "@polyth/web-sdk";
 import { fmtTokens } from "../../../../apps/web/src/format.ts";
 import { formatNumber, getLocale } from "../../../../apps/web/src/i18n/index.ts";
 import { useStore } from "../../../../apps/web/src/store.ts";
@@ -29,6 +27,7 @@ import {
   type UsageRangeDays,
 } from "./dashboardData.ts";
 import { fmtQuota, useQuotaSnapshots } from "./quotaUi.tsx";
+import { UsageOverview } from "./UsageOverview.tsx";
 import {
   Button,
   ChevronRightIcon,
@@ -382,240 +381,6 @@ function ProviderCard({
   );
 }
 
-const palette = (): string[] => {
-  if (typeof document === "undefined") return ["currentColor"];
-  const style = getComputedStyle(document.documentElement);
-  const resolved = ["--accent", "--purple", "--blue", "--green", "--amber", "--text-dim"]
-    .map((name) => style.getPropertyValue(name).trim())
-    .filter(Boolean);
-  return resolved.length > 0 ? resolved : [style.color || "currentColor"];
-};
-
-const chartGridColor = (): string => {
-  if (typeof document === "undefined") return "transparent";
-  return getComputedStyle(document.documentElement).getPropertyValue("--border-soft").trim() || "transparent";
-};
-
-function UsageTimeChart({
-  labels,
-  series,
-  metric,
-  style,
-  showLegend,
-}: {
-  labels: readonly string[];
-  series: readonly { id: string; label: string; values: number[] }[];
-  metric: UsageChartMetric;
-  style: "bar" | "line";
-  showLegend: boolean;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const colors = palette();
-    const visible = series.slice(0, 6);
-    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true
-      || document.documentElement.dataset.reduceAnimations === "true";
-    const chart = new Chart(canvas, {
-      type: style,
-      data: {
-        labels: [...labels],
-        datasets: visible.map((item, index) => ({
-          label: item.label,
-          data: item.values,
-          borderColor: colors[index % colors.length],
-          backgroundColor: colors[index % colors.length],
-          borderWidth: style === "line" ? 2 : 0,
-          pointRadius: 0,
-          tension: style === "line" ? .25 : 0,
-          borderRadius: style === "bar" ? 3 : 0,
-          maxBarThickness: 28,
-        })),
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: reducedMotion ? false : { duration: 180 },
-        interaction: { mode: "index", intersect: false },
-        plugins: {
-          legend: { display: showLegend, position: "bottom", labels: { boxWidth: 8, boxHeight: 8, usePointStyle: true } },
-          tooltip: {
-            callbacks: {
-              label: (ctx) => {
-                const value = Number(ctx.raw ?? 0);
-                const formatted = metric === "cost" ? money(value) : metric === "tokens" ? fmtTokens(value) : formatNumber(value);
-                return `${ctx.dataset.label}: ${formatted}`;
-              },
-            },
-          },
-        },
-        scales: {
-          x: { stacked: style === "bar", grid: { display: false }, ticks: { maxTicksLimit: 8 } },
-          y: {
-            stacked: style === "bar",
-            beginAtZero: true,
-            grid: { color: chartGridColor() },
-            ticks: {
-              callback: (value) => metric === "cost"
-                ? money(Number(value))
-                : metric === "tokens" ? fmtTokens(Number(value)) : compactNumber(Number(value)),
-            },
-          },
-        },
-      },
-    } as ChartConfiguration);
-    return () => chart.destroy();
-  }, [labels, metric, series, showLegend, style]);
-
-  return <canvas ref={canvasRef} aria-label="Usage over time chart" role="img" />;
-}
-
-function Segmented<T extends string>({
-  value,
-  values,
-  onChange,
-  label,
-}: {
-  value: T;
-  values: readonly { value: T; label: string }[];
-  onChange: (value: T) => void;
-  label: string;
-}) {
-  return (
-    <div className="usage-segmented" role="group" aria-label={label}>
-      {values.map((item) => (
-        <button
-          key={item.value}
-          type="button"
-          aria-pressed={value === item.value}
-          onClick={() => onChange(item.value)}
-        >
-          {item.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function Overview({
-  data,
-  prefs,
-}: {
-  data: ReturnType<typeof buildUsageDashboardData>;
-  prefs: ReturnType<typeof useUsagePrefs>;
-}) {
-  const metric = prefs.dashboard.chartMetric;
-  const grouping = prefs.dashboard.chartGrouping;
-  const distributionGrouping = prefs.dashboard.distributionGrouping;
-  const series = data.chart.byDimension[grouping][metric];
-  const consumers = data.consumers[distributionGrouping];
-  const consumerValues = consumers.map((item) =>
-    metric === "cost" ? item.cost : metric === "sessions" ? item.sessions : item.tokens);
-  const total = consumerValues.reduce((sum, value) => sum + value, 0);
-  const max = Math.max(0, ...consumerValues);
-  const rangeLabel = prefs.dashboard.rangeMode === "custom" && prefs.dashboard.customRange
-    ? `${prefs.dashboard.customRange.start} – ${prefs.dashboard.customRange.end}`
-    : `${prefs.dashboard.rangeDays} days`;
-
-  return (
-    <div className="usage-overview">
-      <div className="usage-summary-strip">
-        <Metric label="Spend" value={money(data.totals.cost)} />
-        <Metric label="Tokens" value={fmtTokens(data.totals.tokens)} />
-        <Metric label="Sessions" value={compactNumber(data.totals.sessions)} />
-        {data.totals.cacheHitPercent !== null && (
-          <Metric label="Cache" value={percent(data.totals.cacheHitPercent)} />
-        )}
-      </div>
-
-      {!prefs.hiddenBlocks.includes("usage-trend") && (
-        <section className="usage-analytic-card">
-          <header>
-            <div>
-              <h3>Usage over time</h3>
-              <p>{rangeLabel}</p>
-            </div>
-            <div className="usage-chart-controls">
-              <Segmented
-                label="Usage metric"
-                value={metric}
-                values={[
-                  { value: "cost", label: "Cost" },
-                  { value: "tokens", label: "Tokens" },
-                  { value: "sessions", label: "Sessions" },
-                ]}
-                onChange={(chartMetric) => setUsageDashboardPrefs({ chartMetric })}
-              />
-              <Segmented
-                label="Usage grouping"
-                value={grouping}
-                values={[
-                  { value: "provider", label: "Provider" },
-                  { value: "model", label: "Model" },
-                  { value: "harness", label: "Harness" },
-                  { value: "project", label: "Project" },
-                ]}
-                onChange={(chartGrouping) => setUsageDashboardPrefs({ chartGrouping })}
-              />
-            </div>
-          </header>
-          <div className="usage-time-chart">
-            {series.length > 0
-              ? <UsageTimeChart
-                  labels={data.chart.labels}
-                  series={series}
-                  metric={metric}
-                  style={prefs.dashboard.chartStyle}
-                  showLegend={prefs.dashboard.showChartLegend}
-                />
-              : <p className="usage-chart-empty">No usage in this range.</p>}
-          </div>
-        </section>
-      )}
-
-      {!prefs.hiddenBlocks.includes("distribution") && (
-        <section className="usage-analytic-card usage-distribution">
-          <header>
-            <div>
-              <h3>Top consumers</h3>
-              <p>Where {metric === "sessions" ? "sessions" : metric} are going.</p>
-            </div>
-            <Segmented
-              label="Top consumers grouping"
-              value={distributionGrouping}
-              values={[
-                { value: "model", label: "Model" },
-                { value: "provider", label: "Provider" },
-                { value: "harness", label: "Harness" },
-                { value: "project", label: "Project" },
-              ]}
-              onChange={(next) => setUsageDashboardPrefs({ distributionGrouping: next })}
-            />
-          </header>
-          <div className="usage-distribution-list">
-            {consumers.slice(0, 7).map((item, index) => {
-              const value = consumerValues[index] ?? 0;
-              const share = total > 0 ? value / total * 100 : 0;
-              return (
-                <div className="usage-distribution-row" key={item.id}>
-                  <span title={item.label}>{item.label}</span>
-                  <div className="usage-distribution-track">
-                    <i style={{ width: `${max > 0 ? value / max * 100 : 0}%` }} />
-                  </div>
-                  <strong>{Math.round(share)}%</strong>
-                </div>
-              );
-            })}
-            {consumers.length === 0 && <p className="usage-chart-empty">No usage in this range.</p>}
-          </div>
-        </section>
-      )}
-    </div>
-  );
-}
-
 function CustomRangePopover({
   anchorRef,
   open,
@@ -676,7 +441,7 @@ const providerSort = (
   });
 };
 
-export function UsageDashboard(): ReactNode {
+export function UsageDashboard({ host }: { host?: WebPackageHost } = {}): ReactNode {
   const viewTabsId = useId();
   const sessions = useStore((state) => state.sessions);
   const projectRegistry = useStore((state) => state.projectRegistry);
@@ -701,6 +466,12 @@ export function UsageDashboard(): ReactNode {
     prefs.dashboard.rangeDays,
     prefs.dashboard.customRange,
   );
+  const analyticsRange = useMemo(() => {
+    const now = Date.now();
+    return typeof range === "number"
+      ? { from: now - range * 24 * 60 * 60_000, to: now }
+      : { from: range.start, to: range.end };
+  }, [range]);
   const data = useMemo(
     () => buildUsageDashboardData(sessions, snapshots, range, Date.now(), projectLabels),
     [projectLabels, range, sessions, snapshots],
@@ -812,7 +583,7 @@ export function UsageDashboard(): ReactNode {
 
       <TabPanel idBase={viewTabsId} tabId="overview" active={prefs.dashboard.view === "overview"}>
         <div className="usage-dashboard-content" data-usage-view="overview">
-          <Overview data={data} prefs={prefs} />
+          <UsageOverview range={analyticsRange} host={host} />
         </div>
       </TabPanel>
     </div>
