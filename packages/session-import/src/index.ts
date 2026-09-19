@@ -2,6 +2,18 @@ import { createHash } from "node:crypto";
 import type { CanonicalEventInput, HarnessContext, Project, SessionPersistence, SessionProjection, SessionSourceProvider } from "@polyth/contracts";
 import { redactContinuity } from "@polyth/session";
 const fail = (code: string, message: string) => Object.assign(new Error(message), { code });
+/** Stable publication identity for one native conversation in one project.
+ * Deriving it from source identity (never a title or timestamp) lets a second
+ * import of the same native session resolve to the same canonical session
+ * instead of duplicating it. */
+export function snapshotRequestId(spaceId: string, projectId: string, providerId: string, nativeRef: string): string {
+    return "auto-" + createHash("sha256").update(JSON.stringify([spaceId, projectId, providerId, nativeRef])).digest("hex");
+}
+/** Canonical session id for one Snapshot request. Exported so listing can
+ * report already-imported native sessions without reading their history. */
+export function snapshotSessionId(spaceId: string, projectId: string, requestId: string): string {
+    return "snapshot-" + createHash("sha256").update(JSON.stringify([spaceId, projectId, requestId])).digest("hex");
+}
 /** Read once, stage bounded transactions without a projection, then publish.
  * Completed publication is idempotent by caller request id. Interrupted reads
  * remain unpublished; they are never resumed against an unverified source tail.
@@ -24,7 +36,7 @@ export async function importSnapshot(input: {
         throw fail("not-found", "project not found");
     if (!/^[A-Za-z0-9-]{16,80}$/.test(input.requestId))
         throw fail("invalid-input", "invalid Snapshot request id");
-    const id = "snapshot-" + createHash("sha256").update(JSON.stringify([context.spaceId, project.id, input.requestId])).digest("hex");
+    const id = snapshotSessionId(context.spaceId, project.id, input.requestId);
     const fingerprint = createHash("sha256").update(JSON.stringify([input.providerId, input.ref, input.title])).digest("hex");
     const existing = await store.projection(id);
     if (existing) {

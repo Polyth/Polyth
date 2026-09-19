@@ -17,6 +17,30 @@ Companion docs: `docs/dev/architecture.md` (the system as built),
 
 ---
 
+## Unreleased — unified package-owned session import
+
+### Changed — one import surface for every harness
+
+- The project menu had two import actions: the host "Import sessions…" sheet
+  (OpenCode-only backend adoption) and the `@polyth/session-import` widget's
+  "Import conversation" (snapshot). They are now one entry owned by the
+  package. `apps/web/src/components/ImportSessionsDialog.tsx` and the host
+  menu entry were removed; the legacy `/api/agent/backend-sessions` route stays
+  for programmatic callers and MCP tools.
+- The package picker lists every registered harness that exposes a
+  `SessionSourceProvider`, groups sessions per harness, and supports selecting
+  individual conversations, a whole harness, or all at once. Native
+  conversations Polyth already published are hidden (`total` / `imported`).
+- Publication identity is derived from Space + project + provider + native
+  reference, so re-importing the same conversation resolves to the existing
+  canonical session instead of duplicating it. An explicit request id is still
+  accepted.
+- The picker UI is rebuilt on shared primitives with scoped package CSS that
+  inherits font size, transparency, density, corner rounding and motion
+  preferences, with a bottom-sheet layout on phones.
+
+---
+
 ## Unreleased — recap package extraction and opt-in advanced features
 
 ### Changed

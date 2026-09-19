@@ -22,7 +22,7 @@ This path explains why an attachment defect can be picker, upload, canonical DTO
 | `tenancy` | Space/security/storage boundary | tenancy source and Space design |
 | `session` / `server` | Canonical log/projection, admission, HTTP/WS composition | owning service plus session/runtime regression tests |
 | `harness-runtime` / `backend-*` | Shared runtime machinery / provider translation | current registry/adapter and protocol tests |
-| `session-import` | Generic snapshot orchestration | importer and snapshot tests; native readers stay in providers |
+| `session-import` | Generic snapshot orchestration and the single project-menu import surface | importer and snapshot tests; native readers stay in providers |
 | `tunnel` / `pairing-qr` / Link crates | Remote access product / ticket encoding / protocol-native layers | Link architecture and current remote policy |
 | Feature packages | Package-owned services, routes, content, settings, widgets | manifest, serverEntry/webEntry, own tests |
 

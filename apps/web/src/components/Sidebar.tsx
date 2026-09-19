@@ -14,7 +14,6 @@ import { friendlyError } from "../settings.ts";
 import { Icon } from "../icons.tsx";
 import SessionList from "./sidebar/SessionList.tsx";
 import SessionDateFilterControls from "./sidebar/SessionDateFilterControls.tsx";
-import ImportSessionsDialog from "./ImportSessionsDialog.tsx";
 import { useShellMode } from "../responsiveShell.ts";
 import { useModalSurface } from "./a11y/Dialog.tsx";
 import SlotHost from "./slots/SlotHost.ts";
@@ -111,7 +110,6 @@ export default function Sidebar() {
   const project = projects.find((p) => p.id === activeProjectId) ?? null;
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("");
-  const [importingProject, setImportingProject] = useState<string | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState<ReadonlySet<string>>(new Set());
   const [query, setQuery] = useState("");
@@ -541,11 +539,6 @@ export default function Sidebar() {
       id: "worktree",
       label: tr("sidebar.newSessionInWorktree"),
       onSelect: () => openWorktreeSessionDialog(p.id),
-    },
-    {
-      id: "import",
-      label: tr("sidebar.importSessions"),
-      onSelect: () => setImportingProject(p.id),
     },
     {
       id: "rename",
@@ -1174,9 +1167,6 @@ export default function Sidebar() {
         </div>
         </div>)}
       </nav>
-      {importingProject && (
-        <ImportSessionsDialog projectId={importingProject} onClose={() => setImportingProject(null)} />
-      )}
       {appearanceProjectId && (() => {
         const target = projects.find((candidate) => candidate.id === appearanceProjectId);
         return target ? <ProjectAppearanceDialog project={target} onClose={() => setAppearanceProjectId(null)} /> : null;

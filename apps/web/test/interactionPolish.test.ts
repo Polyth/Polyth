@@ -212,7 +212,7 @@ test("secondary core dialogs and utility actions use shared primitives", async (
     "../src/components/AgentProfileForm.tsx",
     "../src/components/ComposerAddMenu.tsx",
     "../src/components/ComposerFocusDialog.tsx",
-    "../src/components/ImportSessionsDialog.tsx",
+    "../../../packages/session-import/widgets/index.tsx",
     "../src/components/ProjectAppearanceDialog.tsx",
     "../src/components/WorktreeSessionDialog.tsx",
     "../src/components/EmptyState.tsx",

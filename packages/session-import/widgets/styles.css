@@ -1,2 +1,109 @@
+/* Session import package surface. Uses canonical tokens only, so density,
+   font size, transparency, corner rounding and motion preferences all apply. */
 
-.pkg-session-import.pkg-session-import-dialog { display: grid; gap: var(--space-3); }
+.pkg-session-import-trigger .ui-icon { color: var(--muted); }
+
+.pkg-session-import-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.pkg-session-import-intro { margin: 0; }
+
+.pkg-session-import-progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.pkg-session-import-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.pkg-session-import-search > .ui-icon {
+  position: absolute;
+  inset-inline-start: var(--space-3);
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.pkg-session-import-search .ui-input {
+  width: 100%;
+  padding-inline-start: calc(var(--space-3) * 2 + 14px);
+}
+
+.pkg-session-import-all {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--border-soft);
+  border-radius: var(--radius-control);
+}
+
+.pkg-session-import-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.pkg-session-import-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.pkg-session-import-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pkg-session-import-row {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+}
+
+.pkg-session-import-row:hover { background: var(--surface-overlay-hover); }
+
+.pkg-session-import-row-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pkg-session-import-row-copy strong {
+  overflow: hidden;
+  font-size: var(--font-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pkg-session-import-row-copy small { font-size: var(--font-meta); }
+
+.pkg-session-import-note,
+.pkg-session-import-hint {
+  margin: 0;
+  font-size: var(--font-meta);
+}
+
+.pkg-session-import-empty { min-height: 96px; }
+
+/* Phone: the menu switches to a compact anchored popover; keep the row
+   tappable and let long titles wrap instead of clipping. */
+@media (max-width: 700px) {
+  .pkg-session-import-trigger { min-height: var(--tap); }
+  .pkg-session-import-row { min-height: var(--tap); }
+  .pkg-session-import-row-copy small { overflow-wrap: anywhere; }
+  .pkg-session-import-hint { display: none; }
+}

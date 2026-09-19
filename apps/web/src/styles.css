@@ -4615,20 +4615,7 @@ body[data-glass="clear"] .prompt-nav-panel { --prompt-nav-panel-blur: 22px; }
   border-bottom: 1px solid var(--border-soft);
 }
 
-/* ---- F14 import half: backend session import sheet */
-.import-sessions-intro { margin: 0 0 var(--space-3); }
-.import-sessions-body { display: flex; flex-direction: column; gap: 8px; padding: 4px 0; min-height: 120px; }
-.import-session-list { display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow-y: auto; }
-.import-session-row {
-  display: flex; align-items: center; gap: 10px; cursor: pointer;
-  padding: 7px 10px; border: 1px solid var(--border-soft); border-radius: var(--radius-card);
-}
-.import-session-row:hover { background: var(--elevated); }
-.import-session-row .ui-checkbox-text { display: flex; flex-direction: column; min-width: 0; }
-.import-session-row strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.import-session-row small { font-size: var(--font-meta); }
-.import-session-all { border-style: dashed; }
-.import-session-all .ui-checkbox-text { flex-direction: row; gap: 8px; align-items: baseline; }
+/* Import surfaces live in @polyth/session-import and carry their own scoped CSS. */
 
 @media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
 /* Project/session drawer: fixed, above the workspace, never consumes
@@ -8893,7 +8880,6 @@ html[data-modal-surface="open"] body {
     touch-action: manipulation;
   }
   .dialog-panel > :is(
-    .import-sessions-body,
     .profile-form-body,
     .role-editor-body,
     .worktree-session-body
@@ -8920,8 +8906,7 @@ html[data-modal-surface="open"] body {
 min-height: var(--tap);
 }
 
-  .worktree-session-dialog .ui-dialog-foot > .muted,
-  .import-sessions-dialog .ui-dialog-foot > .muted { width: 100%; flex-basis: 100%; }
+  .worktree-session-dialog .ui-dialog-foot > .muted { width: 100%; flex-basis: 100%; }
 
   /* Full-screen settings navigation and page stages. */
   .settings-scrim {
@@ -9212,9 +9197,6 @@ width: 100%; min-height: var(--tap);
     padding-top: var(--safe-top);
   }
 
-  .import-session-list { max-height: none; min-height: 0; flex: 1; }
-  .import-session-row { min-width: 0; min-height: var(--tap); }
-  .import-session-row small { overflow-wrap: anywhere; }
 .set-usage-grid {
 grid-template-columns: 1fr;
 }
@@ -10329,7 +10311,6 @@ min-width: 0;
     .alert-dialog-body,
     .browser-dialog-body,
     .goal-attach,
-    .import-sessions-body,
     .profile-form-body,
     .role-editor-body,
     .source-confirm-dialog,

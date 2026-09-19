@@ -102,6 +102,10 @@ Native observations carry the current reconciliation ordinal. Codex emits a cano
 
 Providers optionally expose `SessionSourceProvider.list/read`. `SourceRecord` contains only user/assistant text and an optional timestamp. The importer contains no engine names and no native transcript parsers.
 
+`@polyth/session-import` owns the single product surface for session import. It registers one project-menu entry that lists every registered provider exposing a source, so a new backend appears without an engine switch in the importer. The picker supports selecting individual conversations or all available ones; the host-side OpenCode-only adoption sheet was removed and the legacy `/api/agent/backend-sessions` route remains only for programmatic callers and MCP tools.
+
+The source listing reports `total` and `imported` per provider and hides already-published conversations. Publication identity is derived from Space + project + provider + native reference, so re-importing the same native conversation resolves to the existing canonical session instead of creating a duplicate. Callers may still supply an explicit request id.
+
 Snapshot reads once into staged canonical events, in batches of at most 200 records or approximately 1 MiB. It publishes the projection atomically only after a completed-read marker. Limits are 1 MiB per text record, 64 MiB total text and 100,000 records. Invalid roles, oversized records, empty sources and interrupted reads remain unpublished.
 
 A stable request ID and source fingerprint make publication idempotent. Completed staging can publish after a disk restart without reopening the source, including through an expired picker handle or a removed provider. An interrupted read cannot resume against an unverified source tail; it requires a new Snapshot request. AES-GCM picker handles hide native references, survive restart, and bind Space/project with a 15-minute window for starting a read.

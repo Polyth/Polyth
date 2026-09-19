@@ -8579,8 +8579,9 @@ export function createSessionService(deps: {
       });
     },
     async sync(projectId) {
-      // F14: bulk adopt-everything, kept for programmatic use. The web now
-      // browses /api/agent/backend-sessions and imports selectively.
+      // F14: bulk adopt-everything, kept for programmatic use. Session import
+      // in the product runs through @polyth/session-import, which browses
+      // harness sources and publishes selected conversations as snapshots.
       const { items } = await backendSessionScan(projectId);
       if (items.length > 0) {
         await this.importBackendSessions!(projectId, items.map((r) => r.id));

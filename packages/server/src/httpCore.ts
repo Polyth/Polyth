@@ -613,9 +613,10 @@ async function dispatchHttp(
 
       if (path === "/api/sessions" && method === "GET") {
         const projectId = url.searchParams.get("projectId") ?? undefined;
-        // F14: listing no longer silently adopts every backend session — the
-        // sidebar's "Import sessions…" sheet browses and adopts selectively
-        // via /api/agent/backend-sessions.
+        // F14: listing no longer silently adopts every backend session. The
+        // @polyth/session-import package browses harness sources and publishes
+        // selected conversations as canonical snapshots; the legacy
+        // /api/agent/backend-sessions adoption remains available programmatically.
         return json(res, 200, await space().sessions.list(projectId));
       }
       if (path === "/api/sessions" && method === "POST") {

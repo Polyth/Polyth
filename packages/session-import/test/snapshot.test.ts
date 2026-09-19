@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SourceRecord, SessionSourceProvider } from "@polyth/contracts";
 import { createStore, deriveMessages, planRuntimeEpochRecovery } from "@polyth/session";
-import { importSnapshot } from "../src/index.ts";
+import { importSnapshot, snapshotRequestId, snapshotSessionId } from "../src/index.ts";
 import { sourceRefs } from "../src/refs.ts";
 const project = { id: "p", name: "p", path: "/tmp", spaceId: "a", createdAt: 0 };
 const context = { spaceId: "a", projectId: "p", cwd: "/tmp" };
@@ -32,6 +32,18 @@ test("Snapshot streams 20,000 records in bounded atomic batches and remains usab
     assert.ok(plan);
     assert.ok(plan.recoveryContext.length <= 16000);
     assert.match(plan.recoveryContext, /message 19999/);
+    await store.close();
+});
+test("native source identity yields a stable canonical id independent of title", async () => {
+    const store = createStore(":memory:");
+    const requestId = snapshotRequestId("a", "p", "fake", "native");
+    assert.equal(requestId, snapshotRequestId("a", "p", "fake", "native"));
+    assert.notEqual(requestId, snapshotRequestId("a", "p", "fake", "other-native"));
+    assert.notEqual(requestId, snapshotRequestId("a", "other", "fake", "native"));
+    assert.equal(snapshotSessionId("a", "p", requestId), snapshotSessionId("a", "p", requestId));
+    const projection = await importSnapshot({ ...base, store, requestId, source: source([{ role: "user", text: "confirmed" }]) });
+    assert.equal(projection.id, snapshotSessionId("a", "p", requestId));
+    assert.ok(await store.projection(snapshotSessionId("a", "p", requestId)));
     await store.close();
 });
 test("malformed, oversized, whitespace-only and interrupted reads never publish a session", async () => {
