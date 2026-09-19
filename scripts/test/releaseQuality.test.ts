@@ -36,7 +36,8 @@ test("CI owns the repository quality contract and app builds stay manual", () =>
   assert.match(builds, /CODE_SIGNING_ALLOWED=NO/);
   assert.match(builds, /--win nsis --x64 --publish never/);
   assert.match(builds, /--linux AppImage --x64 --publish never/);
-  assert.match(builds, /--mac dmg zip --universal --publish never/);
+  assert.match(builds, /--mac dmg zip --x64 --arm64 --publish never/);
+  assert.doesNotMatch(builds, /--universal/);
   assert.match(builds, /npm pack --workspace @polyth\/contracts/);
   assert.match(builds, /npm pack --workspace @polyth\/package-sdk/);
   assert.doesNotMatch(builds, /--publish always/);

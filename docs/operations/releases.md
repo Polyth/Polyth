@@ -42,7 +42,7 @@ Use **Actions → Build apps → Run workflow**.
 |---|---|
 | `android-apk` | Installable debug APK |
 | `ios-app` | Unsigned iOS Simulator `.app` ZIP |
-| `mac-dmg` | Unsigned universal macOS DMG + updater ZIP |
+| `mac-dmg` | Unsigned macOS x64 + arm64 DMG/ZIP pairs |
 | `windows-exe` | x64 NSIS EXE |
 | `linux-appimage` | x64 AppImage |
 | `npm-packages` | `@polyth/contracts` + `@polyth/package-sdk` npm tarballs |
@@ -62,13 +62,13 @@ The release builds:
 
 - Linux AppImage x64 + arm64;
 - Windows signed NSIS x64 + arm64;
-- signed/notarized universal macOS DMG + ZIP.
+- signed/notarized macOS x64 + arm64 DMG/ZIP pairs.
 
 The updater metadata is shipped alongside the installers:
 
 - `latest.yml` — Windows x64;
 - `latest-arm64.yml` — Windows arm64;
-- `latest-mac.yml` — macOS;
+- `latest-mac.yml` — macOS x64 + arm64 files; the updater chooses the native architecture;
 - `latest-linux.yml` and architecture-specific Linux metadata emitted by electron-builder.
 
 After the deterministic release gate passes, the prepare job creates/reuses a **draft GitHub Release** for the aligned tag. The signed desktop jobs publish their binaries and electron-builder updater metadata into that draft. The final publish job reconciles every release artifact, performs optional external publication, and only then marks the release public. Desktop auto-update therefore never sees a half-uploaded release.

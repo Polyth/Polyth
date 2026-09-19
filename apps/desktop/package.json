@@ -56,8 +56,8 @@
         ]
       },
       {
-        "from": "resources/chromium",
-        "to": "chromium",
+        "from": "resources/chromium/${platform}-${arch}",
+        "to": "chromium/${platform}-${arch}",
         "filter": [
           "**/*"
         ]
@@ -70,8 +70,8 @@
         ]
       },
       {
-        "from": "resources/opencode",
-        "to": "opencode",
+        "from": "resources/opencode/${platform}-${arch}",
+        "to": "opencode/${platform}-${arch}",
         "filter": [
           "**/opencode",
           "**/opencode.exe"
@@ -120,7 +120,6 @@
       "icon": "build/icon.png",
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-      "x64ArchFiles": "{**/node_modules/{esbuild,@esbuild/*,node-pty/prebuilds/*}/**,**/Resources/opencode/darwin-*/opencode,**/Resources/chromium/**,**/Resources/polyth-link/**}",
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Polyth uses the microphone only when you start dictation."
       }
