@@ -2950,9 +2950,14 @@ export function createSessionService(deps: {
             lastTurnId.set(sessionId, ev.turnId);
             admitting.delete(sessionId);
             turnReply.set(sessionId, new Map());
-            // A fresh turn (auto-resume, manual retry, or new prompt) settles
-            // any pending rate-limit wait.
-            await clearResume(sessionId, "resumed");
+            // A real new user intent supersedes a pending wait. An auto-resume
+            // keeps the durable plan while its retry is in flight so another
+            // provider-limit stop can advance the attempt/backoff instead of
+            // resetting to attempt 1.
+            const events = await store.events(sessionId);
+            const latestUser = [...events].reverse().find((event) => event.type === "user/message");
+            const autoResume = (latestUser?.data as { autoResume?: unknown } | undefined)?.autoResume === true;
+            if (!autoResume) await clearResume(sessionId, "resumed");
           }
         }
         break;
@@ -3033,7 +3038,7 @@ export function createSessionService(deps: {
         if (sideEffects) {
           // Any non-limit terminal stop (completed / aborted / hard error)
           // supersedes a pending resume from an earlier limit stop.
-          if (!retry) await clearResume(sessionId, "user");
+          if (!retry) await clearResume(sessionId, "resumed");
           const requestsOpen = openRequestTotal(await logFacts(sessionId)) > 0;
           const nextStatus = requestsOpen
             ? "waiting"
@@ -7574,8 +7579,9 @@ export function createSessionService(deps: {
           await clearResume(sessionId, "user");
           throw Object.assign(new Error("resume target is stale"), { code: "no-resume" });
         }
-        await clearResume(sessionId, options.model || options.harness ? "model-switch" : "resumed");
-        const continueNative = proj.resume.resumeMode === "continue" && !options.model && !options.harness;
+        const switchingRoute = Boolean(options.model || options.harness);
+        if (switchingRoute) await clearResume(sessionId, "model-switch");
+        const continueNative = proj.resume.resumeMode === "continue" && !switchingRoute;
         return {
           text: continueNative ? AUTO_RESUME_CONTINUATION : last.text,
           ...(!continueNative && last.attachments
