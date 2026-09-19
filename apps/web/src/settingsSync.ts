@@ -17,6 +17,12 @@ import {
   replaceModelPrefs,
   subscribeModelPrefs,
 } from "@polyth/models/web-prefs";
+import {
+  getUsagePrefs,
+  parseUsagePrefs,
+  replaceUsagePrefs,
+  subscribeUsagePrefs,
+} from "@polyth/usage/web-prefs";
 import { normalizeSettings } from "./settings.ts";
 import { getState, subscribeStore, updateSettings } from "./store.ts";
 import { getUiSettings, parseUiSettings, setUiSettings, subscribeUiSettings } from "./uiPrefs.ts";
@@ -46,6 +52,9 @@ interface SettingsBlob {
   // carry harness-qualified model keys; provider order/accordion state for every
   // harness travels in the same canonical preference object.
   modelPrefs: ReturnType<typeof getModelPrefs>;
+  // Usage dashboard presentation/billing metadata follows the account across
+  // web, PWA and desktop through the same canonical client-settings blob.
+  usagePrefs: ReturnType<typeof getUsagePrefs>;
 }
 
 function currentBlob(): SettingsBlob {
@@ -54,6 +63,7 @@ function currentBlob(): SettingsBlob {
     ui: getUiSettings(),
     sessionDefaults: getSessionDefaults(),
     modelPrefs: getModelPrefs(),
+    usagePrefs: getUsagePrefs(),
   };
 }
 
@@ -69,6 +79,7 @@ function applyRemote(dto: ClientSettingsDto): void {
     ui?: unknown;
     sessionDefaults?: unknown;
     modelPrefs?: unknown;
+    usagePrefs?: unknown;
   };
   applying = true;
   try {
@@ -79,6 +90,9 @@ function applyRemote(dto: ClientSettingsDto): void {
     }
     if (isObject(incoming.modelPrefs)) {
       replaceModelPrefs(parseModelPrefs(JSON.stringify(incoming.modelPrefs)));
+    }
+    if (isObject(incoming.usagePrefs)) {
+      replaceUsagePrefs(parseUsagePrefs(JSON.stringify(incoming.usagePrefs)));
     }
   } finally {
     applying = false;
@@ -93,10 +107,11 @@ function applyRemote(dto: ClientSettingsDto): void {
  *  - an unchanged server revision after a failed/offline push retries any local
  *    blob that still differs from the last confirmed server state. */
 function reconcileRemote(dto: ClientSettingsDto): void {
-  const incoming = dto.settings as { modelPrefs?: unknown };
+  const incoming = dto.settings as { modelPrefs?: unknown; usagePrefs?: unknown };
   const serverHasModelPrefs = isObject(incoming.modelPrefs);
+  const serverHasUsagePrefs = isObject(incoming.usagePrefs);
   applyRemote(dto);
-  if (!serverHasModelPrefs) lastSyncedJson = "";
+  if (!serverHasModelPrefs || !serverHasUsagePrefs) lastSyncedJson = "";
   if (JSON.stringify(currentBlob()) !== lastSyncedJson) schedulePush();
 }
 
@@ -145,6 +160,7 @@ export function initSettingsSync(): void {
     subscribeUiSettings(schedulePush);
     subscribeSessionDefaults(schedulePush);
     subscribeModelPrefs(schedulePush);
+    subscribeUsagePrefs(schedulePush);
     if (typeof window !== "undefined") window.addEventListener("pagehide", flushSettingsSync);
   }
   void api.clientSettings()
