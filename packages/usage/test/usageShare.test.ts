@@ -93,6 +93,7 @@ test("Usage surface is provider-first, compact, theme-native, and progressively 
   const quota = await readFile(new URL("../widgets/usage/quotaUi.tsx", import.meta.url), "utf8");
   const api = await readFile(new URL("../../session/src/webApi.ts", import.meta.url), "utf8");
   const registration = await readFile(new URL("../widgets/index.tsx", import.meta.url), "utf8");
+  const settingsSync = await readFile(new URL("../../../apps/web/src/settingsSync.ts", import.meta.url), "utf8");
   const surfaceStyles = await readFile(new URL("../widgets/dashboardSurface.css", import.meta.url), "utf8");
   const coreStyles = await readFile(new URL("../../../apps/web/src/styles.css", import.meta.url), "utf8");
 
@@ -128,8 +129,11 @@ test("Usage surface is provider-first, compact, theme-native, and progressively 
 
   assert.match(prefsSource, /view: "providers"/);
   assert.match(prefsSource, /layout: "compact"/);
-  assert.match(prefsSource, /\/api\/usage\/preferences/);
-  assert.match(prefsSource, /credentials: "same-origin"/);
+  assert.match(prefsSource, /subscribeUsagePrefs/);
+  assert.match(prefsSource, /replaceUsagePrefs/);
+  assert.doesNotMatch(prefsSource, /\/api\/usage\/preferences/);
+  assert.match(settingsSync, /usagePrefs:\s*getUsagePrefs\(\)/);
+  assert.match(settingsSync, /subscribeUsagePrefs\(schedulePush\)/);
 
   assert.match(quota, /loading: boolean/);
   assert.match(quota, /error: string \| null/);
@@ -138,7 +142,9 @@ test("Usage surface is provider-first, compact, theme-native, and progressively 
   assert.equal(quota.match(/setInterval/g)?.length, 1, "quota polling has one shared timer");
   assert.doesNotMatch(api, /usageQuotas:[\s\S]{0,120}\.catch\(/);
 
-  assert.match(registration, /component: UsageSettings/);
+  assert.doesNotMatch(registration, /host\.settings\.registerPage|UsageSettings/);
+  assert.match(source, /import UsageSettings from "\.\/UsageSettings\.tsx"/);
+  assert.match(source, /<UsageSettings \/>/);
   assert.match(registration, /host\.surfaces\.register\([\s\S]*?component: UsageDashboard/);
   assert.match(registration, /host\.widgets\.registerPlugin\(USAGE_WIDGET_PLUGIN\)/);
 
