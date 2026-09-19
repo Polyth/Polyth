@@ -18,7 +18,10 @@ import type { PermissionService } from "@polyth/permissions";
 
 const flush = () => new Promise((r) => setTimeout(r, 20));
 
-function harness(existingDbPath?: string) {
+function harness(
+  existingDbPath?: string,
+  options: { workspaceInstructions?: string } = {},
+) {
   const listeners = new Set<(sessionId: string, ev: RuntimeEvent) => void>();
   const observers = new Set<(sessionId: string, observation: RuntimeObservation) => void>();
   const startedTexts: string[] = [];
@@ -94,6 +97,10 @@ function harness(existingDbPath?: string) {
   const sessions = createSessionService({
     store, projects, permissions, broadcast, queue: store,
     runtimes: { forProject: async () => rt },
+    ...(options.workspaceInstructions !== undefined ? {
+      workspaceInstructions: { read: async () => options.workspaceInstructions! },
+      workspaceInstructionsEnabled: async () => true,
+    } : {}),
   });
   const observe = (sessionId: string, event: RuntimeEvent, ordinal: number) => {
     const observation: RuntimeObservation = {
@@ -230,6 +237,38 @@ test("native continuation mode resumes without replaying a tool-active prompt", 
 
   const messages = (await h.store.events(id)).filter((event) => event.type === "user/message");
   assert.equal((messages.at(-1)?.data as { autoResume?: boolean }).autoResume, true);
+  await h.store.close();
+});
+
+test("auto-resume preserves the original hidden workspace recovery context", async () => {
+  const h = harness(undefined, {
+    workspaceInstructions: "# AGENTS\nPreserve this server-owned project rule.",
+  });
+  const { id } = await h.sessions.create({ projectId: "p1", title: "T" });
+  await h.sessions.send(id, { text: "inspect the project" });
+  await flush();
+
+  const before = (await h.store.events(id)).filter((event) => event.type === "user/message");
+  assert.match(
+    String((before[0]!.data as { recoveryContext?: unknown }).recoveryContext ?? ""),
+    /Preserve this server-owned project rule/,
+  );
+
+  h.emit(id, {
+    ...LIMIT_STOP,
+    retry: { scope: "rate", provider: "google", retryAfterSec: 30, resumeMode: "replay" },
+  });
+  await flush();
+  await h.sessions.resumeNow!(id);
+  await flush();
+
+  const messages = (await h.store.events(id)).filter((event) => event.type === "user/message");
+  const retry = messages.at(-1)!;
+  assert.equal((retry.data as { autoResume?: boolean }).autoResume, true);
+  assert.match(
+    String((retry.data as { recoveryContext?: unknown }).recoveryContext ?? ""),
+    /Preserve this server-owned project rule/,
+  );
   await h.store.close();
 });
 
