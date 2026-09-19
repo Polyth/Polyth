@@ -39,7 +39,13 @@ const metadataPath = join(target, "polyth-chromium.json");
 
 await rm(target, { recursive: true, force: true });
 await mkdir(dirname(target), { recursive: true });
-await cp(browserRoot, target, { recursive: true, dereference: false, errorOnExist: false, force: true });
+await cp(browserRoot, target, {
+  recursive: true,
+  dereference: false,
+  verbatimSymlinks: true,
+  errorOnExist: false,
+  force: true,
+});
 await writeFile(metadataPath, `${JSON.stringify({
   schemaVersion: 1,
   platform: targetPlatform,

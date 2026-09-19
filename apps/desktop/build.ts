@@ -36,7 +36,7 @@ await mkdir(linkDir, { recursive: true });
 
 if (process.platform === "win32") {
   console.warn("Polyth Link host/client are not packaged on Windows until the native client IPC has a named-pipe transport.");
-} else if (process.platform === "darwin" && process.env.POLYTH_MAC_UNIVERSAL === "1") {
+} else if (process.platform === "darwin" && process.env.POLYTH_MAC_MULTI_ARCH === "1") {
   for (const target of ["aarch64-apple-darwin", "x86_64-apple-darwin"]) {
     const added = spawnSync("rustup", ["target", "add", target], { cwd: repoRoot, stdio: "inherit" });
     if (added.status !== 0) throw new Error(`failed to add Rust target ${target}`);
