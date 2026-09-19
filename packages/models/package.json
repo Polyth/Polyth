@@ -8,6 +8,7 @@
     "./model-picker": "./widgets/ModelPicker.tsx",
     "./model-picker-state": "./widgets/modelPickerState.ts",
     "./model-presentation": "./widgets/modelPresentation.ts",
+    "./provider-logo": "./widgets/ProviderLogo.tsx",
     "./web-prefs": "./widgets/modelPrefs.ts",
     "./auth": "./src/auth/index.ts",
     "./auth/well-known": "./src/auth/wellKnown.ts",

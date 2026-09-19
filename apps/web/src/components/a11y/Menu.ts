@@ -35,10 +35,16 @@ export function useDismissibleMenu({
     };
     const onPointer = (event: PointerEvent) => {
       const target = event.target as Node;
-      if (!menuRef.current?.contains(target) && !triggerRef.current?.contains(target)) close();
+      if (menuRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      // Dialogs render through a body portal and sit outside the menu DOM, but
+      // they are still a nested surface opened from the menu. Let the dialog
+      // own pointer dismissal instead of unmounting it as an outside click.
+      if ((event.target as Element | null)?.closest?.('[role="dialog"]')) return;
+      close();
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      if ((event.target as Element | null)?.closest?.('[role="dialog"]')) return;
       event.preventDefault();
       event.stopPropagation();
       close();

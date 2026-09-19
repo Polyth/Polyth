@@ -77,6 +77,22 @@ test("shared menus focus, navigate, dismiss, and restore their trigger", async (
     assert.equal(document.activeElement, trigger);
 
     await act(async () => { trigger.click(); });
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    const dialogButton = document.createElement("button");
+    dialogButton.textContent = "Dialog control";
+    dialog.append(dialogButton);
+    document.body.append(dialog);
+    await act(async () => {
+      dialogButton.dispatchEvent(new MouseEventCtor("pointerdown", { bubbles: true, cancelable: true }));
+    });
+    assert.ok(container.querySelector('[role="menu"]'), "a portaled dialog stays open over its parent menu");
+    await act(async () => {
+      dialogButton.dispatchEvent(new KeyboardEventCtor("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+    assert.ok(container.querySelector('[role="menu"]'), "a dialog owns Escape before the parent menu");
+    dialog.remove();
+
     await act(async () => {
       document.body.dispatchEvent(new MouseEventCtor("pointerdown", { bubbles: true, cancelable: true }));
     });

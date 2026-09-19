@@ -1,9 +1,10 @@
 import "./styles.css";
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import type { SessionProjection } from "@polyth/contracts";
+import ProviderLogo from "@polyth/models/provider-logo";
 import { createApiTransport, defineWebPackage } from "@polyth/web-sdk";
 import {
-  Button, Checkbox, Dialog, DownloadIcon, Icon, Notice, Progress, SearchIcon, TextInput,
+  Button, Checkbox, Dialog, DownloadIcon, Icon, LoaderIcon, Notice, Progress, SearchIcon, Spinner, TextInput,
 } from "../../../apps/web/src/components/ui/index.ts";
 import { ago } from "../../../apps/web/src/format.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
@@ -37,6 +38,8 @@ function ImportMenuEntry({ projectId }: { projectId: string }) {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [failureCount, setFailureCount] = useState(0);
+  const deferredQuery = useDeferredValue(query);
+  const searchPending = query !== deferredQuery;
 
   const browse = async () => {
     setOpen(true);
@@ -70,12 +73,19 @@ function ImportMenuEntry({ projectId }: { projectId: string }) {
     });
   };
 
-  const match = (title: string) => title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
   const visible = useMemo(
-    () => sources
-      .map((source) => ({ ...source, items: query.trim() ? source.items.filter((item) => match(item.title)) : source.items }))
-      .filter((source) => source.items.length > 0 || (source.imported > 0 && source.total === source.imported)),
-    [sources, query],
+    () => {
+      const normalizedQuery = deferredQuery.trim().toLocaleLowerCase();
+      return sources
+        .map((source) => ({
+          ...source,
+          items: normalizedQuery
+            ? source.items.filter((item) => item.title.toLocaleLowerCase().includes(normalizedQuery))
+            : source.items,
+        }))
+        .filter((source) => source.items.length > 0 || (source.imported > 0 && source.total === source.imported));
+    },
+    [sources, deferredQuery],
   );
   const available = visible.flatMap((source) => source.items);
   const allOn = available.length > 0 && available.every((item) => selected.has(item.ref));
@@ -182,11 +192,28 @@ function ImportMenuEntry({ projectId }: { projectId: string }) {
             )}
             {error && <Notice tone="error" role="alert">{error}</Notice>}
 
-            {loading && <div className="empty">{tr("common.loading")}</div>}
+            {loading && (
+              <div className="pkg-session-import-loading" role="status" aria-live="polite">
+                <div className="pkg-session-import-loading-label">
+                  <Spinner size="sm" />
+                  <span>{tr("common.loading")}</span>
+                </div>
+                <div className="pkg-session-import-loading-group" aria-hidden="true">
+                  <span className="pkg-session-import-skeleton pkg-session-import-skeleton--heading" />
+                  <span className="pkg-session-import-skeleton" />
+                  <span className="pkg-session-import-skeleton" />
+                  <span className="pkg-session-import-skeleton pkg-session-import-skeleton--short" />
+                </div>
+              </div>
+            )}
 
             {!loading && showSearch && (
-              <div className="pkg-session-import-search">
-                <Icon icon={SearchIcon} size="sm" aria-hidden="true" />
+              <div
+                className="pkg-session-import-search"
+                data-searching={searchPending || undefined}
+                aria-busy={searchPending || undefined}
+              >
+                <Icon icon={searchPending ? LoaderIcon : SearchIcon} size="sm" className="pkg-session-import-search-icon" aria-hidden="true" />
                 <TextInput
                   uiSize="sm"
                   type="search"
@@ -195,6 +222,7 @@ function ImportMenuEntry({ projectId }: { projectId: string }) {
                   aria-label={tr("sessionimport.search")}
                   onChange={(event) => setQuery(event.target.value)}
                 />
+                {searchPending && <span className="pkg-session-import-search-status" role="status">{tr("common.loading")}</span>}
               </div>
             )}
 
@@ -212,56 +240,70 @@ function ImportMenuEntry({ projectId }: { projectId: string }) {
               />
             )}
 
-            {!loading && available.length === 0 && !error && (
-              <div className="empty pkg-session-import-empty">
-                {query.trim() !== ""
-                  ? tr("sidebar.noMatchingSessions")
-                  : sources.length === 0
-                    ? tr("sessionimport.noHarness")
-                    : tr("sessionimport.empty")}
+            {!loading && (
+              <div
+                key={deferredQuery}
+                className="pkg-session-import-results"
+                data-searching={searchPending || undefined}
+                aria-busy={searchPending || undefined}
+              >
+                {available.length === 0 && !error && (
+                  <div className="empty pkg-session-import-empty">
+                    {deferredQuery.trim() !== ""
+                      ? tr("sidebar.noMatchingSessions")
+                      : sources.length === 0
+                        ? tr("sessionimport.noHarness")
+                        : tr("sessionimport.empty")}
+                  </div>
+                )}
+
+                {visible.map((source) => (
+                  <section key={source.id} className="pkg-session-import-group" aria-label={source.name}>
+                    <header className="pkg-session-import-group-head">
+                      <div className="pkg-session-import-group-title">
+                        <span className="pkg-session-import-harness-logo" aria-hidden="true">
+                          <ProviderLogo providerID={source.id} providerName={source.name} harnessId={source.id} size="regular" />
+                        </span>
+                        <span>{source.name}</span>
+                      </div>
+                      <span className="pkg-session-import-count">{source.items.length}</span>
+                    </header>
+                    {source.items.length === 0 && source.imported > 0 && (
+                      <p className="muted pkg-session-import-note">
+                        {tr("importsessionsdialog.all")} {source.imported}{" "}
+                        {tr("importsessionsdialog.alreadyImported")}
+                      </p>
+                    )}
+                    <div className="pkg-session-import-list">
+                      {source.items.map((item) => (
+                        <Checkbox
+                          key={item.ref}
+                          className="pkg-session-import-row"
+                          checked={selected.has(item.ref)}
+                          onChange={() => toggle(item.ref)}
+                          label={(
+                            <span className="pkg-session-import-row-copy">
+                              <strong>{item.title || tr("sessionimport.session")}</strong>
+                              {item.updatedAt !== undefined && (
+                                <small className="muted">
+                                  {tr("importsessionsdialog.updated")} {ago(item.updatedAt)} {tr("importsessionsdialog.ago")}
+                                </small>
+                              )}
+                            </span>
+                          )}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                ))}
+
+                {sources.filter((source) => source.unavailable).map((source) => (
+                  <p key={source.id} className="muted pkg-session-import-note">
+                    {tr("sessionimport.unavailableValue", { name: source.name })}
+                  </p>
+                ))}
               </div>
             )}
-
-            {!loading && visible.map((source) => (
-              <section key={source.id} className="pkg-session-import-group" aria-label={source.name}>
-                <header className="pkg-session-import-group-head">
-                  <span>{source.name}</span>
-                  <span className="muted">{source.items.length}</span>
-                </header>
-                {source.items.length === 0 && source.imported > 0 && (
-                  <p className="muted pkg-session-import-note">
-                    {tr("importsessionsdialog.all")} {source.imported}{" "}
-                    {tr("importsessionsdialog.alreadyImported")}
-                  </p>
-                )}
-                <div className="pkg-session-import-list">
-                  {source.items.map((item) => (
-                    <Checkbox
-                      key={item.ref}
-                      className="pkg-session-import-row"
-                      checked={selected.has(item.ref)}
-                      onChange={() => toggle(item.ref)}
-                      label={(
-                        <span className="pkg-session-import-row-copy">
-                          <strong>{item.title || tr("sessionimport.session")}</strong>
-                          {item.updatedAt !== undefined && (
-                            <small className="muted">
-                              {tr("importsessionsdialog.updated")} {ago(item.updatedAt)} {tr("importsessionsdialog.ago")}
-                            </small>
-                          )}
-                        </span>
-                      )}
-                    />
-                  ))}
-                </div>
-              </section>
-            ))}
-
-            {!loading && sources.filter((source) => source.unavailable).map((source) => (
-              <p key={source.id} className="muted pkg-session-import-note">
-                {tr("sessionimport.unavailableValue", { name: source.name })}
-              </p>
-            ))}
           </div>
         </Dialog>
       )}
