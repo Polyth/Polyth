@@ -284,6 +284,11 @@ export interface ServerPackageHost extends TrustedServerPluginHost {
    * there are being migrated; new tenant state goes through `spaceStorage`.
    */
   spaceStorage(ctx: SpaceContext): SpaceStorage;
+  /** Mint the canonical non-human context for trusted background work in one
+   * known Space. The host, not a feature package, owns storage-path and
+   * authority resolution; callers must first derive the Space from a
+   * canonical resource such as a project or session. */
+  systemSpaceContext(spaceId: string): SpaceContext;
   /** Resolve tenant-scoped core services inside request handlers. */
   forSpace(ctx: SpaceContext): { projects: ProjectService; sessions: SessionService };
   /** Deployment/security profile. Branch on this instead of ad-hoc

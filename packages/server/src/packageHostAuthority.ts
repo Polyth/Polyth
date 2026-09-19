@@ -1,4 +1,4 @@
-import type { ProjectService, SessionPersistence, SessionProjection, SessionService, SpaceContext } from "@polyth/contracts";
+import type { ProjectService, SessionPersistence, SessionProjection, SessionService } from "@polyth/contracts";
 import {
   RUNTIME_SYSTEM_PRINCIPAL_ID,
   systemAppendSessionEvent,
@@ -33,14 +33,10 @@ async function systemProjectsForProject(host: ServerPackageHost, projectId: stri
   }
   const project = await host.projects.get(projectId);
   if (!project?.spaceId) throw Object.assign(new Error("project not found"), { code: "not-found" });
-  const ctx: SpaceContext = {
-    spaceId: project.spaceId,
-    spaceSlug: project.spaceId,
-    userId: RUNTIME_SYSTEM_PRINCIPAL_ID,
-    role: "owner",
-    deployment: host.deployment,
-    storageDir: "",
-  };
+  const ctx = host.systemSpaceContext(project.spaceId);
+  if (ctx.spaceId !== project.spaceId || ctx.userId !== RUNTIME_SYSTEM_PRINCIPAL_ID || !ctx.storageDir) {
+    throw unavailable("canonical system Space context is unavailable");
+  }
   return host.forSpace(ctx).projects;
 }
 

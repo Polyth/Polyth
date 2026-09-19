@@ -40,6 +40,17 @@ function fixture(status: SessionProjection["status"] = "idle") {
     store: {
       async projection(id: string) { return id === projection.id ? projection : undefined; },
     },
+    systemSpaceContext(spaceId: string): SpaceContext {
+      assert.equal(spaceId, "spc_one");
+      return {
+        spaceId,
+        spaceSlug: "one",
+        userId: RUNTIME_SYSTEM_PRINCIPAL_ID,
+        role: "owner",
+        deployment: "local-trusted",
+        storageDir: "/tmp/spaces/one",
+      };
+    },
     forSpace(ctx: SpaceContext) {
       contexts.push(ctx);
       return { projects: {} as never, sessions };
@@ -64,7 +75,22 @@ test("background project/session routing uses an explicit non-human system conte
     assert.equal(ctx.userId, RUNTIME_SYSTEM_PRINCIPAL_ID);
     assert.equal(ctx.role, "owner");
     assert.equal(ctx.deployment, "local-trusted");
+    assert.equal(ctx.storageDir, "/tmp/spaces/one");
   }
+});
+
+test("background routing rejects an empty canonical Space storage root", async () => {
+  const f = fixture();
+  f.host.systemSpaceContext = (spaceId: string) => ({
+    spaceId,
+    spaceSlug: "one",
+    userId: RUNTIME_SYSTEM_PRINCIPAL_ID,
+    role: "owner",
+    deployment: "local-trusted",
+    storageDir: "",
+  });
+  await assert.rejects(systemSessionsForProject(f.host as never, "prj_one"), { code: "unavailable" });
+  assert.equal(f.contexts.length, 0);
 });
 
 test("background event append validates canonical snapshot and rejects archived sessions", async () => {

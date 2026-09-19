@@ -2040,6 +2040,7 @@ export async function boot(opts: BootOptions = {}) {
 
   const packageHost: Omit<ServerPackageHost, "pluginId"> = {
     forSpace: spaceServices,
+    systemSpaceContext: (spaceId) => spaceGateway.resolveInternal(spaceId),
     storageDir: dataDir,
     deployment: spaceGateway.deployment,
     spaceStorage: (ctx) => createSpaceStorage(ctx.storageDir),

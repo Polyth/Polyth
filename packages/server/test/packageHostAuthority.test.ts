@@ -36,6 +36,12 @@ test("discovered package sessions route through system-scoped Space services", a
       async projection(id: string) { rawProjection++; return id === projection.id ? projection : undefined; },
       async append() { rawStoreAppend++; throw new Error("raw store append called"); },
     },
+    systemSpaceContext(spaceId: string): SpaceContext {
+      return {
+        spaceId, spaceSlug: "home", userId: RUNTIME_SYSTEM_PRINCIPAL_ID,
+        role: "owner", deployment: "local-trusted", storageDir: "/tmp/spaces/home",
+      };
+    },
     forSpace(ctx: SpaceContext) {
       assert.equal(ctx.spaceId, "spc_home");
       assert.equal(ctx.userId, RUNTIME_SYSTEM_PRINCIPAL_ID);
@@ -77,6 +83,7 @@ test("shared deployments reject package-global project and session authority", a
     },
     sessions: {} as SessionService,
     store: {},
+    systemSpaceContext() { assert.fail("shared package-global authority must not derive a Space"); },
     forSpace() { assert.fail("shared package-global authority must not derive a Space"); },
     events: { async append() { assert.fail("unexpected append"); } },
   } as unknown as ServerPackageHost;
@@ -128,6 +135,12 @@ test("package host authority fails closed instead of exposing new raw methods", 
       claimOperation() { rawCalls.push("store.claimOperation"); },
       settleOperation() { rawCalls.push("store.settleOperation"); },
       rawEscape() { rawCalls.push("store.rawEscape"); },
+    },
+    systemSpaceContext(spaceId: string): SpaceContext {
+      return {
+        spaceId, spaceSlug: "home", userId: RUNTIME_SYSTEM_PRINCIPAL_ID,
+        role: "owner", deployment: "local-trusted", storageDir: "/tmp/spaces/home",
+      };
     },
     forSpace(ctx: SpaceContext) {
       assert.equal(ctx.spaceId, "spc_home");
