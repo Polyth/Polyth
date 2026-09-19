@@ -884,14 +884,19 @@ export function UsageQuotasBlock({
   warningThreshold?: number;
 }) {
   const { snapshots, loading, error } = useQuotaSnapshots();
-  const rows = useMemo(() => snapshots
+  const prefs = useUsagePrefs();
+  const visibleSnapshots = useMemo(
+    () => snapshots.filter((snapshot) => !prefs.hiddenProviders.includes(snapshot.providerId)),
+    [prefs.hiddenProviders, snapshots],
+  );
+  const rows = useMemo(() => visibleSnapshots
     .flatMap((snapshot) => snapshot.windows.map((window) => ({
       providerId: snapshot.providerId,
       window,
       stale: snapshot.stale,
       ratio: window.limit > 0 ? Math.max(0, window.used / window.limit) : 0,
     })))
-    .sort((left, right) => right.ratio - left.ratio || (left.window.resetsAt ?? Number.POSITIVE_INFINITY) - (right.window.resetsAt ?? Number.POSITIVE_INFINITY)), [snapshots]);
+    .sort((left, right) => right.ratio - left.ratio || (left.window.resetsAt ?? Number.POSITIVE_INFINITY) - (right.window.resetsAt ?? Number.POSITIVE_INFINITY)), [visibleSnapshots]);
   const visible = showAllWindows
     ? rows
     : rows.filter((row, index, all) =>
