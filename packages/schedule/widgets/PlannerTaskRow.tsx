@@ -129,7 +129,7 @@ function PlannerTaskRow({
   const changedFields = loopTask.pendingVersion?.changedFields ?? [];
 
   return (
-    <div className={`planner-task${enabled ? "" : " is-paused"}${completed ? " is-completed" : ""}`}>
+    <div className={`planner-task${enabled ? "" : " is-paused"}${completed ? " is-completed" : ""}${groupKind === "paused" || groupKind === "completed" || groupKind === "unscheduled" ? " is-secondary-row" : ""}`}>
       <span className="planner-task-time">{timeLabel}</span>
       <button type="button" className="planner-task-main" onClick={onEdit}>
         <span className="planner-task-title" title={title}>

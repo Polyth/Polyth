@@ -130,11 +130,20 @@ test("main chrome keeps project primary and status secondary", async () => {
   assert.doesNotMatch(view, /<Tabs/);
   assert.doesNotMatch(view, /plannerMore/);
   assert.match(view, /recentlyCompleted/);
-  assert.match(css, /\.planner-canvas \{[\s\S]*max-width:\s*52rem;/);
+  assert.match(view, /className="planner-group-list"/);
+  assert.match(css, /\.planner-canvas \{[\s\S]*max-width:\s*58rem;/);
+  assert.match(css, /\.planner-group-list \{[\s\S]*background:\s*var\(--elevated\)/);
+  assert.match(css, /\.planner-task\.is-secondary-row \{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/);
   assert.match(css, /--subheader-font-size/);
   assert.match(row, /PlannerProjectMark/);
   assert.match(row, /includeTime: false/);
   assert.match(shared, /everyWeekdayValue/);
+});
+
+test("opening run history replaces the editor instead of stacking modal surfaces", async () => {
+  const view = await read("../widgets/PlannerView.tsx");
+  assert.match(view, /const openHistory = \(task: ScheduleTaskDto\) => \{[\s\S]*setEditorOpen\(false\);[\s\S]*setEditing\(null\);[\s\S]*setHistoryTask\(task\);/);
+  assert.match(view, /onViewRuns=\{openHistory\}/);
 });
 
 test("editor keeps explicit Once/Every and a sunken task field", async () => {

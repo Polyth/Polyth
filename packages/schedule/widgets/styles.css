@@ -21,7 +21,7 @@
   flex-direction: column;
   gap: inherit;
   width: 100%;
-  max-width: 52rem;
+  max-width: 58rem;
   margin-inline: auto;
   min-width: 0;
   flex: 1;
@@ -113,6 +113,14 @@
   flex-direction: column;
 }
 
+.schedule-page .planner-group-list {
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--elevated);
+  box-shadow: var(--shadow-sm);
+}
+
 .schedule-page .planner-group + .planner-group {
   margin-top: var(--space-4);
 }
@@ -176,7 +184,7 @@
   align-items: start;
   min-width: 0;
   min-height: max(var(--control-h), var(--hit-min));
-  padding-block: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--hair);
   background: transparent;
 }
@@ -185,9 +193,19 @@
   border-bottom-color: transparent;
 }
 
-.schedule-page .planner-task.is-paused,
-.schedule-page .planner-task.is-completed {
-  opacity: 0.72;
+.schedule-page .planner-task.is-secondary-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.schedule-page .planner-task.is-secondary-row .planner-task-time {
+  display: none;
+}
+
+.schedule-page .planner-task.is-paused .planner-task-title,
+.schedule-page .planner-task.is-completed .planner-task-title,
+.schedule-page .planner-task.is-paused .planner-task-meta,
+.schedule-page .planner-task.is-completed .planner-task-meta {
+  color: var(--text-dim);
 }
 
 .schedule-page .planner-task-state,
@@ -286,8 +304,14 @@
 }
 
 .schedule-page .planner-task-error {
+  width: fit-content;
+  max-width: 100%;
+  padding: 2px var(--space-1);
+  border-radius: var(--radius-control);
+  background: var(--red-wash);
   color: var(--red);
   font-size: var(--font-meta);
+  line-height: 1.4;
 }
 
 .schedule-page .planner-task-tools {
@@ -612,6 +636,9 @@
 
 .planner-run-error {
   flex-basis: 100%;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-control);
+  background: var(--red-wash);
   color: var(--red);
   font-size: var(--font-meta);
 }
@@ -646,6 +673,7 @@
 
   .schedule-page .planner-task {
     column-gap: var(--space-2);
+    padding-inline: var(--space-2);
   }
 
   .schedule-page .planner-task-time {
@@ -748,6 +776,10 @@
   grid-template-columns: minmax(3.25rem, auto) minmax(0, 1fr) auto;
   column-gap: var(--space-3);
   padding-block: var(--space-2);
+}
+
+.schedule-page .planner-task.is-secondary-row {
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .schedule-page .planner-task-time {
@@ -901,6 +933,10 @@
   .schedule-page .planner-task {
     grid-template-columns: minmax(3rem, auto) minmax(0, 1fr) auto;
     column-gap: var(--space-2);
+  }
+
+  .schedule-page .planner-task.is-secondary-row {
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
   .schedule-page .planner-task-main {

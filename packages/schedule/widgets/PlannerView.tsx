@@ -79,7 +79,7 @@ function PlannerGroupSection({
     return (
       <section className="planner-group">
         <h3 className="planner-group-title">{label}</h3>
-        {children}
+        <div className="planner-group-list">{children}</div>
       </section>
     );
   }
@@ -97,7 +97,7 @@ function PlannerGroupSection({
           <Icon icon={ChevronDownIcon} size="sm" />
         </span>
       </button>
-      {open ? children : null}
+      {open ? <div className="planner-group-list">{children}</div> : null}
     </section>
   );
 }
@@ -173,12 +173,21 @@ export default function PlannerView() {
       : tr("scheduleview.all");
 
   const openCreate = () => {
+    setHistoryTask(null);
     setEditing(null);
     setEditorOpen(true);
   };
   const openEdit = (task: ScheduleTaskDto) => {
+    setHistoryTask(null);
     setEditing(task);
     setEditorOpen(true);
+  };
+  const openHistory = (task: ScheduleTaskDto) => {
+    // History and the editor are peer destinations. Keeping both mounted
+    // creates stacked modal surfaces (especially disruptive on phone).
+    setEditorOpen(false);
+    setEditing(null);
+    setHistoryTask(task);
   };
 
   const rescan = async () => {
@@ -372,7 +381,7 @@ export default function PlannerView() {
               groupKind={group.kind}
               now={now}
               onEdit={() => openEdit(task)}
-              onViewRuns={() => setHistoryTask(task)}
+              onViewRuns={() => openHistory(task)}
               onChanged={() => reload()}
             />
           ))}
@@ -399,7 +408,7 @@ export default function PlannerView() {
           setEditing(null);
         }}
         onSaved={() => reload()}
-        onViewRuns={(next) => setHistoryTask(next)}
+        onViewRuns={openHistory}
       />
       <PlannerRunHistory task={historyTask} onClose={() => setHistoryTask(null)} />
     </div>
