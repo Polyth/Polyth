@@ -36,7 +36,12 @@ test("CI owns the repository quality contract and app builds stay manual", () =>
   assert.match(builds, /CODE_SIGNING_ALLOWED=NO/);
   assert.match(builds, /--win nsis --x64 --publish never/);
   assert.match(builds, /--linux AppImage --x64 --publish never/);
-  assert.match(builds, /--mac dmg zip --x64 --arm64 --publish never/);
+  assert.match(builds, /--mac dmg --x64 --arm64 --publish never/);
+  assert.match(builds, /polyth-macos-dmg-x64/);
+  assert.match(builds, /polyth-macos-dmg-arm64/);
+  assert.match(builds, /CSC_LINK/);
+  assert.match(builds, /APPLE_APP_SPECIFIC_PASSWORD/);
+  assert.doesNotMatch(builds, /--config\.mac\.notarize=false/);
   assert.doesNotMatch(builds, /--universal/);
   assert.match(builds, /npm pack --workspace @polyth\/contracts/);
   assert.match(builds, /npm pack --workspace @polyth\/package-sdk/);

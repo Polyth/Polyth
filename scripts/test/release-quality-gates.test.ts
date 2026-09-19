@@ -45,6 +45,10 @@ test("master CI is automatic while build and release workflows stay manual", () 
   assert.match(builds, /--linux AppImage --x64 --publish never/);
   assert.doesNotMatch(builds, /--publish always/);
   assert.match(builds, /mac-dmg/);
+  assert.match(builds, /--mac dmg --x64 --arm64 --publish never/);
+  assert.match(builds, /polyth-macos-dmg-x64/);
+  assert.match(builds, /polyth-macos-dmg-arm64/);
+  assert.doesNotMatch(builds, /--config\.mac\.notarize=false/);
   assert.match(builds, /npm-packages/);
 
   const release = read(".github/workflows/release.yml");

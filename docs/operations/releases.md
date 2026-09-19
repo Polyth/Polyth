@@ -42,13 +42,13 @@ Use **Actions → Build apps → Run workflow**.
 |---|---|
 | `android-apk` | Installable debug APK |
 | `ios-app` | Unsigned iOS Simulator `.app` ZIP |
-| `mac-dmg` | Unsigned macOS x64 + arm64 DMG/ZIP pairs |
+| `mac-dmg` | Signed + notarized macOS x64 DMG and arm64 DMG (separate artifacts) |
 | `windows-exe` | x64 NSIS EXE |
 | `linux-appimage` | x64 AppImage |
 | `npm-packages` | `@polyth/contracts` + `@polyth/package-sdk` npm tarballs |
 | `all` | Every target above |
 
-These jobs use `--publish never`. They are for testing/downloading artifacts, not publishing a release.
+These jobs use `--publish never`. They are for testing/downloading artifacts, not publishing a release. The manual `mac-dmg` target still signs and notarizes its two DMGs so downloaded apps pass Gatekeeper; it does not create updater ZIPs.
 
 ## Manual release
 
@@ -75,7 +75,7 @@ After the deterministic release gate passes, the prepare job creates/reuses a **
 
 The desktop package updater points to **Polyth/Polyth**. Packaged clients with **Automatic updates** enabled check on startup and periodically, automatically download a discovered update, and install it on app quit/restart. Disabling Automatic updates preserves manual check/download behavior.
 
-Required desktop release secrets:
+Required desktop signing secrets (used by both `Build apps → mac-dmg` and `Release`):
 
 - macOS: `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`
 - Windows: `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD`
