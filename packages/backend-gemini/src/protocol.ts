@@ -59,7 +59,7 @@ export function translateGeminiPromptResult(
 
 export function translateGeminiPromptError(
   error: unknown,
-  _context: AcpPromptTranslationContext,
+  context: AcpPromptTranslationContext,
 ): AcpPromptErrorTranslation | undefined {
   const value = record(error);
   const rpcCode = nonNegativeNumber(value?.rpcCode);
@@ -72,6 +72,7 @@ export function translateGeminiPromptError(
     retry: {
       scope: "rate",
       provider: "google",
+      resumeMode: context.hadToolActivity ? "continue" : "replay",
     },
   };
 }
