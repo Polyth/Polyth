@@ -60,6 +60,31 @@ test("activation scope disposes host contributions even if the package forgets a
   assert.equal(getCapability("alpha.cap"), null);
 });
 
+test("activation exposes the host-owned Canvas insertion seam without layout access", () => {
+  const calls: Array<{ id: string; config: unknown }> = [];
+  const fakeHost = {
+    ...webPackageHost,
+    widgets: {
+      ...webPackageHost.widgets,
+      addToCanvas: (id: string, options?: { config?: unknown }) => {
+        calls.push({ id, config: options?.config });
+        return { instanceId: `${id}#2`, duplicated: true };
+      },
+    },
+  };
+  const activation = createPackageActivation("usage", fakeHost);
+  const result = activation.host.widgets.addToCanvas?.("usage.throughput", {
+    config: { range: "24h", groupBy: "provider" },
+  });
+  assert.deepEqual(result, { instanceId: "usage.throughput#2", duplicated: true });
+  assert.deepEqual(calls, [{
+    id: "usage.throughput",
+    config: { range: "24h", groupBy: "provider" },
+  }]);
+  activation.dispose();
+  assert.equal(activation.host.widgets.addToCanvas?.("usage.throughput"), null);
+});
+
 test("disposed scoped host cannot resurrect a widget", () => {
   const activation = createPackageActivation("beta", webPackageHost);
   activation.dispose();

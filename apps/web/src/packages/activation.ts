@@ -67,6 +67,15 @@ export function createPackageActivation(
           widgets: plugin.widgets?.map((widget) => ({ ...widget, ownerPackageId })),
         }));
       },
+      ...(host.widgets.addToCanvas ? {
+        addToCanvas: (definitionId, options) => {
+          if (disposed) {
+            console.warn(`[polyth] package "${ownerPackageId}" attempted widgets.addToCanvas after disposal`);
+            return null;
+          }
+          return host.widgets.addToCanvas!(definitionId, options);
+        },
+      } : {}),
     },
     surfaces: {
       register: (definition) => {

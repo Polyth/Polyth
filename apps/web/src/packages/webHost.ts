@@ -54,11 +54,20 @@ import { registerSurface, type RailSurface } from "../surfaces.ts";
 import { registerSettingsItems } from "../settings/registry.ts";
 import { installSettingsPage } from "./settingsPage.ts";
 import {
+  getWidget,
   registerWidget,
   registerWidgetPlugin,
   type WidgetDef,
   type WidgetPlugin as HostWidgetPlugin,
 } from "../widgets/catalog.ts";
+import {
+  duplicateWidget,
+  ensureWidgets,
+  getWidgetLayout,
+  setWidgetConfig,
+  setWidgetVisible,
+  updateWidgetLayout,
+} from "../widgets/widgetLayout.ts";
 import { registerWebReducer } from "./reducers.ts";
 import { registerProjectContext } from "./projectContext.ts";
 import {
@@ -175,6 +184,35 @@ export const webPackageHost: WebPackageHost = {
           ...(widget.ownerPackageId ? { ownerPackageId: widget.ownerPackageId } : {}),
         })),
       } as unknown as HostWidgetPlugin),
+    addToCanvas: (definitionId, options) => {
+      if (workspaceProjectId(getState()) === null) return null;
+      const definition = getWidget(definitionId);
+      if (!definition) return null;
+      ensureWidgets([definition]);
+      const before = getWidgetLayout();
+      const base = before.widgets[definitionId];
+      if (!base) return null;
+
+      let next = before;
+      let instanceId = definitionId;
+      let duplicated = false;
+      if (base.visible && definition.duplicatable && options?.duplicate !== false) {
+        next = duplicateWidget(before, definitionId, definition);
+        const created = Object.keys(next.widgets).find((id) => !(id in before.widgets));
+        if (created) {
+          instanceId = created;
+          duplicated = true;
+        }
+      } else {
+        next = setWidgetVisible(before, definitionId, true);
+      }
+
+      if (options?.config && (!base.visible || duplicated)) {
+        next = setWidgetConfig(next, instanceId, options.config);
+      }
+      if (next !== before) updateWidgetLayout(next);
+      return { instanceId, duplicated };
+    },
   },
   surfaces: {
     register: (definition: SurfaceDefinition) =>

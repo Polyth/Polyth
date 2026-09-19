@@ -1,6 +1,7 @@
 import "./styles.css";
 import "./sessionUsage.css";
 import "./dashboardSurface.css";
+import "./analytics.css";
 import { defineWebPackage } from "@polyth/web-sdk";
 import { UsageDashboard } from "./usage/UsageDashboard.tsx";
 import UsageSettings from "./usage/UsageSettings.tsx";
@@ -21,7 +22,7 @@ export default defineWebPackage((host) => () => {
       description: "Review token, cost, and provider quota usage.",
       capabilityId: "usage",
       order: 50,
-      component: UsageDashboard,
+      component: () => <UsageDashboard host={host} />,
       presentation: { kind: "workspace", defaultRatio: 0.58, minWidth: 320, preferredMaxWidth: 980, keepAlive: true, escape: "close" },
     }),
     host.widgets.registerPlugin(USAGE_WIDGET_PLUGIN),

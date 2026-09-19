@@ -96,12 +96,24 @@ test("Usage plugin owns all package-declared usage widgets", () => {
   assert.deepEqual(
     widgets.map((widget) => widget.id).sort(),
     [
+      "usage.breakdown",
+      "usage.cache-efficiency",
+      "usage.context-growth",
+      "usage.model-efficiency",
+      "usage.performance",
       "usage.project",
       "usage.quota-summary",
       "usage.quotas",
+      "usage.reliability",
       "usage.session",
       "usage.sessions-table",
+      "usage.spend-trend",
+      "usage.subscription-value",
+      "usage.summary",
+      "usage.throughput",
+      "usage.ttft",
       "usage.turn",
+      "usage.what-changed",
     ],
   );
   assert.ok(widgets.every((widget) => widget.category === "Usage"));
