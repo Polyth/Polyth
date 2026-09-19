@@ -238,7 +238,8 @@ test("v2 parses native contributions and scoped optional authority", () => {
   if (!parsed.ok || parsed.manifest.manifestVersion !== 2) return;
   assert.equal(parsed.manifest.contributes?.messageActions?.[0]?.roles?.[0], "assistant");
   assert.equal(parsed.manifest.contributes?.toolRenderers?.[0]?.presentation?.output, "table");
-  assert.deepEqual(parsed.manifest.capabilities?.[0]?.constraints?.origins, ["https://api.example.com"]);\n  assert.deepEqual(parsed.manifest.capabilities?.[0]?.constraints?.methods, ["GET"]);
+  assert.deepEqual(parsed.manifest.capabilities?.[0]?.constraints?.origins, ["https://api.example.com"]);
+  assert.deepEqual(parsed.manifest.capabilities?.[0]?.constraints?.methods, ["GET"]);
   assert.equal(parsed.manifest.capabilities?.[1]?.required, false);
 });
 
