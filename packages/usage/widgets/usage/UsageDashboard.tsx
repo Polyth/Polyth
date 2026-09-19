@@ -539,6 +539,92 @@ function UsageTimeChart({
   return <canvas ref={canvasRef} aria-label="Usage over time chart" role="img" />;
 }
 
+type UsagePerformanceMetric = "ttft" | "tps" | "errors";
+
+function PerformanceTimeChart({
+  labels,
+  series,
+  metric,
+  showLegend,
+}: {
+  labels: readonly string[];
+  series: readonly { id: string; label: string; values: Array<number | null> }[];
+  metric: UsagePerformanceMetric;
+  showLegend: boolean;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const colors = palette();
+    const visible = series.slice(0, 6);
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true
+      || document.documentElement.dataset.reduceAnimations === "true";
+    const chart = new Chart(canvas, {
+      type: metric === "errors" ? "bar" : "line",
+      data: {
+        labels: [...labels],
+        datasets: visible.map((item, index) => ({
+          label: item.label,
+          data: item.values,
+          borderColor: colors[index % colors.length],
+          backgroundColor: colors[index % colors.length],
+          borderWidth: metric === "errors" ? 0 : 2,
+          pointRadius: 0,
+          tension: metric === "errors" ? 0 : .25,
+          spanGaps: true,
+          borderRadius: metric === "errors" ? 3 : 0,
+          maxBarThickness: 24,
+        })),
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: reducedMotion ? false : { duration: 180 },
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: {
+            display: showLegend,
+            position: "bottom",
+            labels: { boxWidth: 8, boxHeight: 8, usePointStyle: true },
+          },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const value = Number(ctx.raw ?? 0);
+                const formatted = metric === "ttft"
+                  ? formatLatency(value)
+                  : metric === "tps"
+                    ? `${formatSpeed(value)} tok/s`
+                    : formatNumber(value);
+                return `${ctx.dataset.label}: ${formatted}`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } },
+          y: {
+            beginAtZero: true,
+            grid: { color: chartGridColor() },
+            ticks: {
+              callback: (value) => metric === "ttft"
+                ? formatLatency(Number(value))
+                : metric === "tps"
+                  ? formatSpeed(Number(value))
+                  : compactNumber(Number(value)),
+            },
+          },
+        },
+      },
+    } as ChartConfiguration);
+    return () => chart.destroy();
+  }, [labels, metric, series, showLegend]);
+
+  return <canvas ref={canvasRef} aria-label="Performance over time chart" role="img" />;
+}
+
 function Segmented<T extends string>({
   value,
   values,
@@ -575,6 +661,7 @@ function Overview({
 }) {
   const metric = prefs.dashboard.chartMetric;
   const grouping = prefs.dashboard.chartGrouping;
+  const [performanceMetric, setPerformanceMetric] = useState<UsagePerformanceMetric>("ttft");
   const distributionGrouping = prefs.dashboard.distributionGrouping;
   const series = data.chart.byDimension[grouping][metric];
   const consumers = data.consumers[distributionGrouping];
@@ -592,6 +679,12 @@ function Overview({
         <Metric label="Spend" value={money(data.totals.cost)} />
         <Metric label="Tokens" value={fmtTokens(data.totals.tokens)} />
         <Metric label="Sessions" value={compactNumber(data.totals.sessions)} />
+        {data.performance.ttftMs && (
+          <Metric label="TTFT" value={formatLatency(data.performance.ttftMs.p50)} hint="p50" />
+        )}
+        {data.performance.tokPerSec && (
+          <Metric label="Speed" value={`${formatSpeed(data.performance.tokPerSec.p50)}/s`} hint="p50 output" />
+        )}
         {data.totals.cacheHitPercent !== null && (
           <Metric label="Cache" value={percent(data.totals.cacheHitPercent)} />
         )}
@@ -638,6 +731,38 @@ function Overview({
                   showLegend={prefs.dashboard.showChartLegend}
                 />
               : <p className="usage-chart-empty">No usage in this range.</p>}
+          </div>
+        </section>
+      )}
+
+      {!prefs.hiddenBlocks.includes("performance")
+        && (data.performance.ttftMs || data.performance.tokPerSec || data.performance.errorRate !== null) && (
+        <section className="usage-analytic-card usage-performance-card">
+          <header>
+            <div>
+              <h3>Performance</h3>
+              <p>Median request performance over time · grouped by {grouping}.</p>
+            </div>
+            <Segmented
+              label="Performance metric"
+              value={performanceMetric}
+              values={[
+                { value: "ttft", label: "TTFT" },
+                { value: "tps", label: "tok/s" },
+                { value: "errors", label: "Errors" },
+              ]}
+              onChange={setPerformanceMetric}
+            />
+          </header>
+          <div className="usage-time-chart">
+            {data.chart.performance[grouping][performanceMetric].length > 0
+              ? <PerformanceTimeChart
+                  labels={data.chart.labels}
+                  series={data.chart.performance[grouping][performanceMetric]}
+                  metric={performanceMetric}
+                  showLegend={prefs.dashboard.showChartLegend}
+                />
+              : <p className="usage-chart-empty">No performance samples in this range.</p>}
           </div>
         </section>
       )}
