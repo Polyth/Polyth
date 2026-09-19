@@ -82,6 +82,19 @@ The electron-builder provider is `Polyth/Polyth`. `electron-updater` consumes th
 
 macOS updater releases require Developer ID signing and notarization; the release workflow remains strict and fails if those credentials are missing. `electron-updater` selects the matching x64/arm64 file from the shared `latest-mac.yml` feed. Manual `mac-dmg` builds use the same credentials when available. If they are absent, the manual workflow uses electron-builder ad-hoc signing (`mac.identity=-`) and disables notarization only for that smoke artifact. Ad-hoc DMGs are not trusted distribution artifacts and may require local Gatekeeper approval; they must never be published as a release.
 
+## Window chrome and interaction
+
+macOS uses Electron's `hiddenInset` titlebar so the operating system owns the native
+traffic-light controls and their position. The renderer does not mount Polyth's custom
+window buttons there, and the Desktop settings page hides the custom button-position
+and button-theme preferences on macOS. Windows and Linux keep the frameless Polyth
+controls.
+
+Renderer controls, dialogs, and modal scrims are explicitly excluded from Electron
+drag regions. The custom Windows/Linux control island passes pointer events through its
+empty space, so opening Settings or entering Canvas edit mode cannot make an underlying
+close/edit control inert.
+
 ## Background integration
 
 Close-to-tray and start-hidden behavior are configurable on every platform. Launch at
