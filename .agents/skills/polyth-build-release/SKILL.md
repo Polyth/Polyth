@@ -9,7 +9,10 @@ Repository-relative paths below. Read root `AGENTS.md` once. Locate the current 
 
 - `package.json`
 - `.github/workflows/ci.yml`
-- `scripts/ci/select-tests.mjs`
+- `.github/workflows/build-apps.yml`
+- `.github/workflows/release.yml`
+- `scripts/ci/release-quality.mjs`
+- `scripts/release-version.mjs`
 - `Cargo.toml`
 - `codemagic.yaml`
 - `docs/agents/commands.md`
@@ -18,7 +21,7 @@ Repository-relative paths below. Read root `AGENTS.md` once. Locate the current 
 ## Workflow and constraints
 Read the actual package scripts, toolchain pins and owning workflow before suggesting a command. Root `build` is a web build, not native distribution. `mobile:sync` writes native generated files and is not an iOS archive. `build:link` builds the declared Rust executables; follow the current workflow for packaging and native test details.
 
-Preserve the distinction between lightweight validation, platform builds and release publication. Generic CI and Polyth Link have deliberately separate test selection. Do not move Link tests into both owners, remove explicit checks or start signing/distribution on every PR as a documentation side effect.
+Preserve the distinction between blocking validation, manual smoke builds and explicit release publication. `ci.yml` must stay cheap enough for PR/master; `build-apps.yml` must never publish; `release.yml` owns signing, updater metadata, GitHub Release creation, optional Play publication and optional npm publication. Never move signing/distribution onto ordinary pushes.
 
 For a dependency or Node/browser failure trace versions and exports first. Do not update lockfiles, globally install tools, use `npx` to fetch a missing package or add polyfills without a reviewed dependency need. An existing local TypeScript compiler is required for package typechecks; no root typecheck script should be invented.
 
