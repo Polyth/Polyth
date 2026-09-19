@@ -95,8 +95,14 @@ export interface DesktopChatWorkspaceSurface {
   claimed?: boolean;
 }
 
+export interface DesktopSetupClaim {
+  claimToken: string;
+}
+
 export interface PolythDesktopApi {
   getInfo(): Promise<DesktopInfo>;
+  requestSetupClaim(): Promise<DesktopSetupClaim>;
+  restartAfterSetup(): Promise<void>;
   getSettings(): Promise<DesktopSettings>;
   setSettings(patch: Partial<DesktopSettings>): Promise<DesktopSettings>;
   windowAction(action: DesktopWindowAction): Promise<DesktopWindowState>;
