@@ -32,6 +32,10 @@ Polyth records the native conversation ID from `init` and resumes only that
 Space/project/session's recorded ID using `--conversation`. It never uses
 ambient `--continue`. Canonical history, worktrees, titles and the UI remain
 Polyth-owned. Native history import, exact-history reset and fork are unsupported.
+A harness switch or runtime recovery therefore starts a fresh Antigravity
+conversation through the normal create-session operation and supplies bounded
+canonical Polyth continuity separately; it never pretends that the native
+history was copied.
 A fresh runtime is required after abort/disconnection; uncertain prompt delivery
 is not automatically retried. A changed live model/effort/agent is explicitly
 rejected with a new-session instruction rather than silently ignored.

@@ -57,6 +57,12 @@ A synchronized native leg can be reattached where the adapter supports verified 
 7. Atomically publish the runtime epoch, target route, fresh leg, and closed prior leg. Clear transition state and stale model/profile routing in the same transaction.
 8. Establish the fresh binding and reconciliation barrier, then admit the next turn with bounded canonical continuity. The canonical user event contains the user's text; recovery context is separately persisted and hidden by the timeline renderer.
 
+The target creation path does not require an adapter to support exact native-history
+reset. If a provider gives a definitive `unsupported` reset result while exposing
+fresh-session creation, the same durable operation uses that create seam instead;
+canonical continuity is transferred separately and the native tail is never claimed
+to have been copied.
+
 A crash after target creation but before publication resumes the recorded receipt. A target creation with no recoverable receipt stays blocked instead of making another native thread. A pending after-turn switch can be escalated to stop-now. An unresolved target cannot currently be replaced with a different pending target.
 
 ### Local execution ownership

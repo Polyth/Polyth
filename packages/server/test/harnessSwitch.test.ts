@@ -23,6 +23,7 @@ function fixture(path = ":memory:", options: {
   };
   workspaceInstructionsEnabled?: boolean;
   branchOutcome?: "mismatch" | "unknown";
+  resetUnsupportedHarness?: string;
 } = {}) {
   let store = createStore(path);
   const detach: Array<() => void> = [];
@@ -90,7 +91,10 @@ function fixture(path = ":memory:", options: {
         }],
         models: async () => [], agents: async () => [],
         ensureSession: async (input) => nativeId = input.backendSessionId ?? nativeId,
-        createSessionOperation: create, resetSessionOperation: create,
+        createSessionOperation: create,
+        resetSessionOperation: options.resetUnsupportedHarness === id
+          ? async () => ({ kind: "rejected" as const, code: "unsupported", message: "exact native history reset is unavailable" })
+          : create,
         ...(options.branchOutcome ? {
           branchSessionOperation: async (_request, operationId) => options.branchOutcome === "mismatch"
             ? { kind: "rejected" as const, code: "history-mismatch", message: "requested history prefix is not present in the backend session" }
@@ -211,6 +215,22 @@ test("A1 A2 → B1 → A retains one canonical session, cwd and confirmed contex
   assert.equal(a.runtimeBinding!.location.directory, original.runtimeBinding!.location.directory);
   assert.equal((await f.store.projections()).length, 1);
   await f.close();
+});
+
+test("harness switching starts a fresh target session when exact native reset is unsupported", async () => {
+  const f = fixture(":memory:", { resetUnsupportedHarness: "fake-b" });
+  try {
+    const { id } = await f.sessions.create({ projectId: "p" });
+    const original = (await f.store.projection(id))!;
+    const switched = await f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" });
+
+    assert.equal(switched.resolvedHarnessId, "fake-b");
+    assert.notEqual(switched.backendSessionId, original.backendSessionId);
+    assert.equal(f.engines.at(-1)?.harnessId, "fake-b");
+    assert.equal(switched.harnessTransition, undefined);
+  } finally {
+    await f.close();
+  }
 });
 
 test("rewind replacement creates a fresh leg across non-fork harnesses", async () => {

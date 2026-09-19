@@ -918,6 +918,46 @@ export function createSessionService(deps: {
     return outcome;
   };
 
+  /** Start a fresh native leg without requiring exact native-history reset.
+   * Some runtimes can create a new session while deliberately rejecting reset
+   * because they cannot reproduce the old native history (Antigravity). A
+   * definitive reset rejection proves that no mutation was applied, so the
+   * same durable operation can safely try the provider's fresh-session seam. */
+  const freshBackendSessionOperation = async (
+    runtime: AgentRuntime,
+    request: CreateSessionInput & { sessionId: string; cwd: string },
+    operationId: string,
+    mode: "switch" | "epoch",
+  ): Promise<string | MutationOutcome<{ backendSessionId: string }>> => {
+    if (runtime.resetSessionOperation) {
+      const outcome = await runtime.resetSessionOperation.call(runtime, request, operationId);
+      if (outcome.kind !== "rejected") return outcome;
+      if (outcome.code === "unsupported" && runtime.createSessionOperation) {
+        return runtime.createSessionOperation.call(runtime, request, operationId);
+      }
+      if (outcome.code === "capability-unsupported" && runtime.resetSession) {
+        if (mode === "epoch") return runtime.resetSession.call(runtime, request);
+      }
+      if (outcome.code === "capability-unsupported" && runtime.createSessionOperation) {
+        return runtime.createSessionOperation.call(runtime, request, operationId);
+      }
+      return outcome;
+    }
+    if (mode === "epoch" && runtime.resetSession) {
+      return runtime.resetSession.call(runtime, request);
+    }
+    if (runtime.createSessionOperation) {
+      return runtime.createSessionOperation.call(runtime, request, operationId);
+    }
+    if (runtime.resetSession) return runtime.resetSession.call(runtime, request);
+    if (mode === "switch") return runtime.ensureSession.call(runtime, request);
+    return {
+      kind: "rejected",
+      code: "capability-unsupported",
+      message: "runtime cannot create a fresh backend session",
+    };
+  };
+
   const outcomeError = <T,>(outcome: Exclude<MutationOutcome<T>, { kind: "confirmed" }>): Error => {
     if (outcome.kind === "rejected") {
       return Object.assign(new Error(outcome.message), {
@@ -5410,34 +5450,14 @@ export function createSessionService(deps: {
     if (reset.state === "prepared") {
       const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(
         reset,
-        async (operationId) => {
-          const request = {
-            projectId: projection.projectId,
-            title: projection.title,
-            sessionId,
-            cwd,
-            ...(projection.model ? { model: projection.model } : {}),
-            ...(projection.agent ? { agent: projection.agent } : {}),
-          };
-          if (!runtime.resetSessionOperation) {
-            return runtime.resetSession
-              ? runtime.resetSession(request)
-              : Promise.resolve({
-                  kind: "rejected" as const,
-                  code: "capability-unsupported",
-                  message: "runtime cannot create a fresh backend session",
-                });
-          }
-          const outcome = await runtime.resetSessionOperation(request, operationId);
-          // The server facade exposes both methods for compatibility. A
-          // legacy adapter therefore reports capability-unsupported from the
-          // operation-aware seam even when its plain reset is usable.
-          return outcome.kind === "rejected"
-            && outcome.code === "capability-unsupported"
-            && runtime.resetSession
-            ? runtime.resetSession(request)
-            : outcome;
-        },
+        (operationId) => freshBackendSessionOperation(runtime, {
+          projectId: projection.projectId,
+          title: projection.title,
+          sessionId,
+          cwd,
+          ...(projection.model ? { model: projection.model } : {}),
+          ...(projection.agent ? { agent: projection.agent } : {}),
+        }, operationId, "epoch"),
         (backendSessionId) => ({ backendSessionId }),
       );
       if (outcome.kind !== "confirmed") throw outcomeError(outcome);
@@ -6216,10 +6236,7 @@ export function createSessionService(deps: {
       if (operation.state === "prepared") {
         const request = { projectId: projection.projectId, sessionId, title: projection.title, cwd };
         const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(operation,
-          (id) => target.resetSessionOperation ? target.resetSessionOperation(request, id)
-            : target.createSessionOperation ? target.createSessionOperation(request, id)
-            : target.resetSession ? target.resetSession(request)
-            : target.ensureSession(request),
+          (id) => freshBackendSessionOperation(target, request, id, "switch"),
           (backendSessionId) => ({ backendSessionId }),
           async (result, unknownCode) => {
             await settleOperation(operation!, result.kind === "confirmed" ? { ...result, receipt: result.value.backendSessionId } : result, unknownCode);
