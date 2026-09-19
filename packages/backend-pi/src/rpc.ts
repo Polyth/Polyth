@@ -81,6 +81,10 @@ export async function createPiRpc(options: {
   cwd: string;
   env?: NodeJS.ProcessEnv;
   args?: string[];
+  workerPath?: string;
+  bootstrapPath?: string;
+  extensionPath?: string;
+  toolBridge?: { url: string; token: string; capabilityIds: string[] };
   stateFile?: string;
   stableAuthority?: boolean;
 }): Promise<PiRpc> {
@@ -90,11 +94,24 @@ export async function createPiRpc(options: {
   );
   let child: ChildProcess;
   try {
-    child = authority.spawn(
-      options.command,
-      ["--mode", "rpc", ...(options.args ?? [])],
-      { cwd: options.cwd, env: options.env ?? process.env },
-    );
+    const projected = Boolean(options.workerPath && options.bootstrapPath && options.extensionPath && options.toolBridge);
+    child = projected
+      ? authority.spawn(process.execPath, [options.workerPath!], {
+          cwd: options.cwd,
+          env: {
+            ...(options.env ?? process.env),
+            POLYTH_PI_BIN: options.command,
+            POLYTH_PI_ARGS: JSON.stringify(options.args ?? []),
+            POLYTH_PI_BOOTSTRAP: options.bootstrapPath!,
+            POLYTH_PI_EXTENSION: options.extensionPath!,
+            POLYTH_PI_TOOL_BRIDGE: JSON.stringify(options.toolBridge!),
+          },
+        })
+      : authority.spawn(
+          options.command,
+          ["--mode", "rpc", ...(options.args ?? [])],
+          { cwd: options.cwd, env: options.env ?? process.env },
+        );
     await waitForSpawn(child);
   } catch (error) {
     await authority.close().catch(() => undefined);

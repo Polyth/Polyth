@@ -25,7 +25,9 @@ export const PI_CAPABILITIES: RuntimeCapabilities = {
   questions: false,
   compaction: false,
   subagents: false,
-  mcp: false,
+  // Pi has no native MCP client. Polyth projects the same scoped package tools
+  // through a private CLI extension and FD relay.
+  mcp: true,
   steering: false,
   resume: true,
   usage: false,

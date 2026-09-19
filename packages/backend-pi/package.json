@@ -14,7 +14,7 @@
     "serverEntry": "./src/serverEntry.ts",
     "descriptor": {
       "name": "Pi harness",
-      "description": "Detect Pi and report native RPC integration readiness",
+      "description": "Pi native RPC with scoped Polyth tool projection",
       "core": false,
       "enabled": true,
       "icon": "pi",

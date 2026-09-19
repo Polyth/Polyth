@@ -1,12 +1,18 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import type { HarnessContext, HarnessProvider, HarnessRegistry, RuntimeSessionBinding } from "@polyth/contracts";
-import { releaseProcessExecution } from "@polyth/harness-runtime";
+import { captureCapabilityLaunch, provisioningTarget, releaseProcessExecution } from "@polyth/harness-runtime";
 import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/harness-runtime/executable-discovery";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { createPiRpc } from "./rpc.ts";
 import { createPiRuntime, PI_CAPABILITIES } from "./runtime.ts";
+import { createPiCapabilitySync } from "./capabilitySync.ts";
+import { createPiProvisioner, piOverlays } from "./provisioner.ts";
+import { PI_BOOTSTRAP_SOURCE } from "./bootstrapSource.ts";
+import { PI_WORKER_SOURCE } from "./workerSource.ts";
 
 const exec = promisify(execFile);
 const windowsShim = (command: string) => process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
@@ -21,21 +27,53 @@ const resolvePiBinary = async () => {
   return report.hit.executablePath;
 };
 
-const connectPi = async (context: HarnessContext, options: { stateFile?: string; ephemeral?: boolean } = {}) => {
+const writeGenerated = async (file: string, content: string): Promise<void> => {
+  const current = await readFile(file, "utf8").catch(() => undefined);
+  if (current === content) return;
+  await mkdir(dirname(file), { recursive: true });
+  const temp = `${file}.${process.pid}.tmp`;
+  await writeFile(temp, content, { mode: 0o600 });
+  await rename(temp, file);
+};
+
+const connectPi = async (
+  context: HarnessContext,
+  options: { stateFile?: string; ephemeral?: boolean; workerPath?: string; bootstrapPath?: string } = {},
+) => {
   const command = await resolvePiBinary();
   const env = await harnessExecutableChildEnv(command);
-  return createPiRpc({
+  const staged = piOverlays.peek(context, "pi");
+  const projection = staged && options.workerPath && options.bootstrapPath ? staged : undefined;
+  if (projection) {
+    captureCapabilityLaunch({
+      target: provisioningTarget(context, "pi"),
+      desiredRevision: projection.desiredRevision,
+    });
+  }
+  const rpc = await createPiRpc({
     command,
     cwd: context.cwd,
     env,
     args: options.ephemeral ? ["--no-session"] : [],
+    ...(projection ? {
+      workerPath: options.workerPath,
+      bootstrapPath: options.bootstrapPath,
+      extensionPath: projection.value.extensionFile,
+      toolBridge: projection.value.toolBridge,
+    } : {}),
     stateFile: options.stateFile,
     stableAuthority: Boolean(options.stateFile),
   });
+  return projection ? createPiCapabilitySync(context, rpc) : rpc;
 };
 
 export default function registerPackage(host: ServerPackageHost) {
   const registry = host.services.require(serverServiceKey<HarnessRegistry>("harnesses"));
+  const generatedPaths = (context: HarnessContext) => {
+    if (!context.space) throw Object.assign(new Error("Local Space context required"), { code: "unsupported" });
+    const root = join(host.spaceStorage(context.space).packageDir(host.pluginId), "generated");
+    return { worker: join(root, "pi-worker.mjs"), bootstrap: join(root, "pi-bootstrap.mjs") };
+  };
   const stateFile = (context: HarnessContext) => {
     const key = createHash("sha256")
       .update(JSON.stringify([context.projectId, context.cwd, context.sessionId ?? "catalog"]))
@@ -107,7 +145,16 @@ export default function registerPackage(host: ServerPackageHost) {
       if (!context.space || context.remote) {
         throw Object.assign(new Error("Local Space context required"), { code: "unsupported" });
       }
-      const rpc = await connectPi(context, { stateFile: stateFile(context) });
+      const generated = generatedPaths(context);
+      await Promise.all([
+        writeGenerated(generated.worker, PI_WORKER_SOURCE),
+        writeGenerated(generated.bootstrap, PI_BOOTSTRAP_SOURCE),
+      ]);
+      const rpc = await connectPi(context, {
+        stateFile: stateFile(context),
+        workerPath: generated.worker,
+        bootstrapPath: generated.bootstrap,
+      });
       try {
         const runtime = createPiRuntime(context, rpc);
         return Object.assign(runtime, {
@@ -141,6 +188,7 @@ export default function registerPackage(host: ServerPackageHost) {
       }
       return releaseProcessExecution(stateFile(context), binding, operationId);
     },
+    provisioner: createPiProvisioner(),
   };
 
   let registration: ReturnType<HarnessRegistry["register"]> | undefined;
