@@ -85,7 +85,10 @@ The watcher is explicitly controllable. Runtime code may call
 it off immediately cancels pending retries and suppresses any in-flight reload.
 For deployments that never want automatic freshness navigation, build with
 `POLYTH_WEB_BUILD_FRESHNESS=0` (also accepts `false`, `off`, or
-`disabled`). The default remains enabled.
+`disabled`). Production builds remain enabled by default. The development
+supervisor defaults its rebuilds to freshness disabled because every watch
+rebuild creates a new generation; set `POLYTH_WEB_BUILD_FRESHNESS=1` on the
+supervisor process to opt back in.
 
 ### Package web entry skeleton (current API)
 
