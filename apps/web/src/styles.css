@@ -13475,30 +13475,6 @@ html[data-background]:not([data-background="none"]) .app {
   background-image: none;
 }
 
-/* iOS standalone needs the dynamic viewport for layout. Forcing 100vh on
-   current WebKit shortens the flex frame by the Home-indicator band, which
-   clips the composer even though the document canvas continues below it.
-   Keep the app at 100dvh and let it own the selected background so the image
-   still paints under the translucent status bar without changing layout. */
-@supports (-webkit-touch-callout: none) {
-  @media (display-mode: standalone) {
-    .app {
-      height: 100dvh;
-    }
-    html[data-background]:not([data-background="none"]) .app {
-      background-color: var(--bg);
-      background-image:
-        linear-gradient(
-          color-mix(in srgb, var(--bg) 76%, transparent),
-          color-mix(in srgb, var(--bg) 76%, transparent)
-        ),
-        var(--app-background-image);
-      background-position: center;
-      background-repeat: no-repeat;
-      background-size: cover;
-    }
-  }
-}
 html:has(body.desktop-app),
 html:has(body.desktop-app)[data-background]:not([data-background="none"]) {
   background-color: transparent;
