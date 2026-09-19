@@ -295,7 +295,11 @@ function ProviderCard({
           <strong>{provider.label}</strong>
           <span>{snapshot?.accountLabel || (profile.billing === "subscription" ? "Subscription" : "API")}</span>
           <small>
-            {profile.billing === "subscription" ? "Subscription" : "API"}
+            {profile.billing === "subscription"
+              ? profile.monthlyCost !== null
+                ? `Subscription · ${money(profile.monthlyCost)}/mo`
+                : "Subscription"
+              : "API"}
             <i className={statusState} aria-hidden="true" />
             <span className={statusState}>{status}</span>
           </small>
