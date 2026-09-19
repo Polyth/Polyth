@@ -1,9 +1,11 @@
-import { createServer, type Server, type ServerResponse } from "node:http";
-import { createHash } from "node:crypto";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import type { CanonicalSecurity } from "./canonicalSecurity.ts";
+
+export const DESKTOP_SETUP_COOKIE = "polyth_desktop_setup";
 
 const MIME: Readonly<Record<string, string>> = {
   ".html": "text/html; charset=utf-8",
@@ -20,6 +22,8 @@ export interface SetupServerOptions {
   security: CanonicalSecurity;
   webDist: string;
   version: string;
+  /** Native-desktop capability; kept in the main/server process and an HttpOnly cookie only. */
+  desktopSetupCapability?: string;
 }
 
 export interface SetupServerHandle {
