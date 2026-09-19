@@ -72,7 +72,7 @@ export default function UsageSettings(): ReactNode {
   return (
     <div className="usage-settings-page">
       <div className="usage-settings-intro">
-        <h2>Usage</h2>
+        <h2>Usage settings</h2>
         <p>Choose what the dashboard shows. Preferences are mirrored to the server for this Space.</p>
       </div>
 
