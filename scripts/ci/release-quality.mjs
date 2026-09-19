@@ -27,6 +27,9 @@ const QUALITY_TEST_FILES = [
   "scripts/test/releaseQuality.test.ts",
   "scripts/test/release-quality-gates.test.ts",
   "apps/desktop/test/configuration.test.ts",
+  "packages/server/test/canonicalAuth.test.ts",
+  "packages/server/test/runtimeSecurityBinding.test.ts",
+  "packages/server/test/debugAgentAccess.test.ts",
 ];
 
 function fail(command, result) {
