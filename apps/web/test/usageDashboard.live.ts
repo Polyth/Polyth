@@ -11,6 +11,8 @@ import type { Browser, BrowserContext, Page } from "playwright-core";
 const BASE = (process.env.POLYTH_USAGE_URL ?? "http://127.0.0.1:4458").replace(/\/$/, "");
 const PROJECT_ID = process.env.POLYTH_USAGE_PROJECT_ID ?? "usage-audit-project";
 const SESSION_ID = process.env.POLYTH_USAGE_SESSION_ID ?? "usage-audit-0001";
+const LOGIN = process.env.POLYTH_USAGE_LOGIN ?? "usage-audit";
+const PASSWORD = process.env.POLYTH_USAGE_PASSWORD ?? "usage-audit-test-passphrase";
 const ARTIFACTS = process.env.POLYTH_USAGE_ARTIFACTS ?? "/tmp/polyth-usage-audit-artifacts";
 const OWNER_USAGE_PREFS_KEY = "polyth.usagePrefs.account.usr_owner";
 const chromiumCandidates = [
@@ -152,6 +154,23 @@ async function openApp(options: OpenOptions): Promise<Page> {
     ...(options.appearance ? { appearance: options.appearance } : {}),
     ...(options.theme ? { theme: options.theme } : {}),
   });
+
+  const status = await context.request.get(`${BASE}/api/auth/status`);
+  assert.equal(status.ok(), true, "auth status failed");
+  const auth = await status.json() as { authorized?: boolean; csrfToken?: string };
+  if (!auth.authorized) {
+    assert.ok(auth.csrfToken, "auth status did not provide CSRF token");
+    const login = await context.request.post(`${BASE}/api/auth/login`, {
+      headers: {
+        "content-type": "application/json",
+        "origin": BASE,
+        "x-polyth-csrf": auth.csrfToken!,
+      },
+      data: { login: LOGIN, password: PASSWORD },
+    });
+    assert.equal(login.ok(), true, `fixture login failed: ${login.status()} ${await login.text()}`);
+  }
+
   const page = await context.newPage();
   await page.goto(`${BASE}/p/${PROJECT_ID}/s/${SESSION_ID}`, { waitUntil: "load" });
   await page.waitForSelector(".app", { state: "visible", timeout: 15_000 });
