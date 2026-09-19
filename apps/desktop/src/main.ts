@@ -643,6 +643,24 @@ const startServer = async (preferredPort?: number): Promise<void> => {
   if (bundledOpenCode) log(`Bundled OpenCode ${__POLYTH_OPENCODE_VERSION__}: ${binary}`);
 };
 
+async function restartServerAfterSetup(): Promise<void> {
+  const lifecycle = serverLifecycle;
+  if (!lifecycle || !("setup" in lifecycle) || lifecycle.setup !== true) return;
+  const port = Number(new URL(baseUrl).port);
+  const cookieName = "desktopSetupClaimCookieName" in lifecycle
+    && typeof lifecycle.desktopSetupClaimCookieName === "string"
+    ? lifecycle.desktopSetupClaimCookieName
+    : null;
+  if (cookieName) await session.defaultSession.cookies.remove(baseUrl, cookieName);
+  await lifecycle.shutdown();
+  if (serverLifecycle === lifecycle) serverLifecycle = null;
+  await startServer(port);
+  if (serverLifecycle && "setup" in serverLifecycle && serverLifecycle.setup === true) {
+    throw new Error("Polyth setup did not reach the ready state");
+  }
+  log("Polyth server restarted automatically after desktop setup");
+}
+
 const startChatWorkspaceRemoteCoordinator = async (): Promise<void> => {
   const binary = linkClientPath();
   if (!binary || !existsSync(binary)) {
