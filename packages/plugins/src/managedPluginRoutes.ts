@@ -1,6 +1,5 @@
 import type { JsonObject, RouteHandler, SessionEvent } from "@polyth/contracts";
 import type {
-  ContributionInvocation,
   ContributionInvocationKind,
   PackageJsonObject,
 } from "@polyth/package-sdk";
