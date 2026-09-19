@@ -32,18 +32,20 @@ fn host_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_polyth-link-host"))
 }
 
-async fn rpc(stream: &mut UnixStream, id: u64, method: &str, params: Value) -> Value {
+async fn rpc(stream: &mut BufReader<UnixStream>, id: u64, method: &str, params: Value) -> Value {
     let line = json!({"id": id, "method": method, "params": params});
     stream
+        .get_mut()
         .write_all(format!("{line}\n").as_bytes())
         .await
         .unwrap();
-    let mut reader = BufReader::new(&mut *stream);
     let mut response = String::new();
     loop {
         response.clear();
-        reader.read_line(&mut response).await.unwrap();
-        let parsed: Value = serde_json::from_str(response.trim()).unwrap();
+        let bytes = stream.read_line(&mut response).await.unwrap();
+        assert!(bytes > 0, "rpc {method} id={id}: host closed the control socket");
+        let parsed: Value = serde_json::from_str(response.trim())
+            .unwrap_or_else(|error| panic!("rpc {method} id={id}: malformed response {response:?}: {error}"));
         if parsed.get("method").and_then(Value::as_str) == Some("event") {
             continue;
         }
@@ -56,18 +58,20 @@ async fn rpc(stream: &mut UnixStream, id: u64, method: &str, params: Value) -> V
     }
 }
 
-async fn rpc_try(stream: &mut UnixStream, id: u64, method: &str, params: Value) -> Value {
+async fn rpc_try(stream: &mut BufReader<UnixStream>, id: u64, method: &str, params: Value) -> Value {
     let line = json!({"id": id, "method": method, "params": params});
     stream
+        .get_mut()
         .write_all(format!("{line}\n").as_bytes())
         .await
         .unwrap();
-    let mut reader = BufReader::new(&mut *stream);
     let mut response = String::new();
     loop {
         response.clear();
-        reader.read_line(&mut response).await.unwrap();
-        let parsed: Value = serde_json::from_str(response.trim()).unwrap();
+        let bytes = stream.read_line(&mut response).await.unwrap();
+        assert!(bytes > 0, "rpc {method} id={id}: host closed the control socket");
+        let parsed: Value = serde_json::from_str(response.trim())
+            .unwrap_or_else(|error| panic!("rpc {method} id={id}: malformed response {response:?}: {error}"));
         if parsed.get("method").and_then(Value::as_str) == Some("event") {
             continue;
         }
@@ -129,7 +133,8 @@ async fn host_binary_pairs_and_proxies_http() {
     tokio::spawn(serve_ingress(ingress.clone()));
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    let mut rpc_stream = UnixStream::connect(&control).await.unwrap();
+    let rpc_socket = UnixStream::connect(&control).await.unwrap();
+    let mut rpc_stream = BufReader::new(rpc_socket);
     let identity = rpc(&mut rpc_stream, 1, "identity.status", json!({})).await;
     assert!(
         identity
