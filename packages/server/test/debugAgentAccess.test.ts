@@ -35,7 +35,7 @@ async function rejectsDebugBoot(
   }
 }
 
-test("debug agent access refuses wildcard/public/hosted exposure before opening runtime", async t => {
+test("debug agent access refuses wildcard/public/hosted exposure before opening runtime", async () => {
   await rejectsDebugBoot({
     POLYTH_DEBUG_AGENT_ACCESS: "1",
     POLYTH_PUBLIC_ORIGIN: undefined,
