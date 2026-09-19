@@ -31,9 +31,14 @@ const applyDesktopChrome = (settings: DesktopSettings): void => {
   }));
 };
 
+const applyDesktopPlatform = (platform: DesktopInfo["platform"]): void => {
+  document.body.dataset.desktopPlatform = platform;
+};
+
 function WindowControls() {
   const api = desktopBridge()!;
   const [settings, setSettings] = useState(DEFAULTS);
+  const [info, setInfo] = useState<DesktopInfo | null>(null);
   const [windowState, setWindowState] = useState<DesktopWindowState>({
     maximized: false,
     visible: true,
@@ -41,9 +46,11 @@ function WindowControls() {
   });
 
   useEffect(() => {
-    void api.getSettings().then((next) => {
+    void Promise.all([api.getSettings(), api.getInfo()]).then(([next, desktopInfo]) => {
       setSettings(next);
+      setInfo(desktopInfo);
       applyDesktopChrome(next);
+      applyDesktopPlatform(desktopInfo.platform);
     });
     const offSettings = api.onSettingsChanged((next) => {
       setSettings(next);
@@ -61,6 +68,8 @@ function WindowControls() {
     else delete document.body.dataset.desktopMaximized;
     return () => { delete document.body.dataset.desktopMaximized; };
   }, [windowState.maximized]);
+
+  if (!info || info.platform === "darwin") return null;
 
   const controls = (
     <div
@@ -114,6 +123,7 @@ function DesktopSettingsPage() {
     void Promise.all([api.getSettings(), api.getInfo()]).then(([next, desktopInfo]) => {
       setSettings(next);
       setInfo(desktopInfo);
+      applyDesktopPlatform(desktopInfo.platform);
     }).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
     const offSettings = api.onSettingsChanged((next) => {
       setSettings(next);
@@ -162,20 +172,24 @@ function DesktopSettingsPage() {
       >
         <Toggle on={settings.closeToTray} onChange={(value) => save("closeToTray", value)} label="Close to tray" />
       </Row>
-      <Row
-        label="Window buttons"
-        hint="Move the minimize, maximize, and close controls without changing the rest of the layout."
-        itemId="desktop.controlsPosition"
-      >
-        <Seg value={settings.controlsPosition} options={[["left", "Left"], ["right", "Right"]]} onChange={(value) => save("controlsPosition", value)} />
-      </Row>
-      <Row
-        label="Button theme"
-        hint="System follows the operating-system appearance independently of your Polyth palette."
-        itemId="desktop.controlsTheme"
-      >
-        <Seg value={settings.controlsTheme} options={[["system", "System"], ["dark", "Dark"], ["light", "Light"]]} onChange={(value) => save("controlsTheme", value)} />
-      </Row>
+      {info && info.platform !== "darwin" && (
+        <>
+          <Row
+            label="Window buttons"
+            hint="Move the minimize, maximize, and close controls without changing the rest of the layout."
+            itemId="desktop.controlsPosition"
+          >
+            <Seg value={settings.controlsPosition} options={[["left", "Left"], ["right", "Right"]]} onChange={(value) => save("controlsPosition", value)} />
+          </Row>
+          <Row
+            label="Button theme"
+            hint="System follows the operating-system appearance independently of your Polyth palette."
+            itemId="desktop.controlsTheme"
+          >
+            <Seg value={settings.controlsTheme} options={[["system", "System"], ["dark", "Dark"], ["light", "Light"]]} onChange={(value) => save("controlsTheme", value)} />
+          </Row>
+        </>
+      )}
       <Row label="Start hidden" hint="Launch into the system tray instead of showing the main window." itemId="desktop.startMinimized">
         <Toggle on={settings.startMinimized} onChange={(value) => save("startMinimized", value)} label="Start hidden" />
       </Row>
@@ -273,7 +287,10 @@ export function installDesktopIntegration(): () => void {
   const api = desktopBridge();
   if (!api) return () => {};
   document.body.classList.add("desktop-app");
-  void api.getSettings().then(applyDesktopChrome);
+  void Promise.all([api.getSettings(), api.getInfo()]).then(([next, desktopInfo]) => {
+    applyDesktopChrome(next);
+    applyDesktopPlatform(desktopInfo.platform);
+  });
   const unregisterControls = registerSlot(
     "app.window.controls",
     "desktop.window-controls",
@@ -309,5 +326,6 @@ export function installDesktopIntegration(): () => void {
     unregisterSettings();
     unregisterControls();
     document.body.classList.remove("desktop-app");
+    delete document.body.dataset.desktopPlatform;
   };
 }
