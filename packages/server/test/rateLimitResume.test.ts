@@ -209,6 +209,77 @@ test("resumeNow re-sends the last user message and switches the session model", 
   await h.store.close();
 });
 
+test("native continuation mode resumes without replaying a tool-active prompt", async () => {
+  const h = harness();
+  const { id } = await h.sessions.create({ projectId: "p1", title: "T" });
+  await h.sessions.send(id, { text: "deploy the release" });
+  await flush();
+  h.emit(id, {
+    ...LIMIT_STOP,
+    retry: { scope: "rate", provider: "google", retryAfterSec: 30, resumeMode: "continue" },
+  });
+  await flush();
+
+  await h.sessions.resumeNow!(id);
+  await flush();
+
+  assert.equal(h.startedTexts[0], "deploy the release");
+  assert.match(h.startedTexts[1] ?? "", /Continue from the exact point/);
+  assert.doesNotMatch(h.startedTexts[1] ?? "", /deploy the release/);
+  assert.ok((await h.store.projection(id))?.resume, "in-flight auto-resume retains retry state");
+
+  const messages = (await h.store.events(id)).filter((event) => event.type === "user/message");
+  assert.equal((messages.at(-1)?.data as { autoResume?: boolean }).autoResume, true);
+  await h.store.close();
+});
+
+test("switching model during continuation mode replays the original prompt on the new route", async () => {
+  const h = harness();
+  const { id } = await h.sessions.create({ projectId: "p1", title: "T" });
+  await h.sessions.send(id, { text: "deploy the release" });
+  await flush();
+  h.emit(id, {
+    ...LIMIT_STOP,
+    retry: { scope: "rate", provider: "google", retryAfterSec: 30, resumeMode: "continue" },
+  });
+  await flush();
+
+  await h.sessions.resumeNow!(id, { providerID: "openai", modelID: "gpt-5" });
+  await flush();
+
+  assert.deepEqual(h.startedTexts, ["deploy the release", "deploy the release"]);
+  assert.equal((await h.store.projection(id))?.resume, undefined);
+  await h.store.close();
+});
+
+test("repeated auto-resume limits advance the durable attempt instead of resetting", async () => {
+  const h = harness();
+  const { id } = await h.sessions.create({ projectId: "p1", title: "T" });
+  await h.sessions.send(id, { text: "keep going" });
+  await flush();
+  const stop = {
+    type: "turn/stopped" as const,
+    turnId: "limit",
+    reason: "error" as const,
+    error: "429",
+    retry: { scope: "rate" as const, provider: "google" },
+  };
+
+  h.emit(id, stop);
+  await flush();
+  assert.equal((await h.store.projection(id))?.resume?.attempt, 1);
+
+  await h.sessions.resumeNow!(id);
+  await flush();
+  h.emit(id, { ...stop, turnId: "limit-2" });
+  await flush();
+
+  const resume = (await h.store.projection(id))?.resume;
+  assert.equal(resume?.attempt, 2);
+  assert.ok((resume?.resumeAt ?? 0) >= Date.now() + 55_000);
+  await h.store.close();
+});
+
 test("a new user send clears the pending resume before admitting the superseding turn", async () => {
   const h = harness();
   const { id } = await h.sessions.create({ projectId: "p1", title: "T" });
