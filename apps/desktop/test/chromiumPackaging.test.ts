@@ -18,13 +18,18 @@ test("desktop stages an exact installed Playwright Chromium and packages it as a
   assert.match(pkg.scripts["stage:chromium"] ?? "", /stage-chromium\.mjs/);
   assert.match(pkg.scripts.dist ?? "", /stage:chromium/);
   assert.deepEqual(
-    pkg.build.extraResources.find((resource) => resource.to === "chromium"),
-    { from: "resources/chromium", to: "chromium", filter: ["**/*"] },
+    pkg.build.extraResources.find((resource) => resource.to === "chromium/${platform}-${arch}"),
+    {
+      from: "resources/chromium/${platform}-${arch}",
+      to: "chromium/${platform}-${arch}",
+      filter: ["**/*"],
+    },
   );
   assert.ok(pkg.build.files.includes("!**/node_modules/playwright-core/.local-browsers/**/*"), "only the staged resource copy is packaged");
   assert.equal("x64ArchFiles" in pkg.build.mac, false, "per-arch macOS builds must not carry universal merge exceptions");
   assert.match(script, /chromium\.executablePath\(\)/);
   assert.match(script, /playwrightCoreVersion/);
+  assert.match(script, /verbatimSymlinks:\s*true/);
   assert.match(script, /Playwright Chromium is not installed/);
   assert.doesNotMatch(script, /playwright install|browserType\.launch|download/i);
   assert.match(main, /delete process\.env\.POLYTH_CHROMIUM_PATH/);
