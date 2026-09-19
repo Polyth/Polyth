@@ -7586,7 +7586,14 @@ export function createSessionService(deps: {
     async resumeNow(sessionId, input): Promise<SendResult> {
       const options = normalizeResumeOptions(input);
       const plan = await withSessionLock(sessionId, async (): Promise<
-        { text: string; attachments?: AttachmentRef[]; model?: ModelRef; harness?: HarnessSelection }
+        {
+          text: string;
+          attachments?: AttachmentRef[];
+          model?: ModelRef;
+          harness?: HarnessSelection;
+          resumeAt?: number;
+          resumeUserMessageSeq?: number;
+        }
       > => {
         const proj = await store.projection(sessionId);
         if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
@@ -7615,10 +7622,21 @@ export function createSessionService(deps: {
           throw Object.assign(new Error("resume target is stale"), { code: "no-resume" });
         }
         const switchingRoute = Boolean(options.model || options.harness);
-        if (switchingRoute) await clearResume(sessionId, "model-switch");
+        if (switchingRoute) {
+          await clearResume(sessionId, "model-switch");
+        } else {
+          // Prevent the scheduled retry racing the user's explicit Resume now.
+          // Keep projection.resume until turn/started proves admission; if send
+          // fails before that, the catch below can re-arm the same durable plan.
+          resumeScheduler.cancel(sessionId);
+        }
         const continueNative = proj.resume.resumeMode === "continue" && !switchingRoute;
         return {
           text: continueNative ? AUTO_RESUME_CONTINUATION : last.text,
+          ...(!switchingRoute ? {
+            resumeAt: proj.resume.resumeAt,
+            resumeUserMessageSeq: proj.resume.userMessageSeq,
+          } : {}),
           ...(!continueNative && last.attachments
             ? { attachments: last.attachments as unknown as AttachmentRef[] }
             : {}),
@@ -7631,7 +7649,25 @@ export function createSessionService(deps: {
           ...(options.harness ? { harness: options.harness } : {}),
         };
       });
-      return service.send(sessionId, { ...plan, autoResume: true });
+      const {
+        resumeAt,
+        resumeUserMessageSeq,
+        ...sendPlan
+      } = plan;
+      try {
+        return await service.send(sessionId, { ...sendPlan, autoResume: true });
+      } catch (error) {
+        if (resumeAt !== undefined && resumeUserMessageSeq !== undefined) {
+          const current = await store.projection(sessionId);
+          if (
+            current?.resume?.resumeAt === resumeAt
+            && current.resume.userMessageSeq === resumeUserMessageSeq
+          ) {
+            resumeScheduler.arm(sessionId, Math.max(resumeAt, Date.now() + 1_000));
+          }
+        }
+        throw error;
+      }
     },
 
     // UX-MSG-ACTIONS Fork: backend branch is prepared FIRST; the canonical
