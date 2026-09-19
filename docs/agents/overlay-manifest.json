@@ -194,11 +194,6 @@
       "originalGitBlob": null
     },
     {
-      "path": ".github/workflows/agent-knowledge.yml",
-      "sha256": "96b15f4456455675e24970a1665ffa2bd488b258ba3769ad55145c073a6e863a",
-      "originalGitBlob": null
-    },
-    {
       "path": ".opencode/skill/polyth-control/SKILL.md",
       "sha256": "876a09f8b90e5ec78fa182579ef38af3bf09f652e8f8dd4a302cfd7905d76fb4",
       "originalGitBlob": "902895ced07a507782c846acf90dbb44a577232b"
