@@ -158,4 +158,9 @@ test("project settings menu and child pages use canonical dialog chrome", async 
     styles,
     /:is\(\.dialog-panel, \.sheet, \.response-footer-metadata-grid\)\s*\{[\s\S]*?var\(--material-glass-fill\)[\s\S]*?var\(--material-glass-edge\)[\s\S]*?var\(--material-glass-saturation\)/,
   );
+  const backdropStart = styles.indexOf("/* The floating surface owns Quiet Glass.");
+  assert.ok(backdropStart >= 0);
+  const backdropRule = styles.slice(backdropStart, styles.indexOf("}", backdropStart) + 1);
+  assert.match(backdropRule, /background:\s*color-mix\(in srgb, var\(--scrim\) 42%, transparent\)/);
+  assert.doesNotMatch(backdropRule, /backdrop-filter/);
 });
