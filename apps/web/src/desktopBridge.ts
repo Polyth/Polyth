@@ -84,8 +84,23 @@ export interface DesktopChatWorkspaceSurface {
   claimed?: boolean;
 }
 
+export interface DesktopSetupPreparation {
+  recoveryCodes: string[];
+}
+
+export interface DesktopSetupInput {
+  name: string;
+  organizationName: string;
+  login: string;
+  password: string;
+  recoveryAcknowledged: boolean;
+}
+
 export interface PolythDesktopApi {
   getInfo(): Promise<DesktopInfo>;
+  prepareSetup(): Promise<DesktopSetupPreparation>;
+  completeSetup(input: DesktopSetupInput): Promise<void>;
+  restartAfterSetup(): Promise<void>;
   getSettings(): Promise<DesktopSettings>;
   setSettings(patch: Partial<DesktopSettings>): Promise<DesktopSettings>;
   windowAction(action: DesktopWindowAction): Promise<DesktopWindowState>;
