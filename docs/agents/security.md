@@ -14,6 +14,8 @@ Test two real fixture Spaces, foreign IDs, altered path segments and repeated ac
 
 Paired devices are default-deny. Declare package remote policy deliberately and preserve privileged local-only operations. Server-created ingress is trusted context; client headers and loopback are not identity. Review HTTP and upgraded WS paths together, including terminal/package channels. Revoke must invalidate ongoing access, not just future login. Partial revocation is not full success.
 
+The one explicit development exception is `POLYTH_DEBUG_AGENT_ACCESS=1`. It may project the active owner only from server-minted direct-loopback public ingress, and startup must refuse it on non-loopback listeners, configured public origins, or non-`local-trusted` deployment profiles. It must never extend to Polyth Link ingress or weaken canonical identity/setup CSRF/origin validation.
+
 Validate request schema, method, resource scope, authorization and error behavior before execution. Do not add a generic authenticated proxy that bypasses route-specific permissions. Preserve timeout/body-size/backpressure constraints in the owning layer; inspect current values rather than inventing universal constants.
 
 ## Credentials and untrusted inputs
