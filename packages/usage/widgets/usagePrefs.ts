@@ -1,12 +1,12 @@
-// Reactive browser cache for server-owned Usage preferences. The central
-// /api/settings/client settings blob is the persistence authority; browser
-// storage is only a synchronous bootstrap/migration cache.
+// Reactive browser cache for server-owned Usage preferences. Usage contributes
+// this slice through the web client-settings registry; /api/settings/client is
+// the persistence authority and browser storage is only bootstrap/migration.
 import { useSyncExternalStore } from "react";
 import {
   accountStorageGet,
   accountStorageKey,
   accountStorageSet,
-} from "../../../apps/web/src/accountStorage.ts";
+} from "@polyth/web/account-storage";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 
 // ---- model-family grouping (pure) ------------------------------------------
