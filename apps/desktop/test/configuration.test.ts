@@ -34,7 +34,7 @@ test("desktop packaging covers each supported updater target", async () => {
   assert.equal(pkg.build.mac.entitlementsInherit, pkg.build.mac.entitlements);
   assert.equal(
     pkg.build.mac.x64ArchFiles,
-    "{**/node_modules/{esbuild,@esbuild/*,node-pty/prebuilds/*}/**,**/Resources/opencode/darwin-*/opencode,**/Resources/chromium/**}",
+    "{**/node_modules/{esbuild,@esbuild/*,node-pty/prebuilds/*}/**,**/Resources/opencode/darwin-*/opencode,**/Resources/chromium/**,**/Resources/polyth-link/**}",
   );
   assert.deepEqual(pkg.build.win.target, ["nsis"]);
   assert.deepEqual(pkg.build.publish, {
@@ -50,41 +50,30 @@ test("desktop packaging covers each supported updater target", async () => {
   assert.equal(pkg.build.extraResources.some(({ to }) => to === "server/agentToolsMcp.mjs"), true);
 });
 
-test("release workflow builds all platforms and uploads updater metadata", async () => {
-  const workflow = await readFile(join(repositoryRoot, ".github/workflows/desktop-release.yml"), "utf8");
+test("manual desktop workflow builds x64 Windows and Linux artifacts without publishing", async () => {
+  const workflow = await readFile(join(repositoryRoot, ".github/workflows/build-apps.yml"), "utf8");
   const rootPackage = JSON.parse(await readFile(join(repositoryRoot, "package.json"), "utf8")) as {
     scripts: Record<string, string>;
   };
+
   assert.match(rootPackage.scripts["desktop:stage-chromium"] ?? "", /@polyth\/desktop.*stage:chromium/);
   for (const required of [
     "ubuntu-24.04",
-    "macos-14",
     "windows-2025",
-    "--linux AppImage --x64",
-    "--linux AppImage --arm64",
-    "--mac dmg zip --universal",
-    "@esbuild/darwin-x64@$ESBUILD_VERSION",
-    "@esbuild/darwin-arm64@$ESBUILD_VERSION",
-    "--win nsis --x64",
-    "--win nsis --arm64 --config.publish.channel=latest-arm64",
-    "Install pinned Playwright Chromium",
-    "PLAYWRIGHT_BROWSERS_PATH: 0",
+    "--linux AppImage --x64 --publish never",
+    "--win nsis --x64 --publish never",
     "npx playwright-core install chromium",
+    "npm run build:desktop",
     "npm run desktop:stage-chromium",
-    "PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac14",
-    "PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac14-arm64",
+    "npm run desktop:download-opencode",
     "release/*.AppImage",
-    "release/*.dmg",
-    "release/*.zip",
     "release/*.exe",
     "release/latest*.yml",
   ]) {
-    assert.match(workflow, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.ok(workflow.includes(required), `manual desktop build workflow must include ${required}`);
   }
-  assert.match(workflow, /name: Stage pinned Playwright Chromium[\s\S]*?PLAYWRIGHT_BROWSERS_PATH: 0/);
-  assert.match(workflow, /name: Stage pinned Playwright Chromium for macOS x64[\s\S]*?PLAYWRIGHT_BROWSERS_PATH: 0/);
-  assert.match(workflow, /name: Stage pinned Playwright Chromium for macOS arm64[\s\S]*?PLAYWRIGHT_BROWSERS_PATH: 0/);
-  assert.match(workflow, /if: matrix\.arch == 'universal'[\s\S]*?PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac14[\s\S]*?PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac14-arm64/);
+  assert.doesNotMatch(workflow, /--publish always/);
+
   const installed = workflow.indexOf("npx playwright-core install chromium");
   const bundled = workflow.indexOf("run: npm run build:desktop");
   const staged = workflow.indexOf("run: npm run desktop:stage-chromium");
