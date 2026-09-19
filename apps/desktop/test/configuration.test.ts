@@ -63,6 +63,10 @@ test("manual desktop workflow builds Windows, Linux and macOS artifacts without 
     "CSC_LINK",
     "APPLE_APP_SPECIFIC_PASSWORD",
     "Select macOS signing mode",
+    "SIGN_CSC_LINK: ${{ secrets.CSC_LINK }}",
+    "Build Developer ID signed and notarized x64 + arm64 DMG",
+    "Build ad-hoc signed x64 + arm64 DMG",
+    "must be unset for an ad-hoc macOS build",
     "--config.mac.identity=-",
     "--config.mac.notarize=false",
     "Verify packaged macOS signatures",
@@ -87,6 +91,12 @@ test("manual desktop workflow builds Windows, Linux and macOS artifacts without 
     assert.ok(workflow.includes(required), `manual desktop build workflow must include ${required}`);
   }
   assert.doesNotMatch(workflow, /--publish always/);
+  assert.doesNotMatch(
+    workflow,
+    /\n    env:\n      CSC_LINK: \$\{\{ secrets\.CSC_LINK \}\}/,
+    "macOS signing secrets must not exist at job scope; empty CSC_LINK resolves to the app directory",
+  );
+  assert.doesNotMatch(workflow, /CSC_LINK= \\/);
   assert.doesNotMatch(workflow, /CSC_IDENTITY_AUTO_DISCOVERY/);
   assert.doesNotMatch(workflow, /(?:^|\s)-c\.mac\.(?:identity|notarize)=/m);
   assert.doesNotMatch(workflow, /--universal/);

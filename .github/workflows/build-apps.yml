@@ -130,12 +130,6 @@ jobs:
     if: inputs.target == 'mac-dmg' || inputs.target == 'all'
     runs-on: macos-15
     timeout-minutes: 90
-    env:
-      CSC_LINK: ${{ secrets.CSC_LINK }}
-      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -154,12 +148,20 @@ jobs:
 
       - name: Select macOS signing mode
         id: mac_signing
+        env:
+          SIGN_CSC_LINK: ${{ secrets.CSC_LINK }}
+          SIGN_CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          SIGN_APPLE_ID: ${{ secrets.APPLE_ID }}
+          SIGN_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          SIGN_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
           MISSING=()
-          for NAME in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
-            test -n "${!NAME}" || MISSING+=("$NAME")
-          done
+          test -n "$SIGN_CSC_LINK" || MISSING+=("CSC_LINK")
+          test -n "$SIGN_CSC_KEY_PASSWORD" || MISSING+=("CSC_KEY_PASSWORD")
+          test -n "$SIGN_APPLE_ID" || MISSING+=("APPLE_ID")
+          test -n "$SIGN_APPLE_APP_SPECIFIC_PASSWORD" || MISSING+=("APPLE_APP_SPECIFIC_PASSWORD")
+          test -n "$SIGN_APPLE_TEAM_ID" || MISSING+=("APPLE_TEAM_ID")
 
           if [ "${#MISSING[@]}" -eq 0 ]; then
             echo "mode=developer-id" >> "$GITHUB_OUTPUT"
@@ -231,22 +233,31 @@ jobs:
           POLYTH_TARGET_PLATFORM=darwin POLYTH_TARGET_ARCH=x64 npm run desktop:download-opencode
           POLYTH_TARGET_PLATFORM=darwin POLYTH_TARGET_ARCH=arm64 npm run desktop:download-opencode
 
-      - name: Build x64 + arm64 DMG
+      - name: Build Developer ID signed and notarized x64 + arm64 DMG
+        if: steps.mac_signing.outputs.signed == 'true'
+        working-directory: apps/desktop
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npx electron-builder --mac dmg --x64 --arm64 --publish never
+
+      - name: Build ad-hoc signed x64 + arm64 DMG
+        if: steps.mac_signing.outputs.signed != 'true'
         working-directory: apps/desktop
         run: |
           set -euo pipefail
-          if [ "${{ steps.mac_signing.outputs.signed }}" = "true" ]; then
-            npx electron-builder --mac dmg --x64 --arm64 --publish never
-          else
-            CSC_LINK= \
-            CSC_KEY_PASSWORD= \
-            APPLE_ID= \
-            APPLE_APP_SPECIFIC_PASSWORD= \
-            APPLE_TEAM_ID= \
-            npx electron-builder --mac dmg --x64 --arm64 --publish never \
-              --config.mac.identity=- \
-              --config.mac.notarize=false
-          fi
+          for NAME in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            if [ "${!NAME+x}" = "x" ]; then
+              echo "$NAME must be unset for an ad-hoc macOS build" >&2
+              exit 1
+            fi
+          done
+          npx electron-builder --mac dmg --x64 --arm64 --publish never \
+            --config.mac.identity=- \
+            --config.mac.notarize=false
 
       - name: Smoke-test packaged macOS app
         run: |

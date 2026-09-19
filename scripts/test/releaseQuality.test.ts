@@ -39,8 +39,11 @@ test("CI owns the repository quality contract and app builds stay manual", () =>
   assert.match(builds, /--mac dmg --x64 --arm64 --publish never/);
   assert.match(builds, /polyth-macos-dmg-x64/);
   assert.match(builds, /polyth-macos-dmg-arm64/);
-  assert.match(builds, /CSC_LINK/);
+  assert.match(builds, /SIGN_CSC_LINK: \$\{\{ secrets\.CSC_LINK \}\}/);
   assert.match(builds, /APPLE_APP_SPECIFIC_PASSWORD/);
+  assert.doesNotMatch(builds, /\n    env:\n      CSC_LINK: \$\{\{ secrets\.CSC_LINK \}\}/);
+  assert.doesNotMatch(builds, /CSC_LINK= \\/);
+  assert.match(builds, /must be unset for an ad-hoc macOS build/);
   assert.match(builds, /--config\.mac\.identity=-/);
   assert.match(builds, /--config\.mac\.notarize=false/);
   assert.doesNotMatch(builds, /(?:^|\s)-c\.mac\.(?:identity|notarize)=/m);
