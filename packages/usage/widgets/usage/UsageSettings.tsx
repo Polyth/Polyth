@@ -29,7 +29,6 @@ const CARD_METRICS: ReadonlyArray<{ id: UsageMetricId; label: string }> = [
 
 const CHARTS = [
   ["usage-trend", "Usage over time"],
-  ["performance", "Performance"],
   ["distribution", "Top consumers"],
 ] as const;
 
@@ -167,7 +166,7 @@ export default function UsageSettings(): ReactNode {
       <section className="usage-settings-section" data-settings-item="usage.charts">
         <div className="usage-settings-heading">
           <h3>Overview</h3>
-          <p>Keep only the analytical views you use; provider cards remain in Providers.</p>
+          <p>Keep only the analytical views you use; performance charts stay hidden until persisted latency samples exist.</p>
         </div>
         <div className="usage-settings-block-grid">
           {CHARTS.map(([id, label]) => (
