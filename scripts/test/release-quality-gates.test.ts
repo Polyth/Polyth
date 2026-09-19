@@ -54,6 +54,10 @@ test("master CI is automatic while build and release workflows stay manual", () 
   assert.match(release, /Prepare draft GitHub Release/);
   assert.match(release, /gh release create/);
   assert.match(release, /--draft/);
+  assert.match(release, /--mac dmg zip --x64 --arm64 --publish always/);
+  assert.doesNotMatch(release, /--universal/);
+  assert.match(release, /Missing macOS \$ARCH DMG/);
+  assert.match(release, /Missing macOS \$ARCH ZIP/);
   assert.match(release, /--publish always/);
   assert.match(release, /gh release edit .*--draft=false/);
   assert.match(release, /latest\.yml latest-arm64\.yml latest-mac\.yml latest-linux\.yml/);
