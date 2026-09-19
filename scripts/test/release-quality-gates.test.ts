@@ -6,8 +6,11 @@ const read = (path: string): string => readFileSync(path, "utf8");
 
 test("repository quality contract covers stable and Polyth Link tests", () => {
   const script = read("scripts/ci/release-quality.mjs");
-  assert.match(script, /run-tests\.mjs", "ci"/);
-  assert.match(script, /run-tests\.mjs", "polyth-link"/);
+  assert.match(script, /QUALITY_TEST_FILES/);
+  assert.match(script, /release-version\.test\.ts/);
+  assert.match(script, /releaseQuality\.test\.ts/);
+  assert.match(script, /release-quality-gates\.test\.ts/);
+  assert.match(script, /apps\/desktop\/test\/configuration\.test\.ts/);
   for (const project of [
     "packages/contracts",
     "packages/plugins",
