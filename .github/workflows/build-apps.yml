@@ -170,10 +170,10 @@ jobs:
             "@esbuild/darwin-x64@$ESBUILD_VERSION" \
             "@esbuild/darwin-arm64@$ESBUILD_VERSION"
 
-      - name: Build universal desktop bundle
+      - name: Build multi-arch desktop bundle
         run: npm run build:desktop
         env:
-          POLYTH_MAC_UNIVERSAL: "1"
+          POLYTH_MAC_MULTI_ARCH: "1"
 
       - name: Stage Chromium for macOS x64
         run: npm run desktop:stage-chromium
@@ -196,9 +196,9 @@ jobs:
           POLYTH_TARGET_PLATFORM=darwin POLYTH_TARGET_ARCH=x64 npm run desktop:download-opencode
           POLYTH_TARGET_PLATFORM=darwin POLYTH_TARGET_ARCH=arm64 npm run desktop:download-opencode
 
-      - name: Build unsigned universal DMG and updater ZIP
+      - name: Build unsigned x64 + arm64 DMG and ZIP
         working-directory: apps/desktop
-        run: npx electron-builder --mac dmg zip --universal --publish never --config.mac.notarize=false
+        run: npx electron-builder --mac dmg zip --x64 --arm64 --publish never --config.mac.notarize=false
 
       - uses: actions/upload-artifact@v4
         with:
