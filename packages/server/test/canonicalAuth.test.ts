@@ -57,7 +57,16 @@ test("debug agent access is explicit and restricted to direct public loopback in
   assert.equal(local.authenticated, true);
   assert.equal(local.principal.kind, "local-user");
   assert.equal((local.principal as AuthPrincipal & { userId?: string }).userId, f.owner.userId);
+  assert.equal(local.principal.kind === "local-user" ? local.principal.sessionId : undefined, "debug-agent");
   assert.ok(f.gateway.refreshPrincipal(local.principal));
+  assert.equal(
+    f.gateway.refreshPrincipal({
+      kind: "local-user",
+      trustedLoopback: true,
+      userId: f.owner.userId,
+    } as AuthPrincipal),
+    null,
+  );
 
   const browser = f.gateway.resolve(f.request(`${f.cookieName}=${f.owner.token}`), loopback);
   assert.equal(browser.authenticated, true);
