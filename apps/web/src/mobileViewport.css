@@ -7,10 +7,70 @@
   }
 }
 
-/* Native keyboard resize already removes the covered keyboard strip from the
-   WebView. Keep only the optical gap under the new-chat dock while text entry
-   is active; the home-indicator safe area would otherwise lift the composer. */
+/* The measured interaction frame and the decorative canvas have different
+   lifetimes. Never grow the flex layout just to paint a safe-area strip.
+   This sheet is the final mobile viewport owner (see docs/dev/mobile-viewport.md). */
+@media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
+  html:not(:has(body.desktop-app)),
+  body:not(.desktop-app),
+  body:not(.desktop-app) #root {
+    min-height: 0;
+  }
+
+  /* Use the bottom edge, not height alone: Safari can pan a focused editor
+     while retaining the full layout viewport. The keyboard is already removed
+     from this measurement and must not be subtracted a second time. */
+  body:not(.desktop-app) #root > .app {
+    height: var(--visual-bottom, 100dvh);
+    min-height: 0;
+  }
+
+  /* A viewport-fixed paint layer survives a shorter interaction frame. The
+     large viewport is decorative only; it never adds scrollable content or
+     competes with the composer's visible-viewport sizing. */
+  html[data-background]:not([data-background="none"]):not(:has(body.desktop-app)) {
+    background-image: none;
+  }
+  html[data-background]:not([data-background="none"]):not(:has(body.desktop-app))::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    min-height: 100lvh;
+    z-index: -1;
+    pointer-events: none;
+    background-color: var(--bg);
+    background-image:
+      linear-gradient(
+        color-mix(in srgb, var(--bg) 76%, transparent),
+        color-mix(in srgb, var(--bg) 76%, transparent)
+      ),
+      var(--app-background-image);
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: cover;
+  }
+  html[data-background]:not([data-background="none"]) body:not(.desktop-app),
+  html[data-background]:not([data-background="none"]) body:not(.desktop-app) .app {
+    background-color: transparent;
+    background-image: none;
+  }
+}
+
+/* The home-indicator inset belongs to the outer dock once, in both chat
+   states. With a keyboard the already-resized viewport needs only the optical
+   gap, not the full-screen safe area. */
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  /* A short keyboard/landscape band hides .hero-body; retain the bottom
+     anchor even when that flex spacer is absent. */
+  .stage-new .hero-dock {
+    margin-block-start: auto;
+  }
+  .conversation-composer-dock {
+    padding-bottom: max(var(--space-1), var(--safe-bottom));
+  }
+  body[data-keyboard="open"] .conversation-composer-dock {
+    padding-bottom: 0;
+  }
   body[data-keyboard="open"] .hero-dock {
     padding-bottom: var(--space-1);
   }
