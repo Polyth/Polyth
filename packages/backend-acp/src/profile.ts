@@ -104,7 +104,7 @@ export function registerAcpProfile(host: ServerPackageHost, profile: RegisteredA
         onEnable() {
             registration = registry.register({
                 descriptor: profile.descriptor,
-                staticFeatures: ACP_STATIC_FEATURES,
+                staticFeatures: { ...ACP_STATIC_FEATURES, ...(profile.runtimeFeatures ?? {}) },
                 probe: probeProfile,
                 invalidateDiscovery(context) {
                     invalidateAcpDiscovery({ harnessId: profile.descriptor.id, cacheIdentity: contextKey(context) });
@@ -178,6 +178,9 @@ export function registerAcpProfile(host: ServerPackageHost, profile: RegisteredA
                             {
                                 models: catalogs.get(contextKey(context))?.models,
                                 ...(clientTranslator ? { clientTranslator } : {}),
+                                ...(profile.runtimeFeatures ? { runtimeFeatures: profile.runtimeFeatures } : {}),
+                                ...(profile.translatePromptResult ? { translatePromptResult: profile.translatePromptResult } : {}),
+                                ...(profile.translatePromptError ? { translatePromptError: profile.translatePromptError } : {}),
                             },
                         );
                     } catch (error) {
