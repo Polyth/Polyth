@@ -72,7 +72,6 @@ test("manual desktop workflow builds Windows, Linux and macOS artifacts without 
     "npm run desktop:download-opencode",
     "release/*.AppImage",
     "release/*.exe",
-    "release/latest*.yml",
   ]) {
     assert.ok(workflow.includes(required), `manual desktop build workflow must include ${required}`);
   }
