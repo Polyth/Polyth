@@ -163,7 +163,10 @@ implemented yet — today's host execution is unchanged. See §5.
 
 ### 2.8 Package-runtime implications
 
-`ServerPackageHost` now carries `spaceStorage(ctx)` and `deployment`.
+`ServerPackageHost` carries `spaceStorage(ctx)`, `systemSpaceContext(spaceId)`
+and `deployment`. Background package work must derive a Space id from a
+canonical project/session and ask the host for its system context; packages
+must not fabricate a context or reconstruct a tenant storage path.
 `storageDir` is retained and re-documented as the **shared, non-tenant** root —
 correct for deployment-wide state (a binary cache, a trusted registry), wrong
 for anything a Space owns. Packages holding tenant state there are being
