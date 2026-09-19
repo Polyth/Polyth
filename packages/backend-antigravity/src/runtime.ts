@@ -1,0 +1,356 @@
+import { createHash } from "node:crypto";
+import type { ChildProcess } from "node:child_process";
+import type { AgentRuntime, HarnessContext, ModelDescriptor, ModelRef, MutationOutcome, RuntimeEvent, RuntimeObservation, RuntimeSnapshot, TokenUsage } from "@polyth/contracts";
+import { composeTurnPrompt, deltaTokenUsage, resolveModelSelection } from "@polyth/harness-runtime";
+import type { HarnessProcessAuthority } from "@polyth/harness-runtime/process-authority";
+import { ANTIGRAVITY_CAPABILITIES, agyError, agyLaunchArgs, agyUsage, createAgyDecoder, createAgyTurn, record, sameAgyModel, text } from "./protocol.ts";
+
+type Admission = MutationOutcome<{ admissionId?: string }>;
+export interface AntigravityRuntimeOptions {
+  context: HarnessContext;
+  authority: HarnessProcessAuthority;
+  command: string;
+  env?: NodeJS.ProcessEnv;
+  models(): Promise<ModelDescriptor[]>;
+  timeoutMs?: number;
+}
+
+/** One native process per canonical runtime. No agent loop, provider fallback or hidden replay. */
+export function createAntigravityRuntime(options: AntigravityRuntimeOptions): AgentRuntime {
+  const { context, authority } = options;
+  let child: ChildProcess | undefined;
+  let nativeId = "";
+  let createId = "";
+  let selectedModel: ModelRef | undefined;
+  let selectedAgent: string | undefined;
+  let started = false;
+  let connected = true;
+  let stopping = false;
+  let released = false;
+  let closing: Promise<void> | undefined;
+  let initialization: Promise<void> | undefined;
+  let initResolve: (() => void) | undefined;
+  let initReject: ((error: Error) => void) | undefined;
+  let initTimer: ReturnType<typeof setTimeout> | undefined;
+  let active: { id: string; turn: ReturnType<typeof createAgyTurn>; admit?: (outcome: Admission) => void; timer?: ReturnType<typeof setTimeout> } | undefined;
+  let selectionPending = false;
+  let previousUsage: TokenUsage | undefined;
+  let usageBaselineKnown = true;
+  let completedTurns: number | undefined;
+  let completedStep = -1;
+  let currentMaxStep = -1;
+  let serial = 0;
+  let order = 0;
+  let reconciliationOrdinal = 0;
+  const events = new Map<string, RuntimeSnapshot["events"][number]>();
+  const accepted: NonNullable<RuntimeSnapshot["acceptedOperations"]> = [];
+  const listeners = new Set<Parameters<AgentRuntime["onEvent"]>[0]>();
+  const observations = new Set<Parameters<NonNullable<AgentRuntime["onObservation"]>>[0]>();
+  const lifecycle = new Set<Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0]>();
+  const endpoint = {
+    authorityId: authority.authorityId, generation: authority.generation, continuity: "generation-only" as const,
+    url: "stdio:antigravity", location: { directory: context.cwd },
+    control: { kind: "owned" as const, instanceToken: authority.authorityId },
+    config: { kind: "read-only" as const }, authentication: { kind: "none" as const },
+  };
+  const belongs = (sessionId: string) => !!context.sessionId && sessionId === context.sessionId;
+  const knownNative = (id: string) => Object.entries(authority.receipts).some(([key, value]) => key.startsWith("create:") && value === id);
+  const rejected = (code: string, message: string) => ({ kind: "rejected" as const, code, message });
+  const unknown = (operationId: string, message: string) => ({ kind: "unknown" as const, operationId, message });
+  const announce = () => {
+    for (const callback of lifecycle) callback({ type: connected ? "stream-connected" : "stream-disconnected", authorityId: authority.authorityId, generation: authority.generation });
+  };
+  const emit = (event: RuntimeEvent) => {
+    if (!context.sessionId) return;
+    const entityKey = `${active?.id || createId || nativeId}:${++serial}`;
+    const revision = createHash("sha256").update(JSON.stringify(event)).digest("hex");
+    const artifactKind = event.type.startsWith("tool/") ? "tool" : event.type.startsWith("turn/") ? "turn" : "message";
+    events.set(entityKey, { entityKey, revision, artifactKind, events: [event] });
+    // Canonical storage is authoritative; this is a bounded partial replay cache.
+    if (events.size > 4096) events.delete(events.keys().next().value!);
+    if (observations.size) {
+      const observation: RuntimeObservation = { channel: "sse", entityKey, reconciliationOrdinal,
+        identity: { ...endpoint, backendSessionId: nativeId, artifactKind, entityId: entityKey, revision }, events: [event] };
+      for (const callback of observations) callback(context.sessionId, observation);
+    } else for (const callback of listeners) callback(context.sessionId, event);
+  };
+  const settleAdmission = (outcome: Admission) => {
+    if (!active) return;
+    if (active.timer) clearTimeout(active.timer);
+    const resolve = active.admit;
+    active.admit = undefined;
+    resolve?.(outcome);
+  };
+  const closeAuthority = () => {
+    if (released) return Promise.resolve();
+    if (!closing) closing = authority.close().then(() => { released = true; }).finally(() => { closing = undefined; });
+    return closing;
+  };
+  const fail = (error: Error) => {
+    if (!connected || stopping) return;
+    connected = false;
+    if (initTimer) clearTimeout(initTimer);
+    initReject?.(error);
+    initReject = undefined;
+    if (active) settleAdmission(unknown(active.id, error.message));
+    // A closed pipe is not release proof. Only the shared authority can fence
+    // descendants. Keep the turn uncertain when containment cannot be proved.
+    void closeAuthority().then(() => {
+      if (active) {
+        emit({ type: "turn/stopped", turnId: active.id, reason: "error", code: "unknown", error: error.message });
+        active = undefined;
+      }
+      order++;
+      announce();
+    }, () => announce());
+  };
+  const validateModel = async (model?: ModelRef) => {
+    if (!model) return;
+    const selection = resolveModelSelection(await options.models(), model, "antigravity");
+    if (!selection.ok) throw agyError(selection.code, selection.message);
+    agyLaunchArgs(model);
+  };
+  const admitted = async () => {
+    const current = active;
+    if (!current?.admit) return;
+    await authority.receipt(`turn:${current.id}`, nativeId);
+    if (stopping || !connected || active !== current) return;
+    accepted.push({ operationId: current.id, mutationKind: "turn-submit", receipt: current.id, backendSessionId: nativeId });
+    emit({ type: "turn/started", turnId: current.id, ...(selectedModel ? { model: selectedModel } : {}) });
+    settleAdmission({ kind: "confirmed", value: { admissionId: current.id }, receipt: current.id });
+  };
+  let frameQueue = Promise.resolve();
+  let queuedBytes = 0;
+  const onFrame = async (frame: Record<string, unknown>, expectedId?: string) => {
+    if (!connected || stopping) return;
+    if (frame.event === "init") {
+      if (nativeId) throw agyError("protocol-error", "Antigravity sent a duplicate initialization");
+      const id = text(frame.conversation_id);
+      const init = record(frame.init);
+      if (!id || !init || (expectedId && id !== expectedId)) throw agyError("protocol-error", "Antigravity did not initialize the requested conversation");
+      agyLaunchArgs(undefined, undefined, id);
+      if (typeof init.cwd === "string" && init.cwd !== context.cwd) throw agyError("protocol-error", "Antigravity initialized a different workspace");
+      if (selectedModel && init.model !== selectedModel.modelID) throw agyError("protocol-error", "Antigravity did not confirm the selected model");
+      if (selectedAgent && init.agent !== selectedAgent) throw agyError("protocol-error", "Antigravity did not confirm the selected agent");
+      if (!selectedModel && text(init.model)) selectedModel = { providerID: "antigravity", modelID: text(init.model)! };
+      nativeId = id;
+      for (const [key, value] of Object.entries(authority.receipts)) {
+        if (key.startsWith("turn:") && value === id) accepted.push({ operationId: key.slice(5), mutationKind: "turn-submit", receipt: key.slice(5), backendSessionId: id });
+      }
+      if (createId) await authority.receipt(`create:${createId}`, id);
+      if (stopping || !connected) return;
+      if (initTimer) clearTimeout(initTimer);
+      initResolve?.();
+      initResolve = undefined; initReject = undefined;
+      order++;
+      announce();
+      return;
+    }
+    if (frame.event !== "step_update" && frame.event !== "result") return;
+    const payload = record(frame[frame.event]);
+    if (!payload || !nativeId || payload.conversation_id !== nativeId)
+      throw agyError("protocol-error", "Antigravity event belongs to a different conversation");
+    if (frame.event === "result") {
+      const turns = payload.num_turns;
+      if (typeof turns !== "number" || !Number.isSafeInteger(turns) || turns < 1)
+        throw agyError("protocol-error", "Antigravity result has no valid turn counter");
+      if (completedTurns !== undefined && turns <= completedTurns) return;
+      if (completedTurns !== undefined && turns !== completedTurns + 1)
+        throw agyError("protocol-error", "Antigravity turn counter skipped an unobserved turn");
+    }
+    if (!active) return; // No prompt is outstanding; never attach ambient output.
+    const current = active;
+    if (frame.event === "step_update") {
+      const index = payload.step_index;
+      if (typeof index !== "number" || !Number.isSafeInteger(index) || index < 0)
+        throw agyError("protocol-error", "Antigravity step has no valid index");
+      if (index <= completedStep) return;
+      currentMaxStep = Math.max(currentMaxStep, index);
+      await admitted();
+      if (active !== current || !connected || stopping) return;
+      for (const event of current.turn.step(payload)) emit(event);
+      return;
+    }
+    // An error result proves the input reached the native CLI too, even when
+    // it rejected the model/policy before producing a user_input step.
+    await admitted();
+    if (active !== current || !connected || stopping) return;
+    const cumulative = agyUsage(payload.usage);
+    const monotonic = cumulative && (!previousUsage || Object.keys(cumulative).every((key) =>
+      (cumulative[key as keyof TokenUsage] ?? 0) >= (previousUsage![key as keyof TokenUsage] ?? 0)));
+    const usage = cumulative && usageBaselineKnown && monotonic ? deltaTokenUsage(previousUsage, cumulative) : undefined;
+    const resultEvents = current.turn.finish(payload, usage);
+    completedTurns = payload.num_turns as number;
+    completedStep = currentMaxStep;
+    previousUsage = cumulative;
+    usageBaselineKnown = !!cumulative;
+    active = undefined;
+    order++;
+    for (const event of resultEvents) emit(event);
+  };
+  const initialize = async (model?: ModelRef, agent?: string, resumeId?: string) => {
+    if (initialization) {
+      await initialization;
+      if (resumeId && nativeId !== resumeId) throw agyError("conflict", "This runtime already owns another conversation");
+      if ((model && !sameAgyModel(model, selectedModel)) || (agent && agent !== selectedAgent))
+        throw agyError("unsupported", "Antigravity launch settings cannot change while resuming a live runtime");
+      return;
+    }
+    if (!connected || stopping) throw agyError("runtime-unavailable", "Antigravity runtime is closed; reconnect the session");
+    const args = agyLaunchArgs(model, agent, resumeId);
+    selectedModel = model; selectedAgent = agent; usageBaselineKnown = !resumeId;
+    initialization = new Promise<void>((resolve, reject) => { initResolve = resolve; initReject = reject; });
+    // Install a handler immediately; child callbacks can fail before the caller awaits.
+    void initialization.catch(() => {});
+    initTimer = setTimeout(() => fail(agyError("outcome-unknown", "Antigravity did not initialize in time; no prompt was replayed")), options.timeoutMs ?? 15_000);
+    const decoder = createAgyDecoder((frame) => {
+      const size = Buffer.byteLength(JSON.stringify(frame));
+      queuedBytes += size;
+      if (queuedBytes > 8 * 1024 * 1024) throw agyError("protocol-error", "Antigravity output exceeded the pending event limit");
+      frameQueue = frameQueue.then(() => onFrame(frame, resumeId)).catch((error) => fail(error instanceof Error ? error : agyError("protocol-error", "Antigravity event processing failed"))).finally(() => { queuedBytes -= size; });
+    });
+    try {
+      child = authority.spawn(options.command, args, { cwd: context.cwd, env: options.env });
+      started = true;
+      child.stdin?.on("error", () => fail(agyError("outcome-unknown", "Antigravity input pipe closed; the prompt was not replayed")));
+      child.stdout?.on("data", (chunk: Buffer) => {
+        try { decoder.write(chunk); } catch (error) { fail(error as Error); }
+      });
+      // Drain diagnostics, but never persist raw stderr (credentials/auth URLs,
+      // native prompts and paths can appear there).
+      child.stderr?.resume();
+      child.once("error", () => fail(agyError("runtime-unavailable", "Antigravity could not start; check the configured CLI executable")));
+      child.once("close", () => {
+        try { decoder.end(); } catch (error) { fail(error as Error); }
+        void frameQueue.then(() => {
+          if (!stopping) fail(agyError("outcome-unknown", "Antigravity disconnected; verify the native session before retrying"));
+        });
+      });
+    } catch (error) { fail(error instanceof Error ? error : agyError("runtime-unavailable", "Antigravity could not start")); }
+    return initialization;
+  };
+  const create: NonNullable<AgentRuntime["createSessionOperation"]> = async (request, operationId) => {
+    if (!belongs(request.sessionId) || request.cwd !== context.cwd || request.projectId !== context.projectId)
+      return rejected("invalid-session", "Antigravity runtime belongs to another session or workspace");
+    if (createId && createId !== operationId) return rejected("unsupported", "Create a new Polyth session to start a fresh Antigravity conversation");
+    // Claim synchronously before catalog I/O so competing create operations
+    // cannot overwrite the receipt owner while discovery is pending.
+    createId = operationId;
+    try { await validateModel(request.model ?? context.model); } catch (error) {
+      if (!initialization) createId = "";
+      return rejected((error as { code?: string }).code ?? "discovery-unavailable", "Antigravity could not validate the selected model or effort");
+    }
+    try {
+      await initialize(request.model ?? context.model, request.agent, authority.receipts[`create:${operationId}`]);
+      return { kind: "confirmed", value: { backendSessionId: nativeId }, receipt: nativeId };
+    } catch {
+      return started ? unknown(operationId, "Antigravity session creation was not confirmed; no automatic retry was made")
+        : rejected("runtime-unavailable", "Antigravity CLI could not be launched");
+    }
+  };
+  const runtime: AgentRuntime = {
+    harnessId: "antigravity",
+    capabilities: async () => ANTIGRAVITY_CAPABILITIES,
+    models: options.models,
+    agents: async () => [],
+    createSessionOperation: create,
+    resetSessionOperation: async () => rejected("unsupported", "Antigravity cannot replace exact native history; start a new session"),
+    async ensureSession(input) {
+      if (!belongs(input.sessionId) || input.cwd !== context.cwd || input.projectId !== context.projectId || !input.backendSessionId || !knownNative(input.backendSessionId))
+        throw agyError("unknown-session", "Only this Space's recorded Antigravity conversation can be resumed");
+      await validateModel(input.model ?? context.model);
+      await initialize(input.model ?? context.model, input.agent, input.backendSessionId);
+      return nativeId;
+    },
+    sessions: async () => Object.entries(authority.receipts).filter(([key]) => key.startsWith("create:")).map(([key, id]) => ({ id, operationId: key.slice(7), title: "Antigravity session", createdAt: 0, updatedAt: 0 })),
+    history: async () => [],
+    async startTurnOperation(request, operationId) {
+      if (!belongs(request.sessionId)) return rejected("invalid-session", "Antigravity runtime belongs to another session");
+      if (authority.receipts[`turn:${operationId}`] === nativeId && nativeId)
+        return { kind: "confirmed", value: { admissionId: operationId }, receipt: operationId };
+      if (authority.receipts[`sent:${operationId}`]) return unknown(operationId, "This prompt may already have reached Antigravity; it was not replayed");
+      if (!connected || !nativeId || !child?.stdin?.writable || stopping) return rejected("runtime-unavailable", "Antigravity is disconnected; reconnect the session");
+      if (active || selectionPending) return rejected("busy", "Antigravity accepts one turn at a time");
+      if (request.command) return rejected("unsupported", "Native slash commands are unavailable in Antigravity stream mode");
+      if ((request.model && !sameAgyModel(request.model, selectedModel)) || (request.agent && request.agent !== selectedAgent))
+        return rejected("unsupported", "Antigravity model, effort and agent are launch-time settings; start a new session to change them");
+      const prompt = composeTurnPrompt(request.text, request.attachments);
+      if (prompt.images.length || request.attachments?.some((ref) => ref.kind !== "browser-context"))
+        return rejected("unsupported", "Antigravity stream mode accepts text only; attach a text file through Polyth's text projection");
+      const input = JSON.stringify({ event: "user", message: { content: prompt.text } }) + "\n";
+      if (Buffer.byteLength(input) > 4 * 1024 * 1024) return rejected("invalid-input", "Antigravity prompt exceeds the size limit");
+      selectionPending = true;
+      try {
+        // Persist intent BEFORE touching stdin: a lost acknowledgement is not
+        // permission to submit a duplicated prompt after a server restart.
+        await authority.receipt(`sent:${operationId}`, nativeId);
+        if (!connected || stopping) return unknown(operationId, "Antigravity disconnected while recording the prompt intent");
+        return await new Promise<Admission>((resolve) => {
+          active = { id: operationId, turn: createAgyTurn(operationId, selectedModel), admit: resolve };
+          active.timer = setTimeout(() => fail(agyError("outcome-unknown", "Antigravity did not acknowledge the prompt; it was not replayed")), options.timeoutMs ?? 15_000);
+          order++;
+          child!.stdin!.write(input, (error) => { if (error) fail(agyError("outcome-unknown", "Antigravity did not confirm prompt delivery")); });
+        });
+      } catch {
+        fail(agyError("outcome-unknown", "Antigravity prompt delivery was not confirmed"));
+        return unknown(operationId, "Antigravity prompt intent could not be confirmed");
+      }
+      finally { selectionPending = false; }
+    },
+    startTurn: async () => { throw agyError("unsupported", "Operation-aware admission is required"); },
+    async abort(sessionId) {
+      if (!belongs(sessionId)) throw agyError("invalid-session", "Antigravity runtime belongs to another session");
+      stopping = true;
+      if (initTimer) clearTimeout(initTimer);
+      initReject?.(agyError("runtime-unavailable", "Antigravity was stopped"));
+      if (active) settleAdmission(unknown(active.id, "Antigravity was stopped during prompt admission"));
+      // SIGINT/control messages alone are not proof of release. Terminate the
+      // entire owned process tree and wait for the shared authority receipt.
+      await closeAuthority();
+      if (active) {
+        settleAdmission(unknown(active.id, "Antigravity was stopped during prompt admission"));
+        emit({ type: "turn/stopped", turnId: active.id, reason: "aborted" });
+        active = undefined;
+      }
+      connected = false; order++; announce();
+    },
+    async abortOperation(sessionId, operationId) {
+      try { await runtime.abort(sessionId); return { kind: "confirmed", value: {} }; }
+      catch { return unknown(operationId, "Antigravity process-tree release is not confirmed"); }
+    },
+    replyPermission: async () => { throw agyError("unsupported", "Antigravity permissions remain in the native CLI; stream mode has no approval reply channel"); },
+    replyQuestion: async () => { throw agyError("unsupported", "Antigravity stream mode has no interactive question channel"); },
+    endpoint: async () => endpoint,
+    protocol: async () => "legacy",
+    async reconcile(binding) {
+      reconciliationOrdinal = binding.reconciliationOrdinal ?? 0;
+      const matches = belongs(binding.canonicalSessionId) && binding.backendSessionId === nativeId && binding.location.directory === context.cwd
+        && binding.authorityId === authority.authorityId && binding.generation === authority.generation;
+      return { ...endpoint, backendSessionId: binding.backendSessionId ?? nativeId, reconciliationOrdinal,
+        state: { value: !matches || !connected || stopping ? "unknown" : active ? "running" : "idle", comparison: { domain: authority.authorityId, order: ++order }, ...(createId && !accepted.length ? { causalOperationId: createId } : {}) },
+        completeness: { events: "partial", permissions: "complete", questions: "complete" },
+        events: matches ? [...events.values()] : [], permissions: [], questions: [], acceptedOperations: matches ? accepted : [],
+      };
+    },
+    async releaseExecution(binding, operationId) {
+      const proof = (binding.authorityId === authority.authorityId && binding.generation === authority.generation)
+        || authority.releasedAuthorities.some((item) => item.authorityId === binding.authorityId && item.generation === binding.generation);
+      if (!proof || !belongs(binding.canonicalSessionId) || binding.backendSessionId !== nativeId || binding.location.directory !== context.cwd)
+        return rejected("invalid-session", "Antigravity execution binding does not match this runtime");
+      try { await runtime.dispose(); return { kind: "confirmed", value: { authorityId: binding.authorityId, generation: binding.generation, backendSessionId: nativeId } }; }
+      catch { return unknown(operationId, "Antigravity execution release has not been proved"); }
+    },
+    onEvent(callback) { listeners.add(callback); return { dispose: () => { listeners.delete(callback); } }; },
+    onObservation(callback) { observations.add(callback); return { dispose: () => { observations.delete(callback); } }; },
+    onLifecycle(callback) { lifecycle.add(callback); return { dispose: () => { lifecycle.delete(callback); } }; },
+    async dispose() {
+      stopping = true;
+      if (initTimer) clearTimeout(initTimer);
+      initReject?.(agyError("runtime-unavailable", "Antigravity runtime was disposed"));
+      if (active) settleAdmission(unknown(active.id, "Antigravity runtime was disposed during admission"));
+      await closeAuthority();
+      connected = false;
+    },
+  };
+  return runtime;
+}

@@ -150,7 +150,7 @@ export type ParseManifestSuccess = { ok: true; manifest: PackageManifest };
 export type ParseManifestResult = ParseManifestSuccess | ParseManifestFailure;
 
 const err = (code: string, message: string): ParseManifestFailure => ({ ok: false, code, message });
-const fail = (code: string, message: string): never => {
+const fail: (code: string, message: string) => never = (code, message) => {
   throw Object.assign(new Error(message), { code });
 };
 
