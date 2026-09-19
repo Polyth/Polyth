@@ -1,13 +1,16 @@
-// F13 quota half: model-family grouping for provider quota windows plus
-// browser-local display preferences (per-provider visibility, collapsed
-// groups). Prefs live in localStorage under polyth.usagePrefs — they are
-// telemetry display choices and never touch the event log or the server.
+// Reactive browser cache for server-owned Usage preferences. Usage contributes
+// this slice through the web client-settings registry; /api/settings/client is
+// the persistence authority and browser storage is only bootstrap/migration.
 import { useSyncExternalStore } from "react";
+import {
+  accountStorageGet,
+  accountStorageKey,
+  accountStorageSet,
+} from "@polyth/web/account-storage";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 
 // ---- model-family grouping (pure) ------------------------------------------
 
-/** Canonical family per recognizable token; sub-brands fold into the vendor line. */
 const FAMILY_ALIAS: Record<string, string> = {
   claude: "claude", sonnet: "claude", opus: "claude", haiku: "claude",
   gpt: "gpt", chatgpt: "gpt",
@@ -25,25 +28,18 @@ const FAMILY_ALIAS: Record<string, string> = {
 
 const UPPER_LABELS = new Set([tr("usageprefs.gpt"), tr("usageprefs.glm")]);
 
-/** Derive a model family from a quota window id/label. Returns null when the
- *  text does not look like a model name (e.g. "requests-day", "Spend (month)")
- *  so such windows group honestly under a general bucket instead of a fake
- *  family. Pure and total — never throws. */
 export function modelFamily(text: string): string | null {
   const tokens = text.toLowerCase().split(/[^a-z0-9.]+/).filter(Boolean);
   for (const token of tokens) {
     const exact = FAMILY_ALIAS[token];
     if (exact) return exact;
-    // o-series reasoning models: each generation is its own family (o1/o3/o4)
     if (/^o\d$/.test(token)) return token;
-    // glued version suffixes: gpt4o, claude3, gemini15
     const prefix = /^([a-z]+)\d/.exec(token)?.[1];
     if (prefix && FAMILY_ALIAS[prefix]) return FAMILY_ALIAS[prefix];
   }
   return null;
 }
 
-/** Human label for a family id ("gpt" → "GPT", "claude" → "Claude", "o3" → "o3"). */
 export function familyLabel(family: string): string {
   if (UPPER_LABELS.has(family)) return family.toUpperCase();
   if (/^o\d$/.test(family)) return family;
@@ -53,15 +49,11 @@ export function familyLabel(family: string): string {
 export interface QuotaWindowLike { id: string; label: string }
 
 export interface QuotaWindowGroup<W extends QuotaWindowLike> {
-  /** null = provider-level windows not tied to any model family */
   family: string | null;
   label: string;
   windows: W[];
 }
 
-/** Group quota windows by model family. The general (non-model) bucket comes
- *  first; family groups follow in first-appearance order so provider ordering
- *  is preserved. Window order inside each group is untouched. */
 export function groupQuotaWindows<W extends QuotaWindowLike>(windows: readonly W[]): QuotaWindowGroup<W>[] {
   const byKey = new Map<string, QuotaWindowGroup<W>>();
   for (const w of windows) {
@@ -82,101 +74,212 @@ export function groupQuotaWindows<W extends QuotaWindowLike>(windows: readonly W
 
 export type UsageBillingKind = "api" | "subscription";
 export type UsageChartStyle = "bar" | "line";
+export type UsageDashboardDensity = "compact" | "comfortable";
+export type UsageMetricId =
+  | "cost"
+  | "tokens"
+  | "sessions"
+  | "ttft"
+  | "tps"
+  | "cache"
+  | "errors"
+  | "success";
+export type UsagePerformanceStatistic = "p50" | "average" | "p95";
+export type UsageBreakdownDimension = "provider" | "model" | "harness" | "project";
+export type UsageProviderSort = "quota" | "spend" | "usage" | "name" | "manual";
 
 export interface UsageProviderCostProfile {
   billing: UsageBillingKind;
-  /** Fixed monthly subscription price in USD. Null means not configured. */
+  /** Fixed subscription price in USD/month. */
   monthlyCost: number | null;
+  /** Optional API budget in USD/month. */
+  monthlyBudget: number | null;
+  /** Optional default USD / 1M token pricing used for calculated equivalents. */
+  inputPerMillion: number | null;
+  outputPerMillion: number | null;
+}
+
+export interface UsageModelPricingProfile {
+  /** USD / 1M tokens. Null leaves the recorded/catalog-derived value untouched. */
+  inputPerMillion: number | null;
+  outputPerMillion: number | null;
+}
+
+export interface UsageCustomRange {
+  /** YYYY-MM-DD, interpreted in the browser's local timezone. */
+  start: string;
+  /** YYYY-MM-DD, inclusive, interpreted in the browser's local timezone. */
+  end: string;
+}
+
+export interface UsageDashboardPrefs {
+  view: "overview" | "providers";
+  layout: UsageDashboardDensity;
+  rangeDays: 7 | 30 | 90;
+  rangeMode: "preset" | "custom";
+  customRange: UsageCustomRange | null;
+  chartStyle: UsageChartStyle;
+  chartMetric: "tokens" | "cost" | "sessions";
+  chartGrouping: UsageBreakdownDimension;
+  distributionGrouping: UsageBreakdownDimension;
+  showChartLegend: boolean;
+  providerSort: UsageProviderSort;
+  cardMetrics: UsageMetricId[];
+  performanceStatistic: UsagePerformanceStatistic;
+  showApiEquivalent: boolean;
+  showValueMultiplier: boolean;
+  showQuotaDetails: boolean;
+  overviewOrder: string[];
+  providerOrder: string[];
 }
 
 export interface UsagePrefs {
-  /** Provider ids unchecked in Settings → Usage; stay hidden after reload. */
   hiddenProviders: string[];
-  /** Dashboard block ids hidden from the overview via the edit-mode eye. */
+  /** Analytical blocks hidden from Overview. Current ids: usage-trend, performance, distribution. */
   hiddenBlocks: string[];
-  /** Provider cards explicitly kept ahead of the regular provider order. */
+  /** Legacy presentation preference retained for migration; cards no longer expose permanent pin controls. */
   pinnedProviders: string[];
-  /** Collapsed quota groups as "providerId/family" keys. */
   collapsedGroups: string[];
-  /** Browser-local billing metadata keyed by canonical provider id. */
   providerCosts: Record<string, UsageProviderCostProfile>;
-  /** Browser-local dashboard presentation, restored whenever Usage remounts. */
+  /** Model key is the canonical provider/model identity used by Usage composition. */
+  modelPricing: Record<string, UsageModelPricingProfile>;
   dashboard: UsageDashboardPrefs;
 }
 
 export const USAGE_PREFS_KEY = "polyth.usagePrefs";
-
 const MAX_ENTRIES = 128;
+const ALL_CARD_METRICS: UsageMetricId[] = ["cost", "tokens", "sessions", "ttft", "tps", "cache"];
+const DIMENSIONS: UsageBreakdownDimension[] = ["provider", "model", "harness", "project"];
+const PROVIDER_SORTS: UsageProviderSort[] = ["quota", "spend", "usage", "name", "manual"];
+const METRICS: UsageMetricId[] = ["cost", "tokens", "sessions", "ttft", "tps", "cache", "errors", "success"];
+
 const DEFAULT_DASHBOARD_PREFS: UsageDashboardPrefs = {
   view: "providers",
-  layout: "expanded",
+  layout: "compact",
   rangeDays: 7,
+  rangeMode: "preset",
+  customRange: null,
   chartStyle: "bar",
   chartMetric: "tokens",
+  chartGrouping: "provider",
+  distributionGrouping: "model",
   showChartLegend: true,
+  providerSort: "quota",
+  cardMetrics: ALL_CARD_METRICS,
+  performanceStatistic: "p50",
+  showApiEquivalent: true,
+  showValueMultiplier: true,
+  showQuotaDetails: true,
   overviewOrder: [],
   providerOrder: [],
 };
-
-export interface UsageDashboardPrefs {
-  view: "overview" | "providers";
-  layout: "expanded" | "compact";
-  rangeDays: 7 | 30 | 90;
-  chartStyle: UsageChartStyle;
-  chartMetric: "tokens" | "cost" | "sessions";
-  showChartLegend: boolean;
-  overviewOrder: string[];
-  providerOrder: string[];
-}
 
 const stringList = (value: unknown): string[] =>
   Array.isArray(value)
     ? value.filter((s): s is string => typeof s === "string" && s !== "").slice(0, MAX_ENTRIES)
     : [];
 
+const enumValue = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T =>
+  typeof value === "string" && allowed.includes(value as T) ? value as T : fallback;
+
 const finiteMoney = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) && value >= 0
     ? Math.round(value * 100) / 100
     : null;
 
+const finiteRate = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.round(value * 1_000_000) / 1_000_000
+    : null;
+
+const validDateOnly = (value: unknown): string | null =>
+  typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+
 const providerCostProfiles = (value: unknown): Record<string, UsageProviderCostProfile> => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  const entries = Object.entries(value as Record<string, unknown>)
-    .filter(([providerId]) => providerId.trim() !== "")
-    .slice(0, MAX_ENTRIES)
-    .map(([providerId, rawProfile]) => {
-      const profile = rawProfile && typeof rawProfile === "object"
-        ? rawProfile as Partial<UsageProviderCostProfile>
-        : {};
-      return [providerId, {
-        billing: profile.billing === "subscription" ? "subscription" : "api",
-        monthlyCost: finiteMoney(profile.monthlyCost),
-      } satisfies UsageProviderCostProfile] as const;
-    });
-  return Object.fromEntries(entries);
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([providerId]) => providerId.trim() !== "")
+      .slice(0, MAX_ENTRIES)
+      .map(([providerId, rawProfile]) => {
+        const profile = rawProfile && typeof rawProfile === "object"
+          ? rawProfile as Partial<UsageProviderCostProfile>
+          : {};
+        return [providerId, {
+          billing: profile.billing === "subscription" ? "subscription" : "api",
+          monthlyCost: finiteMoney(profile.monthlyCost),
+          monthlyBudget: finiteMoney(profile.monthlyBudget),
+          inputPerMillion: finiteRate(profile.inputPerMillion),
+          outputPerMillion: finiteRate(profile.outputPerMillion),
+        } satisfies UsageProviderCostProfile] as const;
+      }),
+  );
+};
+
+const modelPricingProfiles = (value: unknown): Record<string, UsageModelPricingProfile> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([modelKey]) => modelKey.trim() !== "")
+      .slice(0, MAX_ENTRIES * 4)
+      .map(([modelKey, rawProfile]) => {
+        const profile = rawProfile && typeof rawProfile === "object"
+          ? rawProfile as Partial<UsageModelPricingProfile>
+          : {};
+        return [modelKey, {
+          inputPerMillion: finiteRate(profile.inputPerMillion),
+          outputPerMillion: finiteRate(profile.outputPerMillion),
+        } satisfies UsageModelPricingProfile] as const;
+      })
+      .filter(([, profile]) => profile.inputPerMillion !== null || profile.outputPerMillion !== null),
+  );
+};
+
+const customRange = (value: unknown): UsageCustomRange | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value as Partial<UsageCustomRange>;
+  const start = validDateOnly(raw.start);
+  const end = validDateOnly(raw.end);
+  return start && end && start <= end ? { start, end } : null;
 };
 
 export function parseUsagePrefs(raw: string | null): UsagePrefs {
   try {
     const data = JSON.parse(raw ?? "") as Partial<UsagePrefs>;
-    const dashboard = data.dashboard as Partial<UsageDashboardPrefs> | undefined;
+    const dashboard = data.dashboard as Partial<UsageDashboardPrefs> & { layout?: string } | undefined;
+    const parsedCustomRange = customRange(dashboard?.customRange);
+    const cardMetrics = stringList(dashboard?.cardMetrics)
+      .filter((metric): metric is UsageMetricId => METRICS.includes(metric as UsageMetricId));
     return {
       hiddenProviders: stringList(data.hiddenProviders),
       hiddenBlocks: stringList(data.hiddenBlocks),
       pinnedProviders: stringList(data.pinnedProviders),
       collapsedGroups: stringList(data.collapsedGroups),
       providerCosts: providerCostProfiles(data.providerCosts),
+      modelPricing: modelPricingProfiles(data.modelPricing),
       dashboard: {
         view: dashboard?.view === "overview" ? "overview" : "providers",
-        layout: dashboard?.layout === "compact" ? "compact" : "expanded",
-        rangeDays: dashboard?.rangeDays === 30 || dashboard?.rangeDays === 90
-          ? dashboard.rangeDays
-          : 7,
+        layout: dashboard?.layout === "comfortable" || dashboard?.layout === "expanded"
+          ? "comfortable"
+          : "compact",
+        rangeDays: dashboard?.rangeDays === 30 || dashboard?.rangeDays === 90 ? dashboard.rangeDays : 7,
+        rangeMode: dashboard?.rangeMode === "custom" && parsedCustomRange ? "custom" : "preset",
+        customRange: parsedCustomRange,
         chartStyle: dashboard?.chartStyle === "line" ? "line" : "bar",
         chartMetric: dashboard?.chartMetric === "cost" || dashboard?.chartMetric === "sessions"
           ? dashboard.chartMetric
           : "tokens",
+        chartGrouping: enumValue(dashboard?.chartGrouping, DIMENSIONS, "provider"),
+        distributionGrouping: enumValue(dashboard?.distributionGrouping, DIMENSIONS, "model"),
         showChartLegend: dashboard?.showChartLegend !== false,
+        providerSort: enumValue(dashboard?.providerSort, PROVIDER_SORTS, "quota"),
+        cardMetrics: cardMetrics.length > 0 ? cardMetrics : [...ALL_CARD_METRICS],
+        performanceStatistic: dashboard?.performanceStatistic === "average" || dashboard?.performanceStatistic === "p95"
+          ? dashboard.performanceStatistic
+          : "p50",
+        showApiEquivalent: dashboard?.showApiEquivalent !== false,
+        showValueMultiplier: dashboard?.showValueMultiplier !== false,
+        showQuotaDetails: dashboard?.showQuotaDetails !== false,
         overviewOrder: stringList(dashboard?.overviewOrder),
         providerOrder: stringList(dashboard?.providerOrder),
       },
@@ -188,49 +291,77 @@ export function parseUsagePrefs(raw: string | null): UsagePrefs {
       pinnedProviders: [],
       collapsedGroups: [],
       providerCosts: {},
-      dashboard: { ...DEFAULT_DASHBOARD_PREFS },
+      modelPricing: {},
+      dashboard: { ...DEFAULT_DASHBOARD_PREFS, cardMetrics: [...ALL_CARD_METRICS] },
     };
   }
 }
 
-const read = (): string | null => {
-  try { return localStorage.getItem(USAGE_PREFS_KEY); } catch { return null; }
+let prefs: UsagePrefs = parseUsagePrefs(accountStorageGet(USAGE_PREFS_KEY));
+const listeners = new Set<() => void>();
+
+const notify = (): void => {
+  for (const listener of [...listeners]) listener();
 };
 
-let prefs: UsagePrefs = parseUsagePrefs(read());
-const listeners = new Set<() => void>();
+// Keep open tabs for the active account aligned. settingsSync observes this
+// same subscription and mirrors the change once through the server-owned blob.
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event) => {
+    if (event.key !== accountStorageKey(USAGE_PREFS_KEY)) return;
+    prefs = parseUsagePrefs(event.newValue);
+    notify();
+  });
+}
+
+const commit = (next: UsagePrefs): void => {
+  prefs = next;
+  accountStorageSet(USAGE_PREFS_KEY, JSON.stringify(prefs));
+  notify();
+};
 
 export function getUsagePrefs(): UsagePrefs {
   return prefs;
 }
 
-function save(next: UsagePrefs): void {
-  prefs = next;
-  try { localStorage.setItem(USAGE_PREFS_KEY, JSON.stringify(prefs)); } catch { /* private mode */ }
-  for (const l of [...listeners]) l();
+/** Apply the authoritative server snapshot while refreshing the local cache. */
+export function replaceUsagePrefs(next: UsagePrefs): void {
+  commit(parseUsagePrefs(JSON.stringify(next)));
+}
+
+/** Shared subscription seam for React and central server-settings sync. */
+export function subscribeUsagePrefs(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
 }
 
 const toggled = (list: string[], entry: string, on: boolean): string[] =>
   on ? (list.includes(entry) ? list : [...list, entry].slice(-MAX_ENTRIES)) : list.filter((e) => e !== entry);
 
 export function setProviderHidden(providerId: string, hidden: boolean): void {
-  save({ ...prefs, hiddenProviders: toggled(prefs.hiddenProviders, providerId, hidden) });
+  commit({ ...prefs, hiddenProviders: toggled(prefs.hiddenProviders, providerId, hidden) });
 }
 
 export function setBlockHidden(blockId: string, hidden: boolean): void {
-  save({ ...prefs, hiddenBlocks: toggled(prefs.hiddenBlocks, blockId, hidden) });
+  commit({ ...prefs, hiddenBlocks: toggled(prefs.hiddenBlocks, blockId, hidden) });
 }
 
 export function setProviderPinned(providerId: string, pinned: boolean): void {
-  save({ ...prefs, pinnedProviders: toggled(prefs.pinnedProviders, providerId, pinned) });
+  commit({ ...prefs, pinnedProviders: toggled(prefs.pinnedProviders, providerId, pinned) });
 }
 
 export function setGroupCollapsed(key: string, collapsed: boolean): void {
-  save({ ...prefs, collapsedGroups: toggled(prefs.collapsedGroups, key, collapsed) });
+  commit({ ...prefs, collapsedGroups: toggled(prefs.collapsedGroups, key, collapsed) });
 }
 
 export function setProviderCostProfile(providerId: string, patch: Partial<UsageProviderCostProfile>): void {
-  const current = prefs.providerCosts[providerId] ?? { billing: "api", monthlyCost: null };
+  const current = prefs.providerCosts[providerId] ?? {
+    billing: "api",
+    monthlyCost: null,
+    monthlyBudget: null,
+    inputPerMillion: null,
+    outputPerMillion: null,
+  };
   const next: UsageProviderCostProfile = {
     billing: patch.billing === "subscription"
       ? "subscription"
@@ -238,12 +369,27 @@ export function setProviderCostProfile(providerId: string, patch: Partial<UsageP
         ? "api"
         : current.billing,
     monthlyCost: patch.monthlyCost === undefined ? current.monthlyCost : finiteMoney(patch.monthlyCost),
+    monthlyBudget: patch.monthlyBudget === undefined ? current.monthlyBudget : finiteMoney(patch.monthlyBudget),
+    inputPerMillion: patch.inputPerMillion === undefined ? current.inputPerMillion : finiteRate(patch.inputPerMillion),
+    outputPerMillion: patch.outputPerMillion === undefined ? current.outputPerMillion : finiteRate(patch.outputPerMillion),
   };
-  save({ ...prefs, providerCosts: { ...prefs.providerCosts, [providerId]: next } });
+  commit({ ...prefs, providerCosts: { ...prefs.providerCosts, [providerId]: next } });
+}
+
+export function setModelPricingProfile(modelKey: string, patch: Partial<UsageModelPricingProfile>): void {
+  const current = prefs.modelPricing[modelKey] ?? { inputPerMillion: null, outputPerMillion: null };
+  const next: UsageModelPricingProfile = {
+    inputPerMillion: patch.inputPerMillion === undefined ? current.inputPerMillion : finiteRate(patch.inputPerMillion),
+    outputPerMillion: patch.outputPerMillion === undefined ? current.outputPerMillion : finiteRate(patch.outputPerMillion),
+  };
+  const modelPricing = { ...prefs.modelPricing };
+  if (next.inputPerMillion === null && next.outputPerMillion === null) delete modelPricing[modelKey];
+  else modelPricing[modelKey] = next;
+  commit({ ...prefs, modelPricing });
 }
 
 export function setUsageDashboardPrefs(patch: Partial<UsageDashboardPrefs>): void {
-  save({ ...prefs, dashboard: { ...prefs.dashboard, ...patch } });
+  commit({ ...prefs, dashboard: { ...prefs.dashboard, ...patch } });
 }
 
 export function orderUsageBlocks<T>(items: readonly T[], order: readonly string[], id: (item: T) => string): T[] {
@@ -252,8 +398,6 @@ export function orderUsageBlocks<T>(items: readonly T[], order: readonly string[
     (rank.get(id(left)) ?? order.length) - (rank.get(id(right)) ?? order.length));
 }
 
-/** Preserve the user's order within both groups while guaranteeing pinned
- * providers always render before every unpinned provider. */
 export function orderPinnedUsageBlocks<T>(
   items: readonly T[],
   order: readonly string[],
@@ -271,7 +415,9 @@ export function orderPinnedUsageBlocks<T>(
 export function moveUsageBlock(ids: readonly string[], id: string, to: string | number): string[] {
   const current = ids.indexOf(id);
   if (current < 0) return [...ids];
-  const target = typeof to === "number" ? Math.max(0, Math.min(ids.length - 1, current + to)) : ids.indexOf(to);
+  const target = typeof to === "number"
+    ? Math.max(0, Math.min(ids.length - 1, current + to))
+    : ids.indexOf(to);
   if (target < 0 || target === current) return [...ids];
   const next = [...ids];
   next.splice(current, 1);
@@ -281,10 +427,8 @@ export function moveUsageBlock(ids: readonly string[], id: string, to: string | 
 
 export function useUsagePrefs(): UsagePrefs {
   return useSyncExternalStore(
-    (cb) => {
-      listeners.add(cb);
-      return () => { listeners.delete(cb); };
-    },
+    subscribeUsagePrefs,
+    getUsagePrefs,
     getUsagePrefs,
   );
 }

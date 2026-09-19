@@ -3,7 +3,7 @@
 // provider grouping, model breakdown, and populated chart state is testable.
 //
 // Usage (from the repository root):
-//   node apps/web/test/usageDashboardFixtureSetup.mjs
+//   node --experimental-strip-types apps/web/test/usageDashboardFixtureSetup.mjs
 //   npm run build:web
 //   env HOME=/tmp/polyth-usage-home-34f9 \
 //     POLYTH_DATA_DIR=/tmp/polyth-usage-data-34f9 \
@@ -30,6 +30,32 @@ for (const path of [fixtureRoot, fixtureData, fixtureHome]) {
 }
 for (const path of [fixtureRoot, fixtureData, fixtureHome]) {
   mkdirSync(path, { recursive: true, mode: 0o700 });
+}
+// Canonical security must own an empty data root before any feature data is
+// written. Seed a minimal ready local owner/Space exactly like server tests;
+// this fixture is disposable and never carries real credentials.
+const { openControlPlane } = await import(join(repoRoot, "packages/control-plane/src/index.ts"));
+const { createPasswordService } = await import(join(repoRoot, "packages/identity/src/passwords.ts"));
+const control = openControlPlane({ directory: fixtureData });
+const securityNow = Date.now();
+const auditPassword = "usage-audit-test-passphrase";
+const passwords = createPasswordService({ concurrency: 1 });
+const passwordHash = await passwords.hash(auditPassword);
+passwords.close();
+control.transaction(() => {
+  control.run("INSERT INTO principals(id,kind,status) VALUES('usr_owner','user','active')");
+  control.run("INSERT INTO users(id,display_name,created_at_ms,updated_at_ms) VALUES('usr_owner','Usage Audit Owner',?,?)", securityNow, securityNow);
+  control.run("INSERT INTO password_credentials(user_id,login_name,password_hash,changed_at_ms) VALUES('usr_owner','usage-audit',?,?)", passwordHash, securityNow);
+  control.run("INSERT INTO organizations(id,name,slug) VALUES('org_main','Usage Audit','usage-audit')");
+  control.run("INSERT INTO organization_memberships(org_id,user_id,role) VALUES('org_main','usr_owner','owner')");
+  control.run("INSERT INTO instance_roles(user_id,role) VALUES('usr_owner','owner')");
+  control.run("INSERT INTO spaces(id,org_id,name,storage_identity,kind,is_default,created_at_ms,updated_at_ms) VALUES('spc_personal','org_main','Personal','spc_personal','personal',1,?,?)", securityNow, securityNow);
+  control.run("INSERT INTO space_memberships(space_id,principal_id,role,created_at_ms) VALUES('spc_personal','usr_owner','owner',?)", securityNow);
+  control.run("UPDATE installation SET state='ready' WHERE singleton=1");
+});
+control.close();
+
+for (const path of [fixtureRoot, fixtureData, fixtureHome]) {
   writeFileSync(join(path, ".usage-audit-sentinel"), sentinel);
 }
 
@@ -48,6 +74,7 @@ git("commit", "-m", "chore: seed usage audit fixture");
 const seedTime = Date.now();
 writeFileSync(join(fixtureData, "projects.json"), JSON.stringify([{
   id: projectId,
+  spaceId: "spc_personal",
   path: fixtureRoot,
   name: "Usage Analytics Audit",
   createdAt: seedTime,
@@ -87,30 +114,79 @@ for (let ageDays = 0; ageDays < 180; ageDays += 1) {
       : provider.model;
     const title = `Synthetic ${provider.id} session ${sessionCount}`;
 
-    await store.append(id, "session/created", { title });
-    await store.append(id, "turn/started", {
-      turnId: `${id}-turn`,
-      model: { providerID: provider.id, modelID },
-      agent: "build",
-    });
-    await store.append(id, "usage/recorded", {
-      model: { providerID: provider.id, modelID },
-      tokens: { input, output },
-      cost,
-    });
-    await store.append(id, "turn/stopped", { turnId: `${id}-turn`, reason: "completed" });
-    await store.upsertProjection({
-      id,
-      projectId,
-      title,
-      status: "idle",
-      model: { providerID: provider.id, modelID },
-      agent: "build",
-      createdAt: activityAt - 45 * 60_000,
-      updatedAt: activityAt,
-      lastTurnAt: activityAt,
-      tokenTotals: { input, output },
-      costTotal: cost,
+    const turnStart = activityAt - 12_000;
+    const ttftMs = 420 + ((ageDays * 37 + providerIndex * 71) % 1_500);
+    const durationMs = 3_500 + ((ageDays * 223 + providerIndex * 419) % 9_000);
+    const assistantAt = turnStart + Math.min(ttftMs, durationMs - 800);
+    const usageAt = turnStart + durationMs - 200;
+    const stopAt = turnStart + durationMs;
+    const cacheRead = Math.round(input * (((ageDays + providerIndex) % 4 === 0) ? .35 : .12));
+    const reason = (ageDays + providerIndex * 3) % 29 === 0
+      ? "error"
+      : (ageDays * 2 + providerIndex) % 41 === 0
+        ? "aborted"
+        : "completed";
+    const harnessId = provider.id === "anthropic"
+      ? "claude"
+      : provider.id === "openai"
+        ? "codex"
+        : "opencode";
+
+    await store.appendBatch(id, [
+      {
+        type: "session/created",
+        data: { title },
+        time: activityAt - 45 * 60_000,
+      },
+      {
+        type: "turn/started",
+        data: {
+          turnId: `${id}-turn`,
+          model: { providerID: provider.id, modelID },
+          agent: "build",
+        },
+        ignorable: true,
+        time: turnStart,
+      },
+      {
+        type: "assistant/chunk",
+        data: { partId: `${id}-p1`, text: "Synthetic response." },
+        time: assistantAt,
+      },
+      {
+        type: "usage/recorded",
+        data: {
+          model: { providerID: provider.id, modelID },
+          tokens: { input, output, cacheRead },
+          cost,
+          costSource: "native",
+        },
+        ignorable: true,
+        time: usageAt,
+      },
+      {
+        type: "turn/stopped",
+        data: { turnId: `${id}-turn`, reason },
+        ignorable: true,
+        time: stopAt,
+      },
+    ], {
+      projection: {
+        id,
+        projectId,
+        spaceId: "spc_personal",
+        title,
+        status: "idle",
+        model: { providerID: provider.id, modelID },
+        agent: "build",
+        harness: { mode: "pinned", harnessId },
+        resolvedHarnessId: harnessId,
+        createdAt: activityAt - 45 * 60_000,
+        updatedAt: stopAt,
+        lastTurnAt: stopAt,
+        tokenTotals: { input, output, cacheRead },
+        costTotal: cost,
+      },
     });
   }
 }
@@ -122,5 +198,7 @@ console.log(`export POLYTH_USAGE_URL=http://127.0.0.1:4458`);
 console.log(`export POLYTH_USAGE_PROJECT_ID=${projectId}`);
 console.log(`export POLYTH_USAGE_DATA=${fixtureData}`);
 console.log(`export POLYTH_USAGE_HOME=${fixtureHome}`);
+console.log(`export POLYTH_USAGE_LOGIN=usage-audit`);
+console.log(`export POLYTH_USAGE_PASSWORD=${auditPassword}`);
 console.log(`export POLYTH_USAGE_ROOT=${fixtureRoot}`);
 console.log(`Seeded ${sessionCount} event-backed session projections.`);

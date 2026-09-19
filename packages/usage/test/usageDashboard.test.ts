@@ -50,6 +50,13 @@ test("dashboard derives current-period totals, trends, and provider quota health
     cacheHitPercent: 0,
     cost: .05,
     averageCostPerThousand: .0125,
+    tokenBreakdown: {
+      input: 4_000,
+      output: 0,
+      reasoning: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    },
   });
   assert.equal(Math.round(dashboard.trends.cost!.percent), 400);
   assert.equal(dashboard.trends.averageCostPerThousand!.direction, "down");
@@ -223,4 +230,51 @@ test("dashboard presents legacy Copilot add-on telemetry as GitHub Copilot", () 
   assert.deepEqual(dashboard.providers.map(({ id, label }) => ({ id, label })), [
     { id: "github-copilot", label: "GitHub Copilot" },
   ]);
+});
+
+
+test("dashboard exposes model, harness, and project composition without client-side history scans", () => {
+  const alpha = session("alpha", "openai", now - DAY_MS, 4_000, .08);
+  alpha.projectId = "project-a";
+  alpha.resolvedHarnessId = "codex";
+  alpha.model = { providerID: "openai", modelID: "gpt-5.6-sol" };
+  const beta = session("beta", "anthropic", now - 2 * DAY_MS, 2_000, .04);
+  beta.projectId = "project-b";
+  beta.resolvedHarnessId = "claude";
+  beta.model = { providerID: "anthropic", modelID: "fable-5.1" };
+
+  const dashboard = buildUsageDashboardData(
+    [alpha, beta],
+    [],
+    7,
+    now,
+    { "project-a": "Polyth", "project-b": "Research" },
+  );
+
+  assert.deepEqual(dashboard.consumers.harness.map(({ id, tokens }) => ({ id, tokens })), [
+    { id: "codex", tokens: 4_000 },
+    { id: "claude", tokens: 2_000 },
+  ]);
+  assert.deepEqual(dashboard.consumers.project.map(({ label, tokens }) => ({ label, tokens })), [
+    { label: "Polyth", tokens: 4_000 },
+    { label: "Research", tokens: 2_000 },
+  ]);
+  assert.equal(
+    dashboard.chart.byDimension.model.tokens
+      .flatMap((series) => series.values)
+      .reduce((sum, value) => sum + value, 0),
+    6_000,
+  );
+});
+
+test("dashboard accepts a custom date range and keeps a bounded chart bucket count", () => {
+  const dashboard = buildUsageDashboardData([
+    session("inside", "openai", now - DAY_MS, 1_000, .02),
+    session("outside", "openai", now - 20 * DAY_MS, 5_000, .1),
+  ], [], { start: now - 3 * DAY_MS, end: now }, now);
+
+  assert.equal(dashboard.totals.sessions, 1);
+  assert.equal(dashboard.totals.tokens, 1_000);
+  assert.equal(dashboard.chart.labels.length, 3);
+  assert.equal(dashboard.rangeDays, 3);
 });

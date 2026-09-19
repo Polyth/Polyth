@@ -18,7 +18,7 @@
       "enabled": true,
       "settingsGroup": "Workspace",
       "icon": "usage",
-      "hasSettings": true,
+      "hasSettings": false,
       "category": "workspace",
       "projectAffinity": {}
     }
@@ -27,6 +27,7 @@
     "@polyth/contracts": "0.1.0",
     "@polyth/plugins": "0.1.0",
     "@polyth/session": "0.1.0",
+    "@polyth/web": "0.1.0",
     "@polyth/web-sdk": "0.1.0",
     "chart.js": "^4.5.1"
   },

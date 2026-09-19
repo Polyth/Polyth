@@ -1,0 +1,89 @@
+name: Usage Dashboard Validation
+
+on:
+  push:
+    branches:
+      - feat/usage-telemetry-dashboard
+  pull_request:
+    paths:
+      - "packages/usage/**"
+      - "apps/web/src/settingsSync.ts"
+      - "apps/web/test/settingsServerSync.test.ts"
+      - "apps/web/test/usageDashboard.live.ts"
+      - ".github/workflows/usage-dashboard-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  usage-dashboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: 0
+      POLYTH_USAGE_ARTIFACTS: /tmp/polyth-usage-audit-artifacts
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Focused Usage and settings tests
+        run: |
+          node --experimental-strip-types --test \
+            packages/usage/test/usageDashboard.test.ts \
+            packages/usage/test/usagePrefs.test.ts \
+            packages/usage/test/telemetry.test.ts \
+            packages/usage/test/usageShare.test.ts \
+            packages/usage/test/usageWidget.test.ts \
+            apps/web/test/settingsServerSync.test.ts
+
+      - name: Build web
+        run: npm run build:web
+
+      - name: Install Chromium
+        run: npx playwright-core install --with-deps chromium
+
+      - name: Seed isolated Usage fixture
+        run: |
+          rm -rf /tmp/polyth-usage-fixture-34f9 /tmp/polyth-usage-data-34f9 /tmp/polyth-usage-home-34f9 "$POLYTH_USAGE_ARTIFACTS"
+          node --experimental-strip-types apps/web/test/usageDashboardFixtureSetup.mjs
+
+      - name: Start isolated Polyth
+        run: |
+          env HOME=/tmp/polyth-usage-home-34f9 \
+            POLYTH_DATA_DIR=/tmp/polyth-usage-data-34f9 \
+            POLYTH_FAKE_QUOTAS=1 \
+            PORT=4458 \
+            npm start > /tmp/polyth-usage-server.log 2>&1 &
+          echo $! > /tmp/polyth-usage-server.pid
+          for i in $(seq 1 80); do
+            if curl -fsS http://127.0.0.1:4458/api/health >/dev/null; then exit 0; fi
+            sleep .25
+          done
+          cat /tmp/polyth-usage-server.log
+          exit 1
+
+      - name: Real Chromium visual and responsive audit
+        run: |
+          export POLYTH_CHROMIUM_PATH="$(node -e "import('playwright-core').then(({chromium}) => process.stdout.write(chromium.executablePath()))")"
+          node --experimental-strip-types --test apps/web/test/usageDashboard.live.ts
+
+      - name: Server log
+        if: always()
+        run: cat /tmp/polyth-usage-server.log || true
+
+      - name: Upload visual evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: usage-dashboard-visual-evidence
+          path: /tmp/polyth-usage-audit-artifacts
+          if-no-files-found: warn

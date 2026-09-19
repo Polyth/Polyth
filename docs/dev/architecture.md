@@ -373,13 +373,16 @@ user text.
   `polyth:theme` event.
 - Preferences: `settings.ts` (`polyth.settings`), `uiPrefs.ts` (including
   `polyth.editorPrefs`), `sidebarPrefs.ts`,
-  `prefs.ts` (personas/enabled plugins), `usagePrefs.ts`
-  (`polyth.usagePrefs`: F13 quota-card model-family grouping helper plus
-  per-provider visibility and collapsed-group persistence), `drafts.ts`
-  (`polyth.draft.<sessionId>`) — browser-local. `modelPrefs.ts` keeps a
-  synchronous account-local cache but is canonically mirrored in
-  `/api/settings/client` with the other server-owned client preferences.
-  Server-owned settings go through `/api/settings/*` routes.
+  `prefs.ts` (personas/enabled plugins), and `drafts.ts`
+  (`polyth.draft.<sessionId>`) keep browser-local caches where appropriate.
+  `modelPrefs.ts` is a core account preference and `usagePrefs.ts` is a
+  package-owned account preference; both are canonically mirrored through
+  `/api/settings/client`. Optional packages never get imported into
+  `settingsSync.ts`: they register a slice with `clientSettingsRegistry.ts`
+  (public package seam `@polyth/web/client-settings`). The host preserves
+  unknown/disabled package slices under `settings.packagePrefs`, so toggling a
+  package cannot erase its cross-device preferences. Server-owned settings go
+  through `/api/settings/*` routes.
 - `attachments.ts` (F2) — pending composer pills per session
   (`polyth.draft.att.<sessionId>`; the draft store owns text + pills): stat-verified
   project-file/range refs, `_inbox/` uploads for drops/pastes and annotated browser
