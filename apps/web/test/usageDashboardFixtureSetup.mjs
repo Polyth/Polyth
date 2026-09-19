@@ -3,7 +3,7 @@
 // provider grouping, model breakdown, and populated chart state is testable.
 //
 // Usage (from the repository root):
-//   node apps/web/test/usageDashboardFixtureSetup.mjs
+//   node --experimental-strip-types apps/web/test/usageDashboardFixtureSetup.mjs
 //   npm run build:web
 //   env HOME=/tmp/polyth-usage-home-34f9 \
 //     POLYTH_DATA_DIR=/tmp/polyth-usage-data-34f9 \
