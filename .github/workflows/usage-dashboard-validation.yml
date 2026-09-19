@@ -40,6 +40,7 @@ jobs:
           node --experimental-strip-types --test \
             packages/usage/test/usageDashboard.test.ts \
             packages/usage/test/usagePrefs.test.ts \
+            packages/usage/test/telemetry.test.ts \
             packages/usage/test/usageShare.test.ts \
             packages/usage/test/usageWidget.test.ts \
             apps/web/test/settingsServerSync.test.ts
