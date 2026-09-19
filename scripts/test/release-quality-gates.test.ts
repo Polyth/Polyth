@@ -29,7 +29,7 @@ test("repository quality contract covers stable and Polyth Link tests", () => {
   }
 });
 
-test("master CI is automatic while application packaging is manual and unpublished", () => {
+test("master CI is automatic while build and release workflows stay manual", () => {
   const ci = read(".github/workflows/ci.yml");
   assert.match(ci, /pull_request:/);
   assert.match(ci, /push:\n\s+branches:\n\s+- master/);
@@ -44,6 +44,19 @@ test("master CI is automatic while application packaging is manual and unpublish
   assert.match(builds, /--win nsis --x64 --publish never/);
   assert.match(builds, /--linux AppImage --x64 --publish never/);
   assert.doesNotMatch(builds, /--publish always/);
+  assert.match(builds, /mac-dmg/);
+  assert.match(builds, /npm-packages/);
+
+  const release = read(".github/workflows/release.yml");
+  assert.match(release, /workflow_dispatch:/);
+  assert.doesNotMatch(release, /^\s*push:/m);
+  assert.match(release, /Require master/);
+  assert.match(release, /gh release create/);
+  assert.match(release, /--draft/);
+  assert.match(release, /gh release edit .*--draft=false/);
+  assert.match(release, /latest\.yml latest-arm64\.yml latest-mac\.yml latest-linux\.yml/);
+  assert.match(release, /npm publish/);
+  assert.match(release, /upload-google-play/);
 
   const appGradle = read("apps/mobile/android/app/build.gradle");
   const capacitorGradle = read("apps/mobile/android/app/capacitor.build.gradle");
