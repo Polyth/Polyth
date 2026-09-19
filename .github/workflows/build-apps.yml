@@ -208,7 +208,6 @@ jobs:
             apps/desktop/release/*.dmg
             apps/desktop/release/*.zip
             apps/desktop/release/*.blockmap
-            apps/desktop/release/latest-mac.yml
           if-no-files-found: error
 
   windows:
@@ -261,7 +260,6 @@ jobs:
           path: |
             apps/desktop/release/*.exe
             apps/desktop/release/*.blockmap
-            apps/desktop/release/latest*.yml
           if-no-files-found: error
 
   linux:
@@ -329,7 +327,6 @@ jobs:
           path: |
             apps/desktop/release/*.AppImage
             apps/desktop/release/*.blockmap
-            apps/desktop/release/latest-linux.yml
             apps/desktop/release/appimage-e2e.*
           if-no-files-found: error
 
