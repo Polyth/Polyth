@@ -11,6 +11,9 @@ test("CI owns the repository quality contract and app builds stay manual", () =>
     "scripts/test/releaseQuality.test.ts",
     "scripts/test/release-quality-gates.test.ts",
     "apps/desktop/test/configuration.test.ts",
+    "packages/server/test/canonicalAuth.test.ts",
+    "packages/server/test/runtimeSecurityBinding.test.ts",
+    "packages/server/test/debugAgentAccess.test.ts",
   ]) {
     assert.ok(script.includes(`"${file}"`), `quality gate must include ${file}`);
   }
