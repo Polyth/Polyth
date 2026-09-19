@@ -51,7 +51,7 @@ export default function ProjectAppearanceDialog({ project, onClose }: { project:
         title={tr("projectcomposition.workspace")}
         onClose={onClose}
         size="lg"
-        className="project-settings-dialog project-settings-workspace-dialog"
+        className="project-settings-dialog"
         initialFocus=".project-settings-page-intro .ui-btn"
         footer={(
           <>
