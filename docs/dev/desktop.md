@@ -12,6 +12,14 @@ do not bypass this with `unsafe-inline` or Electron `webSecurity: false`. Rebuil
 restart after changing the shell. Server startup success alone is not renderer
 verification: a first-launch smoke must also confirm that setup UI actually renders.
 
+Polyth Desktop owns its first-run operator step. The trusted Electron main process
+requests one short-lived setup claim from the in-process setup lifecycle and exposes
+it only through the context-isolated desktop bridge; the renderer never asks the user
+for npm, a claim token, or a manual server restart. The setup screen binds that claim
+through the existing canonical setup API, then Electron restarts the local server on
+the same loopback port after account creation. Standalone/headless server setup keeps
+the explicit `npm run setup:claim` operator flow.
+
 ## Local builds
 
 Use Node 22.14 or newer (matching `scripts/check-node.mjs` and `.nvmrc`).
