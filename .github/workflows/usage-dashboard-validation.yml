@@ -53,7 +53,7 @@ jobs:
       - name: Seed isolated Usage fixture
         run: |
           rm -rf /tmp/polyth-usage-fixture-34f9 /tmp/polyth-usage-data-34f9 /tmp/polyth-usage-home-34f9 "$POLYTH_USAGE_ARTIFACTS"
-          node apps/web/test/usageDashboardFixtureSetup.mjs
+          node --experimental-strip-types apps/web/test/usageDashboardFixtureSetup.mjs
 
       - name: Start isolated Polyth
         run: |
