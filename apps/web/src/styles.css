@@ -134,7 +134,7 @@ body.desktop-app {
   --desktop-chrome-radius: var(--radius-sheet);
   --desktop-controls-slot: var(--control-h-sm);
   --desktop-controls-gap: var(--space-2);
-  --desktop-controls-pad: var(--space-3);
+  --desktop-controls-pad: var(--space-2);
   --desktop-controls-island-width: calc(
     (var(--desktop-controls-pad) * 2)
     + (var(--desktop-controls-slot) * 3)
@@ -144,6 +144,8 @@ body.desktop-app {
     (var(--desktop-controls-pad) * 2)
     + var(--desktop-controls-slot)
   );
+  /* Keep the inner wrap arc valid when Appearance rounding is 0. */
+  --desktop-controls-wrap-arc: max(0.01px, var(--desktop-chrome-radius));
   border-radius: var(--desktop-chrome-radius);
   overflow: hidden;
 }
@@ -170,19 +172,43 @@ body.desktop-app .app {
   background-color: var(--bg);
   box-shadow: 0 0 0 1px var(--border-soft);
 }
-/* Header recedes around the control island so the buttons sit on window
-   material, with inner corners matching the outer window radius. */
+/* The header keeps the window's sheet radius and wraps under the control
+   island so the buttons sit in a dedicated window-bg pocket. Inner wrap
+   corners use the same user-scaled radius as the frameless window. */
+body.desktop-app .app > .header {
+  width: auto;
+  margin: 0;
+  box-sizing: border-box;
+  height: calc(var(--desktop-controls-island-height) + var(--desktop-chrome-radius));
+  min-height: calc(var(--desktop-controls-island-height) + var(--desktop-chrome-radius));
+  padding-bottom: var(--desktop-chrome-radius);
+  border-radius: var(--desktop-chrome-radius);
+}
 body.desktop-app[data-desktop-controls-position="right"] .app > .header {
-  width: calc(100% - var(--desktop-controls-island-width));
-  margin-right: var(--desktop-controls-island-width);
-  border-start-end-radius: var(--desktop-chrome-radius);
-  border-end-end-radius: var(--desktop-chrome-radius);
+  padding-right: calc(var(--desktop-controls-island-width) + var(--space-2));
+  clip-path: shape(
+    from 0 0,
+    line to calc(100% - var(--desktop-controls-island-width)) 0,
+    line to calc(100% - var(--desktop-controls-island-width)) calc(var(--desktop-controls-island-height) - var(--desktop-chrome-radius)),
+    arc to calc(100% - var(--desktop-controls-island-width) + var(--desktop-chrome-radius)) var(--desktop-controls-island-height) of var(--desktop-controls-wrap-arc) cw,
+    line to 100% var(--desktop-controls-island-height),
+    line to 100% 100%,
+    line to 0 100%,
+    close
+  );
 }
 body.desktop-app[data-desktop-controls-position="left"] .app > .header {
-  width: calc(100% - var(--desktop-controls-island-width));
-  margin-left: var(--desktop-controls-island-width);
-  border-start-start-radius: var(--desktop-chrome-radius);
-  border-end-start-radius: var(--desktop-chrome-radius);
+  padding-left: calc(var(--desktop-controls-island-width) + var(--space-2));
+  clip-path: shape(
+    from var(--desktop-controls-island-width) 0,
+    line to 100% 0,
+    line to 100% 100%,
+    line to 0 100%,
+    line to 0 var(--desktop-controls-island-height),
+    line to calc(var(--desktop-controls-island-width) - var(--desktop-chrome-radius)) var(--desktop-controls-island-height),
+    arc to var(--desktop-controls-island-width) calc(var(--desktop-controls-island-height) - var(--desktop-chrome-radius)) of var(--desktop-controls-wrap-arc) cw,
+    close
+  );
 }
 body.desktop-app[data-desktop-maximized="true"],
 body.desktop-app[data-desktop-maximized="true"] #root,
@@ -195,6 +221,10 @@ body.desktop-app[data-desktop-maximized="true"] .app > .header {
   width: 100%;
   margin-left: 0;
   margin-right: 0;
+  clip-path: none;
+  height: var(--desktop-controls-island-height);
+  min-height: var(--desktop-controls-island-height);
+  padding-bottom: 0;
 }
 body.desktop-app[data-desktop-maximized="true"][data-desktop-controls-position="right"] .app > .header {
   padding-right: calc(var(--desktop-controls-island-width) + var(--space-3));
@@ -214,7 +244,7 @@ body.desktop-app[data-desktop-maximized="true"][data-desktop-controls-position="
   width: var(--desktop-controls-island-width);
   height: var(--desktop-controls-island-height);
   padding: var(--desktop-controls-pad);
-  background: var(--bg);
+  background: transparent;
   border: 0;
   box-shadow: none;
   -webkit-app-region: drag;

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { desktopBridge, type DesktopInfo, type DesktopSettings, type DesktopUpdateState, type DesktopWindowState } from "./desktopBridge.ts";
 import { registerSlot } from "./slots.ts";
 import { Row, Seg, Toggle } from "./components/settings/parts.tsx";
@@ -61,7 +62,7 @@ function WindowControls() {
     return () => { delete document.body.dataset.desktopMaximized; };
   }, [windowState.maximized]);
 
-  return (
+  const controls = (
     <div
       className={`desktop-window-controls desktop-window-controls-${settings.controlsPosition}`}
       data-controls-theme={settings.controlsTheme}
@@ -96,6 +97,7 @@ function WindowControls() {
       </button>
     </div>
   );
+  return typeof document === "undefined" ? controls : createPortal(controls, document.body);
 }
 
 function DesktopSettingsPage() {
