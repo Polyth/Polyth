@@ -282,7 +282,7 @@ jobs:
           if-no-files-found: error
 
   macos:
-    name: macOS universal DMG + ZIP
+    name: macOS x64 + arm64 DMG + ZIP
     needs: prepare
     runs-on: macos-15
     timeout-minutes: 90
@@ -337,10 +337,10 @@ jobs:
             "@esbuild/darwin-x64@$ESBUILD_VERSION" \
             "@esbuild/darwin-arm64@$ESBUILD_VERSION"
 
-      - name: Build universal desktop bundle
+      - name: Build multi-arch desktop bundle
         run: npm run build:desktop
         env:
-          POLYTH_MAC_UNIVERSAL: "1"
+          POLYTH_MAC_MULTI_ARCH: "1"
 
       - name: Stage Chromium for macOS x64
         run: npm run desktop:stage-chromium
@@ -363,9 +363,9 @@ jobs:
           POLYTH_TARGET_PLATFORM=darwin POLYTH_TARGET_ARCH=x64 npm run desktop:download-opencode
           POLYTH_TARGET_PLATFORM=darwin POLYTH_TARGET_ARCH=arm64 npm run desktop:download-opencode
 
-      - name: Package signed and notarized DMG, ZIP and updater metadata
+      - name: Package signed x64 + arm64 DMG, ZIP and updater metadata
         working-directory: apps/desktop
-        run: npx electron-builder --mac dmg zip --universal --publish always
+        run: npx electron-builder --mac dmg zip --x64 --arm64 --publish always
 
       - uses: actions/upload-artifact@v4
         with:
@@ -549,8 +549,16 @@ jobs:
           for NAME in latest.yml latest-arm64.yml latest-mac.yml latest-linux.yml latest-linux-arm64.yml; do
             test -f "release-assets/$NAME" || { echo "Missing updater metadata: $NAME" >&2; exit 1; }
           done
-          test -n "$(find release-assets -maxdepth 1 -name '*.dmg' -print -quit)"
-          test -n "$(find release-assets -maxdepth 1 -name '*.zip' -print -quit)"
+          for ARCH in x64 arm64; do
+            test -n "$(find release-assets -maxdepth 1 -name "*-mac-$ARCH.dmg" -print -quit)" || {
+              echo "Missing macOS $ARCH DMG" >&2
+              exit 1
+            }
+            test -n "$(find release-assets -maxdepth 1 -name "*-mac-$ARCH.zip" -print -quit)" || {
+              echo "Missing macOS $ARCH ZIP" >&2
+              exit 1
+            }
+          done
           test -n "$(find release-assets -maxdepth 1 -name '*.exe' -print -quit)"
           test -n "$(find release-assets -maxdepth 1 -name '*.AppImage' -print -quit)"
 
