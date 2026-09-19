@@ -97,7 +97,10 @@ async function openApp(options: OpenOptions): Promise<Page> {
     appearance?: string;
     theme?: string;
   }) => {
-    localStorage.setItem("polyth.prefs", JSON.stringify({ persona: "engineer", plugins: [] }));
+    localStorage.setItem("polyth.prefs", JSON.stringify({
+      persona: "engineer",
+      plugins: ["session", "git", "schedule", "github", "dictation", "usage"],
+    }));
     localStorage.setItem("polyth.packageTours.v1", JSON.stringify({ skippedAll: true, completed: {} }));
     localStorage.setItem(`polyth.workspaceMode.v1.${input.projectId}`, "chat");
     localStorage.setItem(`polyth.capabilityLayout.v1.${input.projectId}`, JSON.stringify({
