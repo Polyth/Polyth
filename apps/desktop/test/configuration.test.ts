@@ -102,6 +102,10 @@ test("packaged desktop startup is self-contained across host platforms", async (
     "utf8",
   );
   const smokeSource = await readFile(join(desktopDir, "test", "startup-smoke.mjs"), "utf8");
+  const terminalSource = await readFile(
+    join(repositoryRoot, "packages/terminal/src/index.ts"),
+    "utf8",
+  );
   const releaseWorkflow = await readFile(
     join(repositoryRoot, ".github/workflows/release.yml"),
     "utf8",
@@ -114,6 +118,9 @@ test("packaged desktop startup is self-contained across host platforms", async (
   assert.match(mainSource, /Packaged OpenCode .* is missing at/);
   assert.match(mainSource, /Packaged Chromium is missing for/);
   assert.match(smokeSource, /Desktop startup smoke passed/);
+  assert.match(terminalSource, /platform === "win32"/);
+  assert.match(terminalSource, /env\.COMSPEC\?\.trim\(\) \|\| "cmd\.exe"/);
+  assert.doesNotMatch(terminalSource, /const defaultShell = .*\/bin\/sh/);
   assert.match(releaseWorkflow, /Smoke-test packaged macOS app/);
   assert.match(releaseWorkflow, /Smoke-test packaged Windows app/);
 });
