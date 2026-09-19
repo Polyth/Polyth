@@ -30,6 +30,26 @@ for (const path of [fixtureRoot, fixtureData, fixtureHome]) {
 }
 for (const path of [fixtureRoot, fixtureData, fixtureHome]) {
   mkdirSync(path, { recursive: true, mode: 0o700 });
+}
+// Canonical security must own an empty data root before any feature data is
+// written. Seed a minimal ready local owner/Space exactly like server tests;
+// this fixture is disposable and never carries real credentials.
+const { openControlPlane } = await import(join(repoRoot, "packages/control-plane/src/index.ts"));
+const control = openControlPlane({ directory: fixtureData });
+const securityNow = Date.now();
+control.transaction(() => {
+  control.run("INSERT INTO principals(id,kind,status) VALUES('usr_owner','user','active')");
+  control.run("INSERT INTO users(id,display_name,created_at_ms,updated_at_ms) VALUES('usr_owner','Usage Audit Owner',?,?)", securityNow, securityNow);
+  control.run("INSERT INTO organizations(id,name,slug) VALUES('org_main','Usage Audit','usage-audit')");
+  control.run("INSERT INTO organization_memberships(org_id,user_id,role) VALUES('org_main','usr_owner','owner')");
+  control.run("INSERT INTO instance_roles(user_id,role) VALUES('usr_owner','owner')");
+  control.run("INSERT INTO spaces(id,org_id,name,storage_identity,kind,is_default,created_at_ms,updated_at_ms) VALUES('spc_personal','org_main','Personal','spc_personal','personal',1,?,?)", securityNow, securityNow);
+  control.run("INSERT INTO space_memberships(space_id,principal_id,role,created_at_ms) VALUES('spc_personal','usr_owner','owner',?)", securityNow);
+  control.run("UPDATE installation SET state='ready' WHERE singleton=1");
+});
+control.close();
+
+for (const path of [fixtureRoot, fixtureData, fixtureHome]) {
   writeFileSync(join(path, ".usage-audit-sentinel"), sentinel);
 }
 
