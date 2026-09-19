@@ -192,6 +192,13 @@ function runNode(scriptPath: string): Promise<{ ok: boolean; output: string }> {
     const proc = spawn(process.execPath, ["--experimental-strip-types", scriptPath], {
       cwd: repositoryRoot,
       stdio: ["ignore", "pipe", "pipe"],
+      // Development/watch builds change generation frequently. Auto freshness
+      // reload on resume is disruptive here, so keep it off unless the operator
+      // explicitly opts back in for this supervisor process.
+      env: {
+        ...process.env,
+        POLYTH_WEB_BUILD_FRESHNESS: process.env.POLYTH_WEB_BUILD_FRESHNESS ?? "0",
+      },
     });
     let output = "";
     const collect = (chunk: Buffer): void => {

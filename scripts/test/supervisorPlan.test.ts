@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import {
   applyRestartPolicy,
@@ -155,4 +156,13 @@ test("help is reported without failing", () => {
   const parsed = parseSupervisorArgs(["--help"]);
   assert.ok(parsed.ok);
   assert.equal(parsed.help, true);
+});
+
+
+test("watch builds disable automatic build freshness unless explicitly overridden", async () => {
+  const supervisor = await readFile(new URL("../supervisor.ts", import.meta.url), "utf8");
+  assert.match(
+    supervisor,
+    /POLYTH_WEB_BUILD_FRESHNESS:\s*process\.env\.POLYTH_WEB_BUILD_FRESHNESS\s*\?\?\s*"0"/,
+  );
 });

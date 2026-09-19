@@ -19,6 +19,8 @@ const buildId = process.env.POLYTH_WEB_BUILD_ID?.trim()
   || (Number.isFinite(sourceDateEpoch) && sourceDateEpoch > 0
     ? Math.round(sourceDateEpoch * 1000).toString(36)
     : Date.now().toString(36));
+const buildFreshnessEnv = (process.env.POLYTH_WEB_BUILD_FRESHNESS ?? "").trim().toLowerCase();
+const buildFreshnessEnabled = !["0", "false", "off", "disabled"].includes(buildFreshnessEnv);
 const webPackages = await discoverWebPackages(packagesDir);
 const packageManifests = await Promise.all(webPackages.map(async (pkg) => {
   const parsed = JSON.parse(
@@ -94,6 +96,7 @@ const appResult = await build({
   define: {
     ...browserBuildOptions.define,
     __POLYTH_WEB_BUILD_ID__: JSON.stringify(buildId),
+    __POLYTH_WEB_BUILD_FRESHNESS_ENABLED__: JSON.stringify(buildFreshnessEnabled),
   },
   plugins: [uiFontScalePlugin],
 });

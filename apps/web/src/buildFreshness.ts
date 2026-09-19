@@ -1,10 +1,27 @@
 declare const __POLYTH_WEB_BUILD_ID__: string;
+declare const __POLYTH_WEB_BUILD_FRESHNESS_ENABLED__: boolean;
 
 export const WEB_BUILD_ID_PATH = "/build-id.json";
 export const WEB_BUILD_QUERY = "__polyth_build";
 
 const DEFAULT_RETRY_DELAYS_MS = [400, 1_200, 3_000] as const;
 const DEFAULT_MIN_CHECK_INTERVAL_MS = 750;
+
+let freshnessEnabled = typeof __POLYTH_WEB_BUILD_FRESHNESS_ENABLED__ === "boolean"
+  ? __POLYTH_WEB_BUILD_FRESHNESS_ENABLED__
+  : true;
+const freshnessStateListeners = new Set<(enabled: boolean) => void>();
+
+export function isBuildFreshnessEnabled(): boolean {
+  return freshnessEnabled;
+}
+
+export function setBuildFreshnessEnabled(enabled: boolean): void {
+  const next = Boolean(enabled);
+  if (next === freshnessEnabled) return;
+  freshnessEnabled = next;
+  for (const listener of [...freshnessStateListeners]) listener(next);
+}
 
 export interface BuildFreshnessOptions {
   fetchImpl?: typeof fetch;
@@ -91,7 +108,7 @@ export function installBuildFreshnessWatcher(
   };
 
   const scheduleRetry = (): void => {
-    if (disposed || reloadIssued || documentRef.visibilityState === "hidden") return;
+    if (!freshnessEnabled || disposed || reloadIssued || documentRef.visibilityState === "hidden") return;
     const delay = retryDelaysMs[retryIndex++];
     if (delay === undefined) return;
     clearRetry();
@@ -102,7 +119,7 @@ export function installBuildFreshnessWatcher(
   };
 
   const check = async (freshEvent: boolean): Promise<void> => {
-    if (disposed || reloadIssued || inFlight || documentRef.visibilityState === "hidden") return;
+    if (!freshnessEnabled || disposed || reloadIssued || inFlight || documentRef.visibilityState === "hidden") return;
     const now = Date.now();
     if (freshEvent && now - lastCheckAt < minCheckIntervalMs) return;
     if (freshEvent) {
@@ -113,6 +130,7 @@ export function installBuildFreshnessWatcher(
     inFlight = true;
     try {
       const serverBuildId = await fetchWebBuildId(fetchImpl);
+      if (!freshnessEnabled) return;
       if (!serverBuildId) {
         scheduleRetry();
         return;
@@ -139,7 +157,7 @@ export function installBuildFreshnessWatcher(
   const resume = (): void => {
     if (disposed || !suspended || documentRef.visibilityState === "hidden") return;
     suspended = false;
-    void check(true);
+    if (freshnessEnabled) void check(true);
   };
 
   const onVisibility = (): void => {
@@ -147,6 +165,11 @@ export function installBuildFreshnessWatcher(
     else resume();
   };
 
+  const onFreshnessState = (enabled: boolean): void => {
+    if (!enabled) clearRetry();
+  };
+
+  freshnessStateListeners.add(onFreshnessState);
   windowRef.addEventListener("pagehide", markSuspended);
   windowRef.addEventListener("pageshow", resume);
   documentRef.addEventListener("visibilitychange", onVisibility);
@@ -154,6 +177,7 @@ export function installBuildFreshnessWatcher(
   return () => {
     disposed = true;
     clearRetry();
+    freshnessStateListeners.delete(onFreshnessState);
     windowRef.removeEventListener("pagehide", markSuspended);
     windowRef.removeEventListener("pageshow", resume);
     documentRef.removeEventListener("visibilitychange", onVisibility);
