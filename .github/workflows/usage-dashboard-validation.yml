@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - feat/usage-telemetry-dashboard
+  pull_request:
+    paths:
+      - "packages/usage/**"
+      - "apps/web/src/settingsSync.ts"
+      - "apps/web/test/settingsServerSync.test.ts"
+      - "apps/web/test/usageDashboard.live.ts"
+      - ".github/workflows/usage-dashboard-validation.yml"
   workflow_dispatch:
 
 permissions:
