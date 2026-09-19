@@ -72,9 +72,9 @@ if (stable.length === 0) {
   console.error("release-quality: no tests selected");
   process.exit(1);
 }
-run(process.execPath, ["--experimental-strip-types", "--test", "--test-force-exit", ...stable]);
+run(process.execPath, ["scripts/ci/run-tests.mjs", "ci"]);
 
 run("cargo", ["build", "-p", "polyth-link-core", "--bin", "polyth-link-ws-echo"]);
 const link = capture(process.execPath, ["scripts/ci/select-tests.mjs", "polyth-link"]);
-run(process.execPath, ["--experimental-strip-types", "--test", "--test-force-exit", ...link]);
-console.log(`\nrelease-quality: passed (${TYPECHECK_PROJECTS.length} typecheck projects, ${stable.length + link.length} tests)`);
+run(process.execPath, ["scripts/ci/run-tests.mjs", "polyth-link"]);
+console.log(`\nrelease-quality: passed (${TYPECHECK_PROJECTS.length} typecheck projects, ${stable.length + link.length} test files)`);
