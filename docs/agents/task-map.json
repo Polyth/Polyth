@@ -627,7 +627,9 @@
         "docs/agents/security.md",
         "docs/agents/evidence.md"
       ],
-      "testHints": [],
+      "testHints": [
+        "packages/polyth-mcp/test/control.test.ts"
+      ],
       "risk": "critical"
     }
   ]

@@ -21,6 +21,13 @@ const required = (input: Json, key: string): string => {
   if ((typeof value !== "string" && typeof value !== "number") || String(value).length === 0) throw new Error(`${key} is required`);
   return encodeURIComponent(String(value));
 };
+const needed = (input: Json, key: string): string => {
+  const value = input[key];
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${key} is required`);
+  return value;
+};
+const spaceOf = (input: Json): { spaceId?: string } =>
+  typeof input.spaceId === "string" ? { spaceId: input.spaceId } : {};
 const sessionTitle = (input: Json): string => {
   if (typeof input.title !== "string") throw new Error("title is required for session.create");
   const title = input.title.replace(/\s+/g, " ").trim();
@@ -48,7 +55,7 @@ const action = (
     method,
     path: path(input),
     ...(method === "GET" ? {} : { body: body(input, omit) }),
-    ...(typeof input.spaceId === "string" ? { spaceId: input.spaceId } : {}),
+    ...spaceOf(input),
   }),
 });
 
@@ -108,6 +115,60 @@ export const ACTIONS: Record<string, Action> = {
   "goal.resume": action("goals", "Resume an autonomous goal.", "POST", (i) => `/api/agent/sessions/${required(i, "sessionId")}/goal/resume`, ["sessionId"]),
   "goal.stop": action("goals", "Stop an autonomous goal.", "POST", (i) => `/api/agent/sessions/${required(i, "sessionId")}/goal/stop`, ["sessionId"]),
   "shell.run": action("sessions", "Run a shell command in a session worktree.", "POST", (i) => `/api/agent/sessions/${required(i, "sessionId")}/shell`, ["sessionId"]),
+  // Browser control mirrors the controlled-browser HTTP API. MCP acts as the
+  // agent actor only: it cannot impersonate the user, resume a user
+  // take-control pause, approve a private origin, or change agent
+  // auto-approve policy — those stay user decisions in the UI.
+  "browser.capability": action("browser", "Check whether the controlled browser engine is available.", "GET", () => "/api/browser/capability"),
+  "browser.session.list": action("browser", "List controlled browser sessions, optionally filtered by project.", "GET", (i) => `/api/browser/sessions${query(i, ["projectId"])}`),
+  "browser.session.get": action("browser", "Read one controlled browser session, including agent pause state.", "GET", (i) => `/api/browser/sessions/${required(i, "browserSessionId")}`),
+  "browser.session.open": {
+    group: "browser",
+    description: "Open a controlled browser session in a project, optionally navigating on creation. Public origins load directly; blocked private destinations stay user-owned.",
+    request(input) {
+      needed(input, "projectId");
+      return {
+        method: "POST",
+        path: "/api/browser/sessions",
+        body: { ...body(input), actor: "agent" },
+        ...spaceOf(input),
+      };
+    },
+  },
+  "browser.session.close": action("browser", "Close a controlled browser session.", "DELETE", (i) => `/api/browser/sessions/${required(i, "browserSessionId")}`, ["browserSessionId"]),
+  "browser.navigate": {
+    group: "browser",
+    description: "Navigate a controlled browser session to an absolute http(s) URL.",
+    request(input) {
+      needed(input, "url");
+      return {
+        method: "POST",
+        path: `/api/browser/sessions/${required(input, "browserSessionId")}/navigate`,
+        body: { ...body(input, ["browserSessionId"]), actor: "agent" },
+        ...spaceOf(input),
+      };
+    },
+  },
+  "browser.action": {
+    group: "browser",
+    description: "Run one action object in a controlled browser session: click, type, press, scroll, select, wait, back, forward, reload, resize, color-scheme, inspect, or point.",
+    request(input) {
+      const browserAction = input.action;
+      if (!browserAction || typeof browserAction !== "object" || Array.isArray(browserAction) || typeof (browserAction as Json).kind !== "string") {
+        throw new Error("action with a kind is required for browser.action");
+      }
+      return {
+        method: "POST",
+        path: `/api/browser/sessions/${required(input, "browserSessionId")}/actions`,
+        body: { action: browserAction, actor: "agent" },
+        ...spaceOf(input),
+      };
+    },
+  },
+  "browser.observe": action("browser", "Read page text, an accessibility digest, and optionally a screenshot from a controlled browser session.", "POST", (i) => `/api/browser/sessions/${required(i, "browserSessionId")}/observe`, ["browserSessionId"]),
+  "browser.console": action("browser", "Read recent page console messages from a controlled browser session.", "GET", (i) => `/api/browser/sessions/${required(i, "browserSessionId")}/console`),
+  "browser.context": action("browser", "Capture page, element, area, or text context from a controlled browser session.", "POST", (i) => `/api/browser/sessions/${required(i, "browserSessionId")}/context`, ["browserSessionId"]),
+  "browser.approvals": action("browser", "List origins already approved for a controlled browser session. Approving a new origin stays a user decision.", "GET", (i) => `/api/browser/approvals?browserSessionId=${required(i, "browserSessionId")}`),
   "catalog.models": action("catalog", "List enabled models.", "GET", () => "/api/models"),
   "catalog.providers": action("catalog", "List providers and visibility.", "GET", () => "/api/providers"),
   "catalog.agents": action("catalog", "List available agents.", "GET", () => "/api/agents"),
@@ -240,7 +301,7 @@ export const tools = [
   },
   {
     name: "control",
-    description: "Fully control Polyth projects, sessions, agents, requests, queues, goals, spaces, packages, and any /api feature. Call capabilities to discover actions.",
+    description: "Fully control Polyth projects, sessions, agents, requests, queues, goals, spaces, packages, browser sessions, and any /api feature. Call capabilities to discover actions.",
     inputSchema: {
       type: "object",
       required: ["action"],
