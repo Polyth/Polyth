@@ -107,30 +107,78 @@ for (let ageDays = 0; ageDays < 180; ageDays += 1) {
       : provider.model;
     const title = `Synthetic ${provider.id} session ${sessionCount}`;
 
-    await store.append(id, "session/created", { title });
-    await store.append(id, "turn/started", {
-      turnId: `${id}-turn`,
-      model: { providerID: provider.id, modelID },
-      agent: "build",
-    });
-    await store.append(id, "usage/recorded", {
-      model: { providerID: provider.id, modelID },
-      tokens: { input, output },
-      cost,
-    });
-    await store.append(id, "turn/stopped", { turnId: `${id}-turn`, reason: "completed" });
-    await store.upsertProjection({
-      id,
-      projectId,
-      title,
-      status: "idle",
-      model: { providerID: provider.id, modelID },
-      agent: "build",
-      createdAt: activityAt - 45 * 60_000,
-      updatedAt: activityAt,
-      lastTurnAt: activityAt,
-      tokenTotals: { input, output },
-      costTotal: cost,
+    const turnStart = activityAt - 12_000;
+    const ttftMs = 420 + ((ageDays * 37 + providerIndex * 71) % 1_500);
+    const durationMs = 3_500 + ((ageDays * 223 + providerIndex * 419) % 9_000);
+    const assistantAt = turnStart + Math.min(ttftMs, durationMs - 800);
+    const usageAt = turnStart + durationMs - 200;
+    const stopAt = turnStart + durationMs;
+    const cacheRead = Math.round(input * (((ageDays + providerIndex) % 4 === 0) ? .35 : .12));
+    const reason = (ageDays + providerIndex * 3) % 29 === 0
+      ? "error"
+      : (ageDays * 2 + providerIndex) % 41 === 0
+        ? "aborted"
+        : "completed";
+    const harnessId = provider.id === "anthropic"
+      ? "claude"
+      : provider.id === "openai"
+        ? "codex"
+        : "opencode";
+
+    await store.appendBatch(id, [
+      {
+        type: "session/created",
+        data: { title },
+        time: activityAt - 45 * 60_000,
+      },
+      {
+        type: "turn/started",
+        data: {
+          turnId: `${id}-turn`,
+          model: { providerID: provider.id, modelID },
+          agent: "build",
+        },
+        ignorable: true,
+        time: turnStart,
+      },
+      {
+        type: "assistant/chunk",
+        data: { partId: `${id}-p1`, text: "Synthetic response." },
+        time: assistantAt,
+      },
+      {
+        type: "usage/recorded",
+        data: {
+          model: { providerID: provider.id, modelID },
+          tokens: { input, output, cacheRead },
+          cost,
+        },
+        ignorable: true,
+        time: usageAt,
+      },
+      {
+        type: "turn/stopped",
+        data: { turnId: `${id}-turn`, reason },
+        ignorable: true,
+        time: stopAt,
+      },
+    ], {
+      projection: {
+        id,
+        projectId,
+        spaceId: "spc_personal",
+        title,
+        status: "idle",
+        model: { providerID: provider.id, modelID },
+        agent: "build",
+        harness: { mode: "pinned", harnessId },
+        resolvedHarnessId: harnessId,
+        createdAt: activityAt - 45 * 60_000,
+        updatedAt: stopAt,
+        lastTurnAt: stopAt,
+        tokenTotals: { input, output, cacheRead },
+        costTotal: cost,
+      },
     });
   }
 }
