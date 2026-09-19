@@ -614,7 +614,7 @@ const configureUpdater = (): void => {
   refreshAutomaticUpdateSchedule();
 };
 
-const startServer = async (): Promise<void> => {
+const startServer = async (preferredPort?: number): Promise<void> => {
   const binary = opencodePath();
   const webDist = webDistPath();
   const bundledOpenCode = existsSync(binary);
@@ -623,7 +623,7 @@ const startServer = async (): Promise<void> => {
   }
   if (!bundledOpenCode) log(`Bundled OpenCode ${__POLYTH_OPENCODE_VERSION__} is missing at ${binary}; looking for an installed OpenCode instead`);
   if (!existsSync(join(webDist, "index.html"))) throw new Error(`Polyth web bundle is missing at ${webDist}`);
-  const port = await reservePort();
+  const port = preferredPort ?? await reservePort();
   baseUrl = `http://127.0.0.1:${port}`;
   process.env.POLYTH_DESKTOP = "1";
   const linkHost = linkHostPath();
@@ -637,6 +637,7 @@ const startServer = async (): Promise<void> => {
     process.env.POLYTH_REQUIRE_BUNDLED_CHROMIUM = "1";
     process.env.POLYTH_CHROMIUM_PATH = bundledChromium;
   }
+  desktopSetupClaimToken = null;
   serverLifecycle = await boot({
     port, hostname: "127.0.0.1", dataDir, webDist, webPackagesDir: webPackagesPath(), serverPackages: desktopServerPackages,
     ...(bundledOpenCode ? { opencode: { bin: binary, binarySource: "bundled" as const } } : {}),
@@ -644,6 +645,20 @@ const startServer = async (): Promise<void> => {
   log(`Polyth server started at ${baseUrl}`);
   if (bundledOpenCode) log(`Bundled OpenCode ${__POLYTH_OPENCODE_VERSION__}: ${binary}`);
 };
+
+async function restartDesktopSetupServer(): Promise<void> {
+  const lifecycle = serverLifecycle;
+  if (!lifecycle || !("setup" in lifecycle) || lifecycle.setup !== true) return;
+  const port = Number(new URL(baseUrl).port);
+  await lifecycle.shutdown();
+  if (serverLifecycle === lifecycle) serverLifecycle = null;
+  desktopSetupClaimToken = null;
+  await startServer(port);
+  if (serverLifecycle && "setup" in serverLifecycle && serverLifecycle.setup === true) {
+    throw new Error("Polyth setup did not reach the ready state");
+  }
+  log("Polyth server restarted automatically after desktop setup");
+}
 
 const startChatWorkspaceRemoteCoordinator = async (): Promise<void> => {
   const binary = linkClientPath();
