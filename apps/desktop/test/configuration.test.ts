@@ -88,13 +88,14 @@ test("manual desktop workflow builds Windows, Linux and macOS artifacts without 
   }
   assert.doesNotMatch(workflow, /--publish always/);
   assert.doesNotMatch(workflow, /CSC_IDENTITY_AUTO_DISCOVERY/);
+  assert.doesNotMatch(workflow, /(?:^|\s)-c\.mac\.(?:identity|notarize)=/m);
   assert.doesNotMatch(workflow, /--universal/);
   assert.match(workflow, /mode=developer-id/);
   assert.match(workflow, /mode=adhoc/);
   assert.match(workflow, /these are not trusted release artifacts/);
   assert.match(releaseWorkflow, /Require macOS signing and notarization/);
-  assert.doesNotMatch(releaseWorkflow, /-c\.mac\.identity=-/);
-  assert.doesNotMatch(releaseWorkflow, /-c\.mac\.notarize=false/);
+  assert.doesNotMatch(releaseWorkflow, /--config\.mac\.identity=-/);
+  assert.doesNotMatch(releaseWorkflow, /--config\.mac\.notarize=false/);
   assert.match(workflow, /POLYTH_MAC_MULTI_ARCH/);
 
   const installed = workflow.indexOf("npx playwright-core install chromium");
