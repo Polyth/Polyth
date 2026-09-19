@@ -1,5 +1,6 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
-import { existsSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import type { CanonicalSecurity } from "./canonicalSecurity.ts";
@@ -58,6 +59,21 @@ async function staticFile(root: string, pathname: string): Promise<{ data: Buffe
  */
 export function createSetupServer(options: SetupServerOptions): SetupServerHandle {
   const root = resolve(options.webDist);
+  // The trusted, shipped shell contains the React import map and small inline
+  // bootstrap scripts. 'self' alone blocks them, leaving a fresh install blank.
+  // Hash only this build-owned document, never arbitrary requested HTML. Keep
+  // every other inline script/event handler blocked; do not use unsafe-inline.
+  const shellPath = resolve(root, "index.html");
+  const shell = existsSync(shellPath) ? readFileSync(shellPath, "utf8") : "";
+  const scriptHashes = new Set<string>();
+  for (const [, body] of shell.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)) {
+    if (!body.trim()) continue;
+    // HTML parsing normalizes CRLF and bare CR before CSP checks script text.
+    const hash = createHash("sha256").update(body.replace(/\r\n?/g, "\n")).digest("base64");
+    scriptHashes.add(`'sha256-${hash}'`);
+  }
+  const scriptSources = ["'self'", ...scriptHashes].join(" ");
+  const contentSecurityPolicy = `default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src ${scriptSources}; connect-src 'self' ws: wss:; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`;
   const server = createServer((req, res) => {
     void (async () => {
       let url: URL;
@@ -95,7 +111,7 @@ export function createSetupServer(options: SetupServerOptions): SetupServerHandl
         "content-type": asset.type,
         "cache-control": path === "/" || path.endsWith(".html") ? "no-store" : "public, max-age=3600",
         "x-content-type-options": "nosniff",
-        "content-security-policy": "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws: wss:; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+        "content-security-policy": contentSecurityPolicy,
       });
       res.end(req.method === "HEAD" ? undefined : asset.data);
     })().catch(() => {
