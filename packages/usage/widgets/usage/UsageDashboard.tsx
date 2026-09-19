@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 import Chart from "chart.js/auto";
 import type { ChartConfiguration } from "chart.js";
@@ -17,7 +18,6 @@ import {
   orderUsageBlocks,
   setUsageDashboardPrefs,
   useUsagePrefs,
-  type UsageBreakdownDimension,
   type UsageProviderCostProfile,
 } from "../usagePrefs.ts";
 import {
@@ -25,7 +25,6 @@ import {
   type UsageChartMetric,
   type UsageConsumerSummary,
   type UsageDateRange,
-  type UsageDimension,
   type UsageProviderSummary,
   type UsageRangeDays,
 } from "./dashboardData.ts";
@@ -58,7 +57,8 @@ const compactNumber = (value: number): string =>
 const percent = (value: number): string => `${Math.round(value)}%`;
 
 const relativeDuration = (ms: number): string => {
-  const minutes = Math.max(0, Math.ceil(ms / 60_000));
+  if (ms <= 0) return "now";
+  const minutes = Math.max(1, Math.ceil(ms / 60_000));
   if (minutes < 60) return `${minutes}m`;
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
@@ -241,7 +241,9 @@ function ProviderCard({
   const budgetPercent = profile.billing === "api" && profile.monthlyBudget && profile.monthlyBudget > 0
     ? Math.round(Math.min(1, provider.monthCost / profile.monthlyBudget) * 100)
     : null;
-  const headlinePercent = provider.quotaUsedPercent ?? budgetPercent;
+  const headlinePercent = profile.billing === "api" && budgetPercent !== null
+    ? budgetPercent
+    : provider.quotaUsedPercent;
   const primaryReset = provider.quotaWindow?.resetsAt;
   const status = provider.stale ? "Stale" : snapshot ? "Fresh" : "Session data";
   const statusState = provider.stale ? "stale" : snapshot ? "fresh" : "session";
@@ -381,11 +383,17 @@ function ProviderCard({
 }
 
 const palette = (): string[] => {
-  if (typeof document === "undefined") return ["#777"];
+  if (typeof document === "undefined") return ["currentColor"];
   const style = getComputedStyle(document.documentElement);
-  return ["--accent", "--purple", "--blue", "--green", "--amber", "--text-dim"]
+  const resolved = ["--accent", "--purple", "--blue", "--green", "--amber", "--text-dim"]
     .map((name) => style.getPropertyValue(name).trim())
     .filter(Boolean);
+  return resolved.length > 0 ? resolved : [style.color || "currentColor"];
+};
+
+const chartGridColor = (): string => {
+  if (typeof document === "undefined") return "transparent";
+  return getComputedStyle(document.documentElement).getPropertyValue("--border-soft").trim() || "transparent";
 };
 
 function UsageTimeChart({
@@ -448,7 +456,7 @@ function UsageTimeChart({
           y: {
             stacked: style === "bar",
             beginAtZero: true,
-            grid: { color: "rgba(127,127,127,.12)" },
+            grid: { color: chartGridColor() },
             ticks: {
               callback: (value) => metric === "cost"
                 ? money(Number(value))
@@ -463,9 +471,6 @@ function UsageTimeChart({
 
   return <canvas ref={canvasRef} aria-label="Usage over time chart" role="img" />;
 }
-
-const dimensionLabel = (dimension: UsageDimension): string =>
-  dimension === "provider" ? "Provider" : dimension === "model" ? "Model" : dimension === "harness" ? "Harness" : "Project";
 
 function Segmented<T extends string>({
   value,
@@ -616,7 +621,7 @@ function CustomRangePopover({
   open,
   onClose,
 }: {
-  anchorRef: React.RefObject<HTMLButtonElement | null>;
+  anchorRef: RefObject<HTMLButtonElement | null>;
   open: boolean;
   onClose: () => void;
 }) {
