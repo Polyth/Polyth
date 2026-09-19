@@ -35,11 +35,17 @@ for (const path of [fixtureRoot, fixtureData, fixtureHome]) {
 // written. Seed a minimal ready local owner/Space exactly like server tests;
 // this fixture is disposable and never carries real credentials.
 const { openControlPlane } = await import(join(repoRoot, "packages/control-plane/src/index.ts"));
+const { createPasswordService } = await import(join(repoRoot, "packages/identity/src/passwords.ts"));
 const control = openControlPlane({ directory: fixtureData });
 const securityNow = Date.now();
+const auditPassword = "usage-audit-test-passphrase";
+const passwords = createPasswordService({ concurrency: 1 });
+const passwordHash = await passwords.hash(auditPassword);
+passwords.close();
 control.transaction(() => {
   control.run("INSERT INTO principals(id,kind,status) VALUES('usr_owner','user','active')");
   control.run("INSERT INTO users(id,display_name,created_at_ms,updated_at_ms) VALUES('usr_owner','Usage Audit Owner',?,?)", securityNow, securityNow);
+  control.run("INSERT INTO password_credentials(user_id,login_name,password_hash,changed_at_ms) VALUES('usr_owner','usage-audit',?,?)", passwordHash, securityNow);
   control.run("INSERT INTO organizations(id,name,slug) VALUES('org_main','Usage Audit','usage-audit')");
   control.run("INSERT INTO organization_memberships(org_id,user_id,role) VALUES('org_main','usr_owner','owner')");
   control.run("INSERT INTO instance_roles(user_id,role) VALUES('usr_owner','owner')");
@@ -190,5 +196,7 @@ console.log(`export POLYTH_USAGE_URL=http://127.0.0.1:4458`);
 console.log(`export POLYTH_USAGE_PROJECT_ID=${projectId}`);
 console.log(`export POLYTH_USAGE_DATA=${fixtureData}`);
 console.log(`export POLYTH_USAGE_HOME=${fixtureHome}`);
+console.log(`export POLYTH_USAGE_LOGIN=usage-audit`);
+console.log(`export POLYTH_USAGE_PASSWORD=${auditPassword}`);
 console.log(`export POLYTH_USAGE_ROOT=${fixtureRoot}`);
 console.log(`Seeded ${sessionCount} event-backed session projections.`);
