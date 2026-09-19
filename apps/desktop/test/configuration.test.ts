@@ -73,6 +73,9 @@ test("manual desktop workflow builds Windows, Linux and macOS artifacts without 
     "npm run desktop:download-opencode",
     "release/*.AppImage",
     "release/*.exe",
+    "apps/desktop/test/startup-smoke.mjs",
+    "Smoke-test packaged macOS app",
+    "Smoke-test packaged Windows app",
   ]) {
     assert.ok(workflow.includes(required), `manual desktop build workflow must include ${required}`);
   }
@@ -89,6 +92,30 @@ test("manual desktop workflow builds Windows, Linux and macOS artifacts without 
   assert.ok(installed >= 0 && installed < bundled, "Playwright Chromium must be provisioned before the desktop build");
   assert.ok(bundled >= 0 && bundled < staged, "Chromium must be staged after bundling");
   assert.ok(staged >= 0 && staged < packaged, "Chromium must be staged before electron-builder");
+});
+
+
+test("packaged desktop startup is self-contained across host platforms", async () => {
+  const mainSource = await readFile(join(desktopDir, "src", "main.ts"), "utf8");
+  const serverSource = await readFile(
+    join(repositoryRoot, "packages/server/src/indexCore.ts"),
+    "utf8",
+  );
+  const smokeSource = await readFile(join(desktopDir, "test", "startup-smoke.mjs"), "utf8");
+  const releaseWorkflow = await readFile(
+    join(repositoryRoot, ".github/workflows/release.yml"),
+    "utf8",
+  );
+
+  assert.doesNotMatch(serverSource, /spawn\(\s*["']flock["']/);
+  assert.doesNotMatch(serverSource, /OS advisory locking is unavailable/);
+  assert.match(serverSource, /createServer as createNetServer/);
+  assert.match(mainSource, /POLYTH_DESKTOP_STARTUP_SMOKE/);
+  assert.match(mainSource, /Packaged OpenCode .* is missing at/);
+  assert.match(mainSource, /Packaged Chromium is missing for/);
+  assert.match(smokeSource, /Desktop startup smoke passed/);
+  assert.match(releaseWorkflow, /Smoke-test packaged macOS app/);
+  assert.match(releaseWorkflow, /Smoke-test packaged Windows app/);
 });
 
 test("pinned OpenCode lock covers packaged CPU and operating-system targets", async () => {
