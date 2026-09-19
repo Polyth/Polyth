@@ -1753,6 +1753,7 @@ export const en = {
   "sidebar.sessionlist.sessionIdCopied": "Session ID copied",
   "sidebar.sessionlist.sessionRenamedToValue": "Session renamed to {t}",
   "sidebar.sessionlist.showMoreSessions": "Show more sessions",
+  "sidebar.sessionlist.showLessSessions": "Show less sessions",
   "sidebar.sessionlist.theAgentIsStillRunningOr": "The agent is still running or waiting on you.",
   "sidebar.sessionlist.theLocalIsolationWorkspaceAndEveryFileInItWillAlsoBePermanentlyDeleted": "The local isolation workspace and every file in it will also be permanently deleted.",
   "sidebar.sessionlist.unpin": "Unpin",

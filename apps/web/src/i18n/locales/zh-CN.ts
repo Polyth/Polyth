@@ -1750,6 +1750,7 @@ export const zhCN: AppMessages = {
   "sidebar.sessionlist.sessionIdCopied": "会话 ID 已复制",
   "sidebar.sessionlist.sessionRenamedToValue": "会话已重命名为{t}",
   "sidebar.sessionlist.showMoreSessions": "显示更多会话",
+  "sidebar.sessionlist.showLessSessions": "显示更少会话",
   "sidebar.sessionlist.theAgentIsStillRunningOr": "代理仍在运行或正在等待你。",
   "sidebar.sessionlist.theLocalIsolationWorkspaceAndEveryFileInItWillAlsoBePermanentlyDeleted": "本地隔离工作区及其中的所有文件也将被永久删除。",
   "sidebar.sessionlist.unpin": "取消固定",

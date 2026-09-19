@@ -43,14 +43,17 @@ import {
 } from "../../sessionDates.ts";
 import { Icon } from "../../icons.tsx";
 import { getLocale, tr } from "../../i18n/index.ts";
-import { useShowDateGroups } from "../../sidebarPrefs.ts";
+import {
+  getVisibleSessionCount, setVisibleSessionCount, useShowDateGroups, useSidebarViewMode,
+} from "../../sidebarPrefs.ts";
 import { errorFeedback, successFeedback, tapFeedback } from "../../haptics.ts";
 import { horizontalDistance, SESSION_SWIPE_REVEAL, type GesturePoint } from "../../mobileGestures.ts";
 import { useShiftArmed } from "../../useShiftArmed.ts";
 import { useShellMode } from "../../responsiveShell.ts";
 import { useInlineRename } from "../input/inlineRename.ts";
 
-const INITIAL_VISIBLE_SESSIONS = 6;
+const TREE_VISIBLE_SESSIONS = 6;
+const RAIL_VISIBLE_SESSIONS = 15;
 const INLINE_LABEL_LIMIT = 6;
 const isManagedIsolationBranch = (branch: string | null | undefined): boolean =>
   branch?.startsWith("polyth/isolate/") === true;
@@ -652,12 +655,17 @@ export default function SessionList({
   const expandArchived = useStore((st) => st.settings.showArchived);
   const relativeTime = useStore((st) => st.settings.relativeTime);
   const showDateGroups = useShowDateGroups();
+  const shellMode = useShellMode();
+  const sidebarViewMode = useSidebarViewMode();
+  const sessionViewMode = shellMode === "wide" ? sidebarViewMode : "tree";
+  const initialVisibleSessions = sessionViewMode === "rail" ? RAIL_VISIBLE_SESSIONS : TREE_VISIBLE_SESSIONS;
   const [labels, setLabels] = useState<WorkspaceLabel[]>([]);
   const [worktrees, setWorktrees] = useState<Worktree[]>([]);
   const [collapsed, setCollapsed] = useState<ReadonlyMap<string, boolean>>(new Map());
   const [expandedSubagents, setExpandedSubagents] = useState<ReadonlySet<string>>(new Set());
   const [showArchived, setShowArchived] = useState(expandArchived);
-  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_SESSIONS);
+  const [visibleCount, setVisibleCount] = useState(() =>
+    getVisibleSessionCount(projectId, sessionViewMode, initialVisibleSessions));
   const [removeTarget, setRemoveTarget] = useState<Worktree | null>(null);
   const [deleteBranch, setDeleteBranch] = useState(false);
   const [removeBusy, setRemoveBusy] = useState(false);
@@ -669,15 +677,14 @@ export default function SessionList({
   // a virtual/bluetooth Shift cannot paint every row as if the modifier were
   // held; compact/touch shells keep swipe + menu only.
   const shiftArmed = useShiftArmed();
-  const shellMode = useShellMode();
   const shiftQuick = shiftArmed && shellMode === "wide" && !selectMode;
 
   useEffect(() => {
     setShowArchived(expandArchived);
   }, [expandArchived]);
   useEffect(() => {
-    setVisibleCount(INITIAL_VISIBLE_SESSIONS);
-  }, [projectId, query, attentionOnly, dateFilter.mode, dateFilter.date, dateFilter.from, dateFilter.to]);
+    setVisibleCount(getVisibleSessionCount(projectId, sessionViewMode, initialVisibleSessions));
+  }, [projectId, sessionViewMode, initialVisibleSessions]);
   const hydratedRef = useRef(false);
   useEffect(() => {
     if (hydratedRef.current) return;
@@ -1021,9 +1028,25 @@ export default function SessionList({
       {hiddenActive > 0 && (
         <button
           className="show-more-sessions"
-          onClick={() => setVisibleCount((count) => count + INITIAL_VISIBLE_SESSIONS)}
+          onClick={() => {
+            const next = visibleCount + initialVisibleSessions;
+            setVisibleCount(next);
+            setVisibleSessionCount(projectId, sessionViewMode, next);
+          }}
         >
           {tr("sidebar.sessionlist.showMoreSessions")}{" "}<Icon.chevronDown />
+        </button>
+      )}
+      {visibleCount > initialVisibleSessions && (
+        <button
+          className="show-less-sessions"
+          onClick={() => {
+            const next = Math.max(initialVisibleSessions, visibleCount - initialVisibleSessions);
+            setVisibleCount(next);
+            setVisibleSessionCount(projectId, sessionViewMode, next);
+          }}
+        >
+          {tr("sidebar.sessionlist.showLessSessions")}{" "}<Icon.chevronUp />
         </button>
       )}
 

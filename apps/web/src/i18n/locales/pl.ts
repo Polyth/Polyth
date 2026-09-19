@@ -1750,6 +1750,7 @@ export const pl: AppMessages = {
   "sidebar.sessionlist.sessionIdCopied": "Skopiowano identyfikator sesji",
   "sidebar.sessionlist.sessionRenamedToValue": "Zmieniono nazwę sesji na {t}",
   "sidebar.sessionlist.showMoreSessions": "Pokaż więcej sesji",
+  "sidebar.sessionlist.showLessSessions": "Pokaż mniej sesji",
   "sidebar.sessionlist.theAgentIsStillRunningOr": "Agent nadal działa lub czeka na Ciebie.",
   "sidebar.sessionlist.theLocalIsolationWorkspaceAndEveryFileInItWillAlsoBePermanentlyDeleted": "Lokalny izolowany obszar roboczy i wszystkie znajdujące się w nim pliki również zostaną trwale usunięte.",
   "sidebar.sessionlist.unpin": "Odpiąć",

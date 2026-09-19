@@ -67,6 +67,7 @@ const { createRoot } = await import("react-dom/client");
 const store = await import("../src/store.ts");
 const { getSidebarViewMode, parseSidebarViewMode, setSidebarViewMode, VIEW_MODE_KEY, DATE_GROUPS_KEY, getShowDateGroups, parseShowDateGroups, setShowDateGroups } = await import("../src/sidebarPrefs.ts");
 const { default: Sidebar, PEEK_LEAVE_MS } = await import("../src/components/Sidebar.tsx");
+const { default: SessionList } = await import("../src/components/sidebar/SessionList.tsx");
 const { setSidebarLayout } = await import("../src/sidebarLayout.ts");
 
 const MouseEventCtor = (dom as unknown as { MouseEvent: typeof MouseEvent }).MouseEvent;
@@ -108,6 +109,49 @@ test("parseShowDateGroups defaults on; setter persists and round-trips", () => {
   assert.equal(getShowDateGroups(), false);
   assert.equal(localStorage.getItem(DATE_GROUPS_KEY), "false");
   setShowDateGroups(true);
+});
+
+test("session pagination defaults to 15 in rail and remembers show more/less per view", async () => {
+  const projectId = "pagination";
+  store.activateProject(projectId);
+  store.setSessions(projectId, Array.from({ length: 32 }, (_, index) => ({
+    id: `${projectId}-${index}`,
+    projectId,
+    title: `Pagination session ${index}`,
+    status: "idle" as const,
+    createdAt: now - index,
+    updatedAt: now - index,
+    lastTurnAt: now - index,
+  })));
+  setSidebarViewMode("rail");
+
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(SessionList, { projectId })); });
+    assert.equal(container.querySelectorAll(".session-row").length, 15, "rail starts with fifteen sessions");
+
+    await act(async () => { click(container.querySelector(".show-more-sessions")!); });
+    assert.equal(container.querySelectorAll(".session-row").length, 30, "show more adds one rail page");
+    assert.ok(container.querySelector(".show-less-sessions"), "expanded lists expose show less");
+
+    await act(async () => { click(container.querySelector(".show-less-sessions")!); });
+    assert.equal(container.querySelectorAll(".session-row").length, 15, "show less removes one rail page");
+
+    await act(async () => { click(container.querySelector(".show-more-sessions")!); });
+    await act(async () => { setSidebarViewMode("tree"); });
+    assert.equal(container.querySelectorAll(".session-row").length, 6, "tree keeps its smaller first-use default");
+    await act(async () => { click(container.querySelector(".show-more-sessions")!); });
+    assert.equal(container.querySelectorAll(".session-row").length, 12, "tree remembers its own expansion");
+
+    await act(async () => { setSidebarViewMode("rail"); });
+    assert.equal(container.querySelectorAll(".session-row").length, 30, "rail restores its remembered expansion");
+  } finally {
+    setSidebarViewMode("tree");
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
 });
 
 test("remote projects are marked separately from local projects in the sidebar", async () => {

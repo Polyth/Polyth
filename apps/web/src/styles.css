@@ -6957,7 +6957,8 @@ min-height: var(--tap);
 .side-scroll { padding: 6px 6px 14px; }
 .project-select-btn { display: none; }
 .project-menu-btn svg { width: 16px; height: 16px; }
-.show-more-sessions {
+.show-more-sessions,
+.show-less-sessions {
   min-height: 34px;
   display: flex;
   align-items: center;
@@ -6969,7 +6970,8 @@ min-height: var(--tap);
   background: transparent;
   font-size: var(--font-meta);
 }
-.show-more-sessions svg { width: 13px; height: 13px; }
+.show-more-sessions svg,
+.show-less-sessions svg { width: 13px; height: 13px; }
 .session-list-empty { padding: 10px 8px; font-size: var(--font-meta); }
 /* Chat header + metrics ---------------------------------------------------- */
 .header-chat { border-color: var(--chat-border); background: var(--chat-surface); }

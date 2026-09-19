@@ -1750,6 +1750,7 @@ export const bg: AppMessages = {
   "sidebar.sessionlist.sessionIdCopied": "ID на сесията е копиран",
   "sidebar.sessionlist.sessionRenamedToValue": "Сесията е преименувана на {t}",
   "sidebar.sessionlist.showMoreSessions": "Показване на още сесии",
+  "sidebar.sessionlist.showLessSessions": "Показване на по-малко сесии",
   "sidebar.sessionlist.theAgentIsStillRunningOr": "Агентът все още работи или те чака.",
   "sidebar.sessionlist.theLocalIsolationWorkspaceAndEveryFileInItWillAlsoBePermanentlyDeleted": "Локалното изолирано работно пространство и всички файлове в него също ще бъдат изтрити окончателно.",
   "sidebar.sessionlist.unpin": "Откачи",

@@ -1750,6 +1750,7 @@ export const uk: AppMessages = {
   "sidebar.sessionlist.sessionIdCopied": "ID сеансу скопійовано",
   "sidebar.sessionlist.sessionRenamedToValue": "Сеанс перейменовано на {t}",
   "sidebar.sessionlist.showMoreSessions": "Показати більше сесій",
+  "sidebar.sessionlist.showLessSessions": "Показати менше сесій",
   "sidebar.sessionlist.theAgentIsStillRunningOr": "Агент усе ще працює або чекає на вас.",
   "sidebar.sessionlist.theLocalIsolationWorkspaceAndEveryFileInItWillAlsoBePermanentlyDeleted": "Локальну теку ізоляції та всі файли в ній також буде остаточно видалено.",
   "sidebar.sessionlist.unpin": "Відкріпити",

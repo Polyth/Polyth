@@ -121,6 +121,62 @@ export function useSidebarViewMode(): SidebarViewMode {
   );
 }
 
+// Session pagination is browser-local presentation state. Keep counts per
+// project and view so a roomy project rail does not change the tree's default
+// density, while switching away and back preserves what the user expanded.
+export const SESSION_VISIBLE_COUNTS_KEY = "polyth.sidebar.visibleSessionCounts";
+const SESSION_VISIBLE_COUNT_MAX = 1_000;
+type SessionVisibleCounts = Record<string, number>;
+
+function parseSessionVisibleCounts(raw: string | null): SessionVisibleCounts {
+  try {
+    const value = JSON.parse(raw ?? "null") as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const counts: SessionVisibleCounts = {};
+    for (const [key, count] of Object.entries(value)) {
+      if (!key || !Number.isInteger(count) || count < 1) continue;
+      counts[key] = Math.min(SESSION_VISIBLE_COUNT_MAX, count);
+    }
+    return counts;
+  } catch {
+    return {};
+  }
+}
+
+const readSessionVisibleCounts = (): string | null => {
+  try { return localStorage.getItem(SESSION_VISIBLE_COUNTS_KEY); } catch { return null; }
+};
+const writeSessionVisibleCounts = (value: string): void => {
+  try { localStorage.setItem(SESSION_VISIBLE_COUNTS_KEY, value); } catch { /* private mode */ }
+};
+
+let storedSessionVisibleCounts = parseSessionVisibleCounts(readSessionVisibleCounts());
+
+function sessionVisibleCountKey(projectId: string, viewMode: SidebarViewMode): string {
+  return `${viewMode}:${projectId}`;
+}
+
+export function getVisibleSessionCount(
+  projectId: string,
+  viewMode: SidebarViewMode,
+  defaultCount: number,
+): number {
+  const saved = storedSessionVisibleCounts[sessionVisibleCountKey(projectId, viewMode)];
+  return saved ?? Math.max(1, Math.min(SESSION_VISIBLE_COUNT_MAX, Math.floor(defaultCount)));
+}
+
+export function setVisibleSessionCount(
+  projectId: string,
+  viewMode: SidebarViewMode,
+  count: number,
+): void {
+  const key = sessionVisibleCountKey(projectId, viewMode);
+  const next = Math.max(1, Math.min(SESSION_VISIBLE_COUNT_MAX, Math.floor(count)));
+  if (storedSessionVisibleCounts[key] === next) return;
+  storedSessionVisibleCounts = { ...storedSessionVisibleCounts, [key]: next };
+  writeSessionVisibleCounts(JSON.stringify(storedSessionVisibleCounts));
+}
+
 // Date-group headings in the session list ("today", "2 days ago", …). Pure
 // presentation: hiding them does not change which chats match a filter.
 export const DATE_GROUPS_KEY = "polyth.sidebar.showDateGroups";
