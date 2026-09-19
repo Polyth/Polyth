@@ -50,6 +50,8 @@ the stream was not admitted.
 
 Host secret: `<dataDir>/tunnel/identity` (mode 0600, fail closed).
 Persistent bearer tokens are not used.
-- Mobile: UniFFI currently parses pairing tickets only. Production Android/iOS
-  native pairing, Keychain/Keystore storage, native reconnect, and local proxy
-  restore are not included yet.
+- Mobile: production Android/iOS adapters use the shared Link client through
+  the native ABI. Device identity remains native: iOS uses Keychain and Android
+  uses Keystore-backed encrypted storage. Pairing confirmation, reconnect, and
+  loopback proxy lifecycle stay in the native/shared-client boundary; JavaScript
+  receives only bounded connection metadata and bootstrap URLs.
