@@ -14,7 +14,6 @@ import type { ProfileRegistry, ProfileRegistryEvent, ProfileFrame, ProfilePage }
 import { MANUAL_ONLY_POLICY, newChatTabId, originOf, checkUrl, isInternalBrowserUrl } from "@polyth/browser";
 import { CHAT_PROVIDERS, providerById } from "./providers.ts";
 import {
-  DEFAULT_SETTINGS,
   deleteProfile,
   err,
   listProfiles,

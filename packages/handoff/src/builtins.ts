@@ -1,7 +1,7 @@
 import type { JsonObject, SessionEvent, SpaceContext, SessionService } from "@polyth/contracts";
 import { estimateTokens } from "./tokens.ts";
 import { hashText } from "./hash.ts";
-import type { ContextCollectInput, ContextSourceProvider } from "./index.ts";
+import type { ContextSourceProvider } from "./index.ts";
 
 const err = (code: string, message: string): Error => Object.assign(new Error(message), { code });
 

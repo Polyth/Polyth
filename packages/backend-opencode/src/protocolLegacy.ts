@@ -15,7 +15,6 @@ import type {
   ProviderAuthMethod,
   ProviderAuthorization,
   RuntimeEndpoint,
-  RuntimeEvent,
   RuntimeLocation,
   RuntimeReconciliationBinding,
   RuntimeCommandDescriptor,

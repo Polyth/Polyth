@@ -10,7 +10,7 @@ import {
     provisioningTarget,
     releaseCapabilityLaunch,
 } from "@polyth/harness-runtime";
-import { claudeAuthFingerprint, claudeModelDescriptors, discoverClaudeModels, invalidateClaudeModelCache, peekClaudeModels } from "./discovery.ts";
+import { claudeAuthFingerprint, claudeModelDescriptors, discoverClaudeModels, peekClaudeModels } from "./discovery.ts";
 import { claudeOverlays } from "./provisioner.ts";
 export { claudeOverlays, createClaudeProvisioner } from "./provisioner.ts";
 export { claudeAuthFingerprint, claudeModelDescriptors, discoverClaudeModels, invalidateClaudeModelCache } from "./discovery.ts";

@@ -1,4 +1,4 @@
-import type { JsonObject, RouteHandler, SessionEvent } from "@polyth/contracts";
+import type { RouteHandler, SessionEvent } from "@polyth/contracts";
 import type {
   ContributionInvocationKind,
   PackageJsonObject,

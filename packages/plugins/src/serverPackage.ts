@@ -16,7 +16,6 @@ import type {
   AuthResolution,
   CapabilityKey,
   Disposable,
-  InstalledPluginDto,
   JsonObject,
   ModelRef,
   NotificationRecord,
