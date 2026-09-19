@@ -33,6 +33,14 @@ command interpolation. Model, effort (`low`, `medium`, `high`) and optional
 native agent remain launch arguments; model IDs come from `agy models`, not a
 hardcoded or stale fallback list.
 
+The CLI is launched with a private per-runtime `HOME` whose Gemini `config`
+directory lives in the Space runtime directory; the rest of the user's home,
+including `~/.gemini/antigravity-cli` (authentication and native conversations),
+is linked rather than copied. The Antigravity CLI only reads MCP servers from
+`$HOME/.gemini/config`; its workspace `.agents/plugins` `mcp_config.json` is not
+loaded (verified against CLI 1.2.7), so this private config is the path that
+carries Polyth's MCP projection.
+
 Polyth records the native conversation ID from `init` and resumes only that
 Space/project/session's recorded ID using `--conversation`. It never uses
 ambient `--continue`. Canonical history, worktrees, titles and the UI remain
@@ -82,9 +90,14 @@ macOS/Windows retain the shared portable authority's explicit crash-fence limits
   proven denials becomes a failed turn instead of a silent stop. Native slash
   commands, question replies and steering are not implemented; Polyth MCP tool
   injection (including `@polyth/browser` via `polyth_browser` and the scoped
-  `polyth-agent-tools` bridge) is supported via session-scoped Antigravity
-  plugin configuration (`.agents/plugins/polyth-agent-tools/mcp_config.json`)
-  and gated through the permission bridge.
+  `polyth-agent-tools` bridge) is materialized into the private per-runtime
+  `~/.gemini/config/mcp_config.json`, merged with the user's own global MCP
+  servers, and gated through the permission bridge. The user's native global
+  config is linked, not modified, so a session's bearer token never enters a
+  shared or user-visible file. The private home links the real home's entries
+  instead of copying them; where a platform cannot create a link (for example an
+  unprivileged Windows file symlink on another volume), that entry is left
+  absent, so a tool that reads it may not see the user's configuration.
 - A step the native CLI ends in a failure state (`ERROR`, `INVALID`, `HALTED`,
   `CANCELED`, `INTERRUPTED`) becomes a `tool/error` (or finalizes text it had
   already streamed) and never aborts the canonical turn or disconnects the
@@ -118,7 +131,11 @@ interruption), unterminated tool calls, failed release, recorded resume and
 uncertain replay. Package tests exercise discovery, lazy enable/disable,
 Space/remote gates and the workspace lock. Fixtures are not a live Google
 account verification.
-No provider login, paid prompt, physical-device test or live `agy` run is claimed.
+No provider login, paid prompt, physical-device test or live model turn is
+claimed. MCP discovery was live-checked against Antigravity CLI 1.2.7 with a
+local stdio probe: the private home's `~/.gemini/config/mcp_config.json` server
+was spawned at startup, `agy models` authenticated through the linked app data,
+and no model turn was sent.
 
 Protocol reference, checked 2026-09-19:
 - https://antigravity.google/docs/cli/headless

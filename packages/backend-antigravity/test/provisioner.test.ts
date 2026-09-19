@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readlink, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -28,6 +28,7 @@ import {
   parseAgyHookRequest,
 } from "../src/permissions.ts";
 import { createAntigravityRuntime } from "../src/runtime.ts";
+import { materializeAntigravityHome } from "../src/home.ts";
 import registerPackage from "../src/serverEntry.ts";
 
 const contextOf = (spaceId = "space-a", sessionId = "session-a"): HarnessContext => ({
@@ -295,12 +296,30 @@ test("provisioner detects mcp name collisions", async () => {
   provisioner.release(context);
 });
 
-test("permission bridge prepare writes and cleans up the Antigravity plugin workspace", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "polyth-agy-mcp-bridge-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+test("permission bridge materializes the private Antigravity home and MCP config", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "polyth-agy-bridge-"));
+  const realHome = await mkdtemp(join(tmpdir(), "polyth-agy-realhome-"));
+  const homeRoot = join(root, "agy-home");
+  t.after(() => Promise.all([
+    rm(root, { recursive: true, force: true }),
+    rm(realHome, { recursive: true, force: true }),
+  ]));
+
+  // A real home with app data, a config entry, a user MCP server and a dotfile.
+  await mkdir(join(realHome, ".gemini", "antigravity-cli"), { recursive: true });
+  await mkdir(join(realHome, ".gemini", "config"), { recursive: true });
+  await writeFile(join(realHome, ".gemini", "antigravity-cli", "antigravity-oauth-token"), "token");
+  await writeFile(join(realHome, ".gemini", "config", "config.json"), "{}\n");
+  await writeFile(
+    join(realHome, ".gemini", "config", "mcp_config.json"),
+    JSON.stringify({ mcpServers: { "user-server": { command: "echo" } } }),
+  );
+  await writeFile(join(realHome, ".gitconfig"), "[user]\n");
 
   const bridge = await createAntigravityPermissionBridge({
     root,
+    homeRoot,
+    realHome,
     handle: async () => ({ decision: "allow" }),
   });
 
@@ -312,27 +331,49 @@ test("permission bridge prepare writes and cleans up the Antigravity plugin work
         POLYTH_AGENT_TOOLS_URL: "http://127.0.0.1:4400/tools",
         POLYTH_AGENT_TOOLS_TOKEN: "tok_abc",
       },
-      disabled: false,
     },
   };
 
   await bridge.prepare(mcpServers);
 
-  const pluginJsonPath = join(root, ".agents", "plugins", "polyth-agent-tools", "plugin.json");
-  const mcpConfigPath = join(root, ".agents", "plugins", "polyth-agent-tools", "mcp_config.json");
+  // The Polyth projection wins, the user's own servers are preserved.
+  const config = JSON.parse(await readFile(join(homeRoot, ".gemini", "config", "mcp_config.json"), "utf8"));
+  assert.deepEqual(config.mcpServers["polyth-agent-tools"], mcpServers["polyth-agent-tools"]);
+  assert.deepEqual(config.mcpServers["user-server"], { command: "echo" });
 
-  const manifest = JSON.parse(await readFile(pluginJsonPath, "utf8"));
-  assert.equal(manifest.name, "polyth-agent-tools");
+  // The approval hook still lives in the add-dir permission workspace.
+  await readFile(join(root, ".agents", "hooks.json"), "utf8");
+  await readFile(join(root, "polyth-hook-client.mjs"), "utf8");
+  await assert.rejects(stat(join(root, ".agents", "plugins")), { code: "ENOENT" });
 
-  const config = JSON.parse(await readFile(mcpConfigPath, "utf8"));
-  assert.deepEqual(config, { mcpServers });
-
-  // Calling prepare with no servers cleans up the staged plugin
-  await bridge.prepare({});
-  await assert.rejects(stat(pluginJsonPath), { code: "ENOENT" });
-  await assert.rejects(stat(mcpConfigPath), { code: "ENOENT" });
+  // The real home is linked, not copied, and app data/config entries resolve.
+  assert.equal(await readlink(join(homeRoot, ".gitconfig")), join(realHome, ".gitconfig"));
+  assert.equal(await readlink(join(homeRoot, ".gemini", "antigravity-cli")), join(realHome, ".gemini", "antigravity-cli"));
+  assert.equal(
+    await readlink(join(homeRoot, ".gemini", "config", "config.json")),
+    join(realHome, ".gemini", "config", "config.json"),
+  );
 
   await bridge.close();
+});
+
+test("private home ignores a malformed user MCP config and never links itself", async (t) => {
+  const realHome = await mkdtemp(join(tmpdir(), "polyth-agy-malformed-"));
+  // Nested under the real home so the ancestor must not be linked into itself.
+  const homeRoot = join(realHome, ".polyth", "agy-home");
+  t.after(() => rm(realHome, { recursive: true, force: true }));
+  await mkdir(join(realHome, ".gemini", "config"), { recursive: true });
+  await writeFile(join(realHome, ".gemini", "config", "mcp_config.json"), "{ not json ");
+
+  await materializeAntigravityHome({
+    homeRoot,
+    realHome,
+    mcpServers: { bridge: { command: "node", args: ["bridge.mjs"] } },
+  });
+
+  const config = JSON.parse(await readFile(join(homeRoot, ".gemini", "config", "mcp_config.json"), "utf8"));
+  assert.deepEqual(config, { mcpServers: { bridge: { command: "node", args: ["bridge.mjs"] } } });
+  await assert.rejects(stat(join(homeRoot, ".polyth")), { code: "ENOENT" });
 });
 
 test("browser tool permission classification recognizes actions and URLs", async () => {
@@ -473,10 +514,14 @@ test("runtime lifecycle captures launch overlay and acknowledges application on 
   };
 
   const bridgeRoot = await mkdtemp(join(tmpdir(), "polyth-agy-rt-bridge-"));
+  const bridgeRealHome = await mkdtemp(join(tmpdir(), "polyth-agy-rt-home-"));
   t.after(() => rm(bridgeRoot, { recursive: true, force: true }));
+  t.after(() => rm(bridgeRealHome, { recursive: true, force: true }));
 
   const bridge = await createAntigravityPermissionBridge({
     root: bridgeRoot,
+    homeRoot: join(bridgeRoot, "agy-home"),
+    realHome: bridgeRealHome,
     handle: async () => ({ decision: "allow" }),
   });
   t.after(() => bridge.close());
@@ -519,9 +564,9 @@ test("runtime lifecycle captures launch overlay and acknowledges application on 
   // Verify worker received launch command
   assert.ok(stdinData.includes("polyth_launch"));
 
-  // Check that bridge prepared the MCP plugin files
-  const pluginConfigPath = join(bridgeRoot, ".agents", "plugins", "polyth-agent-tools", "mcp_config.json");
-  const writtenConfig = JSON.parse(await readFile(pluginConfigPath, "utf8"));
+  // Check that bridge prepared the per-runtime MCP config in the private home
+  const homeConfigPath = join(bridgeRoot, "agy-home", ".gemini", "config", "mcp_config.json");
+  const writtenConfig = JSON.parse(await readFile(homeConfigPath, "utf8"));
   assert.ok(writtenConfig.mcpServers["polyth-agent-tools"]);
 
   // Verify application receipt was acknowledged and overlay consumed

@@ -1,10 +1,11 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { chmod, lstat, mkdir, readFile, realpath, rename, rm, unlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { JsonObject } from "@polyth/contracts";
+import { materializeAntigravityHome } from "./home.ts";
 
 export type AgyHookDecision = {
   decision: "allow" | "deny";
@@ -253,6 +254,10 @@ export async function createAntigravityPermissionBridge(options: {
   root: string;
   handle(payload: unknown): Promise<AgyHookDecision>;
   mcpServers?: Record<string, JsonObject>;
+  /** Private HOME the native CLI is launched with; its Gemini config is per runtime. */
+  homeRoot?: string;
+  /** Real user home the CLI is authenticated against. */
+  realHome?: string;
 }): Promise<AntigravityPermissionBridge> {
   const token = randomBytes(32).toString("hex");
   const endpoint = process.platform === "win32"
@@ -317,9 +322,6 @@ export async function createAntigravityPermissionBridge(options: {
   });
   const client = join(options.root, "polyth-hook-client.mjs");
   const hooks = join(options.root, ".agents", "hooks.json");
-  const pluginDir = join(options.root, ".agents", "plugins", "polyth-agent-tools");
-  const pluginManifest = join(pluginDir, "plugin.json");
-  const pluginMcp = join(pluginDir, "mcp_config.json");
   const prepare = async (mcpServers?: Record<string, JsonObject>) => {
     if (mcpServers !== undefined) stagedMcpServers = mcpServers;
     await ensurePrivateDirectory(options.root);
@@ -337,13 +339,15 @@ export async function createAntigravityPermissionBridge(options: {
         }],
       },
     }, null, 2) + "\n");
-    if (stagedMcpServers && Object.keys(stagedMcpServers).length > 0) {
-      await ensurePrivateDirectory(join(options.root, ".agents", "plugins"));
-      await ensurePrivateDirectory(pluginDir);
-      await writeGenerated(pluginManifest, JSON.stringify({ name: "polyth-agent-tools" }, null, 2) + "\n");
-      await writeGenerated(pluginMcp, JSON.stringify({ mcpServers: stagedMcpServers }, null, 2) + "\n");
-    } else {
-      await rm(pluginDir, { recursive: true, force: true }).catch(() => undefined);
+    if (options.homeRoot && options.realHome) {
+      // The native CLI only reads MCP servers from its global Gemini config; a
+      // private HOME keeps one session's bridge out of every other process and
+      // out of the user's own config file.
+      await materializeAntigravityHome({
+        homeRoot: options.homeRoot,
+        realHome: options.realHome,
+        mcpServers: stagedMcpServers,
+      });
     }
   };
   try {

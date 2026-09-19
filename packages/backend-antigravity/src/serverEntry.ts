@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { HarnessContext, HarnessProvider, HarnessRegistry, ModelDescriptor, AgentRuntime } from "@polyth/contracts";
@@ -65,10 +66,16 @@ export default function registerPackage(host: ServerPackageHost) {
   const generatedPaths = (context: HarnessContext) => {
     if (!context.space) throw agyError("unsupported", "A validated local Space is required");
     const root = host.spaceStorage(context.space).packageDir(host.pluginId);
+    const runtime = join(root, "runtime", runtimeKey(context));
     return {
       worker: join(root, "generated", "antigravity-worker.mjs"),
-      permissionRoot: join(root, "runtime", runtimeKey(context), "permission-workspace"),
+      permissionRoot: join(runtime, "permission-workspace"),
+      homeRoot: join(runtime, "agy-home"),
     };
+  };
+  const realUserHome = (env: NodeJS.ProcessEnv): string => {
+    const configured = env.HOME?.trim() || (process.platform === "win32" ? env.USERPROFILE?.trim() : undefined);
+    return configured || homedir();
   };
   const models = async (context: HarnessContext): Promise<ModelDescriptor[]> => {
     if (context.remote) throw agyError("unsupported", "Antigravity runs on the local Polyth server only");
@@ -120,11 +127,20 @@ export default function registerPackage(host: ServerPackageHost) {
       const paths = generatedPaths(context);
       await writeGenerated(paths.worker, ANTIGRAVITY_WORKER_SOURCE);
       const authority = await createHarnessProcessAuthority(file);
+      // The native CLI reads its Gemini config (including MCP servers) from
+      // `$HOME`; a private home keeps one canonical session's bridge isolated
+      // while the real app data stays shared for auth and conversation resume.
+      const launchEnv: NodeJS.ProcessEnv = {
+        ...binary.env,
+        HOME: paths.homeRoot,
+        ...(process.platform === "win32" ? { USERPROFILE: paths.homeRoot } : {}),
+      };
       const runtime = createAntigravityRuntime({
         context,
         authority,
-        ...binary,
+        command: binary.command,
         workerPath: paths.worker,
+        env: launchEnv,
         models: () => models(context),
         autoApprove: async () => {
           if (!context.sessionId) return false;
@@ -137,6 +153,8 @@ export default function registerPackage(host: ServerPackageHost) {
         },
         permissionBridge: (handle) => createAntigravityPermissionBridge({
           root: paths.permissionRoot,
+          homeRoot: paths.homeRoot,
+          realHome: realUserHome(binary.env),
           handle,
         }),
       });
