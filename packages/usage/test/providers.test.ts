@@ -394,8 +394,12 @@ test("Antigravity reads credentials from antigravity-oauth-token, refreshes expi
   assert.equal(snapshot.providerId, "antigravity");
   assert.equal(snapshot.accountLabel, "Antigravity");
   assert.deepEqual(snapshot.windows.map((w) => w.id), [
-    "gemini-3.8-flash-tiered/5h",
-    "claude-sonnet-4-6/5h",
+    "google-models",
+    "third-party-models",
+  ]);
+  assert.deepEqual(snapshot.windows.map((w) => w.label), [
+    "Google models",
+    "Third-party models",
   ]);
   assert.deepEqual(snapshot.windows.map((w) => [w.used, w.limit, w.unit, w.periodMs]), [
     [15, 100, "percent", 5 * 3600 * 1000],
@@ -463,6 +467,46 @@ test("Antigravity handles 429 rate limit cooldown and preserves last-good snapsh
   now += 10_000;
   const cached = await agy.fetch(new AbortController().signal);
   assert.deepEqual(cached.windows, first.windows);
+});
+
+test("Antigravity collapses many identical model quotas into exactly 2 tiers: Google and third-party", async () => {
+  const now = 1_800_000_000_000;
+  const resetIso = new Date(now + 2 * 3600 * 1000).toISOString();
+  const opts: QuotaDiscoveryOptions = {
+    readAuth: () => ({ antigravity: { access: "valid-agy-token" } }),
+    env: {},
+    homedir: "/unused",
+    now: () => now,
+    readFile: () => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); },
+    fetchImpl: (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/v1internal:retrieveUserQuota")) {
+        return jsonResponse({
+          buckets: [
+            { modelId: "gemini-2.5-flash", remainingFraction: 0.9, resetTime: resetIso },
+            { modelId: "gemini-2.5-pro", remainingFraction: 0.9, resetTime: resetIso },
+            { modelId: "gemini-3.8-flash-high", remainingFraction: 0.9, resetTime: resetIso },
+            { modelId: "gemini-3.8-flash-medium", remainingFraction: 0.9, resetTime: resetIso },
+            { modelId: "gemini-3.8-flash-tiered", remainingFraction: 0.9, resetTime: resetIso },
+            { modelId: "claude-sonnet-4-6", remainingFraction: 0.75, resetTime: resetIso },
+            { modelId: "claude-opus-4-6-thinking", remainingFraction: 0.75, resetTime: resetIso },
+            { modelId: "gpt-oss-120b-medium", remainingFraction: 0.75, resetTime: resetIso },
+            { modelId: "chat_20706", remainingFraction: 1 },
+            { modelId: "tab_flash_lite_preview", remainingFraction: 1 },
+          ],
+        });
+      }
+      return jsonResponse({ models: {} });
+    }) as typeof fetch,
+  };
+
+  const agy = provider(discoverQuotaProviders(opts), "antigravity");
+  const snapshot = await agy.fetch(new AbortController().signal);
+  assert.equal(snapshot.windows.length, 2, "Must contain exactly 2 tiers, not 8 identical model rows");
+  assert.deepEqual(snapshot.windows.map((w) => ({ id: w.id, label: w.label, used: w.used })), [
+    { id: "google-models", label: "Google models", used: 10 },
+    { id: "third-party-models", label: "Third-party models", used: 25 },
+  ]);
 });
 
 test("adapter failures and usage-service redaction never include secret values", async () => {

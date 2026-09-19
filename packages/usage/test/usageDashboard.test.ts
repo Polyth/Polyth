@@ -237,8 +237,8 @@ test("dashboard combines Antigravity harness sessions with Antigravity quota lim
     stale: false,
     pace: {},
     windows: [
-      { id: "gemini-3.8-flash-tiered/5h", label: "Gemini 3.8 Flash Tiered 5h", used: 15, limit: 100, unit: "percent" },
-      { id: "claude-sonnet-4-6/5h", label: "Claude Sonnet 4 6 5h", used: 40, limit: 100, unit: "percent" },
+      { id: "google-models", label: "Google models", used: 15, limit: 100, unit: "percent" },
+      { id: "third-party-models", label: "Third-party models", used: 40, limit: 100, unit: "percent" },
     ],
   };
 
@@ -249,7 +249,7 @@ test("dashboard combines Antigravity harness sessions with Antigravity quota lim
   assert.equal(dashboard.providers[0]?.label, "Antigravity");
   assert.equal(dashboard.providers[0]?.tokens, 2_000);
   assert.equal(dashboard.providers[0]?.snapshot?.providerId, "antigravity");
-  assert.equal(dashboard.providers[0]?.quotaWindow?.id, "claude-sonnet-4-6/5h");
+  assert.equal(dashboard.providers[0]?.quotaWindow?.id, "third-party-models");
   assert.equal(dashboard.providers[0]?.remainingPercent, 60);
   assert.deepEqual(dashboard.models.map((m) => ({ id: m.id, provider: m.providerLabel, tokens: m.tokens })), [
     { id: "antigravity/gemini-3.8-flash-high", provider: "Antigravity", tokens: 2_000 },

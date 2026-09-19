@@ -5,6 +5,7 @@ export interface ProviderUsageWindow extends Record<string, unknown> {
   usedPercent?: number | null;
   windowSeconds?: number | null;
   resetAt?: number | string | null;
+  label?: string;
   valueLabel?: string;
   used?: number;
   limit?: number;
@@ -26,6 +27,8 @@ const windowLabel = (key: string): string => {
   if (key === "extra_usage") return "Extra usage";
   if (key === "credits_balance") return "Credits balance";
   if (key === "billing_cycle") return "Billing cycle";
+  if (key === "google-models" || key === "google_models") return "Google models";
+  if (key === "third-party-models" || key === "third_party_models") return "Third-party models";
   return titleWords(key);
 };
 
@@ -96,9 +99,12 @@ const mapOne = (
   if (![used, limit].every(Number.isFinite) || used < 0 || limit < 0) return null;
   const resetAt = timestampValue(value.resetAt);
   const windowSeconds = numberValue(value.windowSeconds);
+  const explicitLabel = typeof value.label === "string" && value.label.trim()
+    ? value.label.trim()
+    : label;
   return {
     id,
-    label: valueLabel ? `${label} · ${valueLabel}` : label,
+    label: valueLabel ? `${explicitLabel} · ${valueLabel}` : explicitLabel,
     used,
     limit,
     unit,

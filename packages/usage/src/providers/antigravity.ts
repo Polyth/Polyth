@@ -239,23 +239,64 @@ async function fetchAntigravityUsage(
     });
   }
 
-  const models: NonNullable<ProviderUsage["models"]> = {};
+  const isGoogleModel = (modelId: string): boolean => {
+    const lower = modelId.toLowerCase();
+    return lower.startsWith("gemini") || lower.startsWith("gemma") || lower.includes("google");
+  };
+
+  const aggregateTier = (rows: ModelQuotaRow[]): { remainingFraction: number | null; resetTime: string | null } => {
+    let minFraction: number | null = null;
+    let resetTime: string | null = null;
+    for (const row of rows) {
+      if (row.remainingFraction !== null && Number.isFinite(row.remainingFraction)) {
+        if (minFraction === null || row.remainingFraction < minFraction) {
+          minFraction = row.remainingFraction;
+          resetTime = row.resetTime ?? resetTime;
+        }
+      } else if (resetTime === null && row.resetTime) {
+        resetTime = row.resetTime;
+      }
+    }
+    return { remainingFraction: minFraction, resetTime };
+  };
+
+  const googleRows: ModelQuotaRow[] = [];
+  const thirdPartyRows: ModelQuotaRow[] = [];
   for (const [name, row] of rawModels) {
-    const remaining = row.remainingFraction;
-    const resetAt = timestampValue(row.resetTime);
-    const seconds = resetAt !== null && (resetAt - runtime.now()) / 1000 <= 10 * 3600 ? 5 * 3600 : 86400;
-    models[name] = {
-      windows: {
-        [seconds === 5 * 3600 ? "5h" : "daily"]: usageWindow({
-          usedPercent: remaining === null ? null : Math.max(0, 100 - Math.round(remaining * 100)),
-          windowSeconds: seconds,
-          resetAt,
-        }),
-      },
-    };
+    if (isGoogleModel(name)) {
+      googleRows.push(row);
+    } else {
+      thirdPartyRows.push(row);
+    }
   }
 
-  return { models };
+  const windows: NonNullable<ProviderUsage["windows"]> = {};
+
+  if (googleRows.length > 0) {
+    const { remainingFraction, resetTime } = aggregateTier(googleRows);
+    const resetAt = timestampValue(resetTime);
+    const seconds = resetAt !== null && (resetAt - runtime.now()) / 1000 <= 10 * 3600 ? 5 * 3600 : 86400;
+    windows["google-models"] = usageWindow({
+      label: "Google models",
+      usedPercent: remainingFraction === null ? null : Math.max(0, 100 - Math.round(remainingFraction * 100)),
+      windowSeconds: seconds,
+      resetAt,
+    });
+  }
+
+  if (thirdPartyRows.length > 0) {
+    const { remainingFraction, resetTime } = aggregateTier(thirdPartyRows);
+    const resetAt = timestampValue(resetTime);
+    const seconds = resetAt !== null && (resetAt - runtime.now()) / 1000 <= 10 * 3600 ? 5 * 3600 : 86400;
+    windows["third-party-models"] = usageWindow({
+      label: "Third-party models",
+      usedPercent: remainingFraction === null ? null : Math.max(0, 100 - Math.round(remainingFraction * 100)),
+      windowSeconds: seconds,
+      resetAt,
+    });
+  }
+
+  return { windows };
 }
 
 const cooldownMs = (retryAfter: string | undefined, now: number): number => {
