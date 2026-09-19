@@ -23,13 +23,15 @@ import {
 } from "../usagePrefs.ts";
 import {
   buildUsageDashboardData,
+  buildUsageDashboardDataFromTelemetry,
   type UsageChartMetric,
   type UsageConsumerSummary,
   type UsageDateRange,
   type UsageProviderSummary,
   type UsageRangeDays,
 } from "./dashboardData.ts";
-import { fmtQuota, useQuotaSnapshots } from "./quotaUi.tsx";
+import { useQuotaSnapshots } from "./quotaUi.tsx";
+import { useUsageTelemetry } from "./telemetryUi.ts";
 import {
   BackIcon,
   Button,
@@ -703,14 +705,25 @@ export function UsageDashboard(): ReactNode {
     () => Object.fromEntries(projectRegistry.projects.map((project) => [project.id, project.name])),
     [projectRegistry.projects],
   );
-  const range = resolvedRange(
-    prefs.dashboard.rangeMode,
-    prefs.dashboard.rangeDays,
-    prefs.dashboard.customRange,
+  const range = useMemo(
+    () => resolvedRange(
+      prefs.dashboard.rangeMode,
+      prefs.dashboard.rangeDays,
+      prefs.dashboard.customRange,
+    ),
+    [prefs.dashboard.customRange, prefs.dashboard.rangeDays, prefs.dashboard.rangeMode],
   );
+  const {
+    telemetry,
+    reload: reloadTelemetry,
+    loading: telemetryLoading,
+    error: telemetryError,
+  } = useUsageTelemetry(range);
   const data = useMemo(
-    () => buildUsageDashboardData(sessions, snapshots, range, Date.now(), projectLabels),
-    [projectLabels, range, sessions, snapshots],
+    () => telemetry
+      ? buildUsageDashboardDataFromTelemetry(telemetry, snapshots)
+      : buildUsageDashboardData(sessions, snapshots, range, Date.now(), projectLabels),
+    [projectLabels, range, sessions, snapshots, telemetry],
   );
   const visibleProviders = providerSort(
     data.providers.filter((provider) => !prefs.hiddenProviders.includes(provider.id)),
@@ -719,15 +732,15 @@ export function UsageDashboard(): ReactNode {
   );
 
   const refreshAll = async (): Promise<void> => {
-    if (refreshing || quotaLoading) return;
+    if (refreshing || quotaLoading || telemetryLoading) return;
     setRefreshing(true);
     try {
-      await refreshQuotaFeeds();
+      await Promise.all([refreshQuotaFeeds(), reloadTelemetry()]);
     } finally {
       setRefreshing(false);
     }
   };
-  const quotaBusy = quotaLoading || refreshing;
+  const quotaBusy = quotaLoading || telemetryLoading || refreshing;
   const selectPreset = (days: UsageRangeDays): void =>
     setUsageDashboardPrefs({ rangeDays: days, rangeMode: "preset" });
 
@@ -787,8 +800,8 @@ export function UsageDashboard(): ReactNode {
           <IconButton
             icon={RefreshIcon}
             className={quotaBusy ? "refreshing" : undefined}
-            label={quotaBusy ? "Refreshing quota feeds" : "Refresh quota feeds"}
-            title={quotaBusy ? "Refreshing quota feeds" : "Refresh quota feeds"}
+            label={quotaBusy ? "Refreshing Usage" : "Refresh Usage"}
+            title={quotaBusy ? "Refreshing Usage" : "Refresh Usage"}
             disabled={quotaBusy}
             onClick={() => void refreshAll()}
           />
@@ -799,8 +812,18 @@ export function UsageDashboard(): ReactNode {
 
       {quotaError && (
         <div className="usage-quota-alert" role="alert">
-          <span><strong>Quota feeds unavailable.</strong> Session usage remains available.</span>
+          <span><strong>Quota feeds unavailable.</strong> Recorded usage remains available.</span>
           <Button size="sm" busy={quotaBusy} onClick={() => void reload()}>Retry</Button>
+        </div>
+      )}
+      {telemetryError && (
+        <div className="usage-history-note" role="status">
+          Historical event aggregation is temporarily unavailable; showing projection totals instead.
+        </div>
+      )}
+      {data.partial && (
+        <div className="usage-history-note" role="status">
+          Very large session history was bounded for this range; totals may be partial.
         </div>
       )}
 
