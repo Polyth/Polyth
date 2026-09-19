@@ -5,6 +5,7 @@ import type {
   SessionPersistence,
   SessionProjection,
   TokenUsage,
+  type TelemetryQuality,
 } from "@polyth/contracts";
 import {
   canonicalProviderId,
@@ -29,12 +30,16 @@ export interface UsageTelemetryDistribution {
   p95: number;
 }
 
+export type UsageCostQuality = TelemetryQuality | "mixed" | null;
+
 export interface UsageTelemetryCounters {
   sessions: number;
   requests: number;
   effectiveTokens: number;
   tokens: UsageTelemetryTokens;
   cost: number;
+  /** Quality of recorded provider cost. "mixed" means multiple qualities contributed. */
+  costQuality: UsageCostQuality;
   cacheHitPercent: number | null;
   ttftMs: UsageTelemetryDistribution | null;
   tokPerSec: UsageTelemetryDistribution | null;
@@ -99,6 +104,7 @@ interface UsageSample {
   projectLabel: string;
   tokens: UsageTelemetryTokens;
   cost: number;
+  costSource: TelemetryQuality | null;
 }
 
 interface TurnSample {
@@ -126,6 +132,7 @@ interface MutableCounters {
   requests: number;
   tokens: UsageTelemetryTokens;
   cost: number;
+  costQualities: Set<TelemetryQuality>;
   ttftMs: number[];
   tokPerSec: number[];
   durationMs: number[];
@@ -255,6 +262,7 @@ const emptyMutable = (): MutableCounters => ({
   requests: 0,
   tokens: emptyTokens(),
   cost: 0,
+  costQualities: new Set(),
   ttftMs: [],
   tokPerSec: [],
   durationMs: [],
@@ -272,6 +280,11 @@ const finalizeCounters = (value: MutableCounters): UsageTelemetryCounters => {
     effectiveTokens: effectiveTokens(value.tokens),
     tokens: { ...value.tokens },
     cost: value.cost,
+    costQuality: value.costQualities.size === 0
+      ? null
+      : value.costQualities.size === 1
+        ? [...value.costQualities][0]!
+        : "mixed",
     cacheHitPercent: eligible > 0 ? value.tokens.cacheRead / eligible * 100 : null,
     ttftMs: distribution(value.ttftMs),
     tokPerSec: distribution(value.tokPerSec),
@@ -296,6 +309,7 @@ const addUsage = (target: MutableCounters, sample: UsageSample): void => {
   target.sessions.add(sample.sessionId);
   addTokens(target.tokens, sample.tokens);
   target.cost += sample.cost;
+  if (sample.cost > 0 && sample.costSource) target.costQualities.add(sample.costSource);
 };
 
 const addTurn = (target: MutableCounters, sample: TurnSample): void => {
@@ -513,6 +527,14 @@ const samplesFromSession = (
       const chosen = providerModel(eventModel, session);
       if (!chosen) continue;
       const sampleTokens = tokensOf(data.tokens);
+      const rawCostSource = data.costSource;
+      const costSource: TelemetryQuality | null =
+        rawCostSource === "native" || rawCostSource === "derived"
+          || rawCostSource === "estimated" || rawCostSource === "unknown"
+          ? rawCostSource
+          : data.cost !== undefined
+            ? "unknown"
+            : null;
       const sample: UsageSample = {
         at: event.time,
         sessionId: session.id,
@@ -523,6 +545,7 @@ const samplesFromSession = (
         projectLabel,
         tokens: sampleTokens,
         cost: finite(data.cost),
+        costSource,
       };
       if (event.time >= earliest) usage.push(sample);
       if (active) {
