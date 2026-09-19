@@ -676,6 +676,11 @@ export function createSessionService(deps: {
   const autoTitleRequested = new Set<string>();
   const autoTitlePrompt = new Map<string, string>();
   const titleFallbackTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  // Native title polling: some harnesses only publish their generated title
+  // through the session list after the terminal event. A bounded read covers
+  // the delayed write without a standing background poll.
+  const titleRefreshInFlight = new Set<string>();
+  const titleRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
   type RuntimeFeatureState = {
     harnessId: string;
     generation: number;
@@ -2369,11 +2374,21 @@ export function createSessionService(deps: {
     }
   };
 
+  const clearTitleRefreshTimer = (sessionId: string): void => {
+    const timer = titleRefreshTimers.get(sessionId);
+    if (timer) {
+      clearTimeout(timer);
+      titleRefreshTimers.delete(sessionId);
+    }
+  };
+
   const clearRuntimeFeatureState = (sessionId: string): void => {
     runtimeFeatureState.delete(sessionId);
     autoTitlePrompt.delete(sessionId);
     autoTitleRequested.delete(sessionId);
     clearTitleFallbackTimer(sessionId);
+    clearTitleRefreshTimer(sessionId);
+    titleRefreshInFlight.delete(sessionId);
   };
 
   const upsertRuntimeFeatureState = (
@@ -2450,6 +2465,54 @@ export function createSessionService(deps: {
     autoTitlePrompt.delete(sessionId);
     void Promise.resolve(hooks.onSessionTitleChanged?.(sessionId, fallback, "fallback"))
       .catch((error) => console.error("[polyth] session title follow-up failed", error));
+  }
+
+  /** SSE is the primary native-title path, but some harnesses only expose the
+   *  generated title through their session list after the terminal event. Read
+   *  that list on a bounded schedule so a late title still wins; when no
+   *  semantic title materializes, settle the request with the prompt fallback. */
+  function pollNativeTitle(sessionId: string, runtime: AgentRuntime): void {
+    if (titleRefreshInFlight.has(sessionId)) return;
+    titleRefreshInFlight.add(sessionId);
+    const delays = [0, 1_000, 3_000, 7_000] as const;
+    const attempt = async (index: number): Promise<void> => {
+      if (!autoTitleRequested.has(sessionId)) {
+        titleRefreshInFlight.delete(sessionId);
+        return;
+      }
+      const current = await store.projection(sessionId).catch(() => undefined);
+      if (!current?.backendSessionId) {
+        titleRefreshInFlight.delete(sessionId);
+        void applyPromptTitleFallback(sessionId);
+        return;
+      }
+      try {
+        const title = (await runtime.sessions())
+          .find((session) => session.id === current.backendSessionId)?.title;
+        // Timestamp titles are a provider's failed auto-title. Accepting one
+        // would leave the visible placeholder in place; keep waiting for a
+        // semantic title and let the prompt fallback settle the request.
+        if (title
+          && !isPlaceholderTitle(title, current.backendSessionId)
+          && !/^new session - \d{4}-\d{2}-\d{2}t/i.test(title)) {
+          await onRuntimeEvent(sessionId, { type: "session/title-generated", title });
+          titleRefreshInFlight.delete(sessionId);
+          return;
+        }
+      } catch {
+        // Retry on the next bounded interval; the native event can still win.
+      }
+      if (index === delays.length - 1) {
+        titleRefreshInFlight.delete(sessionId);
+        void applyPromptTitleFallback(sessionId);
+        return;
+      }
+      titleRefreshTimers.set(sessionId, setTimeout(() => {
+        titleRefreshTimers.delete(sessionId);
+        void attempt(index + 1);
+      }, delays[index + 1]));
+    };
+    void attempt(0);
   }
 
   const cachedCapabilities = async (runtime: AgentRuntime): Promise<RuntimeCapabilities> => {
@@ -3097,11 +3160,12 @@ export function createSessionService(deps: {
           if (applied) {
             lastTurnId.delete(sessionId);
             admitting.delete(sessionId);
-            // Native title push is the primary path; one grace timer covers late arrivals.
+            // Native titles can arrive on SSE or only through the session
+            // list. Emulated/unsupported harnesses settle from the prompt now.
             const titleRuntime = sessionRuntime.get(sessionId);
             if (titleRuntime && autoTitleRequested.has(sessionId)) {
               void cachedCapabilities(titleRuntime).then((caps) => {
-                if (caps.title === "native") armTitleFallbackTimer(sessionId);
+                if (caps.title === "native") pollNativeTitle(sessionId, titleRuntime);
                 else void applyPromptTitleFallback(sessionId);
               }).catch(() => { void applyPromptTitleFallback(sessionId); });
             } else if (autoTitleRequested.has(sessionId)) {
@@ -6389,6 +6453,9 @@ export function createSessionService(deps: {
     dispose() {
       for (const timer of titleFallbackTimers.values()) clearTimeout(timer);
       titleFallbackTimers.clear();
+      for (const timer of titleRefreshTimers.values()) clearTimeout(timer);
+      titleRefreshTimers.clear();
+      titleRefreshInFlight.clear();
       autoTitleRequested.clear();
       autoTitlePrompt.clear();
     },

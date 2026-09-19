@@ -31,7 +31,11 @@ export const PI_CAPABILITIES: RuntimeCapabilities = {
   usage: false,
   cost: false,
   fork: false,
-  title: "native",
+  // Pi RPC exposes a session display name that a client or extension can set,
+  // but the agent does not generate a semantic title from the prompt. Let the
+  // canonical layer publish its prompt-derived fallback immediately and allow
+  // an explicit native name to refine it later.
+  title: "emulated",
   attachments: {
     modalities: {
       image: "native",
@@ -238,6 +242,15 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc): AgentRunti
       } else {
         emit({ type: "tool/result", callId, tool, output: toolOutput(event.result) });
       }
+      return;
+    }
+
+    // Pi does not generate a semantic title, but a user, an extension or the
+    // native `/name` command can set one. Surface that exact name so it can
+    // refine the canonical prompt-derived title.
+    if (type === "session_info_changed") {
+      const name = typeof event.name === "string" ? event.name.trim() : "";
+      if (name) emit({ type: "session/title-generated", title: name });
       return;
     }
 

@@ -42,6 +42,8 @@ Runtime pool keys include Space, project, cwd, canonical session and harness. Se
 | Native session/thread ID | A subordinate provider reference for execution, verified reattachment and reconciliation. It never becomes the Polyth session ID. |
 | Runtime authority and generation | The execution ownership evidence used to fence observations and prove release. This is independent of native conversation identity. |
 
+Title authority stays canonical. A harness declares `title: "native"` only when it publishes a semantic title (an event or a session-list name); a harness that does not generate titles declares `title: "emulated"` so the canonical layer persists the prompt-derived fallback immediately. For a native-title harness, the session service reads the runtime's session list on a bounded schedule after the terminal event so a late title still wins, then settles on the prompt fallback if no semantic title materializes.
+
 New sessions persist `{ mode: "auto" }` separately from `resolvedHarnessId`. Auto uses deterministic priority and ID ordering, and stays on the persisted route. An explicit pin never silently selects another harness. Auto can try another ready factory when constructing a new, unbound session fails before native creation. Persisted routes do not use this fallback path.
 
 A synchronized native leg can be reattached where the adapter supports verified continuity. Returning A → B → A creates a fresh A leg. A mismatch between the leg's effective dialogue checkpoint and current canonical history also forces fresh continuity. Profile intent survives switching, while the old profile's model/account selection is cleared. Model catalogs come from the selected session runtime; harness identity is not encoded into `providerID`.

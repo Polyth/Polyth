@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { RuntimeEvent } from "@polyth/contracts";
-import { createPiRuntime } from "../src/runtime.ts";
+import { createPiRuntime, PI_CAPABILITIES } from "../src/runtime.ts";
 import type { PiRpc, PiRpcEvent, PiRpcState } from "../src/rpc.ts";
 
 const fakePi = () => {
@@ -185,6 +185,24 @@ test("Pi maps catalog, model selection, streaming text, tools and settled termin
     }],
   });
 
+  await runtime.dispose();
+});
+
+test("Pi reports emulated title support and surfaces an explicit native session name", async () => {
+  // Pi RPC can carry a client/extension-set display name, but the agent does
+  // not generate a semantic title. Claiming native would make the canonical
+  // layer wait for an event that never arrives.
+  assert.equal(PI_CAPABILITIES.title, "emulated");
+
+  const fake = fakePi();
+  const runtime = createPiRuntime(context, fake.rpc);
+  const events: RuntimeEvent[] = [];
+  runtime.onEvent((_, event) => events.push(event));
+
+  fake.emit({ type: "session_info_changed", name: "  Fix mobile composer  " });
+  fake.emit({ type: "session_info_changed", name: "   " });
+
+  assert.deepEqual(events, [{ type: "session/title-generated", title: "Fix mobile composer" }]);
   await runtime.dispose();
 });
 

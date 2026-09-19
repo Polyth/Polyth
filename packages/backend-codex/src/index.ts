@@ -492,7 +492,10 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
     let lastUsageCumulative: TokenUsage | undefined;
     let lastUsageDigest = "";
     let lastUsageTurnId = "";
-    let sessionTitle = "Codex session";
+    // Empty means "no native name yet": the canonical layer treats it as a
+    // placeholder, so the restored native-title poll never persists a generic
+    // default before Codex publishes its semantic thread name.
+    let sessionTitle = "";
     let nativeMcpReady = false;
     let requiredNativeMcp: readonly CodexNativeMcp[] = [];
     const listeners = new Set<(id: string, event: RuntimeEvent) => void>();
