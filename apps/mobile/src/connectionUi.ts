@@ -27,6 +27,18 @@ export function connectionUiState(opts: {
   };
 }
 
+export function shouldAutoReconnect(opts: {
+  selectServer?: boolean;
+  pendingPair?: string;
+  hasPendingPush?: boolean;
+  deepLinkPath?: string;
+}): boolean {
+  return !opts.selectServer
+    && !opts.pendingPair
+    && !opts.hasPendingPush
+    && !opts.deepLinkPath;
+}
+
 export function preferredTrustedConnection(
   connections: readonly ConnectionMetadata[],
 ): ConnectionMetadata | undefined {
