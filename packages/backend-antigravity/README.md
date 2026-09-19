@@ -69,9 +69,10 @@ macOS/Windows retain the shared portable authority's explicit crash-fence limits
   supplies a runtime-private `PreToolUse` hook. Standard reads and edits whose
   resolved paths stay inside the canonical workspace are allowed by default;
   traversal, symlink escape, commands, network/research tools, subagents and
-  other actions become ordinary Polyth `permission/requested` events. Existing
-  Polyth allow/deny rules run first, then Auto-Approve, otherwise the user sees
-  the normal approval card. Hook or bridge failure denies the call. The hook is
+  other actions become ordinary Polyth `permission/requested` events. With
+  Auto-Approve off, existing Polyth allow/deny rules handle those requests
+  before the user sees the normal approval card. Auto-Approve bypasses that
+  review path completely. Hook or bridge failure denies the call. The hook is
   re-materialized before every turn and the native CLI still runs in
   `request-review` while Auto-Approve is off, so a missing bridge does not turn
   into the dangerous launch mode. Turning Auto-Approve on is exactly the native
