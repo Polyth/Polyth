@@ -1,4 +1,4 @@
-import { useMemo, useState, type DragEvent } from "react";
+import { useMemo, useState, type DragEvent, type ReactNode } from "react";
 import type { WebPackageHost } from "@polyth/web-sdk";
 import {
   moveUsageBlock,
@@ -26,7 +26,7 @@ interface OverviewBlockDefinition {
   id: string;
   title: string;
   span: "full" | "wide" | "narrow";
-  render(scope: UsageAnalyticsScope): React.ReactNode;
+  render(scope: UsageAnalyticsScope): ReactNode;
   canvasConfig?: Readonly<Record<string, string | number | boolean>>;
   settingsItem?: string;
 }
