@@ -66,6 +66,8 @@ test("manual desktop workflow builds Windows, Linux and macOS artifacts without 
     "-c.mac.identity=-",
     "-c.mac.notarize=false",
     "Verify packaged macOS signatures",
+    "codesign --verify --deep --strict",
+    "spctl --assess --type execute",
     "polyth-macos-dmg-x64-${{ steps.mac_signing.outputs.mode }}",
     "polyth-macos-dmg-arm64-${{ steps.mac_signing.outputs.mode }}",
     "*-mac-x64.dmg",
