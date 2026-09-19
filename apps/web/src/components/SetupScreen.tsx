@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { authJson } from "../authClient.ts";
 import { acceptAuthenticatedBrowserAccount } from "../authPrefetch.ts";
+import { desktopBridge } from "../desktopBridge.ts";
 import { Button, TextInput } from "./ui/index.ts";
 
 const errorMessage = (body: Record<string, unknown>, status: number): string =>
@@ -11,6 +12,9 @@ const errorMessage = (body: Record<string, unknown>, status: number): string =>
       : `HTTP ${status}`;
 
 export default function SetupScreen({ restartRequired = false }: { restartRequired?: boolean }) {
+  const desktop = desktopBridge();
+  const isDesktop = desktop !== null;
+  const desktopPrepareStarted = useRef(false);
   const [claimToken, setClaimToken] = useState("");
   const [recoverySetId, setRecoverySetId] = useState("");
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
@@ -26,12 +30,13 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
 
   const prepare = async () => {
     const token = claimToken.trim().toLowerCase();
-    if (!/^[a-f0-9]{64}$/.test(token) || busy) return;
+    if (busy || (!isDesktop && !/^[a-f0-9]{64}$/.test(token))) return;
     setBusy(true); setError("");
     try {
-      const bound = await authJson("/api/auth/setup/claim", { claimToken: token });
+      const claimBody = isDesktop ? {} : { claimToken: token };
+      const bound = await authJson("/api/auth/setup/claim", claimBody);
       if (!bound.response.ok) throw new Error(errorMessage(bound.body, bound.response.status));
-      const recovery = await authJson<{ setId?: unknown; codes?: unknown }>("/api/auth/setup/recovery", { claimToken: token });
+      const recovery = await authJson<{ setId?: unknown; codes?: unknown }>("/api/auth/setup/recovery", claimBody);
       if (!recovery.response.ok) throw new Error(errorMessage(recovery.body, recovery.response.status));
       if (typeof recovery.body.setId !== "string" || !Array.isArray(recovery.body.codes)
         || !recovery.body.codes.every(code => typeof code === "string")) {
@@ -44,6 +49,12 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally { setBusy(false); }
   };
+
+  useEffect(() => {
+    if (!isDesktop || restartRequired || desktopPrepareStarted.current) return;
+    desktopPrepareStarted.current = true;
+    void prepare();
+  }, [isDesktop, restartRequired]);
 
   const finish = async () => {
     if (busy || !recoverySetId || !recoverySaved || password !== confirmPassword
