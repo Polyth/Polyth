@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { chmod, lstat, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { HarnessContext, HarnessProvider, HarnessRegistry, ModelDescriptor, AgentRuntime } from "@polyth/contracts";
@@ -26,12 +26,27 @@ const metadata = async (binary: Awaited<ReturnType<typeof resolveBinary>>, arg: 
   })).stdout;
 
 const writeGenerated = async (file: string, content: string): Promise<void> => {
-  const current = await readFile(file, "utf8").catch(() => undefined);
-  if (current === content) return;
-  await mkdir(dirname(file), { recursive: true });
-  const temp = `${file}.${process.pid}.tmp`;
-  await writeFile(temp, content, { mode: 0o600 });
-  await rename(temp, file);
+  const directory = dirname(file);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const directoryInfo = await lstat(directory);
+  if (!directoryInfo.isDirectory() || directoryInfo.isSymbolicLink())
+    throw agyError("invalid-path", "Antigravity generated runtime directory is unsafe");
+  const existing = await lstat(file).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (existing && (!existing.isFile() || existing.isSymbolicLink()))
+    throw agyError("invalid-path", "Antigravity generated worker path is unsafe");
+  const current = await readFile(file, "utf8").catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (current !== content) {
+    const temp = `${file}.${process.pid}.${randomUUID()}.tmp`;
+    await writeFile(temp, content, { mode: 0o600 });
+    await rename(temp, file);
+  }
+  await Promise.all([chmod(directory, 0o700), chmod(file, 0o600)]);
 };
 
 export default function registerPackage(host: ServerPackageHost) {

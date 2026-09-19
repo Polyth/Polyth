@@ -124,12 +124,18 @@ export function createAntigravityRuntime(options: AntigravityRuntimeOptions): Ag
     if (!nativeId || request.conversationId !== nativeId || !active || active.turn.terminal) {
       return { decision: "deny", reason: "Tool request does not belong to the active Polyth turn" };
     }
-    if (await currentAutoApprove()) return { decision: "allow" };
+    const turnId = active.id;
+    const autoApprove = await currentAutoApprove();
+    if (!active || active.id !== turnId || active.turn.terminal)
+      return { decision: "deny", reason: "The Polyth turn ended before approval" };
+    if (autoApprove) return { decision: "allow" };
     const classification = await classifyAgyPermission(request, context.cwd);
+    if (!active || active.id !== turnId || active.turn.terminal)
+      return { decision: "deny", reason: "The Polyth turn ended before approval" };
     if (classification.kind === "deny") return { decision: "deny", reason: classification.reason };
     if (classification.kind === "allow") return { decision: "allow" };
     const requestId = `agy_${createHash("sha256")
-      .update(JSON.stringify([request.conversationId, request.stepIdx, request.tool, request.args]))
+      .update(JSON.stringify([turnId, request.conversationId, request.stepIdx, request.tool, request.args]))
       .digest("hex")}`;
     return new Promise<AgyHookDecision>((resolvePermission) => {
       const existing = permissions.get(requestId);
@@ -292,6 +298,7 @@ export function createAntigravityRuntime(options: AntigravityRuntimeOptions): Ag
     completedStep = currentMaxStep;
     previousUsage = cumulative;
     usageBaselineKnown = !!cumulative;
+    resolveAllPermissions({ decision: "deny", reason: "Antigravity ended the turn before approval completed" });
     active = undefined;
     order++;
     for (const event of resultEvents) emit(event);

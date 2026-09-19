@@ -22,15 +22,16 @@ report authentication as unknown; native initialization verifies actual access.
 
 ## Protocol and ownership
 
-One owned child process runs
-`agy --input-format stream-json --output-format stream-json
---dangerously-skip-permissions` per canonical runtime. Polyth does not enable
-Antigravity's optional native terminal sandbox. The always-proceed flag prevents
-headless permission prompts from becoming native soft-denials with an empty
-successful result. Prompts go through stdin, never shell command interpolation.
-Model, effort (`low`, `medium`, `high`) and optional native agent are launch
-arguments; model IDs come from `agy models`, not a hardcoded or stale fallback
-list.
+One supervised Polyth worker owns the native CLI leg for each canonical runtime.
+It runs `agy --input-format stream-json --output-format stream-json` and replaces
+only the idle native leg when the effective Auto-Approve setting changes. With
+Auto-Approve on, the launch includes the literal
+`--dangerously-skip-permissions` flag; with it off, that flag is absent and the
+native init must confirm `request-review`. `--sandbox` is never passed in either
+mode. Prompts and worker controls use NDJSON over owned pipes, never shell
+command interpolation. Model, effort (`low`, `medium`, `high`) and optional
+native agent remain launch arguments; model IDs come from `agy models`, not a
+hardcoded or stale fallback list.
 
 Polyth records the native conversation ID from `init` and resumes only that
 Space/project/session's recorded ID using `--conversation`. It never uses
@@ -64,15 +65,22 @@ macOS/Windows retain the shared portable authority's explicit crash-fence limits
 - Text prompts and Polyth's existing text-file projection work. Native image,
   PDF, audio and URL blocks are not advertised. Unsupported input fails before
   delivery instead of disappearing silently.
-- The stream protocol has no interactive permission/question reply channel.
-  Antigravity therefore runs in native always-proceed mode: its built-in tools
-  do not create Polyth `permission/requested` cards, and the generic Polyth
-  Auto-Approve toggle does not gate those native calls. They execute with the
-  local Polyth server account's authority. Unexpected native permission denial
-  is still preserved in activity; if the CLI returns `SUCCESS` without any
-  public response, Polyth records a failed turn rather than silently presenting
-  an empty completed turn. Native
-  slash commands, steering and Polyth MCP injection are not implemented.
+- The stream protocol has no interactive permission reply channel, so Polyth
+  supplies a runtime-private `PreToolUse` hook. Standard reads and edits whose
+  resolved paths stay inside the canonical workspace are allowed by default;
+  traversal, symlink escape, commands, network/research tools, subagents and
+  other actions become ordinary Polyth `permission/requested` events. Existing
+  Polyth allow/deny rules run first, then Auto-Approve, otherwise the user sees
+  the normal approval card. Hook or bridge failure denies the call. The hook is
+  re-materialized before every turn and the native CLI still runs in
+  `request-review` while Auto-Approve is off, so a missing bridge does not turn
+  into the dangerous launch mode. Turning Auto-Approve on is exactly the native
+  all-tools bypass on the next native launch; turning it off replaces that idle
+  leg before the next prompt. No Antigravity sandbox is used. An unexpected
+  native soft-denial is preserved in activity; an empty `SUCCESS` after only
+  proven denials becomes a failed turn instead of a silent stop. Native slash
+  commands, question replies, steering and Polyth MCP injection are not
+  implemented.
 - A step the native CLI ends in a failure state (`ERROR`, `INVALID`, `HALTED`,
   `CANCELED`, `INTERRUPTED`) becomes a `tool/error` (or finalizes text it had
   already streamed) and never aborts the canonical turn or disconnects the

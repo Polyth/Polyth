@@ -1,6 +1,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { chmod, mkdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
+import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -28,13 +29,20 @@ export type AgyPermissionClassification =
   | { kind: "request"; permission: string; patterns: string[]; tool: string; stepIdx: number }
   | { kind: "deny"; reason: string };
 
-const EDIT_TOOLS = new Set(["write_to_file", "replace_file_content", "multi_replace_file_content"]);
+const EDIT_PATHS = new Map([
+  ["write_to_file", ["TargetFile", "file_path", "path"]],
+  ["replace_file_content", ["TargetFile", "file_path", "path"]],
+  ["multi_replace_file_content", ["TargetFile", "file_path", "path"]],
+  ["sed_file", ["TargetFile", "AbsolutePath", "file_path", "path"]],
+  ["notebook_edit", ["NotebookPath", "notebook_path", "TargetFile", "file_path", "path"]],
+]);
 const READ_PATHS = new Map([
   ["view_file", "AbsolutePath"],
   ["list_dir", "DirectoryPath"],
   ["find_by_name", "SearchDirectory"],
   ["grep_search", "SearchPath"],
 ]);
+const SAFE_CONTROL_TOOLS = new Set(["finish", "wait", "wait_5_seconds", "command_status", "list_permissions"]);
 const MAX_HOOK_BYTES = 1024 * 1024;
 const MAX_PATTERN_LENGTH = 4096;
 
@@ -101,12 +109,14 @@ export async function classifyAgyPermission(
   request: AgyHookRequest,
   cwd: string,
 ): Promise<AgyPermissionClassification> {
-  if (EDIT_TOOLS.has(request.tool)) {
-    if (await isWorkspacePath(request.args.TargetFile, cwd)) return { kind: "allow", permission: "edit" };
+  const editPaths = EDIT_PATHS.get(request.tool);
+  if (editPaths) {
+    const editPath = editPaths.map((key) => request.args[key]).find((value) => typeof value === "string");
+    if (await isWorkspacePath(editPath, cwd)) return { kind: "allow", permission: "edit" };
     return {
       kind: "request",
       permission: "edit",
-      patterns: [boundedText(request.args.TargetFile) ?? "Workspace file change"],
+      patterns: [boundedText(editPath) ?? "Workspace file change"],
       tool: request.tool,
       stepIdx: request.stepIdx,
     };
@@ -124,7 +134,10 @@ export async function classifyAgyPermission(
     };
   }
 
-  if (request.tool === "list_permissions") return { kind: "allow", permission: "read" };
+  if (SAFE_CONTROL_TOOLS.has(request.tool)) return { kind: "allow", permission: "read" };
+  if (request.tool === "ask_question") {
+    return { kind: "deny", reason: "Antigravity interactive questions are unavailable in headless mode" };
+  }
   const pattern = request.tool === "run_command"
     ? boundedText(request.args.CommandLine)
     : request.tool === "read_url_content"
@@ -148,7 +161,16 @@ const quoteCommandArgument = (value: string): string => process.platform === "wi
   : `'${value.replaceAll("'", "'\\''")}'`;
 
 const writeGenerated = async (file: string, content: string): Promise<void> => {
-  const current = await readFile(file, "utf8").catch(() => undefined);
+  const existing = await lstat(file).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (existing && (!existing.isFile() || existing.isSymbolicLink()))
+    throw new Error("Antigravity approval bridge file was replaced by an unsafe filesystem entry");
+  const current = await readFile(file, "utf8").catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
   if (current !== content) {
     await mkdir(dirname(file), { recursive: true, mode: 0o700 });
     const temp = `${file}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
@@ -158,8 +180,16 @@ const writeGenerated = async (file: string, content: string): Promise<void> => {
   await chmod(file, 0o600);
 };
 
-const clientSource = (port: number, token: string): string => `import { createConnection } from "node:net";
-const PORT = ${port};
+const ensurePrivateDirectory = async (directory: string): Promise<void> => {
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const info = await lstat(directory);
+  if (!info.isDirectory() || info.isSymbolicLink())
+    throw new Error("Antigravity approval bridge directory is not a private directory");
+  await chmod(directory, 0o700);
+};
+
+const clientSource = (endpoint: string, token: string): string => `import { createConnection } from "node:net";
+const ENDPOINT = ${JSON.stringify(endpoint)};
 const TOKEN = ${JSON.stringify(token)};
 const MAX_BYTES = ${MAX_HOOK_BYTES};
 let input = "";
@@ -180,7 +210,7 @@ process.stdin.on("end", () => {
   if (finished) return;
   let payload;
   try { payload = JSON.parse(input); } catch { deny(); return; }
-  const socket = createConnection({ host: "127.0.0.1", port: PORT });
+  const socket = createConnection(ENDPOINT);
   let response = "";
   socket.setEncoding("utf8");
   socket.setTimeout(24 * 60 * 60 * 1000, () => { socket.destroy(); deny(); });
@@ -207,11 +237,16 @@ export async function createAntigravityPermissionBridge(options: {
   handle(payload: unknown): Promise<AgyHookDecision>;
 }): Promise<AntigravityPermissionBridge> {
   const token = randomBytes(32).toString("hex");
+  const endpoint = process.platform === "win32"
+    ? `\\\\.\\pipe\\polyth-agy-${randomBytes(16).toString("hex")}`
+    : join(tmpdir(), `polyth-agy-${randomBytes(16).toString("hex")}.sock`);
   const sockets = new Set<Socket>();
   let closed = false;
+  let failed = false;
   const server = createServer((socket) => {
     sockets.add(socket);
     socket.setEncoding("utf8");
+    socket.setTimeout(10_000);
     let input = "";
     let replied = false;
     const reply = (decision: AgyHookDecision) => {
@@ -236,32 +271,37 @@ export async function createAntigravityPermissionBridge(options: {
         reply({ decision: "deny", reason: "Invalid Polyth approval bridge credential" });
         return;
       }
+      socket.setTimeout(0);
       void options.handle(envelope?.payload).then(reply, () => reply({
         decision: "deny",
         reason: "Polyth could not resolve this tool approval",
       }));
     });
+    socket.on("timeout", () => reply({ decision: "deny", reason: "Polyth approval bridge authentication timed out" }));
     socket.on("error", () => {});
     socket.on("close", () => sockets.delete(socket));
-    if (closed) reply({ decision: "deny", reason: "Polyth approval bridge is closed" });
+    if (closed || failed) reply({ decision: "deny", reason: "Polyth approval bridge is closed" });
   });
   await new Promise<void>((resolveListen, rejectListen) => {
     server.once("error", rejectListen);
-    server.listen(0, "127.0.0.1", () => {
+    server.listen(endpoint, () => {
       server.off("error", rejectListen);
       resolveListen();
     });
   });
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    server.close();
-    throw new Error("Polyth could not allocate the Antigravity approval bridge");
-  }
+  server.on("error", () => {
+    failed = true;
+    for (const socket of sockets) socket.end(JSON.stringify({
+      decision: "deny",
+      reason: "Polyth approval bridge failed",
+    }) + "\n");
+  });
   const client = join(options.root, "polyth-hook-client.mjs");
   const hooks = join(options.root, ".agents", "hooks.json");
   const prepare = async () => {
-    await mkdir(join(options.root, ".agents"), { recursive: true, mode: 0o700 });
-    await writeGenerated(client, clientSource(address.port, token));
+    await ensurePrivateDirectory(options.root);
+    await ensurePrivateDirectory(join(options.root, ".agents"));
+    await writeGenerated(client, clientSource(endpoint, token));
     await writeGenerated(hooks, JSON.stringify({
       "polyth-permission-gate": {
         PreToolUse: [{
@@ -275,7 +315,14 @@ export async function createAntigravityPermissionBridge(options: {
       },
     }, null, 2) + "\n");
   };
-  await prepare();
+  try {
+    if (process.platform !== "win32") await chmod(endpoint, 0o600);
+    await prepare();
+  } catch (error) {
+    await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+    if (process.platform !== "win32") await unlink(endpoint).catch(() => undefined);
+    throw error;
+  }
   return {
     root: options.root,
     prepare,
@@ -287,6 +334,7 @@ export async function createAntigravityPermissionBridge(options: {
         reason: "Polyth approval bridge was closed",
       }) + "\n");
       await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+      if (process.platform !== "win32") await unlink(endpoint).catch(() => undefined);
     },
   };
 }

@@ -22,6 +22,50 @@ let killTimer;
 
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\n");
 const fail = (message) => send({ event: "polyth_error", polyth_error: { message } });
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const groupAlive = (pid) => {
+  if (process.platform === "win32") return false;
+  try { process.kill(-pid, 0); return true; }
+  catch (error) { return error?.code !== "ESRCH"; }
+};
+const signalTree = (pid, signal) => {
+  try {
+    if (process.platform === "win32") native?.kill(signal);
+    else process.kill(-pid, signal);
+  } catch (error) {
+    if (error?.code !== "ESRCH") throw error;
+  }
+};
+const taskkill = (pid) => new Promise((resolve, reject) => {
+  const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
+    stdio: "ignore", windowsHide: true, shell: false,
+  });
+  const timer = setTimeout(() => { killer.kill(); reject(new Error("taskkill timed out")); }, 5000);
+  killer.once("error", (error) => { clearTimeout(timer); reject(error); });
+  killer.once("exit", (code) => {
+    clearTimeout(timer);
+    if (code === 0 || code === 128) resolve();
+    else reject(new Error("taskkill did not release the native tree"));
+  });
+});
+const proveNativeTreeReleased = async (pid) => {
+  if (!pid) throw new Error("native process identity is missing");
+  if (process.platform === "win32") { await taskkill(pid); return; }
+  if (!groupAlive(pid)) return;
+  signalTree(pid, "SIGTERM");
+  const gentleDeadline = Date.now() + 1500;
+  while (Date.now() < gentleDeadline) {
+    if (!groupAlive(pid)) return;
+    await sleep(25);
+  }
+  signalTree(pid, "SIGKILL");
+  const hardDeadline = Date.now() + 3500;
+  while (Date.now() < hardDeadline) {
+    if (!groupAlive(pid)) return;
+    await sleep(25);
+  }
+  throw new Error("native process tree did not terminate");
+};
 const clearStopTimers = () => {
   if (stopTimer) clearTimeout(stopTimer);
   if (killTimer) clearTimeout(killTimer);
@@ -63,6 +107,7 @@ const spawnNative = (args, nextMode, reinitializing) => {
     cwd: process.cwd(),
     env: process.env,
     shell: process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command),
+    detached: process.platform !== "win32",
     windowsHide: true,
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -79,6 +124,7 @@ const spawnNative = (args, nextMode, reinitializing) => {
   });
   child.stderr.resume();
   child.once("error", () => fail("Antigravity CLI could not be started by its owned worker"));
+  const pid = child.pid;
   child.once("close", () => {
     if (buffer) forwardLine(buffer, reinitializing);
     buffer = "";
@@ -88,19 +134,21 @@ const spawnNative = (args, nextMode, reinitializing) => {
       fail("Antigravity CLI disconnected from its owned worker");
       return;
     }
-    const next = pending;
-    switching = false;
-    suppressNativeOutput = false;
-    if (!next || !validArgs(next.args)) {
-      fail("Antigravity permission-mode replacement lost its pending turn");
-      return;
-    }
-    const conversationAt = next.args.indexOf("--conversation");
-    if (!nativeId || conversationAt < 0 || next.args[conversationAt + 1] !== nativeId) {
-      fail("Antigravity permission-mode replacement did not pin the native conversation");
-      return;
-    }
-    spawnNative(next.args, next.mode, true);
+    void proveNativeTreeReleased(pid).then(() => {
+      const next = pending;
+      switching = false;
+      suppressNativeOutput = false;
+      if (!next || !validArgs(next.args)) {
+        fail("Antigravity permission-mode replacement lost its pending turn");
+        return;
+      }
+      const conversationAt = next.args.indexOf("--conversation");
+      if (!nativeId || conversationAt < 0 || next.args[conversationAt + 1] !== nativeId) {
+        fail("Antigravity permission-mode replacement did not pin the native conversation");
+        return;
+      }
+      spawnNative(next.args, next.mode, true);
+    }, () => fail("Antigravity native process tree release was not proved"));
   });
 };
 const replaceNative = () => {
@@ -108,8 +156,13 @@ const replaceNative = () => {
   switching = true;
   suppressNativeOutput = true;
   native.stdin?.end();
-  stopTimer = setTimeout(() => native?.kill("SIGTERM"), 1000);
-  killTimer = setTimeout(() => native?.kill("SIGKILL"), 3000);
+  const pid = native.pid;
+  stopTimer = setTimeout(() => {
+    try { signalTree(pid, "SIGTERM"); } catch { fail("Antigravity native process tree could not be stopped"); }
+  }, 1000);
+  killTimer = setTimeout(() => {
+    try { signalTree(pid, "SIGKILL"); } catch { fail("Antigravity native process tree could not be killed"); }
+  }, 3000);
 };
 
 createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line) => {
