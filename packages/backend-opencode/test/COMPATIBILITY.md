@@ -67,10 +67,7 @@ it needs no external provider account. The auth smoke stores a dummy key only
 in its private runtime, verifies restart persistence, and deletes it. These
 checks do not validate a real provider's OAuth website or credential acceptance.
 
-The [CI workflow](../../../.github/workflows/opencode-compatibility.yml) runs
-legacy, pinned V2 and non-blocking latest-V2 lanes. npm postinstall must run:
-both released packages initially install a guard launcher, then select their
-native platform binary during postinstall.
+Released OpenCode compatibility checks are not a separate scheduled GitHub Actions workflow. Run the legacy, pinned V2, and latest-V2 checks explicitly when changing the backend adapter or OpenCode pin. npm postinstall must run: both released packages initially install a guard launcher, then select their native platform binary during postinstall.
 
 ## Boundaries and upstream changes
 
