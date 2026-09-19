@@ -280,7 +280,10 @@ export function createMarketsService(options: MarketsServiceOptions = {}): Marke
 
 export function normalizeSymbol(symbol: string): string {
   const normalized = symbol.trim().toUpperCase();
-  if (!normalized || normalized.length > 32 || !/^[A-Z0-9.^=_:/-]+$/.test(normalized)) {
+  // `.` and `/` are legitimate in symbols (BRK.B, BTC/USDT), so the class alone
+  // admits traversal. Symbols reach URLs and cache keys; reject any `..` run.
+  if (!normalized || normalized.length > 32 || normalized.includes("..")
+    || !/^[A-Z0-9.^=_:/-]+$/.test(normalized)) {
     throw Object.assign(new Error("invalid market symbol"), { code: "invalid-input" });
   }
   return normalized;

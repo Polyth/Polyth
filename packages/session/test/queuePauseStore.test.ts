@@ -12,7 +12,7 @@ test("user Stop pauses automatic queue reservation across restart until a new tu
   {
     const store = createStore(dbPath);
     const queued = await store.enqueue("s1", "follow-up", "queue");
-    await store.append("s1", "queue/enqueued", { queueId: queued.id });
+    await store.append("s1", "queue/enqueued", { queueId: queued.item.id });
     await store.append("s1", "turn/abort-requested", { reason: "user" });
 
     const paused = await store.reserveQueueHead({ sessionId: "s1" });
@@ -31,7 +31,8 @@ test("user Stop pauses automatic queue reservation across restart until a new tu
     assert.equal(resumed.kind, "reserved");
     if (resumed.kind === "reserved") {
       await store.releaseQueueReservation(resumed.reservation.operation.operationId, {
-        kind: "not-applied",
+        kind: "rejected",
+        code: "test-cleanup",
         message: "test cleanup",
       });
     }

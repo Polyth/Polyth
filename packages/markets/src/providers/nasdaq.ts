@@ -30,7 +30,7 @@ export interface NasdaqProviderOptions {
 }
 
 const date = (value: Date): string => value.toISOString().slice(0, 10);
-const miss = (message: string): never => {
+const miss: (message: string) => never = (message) => {
   throw Object.assign(new Error(message), { code: "not-found" });
 };
 const requireSupportedSymbol = (symbol: string): void => {

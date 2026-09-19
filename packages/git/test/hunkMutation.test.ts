@@ -88,9 +88,9 @@ test("unstage only one staged hunk", async (t) => {
 
   const staged = git(root, "diff", "--cached", "--", path);
   const unstaged = git(root, "diff", "--", path);
-  assert.doesNotMatch(staged, /changed 2/);
+  assert.doesNotMatch(staged, /\bchanged 2\b/);
   assert.match(staged, /changed 25/);
-  assert.match(unstaged, /changed 2/);
+  assert.match(unstaged, /\bchanged 2\b/);
   assert.doesNotMatch(unstaged, /changed 25/);
 });
 
@@ -156,8 +156,8 @@ test("CRLF and filenames requiring argv-safe handling remain supported", async (
 test("binary diffs are rejected rather than corrupted", async (t) => {
   const root = repo(t);
   const path = "asset.bin";
-  commitFile(root, path, "\0\1\2before");
-  writeFileSync(join(root, path), "\0\1\2after");
+  commitFile(root, path, "\x00\x01\x02before");
+  writeFileSync(join(root, path), "\x00\x01\x02after");
   const service = createGitService();
   const current = await service.diff(root, { path });
   await assert.rejects(

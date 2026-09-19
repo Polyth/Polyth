@@ -86,7 +86,7 @@ const PLATFORMS: readonly PlatformRuntime[] = [
   },
 ] as const;
 
-const platformRuntime = (platform = process.platform, arch = process.arch): PlatformRuntime | undefined =>
+const platformRuntime = (platform: string = process.platform, arch: string = process.arch): PlatformRuntime | undefined =>
   PLATFORMS.find((entry) => entry.platform === platform && entry.arch === arch);
 
 export interface LocalRuntimeStatus {

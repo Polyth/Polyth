@@ -36,10 +36,10 @@ test("advertises fresh capable desktop runtimes", () => {
 
 test("dispatch correlates acknowledgements and rejects mismatches", async () => {
   const registry = createChatWorkspaceDeviceRuntimeRegistry();
-  let seen: ChatWorkspaceDeviceCommand | null = null;
+  const seen: { command?: ChatWorkspaceDeviceCommand } = {};
   registry.register(hello(), {
     async send(command) {
-      seen = command;
+      seen.command = command;
       return { requestId: command.requestId, ok: true };
     },
   });
@@ -49,7 +49,7 @@ test("dispatch correlates acknowledgements and rejects mismatches", async () => 
     tabId: "tab-1",
   });
   assert.equal(ack.ok, true);
-  assert.equal(seen?.kind, "tab.activate");
+  assert.equal(seen.command?.kind, "tab.activate");
 
   await registry.disconnect("desktop-1");
   registry.register(hello(), {

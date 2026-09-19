@@ -49,8 +49,10 @@ test("extensions never shadow project, user, or builtin commands", () => {
   const ext = extension("review");
   const builtin = command("review", "builtin");
   assert.equal(commandPrecedence("review", [ext, builtin]), builtin);
-  assert.equal(commandPrecedence("review", [ext, command("review", "user")])?.scope, "user");
-  assert.equal(commandPrecedence("review", [ext, command("review", "project")])?.scope, "project");
+  const user = command("review", "user");
+  assert.equal(commandPrecedence("review", [ext, user]), user);
+  const project = command("review", "project");
+  assert.equal(commandPrecedence("review", [ext, project]), project);
 });
 
 test("extension commands beat native runtime commands but lose to Polyth commands", () => {

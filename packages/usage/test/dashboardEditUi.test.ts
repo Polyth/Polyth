@@ -25,17 +25,32 @@ async function mount(blocks: ReturnType<typeof block>[], editing: boolean) {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
-  await act(async () => {
+  const render = (next: ReturnType<typeof block>[]) => {
     root.render(createElement(SortableBlocks, {
       className: "usage-overview-blocks",
-      blocks,
+      blocks: next,
       order: [],
       editing,
+      onChange: () => {},
       onHiddenChange: (id: string, hidden: boolean) => setBlockHidden(id, hidden),
     }));
+  };
+  await act(async () => {
+    render(blocks);
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
-  return { container, async close() { root.unmount(); container.remove(); } };
+  return {
+    container,
+    // SortableBlocks is a controlled view: the dashboard re-renders it from
+    // persisted prefs, so the test must mirror that after a visibility toggle.
+    async rerender(next: ReturnType<typeof block>[]) {
+      await act(async () => {
+        render(next);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    },
+    async close() { root.unmount(); container.remove(); },
+  };
 }
 
 const named = (container: ParentNode, label: string) =>
@@ -68,6 +83,7 @@ test("edit mode reveals hidden blocks and the eye toggles persisted visibility",
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.deepEqual(getUsagePrefs().hiddenBlocks, ["spend"]);
     assert.ok(parseUsagePrefs(dom.localStorage.getItem(USAGE_PREFS_KEY)).hiddenBlocks.includes("spend"));
+    await mounted.rerender(blocks.map((item) => item.id === "spend" ? { ...item, hidden: true } : item));
     const show = named(mounted.container, "Show spend in breakdowns");
     assert.ok(show);
     await act(async () => show!.click());

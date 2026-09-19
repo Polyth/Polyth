@@ -73,7 +73,7 @@ test("non-recoverable primary errors never switch providers", async () => {
   };
   const stream = createFailoverSttAdapter(primary, fallback).createStream({ format });
   await assert.rejects(
-    () => stream.push(chunk("secret")),
+    async () => { await stream.push(chunk("secret")); },
     (error: unknown) => (error as { code?: string }).code === "invalid_credentials",
   );
   assert.equal(fallback.streams.length, 0);
@@ -95,7 +95,7 @@ test("exceeding replay budget keeps primary usable but refuses a lossy later swi
   const stream = createFailoverSttAdapter(primary, fallback, { maxReplayBytes: 64 * 1024 }).createStream({ format });
   await stream.push(new Uint8Array(64 * 1024));
   await assert.rejects(
-    () => stream.push(new Uint8Array(2)),
+    async () => { await stream.push(new Uint8Array(2)); },
     (error: unknown) => {
       const e = error as { code?: string; message?: string };
       return e.code === "network_error" && /replay budget was exceeded/.test(e.message ?? "");

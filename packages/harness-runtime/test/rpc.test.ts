@@ -25,10 +25,14 @@ const waitFor = async <T>(read: () => Promise<T>, timeoutMs = 2_000): Promise<T>
         }
     }
 };
+// Release means the tree no longer executes. A killed process whose parent is
+// already gone lingers as a zombie until its reaper collects it, and under a
+// non-reaping subreaper (Polyth's own runtime supervisor is one) that outlasts
+// the assertion. Zombie/dead holds no execution, so it counts as released.
 const assertGone = async (pid: number) => {
     try {
-        await readFile(`/proc/${pid}/stat`, "utf8");
-        assert.fail(`process ${pid} still exists`);
+        const stat = await readFile(`/proc/${pid}/stat`, "utf8");
+        assert.match(stat.slice(stat.lastIndexOf(")") + 2), /^[ZX] /, `process ${pid} still executes`);
     }
     catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;

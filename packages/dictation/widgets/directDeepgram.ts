@@ -106,7 +106,8 @@ async function mintToken(fetchFn: typeof fetch): Promise<string> {
 
 export async function startDirectDeepgramDictation(options: DirectDeepgramOptions): Promise<StreamingDictation> {
   const fetchFn = options.fetchFn ?? fetch;
-  const socketFactory = options.socketFactory ?? ((url, protocols) => new WebSocket(url, protocols));
+  const socketFactory: (url: string, protocols: string[]) => BrowserSocketLike =
+    options.socketFactory ?? ((url, protocols) => new WebSocket(url, protocols) as unknown as BrowserSocketLike);
   const captureFactory = options.captureFactory ?? startPcm16Capture;
   const context = normalizeDictationContext(options.context ?? { language: options.language || "auto" });
   const url = new URL(PROVIDER_URL);
@@ -287,7 +288,7 @@ export async function startDirectDeepgramDictation(options: DirectDeepgramOption
     active = false;
     capture?.stop();
     capture = null;
-    socket?.close(1000, "dictation setup failed");
+    (socket as BrowserSocketLike | null)?.close(1000, "dictation setup failed");
     throw error;
   }
 

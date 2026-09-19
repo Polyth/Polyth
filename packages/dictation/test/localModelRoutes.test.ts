@@ -64,7 +64,7 @@ test("explicit model download never starts the separate native runtime download"
   const handled = await route({
     path: "/api/dictation/models/nemotron-3.5-streaming-0.6b-560ms/download",
     method: "POST",
-    json(code, body) { statusCode = code; payload = body; },
+    json(code: number, body: unknown) { statusCode = code; payload = body; },
   } as unknown as RouteRequest);
 
   assert.equal(handled, true);

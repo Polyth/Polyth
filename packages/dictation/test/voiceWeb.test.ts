@@ -78,14 +78,14 @@ test("voice installs per-reply read-aloud and a renderable microphone control", 
     assert.ok(widget, "the voice plugin declares a renderable widget");
     await act(async () => { root.render(widget.render({} as never)); });
     assert.ok(container.querySelector(".mic-btn"), "the microphone mounts instead of failing its slot boundary");
-    const mic = container.querySelector<HTMLButtonElement>(".mic-btn");
+    const mic = container.querySelector(".mic-btn") as unknown as HTMLButtonElement | null;
     assert.ok(mic && !mic.disabled, "browser recognition keeps mobile mic usable while the provider is unavailable");
     const inserted: string[] = [];
     const consume = (event: Event) => {
       inserted.push(String((event as CustomEvent).detail));
       event.preventDefault();
     };
-    dom.addEventListener("polyth:composer-insert", consume);
+    dom.addEventListener("polyth:composer-insert", consume as unknown as Parameters<typeof dom.addEventListener>[1]);
     await act(async () => { mic.click(); });
     const recognition = FakeRecognition.latest;
     assert.equal(recognition?.started, 1, "the browser recognition fallback starts from the mic intent");
@@ -106,7 +106,7 @@ test("voice installs per-reply read-aloud and a renderable microphone control", 
     FakeRecognition.throwOnStart = true;
     await act(async () => { mic.click(); });
     assert.equal(FakeRecognition.latest?.aborted, 1, "a synchronous browser start failure releases the recognition object");
-    dom.removeEventListener("polyth:composer-insert", consume);
+    dom.removeEventListener("polyth:composer-insert", consume as unknown as Parameters<typeof dom.removeEventListener>[1]);
   } finally {
     await act(async () => { root.unmount(); });
     globalThis.fetch = originalFetch;

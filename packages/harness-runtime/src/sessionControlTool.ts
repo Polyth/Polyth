@@ -191,7 +191,7 @@ const publicSession = (session: SessionProjection): JsonObject => ({
   parentId: session.parentId ?? null,
   harness: session.harness ?? null,
   resolvedHarnessId: session.resolvedHarnessId ?? null,
-  model: session.model ?? null,
+  model: session.model ? { ...session.model } : null,
   agent: session.agent ?? null,
   createdAt: session.createdAt,
   updatedAt: session.updatedAt,
@@ -241,7 +241,7 @@ export function registerPolythSessionControl(host: ServerPackageHost) {
       spaces.set(contextKey(context.spaceId, context.projectId), context.space);
       return [descriptor];
     },
-    async execute(input: JsonObject, ctx: ToolExecutionContext) {
+    async execute(input: JsonObject, ctx: ToolExecutionContext): Promise<{ output: string; metadata?: JsonObject }> {
       const space = ctx.spaceId ? spaces.get(contextKey(ctx.spaceId, ctx.projectId)) : undefined;
       if (!space) throw Object.assign(new Error("Polyth session control is unavailable outside an authenticated Space/project context"), { code: "forbidden" });
       const scoped = host.forSpace(space);

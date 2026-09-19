@@ -3,7 +3,7 @@
 // strip, dirty guarding, keyboard cycling, and kept-alive resource bodies all
 // live in the shared workspace/PaneHost; one file's document lifecycle lives
 // in editor/FilePane. This file implements no tab store and no second editor.
-import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
 import { api, type FileEntry } from "@polyth/session/web-api";
 import type { SurfaceComponentProps } from "@polyth/web-sdk";
 import { closeWorkspacePane, getState, openEditorFile, setEditorFile, useStore, workspaceProjectId } from "../../../apps/web/src/store.ts";
@@ -47,7 +47,7 @@ interface CtxMenu {
 export default function EditorView({
   projectId: scopedProjectId,
   sessionId: scopedSessionId,
-}: SurfaceComponentProps = {}) {
+}: SurfaceComponentProps) {
   const storeProjectId = useStore(workspaceProjectId);
   const storeSessionId = useStore((s) => s.activeSessionId);
   const projectId = scopedProjectId === undefined ? storeProjectId : scopedProjectId;
@@ -448,7 +448,7 @@ export default function EditorView({
                     aria-selected={selected}
                     {...(e.dir ? { "aria-expanded": open.has(e.path) } : {})}
                     className={`ft-row${e.dir ? " ft-dir" : ""}${selected ? " ft-selected" : ""}`}
-                    style={{ "--ft-depth": String(depth) }}
+                    style={{ "--ft-depth": String(depth) } as CSSProperties}
                     draggable
                     onDragStart={(ev) => setDragPath(ev.dataTransfer, e.path)}
                     onContextMenu={(ev) => onRowContext(ev, e)}

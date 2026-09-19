@@ -3,9 +3,9 @@ import { join } from "node:path";
 import type { SpaceContext, WorkflowDto } from "@polyth/contracts";
 import { atomicWriteSync, RUNTIME_SYSTEM_PRINCIPAL_ID, type ServerPackageHost } from "@polyth/plugins";
 
-const recovery = (message: string): never => {
+function recovery(message: string): never {
   throw Object.assign(new Error(message), { code: "recovery-required" });
-};
+}
 
 interface SeedProject { projectId: string; samples: string[] }
 interface SeedState { v: 1; projects: SeedProject[] }

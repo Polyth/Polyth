@@ -73,11 +73,11 @@ export interface AgentSessionRouteDeps {
   onSessionForked?: (parentSessionId: string, sessionId: string, space: { userId: string; spaceId: string }) => Promise<void>;
 }
 
-const invalid = (message: string): never => {
+const invalid: (message: string) => never = (message) => {
   throw Object.assign(new Error(message), { code: "invalid-input" });
 };
 
-const unsupported = (message: string): never => {
+const unsupported: (message: string) => never = (message) => {
   throw Object.assign(new Error(message), { code: "unsupported" });
 };
 

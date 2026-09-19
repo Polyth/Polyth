@@ -18,6 +18,7 @@ export const BINANCE_CRYPTO_ASSETS = [
 ] as const;
 
 type BinanceAsset = (typeof BINANCE_CRYPTO_ASSETS)[number];
+// Keyed by string: both lookups take a caller-supplied symbol, never a literal.
 const assetBySymbol = new Map<string, BinanceAsset>(BINANCE_CRYPTO_ASSETS.map((asset) => [asset.symbol, asset]));
 const assetByPair = new Map<string, BinanceAsset>(BINANCE_CRYPTO_ASSETS.map((asset) => [asset.pair, asset]));
 const RANGE: Record<MarketRange, { interval: string; limit: number }> = {
@@ -36,7 +37,7 @@ export interface BinanceProviderOptions {
   now?: () => number;
 }
 
-const miss = (message: string): never => {
+const miss: (message: string) => never = (message) => {
   throw Object.assign(new Error(message), { code: "not-found" });
 };
 

@@ -111,7 +111,7 @@ test("Speechmatics maps authorization and quota failures", async () => {
     socket.open();
     socket.emit("message", JSON.stringify({ message: "Error", type, reason: type }));
     await assert.rejects(
-      () => stream.push(new Uint8Array([1, 0])),
+      async () => { await stream.push(new Uint8Array([1, 0])); },
       (error: unknown) => (error as { code?: string }).code === expected,
     );
   }

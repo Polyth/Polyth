@@ -42,7 +42,7 @@ export function createIdempotentMutationClient(
   };
 
   return {
-    async request<T>(path, method, body): Promise<T> {
+    async request<T>(path: string, method: "POST" | "PATCH" | "DELETE", body?: unknown): Promise<T> {
       const encoded = body === undefined ? undefined : JSON.stringify(body);
       const intent = `${method}\n${path}\n${encoded ?? ""}`;
       const operationId = operationIdFor(intent);

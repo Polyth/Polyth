@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { HarnessContext, HarnessProvider, HarnessRegistry } from "@polyth/contracts";
+import type { HarnessContext, HarnessProvider, HarnessRegistry, RuntimeSessionBinding } from "@polyth/contracts";
 import { releaseProcessExecution } from "@polyth/harness-runtime";
 import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/harness-runtime/executable-discovery";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
@@ -111,7 +111,7 @@ export default function registerPackage(host: ServerPackageHost) {
       try {
         const runtime = createPiRuntime(context, rpc);
         return Object.assign(runtime, {
-          releaseExecution: async (binding, operationId) => {
+          releaseExecution: async (binding: RuntimeSessionBinding, operationId: string) => {
             if (!context.space || context.remote) return { kind: "rejected" as const, code: "unsupported", message: "Local Space context required" };
             if (process.platform !== "linux") {
               return {

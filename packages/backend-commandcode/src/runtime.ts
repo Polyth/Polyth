@@ -652,8 +652,8 @@ export function createCommandCodeRuntime(options: {
         acceptedOperations: accepted,
       } satisfies RuntimeSnapshot;
     },
-    onEvent(callback) { listeners.add(callback); return { dispose: () => listeners.delete(callback) }; },
-    onLifecycle(callback) { lifecycle.add(callback); return { dispose: () => lifecycle.delete(callback) }; },
+    onEvent(callback) { listeners.add(callback); return { dispose: () => { listeners.delete(callback); } }; },
+    onLifecycle(callback) { lifecycle.add(callback); return { dispose: () => { lifecycle.delete(callback); } }; },
     async dispose() {
       eventSubscription.dispose();
       closeSubscription.dispose();

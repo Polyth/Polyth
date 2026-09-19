@@ -11,7 +11,7 @@ class FakeSocket {
   onerror: (() => void) | null = null;
   onclose: ((event: { code: number; reason: string }) => void) | null = null;
 
-  constructor(readonly url: string) {
+  constructor(_url: string) {
     queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ message_type: "session_started" }) }));
   }
 

@@ -7,7 +7,7 @@ import {
 } from "@polyth/contracts";
 import { requireInstanceOwnerAuthority } from "@polyth/contracts/instance-authority";
 
-const forbidden = (message: string): never => {
+const forbidden: (message: string) => never = (message) => {
   throw Object.assign(new Error(message), { code: "forbidden" });
 };
 

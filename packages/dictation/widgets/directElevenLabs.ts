@@ -98,7 +98,8 @@ async function mintToken(fetchFn: typeof fetch): Promise<string> {
 
 export async function startDirectElevenLabsDictation(options: DirectElevenLabsOptions): Promise<StreamingDictation> {
   const fetchFn = options.fetchFn ?? fetch;
-  const socketFactory = options.socketFactory ?? ((url) => new WebSocket(url));
+  const socketFactory: (url: string) => BrowserSocketLike =
+    options.socketFactory ?? ((url) => new WebSocket(url) as unknown as BrowserSocketLike);
   const captureFactory = options.captureFactory ?? startPcm16Capture;
   let socket: BrowserSocketLike | null = null;
   let capture: Pcm16Capture | null = null;
@@ -275,7 +276,7 @@ export async function startDirectElevenLabsDictation(options: DirectElevenLabsOp
     active = false;
     capture?.stop();
     capture = null;
-    socket?.close(1000, "dictation setup failed");
+    (socket as BrowserSocketLike | null)?.close(1000, "dictation setup failed");
     throw error;
   }
 

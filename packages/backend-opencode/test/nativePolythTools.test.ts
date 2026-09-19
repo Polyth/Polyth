@@ -99,7 +99,7 @@ test("OpenCode presents Polyth capabilities through the scoped MCP bridge", asyn
     context,
   );
   const result = await provisioner.apply(context, plan, {
-    mcpSecrets: (id) => id === "polyth.agent-tools"
+    mcpSecrets: (id): Record<string, string> => id === "polyth.agent-tools"
       ? {
           POLYTH_AGENT_TOOLS_URL: "http://127.0.0.1:4400/internal/agent-tools",
           POLYTH_AGENT_TOOLS_TOKEN: "native-secret-token",

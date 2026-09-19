@@ -6,7 +6,7 @@ const KEY = /^[A-Za-z0-9._-]{1,64}$/;
 const MAX_VALUE = 8 * 1024;
 const MAX_TOTAL = 64 * 1024;
 
-const fail = (code: string, message: string): never => {
+const fail: (code: string, message: string) => never = (code, message) => {
   throw Object.assign(new Error(message), { code });
 };
 

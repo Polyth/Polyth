@@ -13,7 +13,7 @@ test("desktop runtime client performs hello, command ack and explicit event flow
   assert.ok(address && typeof address !== "string");
 
   let helloSeen = false;
-  let eventSeen: ChatWorkspaceDeviceEvent | null = null;
+  const eventSeen: { event?: ChatWorkspaceDeviceEvent } = {};
   const ack = new Promise<Record<string, unknown>>((resolve) => {
     wss.on("connection", (socket) => {
       socket.on("message", (raw) => {
@@ -33,7 +33,7 @@ test("desktop runtime client performs hello, command ack and explicit event flow
           return;
         }
         if (message.type === "ack") resolve(message.ack as Record<string, unknown>);
-        if (message.type === "event") eventSeen = message.event as ChatWorkspaceDeviceEvent;
+        if (message.type === "event") eventSeen.event = message.event as ChatWorkspaceDeviceEvent;
       });
     });
   });
@@ -76,7 +76,7 @@ test("desktop runtime client performs hello, command ack and explicit event flow
     tabId: "tab-1",
   });
   await new Promise((resolve) => setTimeout(resolve, 10));
-  assert.equal(eventSeen?.kind, "tab.closed");
+  assert.equal(eventSeen.event?.kind, "tab.closed");
 
   await client.close();
   await new Promise<void>((resolve) => wss.close(() => resolve()));

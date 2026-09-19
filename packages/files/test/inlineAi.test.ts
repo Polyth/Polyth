@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { RouteRequest, SpaceContext } from "@polyth/contracts";
+import type { AgentRuntime, ProjectService, RouteRequest, SessionService, SpaceContext } from "@polyth/contracts";
 import { createSpaceStorage } from "@polyth/tenancy";
 import { loadInlineAiSettings, saveInlineAiSettings } from "../src/inlineAi.ts";
 import {
@@ -66,18 +66,21 @@ test("inline-ai routes reject foreign project with not-found", async () => {
         : id === "proj_foreign"
           ? { id, path: "/other", spaceId: foreign.spaceId, name: "other" }
           : undefined),
-    },
+    } as unknown as ProjectService,
     sessions: {
       snapshot: async () => ({ spaceId: owner.spaceId, projectId: "proj_owner" }),
-    },
+    } as unknown as SessionService,
     smallModel: () => ({ providerID: "openai", modelID: "test" }),
     smallModelComplete: async () => {
       completeCalls++;
       return { text: "ok" };
     },
-    runtimes: { forProject: async () => ({}) },
+    runtimes: { forProject: async () => ({}) as AgentRuntime },
   };
-  const route = inlineAiRoutes(host, { projects: host.projects, sessions: host.sessions });
+  const route = inlineAiRoutes(
+    host as unknown as Parameters<typeof inlineAiRoutes>[0],
+    { projects: host.projects, sessions: host.sessions },
+  );
   const invoke = async (space: SpaceContext, body: Record<string, unknown>) => {
     let status = 0;
     let payload: unknown;

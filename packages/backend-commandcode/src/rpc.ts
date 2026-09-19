@@ -154,7 +154,7 @@ export async function createCommandCodeRpc(options: {
   stdin.on("error", disconnected);
   stdout.on("error", disconnected);
 
-  return {
+  const rpc: CommandCodeRpc = {
     authorityId: authority.authorityId,
     generation: authority.generation,
     releasedAuthorities: authority.releasedAuthorities,
@@ -180,9 +180,10 @@ export async function createCommandCodeRpc(options: {
     onEvent(callback) { events.add(callback); return { dispose: () => events.delete(callback) }; },
     onClose(callback) { closes.add(callback); return { dispose: () => closes.delete(callback) }; },
     async close() {
-      if (!closed) await this.request({ type: "shutdown" }, 5_000).catch(() => undefined);
+      if (!closed) await rpc.request({ type: "shutdown" }, 5_000).catch(() => undefined);
       try { await authority.close(); }
       finally { disconnected(); }
     },
   };
+  return rpc;
 }

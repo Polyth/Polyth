@@ -29,7 +29,7 @@ import { assertOauthTxMatchesActive, consumeOauthTx, oauthRedirectOrigin } from 
 import { notFound, optionalSecretVault, secretVault } from "./pluginRouteShared.ts";
 import { withInitialPermissionReview } from "./managedPluginReview.ts";
 
-const fail = (code: string, message: string): never => {
+const fail: (code: string, message: string) => never = (code, message) => {
   throw Object.assign(new Error(message), { code });
 };
 

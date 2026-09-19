@@ -164,7 +164,7 @@ test("OpenAI realtime maps provider auth failures", async () => {
     error: { code: "invalid_api_key", message: "Incorrect API key provided" },
   }));
   await assert.rejects(
-    () => stream.push(pcm16([1, 2, 3, 4])),
+    async () => { await stream.push(pcm16([1, 2, 3, 4])); },
     (error: unknown) => (error as { code?: string }).code === "invalid_credentials",
   );
 });

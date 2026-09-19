@@ -74,6 +74,9 @@ test("Coach session prepares scoped capabilities and injects model-visible bound
       assert.equal(input.path, anchor.path);
       return anchor;
     },
+    async get(id: string) {
+      return id === anchor.id ? anchor : undefined;
+    },
   } as unknown as ProjectService;
 
   const sessions = {

@@ -45,7 +45,7 @@ export interface MarketPortfolioSnapshot {
 export const DEFAULT_PORTFOLIO: MarketPortfolio = { version: 1, holdings: [] };
 const MAX_HOLDINGS = 100;
 
-const fail = (message: string): never => {
+const fail: (message: string) => never = (message) => {
   throw Object.assign(new Error(message), { code: "invalid-input" });
 };
 

@@ -36,7 +36,7 @@ const US_FUNDAMENTALS_SYMBOL = /^[A-Z][A-Z0-9-]{0,15}$/;
 const stripEmphasis = (value: string): string => value.replace(/<\/?em>/g, "");
 const suffixFor = (exchange: string): string => EXCHANGE_SUFFIX.find((item) => item.match.test(exchange))?.suffix ?? "";
 const assetType = (type: string): MarketAssetType => type === "fund" ? "etf" : type === "stock" || type === "dr" ? "equity" : "unknown";
-const miss = (message: string): never => {
+const miss: (message: string) => never = (message) => {
   throw Object.assign(new Error(message), { code: "not-found" });
 };
 

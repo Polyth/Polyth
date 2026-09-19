@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { HarnessContext, HarnessProvider, HarnessRegistry } from "@polyth/contracts";
+import type { HarnessContext, HarnessProvider, HarnessRegistry, RuntimeSessionBinding } from "@polyth/contracts";
 import { releaseProcessExecution } from "@polyth/harness-runtime";
 import { harnessExecutableChildEnv } from "@polyth/harness-runtime/executable-discovery";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
@@ -15,6 +15,7 @@ import {
   discoverCommandCodeModels,
   resolveCommandCodeBinary,
   type CommandCodeCompatibility,
+  type CommandCodeStatus,
 } from "./discovery.ts";
 import {
   commandCodeExecutionModeControl,
@@ -112,7 +113,7 @@ export default function registerPackage(host: ServerPackageHost) {
       }
       const [version, status, compatibility] = await Promise.all([
         commandCodeVersion(command),
-        commandCodeStatus(command).catch(() => ({ authenticated: "unknown" as const })),
+        commandCodeStatus(command).catch((): CommandCodeStatus => ({ authenticated: "unknown" })),
         compatibilityOrUndefined(command),
       ]);
       if (!compatibility) {
@@ -151,7 +152,7 @@ export default function registerPackage(host: ServerPackageHost) {
       if (context.remote) throw Object.assign(new Error("Local execution only"), { code: "unsupported" });
       const command = await resolveCommandCodeBinary();
       const [status, compatibility, agents, mode] = await Promise.all([
-        commandCodeStatus(command).catch(() => ({ authenticated: "unknown" as const })),
+        commandCodeStatus(command).catch((): CommandCodeStatus => ({ authenticated: "unknown" })),
         compatibilityOrUndefined(command),
         discoverCommandCodeAgents(context.cwd),
         executionMode(context),
@@ -282,7 +283,7 @@ export default function registerPackage(host: ServerPackageHost) {
         // rejects any accidental attempt to select one as the primary agent.
         return Object.assign(runtime, {
           agents: () => discoverCommandCodeAgents(context.cwd),
-          releaseExecution: async (binding, operationId) => {
+          releaseExecution: async (binding: RuntimeSessionBinding, operationId: string) => {
             if (!context.space || context.remote) return { kind: "rejected" as const, code: "unsupported", message: "Local Space context required" };
             if (process.platform !== "linux") {
               return {

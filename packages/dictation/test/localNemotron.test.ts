@@ -104,7 +104,7 @@ test("native process failure is surfaced as worker_crashed without sharing the s
   });
   const stream = adapter.createStream({ format });
   await assert.rejects(
-    () => stream.push(pcm),
+    async () => { await stream.push(pcm); },
     (error: unknown) => (error as { code?: string }).code === "worker_crashed",
   );
 });
@@ -122,7 +122,7 @@ test("process startup has a hard deadline instead of hanging forever", async () 
   });
   const stream = adapter.createStream({ format });
   await assert.rejects(
-    () => stream.push(pcm),
+    async () => { await stream.push(pcm); },
     (error: unknown) => {
       const e = error as { code?: string; message?: string };
       return e.code === "worker_crashed" && /did not become ready/.test(e.message ?? "");
@@ -144,7 +144,7 @@ test("a wedged native decode is killed at the RPC deadline", async () => {
   });
   const stream = adapter.createStream({ format });
   await assert.rejects(
-    () => stream.push(pcm),
+    async () => { await stream.push(pcm); },
     (error: unknown) => (error as { code?: string }).code === "worker_crashed",
   );
   assert.equal(child.killed, true);
@@ -169,7 +169,7 @@ test("repeated native crashes trip the restart limiter", async () => {
   for (let i = 0; i < 2; i++) {
     const stream = adapter.createStream({ format });
     await assert.rejects(
-      () => stream.push(pcm),
+      async () => { await stream.push(pcm); },
       (error: unknown) => (error as { code?: string }).code === "worker_crashed",
     );
     clock += 10;
@@ -177,7 +177,7 @@ test("repeated native crashes trip the restart limiter", async () => {
 
   const blocked = adapter.createStream({ format });
   await assert.rejects(
-    () => blocked.push(pcm),
+    async () => { await blocked.push(pcm); },
     (error: unknown) => {
       const e = error as { code?: string; message?: string };
       return e.code === "worker_crashed" && /crash loop/.test(e.message ?? "");
@@ -199,7 +199,7 @@ test("an unexpected clean exit still rejects startup as worker_crashed", async (
   });
   const stream = adapter.createStream({ format });
   await assert.rejects(
-    () => stream.push(pcm),
+    async () => { await stream.push(pcm); },
     (error: unknown) => (error as { code?: string }).code === "worker_crashed",
   );
 });
@@ -236,7 +236,7 @@ test("dispose terminates the process, rejects pending RPC and prevents restart",
   await new Promise<void>((resolve) => setImmediate(resolve));
   adapter.dispose();
   await assert.rejects(
-    () => pushing,
+    async () => { await pushing; },
     (error: unknown) => (error as { code?: string }).code === "session_expired",
   );
   assert.equal(child.killed, true);

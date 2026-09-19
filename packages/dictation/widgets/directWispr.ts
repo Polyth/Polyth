@@ -165,7 +165,8 @@ async function mintToken(fetchFn: typeof fetch, clientId: string): Promise<strin
 
 export async function startDirectWisprDictation(options: DirectWisprOptions): Promise<StreamingDictation> {
   const fetchFn = options.fetchFn ?? fetch;
-  const socketFactory = options.socketFactory ?? ((url) => new WebSocket(url));
+  const socketFactory: (url: string) => BrowserSocketLike =
+    options.socketFactory ?? ((url) => new WebSocket(url) as unknown as BrowserSocketLike);
   const captureFactory = options.captureFactory ?? startPcm16Capture;
   const clientId = options.clientId?.trim() || anonymousClientId();
   const normalizedContext = normalizeDictationContext(options.context ?? { language: options.language || "auto" });
@@ -390,7 +391,7 @@ export async function startDirectWisprDictation(options: DirectWisprOptions): Pr
     active = false;
     capture?.stop();
     capture = null;
-    socket?.close(1000, "dictation setup failed");
+    (socket as BrowserSocketLike | null)?.close(1000, "dictation setup failed");
     throw error;
   }
 

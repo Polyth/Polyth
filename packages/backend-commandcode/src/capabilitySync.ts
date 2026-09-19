@@ -126,7 +126,7 @@ export function createCommandCodeCapabilitySync(context: HarnessContext, rpc: Co
     generation: rpc.generation,
     get receipts() { return rpc.receipts; },
     get releasedAuthorities() { return rpc.releasedAuthorities; },
-    async request<T>(command, timeoutMs) {
+    async request<T>(command: Record<string, unknown> & { type: string }, timeoutMs?: number) {
       if (command.type !== "start_turn") return rpc.request<T>(command, timeoutMs);
       const staged = commandCodeOverlays.peek(context, "commandcode");
       if (!staged) return rpc.request<T>(command, timeoutMs);

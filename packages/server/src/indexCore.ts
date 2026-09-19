@@ -2369,6 +2369,9 @@ export async function boot(opts: BootOptions = {}) {
   const manualSuggestion = createManualSuggestionService({
     latestSeq: (sessionId) => store.latestSeq(sessionId),
     events: (sessionId) => store.events(sessionId),
+    // The suggestion contract has no token budget: without this adapter the
+    // caller's userId lands in `maxOutputTokens` and the requester's own small
+    // model is never resolved.
     complete: (sessionId, prompt, userId) => assistComplete(sessionId, prompt, 1_024, userId),
   });
   // --- spec-driven track orchestration: a genuinely cross-cutting workflow

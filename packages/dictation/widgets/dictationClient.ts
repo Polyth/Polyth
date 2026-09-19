@@ -235,7 +235,7 @@ export async function startStreamingDictation(opts: {
   } catch (error) {
     active = false;
     rejectAckWaiters(error instanceof Error ? error : new Error(String(error)));
-    ws?.close();
+    (ws as WebSocket | null)?.close();
     cancelSession();
     throw error;
   }

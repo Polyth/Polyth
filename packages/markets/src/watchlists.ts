@@ -25,7 +25,7 @@ export const DEFAULT_WATCHLISTS: MarketWatchlists = {
   items: [{ id: "default", name: "Watchlist", symbols: ["SPY", "QQQ"] }],
 };
 
-const fail = (message: string): never => {
+const fail: (message: string) => never = (message) => {
   throw Object.assign(new Error(message), { code: "invalid-input" });
 };
 

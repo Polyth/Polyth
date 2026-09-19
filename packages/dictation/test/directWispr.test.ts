@@ -12,7 +12,7 @@ class FakeSocket {
   onerror: (() => void) | null = null;
   onclose: ((event: { code: number; reason: string }) => void) | null = null;
 
-  constructor(readonly url: string, autoOpen = true) {
+  constructor(_url: string, autoOpen = true) {
     if (autoOpen) queueMicrotask(() => this.open());
     else this.readyState = 0;
   }

@@ -94,7 +94,7 @@ function isEditableElement(element: BrowserPointedElement): boolean {
 export default function PreviewView({
   projectId: scopedProjectId,
   sessionId: scopedSessionId,
-}: SurfaceComponentProps = {}) {
+}: SurfaceComponentProps) {
   const storeProjectId = useStore(workspaceProjectId);
   const storeSessionId = useStore((s) => s.activeSessionId);
   const projectId = scopedProjectId === undefined ? storeProjectId : scopedProjectId;

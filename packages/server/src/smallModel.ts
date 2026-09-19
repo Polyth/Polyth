@@ -76,7 +76,7 @@ export function smallModelExecutionRoute(
 const promptForFallback = (options: SmallModelCompleteOptions): string =>
   options.systemPrompt ? `${options.systemPrompt}\n\n${options.prompt}` : options.prompt;
 
-const fail = (options: SmallModelCompleteOptions, stage: string, error: unknown): never => {
+const fail: (options: SmallModelCompleteOptions, stage: string, error: unknown) => never = (options, stage, error) => {
   if (options.purpose) {
     console.error("[polyth] small-model generation failed", JSON.stringify({
       purpose: options.purpose,

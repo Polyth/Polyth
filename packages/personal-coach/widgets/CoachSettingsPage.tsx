@@ -163,7 +163,7 @@ export default function CoachSettingsPage({
                 label={t("coach.settings.styleLabel")}
                 ariaLabel={t("coach.settings.styleLabel")}
                 value={draft.tone ?? profile.tone}
-                onChange={(tone) => setDraft((current) => ({ ...current, tone: tone as CoachProfileDto["tone"] }))}
+                onChange={(tone: string) => setDraft((current) => ({ ...current, tone: tone as CoachProfileDto["tone"] }))}
                 options={[
                   { value: "supportive", label: t("coach.settings.style.supportive"), detail: t("coach.settings.style.supportiveDetail") },
                   { value: "balanced", label: t("coach.settings.style.balanced"), detail: t("coach.settings.style.balancedDetail") },
@@ -183,7 +183,7 @@ export default function CoachSettingsPage({
                 label={t("coach.settings.initiativeLabel")}
                 ariaLabel={t("coach.settings.initiativeLabel")}
                 value={draft.initiative ?? profile.initiative}
-                onChange={(initiative) => setDraft((current) => ({ ...current, initiative: initiative as CoachProfileDto["initiative"] }))}
+                onChange={(initiative: string) => setDraft((current) => ({ ...current, initiative: initiative as CoachProfileDto["initiative"] }))}
                 options={[
                   { value: "reactive", label: t("coach.settings.initiative.reactive"), detail: t("coach.settings.initiative.reactiveDetail") },
                   { value: "balanced", label: t("coach.settings.initiative.balanced"), detail: t("coach.settings.initiative.balancedDetail") },
@@ -197,7 +197,7 @@ export default function CoachSettingsPage({
             <div className="set-row-text">
               <Checkbox
                 checked={draft.challengeAssumptions ?? profile.challengeAssumptions}
-                onChange={(challengeAssumptions) => setDraft((current) => ({ ...current, challengeAssumptions }))}
+                onChange={(challengeAssumptions: boolean) => setDraft((current) => ({ ...current, challengeAssumptions }))}
                 label={t("coach.settings.challenge")}
                 description={t("coach.settings.challengeHint")}
               />
@@ -225,7 +225,7 @@ export default function CoachSettingsPage({
                 <div className="set-row-text">
                   <Checkbox
                     checked={reminderDraft.dailyCheckIn}
-                    onChange={(dailyCheckIn) => updateReminder({ dailyCheckIn })}
+                    onChange={(dailyCheckIn: boolean) => updateReminder({ dailyCheckIn })}
                     label={t("coach.settings.daily")}
                     description={t("coach.settings.dailyHint")}
                   />
@@ -248,7 +248,7 @@ export default function CoachSettingsPage({
                 <div className="set-row-text">
                   <Checkbox
                     checked={reminderDraft.weeklyReview}
-                    onChange={(weeklyReview) => updateReminder({ weeklyReview })}
+                    onChange={(weeklyReview: boolean) => updateReminder({ weeklyReview })}
                     label={t("coach.settings.weekly")}
                     description={t("coach.settings.weeklyHint")}
                   />
@@ -259,7 +259,7 @@ export default function CoachSettingsPage({
                     ariaLabel={t("coach.settings.weeklyDay")}
                     disabled={!reminderDraft.weeklyReview}
                     value={String(reminderDraft.weeklyDay)}
-                    onChange={(value) => updateReminder({ weeklyDay: Number(value) })}
+                    onChange={(value: string) => updateReminder({ weeklyDay: Number(value) })}
                     options={[
                       { value: "1", label: t("coach.settings.day.monday") },
                       { value: "2", label: t("coach.settings.day.tuesday") },

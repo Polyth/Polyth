@@ -113,7 +113,7 @@ export function createManualSuggestionService(deps: {
   complete(sessionId: string, prompt: string, userId?: string): Promise<string>;
 }): ManualSuggestionService {
   const inFlight = new Set<string>();
-  const fail = (code: "in-flight" | "stale" | "no-completed-exchange"): never => {
+  const fail: (code: "in-flight" | "stale" | "no-completed-exchange") => never = (code) => {
     throw Object.assign(new Error(code), { code });
   };
 

@@ -17,7 +17,7 @@ export function createCommandCodeTitleSync(rpc: CommandCodeRpc): {
     generation: rpc.generation,
     get receipts() { return rpc.receipts; },
     get releasedAuthorities() { return rpc.releasedAuthorities; },
-    request<T>(command, timeoutMs) {
+    request<T>(command: Record<string, unknown> & { type: string }, timeoutMs?: number) {
       const request = command.type === "start_turn" && canonicalTitle
         ? { ...command, title: canonicalTitle }
         : command;

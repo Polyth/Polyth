@@ -36,7 +36,9 @@ test("trusted server routes are denied outside Spaces where the package is enabl
   `);
 
   const root = createContext("trusted-space-gate-test");
-  let route: RouteHandler | null = null;
+  // Held on an object: a `let` assigned only inside the callback below stays
+  // narrowed to its `null` initializer, which turns the assert into `never`.
+  const registered: { route: RouteHandler | null } = { route: null };
   const gate = bindTrustedServerSpaceGate((pluginId, spaceId) =>
     pluginId === "sample.trusted" && spaceId === "spc_a");
   const mounted = await loadServerEntry({
@@ -49,20 +51,20 @@ test("trusted server routes are denied outside Spaces where the package is enabl
       root,
       routes: {
         add(handler) {
-          route = handler;
-          return { dispose: () => { route = null; } };
+          registered.route = handler;
+          return { dispose: () => { registered.route = null; } };
         },
       },
     },
   });
 
-  const activeRoute = route as unknown as RouteHandler;
-  assert.ok(activeRoute);
-  assert.equal(await activeRoute(requestFor("spc_a")), true);
-  assert.equal(await activeRoute(requestFor("spc_b")), false);
+  assert.ok(registered.route);
+  const route = registered.route;
+  assert.equal(await route(requestFor("spc_a")), true);
+  assert.equal(await route(requestFor("spc_b")), false);
 
   gate.dispose();
-  assert.equal(await activeRoute(requestFor("spc_a")), false, "missing canonical gate fails closed");
+  assert.equal(await route(requestFor("spc_a")), false, "missing canonical gate fails closed");
 
   await mounted.dispose();
   await root.dispose();

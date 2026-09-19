@@ -510,11 +510,11 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc): AgentRunti
     },
     onEvent(callback) {
       listeners.add(callback);
-      return { dispose: () => listeners.delete(callback) };
+      return { dispose: () => { listeners.delete(callback); } };
     },
     onLifecycle(callback) {
       lifecycle.add(callback);
-      return { dispose: () => lifecycle.delete(callback) };
+      return { dispose: () => { lifecycle.delete(callback); } };
     },
     async dispose() {
       eventSubscription.dispose();

@@ -49,7 +49,8 @@ test("ended microphone track is replaced before reporting the capture as ended",
     stop() { this.stopped = true; }
   }
   class FakeStream {
-    constructor(readonly track: FakeTrack) {}
+    readonly track: FakeTrack;
+    constructor(track: FakeTrack) { this.track = track; }
     getAudioTracks() { return [this.track] as unknown as MediaStreamTrack[]; }
     getTracks() { return [this.track] as unknown as MediaStreamTrack[]; }
   }

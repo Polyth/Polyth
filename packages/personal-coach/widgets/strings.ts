@@ -2,8 +2,8 @@
  * Every user-facing string the Coach package renders, in one place.
  *
  * Shape and key style deliberately match the per-package catalogues the rest of
- * the repository feeds into `apps/web/src/i18n` (`<owner>.<key>` → message,
- * `{placeholder}` interpolation). Coach is not registered with that loader yet
+ * the repository feeds into the web shell's i18n loader (`<owner>.<key>` →
+ * message, `{placeholder}` interpolation). Coach is not registered with that loader yet
  * — doing so requires complete catalogues for all supported locales — so this
  * module is the single seam that has to change when it is, instead of English
  * being scattered through React components and package registrations.

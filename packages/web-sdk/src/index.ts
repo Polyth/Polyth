@@ -211,7 +211,9 @@ export interface SurfaceDefinition {
   icon?: () => ReactNode;
   capabilityId?: string;
   order: number;
-  component: (props?: SurfaceComponentProps) => ReactNode;
+  /** React always supplies a props object; an optional parameter here makes
+   *  `createElement(component, { projectId })` infer empty props and reject it. */
+  component: (props: SurfaceComponentProps) => ReactNode;
   badge?: (context: SurfaceContext) => number;
   visible?: (context: SurfaceContext) => boolean;
   /** Required package-window capabilities. The host owns all resulting chrome. */

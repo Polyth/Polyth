@@ -8,14 +8,7 @@ import {
   rmSync,
 } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import type {
-  CapabilitySecretResolver,
-  HarnessCapabilityRecord,
-  HarnessCapabilitySupport,
-  HarnessContext,
-  HarnessProvisioner,
-  HarnessProvisioningPlan,
-} from "@polyth/contracts";
+import type { CapabilitySecretResolver, HarnessCapabilityRecord, HarnessCapabilitySupport, HarnessContext, HarnessProvisioner, HarnessProvisioningPlan, JsonObject } from "@polyth/contracts";
 import { createLaunchOverlayStore, mcpNativeNameCollision, type LaunchOverlayStore } from "@polyth/harness-runtime";
 import { CODEX_MCP_STARTUP_TIMEOUT_SEC } from "./mcpReadiness.ts";
 import { renderCapabilityText } from "@polyth/harness-runtime/capability-text";
@@ -35,7 +28,7 @@ export interface CodexNativeMcp {
 
 export interface CodexLaunchOverlay {
   developerInstructions?: string;
-  mcpServers?: Record<string, Record<string, unknown>>;
+  mcpServers?: Record<string, JsonObject>;
   nativeSkills?: {
     root: string;
     skills: CodexNativeSkill[];
@@ -243,7 +236,7 @@ export function createCodexProvisioner(): HarnessProvisioner {
         if (item.capability.kind !== "mcp-server" || item.mode === "unsupported" || !item.capability.enabled) continue;
         if (mcpNativeNameCollision(plan.items, item.capability.id)) continue;
         const values = secrets.mcpSecrets(item.capability.id);
-        const transport = item.capability.transport.kind === "stdio"
+        const transport: JsonObject = item.capability.transport.kind === "stdio"
           ? {
             enabled: true,
             startup_timeout_sec: CODEX_MCP_STARTUP_TIMEOUT_SEC,
