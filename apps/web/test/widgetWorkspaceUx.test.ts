@@ -151,6 +151,34 @@ test("desktop shell clips the frameless window to the sheet radius", async () =>
   assert.match(header, /slot="app.window.controls"/);
 });
 
+test("macOS desktop uses native traffic lights without stealing renderer clicks", async () => {
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  const desktop = await readFile(new URL("../src/desktop.tsx", import.meta.url), "utf8");
+  const main = await readFile(new URL("../../desktop/src/main.ts", import.meta.url), "utf8");
+
+  assert.match(
+    main,
+    /process\.platform === "darwin"[\s\S]*?\? \{ titleBarStyle: "hiddenInset" as const \}[\s\S]*?: \{ frame: false \}/,
+  );
+  assert.match(desktop, /dataset\.desktopPlatform = platform/);
+  assert.match(desktop, /if \(!info \|\| info\.platform === "darwin"\) return null/);
+  assert.match(desktop, /\{info && info\.platform !== "darwin" && \(/);
+  assert.match(
+    styles,
+    /body\.desktop-app :is\([\s\S]*?\.scrim,[\s\S]*?\)\s*\{[^}]*-webkit-app-region:\s*no-drag/s,
+  );
+  assert.match(styles, /\.desktop-window-controls\s*\{[^}]*pointer-events:\s*none/s);
+  assert.match(styles, /\.desktop-window-button\s*\{[^}]*pointer-events:\s*auto/s);
+  assert.match(
+    styles,
+    /body\.desktop-app\[data-desktop-platform="darwin"\]\[data-desktop-controls-position\] \.app > \.header\s*\{[^}]*clip-path:\s*none/s,
+  );
+  assert.match(
+    styles,
+    /body\.desktop-app\[data-desktop-platform="darwin"\] \.desktop-window-controls\s*\{[^}]*display:\s*none/s,
+  );
+});
+
 test("canvas widget settings live on the widget, not a settings customizer", async () => {
   const canvas = await readFile(new URL("../src/widgets/WidgetCanvas.tsx", import.meta.url), "utf8");
   const chat = await readFile(new URL("../src/components/settings/pages.tsx", import.meta.url), "utf8");
