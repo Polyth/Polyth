@@ -33,6 +33,7 @@ import {
   bootstrapUrlWithNext,
   connectionUiState,
   preferredTrustedConnection,
+  shouldAutoReconnect,
 } from "./connectionUi.ts";
 import {
   ConnectionController,
@@ -545,10 +546,12 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
       !controller
       || !trustedLoaded
       || autoReconnectStarted.current
-      || launch.selectServer
-      || launch.pendingPushOpen
-      || initialPending
-      || launch.deepLinkPath
+      || !shouldAutoReconnect({
+        selectServer: launch.selectServer,
+        pendingPair: initialPending,
+        hasPendingPush: Boolean(launch.pendingPushOpen),
+        deepLinkPath: launch.deepLinkPath,
+      })
       || connectionState?.phase !== "idle"
     ) return;
     const candidate = preferredTrustedConnection(trusted);
