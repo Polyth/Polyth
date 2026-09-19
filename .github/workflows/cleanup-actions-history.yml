@@ -1,0 +1,40 @@
+name: Cleanup obsolete Actions history
+
+on:
+  push:
+    branches:
+      - ci/release-workflows-20260919
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Delete runs for removed workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          IDS="$RUNNER_TEMP/obsolete-action-runs.txt"
+
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs?per_page=100" \
+            --jq '.workflow_runs[]
+              | select(
+                  .path != ".github/workflows/ci.yml"
+                  and .path != ".github/workflows/build-apps.yml"
+                  and .path != ".github/workflows/release.yml"
+                  and .path != ".github/workflows/cleanup-actions-history.yml"
+                )
+              | .id' > "$IDS"
+
+          COUNT="$(wc -l < "$IDS" | tr -d ' ')"
+          echo "Deleting $COUNT obsolete workflow runs."
+
+          while IFS= read -r RUN_ID; do
+            [ -n "$RUN_ID" ] || continue
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID"
+          done < "$IDS"
