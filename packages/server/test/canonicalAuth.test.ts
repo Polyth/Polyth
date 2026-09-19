@@ -14,7 +14,10 @@ const passwords: PasswordService = {
   close() {},
 };
 
-async function fixture(t: test.TestContext) {
+async function fixture(
+  t: test.TestContext,
+  options: { debugAgentAccess?: boolean } = {},
+) {
   const dir = mkdtempSync(join(tmpdir(), "polyth-canonical-auth-"));
   const control = openControlPlane({ directory: dir });
   const identity = createIdentityService(control, { passwords });
@@ -28,7 +31,7 @@ async function fixture(t: test.TestContext) {
     login: "owner", password: "owner test passphrase", recoverySetId: recovery.setId, recoveryAcknowledged: true,
   });
   const cookieName = identity.sessions.cookieName();
-  const gateway = createCanonicalAuthGateway({ control, identity, cookieName });
+  const gateway = createCanonicalAuthGateway({ control, identity, cookieName, ...options });
   const request = (cookie?: string) => ({ headers: { ...(cookie ? { cookie } : {}) }, socket: { remoteAddress: "127.0.0.1" } });
   return { control, identity, owner, cookieName, gateway, request };
 }
@@ -42,6 +45,39 @@ test("loopback is never account authority; only the canonical session cookie aut
   assert.equal((good.principal as AuthPrincipal & { userId?: string }).userId, f.owner.userId);
   assert.equal(f.gateway.resolve(f.request(`${f.cookieName}=bad`), ingress).authenticated, false);
   assert.equal(f.gateway.resolve(f.request(`${f.cookieName}=${f.owner.token}; ${f.cookieName}=${f.owner.token}`), ingress).authenticated, false);
+});
+
+
+test("debug agent access is explicit and restricted to direct public loopback ingress", async t => {
+  const f = await fixture(t, { debugAgentAccess: true });
+  const loopback = { kind: "public-http", listenerId: "public", loopback: true, secure: false } as const;
+  const remote = { kind: "public-http", listenerId: "public", loopback: false, secure: false } as const;
+
+  const local = f.gateway.resolve(f.request(), loopback);
+  assert.equal(local.authenticated, true);
+  assert.equal(local.principal.kind, "local-user");
+  assert.equal((local.principal as AuthPrincipal & { userId?: string }).userId, f.owner.userId);
+  assert.ok(f.gateway.refreshPrincipal(local.principal));
+
+  const browser = f.gateway.resolve(f.request(`${f.cookieName}=${f.owner.token}`), loopback);
+  assert.equal(browser.authenticated, true);
+  assert.equal(browser.principal.kind, "ui-session");
+
+  assert.equal(f.gateway.resolve(f.request(), remote).authenticated, false);
+  assert.equal(
+    f.gateway.resolve(
+      f.request(),
+      { kind: "polyth-link", connectionId: "debug-must-not-cross-link", transport: "relay" },
+    ).authenticated,
+    false,
+  );
+
+  f.control.run(
+    "UPDATE principals SET status='suspended',auth_epoch=auth_epoch+1 WHERE id=?",
+    f.owner.userId,
+  );
+  assert.equal(f.gateway.refreshPrincipal(local.principal), null);
+  assert.equal(f.gateway.resolve(f.request(), loopback).authenticated, false);
 });
 
 test("bound UI principal is invalidated by logout without caching authority", async t => {
