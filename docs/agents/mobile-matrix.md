@@ -2,7 +2,7 @@
 
 Shared responsive web, Capacitor bridge, native implementation, release build and real device behavior are different layers. Use the matrix for the affected feature. Mark each cell **not implemented / declared / unit-tested / native-built / device-tested / unknown**, with revision and evidence. Do not fill it from a marketing claim or a previous handoff.
 
-At the audit baseline, `polythLink.ts` has a default unavailable implementation and the Link architecture states production Android/iOS native pairing is not included. The code also contains real native file-picker/local-notification integration. Neither observation proves complete mobile readiness, and neither is a permanent capability statement.
+The TypeScript boundary still defaults fail-closed to `MissingNativeCore`, but current Android and iOS projects register real `PolythLink` and discovery plugins and production connection UI installs that adapter. This is source-level wiring evidence, not a permanent readiness claim: native compilation and physical-device behavior remain separate verification layers.
 
 | Flow | Required scenarios | Boundary to inspect |
 | --- | --- | --- |
