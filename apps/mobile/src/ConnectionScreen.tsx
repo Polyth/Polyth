@@ -266,6 +266,7 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
   const [developer, setDeveloper] = useState(false);
   const [legacyBusy, setLegacyBusy] = useState(false);
   const [legacyError, setLegacyError] = useState("");
+  const [retryConnectionId, setRetryConnectionId] = useState<string | null>(null);
   const scanCleanup = useRef<(() => void) | null>(null);
   const scanIntent = useRef<number | null>(null);
   const autoReconnectStarted = useRef(false);
@@ -296,6 +297,7 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
     : rawError;
   const recovery = recoveryPresentation(connectionState?.phase);
   const preferredTrusted = preferredTrustedConnection(trusted);
+  const retryConnection = trusted.find((connection) => connection.id === retryConnectionId) ?? preferredTrusted;
   const working = connectionState ? connectionPhaseBusy(connectionState.phase) : false;
   const stage = !trustedLoaded && nativeAvailable
     ? "Finding your Polyth…"
@@ -534,6 +536,7 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
 
   const reconnectTrusted = async (connection: ConnectionMetadata) => {
     if (!controller || connection.revoked || !connection.hasSecureIdentity) return;
+    setRetryConnectionId(connection.id);
     stopCamera();
     const launched = connection.pairingState === "prepared"
       ? await controller.recoverPrepared(connection.id)
@@ -557,6 +560,7 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
     const candidate = preferredTrustedConnection(trusted);
     if (!candidate) return;
     autoReconnectStarted.current = true;
+    setRetryConnectionId(candidate.id);
     void controller.connect(candidate.id).then((next) => {
       if (next) openLaunch(next);
     });
@@ -686,12 +690,12 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
         {recovery && (
           <section className={`mobile-connect-recovery is-${recovery.tone}`} role={recovery.tone === "danger" ? "alert" : "status"}>
             <p>{recovery.body}</p>
-            {recovery.action === "retry" && preferredTrusted && (
+            {recovery.action === "retry" && retryConnection && (
               <button
                 type="button"
                 className="mobile-connect-secondary"
                 disabled={busy}
-                onClick={() => void reconnectTrusted(preferredTrusted)}
+                onClick={() => void reconnectTrusted(retryConnection)}
               >
                 {recovery.actionLabel ?? "Try again"}
               </button>
