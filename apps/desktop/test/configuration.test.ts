@@ -16,7 +16,6 @@ test("desktop packaging covers each supported updater target", async () => {
         notarize: boolean;
         entitlements: string;
         entitlementsInherit: string;
-        x64ArchFiles: string;
       };
       win: { target: string[] };
       publish: { provider: string; owner: string; repo: string; releaseType: string };
@@ -32,10 +31,6 @@ test("desktop packaging covers each supported updater target", async () => {
   assert.equal(pkg.build.mac.notarize, true);
   assert.equal(pkg.build.mac.entitlements, "build/entitlements.mac.plist");
   assert.equal(pkg.build.mac.entitlementsInherit, pkg.build.mac.entitlements);
-  assert.equal(
-    pkg.build.mac.x64ArchFiles,
-    "{**/node_modules/{esbuild,@esbuild/*,node-pty/prebuilds/*}/**,**/Resources/opencode/darwin-*/opencode,**/Resources/chromium/**,**/Resources/polyth-link/**}",
-  );
   assert.deepEqual(pkg.build.win.target, ["nsis"]);
   assert.deepEqual(pkg.build.publish, {
     provider: "github",
@@ -62,7 +57,7 @@ test("manual desktop workflow builds Windows, Linux and macOS artifacts without 
     "windows-2025",
     "--linux AppImage --x64 --publish never",
     "--win nsis --x64 --publish never",
-    "--mac dmg zip --universal --publish never",
+    "--mac dmg zip --x64 --arm64 --publish never",
     "release/*.dmg",
     "release/*.zip",
     "npx playwright-core install chromium",
@@ -77,6 +72,8 @@ test("manual desktop workflow builds Windows, Linux and macOS artifacts without 
     assert.ok(workflow.includes(required), `manual desktop build workflow must include ${required}`);
   }
   assert.doesNotMatch(workflow, /--publish always/);
+  assert.doesNotMatch(workflow, /--universal/);
+  assert.match(workflow, /POLYTH_MAC_MULTI_ARCH/);
 
   const installed = workflow.indexOf("npx playwright-core install chromium");
   const bundled = workflow.indexOf("run: npm run build:desktop");
