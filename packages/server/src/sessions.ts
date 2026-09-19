@@ -4860,6 +4860,15 @@ export function createSessionService(deps: {
       }
     }
     const recoveryEvents = await store.events(sessionId);
+    const autoResumeRecoveryContext = input.autoResume === true
+      ? [...recoveryEvents].reverse().find((event) => {
+          if (event.type !== "user/message") return false;
+          return (event.data as { autoResume?: unknown }).autoResume !== true;
+        })
+      : undefined;
+    const originalRecoveryContext = autoResumeRecoveryContext
+      ? (autoResumeRecoveryContext.data as { recoveryContext?: unknown }).recoveryContext
+      : undefined;
     const firstTurnOfRuntimeLeg = proj.runtimeLeg
       ? proj.runtimeLeg.bootstrap !== "native-resume"
       : !recoveryEvents.some((event) => event.type === "turn/started");
@@ -4885,6 +4894,9 @@ export function createSessionService(deps: {
       decoration === null,
     );
     const recoveryContext = [
+      typeof originalRecoveryContext === "string" && originalRecoveryContext.trim()
+        ? originalRecoveryContext
+        : null,
       workspaceInstructions,
       epochRecovery?.recoveryContext,
       decoration?.recoveryContext,
