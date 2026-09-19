@@ -7,7 +7,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { RemoteHost } from "@polyth/contracts";
-import { createReplayBuffer, createTerminalService, hasRealPty } from "../src/index.ts";
+import {
+  createReplayBuffer,
+  createTerminalService,
+  hasRealPty,
+  localShellCommand,
+} from "../src/index.ts";
 
 let cwd: string;
 const services: ReturnType<typeof createTerminalService>[] = [];
@@ -21,6 +26,28 @@ test.after(async () => {
   // close every session so no child keeps the runner alive
   for (const t of services) for (const info of t.list()) await t.close(info.id).catch(() => {});
   await rm(cwd, { recursive: true, force: true });
+});
+
+test("local shell defaults are native to the target platform", () => {
+  assert.deepEqual(
+    localShellCommand(undefined, "win32", {}),
+    { file: "cmd.exe", args: [] },
+  );
+  assert.deepEqual(
+    localShellCommand("echo ready", "win32", { COMSPEC: "C:\\Windows\\System32\\cmd.exe" }),
+    {
+      file: "C:\\Windows\\System32\\cmd.exe",
+      args: ["/d", "/s", "/c", "echo ready"],
+    },
+  );
+  assert.deepEqual(
+    localShellCommand(undefined, "darwin", { SHELL: "/bin/zsh" }),
+    { file: "/bin/zsh", args: ["-i"] },
+  );
+  assert.deepEqual(
+    localShellCommand("echo ready", "linux", {}),
+    { file: "/bin/sh", args: ["-c", "echo ready"] },
+  );
 });
 
 test("create + write + read roundtrip through a long-lived child", async () => {
