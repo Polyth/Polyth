@@ -19,6 +19,7 @@ import {
   orderUsageBlocks,
   setUsageDashboardPrefs,
   useUsagePrefs,
+  type UsageModelPricingProfile,
   type UsageProviderCostProfile,
 } from "../usagePrefs.ts";
 import {
@@ -199,7 +200,49 @@ const profileFor = (
   provider: UsageProviderSummary,
   profiles: Readonly<Record<string, UsageProviderCostProfile>>,
 ): UsageProviderCostProfile =>
-  profiles[provider.id] ?? { billing: "api", monthlyCost: null, monthlyBudget: null };
+  profiles[provider.id] ?? {
+    billing: "api",
+    monthlyCost: null,
+    monthlyBudget: null,
+    inputPerMillion: null,
+    outputPerMillion: null,
+  };
+
+const modelEquivalentCost = (
+  item: UsageConsumerSummary,
+  providerProfile: UsageProviderCostProfile,
+  modelPricing: Readonly<Record<string, UsageModelPricingProfile>>,
+): number => {
+  const override = modelPricing[item.id];
+  const inputRate = override?.inputPerMillion ?? providerProfile.inputPerMillion;
+  const outputRate = override?.outputPerMillion ?? providerProfile.outputPerMillion;
+  if (inputRate === null || outputRate === null) return item.cost;
+  return item.tokenBreakdown.input / 1_000_000 * inputRate
+    + item.tokenBreakdown.output / 1_000_000 * outputRate;
+};
+
+const providerEquivalentCost = (
+  provider: UsageProviderSummary,
+  profile: UsageProviderCostProfile,
+  modelPricing: Readonly<Record<string, UsageModelPricingProfile>>,
+): { value: number; overridden: boolean } => {
+  if (provider.composition.models.length === 0) return { value: provider.cost, overridden: false };
+  let overridden = false;
+  const value = provider.composition.models.reduce((sum, item) => {
+    const override = modelPricing[item.id];
+    const inputRate = override?.inputPerMillion ?? profile.inputPerMillion;
+    const outputRate = override?.outputPerMillion ?? profile.outputPerMillion;
+    if (inputRate !== null && outputRate !== null) overridden = true;
+    return sum + modelEquivalentCost(item, profile, modelPricing);
+  }, 0);
+  return { value, overridden };
+};
+
+const apiCostLabel = (provider: UsageProviderSummary): string => {
+  if (provider.costQuality === "native") return "Spent";
+  if (provider.costQuality === "derived" || provider.costQuality === "estimated") return "Est. cost";
+  return "Cost";
+};
 
 function CompositionBars({
   title,
@@ -240,6 +283,7 @@ function ProviderCard({
   showQuotaDetails,
   metric,
   performanceStatistic,
+  modelPricing,
 }: {
   provider: UsageProviderSummary;
   profile: UsageProviderCostProfile;
@@ -249,6 +293,7 @@ function ProviderCard({
   showQuotaDetails: boolean;
   metric: UsageChartMetric;
   performanceStatistic: "p50" | "average" | "p95";
+  modelPricing: Readonly<Record<string, UsageModelPricingProfile>>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const snapshot = provider.snapshot;
@@ -264,12 +309,13 @@ function ProviderCard({
   const primaryReset = provider.quotaWindow?.resetsAt;
   const status = provider.stale ? "Stale" : snapshot ? "Fresh" : "Session data";
   const statusState = provider.stale ? "stale" : snapshot ? "fresh" : "session";
+  const apiEquivalent = providerEquivalentCost(provider, profile, modelPricing);
   const costLabel = profile.billing === "subscription"
     ? showApiEquivalent ? "API equiv." : "Subscription"
-    : "Spent";
+    : apiCostLabel(provider);
   const costValue = profile.billing === "subscription"
     ? showApiEquivalent
-      ? money(provider.cost, true)
+      ? money(apiEquivalent.value, true)
       : profile.monthlyCost === null ? "—" : `${money(profile.monthlyCost)}/mo`
     : money(provider.cost);
   const valueMultiplier = profile.billing === "subscription"
@@ -375,14 +421,24 @@ function ProviderCard({
               />
               <Metric
                 label="Avg cost / session"
-                value={provider.sessions > 0 ? money(provider.cost / provider.sessions) : "—"}
+                value={provider.sessions > 0
+                  ? money((profile.billing === "subscription" ? apiEquivalent.value : provider.cost) / provider.sessions)
+                  : "—"}
               />
               <Metric
                 label="Cost / 1M tokens"
-                value={provider.tokens > 0 ? money(provider.cost / provider.tokens * 1_000_000) : "—"}
+                value={provider.tokens > 0
+                  ? money((profile.billing === "subscription" ? apiEquivalent.value : provider.cost) / provider.tokens * 1_000_000)
+                  : "—"}
               />
               {profile.billing === "subscription" && showValueMultiplier && valueMultiplier !== null && (
-                <Metric label="Value this month" value={`${valueMultiplier.toFixed(1)}×`} hint="API equiv. / plan" />
+                <Metric label="Value this month" value={`${valueMultiplier.toFixed(1)}×`} hint="recorded API equiv. / plan" />
+              )}
+              {profile.billing === "subscription" && apiEquivalent.overridden && (
+                <Metric label="Pricing" value="Override" hint="selected range · input/output" />
+              )}
+              {profile.billing === "api" && provider.costQuality && (
+                <Metric label="Cost source" value={provider.costQuality === "mixed" ? "Mixed" : provider.costQuality} />
               )}
             </div>
           </section>
@@ -1025,6 +1081,7 @@ export function UsageDashboard(): ReactNode {
                 showQuotaDetails={prefs.dashboard.showQuotaDetails}
                 metric={prefs.dashboard.chartMetric}
                 performanceStatistic={prefs.dashboard.performanceStatistic}
+                modelPricing={prefs.modelPricing}
               />
             ))}
             {visibleProviders.length === 0 && (
