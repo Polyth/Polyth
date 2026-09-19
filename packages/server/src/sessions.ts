@@ -2544,6 +2544,9 @@ export function createSessionService(deps: {
       console.error(`[polyth] rate-limit resume failed for ${sessionId}`, err),
   });
 
+  const AUTO_RESUME_CONTINUATION =
+    "Continue from the exact point where the provider limit interrupted this turn. Do not repeat completed work or rerun completed side effects.";
+
   const lastUserMessage = (
     events: readonly SessionEvent[],
   ): { seq: number; text: string; attachments?: JsonObject[] } | undefined => {
@@ -2551,8 +2554,12 @@ export function createSessionService(deps: {
       const ev = events[i]!;
       if (ev.type !== "user/message") continue;
       const data = ev.data as {
-        text?: unknown; raw?: unknown; attachments?: unknown; githubConflictResolution?: unknown;
+        text?: unknown; raw?: unknown; attachments?: unknown; githubConflictResolution?: unknown; autoResume?: unknown;
       };
+      // Auto-resume turns are hidden transport turns, not a new user intent.
+      // Keep the original visible prompt as the durable resume owner so retry
+      // attempts escalate instead of resetting to attempt 1 on every retry.
+      if (data.autoResume === true) continue;
       if (data.githubConflictResolution === true) return undefined;
       const text = typeof data.raw === "string" && data.raw.trim()
         ? data.raw
@@ -2592,6 +2599,7 @@ export function createSessionService(deps: {
     ...(state.provider ? { provider: state.provider } : {}),
     ...(state.retryAfterSec ? { retryAfterSec: state.retryAfterSec } : {}),
     ...(state.resetAt ? { resetAt: state.resetAt } : {}),
+    ...(state.resumeMode ? { resumeMode: state.resumeMode } : {}),
     resumeAt: state.resumeAt,
     attempt: state.attempt,
   });
@@ -2631,7 +2639,7 @@ export function createSessionService(deps: {
   // through its own admission path.
   const runScheduledResume = async (sessionId: string): Promise<void> => {
     const plan = await withSessionLock(sessionId, async (): Promise<
-      { text: string; attachments?: AttachmentRef[]; model?: ModelRef; resumeAt: number; userMessageSeq: number } | null
+      { text: string; attachments?: AttachmentRef[]; model?: ModelRef; resumeAt: number; userMessageSeq: number; resumeMode?: "replay" | "continue" } | null
     > => {
       const proj = await store.projection(sessionId);
       if (!proj?.resume) return null;
@@ -2643,14 +2651,16 @@ export function createSessionService(deps: {
         await clearResume(sessionId, "user");
         return null;
       }
+      const continueNative = proj.resume.resumeMode === "continue";
       return {
-        text: last.text,
-        ...(last.attachments
+        text: continueNative ? AUTO_RESUME_CONTINUATION : last.text,
+        ...(!continueNative && last.attachments
           ? { attachments: last.attachments as unknown as AttachmentRef[] }
           : {}),
         ...(proj.model ? { model: proj.model } : {}),
         resumeAt: proj.resume.resumeAt,
         userMessageSeq: proj.resume.userMessageSeq,
+        ...(proj.resume.resumeMode ? { resumeMode: proj.resume.resumeMode } : {}),
       };
     });
     if (!plan) return;
@@ -2722,6 +2732,7 @@ export function createSessionService(deps: {
               scope: row.resume.scope,
               ...(row.resume.provider ? { provider: row.resume.provider } : {}),
               ...(row.resume.retryAfterSec ? { retryAfterSec: row.resume.retryAfterSec } : {}),
+              ...(row.resume.resumeMode ? { resumeMode: row.resume.resumeMode } : {}),
               resumeAt: row.resume.resumeAt,
               attempt: row.resume.attempt,
             },
@@ -7564,9 +7575,10 @@ export function createSessionService(deps: {
           throw Object.assign(new Error("resume target is stale"), { code: "no-resume" });
         }
         await clearResume(sessionId, options.model || options.harness ? "model-switch" : "resumed");
+        const continueNative = proj.resume.resumeMode === "continue" && !options.model && !options.harness;
         return {
-          text: last.text,
-          ...(last.attachments
+          text: continueNative ? AUTO_RESUME_CONTINUATION : last.text,
+          ...(!continueNative && last.attachments
             ? { attachments: last.attachments as unknown as AttachmentRef[] }
             : {}),
           // A chosen route without a chosen model intentionally lets its
