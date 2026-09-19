@@ -1,6 +1,5 @@
 // Canonical bootstrap. The large runtime composition root lives in indexCore.ts
 // and is admitted only after the account/tenancy authority is already ready.
-import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createAuthorityOutboxWorker } from "./authorityOutbox.ts";
@@ -11,7 +10,7 @@ import {
   bindCanonicalSecurityFactory,
   canonicalSecurity,
 } from "./runtimeSecurity.ts";
-import { createSetupServer } from "./setupServer.ts";
+import { createSetupServer, DESKTOP_SETUP_CLAIM_COOKIE } from "./setupServer.ts";
 import { createProxyTrust } from "./trustedProxy.ts";
 import {
   acquireDataDirectoryLease,
@@ -158,14 +157,14 @@ export async function boot(opts: BootOptions = {}) {
     }
     binding = bindCanonicalSecurity(security);
 
-    const desktopSetupCapability = process.env.POLYTH_DESKTOP === "1"
-      ? randomBytes(32).toString("hex")
+    const desktopSetupClaim = process.env.POLYTH_DESKTOP === "1"
+      ? security.issueSetupClaim()
       : undefined;
     const setup = createSetupServer({
       security,
       webDist: resolve(opts.webDist ?? resolve(fileURLToPath(new URL("../../../apps/web/dist/", import.meta.url)))),
       version: "0.1.0",
-      ...(desktopSetupCapability ? { desktopSetupCapability } : {}),
+      ...(desktopSetupClaim ? { desktopSetupClaimToken: desktopSetupClaim.token } : {}),
     });
     try {
       await new Promise<void>((resolveListen, rejectListen) => {
@@ -199,9 +198,9 @@ export async function boot(opts: BootOptions = {}) {
       server: setup.server,
       setup: true as const,
       state,
-      ...(desktopSetupCapability ? {
-        desktopSetupCapability,
-        desktopSetupCookieName: "polyth_desktop_setup",
+      ...(desktopSetupClaim ? {
+        desktopSetupClaimToken: desktopSetupClaim.token,
+        desktopSetupClaimCookieName: DESKTOP_SETUP_CLAIM_COOKIE,
       } : {}),
       async shutdown() {
         process.off("SIGINT", sigint);
