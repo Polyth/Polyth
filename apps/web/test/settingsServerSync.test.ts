@@ -113,11 +113,40 @@ test("client settings round-trip through the server and apply on inbound frames"
   assert.match(settingsSync, /modelPrefs:\s*getModelPrefs\(\)/);
   assert.match(settingsSync, /replaceModelPrefs\(parseModelPrefs\(JSON\.stringify\(incoming\.modelPrefs\)\)\)/);
   assert.match(settingsSync, /subscribeModelPrefs\(schedulePush\)/);
-  assert.match(settingsSync, /usagePrefs:\s*getUsagePrefs\(\)/);
-  assert.match(settingsSync, /replaceUsagePrefs\(parseUsagePrefs\(JSON\.stringify\(incoming\.usagePrefs\)\)\)/);
-  assert.match(settingsSync, /subscribeUsagePrefs\(schedulePush\)/);
-  assert.match(settingsSync, /if \(!serverHasModelPrefs \|\| !serverHasUsagePrefs\) lastSyncedJson = "";/);
+
+  // Optional packages contribute preference slices through a registry. Core
+  // never imports a feature package, and disabled package state is retained.
+  assert.match(settingsSync, /packagePrefs:\s*packagePrefsSnapshot\(\)/);
+  assert.match(settingsSync, /listClientSettingsContributions\(\)/);
+  assert.match(settingsSync, /subscribeClientSettingsContributions\(syncContributionSubscriptions\)/);
+  assert.match(settingsSync, /retainedPackagePrefs\[id\] = record\.contribution\.get\(\)/);
+  assert.match(settingsSync, /missingActivePackagePrefs/);
+  assert.doesNotMatch(settingsSync, /@polyth\/usage/);
   assert.match(settingsSync, /if \(JSON\.stringify\(currentBlob\(\)\) !== lastSyncedJson\) schedulePush\(\);/);
+});
+
+test("package client-settings contributions register and dispose without host feature imports", async () => {
+  const registry = await import("../src/clientSettingsRegistry.ts");
+  let value: unknown = { enabled: true };
+  const listeners = new Set<() => void>();
+  const off = registry.registerClientSettingsContribution({
+    id: "test-package",
+    get: () => value,
+    apply: (next) => { value = next; },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+  });
+  assert.deepEqual(registry.listClientSettingsContributions().map((item) => item.id), ["test-package"]);
+  assert.throws(() => registry.registerClientSettingsContribution({
+    id: "test-package",
+    get: () => ({}),
+    apply: () => {},
+    subscribe: () => () => {},
+  }), /duplicate client settings contribution/);
+  off();
+  assert.deepEqual(registry.listClientSettingsContributions(), []);
 });
 
 test("settings flush uses a keepalive write", async () => {
