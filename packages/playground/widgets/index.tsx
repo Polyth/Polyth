@@ -1,5 +1,6 @@
 import { createElement } from "react";
 import { defineWebPackage } from "@polyth/web-sdk";
+import { withSurfaceContent } from "@polyth/web-sdk/surface-content";
 import PlaygroundView from "./PlaygroundView.tsx";
 import "./styles.css";
 
@@ -13,7 +14,7 @@ export default defineWebPackage((host) => () => {
       capabilityId: "playground",
       order: 6,
       component: (props) => createElement(PlaygroundView, { ...props, host }),
-      presentation: {
+      presentation: withSurfaceContent({
         kind: "workspace",
         defaultRatio: 0.56,
         minWidth: 360,
@@ -21,7 +22,7 @@ export default defineWebPackage((host) => () => {
         preferredMaxWidth: 1200,
         keepAlive: true,
         escape: "close",
-      },
+      }, "workspace"),
     }),
     host.workbench.profiles.register({
       id: "playground",
