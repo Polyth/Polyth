@@ -168,10 +168,13 @@ Automatic resume has two modes:
 A model/harness switch can never rely on the old Gemini native state, so an
 explicit switch always replays the original prompt on the replacement runtime.
 
-The resume plan remains durable while an automatic retry is in flight. A second
-limit stop increments the attempt and therefore advances the fallback backoff;
-it no longer resets to attempt 1. The plan survives server restart. A successful
-or otherwise terminal non-limit turn clears it.
+The pending timer state is cleared once the automatic retry has a durable
+`turn/started`; this prevents a server restart from blindly replaying an
+in-flight turn that may already have mutated tools. Retry lineage — original
+owner sequence, attempt and resume mode — is stored on the hidden auto-resume
+message instead. A second limit stop therefore increments the attempt and
+advances the fallback backoff without leaving a stale replayable timer. A
+pending wait that has not yet started still survives server restart.
 
 Polyth never automatically switches billing route/model on Gemini's behalf.
 
