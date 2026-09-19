@@ -2544,6 +2544,9 @@ export function createSessionService(deps: {
       console.error(`[polyth] rate-limit resume failed for ${sessionId}`, err),
   });
 
+  const AUTO_RESUME_CONTINUATION =
+    "Continue from the exact point where the provider limit interrupted this turn. Do not repeat completed work or rerun completed side effects.";
+
   const lastUserMessage = (
     events: readonly SessionEvent[],
   ): { seq: number; text: string; attachments?: JsonObject[] } | undefined => {
@@ -2551,8 +2554,12 @@ export function createSessionService(deps: {
       const ev = events[i]!;
       if (ev.type !== "user/message") continue;
       const data = ev.data as {
-        text?: unknown; raw?: unknown; attachments?: unknown; githubConflictResolution?: unknown;
+        text?: unknown; raw?: unknown; attachments?: unknown; githubConflictResolution?: unknown; autoResume?: unknown;
       };
+      // Auto-resume turns are hidden transport turns, not a new user intent.
+      // Keep the original visible prompt as the durable resume owner so retry
+      // attempts escalate instead of resetting to attempt 1 on every retry.
+      if (data.autoResume === true) continue;
       if (data.githubConflictResolution === true) return undefined;
       const text = typeof data.raw === "string" && data.raw.trim()
         ? data.raw
@@ -2575,14 +2582,33 @@ export function createSessionService(deps: {
   ) => {
     const last = lastUserMessage(events);
     if (!last) return undefined;
-    const previous = (await store.projection(sessionId))?.resume;
+    const projectionResume = (await store.projection(sessionId))?.resume;
+    const previousAutoResume = [...events].reverse().find((event) => {
+      if (event.type !== "user/message") return false;
+      const data = event.data as {
+        autoResume?: unknown;
+        autoResumeOwnerSeq?: unknown;
+        autoResumeAttempt?: unknown;
+      };
+      return data.autoResume === true
+        && data.autoResumeOwnerSeq === last.seq
+        && Number.isSafeInteger(data.autoResumeAttempt)
+        && Number(data.autoResumeAttempt) > 0;
+    });
+    const previousData = previousAutoResume?.data as {
+      autoResumeOwnerSeq?: unknown;
+      autoResumeAttempt?: unknown;
+    } | undefined;
+    const previous = projectionResume
+      ? { attempt: projectionResume.attempt, userMessageSeq: projectionResume.userMessageSeq }
+      : previousData
+        ? { attempt: Number(previousData.autoResumeAttempt), userMessageSeq: Number(previousData.autoResumeOwnerSeq) }
+        : undefined;
     return planResume({
       hint,
       userMessageSeq: last.seq,
       sessionId,
-      ...(previous
-        ? { previous: { attempt: previous.attempt, userMessageSeq: previous.userMessageSeq } }
-        : {}),
+      ...(previous ? { previous } : {}),
       now: Date.now(),
     }) ?? undefined;
   };
@@ -2592,6 +2618,7 @@ export function createSessionService(deps: {
     ...(state.provider ? { provider: state.provider } : {}),
     ...(state.retryAfterSec ? { retryAfterSec: state.retryAfterSec } : {}),
     ...(state.resetAt ? { resetAt: state.resetAt } : {}),
+    ...(state.resumeMode ? { resumeMode: state.resumeMode } : {}),
     resumeAt: state.resumeAt,
     attempt: state.attempt,
   });
@@ -2631,7 +2658,7 @@ export function createSessionService(deps: {
   // through its own admission path.
   const runScheduledResume = async (sessionId: string): Promise<void> => {
     const plan = await withSessionLock(sessionId, async (): Promise<
-      { text: string; attachments?: AttachmentRef[]; model?: ModelRef; resumeAt: number; userMessageSeq: number } | null
+      { text: string; attachments?: AttachmentRef[]; model?: ModelRef; resumeAt: number; userMessageSeq: number; resumeMode?: "replay" | "continue" } | null
     > => {
       const proj = await store.projection(sessionId);
       if (!proj?.resume) return null;
@@ -2643,14 +2670,16 @@ export function createSessionService(deps: {
         await clearResume(sessionId, "user");
         return null;
       }
+      const continueNative = proj.resume.resumeMode === "continue";
       return {
-        text: last.text,
-        ...(last.attachments
+        text: continueNative ? AUTO_RESUME_CONTINUATION : last.text,
+        ...(!continueNative && last.attachments
           ? { attachments: last.attachments as unknown as AttachmentRef[] }
           : {}),
         ...(proj.model ? { model: proj.model } : {}),
         resumeAt: proj.resume.resumeAt,
         userMessageSeq: proj.resume.userMessageSeq,
+        ...(proj.resume.resumeMode ? { resumeMode: proj.resume.resumeMode } : {}),
       };
     });
     if (!plan) return;
@@ -2722,6 +2751,7 @@ export function createSessionService(deps: {
               scope: row.resume.scope,
               ...(row.resume.provider ? { provider: row.resume.provider } : {}),
               ...(row.resume.retryAfterSec ? { retryAfterSec: row.resume.retryAfterSec } : {}),
+              ...(row.resume.resumeMode ? { resumeMode: row.resume.resumeMode } : {}),
               resumeAt: row.resume.resumeAt,
               attempt: row.resume.attempt,
             },
@@ -2939,8 +2969,10 @@ export function createSessionService(deps: {
             lastTurnId.set(sessionId, ev.turnId);
             admitting.delete(sessionId);
             turnReply.set(sessionId, new Map());
-            // A fresh turn (auto-resume, manual retry, or new prompt) settles
-            // any pending rate-limit wait.
+            // turn/started proves the retry was admitted, so the pending
+            // timer is no longer live. Retry lineage/attempt is preserved on
+            // the hidden auto-resume user event instead of keeping a stale
+            // projection.resume that could be replayed blindly after a crash.
             await clearResume(sessionId, "resumed");
           }
         }
@@ -3022,7 +3054,7 @@ export function createSessionService(deps: {
         if (sideEffects) {
           // Any non-limit terminal stop (completed / aborted / hard error)
           // supersedes a pending resume from an earlier limit stop.
-          if (!retry) await clearResume(sessionId, "user");
+          if (!retry) await clearResume(sessionId, "resumed");
           const requestsOpen = openRequestTotal(await logFacts(sessionId)) > 0;
           const nextStatus = requestsOpen
             ? "waiting"
@@ -4844,6 +4876,15 @@ export function createSessionService(deps: {
       }
     }
     const recoveryEvents = await store.events(sessionId);
+    const autoResumeRecoveryContext = input.autoResume === true
+      ? [...recoveryEvents].reverse().find((event) => {
+          if (event.type !== "user/message") return false;
+          return (event.data as { autoResume?: unknown }).autoResume !== true;
+        })
+      : undefined;
+    const originalRecoveryContext = autoResumeRecoveryContext
+      ? (autoResumeRecoveryContext.data as { recoveryContext?: unknown }).recoveryContext
+      : undefined;
     const firstTurnOfRuntimeLeg = proj.runtimeLeg
       ? proj.runtimeLeg.bootstrap !== "native-resume"
       : !recoveryEvents.some((event) => event.type === "turn/started");
@@ -4869,6 +4910,9 @@ export function createSessionService(deps: {
       decoration === null,
     );
     const recoveryContext = [
+      typeof originalRecoveryContext === "string" && originalRecoveryContext.trim()
+        ? originalRecoveryContext
+        : null,
       workspaceInstructions,
       epochRecovery?.recoveryContext,
       decoration?.recoveryContext,
@@ -4914,7 +4958,14 @@ export function createSessionService(deps: {
         ...(model ? { resolvedModel: model as unknown as JsonObject } : {}),
         ...(agent ? { resolvedAgent: agent } : {}),
       } : {}),
-      ...(input.autoResume === true ? { autoResume: true } : {}),
+      ...(input.autoResume === true ? {
+        autoResume: true,
+        ...(proj.resume ? {
+          autoResumeOwnerSeq: proj.resume.userMessageSeq,
+          autoResumeAttempt: proj.resume.attempt,
+          ...(proj.resume.resumeMode ? { autoResumeMode: proj.resume.resumeMode } : {}),
+        } : {}),
+      } : {}),
     };
     let operation = reserved?.operation;
     const existingEvents = reserved ? await store.events(sessionId) : [];
@@ -7535,7 +7586,14 @@ export function createSessionService(deps: {
     async resumeNow(sessionId, input): Promise<SendResult> {
       const options = normalizeResumeOptions(input);
       const plan = await withSessionLock(sessionId, async (): Promise<
-        { text: string; attachments?: AttachmentRef[]; model?: ModelRef; harness?: HarnessSelection }
+        {
+          text: string;
+          attachments?: AttachmentRef[];
+          model?: ModelRef;
+          harness?: HarnessSelection;
+          resumeAt?: number;
+          resumeUserMessageSeq?: number;
+        }
       > => {
         const proj = await store.projection(sessionId);
         if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
@@ -7563,10 +7621,23 @@ export function createSessionService(deps: {
           await clearResume(sessionId, "user");
           throw Object.assign(new Error("resume target is stale"), { code: "no-resume" });
         }
-        await clearResume(sessionId, options.model || options.harness ? "model-switch" : "resumed");
+        const switchingRoute = Boolean(options.model || options.harness);
+        if (switchingRoute) {
+          await clearResume(sessionId, "model-switch");
+        } else {
+          // Prevent the scheduled retry racing the user's explicit Resume now.
+          // Keep projection.resume until turn/started proves admission; if send
+          // fails before that, the catch below can re-arm the same durable plan.
+          resumeScheduler.cancel(sessionId);
+        }
+        const continueNative = proj.resume.resumeMode === "continue" && !switchingRoute;
         return {
-          text: last.text,
-          ...(last.attachments
+          text: continueNative ? AUTO_RESUME_CONTINUATION : last.text,
+          ...(!switchingRoute ? {
+            resumeAt: proj.resume.resumeAt,
+            resumeUserMessageSeq: proj.resume.userMessageSeq,
+          } : {}),
+          ...(!continueNative && last.attachments
             ? { attachments: last.attachments as unknown as AttachmentRef[] }
             : {}),
           // A chosen route without a chosen model intentionally lets its
@@ -7578,7 +7649,25 @@ export function createSessionService(deps: {
           ...(options.harness ? { harness: options.harness } : {}),
         };
       });
-      return service.send(sessionId, { ...plan, autoResume: true });
+      const {
+        resumeAt,
+        resumeUserMessageSeq,
+        ...sendPlan
+      } = plan;
+      try {
+        return await service.send(sessionId, { ...sendPlan, autoResume: true });
+      } catch (error) {
+        if (resumeAt !== undefined && resumeUserMessageSeq !== undefined) {
+          const current = await store.projection(sessionId);
+          if (
+            current?.resume?.resumeAt === resumeAt
+            && current.resume.userMessageSeq === resumeUserMessageSeq
+          ) {
+            resumeScheduler.arm(sessionId, Math.max(resumeAt, Date.now() + 1_000));
+          }
+        }
+        throw error;
+      }
     },
 
     // UX-MSG-ACTIONS Fork: backend branch is prepared FIRST; the canonical

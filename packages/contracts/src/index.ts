@@ -648,6 +648,12 @@ export interface RateLimitRetryHint {
   resetAt?: number;
   /** Default true when omitted; false = never auto-retry. */
   retryable?: boolean;
+  /**
+   * "replay" re-submits the interrupted user prompt. "continue" emits a
+   * hidden continuation turn against the same native session, for providers
+   * that can preserve completed tool results across a limit stop.
+   */
+  resumeMode?: "replay" | "continue";
 }
 
 /** Resume guidance the server attaches to an error turn/stopped when the
@@ -1452,7 +1458,7 @@ export interface SessionAssist {
 
 /** Server-owned pending resume after a provider rate-limit / quota stop. */
 export interface SessionResumeState {
-  /** ms epoch when the last user message is auto-resent. */
+  /** ms epoch when the interrupted turn is resumed. */
   resumeAt: number;
   scope: RateLimitScope;
   provider?: string;
@@ -1462,7 +1468,9 @@ export interface SessionResumeState {
   resetAt?: number;
   /** 1 on the first limit hit for this message, incremented on repeats. */
   attempt: number;
-  /** seq of the user/message that will be re-sent. */
+  /** How the native turn is resumed when the wait elapses. */
+  resumeMode?: "replay" | "continue";
+  /** seq of the original user/message that owns this resume plan. */
   userMessageSeq: number;
 }
 

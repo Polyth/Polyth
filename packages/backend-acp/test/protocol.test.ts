@@ -845,3 +845,95 @@ test("ACP browser-context uses advertised image prompts", async () => {
         await rm(path, { force: true });
     }
 });
+
+
+test("ACP profile prompt-result hook can emit canonical usage metadata", async () => {
+    const f = fakeRpc();
+    f.handle(async (method) => method === "session/new"
+        ? { sessionId: "native" }
+        : { stopReason: "end_turn", _meta: { fixture: true } });
+    const seen: Array<{ hadToolActivity: boolean }> = [];
+    const rt = createAcpRuntime(context, f.rpc, "fixture", undefined, "Fixture", {
+        translatePromptResult(result, translation) {
+            assert.deepEqual(result, { stopReason: "end_turn", _meta: { fixture: true } });
+            seen.push({ hadToolActivity: translation.hadToolActivity });
+            return {
+                events: [{
+                    type: "usage/recorded",
+                    model: { providerID: "fixture", modelID: "model-a" },
+                    tokens: { input: 10, output: 2 },
+                }],
+            };
+        },
+        runtimeFeatures: { usage: true },
+    });
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    const outcome = await rt.startTurnOperation!({ sessionId: "canonical", text: "task" }, "submit");
+    assert.equal(outcome.kind, "confirmed");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(seen, [{ hadToolActivity: false }]);
+    assert.ok(events.some((event) => event.type === "usage/recorded"));
+    assert.equal((await rt.capabilities()).usage, true);
+    await rt.dispose();
+});
+
+test("ACP profile error hook sees tool activity and can turn a known rejection into retryable terminal evidence", async () => {
+    const f = fakeRpc();
+    let rejectPrompt!: (reason: unknown) => void;
+    f.handle(async (method) => {
+        if (method === "session/new") return { sessionId: "native" };
+        if (method === "session/prompt") return new Promise((_resolve, reject) => { rejectPrompt = reject; });
+        return {};
+    });
+    let toolActive: boolean | undefined;
+    const rt = createAcpRuntime(context, f.rpc, "fixture", undefined, "Fixture", {
+        translatePromptError(_error, translation) {
+            toolActive = translation.hadToolActivity;
+            return {
+                admitted: true,
+                error: "fixture rate limit",
+                code: "rate-limited",
+                retry: { scope: "rate", provider: "fixture", resumeMode: translation.hadToolActivity ? "continue" : "replay" },
+            };
+        },
+    });
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    const admission = rt.startTurnOperation!({ sessionId: "canonical", text: "task" }, "submit");
+    f.emit("session/update", {
+        sessionId: "native",
+        update: { sessionUpdate: "tool_call", toolCallId: "write", kind: "edit", title: "Write file" },
+    });
+    assert.equal((await admission).kind, "confirmed");
+    rejectPrompt(Object.assign(new Error("rate limited"), { code: "runtime-rejected", rpcCode: 429 }));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(toolActive, true);
+    assert.ok(events.some((event) =>
+        event.type === "turn/stopped"
+        && event.code === "rate-limited"
+        && event.retry?.resumeMode === "continue"));
+    await rt.dispose();
+});
+
+
+test("ACP does not report an unknown native stop reason as completed", async () => {
+    const f = fakeRpc();
+    f.handle(async (method) => method === "session/new"
+        ? { sessionId: "native" }
+        : { stopReason: "provider_limit" });
+    const rt = createAcpRuntime(context, f.rpc);
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    assert.equal((await rt.startTurnOperation!({ sessionId: "canonical", text: "task" }, "submit")).kind, "confirmed");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.ok(events.some((event) =>
+        event.type === "turn/stopped"
+        && event.reason === "error"
+        && event.code === "unknown"
+        && /provider_limit/.test(event.error ?? "")));
+    await rt.dispose();
+});

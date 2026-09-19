@@ -20,7 +20,7 @@ import { randomUUID } from "node:crypto";
 import { open, readFile, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { AgentRuntime, HarnessContext, HarnessDescriptor, HarnessProvider, JsonObject, ModelDescriptor, MutationOutcome, RuntimeCommandDescriptor, RuntimeEvent, RuntimeSnapshot } from "@polyth/contracts";
+import type { AgentRuntime, HarnessContext, HarnessDescriptor, HarnessProvider, JsonObject, ModelDescriptor, ModelRef, MutationOutcome, RateLimitRetryHint, RuntimeCapabilities, RuntimeCommandDescriptor, RuntimeErrorCode, RuntimeEvent, RuntimeSnapshot } from "@polyth/contracts";
 import {
     acknowledgeCapabilityApplication,
     attachmentModality,
@@ -59,6 +59,12 @@ export interface AcpProfile {
     discoverModels?(connection: AcpConnection, context: HarnessContext): Promise<ModelDescriptor[] | undefined>;
     /** Native client extension metadata advertised during `initialize`. */
     initializeClientMeta?: JsonObject;
+    /** Profile-specific runtime feature claims that are stronger than baseline ACP. */
+    runtimeFeatures?: Partial<RuntimeCapabilities>;
+    /** Translate provider-specific successful prompt metadata into canonical events. */
+    translatePromptResult?(result: unknown, context: AcpPromptTranslationContext): AcpPromptResultTranslation | undefined;
+    /** Translate a provider-specific prompt failure when its native outcome is known. */
+    translatePromptError?(error: unknown, context: AcpPromptTranslationContext): AcpPromptErrorTranslation | undefined;
     /**
      * Optional gate on cold model discovery. Some agent generations cannot
      * answer it, and spawning them to find that out every time is wasted work.
@@ -168,6 +174,38 @@ export type AcpClientMethodTranslator = {
     translateClientMethod(method: string, params: unknown): AcpClientMethodTranslation;
 };
 
+export interface AcpPromptTranslationContext {
+    turnId: string;
+    model?: ModelRef;
+    /** Native tool lifecycle was observed during this prompt. */
+    hadToolActivity: boolean;
+}
+
+export interface AcpPromptResultTranslation {
+    events?: RuntimeEvent[];
+    /** Optional profile-specific interpretation of the native stop reason. */
+    terminal?: {
+        reason: "completed" | "aborted" | "error";
+        error?: string;
+        code?: RuntimeErrorCode;
+        retry?: RateLimitRetryHint;
+    };
+}
+
+export interface AcpPromptErrorTranslation {
+    /** User-safe canonical message; native stderr / secrets must not be copied verbatim. */
+    error: string;
+    code?: RuntimeErrorCode;
+    retry?: RateLimitRetryHint;
+    /**
+     * True only when the provider proves the prompt reached its execution path
+     * and failed without an outcome-unknown mutation. This lets Polyth record a
+     * canonical failed turn and arm auto-resume instead of treating the submit
+     * as an ambiguous admission failure.
+     */
+    admitted?: boolean;
+}
+
 export interface AcpRuntimeOptions {
     /** Maximum silence while a native prompt is active. Activity resets the
      * watchdog; zero disables it for protocol fixtures that own their clock. */
@@ -176,6 +214,12 @@ export interface AcpRuntimeOptions {
     models?: ModelDescriptor[];
     /** Provider-specific client extension methods translated into RuntimeEvents. */
     clientTranslator?: AcpClientMethodTranslator;
+    /** Provider-specific successful prompt metadata translator. */
+    translatePromptResult?: AcpProfile["translatePromptResult"];
+    /** Provider-specific prompt failure translator. */
+    translatePromptError?: AcpProfile["translatePromptError"];
+    /** Stronger profile-specific feature claims, merged over negotiated ACP baseline. */
+    runtimeFeatures?: Partial<RuntimeCapabilities>;
 }
 
 const parseAuthMethods = (value: unknown): AcpAuthMethod[] =>
@@ -240,6 +284,7 @@ export function createAcpRuntime(
     let text = "";
     let messagePartId = "";
     let messagePartOrdinal = 0;
+    let turnHadToolActivity = false;
     let resolveAdmission: ((outcome: MutationOutcome<{ admissionId: string }>) => void) | undefined;
     let promptWatchdog: ReturnType<typeof setTimeout> | undefined;
     let lastTitle = "";
@@ -468,6 +513,7 @@ export function createAcpRuntime(
         }
         if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
             markAccepted();
+            turnHadToolActivity = true;
             // ACP exposes visible prose as chunks but has no message-final
             // notification. A new tool call is the observable boundary
             // between the preceding progress prose and any later final
@@ -657,6 +703,7 @@ export function createAcpRuntime(
             contextOccupancy: "unknown",
             resume: acpAdvertised(agentCapabilities?.sessionCapabilities?.resume)
                 || agentCapabilities?.loadSession === true,
+            ...(options.runtimeFeatures ?? {}),
         }),
         commands: async () => [...nativeCommands],
         // Only what the agent advertised for this session. An agent that
@@ -776,6 +823,7 @@ export function createAcpRuntime(
             text = "";
             messagePartId = "";
             messagePartOrdinal = 0;
+            turnHadToolActivity = false;
             order++;
             return new Promise((resolve) => {
                 resolveAdmission = resolve;
@@ -787,21 +835,66 @@ export function createAcpRuntime(
                     clearPromptWatchdog();
                     markAccepted();
                     finishMessagePart();
+                    const modelId = desiredModelId ?? currentModelId(sessionConfig);
+                    const translated = options.translatePromptResult?.(result, {
+                        turnId,
+                        ...(modelId ? { model: { providerID: harnessId, modelID: modelId, ...(desiredVariant ? { variant: desiredVariant } : {}) } } : {}),
+                        hadToolActivity: turnHadToolActivity,
+                    });
+                    for (const event of translated?.events ?? []) emit(event);
                     active = false;
                     order++;
-                    emit({ type: "turn/stopped", turnId, reason: result.stopReason === "cancelled" ? "aborted" : "completed" });
+                    const terminal = translated?.terminal
+                        ?? (result.stopReason === "end_turn"
+                            ? { reason: "completed" as const }
+                            : result.stopReason === "cancelled"
+                                ? { reason: "aborted" as const }
+                                : {
+                                    reason: "error" as const,
+                                    error: `ACP stopped before completing the turn (${result.stopReason || "unknown"})`,
+                                    code: "unknown" as const,
+                                });
+                    emit({
+                        type: "turn/stopped",
+                        turnId,
+                        reason: terminal.reason,
+                        ...(terminal.error ? { error: terminal.error } : {}),
+                        ...(terminal.code ? { code: terminal.code } : {}),
+                        ...(terminal.retry ? { retry: terminal.retry } : {}),
+                    });
                     for (const cb of lifecycle)
                         cb({ type: "stream-connected", authorityId: rpc.authorityId, generation: rpc.generation });
                 }, (error) => {
                     if (!active || turnId !== operationId) return;
                     clearPromptWatchdog();
+                    const modelId = desiredModelId ?? currentModelId(sessionConfig);
+                    const translated = options.translatePromptError?.(error, {
+                        turnId,
+                        ...(modelId ? { model: { providerID: harnessId, modelID: modelId, ...(desiredVariant ? { variant: desiredVariant } : {}) } } : {}),
+                        hadToolActivity: turnHadToolActivity,
+                    });
+                    if (translated?.admitted) {
+                        markAccepted();
+                        finishMessagePart();
+                        active = false;
+                        order++;
+                        emit({
+                            type: "turn/stopped",
+                            turnId,
+                            reason: "error",
+                            error: translated.error,
+                            ...(translated.code ? { code: translated.code } : {}),
+                            ...(translated.retry ? { retry: translated.retry } : {}),
+                        });
+                        return;
+                    }
                     const rejected = (error as {
                         code?: string;
                     }).code === "runtime-rejected";
                     const pendingAdmission = resolveAdmission;
                     resolveAdmission = undefined;
                     if (pendingAdmission) {
-                        pendingAdmission(rejected ? { kind: "rejected", code: "runtime-rejected", message: "ACP rejected the prompt" } : { kind: "unknown", operationId, message: "ACP response was lost" });
+                        pendingAdmission(rejected ? { kind: "rejected", code: "runtime-rejected", message: translated?.error ?? "ACP rejected the prompt" } : { kind: "unknown", operationId, message: "ACP response was lost" });
                     }
                     active = false;
                     order++;
@@ -814,8 +907,9 @@ export function createAcpRuntime(
                             type: "turn/stopped",
                             turnId,
                             reason: "error",
-                            error: rejected ? "ACP rejected the prompt" : "ACP response was lost before a terminal result",
-                            ...(!rejected ? { code: "unknown" as const } : {}),
+                            error: translated?.error ?? (rejected ? "ACP rejected the prompt" : "ACP response was lost before a terminal result"),
+                            ...(translated?.code ? { code: translated.code } : !rejected ? { code: "unknown" as const } : {}),
+                            ...(translated?.retry ? { retry: translated.retry } : {}),
                         });
                     }
                 });

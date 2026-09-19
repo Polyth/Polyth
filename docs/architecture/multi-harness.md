@@ -16,7 +16,7 @@ flowchart TD
   REG --> CX[backend-codex: App Server]
   REG --> CC[backend-claude: Agent SDK]
   REG --> ACP[backend-acp: shared ACP v1]
-  ACP --> PROFILES[Cursor and fx profiles]
+  ACP --> PROFILES[Cursor, Gemini and fx profiles]
   OC --> AUTH[Owned process supervision and release receipts]
   CX --> AUTH
   CC --> AUTH
@@ -137,6 +137,7 @@ Capabilities below describe the Polyth adapters, not everything each native prod
 | Claude Code | Public Agent SDK, pinned optional dependency 0.3.263; native CLI 2.1.261 in verification. [TypeScript SDK](https://code.claude.com/docs/en/agent-sdk/typescript), [sessions](https://code.claude.com/docs/en/agent-sdk/sessions) | SDK query, documented custom spawn hook, native auth/model catalog, text and tool outcomes, permission bridge and native MCP. Final-message delivery, not token streaming. Generation-only continuity; no general native-resume claim, attachments, steering, questions, subagents, usage/cost, compaction or fork. No source inventory shipped. Live turns and switching passed. |
 | Generic ACP | Explicit protocol v1 negotiation. [ACP v1 prompt turn](https://agentclientprotocol.com/protocol/v1/prompt-turn) | Shared transport, lifecycle, text streaming and permission choices. Admission requires native evidence; cancellation has no acknowledgement and remains unknown until terminal evidence/release. No v2 guessing, native load/resume, model selection, attachments, source reader, usage/cost, fork or compaction. MCP configuration is passed for supported transports; connection/invocation remains unverifiable without a profile-specific readback. Protocol tests passed. |
 | Cursor | `agent acp`. [Official ACP interface](https://cursor.com/docs/cli/acp) | Thin shared-ACP profile. Installed version 2026.09.02-c22c1a3 detected. Authentication status is unknown; manual selection only, excluded from Auto. Native ACP v1 handshake and owned shutdown passed; no paid ACP turn was run. |
+| Gemini CLI | `gemini --acp`. [Harness contract](./gemini-harness.md) | Shared ACP transport plus Gemini-specific quota/usage normalization. Polyth prompt/skill/context capabilities and `polyth-agent-tools` MCP are projected through the canonical ACP provisioning path. Structural 429 errors feed durable replay/continuation auto-resume; tool-active interruptions continue instead of replaying completed side effects. Manual selection until a live authenticated turn is verified. |
 | fx | `fx acp`. [Official ACP interface](https://fx.sh/docs/using-fx/acp) | Thin shared-ACP profile and native sign-in hint. Not installed in the verification environment; no live execution claim. Authentication unknown; excluded from Auto. |
 | Grok Build | Official announcement describes ACP and headless CLI integration. [xAI announcement](https://x.ai/news/grok-build-cli) | Researched, not implemented. Exact stable ACP invocation/auth contracts were not verified sufficiently to ship a profile. |
 | Pi | Native `pi --mode rpc`. [Official RPC docs](https://pi.dev/docs/latest/rpc) | Researched, not implemented. A future package can reuse process ownership while translating its native RPC into `AgentRuntime`. |
