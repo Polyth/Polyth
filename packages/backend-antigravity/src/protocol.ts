@@ -188,6 +188,20 @@ export function createAgyTurn(turnId: string, model: ModelRef | undefined) {
         }
         events.push({ type: "subagent/snapshot", revision: ++revision, agents: [...agents.values()] });
       }
+      // The CLI may surface one logical `invoke_subagent` call as a `tool` step
+      // (the proposal, which opened a tool call) followed by a `subagent` step
+      // (the spawn acknowledgement). Settling the subagent step must close the
+      // still-open call as a result; otherwise it is misreported as an
+      // unterminated tool at turn end and the delegated agent looks stopped.
+      if (settled && openTools.has(index)) {
+        const tool = openTools.get(index)!;
+        openTools.delete(index);
+        const info = record(row.tool_info);
+        const failure = agyFailureText(row, info);
+        if (failed || failure !== undefined || info?.error)
+          events.push({ type: "tool/error", callId: id, tool, error: failure ?? "Antigravity subagent failed" });
+        else events.push({ type: "tool/result", callId: id, tool, output: text(info?.output) ?? "" });
+      }
       if (settled) finished.add(index);
       return events;
     },

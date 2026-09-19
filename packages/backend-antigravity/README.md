@@ -70,6 +70,10 @@ macOS/Windows retain the shared portable authority's explicit crash-fence limits
   runtime; only a terminal native error result does. Transitional and
   unrecognized step states are ignored forward-compatibly, and a tool call the
   CLI never terminates is closed as an error when the turn result arrives.
+  One logical `invoke_subagent` call can arrive as a `tool` proposal step and
+  then a `subagent` spawn step at the same index; settling the spawn closes the
+  proposal as a result, so a successful delegation is never misreported as an
+  unterminated tool error.
 - Native subagents/tools configured in Google's CLI can run, but Polyth does
   not manage their definitions or promise live child completion tracking.
 - This version executes on the local Polyth server, not an SSH project runtime.

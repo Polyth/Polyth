@@ -114,6 +114,36 @@ test("subagent discovery does not claim completion or expose native log paths", 
   const events = turn.step({ step_index: 3, state: "DONE", step_type: "spawn", subagent_info: { subagents: [{ type_name: "reviewer", role: "Inspect tests", conversation_id: "child-1", log_uri: "/private/log", workspace_uris: ["/other-space"] }] } });
   assert.deepEqual(events, [{ type: "subagent/snapshot", revision: 1, agents: [{ sessionId: "child-1", label: "reviewer", status: "unknown", currentTask: "Inspect tests" }] }]);
 });
+test("a subagent step closes a tool proposal opened for the same invocation", () => {
+  const turn = createAgyTurn("t", model);
+  // Observed 1.2.7 wire shape: the tool proposal opens a call, then the spawn
+  // acknowledgement arrives at the same index with `step_type: "subagent"`.
+  assert.deepEqual(turn.step({
+    step_index: 2, state: "ACTIVE", step_type: "tool", tool_name: "invoke_subagent",
+    tool_info: { name: "invoke_subagent", parameters: { Subagents: [{ TypeName: "self", Role: "Math Calculator" }] } },
+  }), [
+    { type: "tool/started", callId: "t:step:2", tool: "invoke_subagent", input: { Subagents: [{ TypeName: "self", Role: "Math Calculator" }] } },
+  ]);
+  assert.deepEqual(turn.step({
+    step_index: 2, state: "DONE", step_type: "subagent", tool_name: "invoke_subagent",
+    subagent_info: { subagents: [{ type_name: "self", role: "Math Calculator", conversation_id: "child-1" }] },
+  }), [
+    { type: "subagent/snapshot", revision: 1, agents: [{ sessionId: "child-1", label: "self", status: "unknown", currentTask: "Math Calculator" }] },
+    { type: "tool/result", callId: "t:step:2", tool: "invoke_subagent", output: "" },
+  ]);
+  // The spawn settles the call, so turn end must not invent an unterminated tool error.
+  assert.deepEqual(turn.finish({ status: "SUCCESS", response: "4" }), [
+    { type: "assistant/message", partId: "t:result", text: "4" },
+    { type: "turn/stopped", turnId: "t", reason: "completed" },
+  ]);
+});
+test("a failed subagent step closes the open call as an error", () => {
+  const turn = createAgyTurn("t", model);
+  turn.step({ step_index: 7, state: "ACTIVE", step_type: "tool", tool_name: "invoke_subagent", tool_info: { name: "invoke_subagent", parameters: { Subagents: [{ TypeName: "self" }] } } });
+  assert.deepEqual(turn.step({ step_index: 7, state: "HALTED", step_type: "subagent", tool_name: "invoke_subagent", error: "subagent halted" }), [
+    { type: "tool/error", callId: "t:step:7", tool: "invoke_subagent", error: "subagent halted" },
+  ]);
+});
 test("result statuses require a real terminal state; errors are not reported as success", () => {
   for (const status of ["WAITING", "RUNNING", "unexpected", undefined]) assert.throws(() => createAgyTurn("t", model).finish({ status }), /not terminal/);
   for (const status of ["ERROR", "INVALID"]) assert.equal(createAgyTurn("t", model).finish({ status }).at(-1)?.type, "turn/stopped");

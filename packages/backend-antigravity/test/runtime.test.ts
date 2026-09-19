@@ -160,6 +160,30 @@ test("a native error step keeps the runtime connected and surfaces the denial", 
   assert.deepEqual(f.events.filter((event) => event.type === "turn/stopped").map((event) => event.reason), ["completed"]);
   assert.equal(f.launches.length, 1);
 });
+test("a subagent invocation closes its tool proposal instead of a false unterminated error", async (t) => {
+  const f = fixture(t);
+  await f.runtime.createSessionOperation!(request, "create-a");
+  const pending = f.start(); await flush(); f.inputStep(); await pending;
+  // Observed wire shape: the tool proposal opens a call, then the spawn
+  // acknowledgement arrives at the same index with `step_type: "subagent"`.
+  f.send({ event: "step_update", step_update: {
+    conversation_id: "native-a", step_index: 2, state: "ACTIVE", step_type: "tool", tool_name: "invoke_subagent",
+    tool_info: { name: "invoke_subagent", parameters: { Subagents: [{ TypeName: "self", Role: "Calculator" }] } },
+  } });
+  f.send({ event: "step_update", step_update: {
+    conversation_id: "native-a", step_index: 2, state: "DONE", step_type: "subagent", tool_name: "invoke_subagent",
+    subagent_info: { subagents: [{ type_name: "self", role: "Calculator", conversation_id: "child-1" }] },
+  } });
+  await flush();
+  assert.deepEqual(f.events.filter((event) => event.type.startsWith("tool/")), [
+    { type: "tool/started", callId: "turn-a:step:2", tool: "invoke_subagent", input: { Subagents: [{ TypeName: "self", Role: "Calculator" }] } },
+    { type: "tool/result", callId: "turn-a:step:2", tool: "invoke_subagent", output: "" },
+  ]);
+  f.finish(); await flush();
+  assert.equal(f.events.some((event) => event.type === "tool/error"), false);
+  assert.equal(f.releases, 0);
+  assert.equal(f.launches.length, 1);
+});
 test("lost initialization is bounded and never submits a prompt", async (t) => {
   const f = fixture(t, { autoInit: false, timeoutMs: 20 });
   assert.equal((await f.runtime.createSessionOperation!(request, "create-a")).kind, "unknown");
