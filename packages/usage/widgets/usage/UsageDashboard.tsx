@@ -976,6 +976,14 @@ function ProviderDetails({
           const hidden = hiddenProviders.includes(preferenceId);
           const pinned = pinnedProviders.includes(preferenceId);
           const costProfile = prefs.providerCosts[preferenceId] ?? { billing: "api" as const, monthlyCost: null };
+          const accountLabel = provider.snapshot?.accountLabel?.trim();
+          const subtitle = accountLabel && accountLabel.toLowerCase() !== provider.label.toLowerCase()
+            ? accountLabel
+            : provider.id === "antigravity"
+              ? "Google & third-party models"
+              : provider.id.toLowerCase() !== provider.label.toLowerCase()
+                ? provider.id
+                : undefined;
           return {
             id: provider.id,
             label: provider.label,
@@ -989,7 +997,7 @@ function ProviderDetails({
                 />
                 <div className="usage-provider-title">
                   <h3>{provider.label}</h3>
-                  <p title={provider.snapshot?.accountLabel ?? provider.id}>{provider.snapshot?.accountLabel ?? provider.id}</p>
+                  {subtitle && <p title={subtitle}>{subtitle}</p>}
                 </div>
                 <div className="usage-provider-badges">
                   <span className={`usage-billing-pill ${costProfile.billing}`}>
@@ -1028,11 +1036,13 @@ function ProviderDetails({
               <div className="usage-provider-windows">
                 {provider.snapshot?.windows.map((quota) => {
                   const used = quota.limit > 0 ? Math.min(1, quota.used / quota.limit) : 0;
+                  const isWarn = used >= 0.8 && used < 0.95;
+                  const isCritical = used >= 0.95;
                   return (
                     <div key={quota.id} className="usage-provider-window">
-                      <div>
-                        <span title={quota.label}>{quota.label}</span>
-                        <strong>{fmtQuota(quota.used, quota.unit)} <small>/ {fmtQuota(quota.limit, quota.unit)}</small></strong>
+                      <div className="usage-provider-window-header">
+                        <span className="usage-provider-window-title" title={quota.label}>{quota.label}</span>
+                        <strong className="usage-provider-window-val">{fmtQuota(quota.used, quota.unit)} <small>/ {fmtQuota(quota.limit, quota.unit)}</small></strong>
                       </div>
                       <span
                         className="usage-provider-window-track"
@@ -1042,9 +1052,11 @@ function ProviderDetails({
                         aria-valuemax={100}
                         aria-valuenow={Math.round(used * 100)}
                       >
-                        <i className={used >= .8 ? "warning" : ""} style={{ width: `${used * 100}%` }} />
+                        <i className={isCritical ? "critical" : isWarn ? "warning" : ""} style={{ width: `${used * 100}%` }} />
                       </span>
-                      <p>{quota.resetsAt !== undefined ? formatQuotaReset(quota.resetsAt) : tr("usage.usagedashboard.liveQuotaUsage")}</p>
+                      <p className="usage-provider-window-reset">
+                        {quota.resetsAt !== undefined ? formatQuotaReset(quota.resetsAt) : tr("usage.usagedashboard.liveQuotaUsage")}
+                      </p>
                     </div>
                   );
                 })}

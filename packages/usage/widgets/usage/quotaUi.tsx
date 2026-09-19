@@ -11,6 +11,7 @@ import {
   setGroupCollapsed,
   useUsagePrefs,
 } from "../usagePrefs.ts";
+import { displayProvider } from "../providerIdentity.ts";
 import ProviderLogo from "../../../models/widgets/ProviderLogo.tsx";
 import { formatNumber, getLocale, tr } from "../../../../apps/web/src/i18n/index.ts";
 import { Button, RefreshIcon } from "../../../../apps/web/src/components/ui/index.ts";
@@ -39,11 +40,13 @@ export function QuotaWindowRow({
 }) {
   const frac = w.limit > 0 ? Math.min(1, w.used / w.limit) : 0;
   const label = quotaWindowLabel(w);
+  const isWarn = frac >= 0.8 && frac < 0.95;
+  const isCritical = frac >= 0.95;
   return (
     <div className="quota-window">
       <div className="quota-window-head">
-        <span>{label}</span>
-        <span className="mono">{fmtQuota(w.used, w.unit)} / {fmtQuota(w.limit, w.unit)}</span>
+        <span className="quota-window-name">{label}</span>
+        <span className="mono quota-window-val">{fmtQuota(w.used, w.unit)} / {fmtQuota(w.limit, w.unit)}</span>
       </div>
       <div
         className="quota-progress"
@@ -53,10 +56,22 @@ export function QuotaWindowRow({
         aria-valuenow={Math.round(frac * 100)}
         aria-label={label}
       >
-        <div className={`quota-progress-fill ${pace?.pace ?? ""}`} style={{ width: `${frac * 100}%` }} />
+        <div
+          className={`quota-progress-fill ${pace?.pace ?? ""}${isCritical ? " critical" : isWarn ? " warn" : ""}`}
+          style={{ width: `${frac * 100}%` }}
+        />
       </div>
-      {w.resetsAt !== undefined && (
-        <div className="muted quota-meta">{tr("usage.quotaui.resets")}{" "}{new Date(w.resetsAt).toLocaleString(getLocale())}</div>
+      {(w.resetsAt !== undefined || (pace && pace.pace !== "on-track")) && (
+        <div className="quota-window-meta">
+          {w.resetsAt !== undefined && (
+            <span className="muted quota-meta">{tr("usage.quotaui.resets")}{" "}{new Date(w.resetsAt).toLocaleString(getLocale())}</span>
+          )}
+          {pace && pace.pace !== "on-track" && (
+            <span className={`quota-pace ${pace.pace}`}>
+              {pace.pace === "over" ? tr("usage.quotaui.at80") : ""}
+            </span>
+          )}
+        </div>
       )}
     </div>
   );
@@ -69,10 +84,10 @@ export function ProviderQuotaChart({ snap }: { snap: QuotaSnapshotDto }) {
     remainingFraction: window.limit > 0 ? Math.max(0, 1 - window.used / window.limit) : 1,
   }));
   const width = 240;
-  const height = 72;
-  const gap = 8;
+  const height = 64;
+  const gap = 12;
   const barWidth = windows.length > 0
-    ? Math.max(8, (width - gap * (windows.length - 1)) / windows.length)
+    ? Math.max(12, (width - gap * (windows.length - 1)) / windows.length)
     : width;
   return (
     <div className="provider-quota-chart" role="img" aria-label={tr("usage.quotaui.valueQuotaUtilizationChart", { providerId: snap.providerId })}>
@@ -81,7 +96,9 @@ export function ProviderQuotaChart({ snap }: { snap: QuotaSnapshotDto }) {
         <line x1="0" x2={width} y1={height * .5} y2={height * .5} />
         <line x1="0" x2={width} y1={height * .8} y2={height * .8} />
         {windows.map((window, index) => {
-          const usedHeight = window.usedFraction * height;
+          const usedHeight = Math.max(2, window.usedFraction * height);
+          const isWarn = window.usedFraction >= 0.8 && window.usedFraction < 0.95;
+          const isCritical = window.usedFraction >= 0.95;
           return (
             <rect
               key={window.id}
@@ -89,16 +106,19 @@ export function ProviderQuotaChart({ snap }: { snap: QuotaSnapshotDto }) {
               y={height - usedHeight}
               width={barWidth}
               height={usedHeight}
-              rx="3"
-              className={window.usedFraction >= .8 ? "warn" : ""}
-            />
+              rx="4"
+              className={isCritical ? "critical" : isWarn ? "warn" : ""}
+            >
+              <title>{`${quotaWindowLabel(window)}: ${formatNumber(Math.round(window.usedFraction * 100))}%`}</title>
+            </rect>
           );
         })}
       </svg>
       <div className="provider-quota-chart-labels">
         {windows.map((window) => (
           <span key={window.id} title={quotaWindowLabel(window)}>
-            {formatNumber(Math.round(window.usedFraction * 100))}%
+            <small>{quotaWindowLabel(window)}</small>
+            <strong>{formatNumber(Math.round(window.usedFraction * 100))}%</strong>
           </span>
         ))}
       </div>
@@ -116,12 +136,16 @@ export function QuotaCard({
   const prefs = useUsagePrefs();
   const groups = groupQuotaWindows(snap.windows);
   const grouped = groups.some((group) => group.family !== null);
+  const providerName = displayProvider(snap.providerId);
+  const showAccount = snap.accountLabel &&
+    snap.accountLabel.trim().toLowerCase() !== providerName.toLowerCase() &&
+    snap.accountLabel.trim().toLowerCase() !== snap.providerId.toLowerCase();
   return (
     <div className={`quota-card ${snap.stale ? "quota-stale" : ""}`}>
       <div className="quota-card-head">
-        <ProviderLogo providerID={snap.providerId} className="quota-provider-logo" />
-        <strong>{snap.providerId}</strong>
-        {snap.accountLabel && <span className="muted">{snap.accountLabel}</span>}
+        <ProviderLogo providerID={snap.providerId} providerName={providerName} className="quota-provider-logo" />
+        <strong className="quota-provider-name">{providerName}</strong>
+        {showAccount && <span className="muted quota-account-label">{snap.accountLabel}</span>}
         {snap.stale && <span className="tag" title={snap.error?.message}>{tr("usage.quotaui.stale")}</span>}
         <span className="header-spacer" />
         {snap.fetchedAt > 0 && (
