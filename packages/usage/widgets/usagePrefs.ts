@@ -6,7 +6,7 @@ import {
   accountStorageGet,
   accountStorageKey,
   accountStorageSet,
-} from "@polyth/web/account-storage";
+} from "../../../apps/web/src/accountStorage.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 
 // ---- model-family grouping (pure) ------------------------------------------
