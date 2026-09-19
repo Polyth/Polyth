@@ -39,6 +39,7 @@ import walkthrough from "../../../packages/walkthrough/src/serverEntry.ts";
 import workflow from "../../../packages/workflow/src/serverEntry.ts";
 
 import backendAcp from "../../../packages/backend-acp/src/serverEntry.ts";
+import backendAntigravity from "../../../packages/backend-antigravity/src/serverEntry.ts";
 
 import backendClaude from "../../../packages/backend-claude/src/serverEntry.ts";
 import backendCodex from "../../../packages/backend-codex/src/serverEntry.ts";
@@ -69,6 +70,7 @@ const entry = (
 
 export const desktopServerPackages = [
   entry("backend-acp", {"name":"ACP harnesses","description":"Shared Agent Client Protocol transport and runtime","core":false,"enabled":true,"icon":"network","hasSettings":false,"category":"system","projectAffinity":{}}, backendAcp),
+  entry("backend-antigravity", {"name":"Antigravity harness","description":"Google Antigravity CLI with native Gemini sessions","core":false,"enabled":true,"icon":"sparkles","hasSettings":false,"category":"system","projectAffinity":{}}, backendAntigravity),
   entry("backend-claude", {"name":"Claude Code harness","description":"Claude Code through its Agent SDK","core":false,"enabled":true,"icon":"assist","hasSettings":false,"category":"system","projectAffinity":{}}, backendClaude),
   entry("backend-codex", {"name":"Codex harness","description":"Native Codex App Server execution","core":false,"enabled":true,"icon":"code","hasSettings":false,"category":"system","projectAffinity":{}}, backendCodex),
   entry("backend-commandcode", {"name":"Command Code harness","description":"Command Code through its official headless event stream and native mod bridge","core":false,"enabled":true,"icon":"command","hasSettings":false,"category":"system","projectAffinity":{}}, backendCommandCode),

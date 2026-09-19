@@ -101,11 +101,32 @@ export function agyUsage(value: unknown): TokenUsage | undefined {
 export const sameAgyModel = (a?: ModelRef, b?: ModelRef) =>
   a?.providerID === b?.providerID && a?.modelID === b?.modelID && a?.variant === b?.variant;
 
+/** Native states that end a step without a DONE result. Every other state is
+ * in-flight or unrecognized: a step frame must never abort the runtime, so an
+ * unknown state degrades to observation instead of a protocol error. */
+const AGY_FAILED_STATES = new Set(["ERROR", "INVALID", "HALTED", "CANCELED", "INTERRUPTED"]);
+
+/** Native failure text, from the tool payload or the step itself. */
+function agyFailureText(row: Record<string, unknown>, info?: Record<string, unknown>): string | undefined {
+  for (const candidate of [info?.error, row.error]) {
+    const direct = text(candidate);
+    if (direct) return direct;
+    const nested = record(candidate);
+    if (!nested) continue;
+    for (const key of ["message", "details", "type"]) {
+      const value = text(nested[key]);
+      if (value) return value;
+    }
+  }
+  return undefined;
+}
+
 /** Only public agent_response content is dialogue. Tool output and thinking stay separate. */
 export function createAgyTurn(turnId: string, model: ModelRef | undefined) {
   const messages = new Map<number, string>();
   const finished = new Set<number>();
   const startedTools = new Set<number>();
+  const openTools = new Map<number, string>();
   const stepUsage = new Map<number, TokenUsage>();
   const agents = new Map<string, { sessionId: string; label: string; status: string; currentTask?: string }>();
   let revision = 0;
@@ -120,11 +141,13 @@ export function createAgyTurn(turnId: string, model: ModelRef | undefined) {
       const index = count(row.step_index);
       if (index === undefined) throw agyError("protocol-error", "Antigravity step has no valid index");
       if (finished.has(index)) return [];
-      if (!["ACTIVE", "DONE"].includes(text(row.state) ?? "")) throw agyError("protocol-error", "Antigravity step has an invalid state");
       if (finished.size + messages.size + startedTools.size > 32768) throw agyError("protocol-error", "Antigravity turn exceeds the step limit");
-      const done = row.state === "DONE";
+      const state = text(row.state);
+      const done = state === "DONE";
+      const failed = state !== undefined && AGY_FAILED_STATES.has(state);
+      const settled = done || failed;
       const events: RuntimeEvent[] = [];
-      const usage = done ? agyUsage(row.usage) : undefined;
+      const usage = settled ? agyUsage(row.usage) : undefined;
       if (usage) stepUsage.set(index, usage);
       const id = `${turnId}:step:${index}`;
       if (row.step_type === "agent_response") {
@@ -136,18 +159,20 @@ export function createAgyTurn(turnId: string, model: ModelRef | undefined) {
           events.push({ type: "assistant/chunk", partId: id, text: delta });
           deltaCount++;
         }
-        if (done && messages.has(index)) events.push({ type: "assistant/message", partId: id, text: messages.get(index)! });
+        if (settled && messages.has(index)) events.push({ type: "assistant/message", partId: id, text: messages.get(index)! });
       } else if (row.step_type === "tool") {
         const info = record(row.tool_info);
         const tool = text(info?.name) ?? text(row.tool_name) ?? "unknown";
         const input = record(info?.parameters) ?? {};
         if (!startedTools.has(index)) {
           startedTools.add(index);
+          openTools.set(index, tool);
           events.push({ type: "tool/started", callId: id, tool, input: input as import("@polyth/contracts").JsonObject });
         }
-        if (done) {
-          const error = record(info?.error);
-          if (info?.error) events.push({ type: "tool/error", callId: id, tool, error: text(error?.message) ?? "Antigravity tool failed" });
+        if (settled) {
+          const failure = agyFailureText(row, info);
+          openTools.delete(index);
+          if (failed || failure !== undefined || info?.error) events.push({ type: "tool/error", callId: id, tool, error: failure ?? "Antigravity tool failed" });
           else events.push({ type: "tool/result", callId: id, tool, output: text(info?.output) ?? "" });
         }
       }
@@ -163,7 +188,7 @@ export function createAgyTurn(turnId: string, model: ModelRef | undefined) {
         }
         events.push({ type: "subagent/snapshot", revision: ++revision, agents: [...agents.values()] });
       }
-      if (done) finished.add(index);
+      if (settled) finished.add(index);
       return events;
     },
     finish(result: Record<string, unknown>, usage?: TokenUsage): RuntimeEvent[] {
@@ -173,6 +198,10 @@ export function createAgyTurn(turnId: string, model: ModelRef | undefined) {
         throw agyError("protocol-error", "Antigravity result is not terminal");
       terminal = true;
       const events: RuntimeEvent[] = [];
+      // A tool the native CLI never terminated must not stay "running" forever.
+      for (const [index, tool] of openTools)
+        events.push({ type: "tool/error", callId: `${turnId}:step:${index}`, tool, error: "Antigravity ended the turn without reporting a result for this tool call" });
+      openTools.clear();
       if (!messages.size && text(result.response)) events.push({ type: "assistant/message", partId: `${turnId}:result`, text: text(result.response)! });
       else for (const [index, body] of messages) if (!finished.has(index))
         events.push({ type: "assistant/message", partId: `${turnId}:step:${index}`, text: body });

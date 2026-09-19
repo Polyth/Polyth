@@ -58,6 +58,57 @@ test("DONE-only tools retain failures and native permission denial", () => {
   assert.equal(events[0]?.type, "tool/started");
   assert.deepEqual(events[1], { type: "tool/error", callId: "t:step:3", tool: "run_command", error: "Permission denied" });
 });
+test("a native error state reports the denial instead of aborting the runtime", () => {
+  const turn = createAgyTurn("t", model);
+  const tool = { name: "run_command", parameters: { CommandLine: "ls -la /home/ubuntu/.gemini/antigravity-cli/" } };
+  assert.deepEqual(turn.step({ step_index: 6, state: "ACTIVE", step_type: "tool", tool_info: tool }), [
+    { type: "tool/started", callId: "t:step:6", tool: "run_command", input: tool.parameters },
+  ]);
+  assert.deepEqual(turn.step({ step_index: 6, state: "ERROR", step_type: "tool", tool_info: tool, error: "permission check failed for unsandboxed command" }), [
+    { type: "tool/error", callId: "t:step:6", tool: "run_command", error: "permission check failed for unsandboxed command" },
+  ]);
+  assert.deepEqual(turn.step({ step_index: 6, state: "ERROR", step_type: "tool", tool_info: tool }), []);
+  assert.deepEqual(turn.finish({ status: "SUCCESS", response: "That directory is outside the workspace." }), [
+    { type: "assistant/message", partId: "t:result", text: "That directory is outside the workspace." },
+    { type: "turn/stopped", turnId: "t", reason: "completed" },
+  ]);
+});
+test("a failed tool step with no ACTIVE frame still surfaces its denial", () => {
+  const turn = createAgyTurn("t", model);
+  assert.deepEqual(turn.step({
+    step_index: 2, state: "ERROR", step_type: "tool", tool_name: "run_command",
+    tool_info: { name: "run_command", parameters: { CommandLine: "cat /etc/shadow" }, error: { type: "denied", message: "user denied permission" } },
+  }), [
+    { type: "tool/started", callId: "t:step:2", tool: "run_command", input: { CommandLine: "cat /etc/shadow" } },
+    { type: "tool/error", callId: "t:step:2", tool: "run_command", error: "user denied permission" },
+  ]);
+});
+test("transitional and unrecognized step states never abort the turn", () => {
+  const turn = createAgyTurn("t", model);
+  for (const state of ["PENDING", "QUEUED", "RUNNING", "WAITING", "GENERATING", "CLEARED", "UNSPECIFIED", "FUTURE_STATE"]) {
+    assert.deepEqual(turn.step({ step_index: 1, state, step_type: "checkpoint" }), []);
+  }
+  assert.deepEqual(turn.step({ step_index: 1, step_type: "checkpoint" }), []);
+  // An unrecognized state does not settle the step, so a later DONE still reports it.
+  assert.deepEqual(turn.step({ step_index: 3, state: "WAITING", step_type: "tool", tool_name: "run_command" }).map((event) => event.type), ["tool/started"]);
+  assert.deepEqual(turn.step({ step_index: 3, state: "DONE", step_type: "tool", tool_info: { name: "run_command", output: "ok" } }), [
+    { type: "tool/result", callId: "t:step:3", tool: "run_command", output: "ok" },
+  ]);
+});
+test("an interrupted text step finalizes the text it already streamed", () => {
+  const turn = createAgyTurn("t", model);
+  turn.step({ step_index: 4, state: "ACTIVE", step_type: "agent_response", text_delta: "Partial " });
+  assert.deepEqual(turn.step({ step_index: 4, state: "INTERRUPTED", step_type: "agent_response" }), [
+    { type: "assistant/message", partId: "t:step:4", text: "Partial " },
+  ]);
+});
+test("a tool the native CLI never terminates is closed as an error at turn end", () => {
+  const turn = createAgyTurn("t", model);
+  turn.step({ step_index: 5, state: "ACTIVE", step_type: "tool", tool_name: "run_command" });
+  const events = turn.finish({ status: "SUCCESS", response: "Done" });
+  assert.deepEqual(events[0], { type: "tool/error", callId: "t:step:5", tool: "run_command", error: "Antigravity ended the turn without reporting a result for this tool call" });
+  assert.deepEqual(events.at(-1), { type: "turn/stopped", turnId: "t", reason: "completed" });
+});
 test("subagent discovery does not claim completion or expose native log paths", () => {
   const turn = createAgyTurn("t", model);
   const events = turn.step({ step_index: 3, state: "DONE", step_type: "spawn", subagent_info: { subagents: [{ type_name: "reviewer", role: "Inspect tests", conversation_id: "child-1", log_uri: "/private/log", workspace_uris: ["/other-space"] }] } });

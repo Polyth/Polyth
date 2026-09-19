@@ -60,6 +60,12 @@ macOS/Windows retain the shared portable authority's explicit crash-fence limits
   Native policy remains in force: no automatic permission bypass, no fake
   approval buttons. Tool permission denial is preserved in activity. Native
   slash commands, steering and Polyth MCP injection are not implemented.
+- A step the native CLI ends in a failure state (`ERROR`, `INVALID`, `HALTED`,
+  `CANCELED`, `INTERRUPTED`) becomes a `tool/error` (or finalizes text it had
+  already streamed) and never aborts the canonical turn or disconnects the
+  runtime; only a terminal native error result does. Transitional and
+  unrecognized step states are ignored forward-compatibly, and a tool call the
+  CLI never terminates is closed as an error when the turn result arrives.
 - Native subagents/tools configured in Google's CLI can run, but Polyth does
   not manage their definitions or promise live child completion tracking.
 - This version executes on the local Polyth server, not an SSH project runtime.
@@ -78,9 +84,11 @@ node --experimental-strip-types --test packages/harness-runtime/test/features.te
 
 The protocol/runtime fixtures exercise fragmented Unicode/NDJSON, bounded
 frames, duplicate results, cumulative usage, admission races, foreign
-conversations, lost initialization, failed release, recorded resume and uncertain
-replay. Package tests exercise discovery, lazy enable/disable, Space/remote gates
-and the workspace lock. Fixtures are not a live Google account verification.
+conversations, lost initialization, native error-state steps (denial /
+interruption), unterminated tool calls, failed release, recorded resume and
+uncertain replay. Package tests exercise discovery, lazy enable/disable,
+Space/remote gates and the workspace lock. Fixtures are not a live Google
+account verification.
 No provider login, paid prompt, physical-device test or live `agy` run is claimed.
 
 Protocol reference, checked 2026-09-19:

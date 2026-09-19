@@ -145,6 +145,21 @@ test("foreign conversation frame fails closed before publishing its content", as
   assert.equal(JSON.stringify(f.events).includes("Foreign content"), false);
 });
 
+test("a native error step keeps the runtime connected and surfaces the denial", async (t) => {
+  const f = fixture(t);
+  await f.runtime.createSessionOperation!(request, "create-a");
+  const pending = f.start(); await flush(); f.inputStep(); await pending;
+  f.send({ event: "step_update", step_update: { conversation_id: "native-a", step_index: 5, state: "ERROR", step_type: "tool", tool_name: "run_command", error: "permission check failed for unsandboxed command" } });
+  await flush();
+  assert.deepEqual(f.events.filter((event) => event.type.startsWith("tool/")), [
+    { type: "tool/started", callId: "turn-a:step:5", tool: "run_command", input: {} },
+    { type: "tool/error", callId: "turn-a:step:5", tool: "run_command", error: "permission check failed for unsandboxed command" },
+  ]);
+  assert.equal(f.releases, 0);
+  f.finish(2); await flush();
+  assert.deepEqual(f.events.filter((event) => event.type === "turn/stopped").map((event) => event.reason), ["completed"]);
+  assert.equal(f.launches.length, 1);
+});
 test("lost initialization is bounded and never submits a prompt", async (t) => {
   const f = fixture(t, { autoInit: false, timeoutMs: 20 });
   assert.equal((await f.runtime.createSessionOperation!(request, "create-a")).kind, "unknown");
