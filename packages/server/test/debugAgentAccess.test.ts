@@ -8,7 +8,6 @@ import { boot } from "../src/index.ts";
 const tempData = (): string => mkdtempSync(join(tmpdir(), "polyth-debug-agent-access-"));
 
 async function rejectsDebugBoot(
-  t: test.TestContext,
   env: Record<string, string | undefined>,
   hostname = "127.0.0.1",
 ): Promise<void> {
@@ -34,23 +33,22 @@ async function rejectsDebugBoot(
       else process.env[key] = value;
     }
   }
-  t.assert.ok(true);
 }
 
 test("debug agent access refuses wildcard/public/hosted exposure before opening runtime", async t => {
-  await rejectsDebugBoot(t, {
+  await rejectsDebugBoot({
     POLYTH_DEBUG_AGENT_ACCESS: "1",
     POLYTH_PUBLIC_ORIGIN: undefined,
     POLYTH_DEPLOYMENT_PROFILE: "local-trusted",
   }, "0.0.0.0");
 
-  await rejectsDebugBoot(t, {
+  await rejectsDebugBoot({
     POLYTH_DEBUG_AGENT_ACCESS: "1",
     POLYTH_PUBLIC_ORIGIN: "https://polyth.example",
     POLYTH_DEPLOYMENT_PROFILE: "local-trusted",
   });
 
-  await rejectsDebugBoot(t, {
+  await rejectsDebugBoot({
     POLYTH_DEBUG_AGENT_ACCESS: "1",
     POLYTH_PUBLIC_ORIGIN: undefined,
     POLYTH_DEPLOYMENT_PROFILE: "multi-tenant-sandboxed",
