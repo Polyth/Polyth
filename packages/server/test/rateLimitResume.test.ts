@@ -226,7 +226,7 @@ test("native continuation mode resumes without replaying a tool-active prompt", 
   assert.equal(h.startedTexts[0], "deploy the release");
   assert.match(h.startedTexts[1] ?? "", /Continue from the exact point/);
   assert.doesNotMatch(h.startedTexts[1] ?? "", /deploy the release/);
-  assert.ok((await h.store.projection(id))?.resume, "in-flight auto-resume retains retry state");
+  assert.equal((await h.store.projection(id))?.resume, undefined, "admitted retry clears active timer state");
 
   const messages = (await h.store.events(id)).filter((event) => event.type === "user/message");
   assert.equal((messages.at(-1)?.data as { autoResume?: boolean }).autoResume, true);
