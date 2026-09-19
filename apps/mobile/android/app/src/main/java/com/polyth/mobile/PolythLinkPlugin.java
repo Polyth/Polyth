@@ -14,6 +14,10 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.google.mlkit.vision.barcode.common.Barcode;
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanner;
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions;
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -470,6 +474,23 @@ public final class PolythLinkPlugin extends Plugin {
         } catch (Exception ignored) {
             return bootstrap;
         }
+    }
+
+    @PluginMethod
+    public void scanPairingQr(PluginCall call) {
+        if (!trusted(call)) return;
+        GmsBarcodeScannerOptions options = new GmsBarcodeScannerOptions.Builder()
+            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+            .enableAutoZoom()
+            .build();
+        GmsBarcodeScanner scanner = GmsBarcodeScanning.getClient(getActivity(), options);
+        scanner.startScan()
+            .addOnSuccessListener(barcode -> {
+                String raw = barcode.getRawValue();
+                call.resolve(raw == null ? new JSObject() : new JSObject().put("raw", raw));
+            })
+            .addOnCanceledListener(() -> call.resolve(new JSObject()))
+            .addOnFailureListener(error -> call.reject("camera-scan-failed", "camera-scan-failed", error));
     }
 
     @PluginMethod

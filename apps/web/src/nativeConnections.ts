@@ -8,6 +8,6 @@ export function installNativeConnectionCommands(): void {
     label: "Switch Polyth server",
     group: "Mobile",
     keywords: ["connections", "servers", "hosts", "polyth link", "switch server"],
-    run: () => { void returnToMobileConnectionHub(); },
+    run: () => { void returnToMobileConnectionHub(undefined, { selectServer: true }); },
   });
 }

@@ -34,9 +34,7 @@ const NativePolythLink = registerPlugin<PolythLinkCapacitorPlugin>("PolythLink")
 let installed = false;
 
 export function nativePairingScannerAvailable(): boolean {
-  return Capacitor.isNativePlatform()
-    && Capacitor.getPlatform() === "ios"
-    && Capacitor.isPluginAvailable("PolythLink");
+  return Capacitor.isNativePlatform() && Capacitor.isPluginAvailable("PolythLink");
 }
 
 export async function scanNativePairingQr(): Promise<string | undefined> {

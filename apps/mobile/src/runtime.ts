@@ -35,6 +35,7 @@ export type MobileLaunch =
       deepLinkPath?: string;
       pendingPair?: string;
       pendingPushOpen?: NativePushOpen;
+      selectServer?: boolean;
       developerUnlocked?: boolean;
     };
 
@@ -258,14 +259,20 @@ async function consumePendingMobilePath(): Promise<string | undefined> {
   return value ? canonicalMobilePath(value) : undefined;
 }
 
-export async function returnToMobileConnectionHub(deepLinkPath?: string): Promise<void> {
+export async function returnToMobileConnectionHub(
+  deepLinkPath?: string,
+  options?: { selectServer?: boolean },
+): Promise<void> {
   try {
     const canonical = deepLinkPath ? canonicalMobilePath(deepLinkPath) : undefined;
     if (canonical) {
       await Preferences.set({ key: PENDING_DEEP_LINK_KEY, value: canonical });
     }
   } finally {
-    location.replace(bundledMobileOrigin());
+    const target = options?.selectServer
+      ? `${bundledMobileOrigin()}?selectServer=1`
+      : bundledMobileOrigin();
+    location.replace(target);
   }
 }
 
@@ -308,11 +315,13 @@ export async function prepareMobileLaunch(): Promise<MobileLaunch> {
   }
 
   const recoveryError = bundledRecoveryError();
+  const selectServer = new URLSearchParams(location.search).get("selectServer") === "1";
   return {
     kind: "connect",
     recent: hosts.recent,
     ...(hosts.active ? { preferred: hosts.active } : {}),
     ...(recoveryError ? { error: recoveryError } : {}),
+    ...(selectServer ? { selectServer: true } : {}),
     ...(deepLinkPath ? { deepLinkPath } : {}),
     ...(pendingPushOpen ? { pendingPushOpen } : {}),
   };
