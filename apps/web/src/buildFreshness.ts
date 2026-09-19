@@ -1,13 +1,14 @@
 declare const __POLYTH_WEB_BUILD_ID__: string;
 
 export const WEB_BUILD_ID_PATH = "/build-id.json";
+export const WEB_BUILD_QUERY = "__polyth_build";
 
 const DEFAULT_RETRY_DELAYS_MS = [400, 1_200, 3_000] as const;
 const DEFAULT_MIN_CHECK_INTERVAL_MS = 750;
 
 export interface BuildFreshnessOptions {
   fetchImpl?: typeof fetch;
-  reload?: () => void;
+  reload?: (serverBuildId: string) => void;
   retryDelaysMs?: readonly number[];
   minCheckIntervalMs?: number;
   windowRef?: Window;
@@ -31,11 +32,33 @@ export async function fetchWebBuildId(fetchImpl: typeof fetch = globalThis.fetch
   return parseWebBuildId(await response.json());
 }
 
+function requestedBuildId(windowRef: Window): string | null {
+  try {
+    return new URL(windowRef.location.href).searchParams.get(WEB_BUILD_QUERY);
+  } catch {
+    return null;
+  }
+}
+
+function replaceIntoBuild(windowRef: Window, serverBuildId: string): void {
+  try {
+    const target = new URL(windowRef.location.href);
+    target.searchParams.set(WEB_BUILD_QUERY, serverBuildId);
+    windowRef.location.replace(target.href);
+  } catch {
+    windowRef.location.reload();
+  }
+}
+
 /**
- * A standalone iOS PWA may resume the exact same frozen WebView after the
- * server has rebuilt. Keep that page on one frontend generation: when it
- * becomes visible again, compare the build compiled into this shell with the
- * server's current build and silently reload the same route on mismatch.
+ * A frozen standalone PWA can resume on an older frontend generation after the
+ * server rebuilt. Freshness checks therefore run only after an actual
+ * hidden/pagehide -> visible/pageshow transition. Never check during ordinary
+ * boot or window-focus churn: that can tear down the client before hydration.
+ *
+ * The target build id is put in the navigation URL. If WebKit still restores a
+ * stale shell for that exact target generation, do not reload it again; this
+ * makes the recovery path fail stable instead of entering a reload loop.
  */
 export function installBuildFreshnessWatcher(
   currentBuildId: string = __POLYTH_WEB_BUILD_ID__,
@@ -48,13 +71,14 @@ export function installBuildFreshnessWatcher(
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   if (typeof fetchImpl !== "function") return () => {};
 
-  const reload = options.reload ?? (() => windowRef.location.reload());
+  const reload = options.reload ?? ((serverBuildId: string) => replaceIntoBuild(windowRef, serverBuildId));
   const retryDelaysMs = options.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
   const minCheckIntervalMs = options.minCheckIntervalMs ?? DEFAULT_MIN_CHECK_INTERVAL_MS;
 
   let disposed = false;
   let inFlight = false;
   let reloadIssued = false;
+  let suspended = documentRef.visibilityState === "hidden";
   let lastCheckAt = 0;
   let retryIndex = 0;
   let retryTimer: number | undefined;
@@ -96,8 +120,9 @@ export function installBuildFreshnessWatcher(
       retryIndex = 0;
       clearRetry();
       if (serverBuildId !== currentBuildId) {
+        if (requestedBuildId(windowRef) === serverBuildId) return;
         reloadIssued = true;
-        reload();
+        reload(serverBuildId);
       }
     } catch {
       scheduleRetry();
@@ -106,23 +131,31 @@ export function installBuildFreshnessWatcher(
     }
   };
 
-  const onResume = (): void => {
-    if (documentRef.visibilityState !== "hidden") void check(true);
-  };
-  const onVisibility = (): void => {
-    if (documentRef.visibilityState !== "hidden") void check(true);
+  const markSuspended = (): void => {
+    suspended = true;
+    clearRetry();
   };
 
-  windowRef.addEventListener("pageshow", onResume);
-  windowRef.addEventListener("focus", onResume);
+  const resume = (): void => {
+    if (disposed || !suspended || documentRef.visibilityState === "hidden") return;
+    suspended = false;
+    void check(true);
+  };
+
+  const onVisibility = (): void => {
+    if (documentRef.visibilityState === "hidden") markSuspended();
+    else resume();
+  };
+
+  windowRef.addEventListener("pagehide", markSuspended);
+  windowRef.addEventListener("pageshow", resume);
   documentRef.addEventListener("visibilitychange", onVisibility);
-  void check(true);
 
   return () => {
     disposed = true;
     clearRetry();
-    windowRef.removeEventListener("pageshow", onResume);
-    windowRef.removeEventListener("focus", onResume);
+    windowRef.removeEventListener("pagehide", markSuspended);
+    windowRef.removeEventListener("pageshow", resume);
     documentRef.removeEventListener("visibilitychange", onVisibility);
   };
 }
