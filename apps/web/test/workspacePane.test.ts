@@ -6,8 +6,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   CHAT_FLOOR, clampDockWidth, contextSurfacesOf, decideDock, isWorkspaceSurface,
-  paneDockEdge, paneDockOptions, preferredOrDefaultWidth, workspaceSurfacesOf,
-  type DockGeometry, type RailSurface, type WorkspacePanePresentation,
+  paneDockEdge, paneDockOptions, paneWindowLayout, preferredOrDefaultWidth, workspaceSurfacesOf,
+  type DockGeometry, type PaneWindowLayoutInput, type RailSurface, type WorkspacePanePresentation,
 } from "../src/surfaces.ts";
 import {
   WORKSPACE_PANE_PREFS_VERSION, emptyWorkspacePanePrefs, parseWorkspacePanePrefs,
@@ -101,6 +101,50 @@ test("paneDockOptions: package-declared edges control the pinned-window actions"
   );
   assert.equal(paneDockEdge(pres({ dock: "bottom", dockOptions: ["bottom", "side"] }), "side"), "side");
   assert.equal(paneDockEdge(pres({ dock: "bottom", dockOptions: ["bottom"] }), "side"), "bottom");
+});
+
+// ---- pinned window layout -----------------------------------------------------
+
+test("paneWindowLayout: a side dock that cannot fit promotes to the layer, never the bottom strip", () => {
+  const input = (over: Partial<PaneWindowLayoutInput> = {}): PaneWindowLayoutInput => ({
+    isWorkspacePane: true, compact: false, paneMode: "pinned", dockEdge: "side",
+    measured: true, admits: true, guardPromoted: false, ...over,
+  });
+  // Wide enough: the classic side dock. No bottom classes anywhere.
+  const side = paneWindowLayout(input());
+  assert.equal(side.layered, false);
+  assert.equal(side.bottomDock, false);
+  assert.equal(side.pinnedNarrow, false);
+  // Too narrow for the side dock: full-screen fallback, still no bottom strip.
+  const fallback = paneWindowLayout(input({ admits: false }));
+  assert.equal(fallback.layered, true, "an admitted-nowhere side pane uses the full-screen layer");
+  assert.equal(fallback.bottomDock, false);
+  assert.equal(fallback.pinnedNarrow, false, "the bottom strip is not a side-dock fallback");
+  // The guard's promotion behaves the same way.
+  const guarded = paneWindowLayout(input({ guardPromoted: true }));
+  assert.equal(guarded.layered, true);
+  assert.equal(guarded.pinnedNarrow, false);
+});
+
+test("paneWindowLayout: the bottom edge keeps the strip; compact forces full screen", () => {
+  const input = (over: Partial<PaneWindowLayoutInput> = {}): PaneWindowLayoutInput => ({
+    isWorkspacePane: true, compact: false, paneMode: "pinned", dockEdge: "bottom",
+    measured: true, admits: true, guardPromoted: false, ...over,
+  });
+  const bottom = paneWindowLayout(input());
+  assert.equal(bottom.bottomDock, true);
+  assert.equal(bottom.pinnedNarrow, true);
+  assert.equal(bottom.layered, false);
+  // A deliberate bottom dock is never "unfitted" into the layer.
+  const narrowBottom = paneWindowLayout(input({ admits: false, guardPromoted: true }));
+  assert.equal(narrowBottom.layered, false);
+  assert.equal(narrowBottom.pinnedNarrow, true);
+  // Compact shells present every workspace package full screen.
+  const compact = paneWindowLayout(input({ compact: true, dockEdge: "side" }));
+  assert.equal(compact.effectiveMode, "fullscreen");
+  assert.equal(compact.layered, true);
+  assert.equal(compact.pinned, false);
+  assert.equal(compact.pinnedNarrow, false);
 });
 
 // ---- project-scoped persistence ----------------------------------------------

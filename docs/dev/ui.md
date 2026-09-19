@@ -250,6 +250,14 @@ host.surfaces.register({
     workspace, lifting Chat's composer above it, with a horizontal resize on
     the strip's top edge (`minHeight` bounds it). Dynamic and fullscreen modes
     ignore `dock`. Terminal and Schedule ship `dock: "bottom"`.
+  - Optional `dockOptions: readonly ("side" | "bottom")[]` lets a pinned
+    package window offer both edges as explicit header actions (`Dock beside
+    Chat` / `Dock below Chat`) instead of the generic pin. The selected edge
+    persists per project/surface. When a chosen edge cannot hold Chat's
+    320px floor, the pane promotes to the full-screen layer — a side dock
+    never silently becomes a bottom strip just because the window is narrow.
+    Terminal is the reference package (`dock: "bottom", dockOptions:
+    ["bottom", "side"]`).
 - Every registered surface renders through the host's single `ModuleView`
   structure: header, title/description, actions, close, body, and content
   wrapper. The host chooses `page`, `panel`, or `workspace` content behavior;

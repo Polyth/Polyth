@@ -58,8 +58,13 @@ test("top workspace launchers close their package window on a second click", asy
 });
 
 test("compact package windows are fullscreen-only", async () => {
-  const source = await readFile(new URL("../src/components/ContextRail.tsx", import.meta.url), "utf8");
-  assert.match(source, /effectivePaneMode = compact && isWorkspacePane \? "fullscreen" : paneMode/);
+  const [source, surfaces] = await Promise.all([
+    readFile(new URL("../src/components/ContextRail.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/surfaces.ts", import.meta.url), "utf8"),
+  ]);
+  // Compact forcing lives in the pure paneWindowLayout precedence.
+  assert.match(surfaces, /input\.compact && input\.isWorkspacePane \? "fullscreen" : input\.paneMode/);
+  assert.match(source, /paneWindowLayout\(\{ isWorkspacePane, compact, paneMode, dockEdge, measured, admits, guardPromoted \}\)/);
   assert.match(source, /onTogglePin=\{isWorkspacePane && !compact \? togglePanePin : undefined\}/);
   assert.match(source, /onToggleFullscreen=\{isWorkspacePane && !compact \? togglePaneFullscreen : undefined\}/);
   assert.match(source, /if \(compact\) closeWorkspacePane\(\);\s*else handlePaneEscape\(\);/);

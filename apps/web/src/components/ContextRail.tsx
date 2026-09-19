@@ -27,7 +27,7 @@ import {
 import { useGitStatus } from "../../../../packages/git/widgets/gitStatusStore.ts";
 import { gitChangedFiles } from "../pendingChanges.ts";
 import {
-  CHAT_FLOOR, clampDockWidth, decideDock, keptSurfaces, listSurfaces, paneDockEdge, paneDockOptions, slotSurfaces, useSurfaceVersion, visibleSurfaces,
+  CHAT_FLOOR, clampDockWidth, decideDock, keptSurfaces, listSurfaces, paneDockEdge, paneDockOptions, paneWindowLayout, slotSurfaces, useSurfaceVersion, visibleSurfaces,
   type DockGeometry, type RailSurface, type RailSurfaceContext, type WorkspacePaneDock,
 } from "../surfaces.ts";
 import { clampRailWidth, railWidthOf, setRailWidth } from "../railPrefs.ts";
@@ -327,6 +327,7 @@ export default function ContextRail() {
       const paneW = presentation && paneEl
         && paneEl.classList.contains("rail-pinned")
         && !paneEl.classList.contains("rail-pinned-narrow")
+        && !paneEl.classList.contains("rail-fullscreen")
         ? paneEl.getBoundingClientRect().width
         : 0;
       // A bottom-docked pane grows DOWN from Chat: sum its height so the
@@ -358,6 +359,7 @@ export default function ContextRail() {
     const publish = () => {
       const width = paneRef.current?.classList.contains("rail-pinned")
         && !paneRef.current.classList.contains("rail-pinned-narrow")
+        && !paneRef.current.classList.contains("rail-fullscreen")
         ? paneRef.current.getBoundingClientRect().width : 0;
       header.style.setProperty("--workspace-pane-inline-size", `${Math.round(width)}px`);
     };
@@ -418,10 +420,10 @@ export default function ContextRail() {
   const guardInputs = `${open?.id ?? ""}:${projectId ?? ""}:${remembered ?? "auto"}`;
   // Compact shells have room for one package at a time. Preserve the user's
   // desktop preference, but present every package as fullscreen on mobile.
-  const effectivePaneMode = compact && isWorkspacePane ? "fullscreen" : paneMode;
-  const layered = isWorkspacePane && effectivePaneMode === "fullscreen";
-  const dynamic = isWorkspacePane && effectivePaneMode === "dynamic";
-  const pinned = isWorkspacePane && effectivePaneMode === "pinned";
+  // A side dock with insufficient room promotes to the full-screen layer; the
+  // bottom strip is reserved for the deliberate `bottom` edge (paneWindowLayout).
+  const { effectiveMode: effectivePaneMode, dynamic, pinned, layered, bottomDock, pinnedNarrow } =
+    paneWindowLayout({ isWorkspacePane, compact, paneMode, dockEdge, measured, admits, guardPromoted });
   const dockPinned = pinned || (layered && panePreviousMode === "pinned");
   const supportedDockOptions = isWorkspacePane && !compact && presentation?.dockOptions?.length
     ? paneDockOptions(presentation)
@@ -448,14 +450,6 @@ export default function ContextRail() {
       onClick: () => chooseDock(edge),
     }))
     : undefined;
-  // Deliberate bottom dock: a pinned pane whose presentation asks for the
-  // bottom edge. It reuses the pinned-narrow row layout (pane under the
-  // workspace, composer lifted above) but is a stable choice, not a
-  // width-driven fallback — so the layout guard never promotes it and it
-  // carries its own horizontal resize on the top edge.
-  const bottomDock = pinned && dockEdge === "bottom";
-  const pinnedNarrow = pinned && (compact || bottomDock || (measured && (!admits || guardPromoted)));
-
   const dockWidth = decision !== null && presentation
     ? clampDockWidth(liveWidth ?? decision.width, presentation, geo)
     : railWidthOf(rail);
@@ -577,7 +571,7 @@ export default function ContextRail() {
 
   const dragRef = useRef<{ startX: number; startW: number } | null>(null);
   const onHandleDown = (e: ReactPointerEvent) => {
-    if (open === null || !pinned || pinnedNarrow) return;
+    if (open === null || !pinned || pinnedNarrow || layered) return;
     e.preventDefault();
     dragRef.current = { startX: e.clientX, startW: dockWidth };
     const direction = document.documentElement.dir === "rtl" ? 1 : -1;
@@ -605,7 +599,7 @@ export default function ContextRail() {
   };
 
   const onHandleKey = (e: ReactKeyboardEvent) => {
-    if (open === null || !pinned || pinnedNarrow) return;
+    if (open === null || !pinned || pinnedNarrow || layered) return;
     const step = e.shiftKey ? RESIZE_STEP_LARGE : RESIZE_STEP;
     let next: number | null = null;
     const rtl = document.documentElement.dir === "rtl";
@@ -854,7 +848,7 @@ export default function ContextRail() {
           data-geometry-ready={!geometryPending}
           onKeyDown={onPaneKey}
         >
-          {pinned && !pinnedNarrow && !compactContext && (
+          {pinned && !pinnedNarrow && !layered && !compactContext && (
             <div
               ref={separatorRef}
               className="rail-resize"

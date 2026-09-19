@@ -76,6 +76,53 @@ export function paneDockEdge(
   return options.includes(preferred) ? preferred : options[0] ?? "side";
 }
 
+/** Persisted pane modes. Structural copy of `PaneMode` so this registry never
+ *  imports the pane-prefs store (and its browser API dependencies). */
+export type WorkspacePaneMode = "dynamic" | "pinned" | "fullscreen";
+
+export interface PaneWindowLayoutInput {
+  isWorkspacePane: boolean;
+  compact: boolean;
+  paneMode: WorkspacePaneMode;
+  /** The package-backed edge the user selected (already resolved). */
+  dockEdge: WorkspacePaneDock;
+  /** The post-sidebar workspace has been measured. */
+  measured: boolean;
+  /** `decideDock` admitted the pinned pane at its content minimum. */
+  admits: boolean;
+  /** The layout guard judged the docked Chat blocked. */
+  guardPromoted: boolean;
+}
+
+export interface PaneWindowLayout {
+  effectiveMode: WorkspacePaneMode;
+  dynamic: boolean;
+  pinned: boolean;
+  /** The full-screen layer owns the pane. */
+  layered: boolean;
+  /** The deliberate full-width strip under the workspace. */
+  bottomDock: boolean;
+  /** The bottom/narrow row layout (deliberate bottom dock or compact shell). */
+  pinnedNarrow: boolean;
+}
+
+/** Pure precedence for the package-window presentation mode. Compact shells
+ *  force full screen; a pinned side pane that cannot keep Chat's floor (or
+ *  whose composer the guard judges covered) promotes to the full-screen layer.
+ *  The bottom strip belongs ONLY to the deliberate `bottom` edge — a side dock
+ *  must never silently become a bottom dock just because the window is narrow. */
+export function paneWindowLayout(input: PaneWindowLayoutInput): PaneWindowLayout {
+  const effectiveMode = input.compact && input.isWorkspacePane ? "fullscreen" : input.paneMode;
+  const dynamic = input.isWorkspacePane && effectiveMode === "dynamic";
+  const pinned = input.isWorkspacePane && effectiveMode === "pinned";
+  const bottomDock = pinned && input.dockEdge === "bottom";
+  const sideDockFallback = pinned && !bottomDock && input.dockEdge === "side"
+    && input.measured && (!input.admits || input.guardPromoted);
+  const layered = input.isWorkspacePane && (effectiveMode === "fullscreen" || sideDockFallback);
+  const pinnedNarrow = pinned && (input.compact || bottomDock);
+  return { effectiveMode, dynamic, pinned, layered, bottomDock, pinnedNarrow };
+}
+
 /** Keep-alive surface components can pause background work while hidden. */
 export interface RailSurfaceComponentProps {
   /** Omitted by legacy/plugin callers; the host always supplies it. */
