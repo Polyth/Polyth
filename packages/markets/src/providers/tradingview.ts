@@ -102,9 +102,10 @@ export function createTradingViewProvider(options: TradingViewProviderOptions = 
       );
       const rows = valueAt(json, "data");
       const first = Array.isArray(rows) ? record(rows[0]) : undefined;
-      const values = Array.isArray(first?.d) ? first.d : undefined;
-      const ticker = text(first?.s);
-      if (!values || !ticker) miss(`tradingview: no fundamentals for ${symbol}`);
+      const values = Array.isArray(first?.d)
+        ? first.d
+        : miss(`tradingview: no fundamentals for ${symbol}`);
+      const ticker = text(first?.s) ?? miss(`tradingview: no fundamentals for ${symbol}`);
       const [marketCap, pe, eps, dividendYieldPct, beta, sharesOutstanding, sector, industry] = values;
       const exchange = ticker.split(":")[0];
       return {
