@@ -286,7 +286,14 @@ export function deriveUsageObservations(
     const data = objectField(event.data);
 
     if (event.type === "session/rewound") {
+      // Keep the marker replayable until a replacement turn is observed. This
+      // preserves regeneration attribution across separate analytics syncs.
       pendingRegeneration = true;
+      continue;
+    }
+
+    if (event.type === "session/rewind-cleared") {
+      pendingRegeneration = false;
       if (current === null) safeSeq = event.seq;
       continue;
     }
