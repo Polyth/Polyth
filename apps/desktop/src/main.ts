@@ -72,6 +72,7 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let settings: DesktopSettings;
 let baseUrl = "";
+let desktopSetupClaimToken: string | null = null;
 let dataDir = "";
 let logPath = "";
 let settingsPath = "";
@@ -495,6 +496,14 @@ const requireChatWorkspaceCoordinator = (): DesktopChatWorkspaceRemoteCoordinato
   return chatWorkspaceRemoteCoordinator;
 };
 
+const requireDesktopSetupLifecycle = () => {
+  const lifecycle = serverLifecycle;
+  if (!lifecycle || !("issueSetupClaim" in lifecycle) || typeof lifecycle.issueSetupClaim !== "function") {
+    throw Object.assign(new Error("Desktop setup is not active"), { code: "setup-not-active" });
+  }
+  return lifecycle;
+};
+
 const installUpdate = async (): Promise<void> => {
   if (updateState.phase !== "downloaded") return;
   quitting = true;
@@ -509,6 +518,13 @@ const installIpc = (): void => {
     canLaunchAtLogin: app.isPackaged && ["darwin", "linux", "win32"].includes(process.platform),
     keepAwakeActive: keepAwakeBlockerId !== null && powerSaveBlocker.isStarted(keepAwakeBlockerId), lowResourceMode: startupLowResourceMode,
   }));
+  trustedHandle("desktop:setup:claim", () => {
+    if (desktopSetupClaimToken) return { claimToken: desktopSetupClaimToken };
+    const claim = requireDesktopSetupLifecycle().issueSetupClaim();
+    desktopSetupClaimToken = claim.token;
+    return { claimToken: claim.token };
+  });
+  trustedHandle("desktop:setup:restart", async () => { await restartDesktopSetupServer(); });
   trustedHandle("desktop:settings:get", () => settings);
   trustedHandle("desktop:settings:set", (_event, patch: unknown) => persistSettings(patch));
   trustedHandle("desktop:window", (_event, action: DesktopWindowAction) => {
