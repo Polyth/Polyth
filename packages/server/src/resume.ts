@@ -2,7 +2,8 @@
 // provider is rate-limited / out of quota / overloaded, the backend adapter
 // tags the `turn/stopped` with a retry hint. The session service turns that
 // into a `SessionResumeState` (this planner) and arms a timer (this
-// scheduler) that re-sends the last user message when the wait elapses.
+// scheduler) that either replays the interrupted prompt or sends a hidden
+// native-continuation prompt when the wait elapses.
 //
 // Policy per product decision: when the provider tells us how long to wait we
 // honour it in full (no ceiling); with no hint we use an escalating backoff so
@@ -46,7 +47,7 @@ export const rateLimitNoticeHint = (text: string): RateLimitRetryHint | null => 
 
 export interface PlanResumeInput {
   hint: RateLimitRetryHint;
-  /** seq of the user/message that will be re-sent. */
+  /** seq of the original user/message that owns the resume plan. */
   userMessageSeq: number;
   /** Canonical session id for resume state derivation. */
   sessionId?: string;
@@ -95,6 +96,7 @@ export const planResume = (
     ...(retryAfterSec !== undefined ? { retryAfterSec } : {}),
     ...(resetAt !== undefined ? { resetAt } : {}),
     attempt,
+    ...(hint.resumeMode ? { resumeMode: hint.resumeMode } : {}),
     userMessageSeq,
   };
 };
