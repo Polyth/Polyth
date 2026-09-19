@@ -108,5 +108,5 @@ test("Gemini stages Polyth prompts, skills, context and agent-tools MCP together
     ],
   }]);
   assert.ok(result.records.every((record) => record.status === "pending"));
-  provisioner.release?.(context);
+  await provisioner.release?.(context);
 });
