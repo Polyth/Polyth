@@ -583,7 +583,10 @@ const configureUpdater = (): void => {
   };
   log(`Updater configured for ${updateChannel ?? "latest"} channel`);
   autoUpdater.on("checking-for-update", () => setUpdateState({ phase: "checking", message: "Checking GitHub Releases…" }));
-  autoUpdater.on("update-available", (info) => setUpdateState({ phase: "available", message: `Polyth ${info.version} is available.`, version: info.version }));
+  autoUpdater.on("update-available", (info) => {
+    setUpdateState({ phase: "available", message: `Polyth ${info.version} is available.`, version: info.version });
+    if (settings.automaticUpdates) void downloadUpdate();
+  });
   autoUpdater.on("update-not-available", (info) => setUpdateState({ phase: "up-to-date", message: `Polyth ${info.version} is current.`, version: info.version }));
   autoUpdater.on("download-progress", (progress) => setUpdateState({
     phase: "downloading", message: `Downloading Polyth ${updateState.version ?? "update"}…`,

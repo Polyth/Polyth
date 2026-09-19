@@ -12,8 +12,10 @@ on:
         options:
           - android-apk
           - ios-app
+          - mac-dmg
           - windows-exe
           - linux-appimage
+          - npm-packages
           - all
 
 permissions:
@@ -54,14 +56,8 @@ jobs:
       - name: Install workspace dependencies
         run: npm ci --no-audit --no-fund
 
-      - name: Build web bundle
-        run: npm run build:web
-
-      - name: Sync Android project
-        run: |
-          npm --workspace @polyth/mobile run assets
-          cd apps/mobile
-          npx cap sync android
+      - name: Build web bundle and sync Android
+        run: npm run build:mobile
 
       - name: Build installable debug APK
         working-directory: apps/mobile/android
@@ -75,7 +71,7 @@ jobs:
           if-no-files-found: error
 
   ios:
-    name: iOS .app
+    name: iOS simulator app
     if: inputs.target == 'ios-app' || inputs.target == 'all'
     runs-on: macos-15
     timeout-minutes: 60
@@ -98,10 +94,8 @@ jobs:
       - name: Install workspace dependencies
         run: npm ci --no-audit --no-fund
 
-      - name: Build web bundle and sync iOS project
-        run: |
-          npm run build:web
-          npm --workspace @polyth/mobile run sync
+      - name: Build web bundle and sync iOS
+        run: npm run build:mobile
 
       - name: Build native Polyth Link framework
         run: npm --workspace @polyth/mobile run native:ios
@@ -110,7 +104,15 @@ jobs:
         run: |
           set -euo pipefail
           DERIVED="$RUNNER_TEMP/PolythDerivedData"
-          xcodebuild             -project apps/mobile/ios/App/App.xcodeproj             -scheme App             -configuration Release             -sdk iphonesimulator             -destination 'generic/platform=iOS Simulator'             -derivedDataPath "$DERIVED"             CODE_SIGNING_ALLOWED=NO             build
+          xcodebuild \
+            -project apps/mobile/ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$DERIVED" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
 
           APP="$DERIVED/Build/Products/Release-iphonesimulator/App.app"
           test -d "$APP"
@@ -121,6 +123,91 @@ jobs:
           name: polyth-ios-app
           retention-days: 14
           path: ${{ runner.temp }}/Polyth-iOS.app.zip
+          if-no-files-found: error
+
+  macos:
+    name: macOS DMG + ZIP
+    if: inputs.target == 'mac-dmg' || inputs.target == 'all'
+    runs-on: macos-15
+    timeout-minutes: 75
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install workspace dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Chromium for macOS x64
+        run: npx playwright-core install chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: 0
+          PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac14
+
+      - name: Install Chromium for macOS arm64
+        run: npx playwright-core install chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: 0
+          PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac14-arm64
+
+      - name: Install both esbuild binaries
+        run: |
+          ESBUILD_VERSION="$(node -p "require('./node_modules/esbuild/package.json').version")"
+          npm install --ignore-scripts --no-save --package-lock=false --force \
+            "@esbuild/darwin-x64@$ESBUILD_VERSION" \
+            "@esbuild/darwin-arm64@$ESBUILD_VERSION"
+
+      - name: Build universal desktop bundle
+        run: npm run build:desktop
+        env:
+          POLYTH_MAC_UNIVERSAL: "1"
+
+      - name: Stage Chromium for macOS x64
+        run: npm run desktop:stage-chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: 0
+          PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac14
+          POLYTH_TARGET_PLATFORM: darwin
+          POLYTH_TARGET_ARCH: x64
+
+      - name: Stage Chromium for macOS arm64
+        run: npm run desktop:stage-chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: 0
+          PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac14-arm64
+          POLYTH_TARGET_PLATFORM: darwin
+          POLYTH_TARGET_ARCH: arm64
+
+      - name: Download OpenCode for both macOS architectures
+        run: |
+          POLYTH_TARGET_PLATFORM=darwin POLYTH_TARGET_ARCH=x64 npm run desktop:download-opencode
+          POLYTH_TARGET_PLATFORM=darwin POLYTH_TARGET_ARCH=arm64 npm run desktop:download-opencode
+
+      - name: Build unsigned universal DMG and updater ZIP
+        working-directory: apps/desktop
+        run: npx electron-builder --mac dmg zip --universal --publish never --config.mac.notarize=false
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: polyth-macos-dmg
+          retention-days: 14
+          path: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+            apps/desktop/release/*.blockmap
           if-no-files-found: error
 
   windows:
@@ -173,7 +260,6 @@ jobs:
           path: |
             apps/desktop/release/*.exe
             apps/desktop/release/*.blockmap
-            apps/desktop/release/latest*.yml
           if-no-files-found: error
 
   linux:
@@ -224,12 +310,15 @@ jobs:
         run: npx electron-builder --linux AppImage --x64 --publish never
 
       - name: Smoke-test packaged AppImage
-        shell: bash
         run: |
           set -euo pipefail
           APPIMAGE="$(find apps/desktop/release -maxdepth 1 -name '*.AppImage' -print -quit)"
           test -n "$APPIMAGE"
-          xvfb-run -a node apps/desktop/test/appimage-e2e.mjs             "$APPIMAGE"             "apps/desktop/release/appimage-e2e.png"             "apps/desktop/release/appimage-e2e.log"             "$GITHUB_WORKSPACE"
+          xvfb-run -a node apps/desktop/test/appimage-e2e.mjs \
+            "$APPIMAGE" \
+            "apps/desktop/release/appimage-e2e.png" \
+            "apps/desktop/release/appimage-e2e.log" \
+            "$GITHUB_WORKSPACE"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -237,5 +326,40 @@ jobs:
           retention-days: 14
           path: |
             apps/desktop/release/*.AppImage
+            apps/desktop/release/*.blockmap
             apps/desktop/release/appimage-e2e.*
+          if-no-files-found: error
+
+  npm:
+    name: npm SDK packages
+    if: inputs.target == 'npm-packages' || inputs.target == 'all'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Validate aligned versions
+        run: node scripts/release-version.mjs
+
+      - name: Pack public SDK packages
+        run: |
+          mkdir -p release/npm
+          npm pack --workspace @polyth/contracts --pack-destination release/npm
+          npm pack --workspace @polyth/package-sdk --pack-destination release/npm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: polyth-npm-packages
+          retention-days: 14
+          path: release/npm/*.tgz
           if-no-files-found: error

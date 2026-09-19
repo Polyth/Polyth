@@ -1,10 +1,132 @@
 # Release operations
 
-Polyth keeps application version metadata behind an **aligned release version gate**: `package.json`, `apps/mobile/package.json`, and `apps/desktop/package.json` must all carry the same stable `X.Y.Z` semver. `scripts/release-version.mjs` validates alignment and exports release metadata to build tooling. GitHub Actions packaging is manual-only; the signed iOS TestFlight path in Codemagic still uses `vX.Y.Z` tags.
+Polyth uses one aligned stable version across the applications and public SDK packages:
 
-Prerelease suffixes (`1.2.3-beta.1`, `1.2.3+build`) are rejected for store releases.
+- root `package.json`
+- `apps/mobile/package.json`
+- `apps/desktop/package.json`
+- `packages/contracts/package.json`
+- `packages/package-sdk/package.json`
 
-## Version gate
+`scripts/release-version.mjs` validates the shared `X.Y.Z` version and exports the Android/iOS release metadata. Prerelease suffixes such as `1.2.3-beta.1` are intentionally rejected by the stable release flow.
+
+## GitHub Actions structure
+
+There are three permanent GitHub Actions workflows:
+
+| Workflow | Trigger | Responsibility |
+|---|---|---|
+| `ci.yml` | PR, push to `master`, manual | Fast blocking repository validation |
+| `build-apps.yml` | Manual only | Unpublished smoke/download artifacts |
+| `release.yml` | Manual only, enforced `master` | Signed/publishable release artifacts and GitHub Release |
+
+Application packaging never runs merely because code was pushed to `master`.
+
+## CI
+
+`ci.yml` runs the normal blocking validation:
+
+- agent/repository guidance validation;
+- production web build;
+- TypeScript validation for the stable core/mobile baseline;
+- deterministic release/workflow contract tests;
+- Rust formatting, Clippy, and workspace tests.
+
+Release packaging remains separate so ordinary pushes do not spend macOS/Windows/ARM runner time.
+
+## Manual application builds
+
+Use **Actions → Build apps → Run workflow**.
+
+| Target | Output |
+|---|---|
+| `android-apk` | Installable debug APK |
+| `ios-app` | Unsigned iOS Simulator `.app` ZIP |
+| `mac-dmg` | Unsigned universal macOS DMG + updater ZIP |
+| `windows-exe` | x64 NSIS EXE |
+| `linux-appimage` | x64 AppImage |
+| `npm-packages` | `@polyth/contracts` + `@polyth/package-sdk` npm tarballs |
+| `all` | Every target above |
+
+These jobs use `--publish never`. They are for testing/downloading artifacts, not publishing a release.
+
+## Manual release
+
+Use **Actions → Release → Run workflow** from `master`.
+
+The workflow refuses another branch and resolves the version from the aligned package manifests before spending release runners.
+
+### Desktop
+
+The release builds:
+
+- Linux AppImage x64 + arm64;
+- Windows signed NSIS x64 + arm64;
+- signed/notarized universal macOS DMG + ZIP.
+
+The updater metadata is shipped alongside the installers:
+
+- `latest.yml` — Windows x64;
+- `latest-arm64.yml` — Windows arm64;
+- `latest-mac.yml` — macOS;
+- `latest-linux.yml` and architecture-specific Linux metadata emitted by electron-builder.
+
+After the deterministic release gate passes, the prepare job creates/reuses a **draft GitHub Release** for the aligned tag. The signed desktop jobs publish their binaries and electron-builder updater metadata into that draft. The final publish job reconciles every release artifact, performs optional external publication, and only then marks the release public. Desktop auto-update therefore never sees a half-uploaded release.
+
+The desktop package updater points to **Polyth/Polyth**. Packaged clients with **Automatic updates** enabled check on startup and periodically, automatically download a discovered update, and install it on app quit/restart. Disabling Automatic updates preserves manual check/download behavior.
+
+Required desktop release secrets:
+
+- macOS: `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`
+- Windows: `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD`
+
+### Android
+
+When the `android` input is enabled, Release builds a signed release APK and AAB.
+
+Required secrets:
+
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
+`play_track` controls optional Google Play publication:
+
+- `none` — build only;
+- `internal` — publish completed internal release;
+- `production` — upload as a production draft.
+
+Google Play publication additionally requires `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`.
+
+### npm SDK packages
+
+When `npm_packages` is enabled, Release packs:
+
+- `@polyth/contracts`
+- `@polyth/package-sdk`
+
+The tarballs are also attached to the GitHub Release. `publish_npm=true` publishes those exact tarballs to npm with provenance after checking whether the same version already exists, making a release-job retry safe.
+
+npm publication requires `NPM_TOKEN`.
+
+Internal first-party workspaces are deliberately **not** bulk-published just because they lack `private: true`; the public npm release allowlist is explicit.
+
+### iOS / TestFlight
+
+The release workflow creates/reuses the stable `vX.Y.Z` tag together with the draft GitHub Release **after release validation but before the platform build fan-out**. Codemagic's `ios-testflight` workflow watches that tag and can build/upload TestFlight in parallel with the desktop/Android release jobs. The GitHub Release stays draft until the GitHub release pipeline succeeds, so desktop auto-update remains hidden while artifacts are incomplete.
+
+Codemagic keeps one release-quality gate, then:
+
+1. resolves the next App Store Connect build number;
+2. syncs the quality-gated web build;
+3. builds the native Polyth Link XCFramework;
+4. signs the application;
+5. uploads the IPA to TestFlight.
+
+Production App Store review is still explicit and is not submitted automatically.
+
+## Version metadata
 
 Run locally:
 
@@ -12,96 +134,23 @@ Run locally:
 node scripts/release-version.mjs
 ```
 
-Exports (names only):
+Exports:
 
 | Variable | Purpose |
 |---|---|
-| `POLYTH_VERSION` | Stable semver without `v` prefix |
-| `POLYTH_RELEASE_TAG` | Tag form (`vX.Y.Z`) |
-| `POLYTH_ANDROID_VERSION_CODE` | Bounded Android `versionCode` (`major*1_000_000 + minor*1_000 + patch + 1`, minor/patch ≤ 999) |
-| `POLYTH_IOS_MARKETING_VERSION` | iOS `MARKETING_VERSION` |
-| `POLYTH_IOS_CURRENT_PROJECT_VERSION` | iOS build number |
-
-Tag validation runs only in real tag contexts (`GITHUB_REF_TYPE=tag`, `CM_TAG`). Manual desktop/Android builds derive version metadata without requiring a tag.
-
-## GitHub Actions
-
-GitHub Actions intentionally exposes only two workflows.
-
-| Workflow | Trigger | Role |
-|---|---|---|
-| `ci.yml` | Pull request, push to `master`, manual | Repository validation |
-| `build-apps.yml` | Manual only | Build downloadable application artifacts |
-
-No application packaging or publishing is triggered by a push to `master` or by a Git tag.
-
-### CI (`ci.yml`)
-
-Every pull request and every push to `master` runs:
-
-- agent-knowledge structure and installer tests;
-- the shared repository quality contract from `scripts/ci/release-quality.mjs`:
-  - web production build;
-  - TypeScript checks for shared/core services and the mobile client; desktop platform compilation belongs to the manual desktop build lanes;
-  - stable repository tests;
-  - Polyth Link contract tests;
-- Rust `fmt`, `clippy`, and workspace tests.
-
-This is the normal merge/master quality gate. Heavy application packaging is deliberately separate.
-
-### Manual application builds (`build-apps.yml`)
-
-Use **Actions → Build apps → Run workflow** and choose one target:
-
-| Target | Runner | Output |
-|---|---|---|
-| `android-apk` | Ubuntu | Installable debug APK |
-| `ios-app` | macOS | Unsigned iOS Simulator `.app` zipped as an artifact |
-| `windows-exe` | Windows | x64 NSIS `.exe` installer |
-| `linux-appimage` | Ubuntu | x64 AppImage plus packaged-app smoke evidence |
-| `all` | Mixed | All four targets above |
-
-These jobs use `--publish never` where electron-builder is involved and never upload to GitHub Releases, Google Play, or the App Store. Artifacts are retained by GitHub Actions for 14 days.
-
-The iOS GitHub artifact is intentionally unsigned and simulator-only. The signed IPA/TestFlight path remains Codemagic. Android Play publication and signed desktop release publication are not automated by the current GitHub Actions set; adding either requires an explicit release workflow rather than overloading the build workflow.
-
-## Codemagic (iOS TestFlight)
-
-Workflow: `ios-testflight` in `codemagic.yaml`.
-
-| Setting | Value |
-|---|---|
-| Trigger | Tag matching `v*.*.*` |
-| App Store Connect integration | `polyth-apple` |
-| Bundle ID | `com.polyth.mobile` |
-| Node | `22.14.0` (matches `.nvmrc`) |
-
-Configure in Codemagic UI:
-
-1. App Store Connect API integration named **`polyth-apple`**
-2. iOS code signing for `com.polyth.mobile` (App Store distribution)
-3. Environment group **`ios_config`** containing:
-   - `APP_STORE_APPLE_ID` — numeric App Store Connect application ID (App Information → Apple ID)
-4. Repository connected with tag-triggered builds
-
-### iOS versioning behavior
-
-- `MARKETING_VERSION` comes from `POLYTH_IOS_MARKETING_VERSION` (aligned package semver).
-- `CURRENT_PROJECT_VERSION` is resolved at build time by `scripts/ci/resolve-ios-build-number.sh`:
-  1. Requires `APP_STORE_APPLE_ID` from the `ios_config` group.
-  2. Queries App Store Connect with `app-store-connect get-latest-testflight-build-number --silent` and `get-latest-app-store-build-number --silent` (stdout only; stderr is not captured).
-  3. Uses **max(latest TestFlight, latest App Store) + 1**.
-  4. Treats empty successful stdout as build number `0` before incrementing.
-  5. Fails the build on any non-zero CLI exit or non-numeric stdout. Authentication, invalid application IDs, and API errors are never treated as “no previous builds”.
-- Versions are injected through `xcodebuild` archive arguments. The Xcode project file is not mutated with `agvtool`.
-- Publishing uploads the IPA to App Store Connect/TestFlight.
-- `submit_to_testflight` (optional manual input `submitToBetaReview`) controls **beta review submission**, not the upload itself.
-- `submit_to_app_store` remains `false`; production App Store review is never automatic.
+| `POLYTH_VERSION` | Stable semver without `v` |
+| `POLYTH_RELEASE_TAG` | `vX.Y.Z` |
+| `POLYTH_ANDROID_VERSION_CODE` | Android versionCode |
+| `POLYTH_IOS_MARKETING_VERSION` | iOS marketing version |
+| `POLYTH_IOS_CURRENT_PROJECT_VERSION` | iOS build number seed/override |
 
 ## Release checklist
 
-1. Bump stable `X.Y.Z` consistently in root, mobile, and desktop `package.json`.
-2. Merge to `master` only after `ci.yml` is green.
-3. When you need downloadable smoke artifacts, run `build-apps.yml` manually for the required target.
-4. For a signed iOS/TestFlight build, create the matching `vX.Y.Z` tag and monitor Codemagic `ios-testflight`.
-5. Treat store publication and signed desktop distribution as explicit operator actions until dedicated release workflows are intentionally added.
+1. Bump the aligned version in root, mobile, desktop, contracts, and package-sdk manifests (and update the lockfile).
+2. Merge to `master` only after CI is green.
+3. Run **Build apps** first when you only need smoke artifacts.
+4. Run **Release** from `master` for an actual release.
+5. Confirm desktop/macOS/Windows signing secrets before release.
+6. Choose Android Play and npm publication explicitly.
+7. Leave `draft=false` for a real release; this is the moment desktop auto-update becomes visible.
+8. Monitor Codemagic/TestFlight after the release tag is created.
