@@ -350,8 +350,15 @@ export default function Header() {
   // Phone widths use one shell header for every workspace surface. Keeping the
   // choice here (rather than inside each view) prevents a surface switch from
   // bringing back the legacy compact bar.
+  const windowControls = <SlotHost slot="app.window.controls" />;
+
   if (mode === "phone") {
-    return chatSurface ? <MobileSessionHeader /> : <MobileViewHeader />;
+    return (
+      <>
+        {chatSurface ? <MobileSessionHeader /> : <MobileViewHeader />}
+        {windowControls}
+      </>
+    );
   }
 
   return (
@@ -410,9 +417,9 @@ export default function Header() {
           )}
           {compact && <MobileNavigationRail />}
           {(!compact || !chatSurface) && <UserMenu githubUser={githubUser} />}
-          <SlotHost slot="app.window.controls" />
         </div>
       </header>
+      {windowControls}
     </>
   );
 }

@@ -123,11 +123,32 @@ test("canvas widget chrome stays hidden until workspace edit mode", async () => 
 test("desktop shell clips the frameless window to the sheet radius", async () => {
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   const desktop = await readFile(new URL("../src/desktop.tsx", import.meta.url), "utf8");
+  const header = await readFile(new URL("../src/components/Header.tsx", import.meta.url), "utf8");
   assert.match(styles, /html:has\(body\.desktop-app\)/);
-  assert.match(styles, /body\.desktop-app\s*\{[^}]*border-radius:\s*var\(--radius-sheet\)/s);
-  assert.match(styles, /body\.desktop-app \.app\s*\{[^}]*border-radius:\s*var\(--radius-sheet\)/s);
-  assert.match(styles, /body\.desktop-app\[data-desktop-maximized="true"\] \.app/);
+  assert.match(styles, /--desktop-chrome-radius:\s*var\(--radius-sheet\)/);
+  assert.match(styles, /--desktop-controls-island-width:\s*calc\(/);
+  assert.match(styles, /--desktop-controls-wrap-arc:\s*max\(0\.01px, var\(--desktop-chrome-radius\)\)/);
+  assert.match(styles, /body\.desktop-app\s*\{[^}]*border-radius:\s*var\(--desktop-chrome-radius\)/s);
+  assert.match(styles, /body\.desktop-app \.app\s*\{[^}]*border-radius:\s*var\(--desktop-chrome-radius\)/s);
+  assert.match(
+    styles,
+    /body\.desktop-app \.app > \.header\s*\{[^}]*height:\s*calc\(var\(--desktop-controls-island-height\) \+ var\(--desktop-chrome-radius\)\)/s,
+  );
+  assert.match(
+    styles,
+    /body\.desktop-app\[data-desktop-controls-position="right"\] \.app > \.header\s*\{[^}]*clip-path:\s*shape\(/s,
+  );
+  assert.match(
+    styles,
+    /body\.desktop-app\[data-desktop-controls-position="left"\] \.app > \.header\s*\{[^}]*clip-path:\s*shape\(/s,
+  );
+  assert.match(styles, /of var\(--desktop-controls-wrap-arc\) cw/);
+  assert.doesNotMatch(styles, /padding-right:\s*116px/);
+  assert.match(styles, /body\.desktop-app\[data-desktop-maximized="true"\] \.app > \.header\s*\{[^}]*clip-path:\s*none/s);
   assert.match(desktop, /dataset\.desktopMaximized/);
+  assert.match(desktop, /createPortal\(controls, document\.body\)/);
+  assert.match(header, /<\/header>\s*\{windowControls\}/s);
+  assert.match(header, /slot="app.window.controls"/);
 });
 
 test("canvas widget settings live on the widget, not a settings customizer", async () => {
