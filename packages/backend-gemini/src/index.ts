@@ -1,1 +1,2 @@
-export { default } from "./serverEntry.ts";
+export { default, inspectGeminiHelp } from "./serverEntry.ts";
+export { translateGeminiPromptError, translateGeminiPromptResult } from "./protocol.ts";
