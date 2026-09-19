@@ -6,8 +6,8 @@ const text = (path: string) => readFileSync(path, "utf8");
 
 test("CI owns the repository quality contract and app builds stay manual", () => {
   const script = text("scripts/ci/release-quality.mjs");
-  assert.match(script, /select-tests\.mjs", "ci"/);
-  assert.match(script, /select-tests\.mjs", "polyth-link"/);
+  assert.match(script, /run-tests\.mjs", "ci"/);
+  assert.match(script, /run-tests\.mjs", "polyth-link"/);
   assert.match(script, /polyth-link-core", "--bin", "polyth-link-ws-echo"/);
 
   const ci = text(".github/workflows/ci.yml");
