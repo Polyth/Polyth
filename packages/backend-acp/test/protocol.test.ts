@@ -917,3 +917,23 @@ test("ACP profile error hook sees tool activity and can turn a known rejection i
         && event.retry?.resumeMode === "continue"));
     await rt.dispose();
 });
+
+
+test("ACP does not report an unknown native stop reason as completed", async () => {
+    const f = fakeRpc();
+    f.handle(async (method) => method === "session/new"
+        ? { sessionId: "native" }
+        : { stopReason: "provider_limit" });
+    const rt = createAcpRuntime(context, f.rpc);
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    assert.equal((await rt.startTurnOperation!({ sessionId: "canonical", text: "task" }, "submit")).kind, "confirmed");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.ok(events.some((event) =>
+        event.type === "turn/stopped"
+        && event.reason === "error"
+        && event.code === "unknown"
+        && /provider_limit/.test(event.error ?? "")));
+    await rt.dispose();
+});
