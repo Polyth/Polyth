@@ -177,6 +177,8 @@ export type AcpClientMethodTranslator = {
 export interface AcpPromptTranslationContext {
     turnId: string;
     model?: ModelRef;
+    /** Native tool lifecycle was observed during this prompt. */
+    hadToolActivity: boolean;
 }
 
 export interface AcpPromptResultTranslation {
@@ -275,6 +277,7 @@ export function createAcpRuntime(
     let text = "";
     let messagePartId = "";
     let messagePartOrdinal = 0;
+    let turnHadToolActivity = false;
     let resolveAdmission: ((outcome: MutationOutcome<{ admissionId: string }>) => void) | undefined;
     let promptWatchdog: ReturnType<typeof setTimeout> | undefined;
     let lastTitle = "";
@@ -503,6 +506,7 @@ export function createAcpRuntime(
         }
         if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
             markAccepted();
+            turnHadToolActivity = true;
             // ACP exposes visible prose as chunks but has no message-final
             // notification. A new tool call is the observable boundary
             // between the preceding progress prose and any later final
@@ -812,6 +816,7 @@ export function createAcpRuntime(
             text = "";
             messagePartId = "";
             messagePartOrdinal = 0;
+            turnHadToolActivity = false;
             order++;
             return new Promise((resolve) => {
                 resolveAdmission = resolve;
@@ -827,6 +832,7 @@ export function createAcpRuntime(
                     const translated = options.translatePromptResult?.(result, {
                         turnId,
                         ...(modelId ? { model: { providerID: harnessId, modelID: modelId, ...(desiredVariant ? { variant: desiredVariant } : {}) } } : {}),
+                        hadToolActivity: turnHadToolActivity,
                     });
                     for (const event of translated?.events ?? []) emit(event);
                     active = false;
@@ -841,6 +847,7 @@ export function createAcpRuntime(
                     const translated = options.translatePromptError?.(error, {
                         turnId,
                         ...(modelId ? { model: { providerID: harnessId, modelID: modelId, ...(desiredVariant ? { variant: desiredVariant } : {}) } } : {}),
+                        hadToolActivity: turnHadToolActivity,
                     });
                     if (translated?.admitted) {
                         markAccepted();
