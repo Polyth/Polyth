@@ -54,7 +54,27 @@ export function translateGeminiPromptResult(
     }
   }
 
-  return events.length ? { events } : undefined;
+  const stopReason = typeof root?.stopReason === "string" ? root.stopReason : undefined;
+  const terminal = stopReason === "max_tokens"
+    ? {
+        reason: "error" as const,
+        error: "Gemini stopped because the context/token limit was reached",
+        code: "unknown" as const,
+      }
+    : stopReason === "max_turn_requests"
+      ? {
+          reason: "error" as const,
+          error: "Gemini stopped after reaching its agent-loop turn limit",
+          code: "unknown" as const,
+        }
+      : undefined;
+
+  return events.length || terminal
+    ? {
+        ...(events.length ? { events } : {}),
+        ...(terminal ? { terminal } : {}),
+      }
+    : undefined;
 }
 
 export function translateGeminiPromptError(
