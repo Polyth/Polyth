@@ -285,7 +285,7 @@ test("capabilities stay within stream protocol, not the wider Gemini model capab
   assert.equal(ANTIGRAVITY_CAPABILITIES.cost, false);
   assert.equal(ANTIGRAVITY_CAPABILITIES.attachments.modalities.image, "unsupported");
   assert.equal(ANTIGRAVITY_CAPABILITIES.fork, false);
-  // The stream protocol has no native title channel: the canonical session
-  // must publish its prompt-derived title instead of waiting for one.
-  assert.equal(ANTIGRAVITY_CAPABILITIES.title, "emulated");
+  // The CLI names each conversation in its own annotation store; the adapter
+  // reads that metadata and the canonical layer polls for the delayed title.
+  assert.equal(ANTIGRAVITY_CAPABILITIES.title, "native");
 });

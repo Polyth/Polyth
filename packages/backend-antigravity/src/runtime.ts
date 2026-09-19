@@ -13,6 +13,7 @@ import {
 import type { HarnessProcessAuthority } from "@polyth/harness-runtime/process-authority";
 import { classifyAgyPermission, parseAgyHookRequest, type AgyHookDecision, type AntigravityPermissionBridge } from "./permissions.ts";
 import { antigravityOverlays } from "./provisioner.ts";
+import type { AntigravityTitleReader } from "./title.ts";
 import { ANTIGRAVITY_CAPABILITIES, agyError, agyLaunchArgs, agyUsage, createAgyDecoder, createAgyTurn, record, sameAgyModel, text } from "./protocol.ts";
 
 type Admission = MutationOutcome<{ admissionId?: string }>;
@@ -24,6 +25,8 @@ export interface AntigravityRuntimeOptions {
   env?: NodeJS.ProcessEnv;
   models(): Promise<ModelDescriptor[]>;
   autoApprove(): Promise<boolean>;
+  /** Optional reader for the CLI's generated per-conversation title. */
+  titleReader?: AntigravityTitleReader;
   permissionBridge(handle: (payload: unknown) => Promise<AgyHookDecision>): Promise<AntigravityPermissionBridge>;
   timeoutMs?: number;
 }
@@ -33,6 +36,7 @@ export function createAntigravityRuntime(options: AntigravityRuntimeOptions): Ag
   const { context, authority } = options;
   let child: ChildProcess | undefined;
   let nativeId = "";
+  let sessionTitle = "";
   let createId = "";
   let selectedModel: ModelRef | undefined;
   let selectedAgent: string | undefined;
@@ -104,6 +108,17 @@ export function createAntigravityRuntime(options: AntigravityRuntimeOptions): Ag
         identity: { ...endpoint, backendSessionId: nativeId, artifactKind, entityId: entityKey, revision }, events: [event] };
       for (const callback of observations) callback(context.sessionId, observation);
     } else for (const callback of listeners) callback(context.sessionId, event);
+  };
+  // Antigravity generates a conversation title into its own annotation store.
+  // Read only that metadata and publish it as a native title; never import the
+  // native transcript. Absence is normal until the CLI finishes naming a
+  // conversation, so a miss is silent.
+  const adoptNativeTitle = async (conversationId: string): Promise<void> => {
+    if (!options.titleReader || !conversationId || conversationId !== nativeId) return;
+    const title = await options.titleReader.read(conversationId);
+    if (!title || title === sessionTitle) return;
+    sessionTitle = title;
+    emit({ type: "session/title-generated", title });
   };
   const settleAdmission = (outcome: Admission) => {
     if (!active) return;
@@ -253,6 +268,7 @@ export function createAntigravityRuntime(options: AntigravityRuntimeOptions): Ag
     }
     if (nativeId) throw agyError("protocol-error", "Antigravity sent a duplicate initialization");
     nativeId = id;
+    void adoptNativeTitle(nativeId);
     if (stagedLaunchTarget && stagedRevision) {
       antigravityOverlays.consumeIfRevision(context, "antigravity", stagedRevision);
       if (stagedCapabilityIds?.length) {
@@ -354,6 +370,7 @@ export function createAntigravityRuntime(options: AntigravityRuntimeOptions): Ag
     active = undefined;
     order++;
     for (const event of resultEvents) emit(event);
+    void adoptNativeTitle(nativeId);
   };
   const initialize = async (model?: ModelRef, agent?: string, resumeId?: string) => {
     if (initialization) {
@@ -463,9 +480,14 @@ export function createAntigravityRuntime(options: AntigravityRuntimeOptions): Ag
         throw agyError("unknown-session", "Only this Space's recorded Antigravity conversation can be resumed");
       await validateModel(input.model ?? context.model);
       await initialize(input.model ?? context.model, input.agent, input.backendSessionId);
+      void adoptNativeTitle(nativeId);
       return nativeId;
     },
-    sessions: async () => Object.entries(authority.receipts).filter(([key]) => key.startsWith("create:")).map(([key, id]) => ({ id, operationId: key.slice(7), title: "Antigravity session", createdAt: 0, updatedAt: 0 })),
+    sessions: async () => {
+      const entries = Object.entries(authority.receipts).filter(([key]) => key.startsWith("create:"));
+      const titles = await Promise.all(entries.map(([, id]) => options.titleReader?.read(id) ?? Promise.resolve(undefined)));
+      return entries.map(([key, id], index) => ({ id, operationId: key.slice(7), title: titles[index] ?? "", createdAt: 0, updatedAt: 0 }));
+    },
     history: async () => [],
     async startTurnOperation(request, operationId) {
       if (!belongs(request.sessionId)) return rejected("invalid-session", "Antigravity runtime belongs to another session");

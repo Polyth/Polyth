@@ -7,6 +7,7 @@ import { test, type TestContext } from "node:test";
 import type { RuntimeEvent } from "@polyth/contracts";
 import type { HarnessProcessAuthority } from "@polyth/harness-runtime/process-authority";
 import { createAntigravityRuntime } from "../src/runtime.ts";
+import type { AntigravityTitleReader } from "../src/title.ts";
 
 const model = { providerID: "antigravity", modelID: "fixture-gemini", variant: "high" };
 const context = { spaceId: "space-a", projectId: "project-a", sessionId: "session-a", cwd: "/project", model };
@@ -18,6 +19,7 @@ function fixture(t: TestContext, options: {
   timeoutMs?: number;
   permissionMode?: string;
   autoApprove?: boolean;
+  titleReader?: AntigravityTitleReader;
 } = {}) {
   const proc = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() });
   const inputs: Array<Record<string, unknown>> = [];
@@ -89,6 +91,7 @@ function fixture(t: TestContext, options: {
     workerPath: "/polyth/antigravity-worker.mjs",
     models: async () => [{ ...model, name: "Fixture Gemini", harnessId: "antigravity", variants: ["low", "medium", "high"] }],
     autoApprove: async () => autoApprove,
+    ...(options.titleReader ? { titleReader: options.titleReader } : {}),
     permissionBridge: async (handle) => {
       hookHandler = handle;
       return { root: "/polyth-hooks", prepare: async () => {}, close: async () => {} };
@@ -231,6 +234,34 @@ test("resume uses recorded exact ID, rejects foreign sessions and unknown prompt
   assert.equal(f.launches[0]?.includes("--continue"), false);
   assert.equal((await f.start("uncertain")).kind, "unknown");
   assert.equal(f.inputs.length, 0);
+});
+
+test("surfaces the CLI's generated conversation title from its annotation store", async (t) => {
+  const f = fixture(t, { titleReader: { read: async (id) => id === "native-a" ? "Fix Runtime Epoch Error" : undefined } });
+  await f.runtime.createSessionOperation!(request, "create-a");
+  await flush();
+  assert.deepEqual(
+    f.events.filter((event) => event.type === "session/title-generated"),
+    [{ type: "session/title-generated", title: "Fix Runtime Epoch Error" }],
+  );
+  assert.equal((await f.runtime.sessions()).find((item) => item.id === "native-a")?.title, "Fix Runtime Epoch Error");
+});
+
+test("adopts a title the CLI writes later and refreshes it on resume", async (t) => {
+  let title: string | undefined;
+  const f = fixture(t, { titleReader: { read: async () => title } });
+  await f.runtime.createSessionOperation!(request, "create-a");
+  await flush();
+  assert.equal(f.events.some((event) => event.type === "session/title-generated"), false);
+  const pending = f.start(); await flush(); f.inputStep(); await pending; f.finish(); await flush();
+  assert.equal(f.events.some((event) => event.type === "session/title-generated"), false);
+  title = "Delayed Native Title";
+  await f.runtime.ensureSession({ ...request, backendSessionId: "native-a" });
+  await flush();
+  assert.deepEqual(
+    f.events.filter((event) => event.type === "session/title-generated"),
+    [{ type: "session/title-generated", title: "Delayed Native Title" }],
+  );
 });
 
 test("first resumed turn uses observed step usage, not historical cumulative counters", async (t) => {

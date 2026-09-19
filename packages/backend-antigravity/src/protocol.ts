@@ -5,7 +5,7 @@ import type { JsonObject, ModelDescriptor, ModelRef, RateLimitRetryHint, Runtime
 export const ANTIGRAVITY_CAPABILITIES = {
   streaming: true, permissions: true, questions: false, compaction: false,
   subagents: true, steering: false, resume: true, usage: true, cost: false,
-  fork: false, mcp: true, title: "emulated", contextOccupancy: "unknown",
+  fork: false, mcp: true, title: "native", contextOccupancy: "unknown",
   attachments: { modalities: {
     file: "emulated", image: "unsupported", pdf: "unsupported",
     audio: "unsupported", url: "unsupported",

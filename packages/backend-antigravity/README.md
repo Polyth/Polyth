@@ -43,8 +43,11 @@ carries Polyth's MCP projection.
 
 Polyth records the native conversation ID from `init` and resumes only that
 Space/project/session's recorded ID using `--conversation`. It never uses
-ambient `--continue`. Canonical history, worktrees, titles and the UI remain
-Polyth-owned. Native history import, exact-history reset and fork are unsupported.
+ambient `--continue`. Canonical history, worktrees and the UI remain
+Polyth-owned; the adapter reads the CLI's generated per-conversation title
+metadata (`~/.gemini/antigravity-cli/annotations/<id>.pbtxt`) to publish a
+native title, and never imports the native transcript. Native history import,
+exact-history reset and fork are unsupported.
 A harness switch or runtime recovery therefore starts a fresh Antigravity
 conversation through the normal create-session operation and supplies bounded
 canonical Polyth continuity separately; it never pretends that the native

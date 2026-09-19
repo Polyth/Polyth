@@ -13,6 +13,7 @@ import { createAntigravityPermissionBridge } from "./permissions.ts";
 import { createAntigravityProvisioner } from "./provisioner.ts";
 import { ANTIGRAVITY_CAPABILITIES, agyError, parseAgyModels } from "./protocol.ts";
 import { createAntigravityRuntime } from "./runtime.ts";
+import { createAntigravityTitleReader } from "./title.ts";
 import { ANTIGRAVITY_WORKER_SOURCE } from "./workerSource.ts";
 
 const exec = promisify(execFile);
@@ -142,6 +143,9 @@ export default function registerPackage(host: ServerPackageHost) {
         workerPath: paths.worker,
         env: launchEnv,
         models: () => models(context),
+        titleReader: createAntigravityTitleReader(
+          join(realUserHome(binary.env), ".gemini", "antigravity-cli", "annotations"),
+        ),
         autoApprove: async () => {
           if (!context.sessionId) return false;
           try {
