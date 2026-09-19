@@ -124,8 +124,19 @@ test("desktop shell clips the frameless window to the sheet radius", async () =>
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   const desktop = await readFile(new URL("../src/desktop.tsx", import.meta.url), "utf8");
   assert.match(styles, /html:has\(body\.desktop-app\)/);
-  assert.match(styles, /body\.desktop-app\s*\{[^}]*border-radius:\s*var\(--radius-sheet\)/s);
-  assert.match(styles, /body\.desktop-app \.app\s*\{[^}]*border-radius:\s*var\(--radius-sheet\)/s);
+  assert.match(styles, /--desktop-chrome-radius:\s*var\(--radius-sheet\)/);
+  assert.match(styles, /--desktop-controls-island-width:\s*calc\(/);
+  assert.match(styles, /body\.desktop-app\s*\{[^}]*border-radius:\s*var\(--desktop-chrome-radius\)/s);
+  assert.match(styles, /body\.desktop-app \.app\s*\{[^}]*border-radius:\s*var\(--desktop-chrome-radius\)/s);
+  assert.match(
+    styles,
+    /body\.desktop-app\[data-desktop-controls-position="right"\] \.app > \.header\s*\{[^}]*border-start-end-radius:\s*var\(--desktop-chrome-radius\)/s,
+  );
+  assert.match(
+    styles,
+    /body\.desktop-app\[data-desktop-controls-position="left"\] \.app > \.header\s*\{[^}]*border-start-start-radius:\s*var\(--desktop-chrome-radius\)/s,
+  );
+  assert.doesNotMatch(styles, /padding-right:\s*116px/);
   assert.match(styles, /body\.desktop-app\[data-desktop-maximized="true"\] \.app/);
   assert.match(desktop, /dataset\.desktopMaximized/);
 });

@@ -127,7 +127,26 @@ button:disabled { opacity: 0.5; cursor: default; }
 }
 
 /* Electron desktop chrome. The host remains a normal web app unless the
-   sandboxed preload bridge is present; controls enter through a typed slot. */
+   sandboxed preload bridge is present; controls enter through a typed slot.
+   Window rounding and the control-island wrap both follow the user radius
+   scale (--radius-sheet), so Appearance → rounding reshapes the whole chrome. */
+body.desktop-app {
+  --desktop-chrome-radius: var(--radius-sheet);
+  --desktop-controls-slot: var(--control-h-sm);
+  --desktop-controls-gap: var(--space-2);
+  --desktop-controls-pad: var(--space-3);
+  --desktop-controls-island-width: calc(
+    (var(--desktop-controls-pad) * 2)
+    + (var(--desktop-controls-slot) * 3)
+    + (var(--desktop-controls-gap) * 2)
+  );
+  --desktop-controls-island-height: calc(
+    (var(--desktop-controls-pad) * 2)
+    + var(--desktop-controls-slot)
+  );
+  border-radius: var(--desktop-chrome-radius);
+  overflow: hidden;
+}
 body.desktop-app .header {
   -webkit-app-region: drag;
 }
@@ -136,7 +155,7 @@ body.desktop-app .header input,
 body.desktop-app .header select,
 body.desktop-app .header textarea,
 body.desktop-app .header a,
-body.desktop-app .desktop-window-controls {
+body.desktop-app .desktop-window-controls button {
   -webkit-app-region: no-drag;
 }
 html:has(body.desktop-app),
@@ -145,71 +164,76 @@ body.desktop-app #root {
   background-color: transparent;
   background-image: none;
 }
-body.desktop-app {
-  border-radius: var(--radius-sheet);
-  overflow: hidden;
-}
 body.desktop-app .app {
-  border-radius: var(--radius-sheet);
+  border-radius: var(--desktop-chrome-radius);
   overflow: hidden;
   background-color: var(--bg);
   box-shadow: 0 0 0 1px var(--border-soft);
 }
-body.desktop-app .desktop-window-controls-right {
-  border-top-right-radius: var(--radius-sheet);
+/* Header recedes around the control island so the buttons sit on window
+   material, with inner corners matching the outer window radius. */
+body.desktop-app[data-desktop-controls-position="right"] .app > .header {
+  width: calc(100% - var(--desktop-controls-island-width));
+  margin-right: var(--desktop-controls-island-width);
+  border-start-end-radius: var(--desktop-chrome-radius);
+  border-end-end-radius: var(--desktop-chrome-radius);
 }
-body.desktop-app .desktop-window-controls-left {
-  border-top-left-radius: var(--radius-sheet);
+body.desktop-app[data-desktop-controls-position="left"] .app > .header {
+  width: calc(100% - var(--desktop-controls-island-width));
+  margin-left: var(--desktop-controls-island-width);
+  border-start-start-radius: var(--desktop-chrome-radius);
+  border-end-start-radius: var(--desktop-chrome-radius);
 }
 body.desktop-app[data-desktop-maximized="true"],
 body.desktop-app[data-desktop-maximized="true"] #root,
 body.desktop-app[data-desktop-maximized="true"] .app,
-body.desktop-app[data-desktop-maximized="true"] .desktop-window-controls-right,
-body.desktop-app[data-desktop-maximized="true"] .desktop-window-controls-left {
+body.desktop-app[data-desktop-maximized="true"] .app > .header,
+body.desktop-app[data-desktop-maximized="true"] .desktop-window-controls {
   border-radius: 0;
 }
-body.desktop-app[data-desktop-controls-position="left"] .header {
-  padding-left: 116px;
+body.desktop-app[data-desktop-maximized="true"] .app > .header {
+  width: 100%;
+  margin-left: 0;
+  margin-right: 0;
 }
-body.desktop-app[data-desktop-controls-position="right"] .header {
-  padding-right: 116px;
+body.desktop-app[data-desktop-maximized="true"][data-desktop-controls-position="right"] .app > .header {
+  padding-right: calc(var(--desktop-controls-island-width) + var(--space-3));
+}
+body.desktop-app[data-desktop-maximized="true"][data-desktop-controls-position="left"] .app > .header {
+  padding-left: calc(var(--desktop-controls-island-width) + var(--space-3));
 }
 .desktop-window-controls {
   position: fixed;
   z-index: 10020;
   top: 0;
+  box-sizing: border-box;
   display: flex;
-  height: 36px;
-  overflow: hidden;
-  border: 1px solid var(--border-soft);
-  border-top: 0;
-  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.18);
+  align-items: center;
+  justify-content: center;
+  gap: var(--desktop-controls-gap);
+  width: var(--desktop-controls-island-width);
+  height: var(--desktop-controls-island-height);
+  padding: var(--desktop-controls-pad);
+  background: var(--bg);
+  border: 0;
+  box-shadow: none;
+  -webkit-app-region: drag;
 }
-.desktop-window-controls-left {
-  left: 0;
-  border-left: 0;
-  border-bottom-right-radius: var(--radius-card);
-}
-.desktop-window-controls-right {
-  right: 0;
-  border-right: 0;
-  border-bottom-left-radius: var(--radius-card);
-}
+.desktop-window-controls-left { left: 0; }
+.desktop-window-controls-right { right: 0; }
 .desktop-window-button {
   display: grid;
   place-items: center;
-  width: 38px;
-  height: 35px;
-  min-width: 38px;
+  width: var(--desktop-controls-slot);
+  height: var(--desktop-controls-slot);
+  min-width: var(--desktop-controls-slot);
   padding: 0;
   border: 0;
-  border-right: 1px solid var(--border-soft);
-  border-radius: 0;
+  border-radius: var(--radius-round);
   color: var(--text-dim);
-  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  background: var(--surface-overlay);
   line-height: 1;
 }
-.desktop-window-button:last-child { border-right: 0; }
 .desktop-window-button:hover {
   color: var(--text);
   background: var(--surface-overlay-strong);
