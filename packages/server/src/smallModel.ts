@@ -137,20 +137,19 @@ export function createSmallModelService(store: RuntimeMutationStore): SmallModel
           if ((error as { code?: unknown }).code !== "unsupported") fail(options, "direct-provider", error);
         }
       }
-      if (!model) {
-        fail(options, "model-resolution", Object.assign(new Error("no small model configured"), { code: "unavailable" }));
-      }
+      const fallbackModel = model
+        ?? fail(options, "model-resolution", Object.assign(new Error("no small model configured"), { code: "unavailable" }));
       if (options.signal?.aborted) throw options.signal.reason ?? new DOMException("aborted", "AbortError");
       const text = await oneShot(runtime, {
         cwd: options.cwd,
         prompt: promptForFallback(options),
-        model,
+        model: fallbackModel,
         ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
       }, store).catch((error) => fail(options, "compatibility", error));
       return {
         text,
-        providerID: model.providerID,
-        modelID: model.modelID,
+        providerID: fallbackModel.providerID,
+        modelID: fallbackModel.modelID,
         inputTruncated: false,
         transport: "compatibility",
         latencyMs: Math.round(performance.now() - started),
