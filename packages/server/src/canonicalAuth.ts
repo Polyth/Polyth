@@ -37,15 +37,18 @@ export interface CanonicalAuthGateway {
 
 /**
  * Adapter from the account-first control authority into the existing HTTP/WS
- * principal contract. Loopback address is reachability information only: it
- * never manufactures a human identity or bypasses the session cookie.
+ * principal contract. Direct loopback remains reachability-only unless the
+ * operator explicitly enables the development-only local agent mode.
  */
 export function createCanonicalAuthGateway(options: {
   control: ControlPlane;
   identity: IdentityService;
   cookieName: string;
+  /** Test seam. Runtime defaults to POLYTH_DEBUG_AGENT_ACCESS=1. */
+  debugAgentAccess?: boolean;
   resolvePairedDevice?: PairedDeviceResolver;
 }): CanonicalAuthGateway {
+  const debugAgentAccess = options.debugAgentAccess ?? process.env.POLYTH_DEBUG_AGENT_ACCESS === "1";
   let pairedResolver = options.resolvePairedDevice;
   const accountExists = (userId: string): boolean => !!options.control.get(
     "SELECT 1 FROM users u JOIN principals p ON p.id=u.id WHERE u.id=? AND p.kind='user' AND p.status='active'",
@@ -55,6 +58,17 @@ export function createCanonicalAuthGateway(options: {
     const value = (principal as IdentifiedPrincipal).userId;
     return typeof value === "string" && value ? value : undefined;
   };
+  const activeOwnerId = (): string | undefined => options.control.get<{ user_id: string }>(
+    `SELECT r.user_id FROM instance_roles r JOIN principals p ON p.id=r.user_id
+      WHERE r.role='owner' AND p.status='active' ORDER BY r.user_id LIMIT 1`,
+  )?.user_id;
+  const debugOwnerPrincipal = (): AuthPrincipal | null => {
+    if (!debugAgentAccess) return null;
+    const userId = activeOwnerId();
+    return userId
+      ? ({ kind: "local-user", trustedLoopback: true, userId } as AuthPrincipal)
+      : null;
+  };
   const livePair = (principal: Extract<AuthPrincipal, { kind: "paired-device" }>): AuthPrincipal | null => {
     const userId = directUser(principal);
     if (!userId || !accountExists(userId) || !pairedResolver) return null;
@@ -63,11 +77,16 @@ export function createCanonicalAuthGateway(options: {
       || latest.deviceId !== principal.deviceId || directUser(latest) !== userId) return null;
     return latest;
   };
-  const resolvePublic = (request: AuthRequestLike): AuthResolution => {
+  const resolvePublic = (
+    request: AuthRequestLike,
+    ingress: Extract<RequestIngress, { kind: "public-http" }>,
+  ): AuthResolution => {
     const token = cookieToken(request.headers.cookie, options.cookieName);
     const session = options.identity.sessions.resolve(token);
-    return session
-      ? { principal: principalForSession(session), authenticated: true }
+    if (session) return { principal: principalForSession(session), authenticated: true };
+    const debugPrincipal = ingress.loopback ? debugOwnerPrincipal() : null;
+    return debugPrincipal
+      ? { principal: debugPrincipal, authenticated: true }
       : { principal: ANONYMOUS, authenticated: false };
   };
   const gateway: CanonicalAuthGateway = {
@@ -76,7 +95,7 @@ export function createCanonicalAuthGateway(options: {
     accountExists,
     userIdForPrincipal: directUser,
     resolve(request, ingress) {
-      if (ingress.kind === "public-http") return resolvePublic(request);
+      if (ingress.kind === "public-http") return resolvePublic(request, ingress);
       if (ingress.kind === "internal") {
         return { principal: { kind: "internal-service", serviceId: ingress.serviceId }, authenticated: true };
       }
@@ -95,8 +114,11 @@ export function createCanonicalAuthGateway(options: {
     refreshPrincipal(principal) {
       switch (principal.kind) {
         case "anonymous":
-        case "local-user":
           return null;
+        case "local-user": {
+          const userId = directUser(principal);
+          return debugAgentAccess && userId && activeOwnerId() === userId ? principal : null;
+        }
         case "internal-service":
           return principal;
         case "paired-device":
