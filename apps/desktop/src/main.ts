@@ -72,6 +72,7 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let settings: DesktopSettings;
 let baseUrl = "";
+let desktopSetupClaimToken: string | null = null;
 let dataDir = "";
 let logPath = "";
 let settingsPath = "";
