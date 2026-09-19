@@ -67,18 +67,20 @@ export function parsePortfolio(value: unknown): MarketPortfolio {
     const symbol = normalizeSymbol(rawSymbol);
     if (seen.has(symbol)) fail(`duplicate holding symbol: ${symbol}`);
     seen.add(symbol);
-    if (typeof item.quantity !== "number" || !Number.isFinite(item.quantity) || item.quantity <= 0) {
-      fail("holding quantity must be a positive number");
+    const quantity = item.quantity;
+    if (typeof quantity !== "number" || !Number.isFinite(quantity) || quantity <= 0) {
+      return fail("holding quantity must be a positive number");
     }
-    if (item.averageCost !== undefined && (
-      typeof item.averageCost !== "number" || !Number.isFinite(item.averageCost) || item.averageCost < 0
+    const averageCost = item.averageCost;
+    if (averageCost !== undefined && (
+      typeof averageCost !== "number" || !Number.isFinite(averageCost) || averageCost < 0
     )) {
-      fail("holding average cost must be a non-negative number");
+      return fail("holding average cost must be a non-negative number");
     }
     return {
       symbol,
-      quantity: item.quantity,
-      ...(item.averageCost === undefined ? {} : { averageCost: item.averageCost as number }),
+      quantity,
+      ...(averageCost === undefined ? {} : { averageCost }),
     };
   });
 
