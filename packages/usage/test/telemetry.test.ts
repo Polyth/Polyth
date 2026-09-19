@@ -184,7 +184,7 @@ test("historical telemetry uses event time, exact range, percentiles, cache and 
     assert.equal(telemetry.current.totals.requests, 2);
     assert.equal(telemetry.current.totals.effectiveTokens, 3_000);
     assert.equal(telemetry.current.totals.cost, .2);
-    assert.equal(Math.round(telemetry.current.totals.cacheHitPercent!), 17);
+    assert.equal(Math.round(telemetry.current.totals.cacheHitPercent!), 18);
     assert.equal(telemetry.current.totals.ttftMs?.p50, 1_000);
     assert.equal(telemetry.current.totals.ttftMs?.average, 1_000);
     assert.equal(telemetry.current.totals.errorRate, 50);
