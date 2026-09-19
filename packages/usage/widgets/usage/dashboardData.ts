@@ -1,5 +1,10 @@
 import type { SessionProjection, TokenUsage } from "@polyth/contracts";
 import type { QuotaSnapshotDto, QuotaWindowDto } from "@polyth/session/web-api";
+import type {
+  UsageTelemetryConsumer,
+  UsageTelemetryDistribution,
+  UsageTelemetryDto,
+} from "../../src/telemetry.ts";
 import { getLocale } from "../../../../apps/web/src/i18n/index.ts";
 import {
   canonicalProviderId,
@@ -35,6 +40,16 @@ export interface UsageConsumerSummary {
   cost: number;
 }
 
+export interface UsagePerformanceSummary {
+  requests: number | null;
+  ttftMs: UsageTelemetryDistribution | null;
+  tokPerSec: UsageTelemetryDistribution | null;
+  durationMs: UsageTelemetryDistribution | null;
+  successRate: number | null;
+  errorRate: number | null;
+  interruptedRate: number | null;
+}
+
 export interface UsageProviderSummary {
   id: string;
   label: string;
@@ -45,6 +60,7 @@ export interface UsageProviderSummary {
   monthCost: number;
   tokenBreakdown: UsageTokenBreakdown;
   cacheHitPercent: number | null;
+  performance: UsagePerformanceSummary;
   trends: {
     sessions: UsageTrend | null;
     tokens: UsageTrend | null;
@@ -81,6 +97,18 @@ export interface UsageDimensionSeries {
   sessions: UsageChartSeries[];
 }
 
+export interface UsageNullableChartSeries {
+  id: string;
+  label: string;
+  values: Array<number | null>;
+}
+
+export interface UsagePerformanceDimensionSeries {
+  ttft: UsageNullableChartSeries[];
+  tps: UsageNullableChartSeries[];
+  errors: UsageChartSeries[];
+}
+
 export interface UsageDashboardData {
   rangeDays: number;
   rangeStart: number;
@@ -100,6 +128,9 @@ export interface UsageDashboardData {
     cost: UsageTrend | null;
     averageCostPerThousand: UsageTrend | null;
   };
+  performance: UsagePerformanceSummary;
+  source: "events" | "projections";
+  partial: boolean;
   providers: UsageProviderSummary[];
   models: UsageModelSummary[];
   consumers: Record<UsageDimension, UsageConsumerSummary[]>;
@@ -111,10 +142,22 @@ export interface UsageDashboardData {
     cost: UsageChartSeries[];
     sessions: UsageChartSeries[];
     byDimension: Record<UsageDimension, UsageDimensionSeries>;
+    performance: Record<UsageDimension, UsagePerformanceDimensionSeries>;
   };
 }
 
 const DAY_MS = 24 * 60 * 60_000;
+
+const EMPTY_PERFORMANCE: UsagePerformanceSummary = {
+  requests: null,
+  ttftMs: null,
+  tokPerSec: null,
+  durationMs: null,
+  successRate: null,
+  errorRate: null,
+  interruptedRate: null,
+};
+
 
 const finiteNonNegative = (value: number | undefined): number =>
   typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
@@ -373,6 +416,7 @@ export function buildUsageDashboardData(
       monthCost: providerMonth.reduce((sum, session) => sum + sessionCost(session), 0),
       tokenBreakdown: currentTotals.tokenBreakdown,
       cacheHitPercent: currentTotals.cacheHitPercent,
+      performance: EMPTY_PERFORMANCE,
       trends: {
         sessions: trendOf(currentTotals.sessions, previousProviderTotals.sessions),
         tokens: trendOf(currentTotals.tokens, previousProviderTotals.tokens),
@@ -455,6 +499,9 @@ export function buildUsageDashboardData(
       cost: trendOf(totals.cost, previousTotals.cost),
       averageCostPerThousand: trendOf(totals.averageCostPerThousand, previousTotals.averageCostPerThousand),
     },
+    performance: EMPTY_PERFORMANCE,
+    source: "projections",
+    partial: false,
     providers,
     models,
     consumers,
@@ -465,6 +512,193 @@ export function buildUsageDashboardData(
       cost: byDimension.provider.cost,
       sessions: byDimension.provider.sessions,
       byDimension,
+      performance: Object.fromEntries(dimensions.map((dimension) => [
+        dimension,
+        { ttft: [], tps: [], errors: [] },
+      ])) as Record<UsageDimension, UsagePerformanceDimensionSeries>,
+    },
+  };
+}
+
+
+const telemetryConsumer = (item: UsageTelemetryConsumer): UsageConsumerSummary => ({
+  id: item.id,
+  label: item.label,
+  sessions: item.sessions,
+  tokens: item.effectiveTokens,
+  cost: item.cost,
+});
+
+const telemetryPerformance = (
+  item: Pick<UsageTelemetryConsumer, "requests" | "ttftMs" | "tokPerSec" | "durationMs" | "successRate" | "errorRate" | "interruptedRate">,
+): UsagePerformanceSummary => ({
+  requests: item.requests,
+  ttftMs: item.ttftMs,
+  tokPerSec: item.tokPerSec,
+  durationMs: item.durationMs,
+  successRate: item.successRate,
+  errorRate: item.errorRate,
+  interruptedRate: item.interruptedRate,
+});
+
+/**
+ * Convert the server's event-derived, Space-wide aggregation into the existing
+ * dashboard view model. Quota snapshots remain a separate live provider feed.
+ */
+export function buildUsageDashboardDataFromTelemetry(
+  telemetry: UsageTelemetryDto,
+  snapshots: readonly QuotaSnapshotDto[],
+): UsageDashboardData {
+  const current = telemetry.current;
+  const previous = telemetry.previous;
+  const previousProviders = new Map(previous.providers.map((provider) => [provider.id, provider]));
+  const providers = new Map(current.providers.map((provider) => [provider.id, provider]));
+
+  // A provider can have a quota feed without any usage in the selected range.
+  for (const snapshot of snapshots) {
+    const id = quotaProviderId(snapshot.providerId);
+    if (!id || providers.has(id)) continue;
+    providers.set(id, {
+      id,
+      label: displayProvider(id),
+      sessions: 0,
+      requests: 0,
+      effectiveTokens: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
+      cost: 0,
+      cacheHitPercent: null,
+      ttftMs: null,
+      tokPerSec: null,
+      durationMs: null,
+      successRate: null,
+      errorRate: null,
+      interruptedRate: null,
+      models: [],
+      harnesses: [],
+      projects: [],
+    });
+  }
+
+  const providerRows: UsageProviderSummary[] = [...providers.values()].map((provider) => {
+    const snapshot = snapshots.find((item) => quotaProviderId(item.providerId) === provider.id);
+    const quotaWindow = primaryQuotaWindow(snapshot);
+    const quotaUsedPercent = quotaWindow && quotaWindow.limit > 0
+      ? Math.round(Math.min(1, Math.max(0, quotaWindow.used / quotaWindow.limit)) * 100)
+      : null;
+    const before = previousProviders.get(provider.id);
+    return {
+      id: provider.id,
+      label: provider.label,
+      sessions: provider.sessions,
+      tokens: provider.effectiveTokens,
+      cost: provider.cost,
+      monthCost: telemetry.monthCostByProvider[provider.id] ?? 0,
+      tokenBreakdown: { ...provider.tokens },
+      cacheHitPercent: provider.cacheHitPercent,
+      performance: telemetryPerformance(provider),
+      trends: {
+        sessions: trendOf(provider.sessions, before?.sessions ?? 0),
+        tokens: trendOf(provider.effectiveTokens, before?.effectiveTokens ?? 0),
+        cost: trendOf(provider.cost, before?.cost ?? 0),
+      },
+      ...(snapshot ? { snapshot } : {}),
+      ...(quotaWindow ? { quotaWindow } : {}),
+      quotaUsedPercent,
+      remainingPercent: quotaUsedPercent === null ? null : 100 - quotaUsedPercent,
+      stale: snapshot?.stale ?? false,
+      composition: {
+        models: provider.models.map(telemetryConsumer),
+        harnesses: provider.harnesses.map(telemetryConsumer),
+        projects: provider.projects.map(telemetryConsumer),
+      },
+    };
+  }).sort((a, b) =>
+    b.cost - a.cost || b.tokens - a.tokens || b.sessions - a.sessions || a.label.localeCompare(b.label));
+
+  const consumers = Object.fromEntries(
+    (["provider", "model", "harness", "project"] as UsageDimension[]).map((dimension) => [
+      dimension,
+      telemetry.current.consumers[dimension].map(telemetryConsumer),
+    ]),
+  ) as Record<UsageDimension, UsageConsumerSummary[]>;
+
+  const models: UsageModelSummary[] = telemetry.current.consumers.model.map((model) => {
+    const slash = model.id.indexOf("/");
+    const providerId = slash >= 0 ? model.id.slice(0, slash) : "";
+    return {
+      ...telemetryConsumer(model),
+      providerId,
+      providerLabel: providerId ? displayProvider(providerId) : "",
+    };
+  });
+
+  const dimensions: UsageDimension[] = ["provider", "model", "harness", "project"];
+  const byDimension = Object.fromEntries(dimensions.map((dimension) => {
+    const rows = telemetry.chart.byDimension[dimension];
+    return [dimension, {
+      tokens: rows.map((row) => ({ id: row.id, label: row.label, values: row.tokens })),
+      cost: rows.map((row) => ({ id: row.id, label: row.label, values: row.cost })),
+      sessions: rows.map((row) => ({ id: row.id, label: row.label, values: row.sessions })),
+    }];
+  })) as Record<UsageDimension, UsageDimensionSeries>;
+
+  const performance = Object.fromEntries(dimensions.map((dimension) => {
+    const rows = telemetry.chart.byDimension[dimension];
+    return [dimension, {
+      ttft: rows.map((row) => ({ id: row.id, label: row.label, values: row.ttftMs })),
+      tps: rows.map((row) => ({ id: row.id, label: row.label, values: row.tokPerSec })),
+      errors: rows.map((row) => ({ id: row.id, label: row.label, values: row.errors })),
+    }];
+  })) as Record<UsageDimension, UsagePerformanceDimensionSeries>;
+
+  const currentAvg = current.totals.effectiveTokens > 0
+    ? current.totals.cost / current.totals.effectiveTokens * 1_000
+    : 0;
+  const previousAvg = previous.totals.effectiveTokens > 0
+    ? previous.totals.cost / previous.totals.effectiveTokens * 1_000
+    : 0;
+
+  return {
+    rangeDays: Math.max(1, Math.ceil((telemetry.end - telemetry.start) / DAY_MS)),
+    rangeStart: telemetry.start,
+    rangeEnd: telemetry.end,
+    totals: {
+      sessions: current.totals.sessions,
+      tokens: current.totals.effectiveTokens,
+      cacheRead: current.totals.tokens.cacheRead,
+      cacheHitPercent: current.totals.cacheHitPercent,
+      cost: current.totals.cost,
+      averageCostPerThousand: currentAvg,
+      tokenBreakdown: { ...current.totals.tokens },
+    },
+    trends: {
+      sessions: trendOf(current.totals.sessions, previous.totals.sessions),
+      tokens: trendOf(current.totals.effectiveTokens, previous.totals.effectiveTokens),
+      cost: trendOf(current.totals.cost, previous.totals.cost),
+      averageCostPerThousand: trendOf(currentAvg, previousAvg),
+    },
+    performance: {
+      requests: current.totals.requests,
+      ttftMs: current.totals.ttftMs,
+      tokPerSec: current.totals.tokPerSec,
+      durationMs: current.totals.durationMs,
+      successRate: current.totals.successRate,
+      errorRate: current.totals.errorRate,
+      interruptedRate: current.totals.interruptedRate,
+    },
+    source: "events",
+    partial: telemetry.partial,
+    providers: providerRows,
+    models,
+    consumers,
+    chart: {
+      labels: telemetry.chart.bucketStarts.map((start) => bucketLabel(start, start + telemetry.chart.bucketMs)),
+      bucketHours: telemetry.chart.bucketMs / (60 * 60_000),
+      tokens: byDimension.provider.tokens,
+      cost: byDimension.provider.cost,
+      sessions: byDimension.provider.sessions,
+      byDimension,
+      performance,
     },
   };
 }
