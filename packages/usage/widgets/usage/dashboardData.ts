@@ -4,6 +4,7 @@ import type {
   UsageTelemetryConsumer,
   UsageTelemetryDistribution,
   UsageTelemetryDto,
+  type UsageCostQuality,
 } from "../../src/telemetry.ts";
 import { getLocale } from "../../../../apps/web/src/i18n/index.ts";
 import {
@@ -38,6 +39,7 @@ export interface UsageConsumerSummary {
   sessions: number;
   tokens: number;
   cost: number;
+  tokenBreakdown: UsageTokenBreakdown;
 }
 
 export interface UsagePerformanceSummary {
@@ -56,6 +58,7 @@ export interface UsageProviderSummary {
   sessions: number;
   tokens: number;
   cost: number;
+  costQuality: UsageCostQuality;
   /** Calendar-month recorded API/equivalent spend, independent of selected range. */
   monthCost: number;
   tokenBreakdown: UsageTokenBreakdown;
@@ -345,10 +348,12 @@ const summarizeDimension = (
       sessions: 0,
       tokens: 0,
       cost: 0,
+      tokenBreakdown: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
     };
     summary.sessions += 1;
     summary.tokens += sessionTokens(session);
     summary.cost += sessionCost(session);
+    summary.tokenBreakdown = addTokenBreakdown(summary.tokenBreakdown, tokenBreakdown(session.tokenTotals));
     summaries.set(identity.id, summary);
   }
   return [...summaries.values()].sort((a, b) =>
@@ -413,6 +418,7 @@ export function buildUsageDashboardData(
       sessions: currentTotals.sessions,
       tokens: currentTotals.tokens,
       cost: currentTotals.cost,
+      costQuality: null,
       monthCost: providerMonth.reduce((sum, session) => sum + sessionCost(session), 0),
       tokenBreakdown: currentTotals.tokenBreakdown,
       cacheHitPercent: currentTotals.cacheHitPercent,
@@ -527,6 +533,7 @@ const telemetryConsumer = (item: UsageTelemetryConsumer): UsageConsumerSummary =
   sessions: item.sessions,
   tokens: item.effectiveTokens,
   cost: item.cost,
+  tokenBreakdown: { ...item.tokens },
 });
 
 const telemetryPerformance = (
@@ -566,6 +573,7 @@ export function buildUsageDashboardDataFromTelemetry(
       effectiveTokens: 0,
       tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
       cost: 0,
+      costQuality: null,
       cacheHitPercent: null,
       ttftMs: null,
       tokPerSec: null,
@@ -592,6 +600,7 @@ export function buildUsageDashboardDataFromTelemetry(
       sessions: provider.sessions,
       tokens: provider.effectiveTokens,
       cost: provider.cost,
+      costQuality: provider.costQuality,
       monthCost: telemetry.monthCostByProvider[provider.id] ?? 0,
       tokenBreakdown: { ...provider.tokens },
       cacheHitPercent: provider.cacheHitPercent,
