@@ -10,6 +10,8 @@ export type UsageAnalyticsMetric =
   | "turnDurationMs"
   | "modelTimeMs"
   | "toolTimeMs"
+  | "contextUsedTokens"
+  | "contextPercent"
   | "successRate"
   | "errorRate"
   | "turns"
@@ -98,6 +100,8 @@ export interface UsageAnalyticsSummary {
   turnDurationMs: UsagePerformanceStats;
   modelTimeMs: UsagePerformanceStats;
   toolTimeMs: UsagePerformanceStats;
+  contextUsedTokens: UsagePerformanceStats;
+  contextPercent: UsagePerformanceStats;
 }
 
 export interface UsageAnalyticsGroupSummary extends UsageAnalyticsSummary {
