@@ -44,12 +44,16 @@ executable probe because installation is not proof of a valid Google session.
 ## Models, thinking and native sessions
 
 Model discovery uses the shared ACP session metadata/config-option mechanism.
-Gemini's model selector and dependent thinking controls therefore flow into the
-normal Polyth model picker without a static guessed catalog.
+Current Gemini ACP returns the legacy standardized `models` block, so the
+normal Polyth model picker gets the live native model catalog without a static
+guessed list.
 
-Model and thinking selections are session-scoped and applied through ACP config
-options. Unsupported native controls remain unsupported rather than being
-encoded into prompts.
+Model selection is session-scoped and applied through ACP's native model
+control. Current Gemini ACP does **not** publish a separate thinking-effort
+selector, so Polyth does not invent Gemini thinking variants or encode an
+unverified effort value into prompts. If Gemini later publishes a semantic
+`thought_level` config option, the shared ACP parser can expose it without a
+Gemini-specific static catalog.
 
 Gemini ACP advertises native session loading. Polyth reattaches only by the exact
 persisted native session id; titles, timestamps and transcript similarity are
@@ -128,6 +132,17 @@ Shared ACP normalization maps:
 
 Private thought content is not promoted into canonical dialogue.
 
+Gemini also publishes native slash commands through ACP
+`available_commands_update`. The shared ACP command registry exposes those as
+session-scoped native commands and invokes them through raw native input rather
+than reimplementing Gemini command semantics.
+
+Gemini ACP publishes native approval/session modes as well. Polyth deliberately
+does not present those as a second permission-policy system: canonical Polyth
+permission decisions remain authoritative and ACP permission requests are
+bridged explicitly. A future dedicated read-only planning control may map a
+verified Gemini mode, but no mode is silently selected today.
+
 ## Usage
 
 Gemini exposes stronger evidence than baseline ACP. A successful
@@ -194,7 +209,7 @@ No extra Gemini-only attachment guess is added.
 | Streaming | yes, ACP |
 | Exact native load/resume | yes when advertised by Gemini ACP |
 | Model discovery/selection | yes, ACP session config |
-| Thinking selection | when exposed by the selected model's ACP config |
+| Thinking selection | not currently exposed by Gemini ACP; no guessed variants |
 | Native permissions | yes, ACP permission bridge |
 | Polyth instructions/context | yes, prompt projection |
 | Polyth skills | yes, prompt projection |
@@ -202,6 +217,8 @@ No extra Gemini-only attachment guess is added.
 | MCP | yes, negotiated ACP session config |
 | Polyth package tools | yes, through `polyth-agent-tools` MCP |
 | Tool lifecycle | yes, ACP tool updates |
+| Native slash commands | yes, ACP command discovery/raw native invocation |
+| Native approval modes | observed but not exposed as a competing Polyth policy control |
 | Token usage | yes, Gemini prompt quota metadata |
 | Cost | no verified source |
 | Context occupancy | unknown |
@@ -219,6 +236,7 @@ The package has model-free contract tests for:
 - `--acp` compatibility detection;
 - Gemini quota metadata to canonical usage;
 - structural 429 normalization;
+- non-success native stop reasons (`max_tokens`, `max_turn_requests`);
 - replay vs tool-safe continuation strategy;
 - prompt/skill/context projection;
 - `polyth-agent-tools` MCP projection without prompt-secret leakage;
