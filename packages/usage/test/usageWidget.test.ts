@@ -10,10 +10,11 @@ register("./tsxHooks.mjs", import.meta.url);
 const { SessionUsageStats } = await import("../widgets/usagePlugin.tsx");
 const { formatQuotaReset } = await import("../widgets/usage/UsageDashboard.tsx");
 
-test("quota reset labels interpolate the formatted reset time", () => {
-  const label = formatQuotaReset(Date.UTC(2027, 0, 1));
-  assert.match(label, /^Resets /);
-  assert.doesNotMatch(label, /\{value\}/);
+test("quota reset labels are compact and relative", () => {
+  const now = Date.UTC(2027, 0, 1);
+  assert.equal(formatQuotaReset(now + 4 * 60 * 60_000, now), "resets 4h");
+  assert.equal(formatQuotaReset(now + (2 * 24 + 6) * 60 * 60_000, now), "resets 2d 6h");
+  assert.equal(formatQuotaReset(now - 1, now), "resets now");
 });
 
 test("session usage renderer shows context percentage and all default metrics", () => {
