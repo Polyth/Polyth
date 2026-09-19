@@ -70,8 +70,23 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
+      - name: Validate release inputs
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.publish_npm }}" = "true" ] && [ "${{ inputs.npm_packages }}" != "true" ]; then
+            echo "publish_npm=true requires npm_packages=true" >&2
+            exit 1
+          fi
+          if [ "${{ inputs.play_track }}" != "none" ] && [ "${{ inputs.android }}" != "true" ]; then
+            echo "play_track requires android=true" >&2
+            exit 1
+          fi
+
       - name: Install workspace dependencies
         run: npm ci --no-audit --no-fund
+
+      - name: Run deterministic release quality gate
+        run: node scripts/ci/release-quality.mjs
 
       - id: release
         name: Resolve aligned release version
@@ -431,6 +446,16 @@ jobs:
             apps/mobile/android/app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
 
+      - name: Require Google Play credentials
+        if: inputs.play_track != 'none'
+        env:
+          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          test -n "$GOOGLE_PLAY_SERVICE_ACCOUNT_JSON" || {
+            echo "GOOGLE_PLAY_SERVICE_ACCOUNT_JSON is required when play_track != none" >&2
+            exit 1
+          }
+
       - name: Publish AAB to Google Play
         if: inputs.play_track != 'none'
         uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5
@@ -521,7 +546,7 @@ jobs:
         run: |
           set -euo pipefail
           find release-assets -maxdepth 1 -type f -printf '%f\n' | sort
-          for NAME in latest.yml latest-arm64.yml latest-mac.yml latest-linux.yml; do
+          for NAME in latest.yml latest-arm64.yml latest-mac.yml latest-linux.yml latest-linux-arm64.yml; do
             test -f "release-assets/$NAME" || { echo "Missing updater metadata: $NAME" >&2; exit 1; }
           done
           test -n "$(find release-assets -maxdepth 1 -name '*.dmg' -print -quit)"
