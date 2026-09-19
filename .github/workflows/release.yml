@@ -321,13 +321,13 @@ jobs:
       - name: Install Chromium for macOS x64
         run: npx playwright-core install chromium
         env:
-          PLAYWRIGHT_BROWSERS_PATH: 0
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-mac-x64
           PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac14
 
       - name: Install Chromium for macOS arm64
         run: npx playwright-core install chromium
         env:
-          PLAYWRIGHT_BROWSERS_PATH: 0
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-mac-x64
           PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac14-arm64
 
       - name: Install both esbuild binaries
@@ -345,7 +345,7 @@ jobs:
       - name: Stage Chromium for macOS x64
         run: npm run desktop:stage-chromium
         env:
-          PLAYWRIGHT_BROWSERS_PATH: 0
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-mac-x64
           PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac14
           POLYTH_TARGET_PLATFORM: darwin
           POLYTH_TARGET_ARCH: x64
@@ -353,7 +353,7 @@ jobs:
       - name: Stage Chromium for macOS arm64
         run: npm run desktop:stage-chromium
         env:
-          PLAYWRIGHT_BROWSERS_PATH: 0
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-mac-x64
           PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac14-arm64
           POLYTH_TARGET_PLATFORM: darwin
           POLYTH_TARGET_ARCH: arm64
