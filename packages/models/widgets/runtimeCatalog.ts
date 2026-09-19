@@ -38,6 +38,12 @@ const persistedRosters = createCatalogCache<HarnessRosterItem[]>(DAILY_CACHE_MS,
 const persistedGlobalModels = createCatalogCache<ModelDescriptor[]>(DAILY_CACHE_MS, 64, Date.now, persistentStorage("polyth.runtimeGlobalModels.v1"));
 const persistedGlobalAgents = createCatalogCache<AgentDescriptor[]>(DAILY_CACHE_MS, 64, Date.now, persistentStorage("polyth.runtimeGlobalAgents.v1"));
 const persistedWarmScopes = createCatalogCache<true>(DAILY_CACHE_MS, 64, Date.now, persistentStorage("polyth.runtimeWarmScopes.v1"));
+const persistedHarnessTopology = persistentStorage("polyth.runtimeHarnessTopology.v1");
+// Stored metadata that predates the topology recorded beside it has unproven
+// provenance: a harness package may have been added while this client was away.
+// Drop it here, at load, because the shell paints from these caches before the
+// package registry has finished syncing the real harness topology.
+if (persistedHarnessTopology.read() === null) clearPersistedCatalogs();
 let revision = 0;
 const listeners = new Set<() => void>();
 const invalidationListeners = new Set<() => void>();
@@ -56,15 +62,29 @@ export function resetRuntimeCatalogMemory(notify = true): void {
   revision++;
   if (notify) for (const listener of listeners) listener();
 }
-export function invalidateRuntimeCatalogs(notify = true): void {
+function clearPersistedCatalogs(): void {
   persistedCatalogs.clear();
   persistedHarnesses.clear();
   persistedRosters.clear();
   persistedGlobalModels.clear();
   persistedGlobalAgents.clear();
   persistedWarmScopes.clear();
+}
+export function invalidateRuntimeCatalogs(notify = true): void {
+  clearPersistedCatalogs();
   for (const listener of invalidationListeners) listener();
   resetRuntimeCatalogMemory(notify);
+}
+/** Record the set of harness-owning packages the day-long metadata was stored
+ * under, and drop that metadata when the set has changed. The package registry's
+ * in-memory baseline only sees transitions within one page, so a harness
+ * installed while this client was away stayed invisible until the stored copies
+ * aged out. An absent record is handled at load, not here. */
+export function reconcileHarnessTopology(fingerprint: string): void {
+  const previous = persistedHarnessTopology.read();
+  if (previous === fingerprint) return;
+  persistedHarnessTopology.write(fingerprint);
+  if (previous !== null) invalidateRuntimeCatalogs();
 }
 type SnapshotRequest = { projectId?: string | null; spaceId?: string; cwd?: string; harnessId?: string; force?: boolean; detail?: boolean };
 const snapshotRequestKey = (options: SnapshotRequest) => JSON.stringify([

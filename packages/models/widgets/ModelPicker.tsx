@@ -771,7 +771,7 @@ export default function ModelPicker({
                 <Button
                   size="sm"
                   variant="ghost"
-                  pressed={editing}
+                  aria-pressed={editing}
                   onClick={() => setEditing((current) => !current)}
                 >
                   {editing ? tr("common.done") : tr("common.edit")}

@@ -32,12 +32,20 @@ globalThis.fetch = async (input) => {
 };
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
+// Seeded before the catalog module loads: a stored roster from a client that
+// never recorded which harness packages produced it.
+const { accountStorageKey, activeBrowserAccountId } = await import("@polyth/web/account-storage");
+const unprovenRosterKey = accountStorageKey("polyth.runtimeRosters.v1", activeBrowserAccountId());
+localStorage.setItem(unprovenRosterKey, JSON.stringify(
+  [[JSON.stringify([activeBrowserAccountId(), "page", "unproven"]), { value: roster, expiresAt: Date.now() + 60_000 }]],
+));
 const {
   invalidateRuntimeCatalogs,
   peekHarnessSnapshots,
   preloadRuntimeCatalogs,
   readHarnessRoster,
   readHarnessSnapshots,
+  reconcileHarnessTopology,
   resetRuntimeCatalogMemory,
   useRuntimeCatalog,
 } = await import("../widgets/runtimeCatalog.ts");
@@ -49,6 +57,10 @@ const snapshot = (harnessId: string, modelID: string, projectId = "p", spaceId =
   catalog: { models: [{ harnessId, providerID: "native", modelID, name: modelID }] },
   context: { projectId, spaceId, cwd, revision: "1", fetchedAt: 1 },
 }];
+
+test("stored metadata with no recorded harness topology is dropped before the shell can paint it", () => {
+  assert.equal(localStorage.getItem(unprovenRosterKey), null);
+});
 
 test("first mount paints cached harness snapshots while detail discovery is still pending", async (t) => {
   invalidateRuntimeCatalogs();
@@ -358,4 +370,25 @@ test("forced cheap snapshots seed the new revision before subscribers can refill
   assert.equal(cached[0]?.identity.name, "Cursor-v2");
   assert.equal(requests.length, count);
   cheapSnapshots = [];
+});
+
+test("a harness package installed between page loads drops the persisted roster", async () => {
+  invalidateRuntimeCatalogs();
+  const scope = { projectId: "topology", spaceId: "space-a" };
+  const before = JSON.stringify([["backend-codex", true]]);
+  const after = JSON.stringify([["backend-antigravity", true], ["backend-codex", true]]);
+  reconcileHarnessTopology(before);
+  requests.length = 0;
+  await readHarnessRoster(scope);
+  assert.equal(requests.length, 1);
+
+  resetRuntimeCatalogMemory(false);
+  reconcileHarnessTopology(before);
+  await readHarnessRoster(scope);
+  assert.equal(requests.length, 1, "an unchanged harness topology keeps the day-long roster");
+
+  resetRuntimeCatalogMemory(false);
+  reconcileHarnessTopology(after);
+  await readHarnessRoster(scope);
+  assert.equal(requests.length, 2, "a harness added while the client was away must force a fresh roster");
 });

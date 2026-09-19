@@ -2,7 +2,7 @@
 // Status is derived (Ready / Needs setup / Disabled) and is never
 // the same thing as the enable toggle. Model search is local to a card.
 import { useEffect, useMemo, useState } from "react";
-import { deriveProviderStatus, filterProviderModels, isFavorite, modelKey, orderProviders } from "@polyth/models";
+import { deriveProviderStatus, filterProviderModels, isFavorite, modelKey, orderProviders, providerPreferenceKey } from "@polyth/models";
 import { createApiTransport } from "@polyth/web-sdk";
 import {
   reorderModelProviders,
@@ -319,7 +319,9 @@ export default function ModelsPage() {
       <div className="provider-list">
         {shown.map((p, index) => {
           const enabledCount = p.models.filter((m) => m.enabled).length;
-          const expanded = prefs.expandedProviders.includes(p.id);
+          // Stored keys are harness-qualified; this page is OpenCode's catalog,
+          // which is what the unqualified writer below resolves to.
+          const expanded = prefs.expandedProviders.includes(providerPreferenceKey(undefined, p.id));
           const status = statusLabel(p.status);
           const query = modelQuery[p.id] ?? "";
           const visibleModels = filterProviderModels(p.models, query);

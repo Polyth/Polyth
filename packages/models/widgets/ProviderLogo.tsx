@@ -13,7 +13,7 @@ const PROVIDERS = [
   ["azure", ["azure"]],
   ["openai", ["openai", "chatgpt", "gpt", "codex"]],
   ["vertex", ["vertex"]],
-  ["gemini", ["gemini", "google"]],
+  ["gemini", ["gemini", "google", "antigravity"]],
   ["copilot", ["copilot", "github"]],
   ["xai", ["xai", "grok"]],
   ["groq", ["groq"]],

@@ -1,5 +1,5 @@
 import { api } from "@polyth/session/web-api";
-import { invalidateRuntimeCatalogs } from "@polyth/models/runtime-catalog";
+import { invalidateRuntimeCatalogs, reconcileHarnessTopology } from "@polyth/models/runtime-catalog";
 import { installIntegrationsPackage } from "./integrations.ts";
 import { installMcpPackage } from "./mcp.ts";
 import { configurePackageReconcile, reconcilePackage } from "./reconcile.ts";
@@ -225,6 +225,12 @@ async function syncPackages(): Promise<void> {
       || [...nextHarnessStates].some(([id, value]) => previousHarnessStates.get(id) !== value));
   harnessTopologySynced = true;
   if (harnessTopologyChanged) invalidateRuntimeCatalogs();
+  // The baseline above only covers this page's lifetime. A harness package
+  // added between page loads is only visible against the topology recorded
+  // next to the persisted catalogs.
+  reconcileHarnessTopology(JSON.stringify([...nextHarnessStates].toSorted(
+    ([left], [right]) => left.localeCompare(right),
+  )));
 
   const ids = knownCanonicalIds();
   for (const id of ids) refreshDesired(id);
