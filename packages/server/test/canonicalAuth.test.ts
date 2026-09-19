@@ -82,13 +82,18 @@ test("debug agent access is explicit and restricted to direct public loopback in
   );
 
   f.control.transaction(() => {
+    f.control.run("INSERT INTO principals(id,kind,status) VALUES('usr_backup','user','active')");
+    f.control.run("INSERT INTO users(id,display_name,created_at_ms,updated_at_ms) VALUES('usr_backup','Backup',0,0)");
+    f.control.run("INSERT INTO instance_roles(user_id,role) VALUES('usr_backup','owner')");
     f.control.run(
       "UPDATE principals SET status='suspended',auth_epoch=auth_epoch+1 WHERE id=?",
       f.owner.userId,
     );
   });
   assert.equal(f.gateway.refreshPrincipal(local.principal), null);
-  assert.equal(f.gateway.resolve(f.request(), loopback).authenticated, false);
+  const rebound = f.gateway.resolve(f.request(), loopback);
+  assert.equal(rebound.authenticated, true);
+  assert.equal((rebound.principal as AuthPrincipal & { userId?: string }).userId, "usr_backup");
 });
 
 test("bound UI principal is invalidated by logout without caching authority", async t => {
