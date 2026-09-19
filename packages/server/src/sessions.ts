@@ -2582,14 +2582,33 @@ export function createSessionService(deps: {
   ) => {
     const last = lastUserMessage(events);
     if (!last) return undefined;
-    const previous = (await store.projection(sessionId))?.resume;
+    const projectionResume = (await store.projection(sessionId))?.resume;
+    const previousAutoResume = [...events].reverse().find((event) => {
+      if (event.type !== "user/message") return false;
+      const data = event.data as {
+        autoResume?: unknown;
+        autoResumeOwnerSeq?: unknown;
+        autoResumeAttempt?: unknown;
+      };
+      return data.autoResume === true
+        && data.autoResumeOwnerSeq === last.seq
+        && Number.isSafeInteger(data.autoResumeAttempt)
+        && Number(data.autoResumeAttempt) > 0;
+    });
+    const previousData = previousAutoResume?.data as {
+      autoResumeOwnerSeq?: unknown;
+      autoResumeAttempt?: unknown;
+    } | undefined;
+    const previous = projectionResume
+      ? { attempt: projectionResume.attempt, userMessageSeq: projectionResume.userMessageSeq }
+      : previousData
+        ? { attempt: Number(previousData.autoResumeAttempt), userMessageSeq: Number(previousData.autoResumeOwnerSeq) }
+        : undefined;
     return planResume({
       hint,
       userMessageSeq: last.seq,
       sessionId,
-      ...(previous
-        ? { previous: { attempt: previous.attempt, userMessageSeq: previous.userMessageSeq } }
-        : {}),
+      ...(previous ? { previous } : {}),
       now: Date.now(),
     }) ?? undefined;
   };
@@ -2950,14 +2969,11 @@ export function createSessionService(deps: {
             lastTurnId.set(sessionId, ev.turnId);
             admitting.delete(sessionId);
             turnReply.set(sessionId, new Map());
-            // A real new user intent supersedes a pending wait. An auto-resume
-            // keeps the durable plan while its retry is in flight so another
-            // provider-limit stop can advance the attempt/backoff instead of
-            // resetting to attempt 1.
-            const events = await store.events(sessionId);
-            const latestUser = [...events].reverse().find((event) => event.type === "user/message");
-            const autoResume = (latestUser?.data as { autoResume?: unknown } | undefined)?.autoResume === true;
-            if (!autoResume) await clearResume(sessionId, "resumed");
+            // turn/started proves the retry was admitted, so the pending
+            // timer is no longer live. Retry lineage/attempt is preserved on
+            // the hidden auto-resume user event instead of keeping a stale
+            // projection.resume that could be replayed blindly after a crash.
+            await clearResume(sessionId, "resumed");
           }
         }
         break;
@@ -4942,7 +4958,14 @@ export function createSessionService(deps: {
         ...(model ? { resolvedModel: model as unknown as JsonObject } : {}),
         ...(agent ? { resolvedAgent: agent } : {}),
       } : {}),
-      ...(input.autoResume === true ? { autoResume: true } : {}),
+      ...(input.autoResume === true ? {
+        autoResume: true,
+        ...(proj.resume ? {
+          autoResumeOwnerSeq: proj.resume.userMessageSeq,
+          autoResumeAttempt: proj.resume.attempt,
+          ...(proj.resume.resumeMode ? { autoResumeMode: proj.resume.resumeMode } : {}),
+        } : {}),
+      } : {}),
     };
     let operation = reserved?.operation;
     const existingEvents = reserved ? await store.events(sessionId) : [];
