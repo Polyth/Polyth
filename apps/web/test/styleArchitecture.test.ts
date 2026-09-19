@@ -184,3 +184,31 @@ test("tablet-class width is a container-query layout state, not a media pile", a
     "chat surfaces reserve a lane for the affordance so nothing renders beneath it",
   );
 });
+
+test("the canvas reserves the idle rail's lane at every desktop width", async () => {
+  const styles = await read("../src/styles.css");
+  // Several blocks share this query; take the one that owns the rail overlay.
+  const desktop = new RegExp(`@media \\(min-width: ${COMPACT_MAX_WIDTH + 1}px\\)\\s*\\{[\\s\\S]*?\\n\\}\\n`, "g");
+  const block = [...styles.matchAll(desktop)]
+    .map((match) => match[0])
+    .find((body) => body.includes(".widget-canvas-grid")) ?? "";
+
+  // The idle rail is `position: absolute` at the shell's inline end from this
+  // width up, and it now renders in Canvas as well as Chat. A full-bleed
+  // canvas must not put widgets (or the add-widget trigger) underneath it.
+  assert.match(
+    block,
+    /\.railbar\s*\{[^}]*position:\s*absolute[^}]*inset-inline-end:\s*0/s,
+    "the idle rail overlays the shell edge on desktop",
+  );
+  assert.match(
+    block,
+    /\.app-shell:not\(:has\(\.railbar-open\)\) \.widget-canvas-grid\s*\{[^}]*padding-inline-end:/,
+    "the canvas grid reserves the launcher lane",
+  );
+  assert.match(
+    block,
+    /\.app-shell:not\(:has\(\.railbar-open\)\) \.widget-menu-trigger\s*\{[^}]*right:/,
+    "the add-widget trigger clears the launcher lane",
+  );
+});

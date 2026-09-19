@@ -38,10 +38,13 @@ export default function Tabs({ tabs, value, onChange, label, idBase, size = "md"
     event.preventDefault();
     const enabled = tabs.filter((tab) => !tab.disabled);
     if (enabled.length === 0) return;
-    const current = Math.max(0, enabled.findIndex((tab) => tab.id === value));
+    const current = enabled.findIndex((tab) => tab.id === value);
     const next =
       event.key === "Home" ? 0
       : event.key === "End" ? enabled.length - 1
+      // An arrow key with the selection outside this strip enters at the first
+      // tab rather than skipping it.
+      : current < 0 ? 0
       : (current + (event.key === "ArrowRight" ? 1 : -1) + enabled.length) % enabled.length;
     const target = enabled[next]!;
     onChange(target.id);
@@ -49,6 +52,13 @@ export default function Tabs({ tabs, value, onChange, label, idBase, size = "md"
       ?.querySelector<HTMLElement>(`[id="${tabId(base, target.id)}"]`)
       ?.focus();
   };
+
+  // Roving tabindex needs exactly one entry point. When the current value is
+  // not one of these tabs — a strip that lists part of a larger set, or a
+  // surface whose selection is momentarily elsewhere — the first enabled tab
+  // holds it so the tablist never drops out of the keyboard order.
+  const selectedIndex = tabs.findIndex((tab) => tab.id === value && !tab.disabled);
+  const entryIndex = selectedIndex >= 0 ? selectedIndex : tabs.findIndex((tab) => !tab.disabled);
 
   return (
     <div
@@ -58,7 +68,7 @@ export default function Tabs({ tabs, value, onChange, label, idBase, size = "md"
       className={`ui-tabs ui-tabs--${size}${className ? ` ${className}` : ""}`}
       onKeyDown={onKeyDown}
     >
-      {tabs.map((tab) => {
+      {tabs.map((tab, index) => {
         const selected = tab.id === value;
         return (
           <button
@@ -68,7 +78,7 @@ export default function Tabs({ tabs, value, onChange, label, idBase, size = "md"
             id={tabId(base, tab.id)}
             aria-selected={selected}
             aria-controls={tabPanelId(base, tab.id)}
-            tabIndex={selected ? 0 : -1}
+            tabIndex={index === entryIndex ? 0 : -1}
             disabled={tab.disabled}
             className={`ui-tab${selected ? " ui-tab--selected" : ""}`}
             onClick={() => onChange(tab.id)}

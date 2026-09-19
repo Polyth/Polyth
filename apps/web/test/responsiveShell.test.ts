@@ -333,21 +333,35 @@ test("pending OpenCode changes render in the OpenCode Runtime detail", async () 
   assert.ok(!bootstrap.includes("installOpenCodeRestartControl"), "OpenCode restart is no longer installed into a global footer");
 });
 
-test("open rails remain visible in every workspace mode", async () => {
+test("rails remain visible in every workspace mode", async () => {
   const rail = await read("../src/components/ContextRail.tsx");
+  const header = await read("../src/components/Header.tsx");
   const css = await read("../src/styles.css");
   assert.ok(rail.includes('`railbar${open ? " railbar-open" : ""}${pinnedNarrow ? " railbar-pinned-narrow" : ""}${bottomDock ? " railbar-dock-bottom" : ""}`'), "the host marks an active surface");
-  assert.ok(
-    !css.includes(".app.view-session.mode-chat .railbar:not(.railbar-open)"),
-    "Chat keeps the inactive desktop rail available as a stable launcher",
-  );
-  for (const mode of ["widgets", "edit"]) {
+  // The rail is a shell launcher: Chat, Canvas, and Canvas edit mode all keep
+  // the same host, open or idle.
+  for (const mode of ["chat", "widgets", "edit"]) {
     assert.ok(
-      css.includes(`.app.view-session.mode-${mode} .railbar:not(.railbar-open)`),
-      `${mode} hides only an inactive rail host`,
+      !css.includes(`.app.view-session.mode-${mode} .railbar`),
+      `${mode} does not own a mode-specific rail host rule`,
+    );
+    assert.ok(
+      !css.includes(`.app.mode-${mode} .railbar`),
+      `${mode} does not hide the shell rail host`,
     );
   }
-  assert.ok(!/mode-chat \.railbar\s*[,{][^}]*display:\s*none/.test(css), "Chat never hides an active rail");
+  assert.ok(!/mode-\w+ \.railbar\s*[,{][^}]*display:\s*none/.test(css), "no workspace mode hides a rail");
+  // The top rail (built-in launchers plus the "app.header.center" widget area)
+  // is workspace chrome, not a chat decoration.
+  assert.ok(
+    !header.includes('workspaceMode === "chat" && !compact && <><span className="header-divider"'),
+    "the top rail is no longer gated on chat mode",
+  );
+  assert.match(
+    header,
+    /\{!compact && <><span className="header-divider" aria-hidden="true" \/><CapabilityNav \/><\/>\}/,
+    "every wide workspace mode renders the top rail",
+  );
   assert.match(css, /\.railbar:has\(\.rail-fullscreen\)\s*\{[^}]*position:\s*absolute[^}]*inset:\s*0[^}]*overflow:\s*visible/s,
     "fullscreen package panes escape the floating rail clipping context");
   assert.match(css, /\.railbar:has\(\.rail-fullscreen\)\s*>\s*\.rail-fullscreen\s*\{[^}]*position:\s*relative[^}]*flex:\s*1/s,

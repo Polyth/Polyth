@@ -116,3 +116,22 @@ test("background and glass controls are wired into Appearance and the held-Shift
     "runtime background changes keep both document-canvas tint and browser-owned chrome in sync");
   assert.doesNotMatch(styles, /prefers-reduced-motion:\s*no-preference[\s\S]{0,1200}data-glass/);
 });
+
+test("the widget canvas is a workspace surface, so the selected background reaches it", async () => {
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+
+  // The canvas used to paint its own tinted fill over the whole workspace,
+  // which hid every wallpaper behind it.
+  assert.match(
+    styles,
+    /html\[data-background\]:not\(\[data-background="none"\]\) \.widget-workspace\s*\{[^}]*background:\s*transparent;/s,
+    "a selected background is not covered by the canvas fill",
+  );
+  assert.match(
+    styles,
+    /html\[data-background\]:not\(\[data-background="none"\]\) \.widget-workspace:not\(\.editing\) \.widget-canvas-grid\s*\{[^}]*background-image:\s*none;/s,
+    "the alignment dot grid stays an editing aid instead of a texture over the image",
+  );
+  // Cards keep an opaque surface: content stays readable over any image.
+  assert.match(styles, /\.widget-card\s*\{[^}]*background:\s*var\(--elevated\)/s);
+});

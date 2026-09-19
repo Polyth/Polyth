@@ -682,11 +682,16 @@ export function moveWidgetToSlot(
     });
     if (zonesUnchanged && slotsUnchanged) return layout;
   }
+  // Arriving on the canvas from a slot area (or from being hidden) is an add:
+  // the widget takes the nearest free space at the top rather than keeping a
+  // placeholder position that overlaps whatever is already there.
+  const moved = { ...layout, zones, slotPlacements };
+  const position = zone === null || widgetZoneOf(layout, id) !== null
+    ? current.position
+    : topFreePosition(current.size, canvasOccupancy(moved, id));
   return {
-    ...layout,
-    zones,
-    slotPlacements,
-    widgets: { ...layout.widgets, [id]: { ...current, visible: true } },
+    ...moved,
+    widgets: { ...layout.widgets, [id]: { ...current, visible: true, position } },
   };
 }
 
@@ -700,6 +705,39 @@ export function moveWidget(
   return moveWidgetToSlot(layout, id, widgetSlotFromZone(zone), index, definition);
 }
 
+/** Widgets that actually occupy canvas cells: every visible instance placed in
+ *  a canvas zone, except `exceptId`. Slot-placed widgets (header clusters,
+ *  rail, composer rows) carry a placeholder position that means nothing on the
+ *  grid, so they must never be treated as occupied cells. */
+function canvasOccupancy(layout: WidgetLayout, exceptId: string): WidgetPlacement[] {
+  return [...new Set(WIDGET_ZONES.flatMap((zone) => layout.zones[zone]))]
+    .filter((instanceId) => instanceId !== exceptId && layout.widgets[instanceId]?.visible)
+    .map((instanceId) => layout.widgets[instanceId]!);
+}
+
+/** The topmost — then leftmost — free cell a widget of `size` fits in. Adding a
+ *  widget lands it in the first real gap, so it appears where the user is
+ *  already looking instead of below everything else on a scrolled canvas. */
+export function topFreePosition(
+  size: WidgetSize,
+  occupied: readonly WidgetPlacement[],
+): WidgetPosition {
+  const maxX = Math.max(0, 12 - size.w);
+  const bottom = occupied.reduce(
+    (lowest, placement) => Math.max(lowest, placement.position.y + placement.size.h),
+    0,
+  );
+  for (let y = 0; y <= bottom; y++) {
+    for (let x = 0; x <= maxX; x++) {
+      const position = { x, y };
+      const blocked = occupied.some((placement) =>
+        overlaps(position, size, placement.position, placement.size));
+      if (!blocked) return position;
+    }
+  }
+  return { x: 0, y: bottom };
+}
+
 export function setWidgetVisible(layout: WidgetLayout, id: string, visible: boolean): WidgetLayout {
   const current = layout.widgets[id];
   if (!current || current.visible === visible) return layout;
@@ -707,19 +745,12 @@ export function setWidgetVisible(layout: WidgetLayout, id: string, visible: bool
   if (!visible) {
     return { ...layout, widgets: { ...layout.widgets, [id]: { ...current, visible: false } } };
   }
-  const others = Object.entries(layout.widgets)
-    .filter(([otherId, placement]) => otherId !== id && placement.visible);
-  const collides = others.some(([, placement]) =>
-    overlaps(current.position, current.size, placement.position, placement.size));
-  const position = collides
-    ? {
-        x: 0,
-        y: others.reduce(
-          (bottom, [, placement]) => Math.max(bottom, placement.position.y + placement.size.h),
-          0,
-        ),
-      }
-    : current.position;
+  // Revealing a widget is the canvas's only "add" gesture, so it always lands
+  // at the nearest free space at the top of the grid. Widgets that live in a
+  // slot instead of a canvas zone have no grid geometry to recompute.
+  const position = widgetZoneOf(layout, id) === null
+    ? current.position
+    : topFreePosition(current.size, canvasOccupancy(layout, id));
   return {
     ...layout,
     widgets: { ...layout.widgets, [id]: { ...current, visible: true, position } },

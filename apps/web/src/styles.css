@@ -5220,6 +5220,22 @@ color: var(--text-dim);
 .widget-card.editing .widget-resize-handle { display: grid; place-items: center; }
 .widget-chat { min-height: 0; flex: 1; display: flex; flex-direction: column; }
 .widget-chat-empty { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--space-3); padding: var(--space-4); overflow: auto; text-align: center; color: var(--muted); }
+/* Session switcher inside the conversation widget: the canvas has no session
+   sidebar, so the widget carries its own strip of the project's sessions. */
+.widget-chat-tabs {
+  flex: none; min-width: 0; display: flex; align-items: center; gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border-soft);
+}
+/* Hug the tabs, shrink (and scroll inside the pill) only when the widget is
+   too narrow for them; "More" keeps the end of the row. */
+.widget-chat-tablist { flex: 0 1 auto; min-width: 0; margin-inline-end: auto; }
+.widget-chat-tablist .ui-tab { min-width: 0; display: inline-flex; align-items: center; gap: var(--space-1); }
+.widget-chat-tab-title { min-width: 0; max-width: 20ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.widget-chat-tab-status { flex: none; display: inline-grid; place-items: center; color: var(--muted); font-size: var(--font-meta); }
+.widget-chat-tab-status.needs-approval, .widget-chat-tab-status.needs-reply { color: var(--amber-on-wash); }
+.widget-chat-tab-status.failed { color: var(--red); }
+.widget-chat-tabs-more { flex: none; }
 .widget-quick-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px; }
 .widget-quick-actions button { padding: 5px 9px; font-size: var(--font-meta); }
 .widget-empty { margin: auto; padding: 20px; color: var(--muted); font-size: 12px; }
@@ -5554,8 +5570,8 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .app .workspace { background: var(--bg); }
 .app.view-session .statusbar { display: none; }
 .app.view-session .statusbar:has(.sb-workflow) { display: flex; }
-.app.view-session.mode-widgets .railbar:not(.railbar-open),
-.app.view-session.mode-edit .railbar:not(.railbar-open) { display: none; }
+/* The right rail is a shell launcher, not a chat decoration: Canvas and its
+   edit mode keep the same rail host every other workspace mode shows. */
 
 .turn-rate-limit {
   width: min(var(--chat-measure), 100%); margin-inline: auto;
@@ -6664,7 +6680,6 @@ min-width: 0;
 
 
 /* Focus/canvas workspace overhaul. */
-.app.mode-widgets .railbar:not(.railbar-open) { display: none; }
 
 .copy-btn svg,
 .msg-actions svg,
@@ -12860,6 +12875,17 @@ html[data-font] body :is(
     z-index: 2;
     margin-inline-end: 0;
   }
+  /* An idle rail is an overlay at the shell's inline end, and it shows in
+     every workspace mode. Chat clears it through its measure-centred frame;
+     the full-bleed Canvas reserves the same lane explicitly, for its widgets
+     and for the add-widget trigger. An open pane returns to flow (pinned) or
+     owns the overlay itself (dynamic), so neither reserves anything here. */
+  .app-shell:not(:has(.railbar-open)) .widget-canvas-grid {
+    padding-inline-end: calc(18px + var(--control-h-sm) + var(--space-5));
+  }
+  .app-shell:not(:has(.railbar-open)) .widget-menu-trigger {
+    right: calc(18px + var(--control-h-sm) + var(--space-5));
+  }
   /* Fullscreen is shared by every workspace package. Escape the floating
      rail's clipping/blur containing block, then let the pane and launcher
      strip fill the viewport as normal flex siblings. */
@@ -13662,6 +13688,14 @@ html:has(body.desktop-app)[data-background]:not([data-background="none"]) .app {
   background-size: cover;
 }
 html[data-background]:not([data-background="none"]) .stage::before { background: transparent; }
+/* The canvas is a workspace surface like the chat stage, so the selected
+   wallpaper reaches it too: the tinted canvas fill steps aside and the
+   alignment dot grid stays an editing aid instead of a permanent texture
+   printed over the user's image. Widget cards keep their own surface. */
+html[data-background]:not([data-background="none"]) .widget-workspace { background: transparent; }
+html[data-background]:not([data-background="none"]) .widget-workspace:not(.editing) .widget-canvas-grid {
+  background-image: none;
+}
 html[data-background]:not([data-background="none"]) .rail.rail-workspace:not(.rail-fullscreen) {
   background: color-mix(in srgb, var(--panel) 92%, transparent);
 }

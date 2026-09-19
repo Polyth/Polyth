@@ -232,6 +232,28 @@ export default defineWebPackage((host) => () => {
   correctly in its context (a session-scoped widget must handle `null`
   project/session in workspace slots).
 
+### The Canvas is a workspace surface, not a separate app
+
+`workspaceMode` (`chat` | `widgets` | `edit`) swaps the **main surface only**.
+Shell chrome is identical in all three:
+
+- the header top rail (built-in capability launchers plus the
+  `app.header.center` widget area) renders in every wide workspace mode;
+- the right rail (`workspace.rail` plus its built-in launchers) is never
+  hidden by workspace mode — opening a tool from either rail docks a pane
+  beside the Canvas instead of replacing it;
+- the user's selected workspace background (`appearance.background`) paints
+  behind the Canvas exactly as it does behind Chat. The Canvas adds no opaque
+  fill; the alignment dot grid appears over an image only while editing.
+  Widget cards keep their own opaque surface so content stays readable.
+
+The Canvas has no session sidebar, so the built-in conversation widget
+(`core.chat`) carries its own session switcher: the project's most recent
+sessions as tabs, `CHAT_SESSION_TAB_PAGE` (5) at a time with the rest behind
+one control. A tab activates the canonical session
+(`openSession(id, { showChat: false })`) — every session-scoped widget on the
+Canvas follows, and the workspace stays on Canvas.
+
 ## 9. Sizing
 
 - Grid cells (`w`×`h`). Provide sensible `defaultSize`/`recommendedSize` and
@@ -249,6 +271,15 @@ export default defineWebPackage((host) => () => {
   set `duplicatable: false`.
 - `defaultVisible` controls first placement; `requiredVisible` forces
   visibility (users may relocate, not hide).
+- Revealing a widget is the canvas's only "add" gesture, so it always lands
+  at the **nearest free space at the top** of the grid — the first gap that
+  fits, scanning rows top-down and then left-to-right
+  (`topFreePosition` in `widgetLayout.ts`). The same re-homing applies when a
+  widget is moved onto the canvas from a shell slot. Only widgets that hold
+  canvas cells count as occupied: a visible mini-widget in `app.header.center`
+  or `workspace.rail` carries a placeholder position and never blocks the
+  grid. Duplicating keeps its anchor below the source instead, because the
+  user picked that spot.
 - `audience`/`showIn` gate placement per workspace audience; the host
   derives the allowlist (`showIn` defaults to `audience` and above).
 

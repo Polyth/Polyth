@@ -401,7 +401,10 @@ export default function Header() {
             <button className={workspaceMode === "widgets" ? "active" : ""} aria-pressed={workspaceMode === "widgets"} onClick={() => switchWorkspaceMode("widgets")}>{tr("header.canvas")}</button>
             <button className={workspaceMode === "edit" ? "active" : ""} aria-pressed={workspaceMode === "edit"} onClick={() => switchWorkspaceMode(workspaceMode === "edit" ? "widgets" : "edit")}>{workspaceMode === "edit" ? tr("common.done") : tr("common.edit")}</button>
           </div>}
-          {workspaceMode === "chat" && !compact && <><span className="header-divider" aria-hidden="true" /><CapabilityNav /></>}
+          {/* The top rail launches workspace tools, which are workspace-wide,
+              not chat-only. Canvas and its edit mode keep the same rail (and
+              the "app.header.center" widget area inside it) that Chat shows. */}
+          {!compact && <><span className="header-divider" aria-hidden="true" /><CapabilityNav /></>}
         </div>
         {session && <DesktopSessionStatus showTrigger={showSessionStatus} trailing={sessionStatusContribution} />}
         <span className="header-spacer" />

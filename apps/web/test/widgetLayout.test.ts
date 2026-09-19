@@ -37,6 +37,9 @@ test("dragged widgets displace collisions and resting widgets snap back", () => 
   let layout = createDefaultWidgetLayout(definitions);
   layout = setWidgetVisible(layout, "a", true);
   layout = setWidgetVisible(layout, "b", true);
+  // Adding lands b beside a on the top row; this case is about dragging it
+  // onto an occupied cell, so stack the two first.
+  layout = setWidgetPosition(layout, "b", { x: 0, y: 3 });
   const moved = setWidgetPosition(layout, "b", { x: 0, y: 0 }, layout);
   assert.deepEqual(moved.widgets.a?.position, { x: 0, y: 3 });
   assert.deepEqual(moved.widgets.b?.position, { x: 0, y: 0 });
@@ -52,6 +55,69 @@ test("dragged widgets displace collisions and resting widgets snap back", () => 
 
   const parsed = parseWidgetLayout(serializeWidgetLayout(moved), definitions);
   assert.deepEqual(parsed.widgets.a?.position, { x: 0, y: 3 });
+});
+
+test("added widgets take the nearest free space at the top of the canvas", () => {
+  const definitions = [
+    { id: "wide", defaultSize: { w: 12, h: 4 } },
+    { id: "left", defaultSize: { w: 4, h: 3 } },
+    { id: "gap", defaultSize: { w: 4, h: 3 } },
+    { id: "late", defaultSize: { w: 4, h: 2 } },
+  ];
+  let layout = createDefaultWidgetLayout(definitions);
+  layout = setWidgetVisible(layout, "wide", true);
+  layout = setWidgetVisible(layout, "left", true);
+  // A full-width widget owns rows 0-3, so the next one starts the row below it
+  // instead of being pushed under the whole canvas.
+  assert.deepEqual(layout.widgets.wide?.position, { x: 0, y: 0 });
+  assert.deepEqual(layout.widgets.left?.position, { x: 0, y: 4 });
+
+  // The first gap in that row is used before anything is appended lower down.
+  layout = setWidgetVisible(layout, "gap", true);
+  assert.deepEqual(layout.widgets.gap?.position, { x: 4, y: 4 });
+
+  // A widget dragged far down the grid and then removed comes back at the top
+  // when it is added again, instead of reappearing off-screen.
+  layout = setWidgetVisible(layout, "late", true);
+  layout = setWidgetPosition(layout, "late", { x: 0, y: 30 });
+  assert.deepEqual(layout.widgets.late?.position, { x: 0, y: 30 });
+  layout = setWidgetVisible(layout, "late", false);
+  layout = setWidgetVisible(layout, "late", true);
+  assert.deepEqual(layout.widgets.late?.position, { x: 8, y: 4 });
+});
+
+test("a visible header mini-widget never pushes canvas adds below the grid", () => {
+  const definitions = [
+    { id: "shell.badge", defaultSlot: "app.header.center" as const, kind: "mini-widget" as const },
+    { id: "canvas.panel", defaultSize: { w: 6, h: 4 } },
+  ];
+  let layout = createDefaultWidgetLayout(definitions);
+  layout = setWidgetVisible(layout, "shell.badge", true);
+  layout = setWidgetVisible(layout, "canvas.panel", true);
+  assert.equal(widgetSlotOf(layout, "shell.badge"), "app.header.center");
+  assert.deepEqual(
+    layout.widgets["canvas.panel"]?.position,
+    { x: 0, y: 0 },
+    "slot-placed widgets hold no canvas cells",
+  );
+});
+
+test("a widget moved from a shell slot onto the canvas lands in a free cell", () => {
+  const definitions = [
+    { id: "resident", defaultSize: { w: 8, h: 4 } },
+    {
+      id: "roamer",
+      defaultSlot: "app.header.center" as const,
+      supportedSlots: ["app.header.center", "workspace.main"] as const,
+      defaultSize: { w: 6, h: 3 },
+    },
+  ];
+  let layout = createDefaultWidgetLayout(definitions);
+  layout = setWidgetVisible(layout, "resident", true);
+  layout = setWidgetVisible(layout, "roamer", true);
+  layout = moveWidgetToSlot(layout, "roamer", "workspace.main");
+  assert.equal(widgetZoneOf(layout, "roamer"), "main");
+  assert.deepEqual(layout.widgets.roamer?.position, { x: 0, y: 4 });
 });
 
 test("default widget layout contains every built-in exactly once", () => {
