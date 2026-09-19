@@ -2,11 +2,24 @@ import "./styles.css";
 import "./sessionUsage.css";
 import "./dashboardSurface.css";
 import { defineWebPackage } from "@polyth/web-sdk";
+import { registerClientSettingsContribution } from "@polyth/web/client-settings";
 import { UsageDashboard } from "./usage/UsageDashboard.tsx";
+import {
+  getUsagePrefs,
+  parseUsagePrefs,
+  replaceUsagePrefs,
+  subscribeUsagePrefs,
+} from "./usagePrefs.ts";
 import { USAGE_WIDGET_PLUGIN } from "./sessionUsagePlugin.tsx";
 
 export default defineWebPackage((host) => () => {
   const off = [
+    registerClientSettingsContribution({
+      id: "usage",
+      get: getUsagePrefs,
+      apply: (value) => replaceUsagePrefs(parseUsagePrefs(JSON.stringify(value ?? {}))),
+      subscribe: subscribeUsagePrefs,
+    }),
     host.surfaces.register({
       id: "usage",
       title: "Usage",
