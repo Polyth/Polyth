@@ -89,6 +89,10 @@ export function useUsageAnalytics(query: UsageAnalyticsClientQuery): {
   refresh(): Promise<void>;
 } {
   const key = useMemo(() => queryKey(query), [query]);
+  const stableQuery = useMemo(
+    () => Object.fromEntries(JSON.parse(key) as Array<[string, unknown]>) as UsageAnalyticsClientQuery,
+    [key],
+  );
   const [, render] = useReducer((value: number) => value + 1, 0);
   const entry = entryFor(key);
 
@@ -96,20 +100,20 @@ export function useUsageAnalytics(query: UsageAnalyticsClientQuery): {
     const active = entryFor(key);
     const listener = () => render();
     active.listeners.add(listener);
-    void load(key, query);
+    void load(key, stableQuery);
     return () => {
       active.listeners.delete(listener);
       if (active.listeners.size === 0 && Date.now() - active.updatedAt > 5 * 60_000) {
         cache.delete(key);
       }
     };
-  }, [key, query]);
+  }, [key, stableQuery]);
 
   return {
     data: entry.data,
     error: entry.error,
     loading: entry.loading,
-    refresh: () => load(key, query, true),
+    refresh: () => load(key, stableQuery, true),
   };
 }
 
