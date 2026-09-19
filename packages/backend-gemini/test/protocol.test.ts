@@ -19,6 +19,7 @@ test("Gemini ACP model usage becomes canonical usage records", () => {
     },
   }, {
     turnId: "turn-a",
+    hadToolActivity: false,
     model: { providerID: "gemini", modelID: "gemini-3.1-pro-preview" },
   });
 
@@ -47,6 +48,7 @@ test("Gemini ACP total token count is retained when per-model usage is absent", 
     },
   }, {
     turnId: "turn-a",
+    hadToolActivity: false,
     model: { providerID: "gemini", modelID: "gemini-3.1-pro-preview" },
   });
 
@@ -61,7 +63,7 @@ test("zero-only Gemini ACP command metadata does not create fake usage", () => {
   const result = translateGeminiPromptResult({
     stopReason: "end_turn",
     _meta: { quota: { token_count: { input_tokens: 0, output_tokens: 0 }, model_usage: [] } },
-  }, { turnId: "turn-a" });
+  }, { turnId: "turn-a", hadToolActivity: false });
   assert.equal(result, undefined);
 });
 
@@ -70,11 +72,24 @@ test("Gemini ACP 429 becomes a durable Google rate-limit retry hint", () => {
     code: "runtime-rejected",
     rpcCode: 429,
     remoteMessage: "Rate limit exceeded. Try again later.",
-  }, { turnId: "turn-a" }), {
+  }, { turnId: "turn-a", hadToolActivity: false }), {
     admitted: true,
     error: "Gemini rate limit reached",
     code: "rate-limited",
-    retry: { scope: "rate", provider: "google" },
+    retry: { scope: "rate", provider: "google", resumeMode: "replay" },
+  });
+});
+
+test("Gemini rate-limit retry continues instead of replaying after native tool activity", () => {
+  assert.deepEqual(translateGeminiPromptError({
+    code: "runtime-rejected",
+    rpcCode: 429,
+    remoteMessage: "Rate limit exceeded. Try again later.",
+  }, { turnId: "turn-a", hadToolActivity: true }), {
+    admitted: true,
+    error: "Gemini rate limit reached",
+    code: "rate-limited",
+    retry: { scope: "rate", provider: "google", resumeMode: "continue" },
   });
 });
 
@@ -83,5 +98,5 @@ test("Gemini adapter does not guess semantics for unrelated ACP failures", () =>
     code: "runtime-rejected",
     rpcCode: 500,
     remoteMessage: "Internal error",
-  }, { turnId: "turn-a" }), undefined);
+  }, { turnId: "turn-a", hadToolActivity: false }), undefined);
 });
