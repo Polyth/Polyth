@@ -17,12 +17,13 @@ const testPasswords = (): PasswordService => ({
   close() {},
 });
 
-function fixture(t: test.TestContext, ready = true) {
+function fixture(t: test.TestContext, ready = true, debugAgentAccess = false) {
   const dataDir = mkdtempSync(join(tmpdir(), "polyth-runtime-security-"));
   const security = createCanonicalSecurity({
     dataDir,
     origin: "http://127.0.0.1:4400",
     localOnly: true,
+    ...(debugAgentAccess ? { debugAgentAccess: true } : {}),
     passwords: testPasswords(),
   });
   if (ready) {
@@ -82,6 +83,26 @@ test("bound auth facade never opens legacy auth.json and loopback does not manuf
     { headers: { cookie }, socket: { remoteAddress: "127.0.0.1" } },
     { kind: "public-http", listenerId: "public", loopback: true, secure: false },
   ).authenticated, false);
+});
+
+
+test("validated canonical debug authority reaches the bound auth facade only on loopback", t => {
+  const { dataDir } = fixture(t, true, true);
+  const auth = createAuthService({ file: join(dataDir, "auth.json") });
+  const local = auth.resolve(
+    { headers: {}, socket: { remoteAddress: "127.0.0.1" } },
+    { kind: "public-http", listenerId: "public", loopback: true, secure: false },
+  );
+  assert.equal(local.authenticated, true);
+  assert.equal(local.principal.kind, "local-user");
+  assert.equal(auth.userIdForPrincipal(local.principal), "usr_owner");
+
+  const remote = auth.resolve(
+    { headers: {}, socket: { remoteAddress: "10.0.0.2" } },
+    { kind: "public-http", listenerId: "public", loopback: false, secure: false },
+  );
+  assert.equal(remote.authenticated, false);
+  assert.equal(remote.principal.kind, "anonymous");
 });
 
 test("bound Space gateway never opens tenancy.json and internal runtime does not impersonate owner", async t => {
