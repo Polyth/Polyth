@@ -36,6 +36,7 @@ test("usage package declares the complete widget suite", () => {
       "usage.breakdown",
       "usage.reliability",
       "usage.cache-efficiency",
+      "usage.context-growth",
       "usage.project",
       "usage.sessions-table",
       "usage.turn"
