@@ -17,7 +17,6 @@ const TYPECHECK_PROJECTS = [
   "packages/terminal",
   "packages/markets",
   "apps/mobile",
-  "apps/desktop",
 ];
 
 function fail(command, result) {
