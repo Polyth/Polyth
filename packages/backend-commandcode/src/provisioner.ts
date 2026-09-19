@@ -54,9 +54,10 @@ const support = (_context: HarnessContext): HarnessCapabilitySupport => ({
     // so the shared controller can mint its reserved scoped AgentTool grant.
     "mcp-server": { modes: ["unsupported"], mutability: "immutable", remote: false, configScope: "session" },
     // The shared controller's MCP-mode grant seam supplies canonical authz and
-    // tenancy. Command Code itself sees native addTool registrations over a
-    // private FD relay. apply() narrows projection to non-mutating tools because
-    // native dont-ask would deny a mutating custom tool before our run().
+    // tenancy. Command Code sees transient addTool registrations over a private
+    // FD relay. The native registrations are read-only carriers so Command
+    // Code's dont-ask mode reaches Polyth's authoritative per-call permission
+    // gate even when the underlying package tool is mutating.
     tool: { modes: ["mcp"], mutability: "immediate", remote: false, configScope: "session" },
     extension: { modes: ["unsupported"], mutability: "immutable" },
   },
@@ -363,18 +364,9 @@ export function createCommandCodeProvisioner(): HarnessProvisioner {
       if (skillRoot && overlay.skillCapabilityIds.length) overlay.skillRoot = skillRoot;
 
       const toolItems = plan.items.filter((item) => item.capability.kind === "tool");
-      const mutatingTools = toolItems.filter((item) =>
-        item.capability.kind === "tool" && item.mode === "mcp" && item.capability.mutating === true);
-      for (const item of mutatingTools) {
-        records.push(record(
-          item,
-          "unsupported",
-          "Command Code dont-ask can deny a mutating custom tool before Polyth authorization; transient native permission delegation is unavailable",
-        ));
-      }
-      const readOnlyTools = toolItems.filter((item) =>
-        item.capability.kind === "tool" && item.mode === "mcp" && item.capability.mutating === false);
-      const validIdTools = readOnlyTools.filter((item) => {
+      const bridgeTools = toolItems.filter((item) =>
+        item.capability.kind === "tool" && item.mode === "mcp");
+      const validIdTools = bridgeTools.filter((item) => {
         if (item.capability.id.length <= MAX_TOOL_CAPABILITY_ID) return true;
         records.push(record(item, "failed", `Command Code tool capability id exceeds ${MAX_TOOL_CAPABILITY_ID} characters`));
         return false;
@@ -403,7 +395,7 @@ export function createCommandCodeProvisioner(): HarnessProvisioner {
               capabilityIds: [...overlay.toolCapabilityIds],
             };
             for (const item of projectedTools) {
-              records.push(record(item, "pending", "Staged for native read-only Command Code addTool backed by the scoped Polyth tool bridge"));
+              records.push(record(item, "pending", "Staged for native Command Code addTool backed by the scoped Polyth permission bridge"));
             }
           } catch {
             for (const item of projectedTools) records.push(record(item, "failed", "Could not stage the transient Command Code tool Mod"));

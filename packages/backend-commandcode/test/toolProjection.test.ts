@@ -107,7 +107,7 @@ const readOnlyTool = (id: string, index: number): HarnessProvisioningPlan["items
   mutability: "immediate",
 });
 
-test("Command Code exposes only non-mutating package tools through native addTool", async () => {
+test("Command Code exposes read-only and mutating package tools through Polyth's scoped permission bridge", async () => {
   const storage = temporaryDirectory();
   const context = contextAt(storage);
   const provisioner = createCommandCodeProvisioner();
@@ -116,23 +116,23 @@ test("Command Code exposes only non-mutating package tools through native addToo
   const readOnly = result.records.find((row) => row.capabilityId === "example.inspect");
   const mutating = result.records.find((row) => row.capabilityId === "example.modify");
   assert.equal(readOnly?.status, "pending");
-  assert.equal(mutating?.status, "unsupported");
-  assert.match(mutating?.reason ?? "", /dont-ask|permission delegation/i);
+  assert.equal(mutating?.status, "pending");
 
   const overlay = commandCodeOverlays.peek(context, "commandcode")?.value;
   assert.ok(overlay?.toolModFile);
-  assert.deepEqual(overlay.toolCapabilityIds, ["example.inspect"]);
-  assert.deepEqual(overlay.toolBridge?.capabilityIds, ["example.inspect"]);
+  assert.deepEqual(overlay.toolCapabilityIds, ["example.inspect", "example.modify"]);
+  assert.deepEqual(overlay.toolBridge?.capabilityIds, ["example.inspect", "example.modify"]);
   assert.equal(overlay.toolBridge?.url, "http://127.0.0.1:7777/internal/agent-tools");
   assert.equal(overlay.toolBridge?.token, "opaque-secret-token");
 
   const mod = readFileSync(overlay.toolModFile, "utf8");
   assert.match(mod, /inspect_project/);
   assert.match(mod, /example\.inspect/);
+  assert.match(mod, /modify_project/);
+  assert.match(mod, /example\.modify/);
   assert.match(mod, /readOnly: true/);
   assert.match(mod, /bridgeClosed/);
   assert.match(mod, /Polyth tool bridge returned malformed response/);
-  assert.doesNotMatch(mod, /modify_project|example\.modify/);
   assert.doesNotMatch(mod, /127\.0\.0\.1:7777|opaque-secret-token/);
 
   const modPath = overlay.toolModFile;
@@ -191,7 +191,7 @@ test("oversized tool capability id fails locally without dropping prompt project
   provisioner.release?.(context);
 });
 
-test("Command Code advertises the scoped AgentTool grant seam but rejects mutating projection in apply", async () => {
+test("Command Code advertises the scoped AgentTool grant seam for all package tools", async () => {
   const storage = temporaryDirectory();
   const context = contextAt(storage);
   const support = await createCommandCodeProvisioner().support(context);
