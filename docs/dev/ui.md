@@ -72,12 +72,20 @@ helpers instead of cloning them.
 ### Frontend build freshness
 
 Every completed web build writes `/build-id.json` and compiles the same build
-id into the shell. `apps/web/src/buildFreshness.ts` checks that id on initial
-load and whenever a suspended page becomes visible/focused or receives
-`pageshow`. A stale standalone PWA silently reloads its current URL, so iOS
-cannot keep using a frozen pre-rebuild shell with freshly rebuilt package
-assets. The check uses `cache: "no-store"`; the service worker does not own
-application asset caching.
+id into the shell. `apps/web/src/buildFreshness.ts` checks that id only after
+a real hidden/pagehide → visible/pageshow resume; cold boot and ordinary focus
+changes never trigger a freshness reload. A stale standalone PWA navigates once
+toward the current build generation so iOS cannot keep using a frozen
+pre-rebuild shell with freshly rebuilt package assets. The check uses
+`cache: "no-store"`; the service worker does not own application asset
+caching.
+
+The watcher is explicitly controllable. Runtime code may call
+`setBuildFreshnessEnabled(false)` / `setBuildFreshnessEnabled(true)`; turning
+it off immediately cancels pending retries and suppresses any in-flight reload.
+For deployments that never want automatic freshness navigation, build with
+`POLYTH_WEB_BUILD_FRESHNESS=0` (also accepts `false`, `off`, or
+`disabled`). The default remains enabled.
 
 ### Package web entry skeleton (current API)
 
