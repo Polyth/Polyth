@@ -39,8 +39,8 @@ test("desktop packaging covers each supported updater target", async () => {
   assert.deepEqual(pkg.build.win.target, ["nsis"]);
   assert.deepEqual(pkg.build.publish, {
     provider: "github",
-    owner: "otto-assistant",
-    repo: "polyth",
+    owner: "Polyth",
+    repo: "Polyth",
     releaseType: "release",
   });
   assert.equal(pkg.build.extraResources.some(({ to }) => to === "opencode"), true);
@@ -50,7 +50,7 @@ test("desktop packaging covers each supported updater target", async () => {
   assert.equal(pkg.build.extraResources.some(({ to }) => to === "server/agentToolsMcp.mjs"), true);
 });
 
-test("manual desktop workflow builds x64 Windows and Linux artifacts without publishing", async () => {
+test("manual desktop workflow builds Windows, Linux and macOS artifacts without publishing", async () => {
   const workflow = await readFile(join(repositoryRoot, ".github/workflows/build-apps.yml"), "utf8");
   const rootPackage = JSON.parse(await readFile(join(repositoryRoot, "package.json"), "utf8")) as {
     scripts: Record<string, string>;
@@ -62,13 +62,15 @@ test("manual desktop workflow builds x64 Windows and Linux artifacts without pub
     "windows-2025",
     "--linux AppImage --x64 --publish never",
     "--win nsis --x64 --publish never",
+    "--mac dmg zip --universal --publish never",
+    "release/*.dmg",
+    "release/*.zip",
     "npx playwright-core install chromium",
     "npm run build:desktop",
     "npm run desktop:stage-chromium",
     "npm run desktop:download-opencode",
     "release/*.AppImage",
     "release/*.exe",
-    "release/latest*.yml",
   ]) {
     assert.ok(workflow.includes(required), `manual desktop build workflow must include ${required}`);
   }

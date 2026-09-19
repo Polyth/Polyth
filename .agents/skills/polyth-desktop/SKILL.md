@@ -10,6 +10,7 @@ Repository-relative paths below. Read root `AGENTS.md` once. Locate the current 
 - `apps/desktop`
 - `docs/dev/desktop.md`
 - `.github/workflows/build-apps.yml`
+- `.github/workflows/release.yml`
 - `docs/agents/verification.md`
 
 ## Workflow and constraints
@@ -19,7 +20,7 @@ Validate IPC payloads, navigation targets and local paths. Keep authentication, 
 
 When changing package discovery or manifests, inspect desktop's packaged server inventory too. A package present in a development workspace may be missing from a bundled release. Confirm native binaries, resources, executable permissions and architecture-specific assets without downloading or executing untrusted binaries by default.
 
-Use the current manual build workflow and desktop guide for signing, notarization and artifact operations. Build, unsigned package, signed distribution and launched-app smoke are different verification levels. Do not publish releases, consume signing credentials or rotate updater settings as an incidental implementation step. Test macOS, Windows and Linux-specific behavior only where evidence exists, and state untested platforms. Preserve user data paths and provide migration/rollback guidance for any persisted settings change.
+Use the current manual build workflow for unsigned smoke artifacts, the release workflow for signing/notarization/updater publication, and the desktop guide for platform details. Build, unsigned package, signed distribution and launched-app smoke are different verification levels. Do not publish releases, consume signing credentials or rotate updater settings as an incidental implementation step. Test macOS, Windows and Linux-specific behavior only where evidence exists, and state untested platforms. Preserve user data paths and provide migration/rollback guidance for any persisted settings change.
 
 ## Verification and handoff
 Suggested test locations (confirm current files first): `apps/desktop/test/configuration.test.ts`; `apps/desktop/test/serverPackages.test.ts`

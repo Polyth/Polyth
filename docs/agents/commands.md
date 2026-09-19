@@ -20,11 +20,11 @@ Observed at the evidence baseline. Inspect current manifests before execution. T
 | `npm run mobile:open:ios` / `mobile:open:android` | Open native project | Requires platform tooling; not a test |
 | `npm run build:link` | Build declared Link Rust executables | Requires pinned Rust toolchain; not a native mobile adapter test |
 
-Repository validation lives in `.github/workflows/ci.yml`. Manual, unpublished application artifacts live in `.github/workflows/build-apps.yml`. Signed iOS/TestFlight builds live in `codemagic.yaml`. GitHub Actions currently has no tag-triggered desktop or Android publisher. Read these current files for exact build/sign/upload boundaries rather than copying commands from an old chat.
+Repository validation lives in `.github/workflows/ci.yml`. Manual unpublished artifacts live in `.github/workflows/build-apps.yml`. Actual publication is owned by the manual, master-only `.github/workflows/release.yml`; signed iOS/TestFlight remains in `codemagic.yaml` and is tag-triggered by the release flow. Read these files for exact build/sign/upload boundaries rather than copying commands from an old chat.
 
 ## Existing CI is not “everything passed”
 
-Current `ci.yml` runs on pull requests, pushes to `master`, and manual dispatch. It validates the agent knowledge structure, runs the shared `release-quality.mjs` contract (web build, owned TypeScript projects, stable tests, and Polyth Link contract tests), and runs Rust format/lint/workspace tests in a separate job. The selector still explicitly excludes one known workflow baseline test; that exclusion is visible debt, not permission to add silent exclusions.
+Current `ci.yml` runs on pull requests, pushes to `master`, and manual dispatch. It validates the agent knowledge structure, runs the deterministic `release-quality.mjs` contract (web build, owned TypeScript projects and release/workflow contract tests), and runs Rust format/lint/workspace tests in a separate job. Broader environment-heavy test suites are not a blocking baseline until independently made green; do not silently widen or weaken the gate.
 
 No root lint or root typecheck script was declared at the audit baseline. Do not infer the absence of CI from that fact. Use manifest-defined commands or the actual installed local compiler. Never let a package manager install a missing tool silently while claiming to have only run a check.
 

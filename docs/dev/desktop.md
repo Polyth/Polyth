@@ -43,14 +43,20 @@ browser service's isolated context and URL policy.
 
 ## Release and updates
 
-GitHub Actions uses `.github/workflows/build-apps.yml` only for explicit manual smoke artifacts:
+GitHub Actions separates smoke artifacts from real releases.
 
-- `windows-exe` builds an x64 NSIS installer with `--publish never`;
-- `linux-appimage` builds an x64 AppImage with `--publish never` and runs the packaged AppImage smoke test.
+`.github/workflows/build-apps.yml` is manual and unpublished:
 
-There is no tag-triggered desktop packaging or GitHub Release publication in the current Actions set. macOS desktop packages can still be built locally with `npm run desktop:dist:mac`; signed/notarized distribution is a separate operator release concern and is not implied by a successful local or manual CI artifact.
+- `windows-exe`: x64 NSIS installer;
+- `linux-appimage`: x64 AppImage with packaged-app smoke;
+- `mac-dmg`: unsigned universal DMG plus the updater ZIP;
+- platform mobile targets and public npm SDK tarballs are available from the same manual chooser.
 
-`electron-updater` still consumes electron-builder update metadata when a real published release provides it, but the manual build workflow never publishes that metadata. Any future automatic updater release path must be introduced as an explicit signed publishing workflow, not by changing the manual smoke-build contract.
+`.github/workflows/release.yml` is also manual but may run only from `master`. It builds signed Windows x64/arm64 installers, Linux x64/arm64 AppImages, and a signed/notarized universal macOS DMG + ZIP. The final job gathers the generated electron-builder updater metadata, creates or refreshes a draft GitHub Release, and publishes that release only after all required artifacts (and optional external publication) succeed.
+
+The electron-builder provider is `Polyth/Polyth`. `electron-updater` consumes the published GitHub Release metadata (`latest.yml`, `latest-mac.yml`, `latest-linux.yml`, plus architecture-specific channels). Automatic updates are enabled by default in Desktop settings: the app checks shortly after startup and every six hours, automatically downloads an available release when that setting is enabled, and installs the downloaded update on quit/restart. Manual check/download/install remains available when automatic updates are disabled.
+
+macOS updater releases require code signing; the release workflow also notarizes the universal package. Manual `mac-dmg` builds deliberately disable signing/notarization and are not updater releases.
 
 ## Background integration
 

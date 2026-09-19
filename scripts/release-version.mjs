@@ -2,7 +2,7 @@
 /**
  * Aligned release version gate for GitHub Actions and Codemagic.
  *
- * Validates matching stable semver (X.Y.Z only) across root/apps/mobile/apps/desktop
+ * Validates matching stable semver (X.Y.Z only) across root/apps/mobile/apps/desktop and public npm SDK packages
  * package.json files, computes a bounded Android versionCode, optionally validates
  * release tags, and exports POLYTH_* variables to GITHUB_ENV / CM_ENV when present.
  */
@@ -17,6 +17,8 @@ const PACKAGE_PATHS = [
   join(REPO_ROOT, "package.json"),
   join(REPO_ROOT, "apps/mobile/package.json"),
   join(REPO_ROOT, "apps/desktop/package.json"),
+  join(REPO_ROOT, "packages/contracts/package.json"),
+  join(REPO_ROOT, "packages/package-sdk/package.json"),
 ];
 
 /** @type {const} */
