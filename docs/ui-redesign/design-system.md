@@ -197,12 +197,15 @@ All from `apps/web/src/components/ui` (see `index.ts`):
 
 ## 10. Toast strategy
 
-No new toast system in Phase 1. Transient failures use the existing bottom
-error banner (`--z-toast`); durable, actionable outcomes go to the
-notification centre (NTF-01) and, out-of-page, web push. Success feedback is
-in-place state change (button label/badge/row update), not a toast. If a true
-ephemeral toast becomes necessary, it will be one core primitive layered at
-`--z-toast` — packages must not invent their own.
+No new toast system. The single host-owned transient error surface lives in
+`App.tsx` as `Notice` + `.error-banner` at `--z-toast`: a quiet close control
+first, title/detail copy, then a contextual category glyph, with the right edge
+intentionally hidden past the viewport. Its store slot replaces stale errors,
+and it keeps the existing 7s lifetime, right-edge anchor and slide enter/exit
+motion; the thin lifetime hairline follows that same timer. Durable,
+actionable outcomes go to the notification centre (NTF-01) and, out-of-page,
+web push. Success feedback is in-place state change (button label/badge/row
+update), not a toast. Packages must not invent their own.
 
 ## 11. Scroll areas
 

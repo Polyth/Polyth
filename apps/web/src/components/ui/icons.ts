@@ -44,6 +44,11 @@ export {
   TriangleAlert as WarningIcon,
   Info as InfoIcon,
   CircleHelp as HelpIcon,
+  // transient error-toast categories
+  WifiOff as OfflineIcon,
+  HardDrive as StorageIcon,
+  ServerCrash as ServerErrorIcon,
+  Ban as BlockedIcon,
   // navigation
   Menu as MenuIcon,
   ChevronDown as ChevronDownIcon,

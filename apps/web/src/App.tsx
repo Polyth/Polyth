@@ -18,30 +18,68 @@ import AlertDialog from "./components/AlertDialog.tsx";
 import { useWorkspaceMode } from "./widgets/workspaceMode.ts";
 import { useShellMode } from "./responsiveShell.ts";
 import { tr } from "./i18n/index.ts";
-import { Button, IconButton, Notice } from "./components/ui/index.ts";
-import { CloseIcon } from "./components/ui/icons.ts";
+import { Button, Icon, IconButton, Notice } from "./components/ui/index.ts";
+import {
+  BlockedIcon,
+  CloseIcon,
+  ErrorIcon,
+  LockIcon,
+  OfflineIcon,
+  ServerErrorIcon,
+  StorageIcon,
+  type LucideIcon,
+} from "./components/ui/icons.ts";
+import { presentUiError, type UiErrorCategory } from "./errorPresentation.ts";
 import BackgroundQuickPicker from "./components/BackgroundPicker.tsx";
+
+// One contextual glyph per failure family keeps the toast legible at a glance
+// without changing where the error came from or how long it stays.
+const ERROR_CATEGORY_ICON: Record<UiErrorCategory, LucideIcon> = {
+  network: OfflineIcon,
+  auth: LockIcon,
+  storage: StorageIcon,
+  server: ServerErrorIcon,
+  blocked: BlockedIcon,
+  error: ErrorIcon,
+};
 
 function ErrorBanner() {
   const message = useStore((s) => s.uiError);
   const action = useStore((s) => s.uiErrorAction);
   if (!message) return null;
+  const view = presentUiError(message);
+  const CategoryIcon = ERROR_CATEGORY_ICON[view.category];
   return (
     <Notice
       key={message}
       tone="error"
       className="error-banner"
       role="alert"
-      actions={<>
-        <IconButton icon={CloseIcon} label={tr("app.dismissError")} size="sm" onClick={clearUiError} />
-        {action && (
-          <Button size="sm" variant="ghost" onClick={() => { clearUiError(); void action.run(); }}>
-            {action.label}
-          </Button>
-        )}
-      </>}
+      data-category={view.category}
+      leading={(
+        <IconButton
+          icon={CloseIcon}
+          label={tr("app.dismissError")}
+          size="sm"
+          className="error-banner-close"
+          onClick={clearUiError}
+        />
+      )}
+      icon={<span className="error-banner-glyph"><Icon icon={CategoryIcon} size="md" /></span>}
+      iconPosition="trailing"
+      heading={view.title || undefined}
     >
-      {message}
+      {view.description && <div className="error-banner-detail">{view.description}</div>}
+      {action && (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="error-banner-action"
+          onClick={() => { clearUiError(); void action.run(); }}
+        >
+          {action.label}
+        </Button>
+      )}
     </Notice>
   );
 }
