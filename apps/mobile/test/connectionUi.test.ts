@@ -5,6 +5,7 @@ import {
   bootstrapUrlWithNext,
   connectionUiState,
   preferredTrustedConnection,
+  shouldAutoReconnect,
 } from "../src/connectionUi.ts";
 import {
   clearPendingPairingLink,
@@ -145,4 +146,13 @@ test("Android and iOS expose native pairing scanners through the PolythLink plug
   assert.match(gradle, /play-services-code-scanner:16\.1\.0/);
   assert.match(manifest, /com\.google\.mlkit\.vision\.DEPENDENCIES[\s\S]*barcode_ui/);
   assert.match(swift, /func scanPairingQr\(_ call: CAPPluginCall\)/);
+});
+
+
+test("automatic trusted reconnect yields to explicit connection intents", () => {
+  assert.equal(shouldAutoReconnect({}), true);
+  assert.equal(shouldAutoReconnect({ selectServer: true }), false);
+  assert.equal(shouldAutoReconnect({ pendingPair: "polyth://pair?v=1&t=x" }), false);
+  assert.equal(shouldAutoReconnect({ hasPendingPush: true }), false);
+  assert.equal(shouldAutoReconnect({ deepLinkPath: "/?session=s1" }), false);
 });
