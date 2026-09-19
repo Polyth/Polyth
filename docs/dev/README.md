@@ -14,7 +14,7 @@ The manifest's `polyth.serverEntry` and `polyth.webEntry` opt into separate disc
 
 Use `@polyth/plugins` for server packages and `@polyth/web-sdk` for browser registrations. Read `packages/plugins/src/serverPackage.ts` for exact lifecycle and service contracts. Resolve cross-package services in enable hooks or handlers, not at registration time. Return/execute cleanup on disable and failed startup.
 
-Inside a request use the already validated `rc.space`, then `host.forSpace(rc.space)` for scoped core services. Validate ownership before any operation that uses a legacy/unscoped handle. Store tenant data via `host.spaceStorage(rc.space)`; shared `storageDir` is not a tenant store. Paired access is default-deny; new remote-safe routes need a reviewed `remoteAccess` declaration and negative authorization tests.
+Feature-specific contracts stay with their owners. See [Browser](browser.md) for controlled Chromium and [Playground](playground.md) for the zero-build chat-driven live artifact loop.\n\nInside a request use the already validated `rc.space`, then `host.forSpace(rc.space)` for scoped core services. Validate ownership before any operation that uses a legacy/unscoped handle. Store tenant data via `host.spaceStorage(rc.space)`; shared `storageDir` is not a tenant store. Paired access is default-deny; new remote-safe routes need a reviewed `remoteAccess` declaration and negative authorization tests.
 
 Use the existing durable event path for model-visible state. `host.events.append` persists before broadcasting; direct store append alone does not broadcast. Pure browser presentation stays outside canonical history. Define backward-compatible DTO/event additions in the appropriate public contract and inspect every affected consumer.
 
