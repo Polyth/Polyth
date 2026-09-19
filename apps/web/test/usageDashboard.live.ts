@@ -159,6 +159,7 @@ async function openApp(options: OpenOptions): Promise<Page> {
 }
 
 async function openUsage(page: Page): Promise<void> {
+  if (await page.locator(".usage-dashboard").isVisible().catch(() => false)) return;
   const width = await page.evaluate(() => innerWidth);
   if (width > 820) {
     const button = page.locator(".view-switcher").getByRole("button", { name: /Usage/i });
