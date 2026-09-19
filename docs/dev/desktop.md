@@ -5,6 +5,13 @@ boots `@polyth/server` on a random loopback port, serves the packaged SPA, and p
 absolute bundled OpenCode executable to `@polyth/backend-opencode`. The desktop layer
 does not call OpenCode itself.
 
+Fresh installations initially serve the same SPA through the authority-only setup
+server. Its Content Security Policy hashes the inline scripts in the trusted built
+`index.html`, including the React import map. Arbitrary inline scripts remain blocked;
+do not bypass this with `unsafe-inline` or Electron `webSecurity: false`. Rebuild and
+restart after changing the shell. Server startup success alone is not renderer
+verification: a first-launch smoke must also confirm that setup UI actually renders.
+
 ## Local builds
 
 Use Node 22.14 or newer (matching `scripts/check-node.mjs` and `.nvmrc`).
