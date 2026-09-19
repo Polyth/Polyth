@@ -9,6 +9,7 @@ import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/ha
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { createPiRpc } from "./rpc.ts";
 import { createPiRuntime, PI_CAPABILITIES } from "./runtime.ts";
+import { createPiTitleRunner, withPiTitleGeneration } from "./title.ts";
 import { createPiCapabilitySync } from "./capabilitySync.ts";
 import { createPiProvisioner, piOverlays } from "./provisioner.ts";
 import { PI_BOOTSTRAP_SOURCE } from "./bootstrapSource.ts";
@@ -64,7 +65,11 @@ const connectPi = async (
     stateFile: options.stateFile,
     stableAuthority: Boolean(options.stateFile),
   });
-  return projection ? createPiCapabilitySync(context, rpc) : rpc;
+  return {
+    rpc: projection ? createPiCapabilitySync(context, rpc) : rpc,
+    command,
+    env,
+  };
 };
 
 export default function registerPackage(host: ServerPackageHost) {
@@ -126,7 +131,7 @@ export default function registerPackage(host: ServerPackageHost) {
     },
     async discover(context) {
       if (context.remote) throw Object.assign(new Error("Local execution only"), { code: "unsupported" });
-      const rpc = await connectPi(context, { ephemeral: true });
+      const { rpc } = await connectPi(context, { ephemeral: true });
       const runtime = createPiRuntime(context, rpc);
       try {
         const [models, capabilities] = await Promise.all([runtime.models(), runtime.capabilities()]);
@@ -150,13 +155,18 @@ export default function registerPackage(host: ServerPackageHost) {
         writeGenerated(generated.worker, PI_WORKER_SOURCE),
         writeGenerated(generated.bootstrap, PI_BOOTSTRAP_SOURCE),
       ]);
-      const rpc = await connectPi(context, {
+      const { rpc, command, env } = await connectPi(context, {
         stateFile: stateFile(context),
         workerPath: generated.worker,
         bootstrapPath: generated.bootstrap,
       });
       try {
-        const runtime = createPiRuntime(context, rpc);
+        const runtime = withPiTitleGeneration(
+          context,
+          rpc,
+          createPiRuntime(context, rpc),
+          createPiTitleRunner({ command, cwd: context.cwd, env }),
+        );
         return Object.assign(runtime, {
           releaseExecution: async (binding: RuntimeSessionBinding, operationId: string) => {
             if (!context.space || context.remote) return { kind: "rejected" as const, code: "unsupported", message: "Local Space context required" };

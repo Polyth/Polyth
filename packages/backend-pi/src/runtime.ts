@@ -15,6 +15,7 @@ import {
   attachmentModality,
   composeTurnPrompt,
   contextWindowTelemetry,
+  isPlaceholderTitle,
   unsupportedAttachmentMessage,
 } from "@polyth/harness-runtime";
 import type { PiRpc, PiRpcEvent, PiRpcModel, PiRpcSessionStats, PiRpcState } from "./rpc.ts";
@@ -33,10 +34,11 @@ export const PI_CAPABILITIES: RuntimeCapabilities = {
   usage: false,
   cost: false,
   fork: false,
-  // Pi RPC exposes a session display name that a client or extension can set,
-  // but the agent does not generate a semantic title from the prompt. Let the
-  // canonical layer publish its prompt-derived fallback immediately and allow
-  // an explicit native name to refine it later.
+  // Pi RPC exposes a session display name that a user, an extension or a
+  // client can set, but the native agent does not derive one from the prompt.
+  // The adapter adds a best-effort generated name; keeping "emulated" lets the
+  // canonical layer publish its prompt-derived fallback immediately and lets
+  // the generated (or explicit) native name refine it later.
   title: "emulated",
   attachments: {
     modalities: {
@@ -119,6 +121,7 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc): AgentRunti
   const lifecycle = new Set<Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0]>();
   const accepted: NonNullable<RuntimeSnapshot["acceptedOperations"]> = [];
   let nativeId = "";
+  let sessionTitle = "";
   let createOperationId = "";
   let activeOperationId = "";
   let assistantMessageOrdinal = 0;
@@ -144,6 +147,18 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc): AgentRunti
   const emit = (event: RuntimeEvent) => {
     if (!context.sessionId) return;
     for (const callback of listeners) callback(context.sessionId, event);
+  };
+
+  // Pi stores a display name in the native session file. A name set through
+  // `/name`, `--name`, an extension or Polyth's generated title is a semantic
+  // title; the placeholder Polyth would otherwise write at creation is not.
+  const adoptNativeTitle = (value: unknown): void => {
+    const next = typeof value === "string" ? value.trim() : "";
+    if (next === sessionTitle) return;
+    sessionTitle = next;
+    if (next && !isPlaceholderTitle(next, context.sessionId)) {
+      emit({ type: "session/title-generated", title: next });
+    }
   };
 
   const partId = (contentIndex: number) => `${activeOperationId}:${activeAssistantOrdinal}:${contentIndex}`;
@@ -247,12 +262,12 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc): AgentRunti
       return;
     }
 
-    // Pi does not generate a semantic title, but a user, an extension or the
-    // native `/name` command can set one. Surface that exact name so it can
-    // refine the canonical prompt-derived title.
+    // Pi does not generate a semantic title by itself, but a user, an
+    // extension, an explicit `/name`, or Polyth's own generated name can set
+    // one. Surface that exact name so it can refine the canonical
+    // prompt-derived title.
     if (type === "session_info_changed") {
-      const name = typeof event.name === "string" ? event.name.trim() : "";
-      if (name) emit({ type: "session/title-generated", title: name });
+      adoptNativeTitle(event.name);
       return;
     }
 
@@ -338,8 +353,13 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc): AgentRunti
       createOperationId = operationId;
       await rpc.receipt(operationId, nativeId);
 
-      if (canonical.title?.trim()) {
-        await rpc.request({ type: "set_session_name", name: canonical.title.trim() }, 10_000).catch(() => undefined);
+      // Only a real title belongs in Pi's own session list. A Polyth
+      // placeholder must not shadow the first user message Pi would show
+      // before its generated title arrives.
+      const requestedTitle = canonical.title?.trim() ?? "";
+      if (requestedTitle && !isPlaceholderTitle(requestedTitle, canonical.sessionId)) {
+        sessionTitle = requestedTitle;
+        await rpc.request({ type: "set_session_name", name: requestedTitle }, 10_000).catch(() => undefined);
       }
       return { backendSessionId: nativeId };
     });
@@ -358,6 +378,7 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc): AgentRunti
       const state = await currentState();
       if (state.sessionFile === input.backendSessionId) {
         nativeId = input.backendSessionId;
+        adoptNativeTitle(state.sessionName);
         return nativeId;
       }
       const switched = await rpc.request<{ cancelled?: boolean }>({
@@ -372,6 +393,7 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc): AgentRunti
         throw Object.assign(new Error("Pi switched to a different native session than requested"), { code: "unknown-session" });
       }
       nativeId = input.backendSessionId;
+      adoptNativeTitle(verified.sessionName);
       return nativeId;
     },
     createSessionOperation: createSession,
@@ -379,7 +401,7 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc): AgentRunti
     sessions: async () => Object.entries(rpc.receipts).map(([operationId, id]) => ({
       id,
       operationId,
-      title: "Pi session",
+      title: id === nativeId ? sessionTitle : "",
       createdAt: 0,
       updatedAt: 0,
     })),

@@ -206,6 +206,33 @@ test("Pi reports emulated title support and surfaces an explicit native session 
   await runtime.dispose();
 });
 
+test("Pi surfaces a stored native name on resume and reports it from the session list", async () => {
+  const fake = fakePi();
+  const first = createPiRuntime(context, fake.rpc);
+  await first.createSessionOperation!(
+    { projectId: "project", sessionId: "canonical", title: "Generated session name", cwd: "/tmp" },
+    "create-op",
+  );
+  assert.equal(
+    (await first.sessions()).find((item) => item.id === "/tmp/pi-created.jsonl")?.title,
+    "Generated session name",
+  );
+  await first.dispose();
+
+  const resumed = createPiRuntime(context, fake.rpc);
+  const events: RuntimeEvent[] = [];
+  resumed.onEvent((_, event) => events.push(event));
+  await resumed.ensureSession({
+    projectId: "project",
+    sessionId: "canonical",
+    title: "New session",
+    cwd: "/tmp",
+    backendSessionId: "/tmp/pi-created.jsonl",
+  });
+  assert.deepEqual(events, [{ type: "session/title-generated", title: "Generated session name" }]);
+  await resumed.dispose();
+});
+
 test("Pi abort is confirmed only after the native abort command returns", async () => {
   const fake = fakePi();
   const runtime = createPiRuntime(context, fake.rpc);
