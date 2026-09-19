@@ -1022,6 +1022,110 @@ test("owned epoch recovery auto-continues when only an active tool was cut", asy
   }
 });
 
+test("stable owned authority recovers after a generation bump without killing the live successor", async () => {
+  const endpoint: RuntimeEndpoint = {
+    authorityId: "owned:stable",
+    continuity: "generation-only",
+    generation: 2,
+    url: "http://runtime.invalid",
+    location: { directory: "/project" },
+    control: { kind: "owned", instanceToken: "stable-instance" },
+    config: { kind: "read-only" },
+    authentication: { kind: "none" },
+  };
+  const submitted: string[] = [];
+  let releaseCalls = 0;
+  const runtime: AgentRuntime = {
+    ...borrowedConfirmRuntime(endpoint, submitted),
+    // A non-destructive read must never be needed, and a destructive release
+    // would fence the still-live successor Polyth is trying to reconnect to.
+    releaseExecution: async () => {
+      releaseCalls += 1;
+      return { kind: "rejected", code: "unsupported", message: "must not be called" };
+    },
+  };
+  const { dir, store, project, sessions } = harness(runtime, "polyth-epoch-stable-restart-");
+  const sessionId = "session-stable-restart";
+  try {
+    const projection = projectionFor(project, endpoint, sessionId, "backend-old", "owned:stable");
+    projection.status = "epoch-pending";
+    projection.runtimeControl = "owned";
+    projection.runtimeBinding = {
+      ...projection.runtimeBinding!,
+      generation: 1,
+      continuity: "generation-only",
+    };
+    await store.upsertProjection(projection);
+
+    await sessions.send(sessionId, { text: "continue after stable restart" });
+
+    assert.equal(releaseCalls, 0);
+    const after = await store.projection(sessionId);
+    assert.equal(after?.status, "idle");
+    assert.equal(after?.runtimeBinding?.epoch, 1);
+    assert.equal(after?.runtimeBinding?.generation, 2);
+    assert.equal(after?.backendSessionId, "backend-borrowed-new");
+    const marker = (await store.events(sessionId))
+      .findLast((event) => event.type === "runtime/epoch-replaced");
+    assert.ok(marker);
+    assert.equal(
+      (marker.data as { old?: { generation?: number } }).old?.generation,
+      1,
+    );
+    assert.equal(
+      (marker.data as { new?: { generation?: number } }).new?.generation,
+      2,
+    );
+    assert.equal(submitted.length, 1);
+    assert.match(submitted[0] ?? "", /continue after stable restart/);
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("stable owned authority refuses a non-successor generation", async () => {
+  const endpoint: RuntimeEndpoint = {
+    authorityId: "owned:stable",
+    continuity: "generation-only",
+    generation: 1,
+    url: "http://runtime.invalid",
+    location: { directory: "/project" },
+    control: { kind: "owned", instanceToken: "stable-instance" },
+    config: { kind: "read-only" },
+    authentication: { kind: "none" },
+  };
+  const submitted: string[] = [];
+  const runtime = borrowedConfirmRuntime(endpoint, submitted);
+  const { dir, store, project, sessions } = harness(runtime, "polyth-epoch-stable-nonsuccessor-");
+  const sessionId = "session-stable-nonsuccessor";
+  try {
+    const projection = projectionFor(project, endpoint, sessionId, "backend-old", "owned:stable");
+    projection.status = "epoch-pending";
+    projection.runtimeControl = "owned";
+    projection.runtimeBinding = {
+      ...projection.runtimeBinding!,
+      generation: 2,
+      continuity: "generation-only",
+    };
+    await store.upsertProjection(projection);
+
+    await assert.rejects(
+      () => sessions.send(sessionId, { text: "must not guess" }),
+      (error: Error & { code?: string }) => error.code === "epoch-proof-required",
+    );
+    assert.equal((await store.projection(sessionId))?.status, "epoch-pending");
+    assert.equal(submitted.length, 0);
+    assert.equal(
+      (await store.events(sessionId)).some((event) => event.type === "runtime/epoch-replaced"),
+      false,
+    );
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("borrowed confirm starts a fresh epoch without fencing unknowns", async () => {
   const endpoint: RuntimeEndpoint = {
     authorityId: "external:replacement",

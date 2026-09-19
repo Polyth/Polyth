@@ -5669,16 +5669,37 @@ export function createSessionService(deps: {
         });
         projection = (await store.projection(sessionId))!;
       } else {
-        if (
-          endpoint.control.kind !== "owned"
-          || endpoint.authorityId === projection.runtimeBinding.authorityId
-        ) {
+        const oldBinding = projection.runtimeBinding;
+        if (endpoint.control.kind !== "owned") {
           throw Object.assign(
             new Error("runtime epoch requires explicit confirmation for this endpoint"),
-            { code: endpoint.control.kind === "owned" ? "epoch-proof-required" : "confirmation-required" },
+            { code: "confirmation-required" },
           );
         }
-        const oldBinding = projection.runtimeBinding;
+        // A stable owned authority (Pi/CommandCode keeps its id while advancing
+        // generation across its own restart) is not a new authority: the live
+        // successor is the authority Polyth must keep using. Its prior
+        // generation-only backend session cannot be reattached and cannot be
+        // proven released through `releaseExecution` without destroying that
+        // live successor, so start a fresh native context on the live authority
+        // and restore confirmed canonical history instead. A generation that is
+        // not a strict successor stays a hard refusal.
+        const sameAuthority = endpoint.authorityId === oldBinding.authorityId;
+        if (sameAuthority && endpoint.generation <= oldBinding.generation) {
+          throw Object.assign(
+            new Error("runtime epoch requires explicit confirmation for this endpoint"),
+            { code: "epoch-proof-required" },
+          );
+        }
+        if (sameAuthority) {
+          // Terminalize any cut turn before the epoch marker so admission after
+          // rehydration does not see a still-open turn in the durable log.
+          const eventsBeforeReset = await store.events(sessionId);
+          if (openTurnFromEvents(eventsBeforeReset) || activeToolsFromEvents(eventsBeforeReset).size > 0) {
+            await stopLocally(sessionId);
+          }
+          unwire(sessionId);
+        }
         const reset = await prepareFreshEpochResetUnderLock(
           sessionId,
           projection,
@@ -5690,11 +5711,13 @@ export function createSessionService(deps: {
         await transitionRuntimeEpochUnderLock(sessionId, runtime, {
           resetOperationId: reset.operationId,
           reason: "owned runtime authority changed; restoring confirmed canonical history",
-          authorityDisposition: {
-            kind: "owned-authority-destroyed",
-            authorityId: oldBinding.authorityId,
-            generation: oldBinding.generation,
-          },
+          authorityDisposition: sameAuthority
+            ? { kind: "unknown-session-replaced" }
+            : {
+                kind: "owned-authority-destroyed",
+                authorityId: oldBinding.authorityId,
+                generation: oldBinding.generation,
+              },
         });
         projection = (await store.projection(sessionId))!;
       }
