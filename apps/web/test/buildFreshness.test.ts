@@ -3,11 +3,15 @@ import assert from "node:assert/strict";
 import {
   fetchWebBuildId,
   installBuildFreshnessWatcher,
+  isBuildFreshnessEnabled,
   parseWebBuildId,
+  setBuildFreshnessEnabled,
   WEB_BUILD_QUERY,
 } from "../src/buildFreshness.ts";
 
 const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+test.beforeEach(() => setBuildFreshnessEnabled(true));
 
 class FakeWindow extends EventTarget {
   replaced: string[] = [];
@@ -84,6 +88,43 @@ test("ordinary boot and focus churn never run a freshness check", async () => {
   dispose();
 });
 
+test("build freshness can be disabled and re-enabled programmatically", async () => {
+  const fakeWindow = new FakeWindow();
+  const fakeDocument = new FakeDocument();
+  let calls = 0;
+  let reloads = 0;
+  const dispose = installBuildFreshnessWatcher("build-a", {
+    windowRef: fakeWindow as unknown as Window,
+    documentRef: fakeDocument as unknown as Document,
+    minCheckIntervalMs: 0,
+    retryDelaysMs: [],
+    reload: () => { reloads++; },
+    fetchImpl: (async () => {
+      calls++;
+      return new Response(JSON.stringify({ build: "build-b" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch,
+  });
+
+  setBuildFreshnessEnabled(false);
+  assert.equal(isBuildFreshnessEnabled(), false);
+  suspendAndResume(fakeDocument);
+  await settle();
+  assert.equal(calls, 0);
+  assert.equal(reloads, 0);
+
+  setBuildFreshnessEnabled(true);
+  assert.equal(isBuildFreshnessEnabled(), true);
+  suspendAndResume(fakeDocument);
+  await settle();
+  assert.equal(calls, 1);
+  assert.equal(reloads, 1);
+
+  dispose();
+});
+
 test("a genuinely resumed stale PWA reloads once", async () => {
   const fakeWindow = new FakeWindow();
   const fakeDocument = new FakeDocument();
@@ -141,6 +182,35 @@ test("a stale shell already navigated to the target build fails stable instead o
   await settle();
   assert.equal(reloads, 0, "the same target generation is never reloaded forever");
 
+  dispose();
+});
+
+test("disabling freshness during an in-flight check suppresses reload", async () => {
+  const fakeWindow = new FakeWindow();
+  const fakeDocument = new FakeDocument();
+  let resolveResponse!: (response: Response) => void;
+  const response = new Promise<Response>((resolve) => { resolveResponse = resolve; });
+  let reloads = 0;
+
+  const dispose = installBuildFreshnessWatcher("build-a", {
+    windowRef: fakeWindow as unknown as Window,
+    documentRef: fakeDocument as unknown as Document,
+    minCheckIntervalMs: 0,
+    retryDelaysMs: [],
+    reload: () => { reloads++; },
+    fetchImpl: (async () => response) as typeof fetch,
+  });
+
+  suspendAndResume(fakeDocument);
+  await settle();
+  setBuildFreshnessEnabled(false);
+  resolveResponse(new Response(JSON.stringify({ build: "build-b" }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  }));
+  await settle();
+
+  assert.equal(reloads, 0);
   dispose();
 });
 
