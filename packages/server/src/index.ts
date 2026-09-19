@@ -32,6 +32,11 @@ const localOriginHost = (hostname: string): string => {
   );
 };
 
+const isLoopbackListenerHost = (hostname: string): boolean => {
+  const host = hostname.trim().toLowerCase().replace(/^\[|\]$/g, "");
+  return host === "127.0.0.1" || host === "localhost" || host === "::1";
+};
+
 const recoveryRequired = (): Error => Object.assign(
   new Error("Canonical security authority requires operator recovery"),
   { code: "recovery-required" },
@@ -66,9 +71,20 @@ export async function boot(opts: BootOptions = {}) {
   }
   const hostname = opts.hostname ?? process.env.HOST ?? "127.0.0.1";
   const publicOrigin = (process.env.POLYTH_PUBLIC_ORIGIN ?? "").trim();
+  const debugAgentAccess = process.env.POLYTH_DEBUG_AGENT_ACCESS === "1";
+  const deploymentProfile = process.env.POLYTH_DEPLOYMENT_PROFILE ?? "local-trusted";
+  if (debugAgentAccess
+    && (publicOrigin || !isLoopbackListenerHost(hostname) || deploymentProfile !== "local-trusted")) {
+    throw invalidOrigin(
+      "POLYTH_DEBUG_AGENT_ACCESS requires a loopback-only local-trusted deployment and cannot be combined with POLYTH_PUBLIC_ORIGIN",
+    );
+  }
   const origin = publicOrigin
     ? canonicalPublicOrigin(publicOrigin)
     : `http://${localOriginHost(hostname)}:${port}`;
+  if (debugAgentAccess) {
+    console.warn("[polyth] DEBUG agent access enabled: direct-loopback HTTP/WS runs as the active owner");
+  }
   const dataDir = resolve(opts.dataDir ?? process.env.POLYTH_DATA_DIR ?? "./data");
   const preflight = inspectCanonicalInstallation(dataDir);
   if (preflight.kind === "existing" && preflight.state === "recovery") throw recoveryRequired();
