@@ -182,7 +182,7 @@
 
 .mobile-connect h1 {
   max-width: 18ch;
-  font-size: clamp(var(--font-title), 7vw, calc(var(--font-title) * 1.35));
+  font-size: var(--font-title);
   line-height: 1.08;
   letter-spacing: -0.025em;
 }
@@ -566,7 +566,7 @@
   background: var(--input-bg);
   color: var(--text);
   font-family: var(--mono);
-  font-size: calc(var(--font-title) * 1.15);
+  font-size: var(--font-title);
   font-weight: 750;
   box-shadow: var(--inset-hi);
 }
