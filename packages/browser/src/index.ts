@@ -58,6 +58,11 @@ export type {
   ProfileNav,
   ScreencastFrame,
   NavigationKind,
+  ManualHandoffActionEvent,
+  ManualHandoffActionId,
+  ManualHandoffControlsOptions,
+  ManualHandoffExtraction,
+  ManualHandoffScope,
 } from "./profileDriver.ts";
 export { MANUAL_ONLY_POLICY } from "./profileDriver.ts";
 export { createFakeProfileDriver, resetFakeProfileLocks } from "./fakeProfile.ts";
