@@ -12,18 +12,26 @@ const model = { providerID: "antigravity", modelID: "fixture-gemini", variant: "
 const context = { spaceId: "space-a", projectId: "project-a", sessionId: "session-a", cwd: "/project", model };
 const request = { ...context };
 const flush = async () => { await tick(); await tick(); };
-function fixture(t: TestContext, options: { receipts?: Record<string, string>; autoInit?: boolean; timeoutMs?: number } = {}) {
+function fixture(t: TestContext, options: {
+  receipts?: Record<string, string>;
+  autoInit?: boolean;
+  timeoutMs?: number;
+  permissionMode?: string;
+  autoApprove?: boolean;
+} = {}) {
   const proc = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() });
   const inputs: Array<Record<string, unknown>> = [];
+  const controls: Array<Record<string, unknown>> = [];
   const events: RuntimeEvent[] = [];
   const launches: string[][] = [];
+  let autoApprove = options.autoApprove ?? false;
+  let hookHandler: ((payload: unknown) => Promise<{ decision: "allow" | "deny"; reason?: string }>) | undefined;
+  let nativeMode = "";
   let releaseFailure = false;
   let releases = 0;
   const authority: HarnessProcessAuthority = {
     authorityId: "authority-a", generation: 1, receipts: options.receipts ?? {}, releasedAuthorities: [], durable: true,
-    spawn(_command, args) {
-      launches.push(args);
-      if (options.autoInit !== false) queueMicrotask(() => send({ event: "init", conversation_id: "native-a", init: { cwd: context.cwd, model: model.modelID } }));
+    spawn() {
       return proc as unknown as ChildProcess;
     },
     async receipt(id, value) { this.receipts[id] = value; },
@@ -32,15 +40,76 @@ function fixture(t: TestContext, options: { receipts?: Record<string, string>; a
       if (releaseFailure) throw new Error("no containment proof");
     },
   };
-  proc.stdin.on("data", (chunk: Buffer) => { for (const line of chunk.toString().trim().split("\n")) if (line) inputs.push(JSON.parse(line)); });
   const send = (frame: unknown) => proc.stdout.write(JSON.stringify(frame) + "\n");
-  const runtime = createAntigravityRuntime({ context, authority, command: "agy-fixture", models: async () => [{ ...model, name: "Fixture Gemini", harnessId: "antigravity", variants: ["low", "medium", "high"] }], timeoutMs: options.timeoutMs ?? 500 });
+  proc.stdin.on("data", (chunk: Buffer) => {
+    for (const line of chunk.toString().trim().split("\n")) {
+      if (!line) continue;
+      const control = JSON.parse(line) as Record<string, unknown>;
+      controls.push(control);
+      if (control.event === "polyth_launch") {
+        const args = control.args as string[];
+        launches.push(args);
+        nativeMode = String(control.mode);
+        if (options.autoInit !== false) queueMicrotask(() => send({
+          event: "init",
+          conversation_id: "native-a",
+          init: {
+            cwd: context.cwd,
+            model: model.modelID,
+            permission_mode: options.permissionMode
+              ?? (args.includes("--dangerously-skip-permissions") ? "always-proceed" : "request-review"),
+          },
+        }));
+      } else if (control.event === "polyth_user") {
+        const args = control.args as string[];
+        if (control.mode !== nativeMode) {
+          launches.push(args);
+          nativeMode = String(control.mode);
+          queueMicrotask(() => send({
+            event: "polyth_reinit",
+            polyth_reinit: {
+              event: "init",
+              conversation_id: "native-a",
+              init: {
+                cwd: context.cwd,
+                model: model.modelID,
+                permission_mode: args.includes("--dangerously-skip-permissions") ? "always-proceed" : "request-review",
+              },
+            },
+          }));
+        }
+        inputs.push(control.input as Record<string, unknown>);
+      }
+    }
+  });
+  const runtime = createAntigravityRuntime({
+    context,
+    authority,
+    command: "agy-fixture",
+    workerPath: "/polyth/antigravity-worker.mjs",
+    models: async () => [{ ...model, name: "Fixture Gemini", harnessId: "antigravity", variants: ["low", "medium", "high"] }],
+    autoApprove: async () => autoApprove,
+    permissionBridge: async (handle) => {
+      hookHandler = handle;
+      return { root: "/polyth-hooks", prepare: async () => {}, close: async () => {} };
+    },
+    timeoutMs: options.timeoutMs ?? 500,
+  });
   runtime.onEvent((_id, event) => events.push(event));
   t.after(async () => { releaseFailure = false; await runtime.dispose(); });
   const inputStep = (index = 0) => send({ event: "step_update", step_update: { conversation_id: "native-a", step_index: index, state: "DONE", step_type: "user_input" } });
   const finish = (turns = 1, input = 100, output = 10) => send({ event: "result", result: { conversation_id: "native-a", status: "SUCCESS", response: "Answer", num_turns: turns, usage: { input_tokens: input, output_tokens: output, thinking_tokens: 0, cache_read_tokens: 0 } } });
   const start = (id = "turn-a", body = "Hello") => runtime.startTurnOperation!({ sessionId: context.sessionId, text: body, model }, id);
-  return { runtime, authority, proc, inputs, events, launches, send, inputStep, finish, start, get releases() { return releases; }, set releaseFailure(value: boolean) { releaseFailure = value; } };
+  const hook = (tool: string, args: Record<string, unknown>, stepIdx = 2) => {
+    if (!hookHandler) throw new Error("permission bridge is not initialized");
+    return hookHandler({ conversationId: "native-a", stepIdx, toolCall: { name: tool, args } });
+  };
+  return {
+    runtime, authority, proc, inputs, controls, events, launches, send, inputStep, finish, start, hook,
+    get releases() { return releases; },
+    set releaseFailure(value: boolean) { releaseFailure = value; },
+    set autoApprove(value: boolean) { autoApprove = value; },
+  };
 }
 
 test("native create is lazy, records exact ID and doesn't submit a paid prompt", async (t) => {
@@ -51,6 +120,23 @@ test("native create is lazy, records exact ID and doesn't submit a paid prompt",
   assert.equal(f.authority.receipts["create:create-a"], "native-a");
   assert.equal(f.inputs.length, 0);
   assert.equal(f.launches.length, 1);
+  assert.equal(f.launches[0]?.includes("--dangerously-skip-permissions"), false);
+  assert.equal(f.launches[0]?.includes("--sandbox"), false);
+});
+
+test("native initialization must confirm approval-required mode when Auto-Approve is off", async (t) => {
+  const f = fixture(t, { permissionMode: "always-proceed" });
+  const created = await f.runtime.createSessionOperation!(request, "create-a");
+  assert.equal(created.kind, "unknown");
+  await flush();
+  assert.equal(f.releases, 1);
+});
+
+test("Auto-Approve launches the native CLI with the literal dangerous flag and no sandbox", async (t) => {
+  const f = fixture(t, { autoApprove: true });
+  assert.equal((await f.runtime.createSessionOperation!(request, "create-a")).kind, "confirmed");
+  assert.equal(f.launches[0]?.includes("--dangerously-skip-permissions"), true);
+  assert.equal(f.launches[0]?.includes("--sandbox"), false);
 });
 
 test("admission waits for native evidence, only sends the new prompt and never replays an ID", async (t) => {
@@ -76,6 +162,49 @@ test("admission waits for native evidence, only sends the new prompt and never r
     { input: 100, output: 10, reasoning: 0, cacheRead: 0 },
     { input: 40, output: 6, reasoning: 0, cacheRead: 0 },
   ]);
+});
+
+test("manual mode routes a command through Polyth permission events and applies the reply", async (t) => {
+  const f = fixture(t);
+  await f.runtime.createSessionOperation!(request, "create-a");
+  const admission = f.start(); await flush(); f.inputStep(); await admission;
+  const decision = f.hook("run_command", { CommandLine: "npm test", Cwd: context.cwd });
+  await flush();
+  const event = f.events.find((candidate) => candidate.type === "permission/requested");
+  assert.equal(event?.type, "permission/requested");
+  if (event?.type !== "permission/requested") throw new Error("permission event missing");
+  assert.equal(event.permission, "bash");
+  assert.deepEqual(event.patterns, ["npm test"]);
+  const endpoint = await f.runtime.endpoint!();
+  const snapshot = await f.runtime.reconcile!({
+    ...endpoint,
+    canonicalSessionId: context.sessionId,
+    backendSessionId: "native-a",
+  });
+  assert.equal(snapshot.permissions[0]?.requestId, event.requestId);
+  assert.equal((await f.runtime.replyPermissionOperation!(context.sessionId, event.requestId, "once", "permission-a")).kind, "confirmed");
+  assert.deepEqual(await decision, { decision: "allow" });
+  assert.equal((await f.runtime.replyPermissionOperation!(context.sessionId, event.requestId, "once", "permission-b")).kind, "rejected");
+  f.finish(); await flush();
+});
+
+test("changing Auto-Approve replaces only the idle native leg and changes the exact launch flag", async (t) => {
+  const f = fixture(t);
+  await f.runtime.createSessionOperation!(request, "create-a");
+  f.autoApprove = true;
+  const first = f.start(); await flush(); f.inputStep(); await first;
+  assert.equal(f.launches.length, 2);
+  assert.equal(f.launches[1]?.includes("--dangerously-skip-permissions"), true);
+  assert.deepEqual(await f.hook("run_command", { CommandLine: "npm test" }), { decision: "allow" });
+  assert.equal(f.events.some((event) => event.type === "permission/requested"), false);
+  f.finish(); await flush();
+
+  f.autoApprove = false;
+  const second = f.start("turn-b", "Review again"); await flush(); f.inputStep(3); await second;
+  assert.equal(f.launches.length, 3);
+  assert.equal(f.launches[2]?.includes("--dangerously-skip-permissions"), false);
+  assert.equal(f.launches.every((args) => !args.includes("--sandbox")), true);
+  f.finish(2); await flush();
 });
 
 test("late old result and steps cannot finalize or contaminate the next turn", async (t) => {
@@ -145,7 +274,7 @@ test("foreign conversation frame fails closed before publishing its content", as
   assert.equal(JSON.stringify(f.events).includes("Foreign content"), false);
 });
 
-test("a native error step keeps the runtime connected and surfaces the denial", async (t) => {
+test("a native error step with a response keeps the runtime connected and surfaces the denial", async (t) => {
   const f = fixture(t);
   await f.runtime.createSessionOperation!(request, "create-a");
   const pending = f.start(); await flush(); f.inputStep(); await pending;
@@ -159,6 +288,24 @@ test("a native error step keeps the runtime connected and surfaces the denial", 
   f.finish(2); await flush();
   assert.deepEqual(f.events.filter((event) => event.type === "turn/stopped").map((event) => event.reason), ["completed"]);
   assert.equal(f.launches.length, 1);
+});
+test("a soft-denied tool followed by an empty SUCCESS fails instead of stopping silently", async (t) => {
+  const f = fixture(t);
+  await f.runtime.createSessionOperation!(request, "create-a");
+  const pending = f.start(); await flush(); f.inputStep(); await pending;
+  f.send({ event: "step_update", step_update: {
+    conversation_id: "native-a", step_index: 2, state: "ERROR", step_type: "tool", tool_name: "run_command",
+    error: "permission check failed for unsandboxed command",
+  } });
+  f.send({ event: "result", result: {
+    conversation_id: "native-a", status: "SUCCESS", response: "", num_turns: 1,
+    usage: { input_tokens: 100, output_tokens: 10, thinking_tokens: 0, cache_read_tokens: 0 },
+  } });
+  await flush();
+  const stop = f.events.findLast((event) => event.type === "turn/stopped");
+  assert.equal(stop?.reason, "error");
+  assert.match(stop?.error ?? "", /instead of completing Polyth's approval flow/);
+  assert.equal(f.releases, 0, "a soft denial is not a runtime disconnect");
 });
 test("a subagent invocation closes its tool proposal instead of a false unterminated error", async (t) => {
   const f = fixture(t);
@@ -215,7 +362,7 @@ test("unsupported controls and attachments fail before input; no silent model ch
     assert.equal((await f.runtime.startTurnOperation!({ sessionId: context.sessionId, text: "Hello", ...extra }, "rejected")).kind, "rejected");
   }
   assert.equal(f.inputs.length, 0);
-  await assert.rejects(f.runtime.replyPermission(context.sessionId, "p", "once"), { code: "unsupported" });
+  await assert.rejects(f.runtime.replyPermission(context.sessionId, "p", "once"), { code: "not-found" });
 });
 
 test("observations and pull reconciliation share identities and enforce generation/Space fences", async (t) => {

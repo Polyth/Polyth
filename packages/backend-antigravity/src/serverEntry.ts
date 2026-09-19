@@ -1,13 +1,17 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { HarnessContext, HarnessProvider, HarnessRegistry, ModelDescriptor, AgentRuntime } from "@polyth/contracts";
 import { releaseProcessExecution } from "@polyth/harness-runtime";
 import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/harness-runtime/executable-discovery";
 import { createHarnessProcessAuthority } from "@polyth/harness-runtime/process-authority";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
+import { createAntigravityPermissionBridge } from "./permissions.ts";
 import { ANTIGRAVITY_CAPABILITIES, agyError, parseAgyModels } from "./protocol.ts";
 import { createAntigravityRuntime } from "./runtime.ts";
+import { ANTIGRAVITY_WORKER_SOURCE } from "./workerSource.ts";
 
 const exec = promisify(execFile);
 const resolveBinary = async () => {
@@ -21,15 +25,34 @@ const metadata = async (binary: Awaited<ReturnType<typeof resolveBinary>>, arg: 
     shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(binary.command), windowsHide: true,
   })).stdout;
 
+const writeGenerated = async (file: string, content: string): Promise<void> => {
+  const current = await readFile(file, "utf8").catch(() => undefined);
+  if (current === content) return;
+  await mkdir(dirname(file), { recursive: true });
+  const temp = `${file}.${process.pid}.tmp`;
+  await writeFile(temp, content, { mode: 0o600 });
+  await rename(temp, file);
+};
+
 export default function registerPackage(host: ServerPackageHost) {
   const runtimes = new Set<AgentRuntime>();
   const catalog = new Map<string, { expires: number; promise: Promise<ModelDescriptor[]> }>();
   const scopeKey = (context: HarnessContext) => JSON.stringify([context.spaceId, context.projectId, context.cwd]);
+  const runtimeKey = (context: HarnessContext) => createHash("sha256")
+    .update(JSON.stringify([context.spaceId, context.projectId, context.cwd, context.sessionId]))
+    .digest("hex");
   const stateFile = (context: HarnessContext) => {
     if (!context.space || context.space.spaceId !== context.spaceId || context.remote || !context.sessionId)
       throw agyError("unsupported", "A validated local Space and canonical session are required");
-    const key = createHash("sha256").update(JSON.stringify([context.spaceId, context.projectId, context.cwd, context.sessionId])).digest("hex");
-    return host.spaceStorage(context.space).path(`runtime/antigravity/${key}.json`);
+    return host.spaceStorage(context.space).path(`runtime/antigravity/${runtimeKey(context)}.json`);
+  };
+  const generatedPaths = (context: HarnessContext) => {
+    if (!context.space) throw agyError("unsupported", "A validated local Space is required");
+    const root = host.spaceStorage(context.space).packageDir(host.pluginId);
+    return {
+      worker: join(root, "generated", "antigravity-worker.mjs"),
+      permissionRoot: join(root, "runtime", runtimeKey(context), "permission-workspace"),
+    };
   };
   const models = async (context: HarnessContext): Promise<ModelDescriptor[]> => {
     if (context.remote) throw agyError("unsupported", "Antigravity runs on the local Polyth server only");
@@ -70,7 +93,7 @@ export default function registerPackage(host: ServerPackageHost) {
     async discover(context) {
       return { state: "unknown", authenticated: "unknown", capabilities: ANTIGRAVITY_CAPABILITIES,
         catalog: { models: await models(context), agents: [] },
-        message: "Native CLI authentication is verified on session initialization; stream mode does not expose permission replies." };
+        message: "Native CLI authentication is verified on session initialization; Polyth gates non-edit tools unless Auto-Approve is enabled." };
     },
     invalidateDiscovery(context) {
       for (const key of catalog.keys()) if (JSON.parse(key)[0] === scopeKey(context)) catalog.delete(key);
@@ -78,8 +101,29 @@ export default function registerPackage(host: ServerPackageHost) {
     async createRuntime(context) {
       const file = stateFile(context);
       const binary = await resolveBinary();
+      const paths = generatedPaths(context);
+      await writeGenerated(paths.worker, ANTIGRAVITY_WORKER_SOURCE);
       const authority = await createHarnessProcessAuthority(file);
-      const runtime = createAntigravityRuntime({ context, authority, ...binary, models: () => models(context) });
+      const runtime = createAntigravityRuntime({
+        context,
+        authority,
+        ...binary,
+        workerPath: paths.worker,
+        models: () => models(context),
+        autoApprove: async () => {
+          if (!context.sessionId) return false;
+          try {
+            const sessions = host.forSpace(context.space!).sessions;
+            return (await sessions.autoAcceptGet?.(context.sessionId))?.effective ?? false;
+          } catch {
+            return false;
+          }
+        },
+        permissionBridge: (handle) => createAntigravityPermissionBridge({
+          root: paths.permissionRoot,
+          handle,
+        }),
+      });
       const dispose = runtime.dispose.bind(runtime);
       runtime.dispose = async () => { await dispose(); runtimes.delete(runtime); };
       runtimes.add(runtime);

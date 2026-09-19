@@ -23,10 +23,14 @@ report authentication as unknown; native initialization verifies actual access.
 ## Protocol and ownership
 
 One owned child process runs
-`agy --input-format stream-json --output-format stream-json` per canonical
-runtime. Prompts go through stdin, never shell command interpolation. Model,
-effort (`low`, `medium`, `high`) and optional native agent are launch arguments;
-model IDs come from `agy models`, not a hardcoded or stale fallback list.
+`agy --input-format stream-json --output-format stream-json
+--dangerously-skip-permissions` per canonical runtime. Polyth does not enable
+Antigravity's optional native terminal sandbox. The always-proceed flag prevents
+headless permission prompts from becoming native soft-denials with an empty
+successful result. Prompts go through stdin, never shell command interpolation.
+Model, effort (`low`, `medium`, `high`) and optional native agent are launch
+arguments; model IDs come from `agy models`, not a hardcoded or stale fallback
+list.
 
 Polyth records the native conversation ID from `init` and resumes only that
 Space/project/session's recorded ID using `--conversation`. It never uses
@@ -61,8 +65,13 @@ macOS/Windows retain the shared portable authority's explicit crash-fence limits
   PDF, audio and URL blocks are not advertised. Unsupported input fails before
   delivery instead of disappearing silently.
 - The stream protocol has no interactive permission/question reply channel.
-  Native policy remains in force: no automatic permission bypass, no fake
-  approval buttons. Tool permission denial is preserved in activity. Native
+  Antigravity therefore runs in native always-proceed mode: its built-in tools
+  do not create Polyth `permission/requested` cards, and the generic Polyth
+  Auto-Approve toggle does not gate those native calls. They execute with the
+  local Polyth server account's authority. Unexpected native permission denial
+  is still preserved in activity; if the CLI returns `SUCCESS` without any
+  public response, Polyth records a failed turn rather than silently presenting
+  an empty completed turn. Native
   slash commands, steering and Polyth MCP injection are not implemented.
 - A step the native CLI ends in a failure state (`ERROR`, `INVALID`, `HALTED`,
   `CANCELED`, `INTERRUPTED`) becomes a `tool/error` (or finalizes text it had

@@ -25,10 +25,16 @@ test("model catalog is dynamic, deduplicated and does not invent auth or prices"
   assert.equal(models[0]?.cost, undefined);
   assert.deepEqual(parseAgyModels("Sign in to continue"), []);
 });
-test("launch arguments pin explicit conversation/model/effort and never bypass permissions", () => {
+test("launch arguments map Auto-Approve exactly to the dangerous flag and never enable a sandbox", () => {
   assert.deepEqual(agyLaunchArgs(model, "reviewer", "conversation-1"), ["--input-format", "stream-json", "--output-format", "stream-json", "--conversation", "conversation-1", "--model", "fixture-gemini", "--effort", "high", "--agent", "reviewer"]);
+  assert.deepEqual(agyLaunchArgs(undefined, undefined, undefined, { autoApprove: true, hookRoot: "/polyth-hooks" }), [
+    "--input-format", "stream-json", "--output-format", "stream-json",
+    "--dangerously-skip-permissions", "--add-dir", "/polyth-hooks",
+  ]);
+  assert.equal(agyLaunchArgs().includes("--sandbox"), false);
   assert.equal(agyLaunchArgs().includes("--continue"), false);
   assert.equal(agyLaunchArgs().includes("--dangerously-skip-permissions"), false);
+  assert.equal(agyLaunchArgs(undefined, undefined, undefined, { autoApprove: true }).includes("--dangerously-skip-permissions"), true);
   assert.throws(() => agyLaunchArgs({ ...model, modelID: "--evil" }), /catalog/);
   assert.throws(() => agyLaunchArgs({ ...model, providerID: "other" }), /catalog/);
   assert.throws(() => agyLaunchArgs({ ...model, variant: "max" }), /effort/);
@@ -82,6 +88,37 @@ test("a failed tool step with no ACTIVE frame still surfaces its denial", () => 
     { type: "tool/started", callId: "t:step:2", tool: "run_command", input: { CommandLine: "cat /etc/shadow" } },
     { type: "tool/error", callId: "t:step:2", tool: "run_command", error: "user denied permission" },
   ]);
+});
+test("a soft-denied headless tool cannot end as a silent successful turn", () => {
+  const turn = createAgyTurn("t", model);
+  turn.step({
+    step_index: 2, state: "ERROR", step_type: "tool", tool_name: "run_command",
+    error: "permission check failed for unsandboxed command",
+  });
+  const events = turn.finish({ status: "SUCCESS", response: "" });
+  assert.deepEqual(events.at(-1), {
+    type: "turn/stopped",
+    turnId: "t",
+    reason: "error",
+    error: "Antigravity denied a tool instead of completing Polyth's approval flow. No mutation was confirmed; check the permission bridge and native policy, then retry.",
+    code: "unknown",
+  });
+});
+test("an empty native SUCCESS without proven non-application keeps its native outcome", () => {
+  const turn = createAgyTurn("t", model);
+  assert.deepEqual(turn.finish({ status: "SUCCESS", response: "" }), [{
+    type: "turn/stopped",
+    turnId: "t",
+    reason: "completed",
+  }]);
+});
+test("a prior successful tool prevents a denial from offering an unsafe turn retry", () => {
+  const turn = createAgyTurn("t", model);
+  turn.step({ step_index: 1, state: "DONE", step_type: "tool", tool_name: "write_to_file", tool_info: { name: "write_to_file", output: "written" } });
+  turn.step({ step_index: 2, state: "ERROR", step_type: "tool", tool_name: "run_command", error: "permission denied" });
+  assert.deepEqual(turn.finish({ status: "SUCCESS", response: "" }).at(-1), {
+    type: "turn/stopped", turnId: "t", reason: "completed",
+  });
 });
 test("transitional and unrecognized step states never abort the turn", () => {
   const turn = createAgyTurn("t", model);
@@ -159,7 +196,7 @@ test("resumed usage fallback sums final steps once, including zero counters", ()
   assert.equal(agyUsage({ input_tokens: NaN, output_tokens: 2 }), undefined);
 });
 test("capabilities stay within stream protocol, not the wider Gemini model capabilities", () => {
-  assert.equal(ANTIGRAVITY_CAPABILITIES.permissions, false);
+  assert.equal(ANTIGRAVITY_CAPABILITIES.permissions, true);
   assert.equal(ANTIGRAVITY_CAPABILITIES.cost, false);
   assert.equal(ANTIGRAVITY_CAPABILITIES.attachments.modalities.image, "unsupported");
   assert.equal(ANTIGRAVITY_CAPABILITIES.fork, false);

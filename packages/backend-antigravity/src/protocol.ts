@@ -1,8 +1,9 @@
 import { StringDecoder } from "node:string_decoder";
+import { isAbsolute } from "node:path";
 import type { ModelDescriptor, ModelRef, RuntimeCapabilities, RuntimeEvent, TokenUsage } from "@polyth/contracts";
 
 export const ANTIGRAVITY_CAPABILITIES = {
-  streaming: true, permissions: false, questions: false, compaction: false,
+  streaming: true, permissions: true, questions: false, compaction: false,
   subagents: true, steering: false, resume: true, usage: true, cost: false,
   fork: false, mcp: false, title: "emulated", contextOccupancy: "unknown",
   attachments: { modalities: {
@@ -63,9 +64,26 @@ export function parseAgyModels(output: string): ModelDescriptor[] {
   return [...rows.values()];
 }
 
-export function agyLaunchArgs(model?: ModelRef, agent?: string, conversationId?: string): string[] {
+export function agyLaunchArgs(
+  model?: ModelRef,
+  agent?: string,
+  conversationId?: string,
+  policy: { autoApprove?: boolean; hookRoot?: string } = {},
+): string[] {
   const safe = (value: string) => /^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,255}$/.test(value);
-  const args = ["--input-format", "stream-json", "--output-format", "stream-json"];
+  const args = [
+    "--input-format", "stream-json",
+    "--output-format", "stream-json",
+  ];
+  // Auto-Approve is deliberately the native all-tools bypass, not a weaker
+  // adapter-side approximation. Review mode omits it and routes tool decisions
+  // through Polyth's PreToolUse bridge. The optional CLI sandbox is never used.
+  if (policy.autoApprove) args.push("--dangerously-skip-permissions");
+  if (policy.hookRoot) {
+    if (!isAbsolute(policy.hookRoot) || policy.hookRoot.includes("\0"))
+      throw agyError("invalid-path", "Antigravity permission bridge root must be absolute");
+    args.push("--add-dir", policy.hookRoot);
+  }
   if (conversationId) {
     if (!safe(conversationId)) throw agyError("invalid-session", "Invalid Antigravity conversation ID");
     args.push("--conversation", conversationId);
@@ -83,7 +101,7 @@ export function agyLaunchArgs(model?: ModelRef, agent?: string, conversationId?:
     if (!safe(agent)) throw agyError("invalid-agent", "Invalid Antigravity agent name");
     args.push("--agent", agent);
   }
-  // Never add ambient --continue, -p, shell interpolation, or permission bypass.
+  // Never add ambient --continue, -p, shell interpolation, or --sandbox.
   return args;
 }
 
@@ -133,6 +151,13 @@ export function createAgyTurn(turnId: string, model: ModelRef | undefined) {
   let terminal = false;
   let deltaCount = 0;
   let responseBytes = 0;
+  let failedTools = 0;
+  let deniedTools = 0;
+  let successfulTools = 0;
+  const noteToolFailure = (error: string) => {
+    failedTools++;
+    if (/\b(?:permission|denied|approval|not allowed|unsandboxed)\b/i.test(error)) deniedTools++;
+  };
   return {
     get terminal() { return terminal; },
     get deltaCount() { return deltaCount; },
@@ -172,8 +197,14 @@ export function createAgyTurn(turnId: string, model: ModelRef | undefined) {
         if (settled) {
           const failure = agyFailureText(row, info);
           openTools.delete(index);
-          if (failed || failure !== undefined || info?.error) events.push({ type: "tool/error", callId: id, tool, error: failure ?? "Antigravity tool failed" });
-          else events.push({ type: "tool/result", callId: id, tool, output: text(info?.output) ?? "" });
+          if (failed || failure !== undefined || info?.error) {
+            const error = failure ?? "Antigravity tool failed";
+            noteToolFailure(error);
+            events.push({ type: "tool/error", callId: id, tool, error });
+          } else {
+            successfulTools++;
+            events.push({ type: "tool/result", callId: id, tool, output: text(info?.output) ?? "" });
+          }
         }
       }
       const subagents = record(row.subagent_info)?.subagents;
@@ -198,9 +229,14 @@ export function createAgyTurn(turnId: string, model: ModelRef | undefined) {
         openTools.delete(index);
         const info = record(row.tool_info);
         const failure = agyFailureText(row, info);
-        if (failed || failure !== undefined || info?.error)
-          events.push({ type: "tool/error", callId: id, tool, error: failure ?? "Antigravity subagent failed" });
-        else events.push({ type: "tool/result", callId: id, tool, output: text(info?.output) ?? "" });
+        if (failed || failure !== undefined || info?.error) {
+          const error = failure ?? "Antigravity subagent failed";
+          noteToolFailure(error);
+          events.push({ type: "tool/error", callId: id, tool, error });
+        } else {
+          successfulTools++;
+          events.push({ type: "tool/result", callId: id, tool, output: text(info?.output) ?? "" });
+        }
       }
       if (settled) finished.add(index);
       return events;
@@ -213,8 +249,11 @@ export function createAgyTurn(turnId: string, model: ModelRef | undefined) {
       terminal = true;
       const events: RuntimeEvent[] = [];
       // A tool the native CLI never terminated must not stay "running" forever.
-      for (const [index, tool] of openTools)
-        events.push({ type: "tool/error", callId: `${turnId}:step:${index}`, tool, error: "Antigravity ended the turn without reporting a result for this tool call" });
+      for (const [index, tool] of openTools) {
+        const error = "Antigravity ended the turn without reporting a result for this tool call";
+        noteToolFailure(error);
+        events.push({ type: "tool/error", callId: `${turnId}:step:${index}`, tool, error });
+      }
       openTools.clear();
       if (!messages.size && text(result.response)) events.push({ type: "assistant/message", partId: `${turnId}:result`, text: text(result.response)! });
       else for (const [index, body] of messages) if (!finished.has(index))
@@ -229,9 +268,21 @@ export function createAgyTurn(turnId: string, model: ModelRef | undefined) {
         }
       }
       if (usage) events.push({ type: "usage/recorded", model: model ?? { providerID: "antigravity", modelID: "unknown" }, tokens: usage });
+      // Headless Antigravity soft-denies permission prompts, but still reports
+      // SUCCESS and exit 0. A SUCCESS result with no public response therefore
+      // cannot prove a completed assistant turn when every attempted tool was
+      // definitively denied before execution. Surface that proven non-
+      // application instead of leaving Polyth idle with no answer. If any tool
+      // succeeded (or failed ambiguously), preserve SUCCESS: offering a retry
+      // could duplicate a mutation whose outcome is already confirmed/unknown.
+      const hasAssistantResponse = [...messages.values()].some((body) => body.trim().length > 0)
+        || (text(result.response)?.trim().length ?? 0) > 0;
+      const silentPermissionDenial = status === "SUCCESS" && !hasAssistantResponse
+        && failedTools > 0 && deniedTools === failedTools && successfulTools === 0;
       events.push({ type: "turn/stopped", turnId,
-        reason: status === "SUCCESS" ? "completed" : status === "CANCELED" || status === "INTERRUPTED" ? "aborted" : "error",
-        ...(status === "ERROR" || status === "INVALID" ? { error: "Antigravity did not complete the turn. Check the native CLI authentication, model access and permission settings.", code: "unknown" as const } : {}),
+        reason: status === "SUCCESS" && !silentPermissionDenial ? "completed" : status === "CANCELED" || status === "INTERRUPTED" ? "aborted" : "error",
+        ...(silentPermissionDenial ? { error: "Antigravity denied a tool instead of completing Polyth's approval flow. No mutation was confirmed; check the permission bridge and native policy, then retry.", code: "unknown" as const }
+          : status === "ERROR" || status === "INVALID" ? { error: "Antigravity did not complete the turn. Check the native CLI authentication, model access and permission settings.", code: "unknown" as const } : {}),
       });
       return events;
     },
