@@ -48,6 +48,7 @@ test("desktop packaging covers each supported updater target", async () => {
 
 test("manual desktop workflow builds Windows, Linux and macOS artifacts without publishing", async () => {
   const workflow = await readFile(join(repositoryRoot, ".github/workflows/build-apps.yml"), "utf8");
+  const releaseWorkflow = await readFile(join(repositoryRoot, ".github/workflows/release.yml"), "utf8");
   const rootPackage = JSON.parse(await readFile(join(repositoryRoot, "package.json"), "utf8")) as {
     scripts: Record<string, string>;
   };
@@ -61,8 +62,14 @@ test("manual desktop workflow builds Windows, Linux and macOS artifacts without 
     "--mac dmg --x64 --arm64 --publish never",
     "CSC_LINK",
     "APPLE_APP_SPECIFIC_PASSWORD",
-    "polyth-macos-dmg-x64",
-    "polyth-macos-dmg-arm64",
+    "Select macOS signing mode",
+    "-c.mac.identity=-",
+    "-c.mac.notarize=false",
+    "Verify packaged macOS signatures",
+    "codesign --verify --deep --strict",
+    "spctl --assess --type execute",
+    "polyth-macos-dmg-x64-${{ steps.mac_signing.outputs.mode }}",
+    "polyth-macos-dmg-arm64-${{ steps.mac_signing.outputs.mode }}",
     "*-mac-x64.dmg",
     "*-mac-arm64.dmg",
     "npx playwright-core install chromium",
@@ -80,9 +87,14 @@ test("manual desktop workflow builds Windows, Linux and macOS artifacts without 
     assert.ok(workflow.includes(required), `manual desktop build workflow must include ${required}`);
   }
   assert.doesNotMatch(workflow, /--publish always/);
-  assert.doesNotMatch(workflow, /--config\.mac\.notarize=false/);
   assert.doesNotMatch(workflow, /CSC_IDENTITY_AUTO_DISCOVERY/);
   assert.doesNotMatch(workflow, /--universal/);
+  assert.match(workflow, /mode=developer-id/);
+  assert.match(workflow, /mode=adhoc/);
+  assert.match(workflow, /these are not trusted release artifacts/);
+  assert.match(releaseWorkflow, /Require macOS signing and notarization/);
+  assert.doesNotMatch(releaseWorkflow, /-c\.mac\.identity=-/);
+  assert.doesNotMatch(releaseWorkflow, /-c\.mac\.notarize=false/);
   assert.match(workflow, /POLYTH_MAC_MULTI_ARCH/);
 
   const installed = workflow.indexOf("npx playwright-core install chromium");

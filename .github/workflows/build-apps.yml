@@ -126,7 +126,7 @@ jobs:
           if-no-files-found: error
 
   macos:
-    name: macOS signed DMG
+    name: macOS DMG
     if: inputs.target == 'mac-dmg' || inputs.target == 'all'
     runs-on: macos-15
     timeout-minutes: 90
@@ -152,12 +152,36 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Require macOS signing and notarization
+      - name: Select macOS signing mode
+        id: mac_signing
         run: |
           set -euo pipefail
+          MISSING=()
           for NAME in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
-            test -n "${!NAME}" || { echo "$NAME is required for mac-dmg" >&2; exit 1; }
+            test -n "${!NAME}" || MISSING+=("$NAME")
           done
+
+          if [ "${#MISSING[@]}" -eq 0 ]; then
+            echo "mode=developer-id" >> "$GITHUB_OUTPUT"
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "## macOS signing"
+              echo "Developer ID signing and Apple notarization enabled."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "mode=adhoc" >> "$GITHUB_OUTPUT"
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            MISSING_CSV="$(IFS=', '; echo "${MISSING[*]}")"
+            echo "::warning::macOS signing/notarization secrets are incomplete (${MISSING_CSV}). Building ad-hoc signed smoke DMGs; these are not trusted release artifacts."
+            {
+              echo "## macOS signing"
+              echo "Developer ID credentials are incomplete. Building ad-hoc signed smoke DMGs."
+              echo
+              echo "Missing: `${MISSING_CSV}`"
+              echo
+              echo "These artifacts are for testing only and are not equivalent to a notarized release."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Install workspace dependencies
         run: npm ci --no-audit --no-fund
@@ -207,9 +231,22 @@ jobs:
           POLYTH_TARGET_PLATFORM=darwin POLYTH_TARGET_ARCH=x64 npm run desktop:download-opencode
           POLYTH_TARGET_PLATFORM=darwin POLYTH_TARGET_ARCH=arm64 npm run desktop:download-opencode
 
-      - name: Build signed and notarized x64 + arm64 DMG
+      - name: Build x64 + arm64 DMG
         working-directory: apps/desktop
-        run: npx electron-builder --mac dmg --x64 --arm64 --publish never
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.mac_signing.outputs.signed }}" = "true" ]; then
+            npx electron-builder --mac dmg --x64 --arm64 --publish never
+          else
+            CSC_LINK= \
+            CSC_KEY_PASSWORD= \
+            APPLE_ID= \
+            APPLE_APP_SPECIFIC_PASSWORD= \
+            APPLE_TEAM_ID= \
+            npx electron-builder --mac dmg --x64 --arm64 --publish never \
+              -c.mac.identity=- \
+              -c.mac.notarize=false
+          fi
 
       - name: Smoke-test packaged macOS app
         run: |
@@ -225,10 +262,23 @@ jobs:
           test -n "$APP_BIN" || { echo "No packaged Polyth.app matches runner architecture $NATIVE_ARCH" >&2; exit 1; }
           node apps/desktop/test/startup-smoke.mjs "$APP_BIN"
 
+      - name: Verify packaged macOS signatures
+        run: |
+          set -euo pipefail
+          FOUND=0
+          while IFS= read -r APP; do
+            FOUND=1
+            codesign --verify --deep --strict --verbose=2 "$APP"
+            if [ "${{ steps.mac_signing.outputs.signed }}" = "true" ]; then
+              spctl --assess --type execute --verbose=4 "$APP"
+            fi
+          done < <(find apps/desktop/release -name 'Polyth.app' -type d -print)
+          test "$FOUND" -eq 1 || { echo "No packaged Polyth.app found for signature verification" >&2; exit 1; }
+
       - name: Upload macOS x64 DMG
         uses: actions/upload-artifact@v4
         with:
-          name: polyth-macos-dmg-x64
+          name: polyth-macos-dmg-x64-${{ steps.mac_signing.outputs.mode }}
           retention-days: 14
           path: apps/desktop/release/*-mac-x64.dmg
           if-no-files-found: error
@@ -236,7 +286,7 @@ jobs:
       - name: Upload macOS arm64 DMG
         uses: actions/upload-artifact@v4
         with:
-          name: polyth-macos-dmg-arm64
+          name: polyth-macos-dmg-arm64-${{ steps.mac_signing.outputs.mode }}
           retention-days: 14
           path: apps/desktop/release/*-mac-arm64.dmg
           if-no-files-found: error

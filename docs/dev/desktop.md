@@ -58,14 +58,14 @@ GitHub Actions separates smoke artifacts from real releases.
 
 - `windows-exe`: x64 NSIS installer plus packaged-server startup smoke;
 - `linux-appimage`: x64 AppImage with full packaged-app smoke;
-- `mac-dmg`: signed/notarized native x64 DMG and arm64 DMG as separate artifacts, plus packaged-server startup smoke on the runner-native architecture; no updater ZIP is produced by the smoke/download workflow;
+- `mac-dmg`: native x64 DMG and arm64 DMG as separate artifacts, plus packaged-server startup smoke on the runner-native architecture. With complete Apple secrets they are Developer ID signed/notarized; without those secrets the manual workflow falls back to explicit ad-hoc signing for smoke/testing only. No updater ZIP is produced by this workflow;
 - platform mobile targets and public npm SDK tarballs are available from the same manual chooser.
 
 `.github/workflows/release.yml` is also manual but may run only from `master`. It builds signed Windows x64/arm64 installers, Linux x64/arm64 AppImages, and signed/notarized native macOS x64 + arm64 DMG/ZIP pairs. Before artifact handoff it launches the packaged Windows x64 app and one runner-native macOS app through the startup-smoke path, which must boot the bundled server using only packaged OpenCode/Chromium resources. The final job gathers the generated electron-builder updater metadata, creates or refreshes a draft GitHub Release, and publishes that release only after all required artifacts (and optional external publication) succeed.
 
 The electron-builder provider is `Polyth/Polyth`. `electron-updater` consumes the published GitHub Release metadata (`latest.yml`, `latest-mac.yml`, `latest-linux.yml`, plus architecture-specific channels). Automatic updates are enabled by default in Desktop settings: the app checks shortly after startup and every six hours, automatically downloads an available release when that setting is enabled, and installs the downloaded update on quit/restart. Manual check/download/install remains available when automatic updates are disabled.
 
-macOS updater releases require code signing; the release workflow signs and notarizes both native architectures. `electron-updater` selects the matching x64/arm64 file from the shared `latest-mac.yml` feed. Manual `mac-dmg` builds use the same Developer ID signing/notarization credentials as releases so downloaded DMGs open normally under Gatekeeper, but they stay unpublished and omit updater ZIP/metadata.
+macOS updater releases require Developer ID signing and notarization; the release workflow remains strict and fails if those credentials are missing. `electron-updater` selects the matching x64/arm64 file from the shared `latest-mac.yml` feed. Manual `mac-dmg` builds use the same credentials when available. If they are absent, the manual workflow uses electron-builder ad-hoc signing (`mac.identity=-`) and disables notarization only for that smoke artifact. Ad-hoc DMGs are not trusted distribution artifacts and may require local Gatekeeper approval; they must never be published as a release.
 
 ## Background integration
 
