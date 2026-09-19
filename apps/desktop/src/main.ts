@@ -53,6 +53,7 @@ interface SavedWindowState {
 }
 
 const isE2e = process.env.POLYTH_DESKTOP_E2E === "1";
+const startupSmoke = process.env.POLYTH_DESKTOP_STARTUP_SMOKE === "1";
 if (process.env.POLYTH_DESKTOP_USER_DATA) {
   app.setPath("userData", resolve(process.env.POLYTH_DESKTOP_USER_DATA));
 }
@@ -601,6 +602,9 @@ const startServer = async (): Promise<void> => {
   const binary = opencodePath();
   const webDist = webDistPath();
   const bundledOpenCode = existsSync(binary);
+  if (app.isPackaged && !bundledOpenCode) {
+    throw new Error(`Packaged OpenCode ${__POLYTH_OPENCODE_VERSION__} is missing at ${binary}`);
+  }
   if (!bundledOpenCode) log(`Bundled OpenCode ${__POLYTH_OPENCODE_VERSION__} is missing at ${binary}; looking for an installed OpenCode instead`);
   if (!existsSync(join(webDist, "index.html"))) throw new Error(`Polyth web bundle is missing at ${webDist}`);
   const port = await reservePort();
@@ -611,9 +615,11 @@ const startServer = async (): Promise<void> => {
   if (app.isPackaged) process.env.POLYTH_RESOURCES_DIR ??= process.resourcesPath;
   const bundledChromium = stagedChromiumExecutable(process.resourcesPath, process.platform, process.arch);
   if (app.isPackaged) {
+    if (!bundledChromium) {
+      throw new Error(`Packaged Chromium is missing for ${process.platform}-${process.arch}`);
+    }
     process.env.POLYTH_REQUIRE_BUNDLED_CHROMIUM = "1";
-    if (bundledChromium) process.env.POLYTH_CHROMIUM_PATH = bundledChromium;
-    else { delete process.env.POLYTH_CHROMIUM_PATH; log("Staged Chromium is missing; browser capability will report unavailable"); }
+    process.env.POLYTH_CHROMIUM_PATH = bundledChromium;
   }
   serverLifecycle = await boot({
     port, hostname: "127.0.0.1", dataDir, webDist, webPackagesDir: webPackagesPath(), serverPackages: desktopServerPackages,
@@ -660,6 +666,13 @@ async function start(): Promise<void> {
   session.defaultSession.setPermissionCheckHandler((webContents, permission, _origin, details) =>
     !!webContents && isLocalNavigation(webContents.getURL()) && (permission === "notifications" || (permission === "media" && details.mediaType === "audio")));
   await startServer();
+  if (startupSmoke) {
+    log("Desktop startup smoke passed");
+    quitting = true;
+    await shutdownServer();
+    app.exit(0);
+    return;
+  }
   await startChatWorkspaceRemoteCoordinator().catch((error) => log("Could not start Desktop Chat Workspace remote coordinator", error));
   installIpc();
   configureUpdater();
