@@ -16,6 +16,17 @@ const loopback = (address?: string): boolean => ['127.0.0.1', '::1', '::ffff:127
 export const TERMINATED_TLS = Symbol.for('polyth.identity.terminatedTls');
 const terminatedTls = (req: IncomingMessage): boolean =>
   (req as unknown as Record<symbol, unknown>)[TERMINATED_TLS] === true;
+
+/**
+ * App-owned installer/native channel only. The setup listener may attach the
+ * already-issued operator claim after validating its HttpOnly cookie. Never
+ * accept a request header as this marker.
+ */
+export const TRUSTED_SETUP_CLAIM = Symbol.for('polyth.identity.trustedSetupClaim');
+const trustedSetupClaim = (req: IncomingMessage): string | null => {
+  const value = (req as unknown as Record<symbol, unknown>)[TRUSTED_SETUP_CLAIM];
+  return typeof value === 'string' && validToken(value) ? value : null;
+};
 const csrfFor = (token: string): string => digest(`csrf:${token}`);
 const csrfMatches = (received: unknown, nonce: string): boolean => typeof received === 'string' && /^[a-f0-9]{64}$/.test(received)
   && timingSafeEqual(Buffer.from(received, 'hex'), Buffer.from(csrfFor(nonce), 'hex'));
@@ -65,6 +76,12 @@ const text = (body: Record<string, unknown>, key: string): string => {
   const value = body[key];
   if (typeof value !== 'string') throw controlError('invalid-input', 'Required string field is missing');
   return value;
+};
+const setupClaim = (req: IncomingMessage, body: Record<string, unknown>): string => {
+  if (typeof body.claimToken === 'string') return body.claimToken;
+  const trusted = trustedSetupClaim(req);
+  if (trusted) return trusted;
+  throw controlError('invalid-input', 'Required string field is missing');
 };
 const returnTo = (body: Record<string, unknown>): string => typeof body.returnTo === 'string' ? body.returnTo : '/';
 const statusFor: Readonly<Record<string, number>> = {
@@ -187,11 +204,11 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
           send(200, { ok: true, csrfToken: csrfFor(freshNonce), ...extra });
         };
         if (req.method === 'POST' && path === '/api/auth/setup/claim') {
-          send(200, identity.setup.bindClaim(text(body, 'claimToken'), nonce));
+          send(200, identity.setup.bindClaim(setupClaim(req, body), nonce));
         } else if (req.method === 'POST' && path === '/api/auth/setup/recovery') {
-          send(200, identity.setup.prepareRecovery(text(body, 'claimToken'), nonce));
+          send(200, identity.setup.prepareRecovery(setupClaim(req, body), nonce));
         } else if (req.method === 'POST' && path === '/api/auth/setup/complete') {
-          const result = await identity.setup.complete({ claimToken: text(body, 'claimToken'), browserBinding: nonce,
+          const result = await identity.setup.complete({ claimToken: setupClaim(req, body), browserBinding: nonce,
             name: text(body, 'name'), organizationName: text(body, 'organizationName'), login: text(body, 'login'),
             password: text(body, 'password'), recoverySetId: text(body, 'recoverySetId'), recoveryAcknowledged: body.recoveryAcknowledged === true });
           issued(result);
