@@ -625,6 +625,20 @@ const startServer = async (preferredPort?: number): Promise<void> => {
     port, hostname: "127.0.0.1", dataDir, webDist, webPackagesDir: webPackagesPath(), serverPackages: desktopServerPackages,
     ...(bundledOpenCode ? { opencode: { bin: binary, binarySource: "bundled" as const } } : {}),
   });
+  if ("desktopSetupClaimToken" in serverLifecycle
+    && typeof serverLifecycle.desktopSetupClaimToken === "string"
+    && "desktopSetupClaimCookieName" in serverLifecycle
+    && typeof serverLifecycle.desktopSetupClaimCookieName === "string") {
+    await session.defaultSession.cookies.set({
+      url: baseUrl,
+      name: serverLifecycle.desktopSetupClaimCookieName,
+      value: serverLifecycle.desktopSetupClaimToken,
+      path: "/",
+      httpOnly: true,
+      sameSite: "strict",
+      secure: false,
+    });
+  }
   log(`Polyth server started at ${baseUrl}`);
   if (bundledOpenCode) log(`Bundled OpenCode ${__POLYTH_OPENCODE_VERSION__}: ${binary}`);
 };
