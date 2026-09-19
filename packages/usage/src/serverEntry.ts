@@ -7,6 +7,7 @@ import {
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
+import { collectUsageTelemetry } from "./telemetry.ts";
 import {
   buildProviderUsageOverview,
   createFakeQuotaProvider,
@@ -17,8 +18,16 @@ import {
   type UsageService,
 } from "./index.ts";
 
-export function usageRoutes(usage: UsageService): RouteHandler {
-  return async ({ path, method, json, body }) => {
+const MAX_TELEMETRY_RANGE_MS = 2 * 366 * 24 * 60 * 60_000;
+const TELEMETRY_CACHE_MS = 15_000;
+
+export function usageRoutes(usage: UsageService, host?: ServerPackageHost): RouteHandler {
+  const telemetryCache = new Map<string, {
+    expiresAt: number;
+    value: Promise<Awaited<ReturnType<typeof collectUsageTelemetry>>>;
+  }>();
+
+  return async ({ path, method, url, json, body, space }) => {
     if (path === "/api/usage/quotas" && method === "GET") {
       const snapshots = usage.snapshots();
       const overview = new Map(
@@ -40,6 +49,49 @@ export function usageRoutes(usage: UsageService): RouteHandler {
         pace: usage.pace(providerId),
         overview: buildProviderUsageOverview([snapshot])[0],
       });
+      return true;
+    }
+    if (path === "/api/usage/telemetry" && method === "GET" && host) {
+      const start = Number(url.searchParams.get("start"));
+      const end = Number(url.searchParams.get("end"));
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end || end - start > MAX_TELEMETRY_RANGE_MS) {
+        json(400, {
+          error: "invalid-input",
+          message: "start/end must define a positive Usage range of at most two years",
+        });
+        return true;
+      }
+      const now = Date.now();
+      const clippedEnd = Math.min(now, end);
+      if (start >= clippedEnd) {
+        json(400, { error: "invalid-input", message: "Usage range must include past time" });
+        return true;
+      }
+      const key = `${space.spaceId}:${Math.round(start)}:${Math.round(clippedEnd)}`;
+      for (const [cacheKey, entry] of telemetryCache) {
+        if (entry.expiresAt <= now) telemetryCache.delete(cacheKey);
+      }
+      let cached = telemetryCache.get(key);
+      if (!cached) {
+        const scoped = host.forSpace(space);
+        const value = scoped.projects.list().then((projects) => collectUsageTelemetry({
+          store: host.store,
+          spaceId: space.spaceId,
+          projects,
+          start,
+          end: clippedEnd,
+          now,
+        }));
+        cached = { expiresAt: now + TELEMETRY_CACHE_MS, value };
+        telemetryCache.set(key, cached);
+      }
+      try {
+        json(200, await cached.value);
+      } catch (cause) {
+        telemetryCache.delete(key);
+        console.warn("[usage] telemetry aggregation failed:", cause instanceof Error ? cause.message : cause);
+        json(500, { error: "telemetry-failed", message: "Could not aggregate Usage telemetry" });
+      }
       return true;
     }
     return false;
@@ -65,7 +117,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   }
   for (const provider of discoverQuotaProviders()) usage.register(provider);
   host.services.provide(serverServiceKey<UsageService>("usage"), usage);
-  const routes = usageRoutes(usage);
+  const routes = usageRoutes(usage, host);
   return {
     remoteAccess: localOnlyRemoteAccess(["usage"]),
     routes,
