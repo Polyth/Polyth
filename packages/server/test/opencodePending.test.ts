@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createConfigApplier } from "@polyth/backend-opencode";
-import { createDeferredConfigApplier, createOpenCodePendingService, inspectOpenCodeConfiguration, physicalRestartKeysFor, restartScopeFor, type PendingTask } from "../src/opencodePending.ts";
+import { createDeferredConfigApplier, createOpenCodePendingService, inspectOpenCodeConfiguration, physicalRestartKeysFor, restartPlanFor, restartScopeFor, type PendingTask } from "../src/opencodePending.ts";
 import { opencodePendingRoutes } from "../src/routes/opencodePending.ts";
 import type { RouteRequest } from "../src/http.ts";
 import type { SpaceContext } from "@polyth/contracts";
@@ -230,7 +230,7 @@ test("restartScopeFor: a runtime-capabilities-only batch scopes to the union of 
   assert.deepEqual([...(scoped ?? [])].sort(), ["opencode:local:p1:/a", "opencode:local:p2:/b"]);
 });
 
-test("restartScopeFor: any non runtime-capabilities task in the batch forces a global restart", () => {
+test("restartScopeFor: shared config prevents treating the whole batch as exact capability scope", () => {
   const scope = restartScopeFor([
     rcTask({ id: "a", kind: "runtime-capabilities", label: "a", restartKeys: ["k1"] }),
     rcTask({ id: "mcp", kind: "mcp", label: "MCP servers" }),
@@ -238,9 +238,35 @@ test("restartScopeFor: any non runtime-capabilities task in the batch forces a g
   assert.equal(scope, undefined);
 });
 
-test("restartScopeFor: a runtime-capabilities task with no declared scope forces a global restart", () => {
+test("restartScopeFor: a runtime-capabilities task with no target cannot be narrowed", () => {
   const scope = restartScopeFor([rcTask({ id: "a", kind: "runtime-capabilities", label: "a" })]);
   assert.equal(scope, undefined);
+});
+
+test("restartPlanFor keeps shared local config and explicit remote capability targets in one batch", () => {
+  const remote = "opencode:conn-1:proj-p:/work/p";
+  const plan = restartPlanFor([
+    rcTask({
+      id: "runtime-capabilities:spc:proj-p:/work/p",
+      kind: "runtime-capabilities",
+      label: "OpenCode runtime capabilities",
+      restartKeys: [remote],
+    }),
+    rcTask({ id: "mcp", kind: "mcp", label: "MCP servers" }),
+  ]);
+  assert.equal(plan.mode, "local-config");
+  assert.deepEqual([...plan.keys], [remote]);
+});
+
+test("restartPlanFor fails safe across all runtimes when a capability target is absent", () => {
+  const plan = restartPlanFor([
+    rcTask({
+      id: "runtime-capabilities:spc:proj-p:/work/p",
+      kind: "runtime-capabilities",
+      label: "OpenCode runtime capabilities",
+    }),
+  ]);
+  assert.equal(plan.mode, "all");
 });
 
 test("physicalRestartKeysFor matches live restarters synchronously including remote keys", () => {
@@ -264,9 +290,9 @@ test("physicalRestartKeysFor matches live restarters synchronously including rem
 test("applyAndRestart scopes a runtime-capabilities-only batch to its declared restart keys", async () => {
   const seen: Array<ReadonlySet<string> | undefined> = [];
   const pending = createOpenCodePendingService({
-    canRestart: async (_state, keys) => { seen.push(keys); return { safe: true }; },
-    captureRestartState: async (keys) => ({ keys }),
-    restart: async (_state, keys) => { seen.push(keys); return keys?.size ?? 0; },
+    canRestart: async (_state, plan) => { seen.push(plan.keys); return { safe: true }; },
+    captureRestartState: async (plan) => ({ plan }),
+    restart: async (_state, plan) => { seen.push(plan.keys); return plan.keys.size; },
   });
   const keyP = "opencode:local:proj-p:/work/p";
   pending.stage(rcTask({
@@ -281,10 +307,13 @@ test("applyAndRestart scopes a runtime-capabilities-only batch to its declared r
   assert.equal(result.restarted, 1);
 });
 
-test("applyAndRestart restarts globally when the batch mixes a shared config write with runtime-capabilities", async () => {
-  const seen: Array<ReadonlySet<string> | undefined> = [];
+test("applyAndRestart retains explicit capability targets in a shared-config batch", async () => {
+  const seen: Array<{ mode: string; keys: string[] }> = [];
   const pending = createOpenCodePendingService({
-    restart: async (_state, keys) => { seen.push(keys); return 1; },
+    restart: async (_state, plan) => {
+      seen.push({ mode: plan.mode, keys: [...plan.keys] });
+      return 1;
+    },
   });
   pending.stage(rcTask({
     id: "runtime-capabilities:spc:proj-p:/work/p",
@@ -294,7 +323,10 @@ test("applyAndRestart restarts globally when the batch mixes a shared config wri
   }));
   pending.stage(rcTask({ id: "mcp", kind: "mcp", label: "MCP servers" }));
   await pending.applyAndRestart();
-  assert.equal(seen[0], undefined, "a batch with any non runtime-capabilities change restarts every runtime");
+  assert.deepEqual(seen[0], {
+    mode: "local-config",
+    keys: ["opencode:local:proj-p:/work/p"],
+  });
 });
 
 test("scoped restart against a fake restarter map mirroring production keys: P restarts, C is never called, C being busy does not block P", async () => {
@@ -305,18 +337,20 @@ test("scoped restart against a fake restarter map mirroring production keys: P r
     [keyC, { called: 0, busy: true }],
   ]);
   const pending = createOpenCodePendingService({
-    canRestart: async (_state, keys) => {
+    canRestart: async (_state, plan) => {
       for (const [key, restarter] of restarters) {
         // A scoped restart must not safety-check (or fail on) targets
         // outside its scope — an unrelated project's busy session must
         // never defer a restart it has nothing to do with.
-        if (keys && !keys.has(key)) continue;
+        if (plan.mode === "exact" && !plan.keys.has(key)) continue;
         if (restarter.busy) return { safe: false as const, reason: `runtime ${key} is busy` };
       }
       return { safe: true as const };
     },
-    restart: async (_state, keys) => {
-      const entries = keys ? [...restarters].filter(([key]) => keys.has(key)) : [...restarters];
+    restart: async (_state, plan) => {
+      const entries = plan.mode === "exact"
+        ? [...restarters].filter(([key]) => plan.keys.has(key))
+        : [...restarters];
       for (const [, restarter] of entries) restarter.called += 1;
       return entries.length;
     },

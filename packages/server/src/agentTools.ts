@@ -18,6 +18,7 @@ import { semanticCapabilityRevision } from "@polyth/harness-runtime";
 
 export const AGENT_TOOLS_MCP_NAME = "polyth-agent-tools";
 export const AGENT_TOOLS_PATH = "/internal/agent-tools";
+export const AGENT_TOOLS_MCP_PATH = `${AGENT_TOOLS_PATH}/mcp`;
 const POLYTH_SESSION_CONTROL_TOOL_ID = "harness-runtime.polyth-control";
 
 export interface AgentToolBinding {
@@ -203,6 +204,84 @@ export function createAgentToolBridge(opts: {
     && binding.mutating === descriptor.mutating
     && binding.digest === semanticCapabilityRevision(descriptor);
 
+  type InvocationResult = { status: number; body: JsonObject } | undefined;
+  const invoke = async (
+    token: string,
+    grant: AgentToolGrant,
+    id: string,
+    input: JsonObject,
+    signal: AbortSignal,
+  ): Promise<InvocationResult> => {
+    const fail = (status: number, code: string, message: string): InvocationResult => ({
+      status,
+      body: { error: { code, message } },
+    });
+    const tool = grant.tools.find((item) => item.id === id);
+    const binding = grant.bindings.find((item) => item.id === id);
+    const contribution = opts.contribution?.(id);
+    const descriptor = contribution?.descriptor.kind === "tool" ? contribution.descriptor : undefined;
+    const execute = contribution?.execute;
+    if (!tool || !binding || !contribution || !descriptor || !execute) {
+      return fail(404, "not-found", "tool is not available");
+    }
+    if (!matchesBinding(binding, descriptor)) {
+      return fail(403, "stale-capability", "tool grant no longer matches the registered capability");
+    }
+    const sessionId = opts.resolveSession ? await opts.resolveSession(grant) : grant.sessionId;
+    if (opts.resolveSession && !sessionId) {
+      return fail(403, "session-unavailable", "No unambiguous active Polyth session owns this request");
+    }
+    const scopedGrant = { ...grant, ...(sessionId ? { sessionId } : {}) };
+    if (signal.aborted) return undefined;
+    await opts.requested?.(descriptor, scopedGrant);
+    const authorize = opts.authorize ?? defaultAuthorize;
+    for (const subject of polythSessionAuthorizationSubjects(descriptor, scopedGrant, input)) {
+      const decision = await authorize(subject, scopedGrant, signal);
+      if (decision === "deny") return fail(403, "forbidden", "tool is not permitted");
+      if (decision === "permission-required") {
+        return fail(403, "permission-required", "Polyth authorization is required before this tool can run");
+      }
+    }
+    const liveGrant = grantFor(token);
+    const liveBinding = liveGrant?.bindings.find((item) => item.id === id);
+    const liveContribution = opts.contribution?.(id);
+    const liveDescriptor = liveContribution?.descriptor.kind === "tool"
+      ? liveContribution.descriptor
+      : undefined;
+    const liveExecute = liveContribution?.execute;
+    if (!liveGrant || !liveBinding || !liveDescriptor || !liveExecute) {
+      return fail(404, "not-found", "tool is not available");
+    }
+    if (liveContribution !== contribution || !matchesBinding(liveBinding, liveDescriptor)) {
+      return fail(403, "stale-capability", "tool grant no longer matches the registered capability");
+    }
+    if (signal.aborted) return undefined;
+    if (opts.resolveSession && await opts.resolveSession(scopedGrant) !== sessionId) {
+      return fail(403, "session-unavailable", "The requesting Polyth session is no longer active");
+    }
+    if (signal.aborted) return undefined;
+    if (grantFor(token) !== liveGrant || opts.contribution?.(id) !== liveContribution
+      || !matchesBinding(liveBinding, liveDescriptor)) {
+      return fail(403, "stale-capability", "tool grant is no longer active");
+    }
+    try {
+      return {
+        status: 200,
+        body: await liveExecute(input, {
+          sessionId: sessionId ?? "",
+          signal,
+          projectId: liveGrant.projectId,
+          cwd: liveGrant.cwd,
+          spaceId: liveGrant.spaceId,
+        }),
+      };
+    } catch (error) {
+      return fail(400, "tool-failed", (error as Error).message);
+    }
+  };
+  const pendingMcp = new Map<string, AbortController>();
+  const mcpRequestKey = (token: string, id: unknown): string => `${token}\0${JSON.stringify(id)}`;
+
   return {
     mint(input) {
       const token = randomBytes(32).toString("hex");
@@ -230,7 +309,7 @@ export function createAgentToolBridge(opts: {
       };
     },
     async route(rc) {
-      if (rc.path !== AGENT_TOOLS_PATH) return false;
+      if (rc.path !== AGENT_TOOLS_PATH && rc.path !== AGENT_TOOLS_MCP_PATH) return false;
       if (rc.ingress.kind !== "public-http" || rc.ingress.loopback !== true) {
         rc.json(403, { error: { code: "forbidden", message: "agent tools are local-only" } });
         return true;
@@ -243,6 +322,105 @@ export function createAgentToolBridge(opts: {
       if (!grant) {
         rc.json(401, { error: { code: "unauthorized", message: "invalid tool token" } });
         return true;
+      }
+      if (rc.path === AGENT_TOOLS_MCP_PATH) {
+        if (rc.method !== "POST") {
+          rc.json(405, { error: { code: "invalid-input", message: "POST required" } });
+          return true;
+        }
+        const body = await rc.body();
+        const requestId = body.id;
+        const respond = (result: JsonObject) => {
+          if (requestId === undefined) rc.json(202, {});
+          else rc.json(200, { jsonrpc: "2.0", id: requestId, result });
+        };
+        const method = typeof body.method === "string" ? body.method : "";
+        if (body.jsonrpc !== "2.0" || !method) {
+          rc.json(400, { jsonrpc: "2.0", id: requestId ?? null, error: { code: -32600, message: "Invalid Request" } });
+          return true;
+        }
+        if (method === "initialize") {
+          respond({
+            protocolVersion: "2024-11-05",
+            capabilities: { tools: { listChanged: false } },
+            serverInfo: { name: AGENT_TOOLS_MCP_NAME, version: "0.1.0" },
+          });
+          return true;
+        }
+        if (method === "notifications/initialized" || method === "initialized") {
+          respond({});
+          return true;
+        }
+        if (method === "notifications/cancelled") {
+          const params = body.params && typeof body.params === "object" && !Array.isArray(body.params)
+            ? body.params as Record<string, unknown>
+            : {};
+          pendingMcp.get(mcpRequestKey(token!, params.requestId))?.abort();
+          respond({});
+          return true;
+        }
+        if (method === "ping") {
+          respond({});
+          return true;
+        }
+        if (method === "tools/list") {
+          respond({
+            tools: grant.tools.map((tool) => ({
+              name: tool.name,
+              description: tool.description,
+              inputSchema: tool.inputSchema,
+            })),
+          });
+          return true;
+        }
+        if (method !== "tools/call") {
+          rc.json(200, { jsonrpc: "2.0", id: requestId ?? null, error: { code: -32601, message: "Method not found" } });
+          return true;
+        }
+        const params = body.params && typeof body.params === "object" && !Array.isArray(body.params)
+          ? body.params as Record<string, unknown>
+          : {};
+        const name = typeof params.name === "string" ? params.name : "";
+        const id = grant.tools.find((item) => item.name === name)?.id ?? "";
+        if (!id) {
+          respond({ content: [{ type: "text", text: "tool is not available" }], isError: true });
+          return true;
+        }
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        const key = mcpRequestKey(token!, requestId);
+        if (requestId !== undefined) {
+          pendingMcp.get(key)?.abort();
+          pendingMcp.set(key, controller);
+        }
+        rc.req.once?.("aborted", abort);
+        rc.res?.once?.("close", abort);
+        try {
+          const input = params.arguments && typeof params.arguments === "object" && !Array.isArray(params.arguments)
+            ? params.arguments as JsonObject
+            : {};
+          const outcome = await invoke(token!, grant, id, input, controller.signal);
+          if (!outcome || controller.signal.aborted || rc.req.aborted || rc.res?.destroyed) return true;
+          const error = outcome.body.error as { message?: unknown } | undefined;
+          if (outcome.status >= 400 || error) {
+            respond({
+              content: [{ type: "text", text: typeof error?.message === "string" ? error.message : "tool failed" }],
+              isError: true,
+            });
+          } else {
+            respond({
+              content: [{ type: "text", text: String(outcome.body.output ?? "") }],
+              ...(outcome.body.metadata && typeof outcome.body.metadata === "object"
+                ? { structuredContent: outcome.body.metadata }
+                : {}),
+            });
+          }
+          return true;
+        } finally {
+          if (pendingMcp.get(key) === controller) pendingMcp.delete(key);
+          rc.req.off?.("aborted", abort);
+          rc.res?.off?.("close", abort);
+        }
       }
       if (rc.method === "GET") {
         rc.json(200, {
@@ -265,82 +443,15 @@ export function createAgentToolBridge(opts: {
         rc.json(400, { error: { code: "invalid-input", message: "tool id is required" } });
         return true;
       }
-      const tool = grant.tools.find((item) => item.id === id);
-      const binding = grant.bindings.find((item) => item.id === id);
-      const contribution = opts.contribution?.(id);
-      const descriptor = contribution?.descriptor.kind === "tool" ? contribution.descriptor : undefined;
-      const execute = contribution?.execute;
-      if (!tool || !binding || !contribution || !descriptor || !execute) {
-        rc.json(404, { error: { code: "not-found", message: "tool is not available" } });
-        return true;
-      }
-      if (!matchesBinding(binding, descriptor)) {
-        rc.json(403, { error: { code: "stale-capability", message: "tool grant no longer matches the registered capability" } });
-        return true;
-      }
       const controller = new AbortController();
       const abort = () => controller.abort();
       rc.req.once?.("aborted", abort);
       rc.res?.once?.("close", abort);
       try {
-        const sessionId = opts.resolveSession ? await opts.resolveSession(grant) : grant.sessionId;
-        if (opts.resolveSession && !sessionId) {
-          rc.json(403, { error: { code: "session-unavailable", message: "No unambiguous active Polyth session owns this request" } });
-          return true;
-        }
-        const scopedGrant = { ...grant, ...(sessionId ? { sessionId } : {}) };
-        if (controller.signal.aborted || rc.req.aborted || rc.res?.destroyed) return true;
-        await opts.requested?.(descriptor, scopedGrant);
         const input = (body.arguments ?? {}) as JsonObject;
-        const authorize = opts.authorize ?? defaultAuthorize;
-        for (const subject of polythSessionAuthorizationSubjects(descriptor, scopedGrant, input)) {
-          const decision = await authorize(subject, scopedGrant, controller.signal);
-          if (decision === "deny") {
-            rc.json(403, { error: { code: "forbidden", message: "tool is not permitted" } });
-            return true;
-          }
-          if (decision === "permission-required") {
-            rc.json(403, { error: { code: "permission-required", message: "Polyth authorization is required before this tool can run" } });
-            return true;
-          }
-        }
-        const liveGrant = grantFor(token);
-        const liveBinding = liveGrant?.bindings.find((item) => item.id === id);
-        const liveContribution = opts.contribution?.(id);
-        const liveDescriptor = liveContribution?.descriptor.kind === "tool"
-          ? liveContribution.descriptor
-          : undefined;
-        const liveExecute = liveContribution?.execute;
-        if (!liveGrant || !liveBinding || !liveDescriptor || !liveExecute) {
-          rc.json(404, { error: { code: "not-found", message: "tool is not available" } });
-          return true;
-        }
-        if (liveContribution !== contribution || !matchesBinding(liveBinding, liveDescriptor)) {
-          rc.json(403, { error: { code: "stale-capability", message: "tool grant no longer matches the registered capability" } });
-          return true;
-        }
-        if (controller.signal.aborted || rc.req.aborted || rc.res?.destroyed) return true;
-        if (opts.resolveSession && await opts.resolveSession(scopedGrant) !== sessionId) {
-          rc.json(403, { error: { code: "session-unavailable", message: "The requesting Polyth session is no longer active" } });
-          return true;
-        }
-        if (controller.signal.aborted || rc.req.aborted || rc.res?.destroyed) return true;
-        if (grantFor(token) !== liveGrant || opts.contribution?.(id) !== liveContribution
-          || !matchesBinding(liveBinding, liveDescriptor)) {
-          rc.json(403, { error: { code: "stale-capability", message: "tool grant is no longer active" } });
-          return true;
-        }
-        try {
-          const result = await liveExecute(input, {
-            sessionId: sessionId ?? "",
-            signal: controller.signal,
-            projectId: liveGrant.projectId,
-            cwd: liveGrant.cwd,
-            spaceId: liveGrant.spaceId,
-          });
-          rc.json(200, result);
-        } catch (error) {
-          rc.json(400, { error: { code: "tool-failed", message: (error as Error).message } });
+        const outcome = await invoke(token!, grant, id, input, controller.signal);
+        if (outcome && !controller.signal.aborted && !rc.req.aborted && !rc.res?.destroyed) {
+          rc.json(outcome.status, outcome.body);
         }
         return true;
       } finally {

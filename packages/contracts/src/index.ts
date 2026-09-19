@@ -3890,6 +3890,10 @@ export interface RemoteForwardHandle extends Disposable {
   localPort: number;
 }
 
+export interface RemoteReverseForwardHandle extends Disposable {
+  remotePort: number;
+}
+
 export interface RemoteHost {
   /** Human-readable identity for error messages (e.g. "user@host"). */
   label: string;
@@ -3903,6 +3907,10 @@ export interface RemoteHost {
   start(command: string, opts?: { interactive?: boolean; stdin?: "pipe" }): Promise<RemoteProcessHandle>;
   /** Forward a fresh local port to `remotePort` on the remote loopback. */
   forward(remotePort: number): Promise<RemoteForwardHandle>;
+  /** Expose a local loopback port on the remote loopback. Implementations may
+   * allocate `remotePort` when it is omitted; an explicit port is used when a
+   * transport must recreate the same endpoint after reconnecting. */
+  reverseForward?(localPort: number, remotePort?: number): Promise<RemoteReverseForwardHandle>;
 }
 
 // ---------------------------------------------------------------- task trackers

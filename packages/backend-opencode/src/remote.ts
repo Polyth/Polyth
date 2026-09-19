@@ -17,8 +17,14 @@ import type {
   AgentRuntime,
   JsonObject,
   RemoteHost,
+  RemoteReverseForwardHandle,
   RuntimeAuthentication,
 } from "@polyth/contracts";
+import {
+  acknowledgeCapabilityApplication,
+  captureCapabilityLaunch,
+  releaseCapabilityLaunch,
+} from "@polyth/harness-runtime";
 import {
   attachRuntimeLifecycle,
   createOpenCodeRuntimeLifecycle,
@@ -27,7 +33,10 @@ import {
 } from "./index.ts";
 import {
   createOwnedSshEndpointLease,
+  headersForAuthentication,
 } from "./endpoint.ts";
+import { verifyOpenCodeCapabilities } from "./capabilityDelivery.ts";
+import type { OpenCodeLaunchOverlay } from "./provisioner.ts";
 import type { PreparedRemoteOpenCodeRuntime } from "./remoteStorage.ts";
 import {
   acquireRemoteRuntimeLock,
@@ -56,6 +65,12 @@ export interface RemoteOpenCodeOptions {
   remoteStateKey?: string;
   /** Project identity recorded in remote runtime.json (not folded into storageId). */
   projectId?: string;
+  /** Canonical Space identity for capability receipts. */
+  spaceId?: string;
+  /** Memory-only capability overlay captured before the remote process starts.
+   * A resolver lets owned generation replacement read the newly reconciled
+   * revision without persisting its scoped bearer. */
+  capabilityOverlay?: OpenCodeLaunchOverlay | (() => OpenCodeLaunchOverlay | undefined);
   /** Remote opencode binary (default "opencode" on the remote PATH). */
   bin?: string;
   sessionIdMap?: Map<string, string>;
@@ -111,6 +126,73 @@ const checkRemoteRuntimeDir = (path: string): string => {
   if (!checked.startsWith("/")) throw invalid("remote runtimeDir must be an absolute path");
   return posix.normalize(checked);
 };
+
+interface RemoteAgentToolsLaunch {
+  localPort: number;
+  path: string;
+  name: string;
+  headers: Record<string, string>;
+}
+
+const remoteAgentToolsLaunch = (
+  overlay: OpenCodeLaunchOverlay | undefined,
+): RemoteAgentToolsLaunch | undefined => {
+  const servers = overlay?.remoteMcp ?? [];
+  if (!servers.length) return undefined;
+  if (servers.length !== 1 || servers[0]?.capabilityId !== "polyth.agent-tools") {
+    throw invalid("remote OpenCode received an unsupported host-bridge capability set");
+  }
+  const server = servers[0];
+  let target: URL;
+  try { target = new URL(server.url); } catch { throw invalid("remote OpenCode received an invalid Polyth tool endpoint"); }
+  const hostname = target.hostname.toLowerCase();
+  const port = Number(target.port || (target.protocol === "http:" ? 80 : 443));
+  if (target.protocol !== "http:"
+    || hostname !== "127.0.0.1"
+    || !target.port
+    || target.username || target.password
+    || target.pathname !== "/internal/agent-tools/mcp"
+    || target.search || target.hash
+    || !Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw invalid("remote OpenCode Polyth tools require the canonical local MCP endpoint");
+  }
+  const headers = Object.fromEntries(Object.entries(server.headers).map(([key, value]) => {
+    if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/.test(key) || !value || /[\r\n]/.test(value)) {
+      throw invalid("remote OpenCode received an invalid Polyth tool header");
+    }
+    return [key, value];
+  }));
+  const headerEntries = Object.entries(headers);
+  if (headerEntries.length !== 1
+    || headerEntries[0]![0].toLowerCase() !== "authorization"
+    || !/^Bearer [a-f0-9]{64}$/.test(headerEntries[0]![1])) {
+    throw invalid("remote OpenCode Polyth tools require scoped authorization");
+  }
+  if (server.name !== "polyth-agent-tools") {
+    throw invalid("remote OpenCode received an invalid Polyth tool bridge name");
+  }
+  return { localPort: port, path: target.pathname, name: server.name, headers };
+};
+
+const remoteAgentToolsConfig = (
+  launch: RemoteAgentToolsLaunch,
+  remotePort: number,
+): string => JSON.stringify({
+  mcp: {
+    [launch.name]: {
+      type: "remote",
+      url: `http://127.0.0.1:${remotePort}${launch.path}`,
+      headers: launch.headers,
+      enabled: true,
+    },
+  },
+});
+
+const capabilityOverlayOf = (
+  options: Pick<RemoteOpenCodeOptions, "capabilityOverlay">,
+): OpenCodeLaunchOverlay | undefined => typeof options.capabilityOverlay === "function"
+  ? options.capabilityOverlay()
+  : options.capabilityOverlay;
 
 const defaultRemoteStateKey = (
   connectionIdentity: string,
@@ -310,6 +392,7 @@ const startServe = async (
     port: number;
     serveToken: string;
     password?: string;
+    configContent?: string;
   },
 ): Promise<StartedServe> => {
   // The PID record is a process-ownership boundary. Key it by the isolated
@@ -333,6 +416,10 @@ const startServe = async (
     ...(opts.password ? [
       'IFS= read -r OPENCODE_PASSWORD || { echo "POLYTH_OPENCODE_PASSWORD_INPUT_FAILED=1" >&2; exit 78; }',
       "export OPENCODE_PASSWORD",
+    ] : []),
+    ...(opts.configContent ? [
+      'IFS= read -r OPENCODE_CONFIG_CONTENT || { echo "POLYTH_OPENCODE_CONFIG_INPUT_FAILED=1" >&2; exit 78; }',
+      "export OPENCODE_CONFIG_CONTENT",
     ] : []),
     `PF=${pidFileExpr}`,
     'mkdir -p "$(dirname "$PF")"',
@@ -383,7 +470,7 @@ const startServe = async (
   ].join("; ");
 
   const handle = await withRemoteDeadline(
-    opts.host.start(command, opts.password ? { stdin: "pipe" } : undefined),
+    opts.host.start(command, opts.password || opts.configContent ? { stdin: "pipe" } : undefined),
     opts.lifecycleTimeoutMs,
     "remote OpenCode process start",
     async (lateHandle) => {
@@ -394,16 +481,18 @@ const startServe = async (
       ).catch(() => {});
     },
   );
-  if (opts.password) {
+  if (opts.password || opts.configContent) {
     if (!handle.write) {
       await withRemoteDeadline(handle.kill(), opts.lifecycleTimeoutMs, "remote OpenCode input cleanup").catch(() => {});
       throw unavailable("remote OpenCode start transport has no non-interactive input channel");
     }
     try {
-      await handle.write(`${opts.password}\n`);
+      await handle.write(`${opts.password ? `${opts.password}\n` : ""}${opts.configContent ? `${opts.configContent}\n` : ""}`);
     } catch {
       await withRemoteDeadline(handle.kill(), opts.lifecycleTimeoutMs, "remote OpenCode input cleanup").catch(() => {});
-      throw unavailable("could not deliver private remote OpenCode startup credential");
+      throw unavailable(opts.configContent
+        ? "could not deliver private remote OpenCode startup configuration"
+        : "could not deliver private remote OpenCode startup credential");
     }
   }
   return new Promise<StartedServe>((resolve, reject) => {
@@ -540,7 +629,7 @@ const attachAdoptedServe = async (opts: {
  *  attached through a forwarded local port. Failure modes are explicit:
  *  missing binary and missing workspace path are reported before any process
  *  is started; port collisions retry with a fresh candidate. */
-export const createRemoteOpenCodeRuntime = async (
+const createRemoteOpenCodeRuntimeInner = async (
   options: RemoteOpenCodeOptions,
 ): Promise<AgentRuntime> => {
   const { host } = options;
@@ -551,6 +640,10 @@ export const createRemoteOpenCodeRuntime = async (
   const lifecycleTimeoutMs = options.lifecycleTimeoutMs ?? 10_000;
   const pickPort = options.pickPort ?? (() => 20_000 + Math.floor(Math.random() * 45_000));
   const connection = options.connectionIdentity ?? host.label;
+  const initialAgentTools = remoteAgentToolsLaunch(capabilityOverlayOf(options));
+  if (initialAgentTools && !host.reverseForward) {
+    throw unavailable("remote host transport cannot expose the scoped Polyth tool bridge");
+  }
   const remoteStateKey = options.remoteStateKey ?? defaultRemoteStateKey(connection, remotePath);
   const projectId = options.projectId?.trim() || connection;
   const runtimeDir = options.runtimeDir
@@ -574,6 +667,9 @@ export const createRemoteOpenCodeRuntime = async (
   const modern = isOpenCodeV2(probe.version);
   const configuredModernPassword = process.env.OPENCODE_PASSWORD
     || process.env.OPENCODE_SERVER_PASSWORD;
+  if (configuredModernPassword && /[\r\n]/.test(configuredModernPassword)) {
+    throw invalid("remote OpenCode password cannot contain line breaks");
+  }
   // An owned v2 serve must not leave the upstream-generated password unknown
   // to its controller. Keep a generated value only in this runtime closure and
   // pass it to the child environment, never the parent process environment.
@@ -602,7 +698,7 @@ export const createRemoteOpenCodeRuntime = async (
     );
   }
   let pendingAdoption = lock.adoption;
-  if (modern && pendingAdoption && !configuredModernPassword) {
+  if (modern && pendingAdoption && !configuredModernPassword && !initialAgentTools) {
     await lock.release();
     throw unavailable(
       "cannot attach to an existing owned OpenCode v2 serve without its explicit OPENCODE_PASSWORD; refusing to stop or replace it",
@@ -611,6 +707,11 @@ export const createRemoteOpenCodeRuntime = async (
   let controllerState: "held" | "releasing" | "released" | "lost" = "held";
   let publishedPort: number | undefined;
   let publishedServeToken: string | undefined;
+  let publishedCapabilityOverlay: OpenCodeLaunchOverlay | undefined;
+  let publishedLaunchCapture: {
+    target: { harnessId: "opencode"; spaceId: string; projectId: string; cwd: string };
+    desiredRevision: string;
+  } | undefined;
   let committed = false;
   let releaseLockFlight: Promise<void> | undefined;
   void lock.lost.then(() => {
@@ -694,45 +795,113 @@ export const createRemoteOpenCodeRuntime = async (
           { code: "conflict" },
         );
       }
-      await runtime.recordOpen(incarnation);
-      let started: StartedServe | null = null;
-      if (pendingAdoption) {
-        const adoption = pendingAdoption;
-        pendingAdoption = undefined;
-        const attached = await attachAdoptedServe({
-          host,
-          runtimeDir: runtime.runtimeDir,
-          remotePath,
-          adoption,
-          lifecycleTimeoutMs,
-        });
-        if (attached.kind === "live") started = attached.serve;
+      const launchOverlay = capabilityOverlayOf(options);
+      const agentTools = remoteAgentToolsLaunch(launchOverlay);
+      if (agentTools && !host.reverseForward) {
+        throw unavailable("remote host transport cannot expose the scoped Polyth tool bridge");
       }
-      if (!started) {
-        let lastError: unknown;
-        // Three collisions still get three fresh retries and a fourth candidate.
-        for (let attempt = 0; attempt < 4 && !started; attempt++) {
-          const port = pickPort();
-          try {
-            started = await startServe({
-              host,
-              remotePath,
-              runtimeDir: runtime.runtimeDir,
-              bin,
-              listenTimeoutMs,
+      const launchCapture = options.projectId && launchOverlay?.desiredRevision
+        ? {
+            target: {
+              harnessId: "opencode" as const,
+              spaceId: options.spaceId ?? "",
+              projectId: options.projectId,
+              cwd: remotePath,
+            },
+            desiredRevision: launchOverlay.desiredRevision,
+          }
+        : undefined;
+      if (launchCapture) captureCapabilityLaunch(launchCapture);
+      try {
+        await runtime.recordOpen(incarnation);
+      } catch (error) {
+        if (launchCapture) releaseCapabilityLaunch(launchCapture);
+        throw error;
+      }
+      const openReverse = async (
+        localPort: number,
+        remotePort?: number,
+      ): Promise<RemoteReverseForwardHandle> => {
+        const reverseForward = host.reverseForward;
+        if (!reverseForward) {
+          throw unavailable("remote host transport cannot expose the scoped Polyth tool bridge");
+        }
+        return withRemoteDeadline(
+          reverseForward.call(host, localPort, remotePort),
+          lifecycleTimeoutMs,
+          "remote Polyth tool reverse forward",
+          async (lateReverse) => {
+            await withRemoteDeadline(
+              Promise.resolve(lateReverse.dispose()),
               lifecycleTimeoutMs,
-              port,
-              serveToken: leaseToken,
-              ...(modernPassword ? { password: modernPassword } : {}),
-            });
-          } catch (error) {
-            lastError = error;
-            if ((error as { code?: string }).code !== "port-in-use") throw error;
+              "late remote Polyth tool reverse-forward cleanup",
+            ).catch(() => {});
+          },
+        );
+      };
+      let reverse: RemoteReverseForwardHandle | undefined;
+      try {
+        reverse = agentTools ? await openReverse(agentTools.localPort) : undefined;
+      } catch (error) {
+        if (launchCapture) releaseCapabilityLaunch(launchCapture);
+        throw error;
+      }
+      const configContent = agentTools && reverse
+        ? remoteAgentToolsConfig(agentTools, reverse.remotePort)
+        : undefined;
+      let started: StartedServe | null = null;
+      try {
+        if (pendingAdoption) {
+          const adoption = pendingAdoption;
+          pendingAdoption = undefined;
+          const attached = await attachAdoptedServe({
+            host,
+            runtimeDir: runtime.runtimeDir,
+            remotePath,
+            adoption,
+            lifecycleTimeoutMs,
+          });
+          if (attached.kind === "live") {
+            if (agentTools) {
+              // Agent-tool grants are memory-only and minted for this launch.
+              // An older serve cannot prove it holds the current scoped token.
+              await attached.serve.disposeCommittedRuntime();
+            } else {
+              started = attached.serve;
+            }
           }
         }
         if (!started) {
-          throw lastError ?? unavailable(`could not start opencode serve on ${host.label}`);
+          let lastError: unknown;
+          // Three collisions still get three fresh retries and a fourth candidate.
+          for (let attempt = 0; attempt < 4 && !started; attempt++) {
+            const port = pickPort();
+            try {
+              started = await startServe({
+                host,
+                remotePath,
+                runtimeDir: runtime.runtimeDir,
+                bin,
+                listenTimeoutMs,
+                lifecycleTimeoutMs,
+                port,
+                serveToken: leaseToken,
+                ...(modernPassword ? { password: modernPassword } : {}),
+                ...(configContent ? { configContent } : {}),
+              });
+            } catch (error) {
+              lastError = error;
+              if ((error as { code?: string }).code !== "port-in-use") throw error;
+            }
+          }
+          if (!started) {
+            throw lastError ?? unavailable(`could not start opencode serve on ${host.label}`);
+          }
         }
+      } catch (error) {
+        await Promise.resolve(reverse?.dispose()).catch(() => {});
+        if (launchCapture) releaseCapabilityLaunch(launchCapture);
+        throw error;
       }
       const serve = started;
       publishedPort = serve.port;
@@ -757,8 +926,12 @@ export const createRemoteOpenCodeRuntime = async (
         forward = await openForward(serve.port);
       } catch (error) {
         await serve.cleanupOnFailedStart();
+        await Promise.resolve(reverse?.dispose()).catch(() => {});
+        if (launchCapture) releaseCapabilityLaunch(launchCapture);
         throw error;
       }
+      publishedCapabilityOverlay = launchOverlay;
+      publishedLaunchCapture = launchCapture;
 
       let stopped = false;
       let reviving: Promise<string | undefined> | undefined;
@@ -818,8 +991,21 @@ export const createRemoteOpenCodeRuntime = async (
             if (status === "dead") return undefined;
             if (transportIsUp()) return `http://127.0.0.1:${forward.localPort}`;
             const next = await openForward(serve.port);
+            let nextReverse: RemoteReverseForwardHandle | undefined;
+            if (agentTools && reverse) {
+              const remotePort = reverse.remotePort;
+              await Promise.resolve(reverse.dispose()).catch(() => {});
+              reverse = undefined;
+              try {
+                nextReverse = await openReverse(agentTools.localPort, remotePort);
+              } catch (error) {
+                await Promise.resolve(next.dispose()).catch(() => {});
+                throw error;
+              }
+            }
             await Promise.resolve(forward.dispose()).catch(() => {});
             forward = next;
+            if (nextReverse) reverse = nextReverse;
             recoveredTransport = true;
             console.log(
               `[polyth] runtime.remote.reconnect runtimeDir=${runtime.runtimeDir} port=${serve.port}`,
@@ -831,13 +1017,23 @@ export const createRemoteOpenCodeRuntime = async (
         async stop() {
           if (stopped) return;
           stopped = true;
-          if (committed) await serve.disposeCommittedRuntime();
-          else await serve.cleanupOnFailedStart();
-          await withRemoteDeadline(
-            Promise.resolve(forward.dispose()),
-            lifecycleTimeoutMs,
-            "remote OpenCode forward disposal",
-          ).catch(() => {});
+          try {
+            if (committed) await serve.disposeCommittedRuntime();
+            else await serve.cleanupOnFailedStart();
+          } finally {
+            await Promise.all([
+              withRemoteDeadline(
+                Promise.resolve(forward.dispose()),
+                lifecycleTimeoutMs,
+                "remote OpenCode forward disposal",
+              ).catch(() => {}),
+              withRemoteDeadline(
+                Promise.resolve(reverse?.dispose()),
+                lifecycleTimeoutMs,
+                "remote Polyth tool reverse-forward disposal",
+              ).catch(() => {}),
+            ]);
+          }
         },
       };
     },
@@ -860,6 +1056,10 @@ export const createRemoteOpenCodeRuntime = async (
     }
     committed = true;
   } catch (error) {
+    if (publishedLaunchCapture) {
+      releaseCapabilityLaunch(publishedLaunchCapture);
+      publishedLaunchCapture = undefined;
+    }
     await lease.dispose();
     if (error instanceof Error && /unpublished remote OpenCode serve/.test(error.message)) {
       throw error;
@@ -867,6 +1067,112 @@ export const createRemoteOpenCodeRuntime = async (
     throw unavailable(
       `remote opencode serve on ${host.label} did not become ready: ${error instanceof Error ? error.message : String(error)}`,
     );
+  }
+
+  const acknowledgePublishedCapabilities = async (endpoint: Awaited<ReturnType<typeof lifecycle.endpoint>>): Promise<void> => {
+    if (!options.projectId) return;
+    const overlay = publishedCapabilityOverlay;
+    const target = {
+      harnessId: "opencode" as const,
+      spaceId: options.spaceId ?? "",
+      projectId: options.projectId,
+      cwd: remotePath,
+      authorityId: endpoint.authorityId,
+      generation: endpoint.generation,
+    };
+    acknowledgeCapabilityApplication({
+      target,
+      desiredRevision: overlay?.desiredRevision ?? "",
+      capabilityIds: overlay?.capabilityIds ?? [],
+      outcome: "unverifiable",
+      evidence: { stage: "staged", source: "opencode:ssh-launch" },
+      reason: overlay
+        ? "Remote OpenCode started with the private SSH launch overlay"
+        : "Remote OpenCode started",
+    });
+    publishedLaunchCapture = undefined;
+    if (!overlay) return;
+    const v2 = isOpenCodeV2(probe.version!);
+    let activation: Promise<void> | undefined;
+    const capabilityUrl = (path: string): URL => {
+      const url = new URL(path, endpoint.url);
+      url.searchParams.set(v2 ? "location[directory]" : "directory", remotePath);
+      return url;
+    };
+    await verifyOpenCodeCapabilities(
+      overlay,
+      target,
+      async (path) => {
+        const headers = await headersForAuthentication(authentication);
+        if (v2) {
+          activation ??= (async () => {
+            const response = await fetch(capabilityUrl("/api/plugin/await-activation"), {
+              method: "POST",
+              headers,
+              signal: AbortSignal.timeout(listenTimeoutMs),
+            });
+            if (response.status !== 204) {
+              throw new Error(`OpenCode V2 plugin activation wait failed (HTTP ${response.status})`);
+            }
+          })();
+          await activation;
+        }
+        const response = await fetch(capabilityUrl(path), {
+          headers,
+          signal: AbortSignal.timeout(5_000),
+        });
+        if (!response.ok) throw new Error("OpenCode capability readback unavailable");
+        return response.json();
+      },
+      undefined,
+      v2 ? "v2" : "legacy",
+    );
+  };
+  const releaseFailedPublishedLaunch = (): void => {
+    if (!publishedLaunchCapture) return;
+    releaseCapabilityLaunch(publishedLaunchCapture);
+    publishedLaunchCapture = undefined;
+  };
+  const refreshLifecycle = lifecycle.refresh.bind(lifecycle);
+  lifecycle.refresh = async (reason) => {
+    const previous = await lifecycle.endpoint().catch(() => undefined);
+    try {
+      const endpoint = await refreshLifecycle(reason);
+      if (!previous
+        || previous.authorityId !== endpoint.authorityId
+        || previous.generation !== endpoint.generation) {
+        await acknowledgePublishedCapabilities(endpoint);
+      }
+      return endpoint;
+    } catch (error) {
+      releaseFailedPublishedLaunch();
+      throw error;
+    }
+  };
+  if ("restart" in lifecycle) {
+    const restartLifecycle = lifecycle.restart.bind(lifecycle);
+    lifecycle.restart = async (reason) => {
+      try {
+        const endpoint = await restartLifecycle(reason);
+        await acknowledgePublishedCapabilities(endpoint);
+        return endpoint;
+      } catch (error) {
+        releaseFailedPublishedLaunch();
+        throw error;
+      }
+    };
+    const withConfigRestart = lifecycle.withConfigRestart.bind(lifecycle);
+    lifecycle.withConfigRestart = (action) => withConfigRestart((restartGeneration) =>
+      action(async () => {
+        try {
+          const endpoint = await restartGeneration();
+          await acknowledgePublishedCapabilities(endpoint);
+          return endpoint;
+        } catch (error) {
+          releaseFailedPublishedLaunch();
+          throw error;
+        }
+      }));
   }
 
   const runtime = createOpenCodeRuntimeFacade({
@@ -884,7 +1190,15 @@ export const createRemoteOpenCodeRuntime = async (
     await lifecycle.dispose();
     await releaseLock();
   };
-  return attachRuntimeLifecycle(runtime, lifecycle) as ManagedOpenCodeRuntime;
+  const managed = attachRuntimeLifecycle(runtime, lifecycle) as ManagedOpenCodeRuntime;
+  try {
+    await acknowledgePublishedCapabilities(await lifecycle.endpoint());
+  } catch (error) {
+    releaseFailedPublishedLaunch();
+    await managed.dispose();
+    throw error;
+  }
+  return managed;
   } catch (error) {
     if (!(error instanceof Error && /unpublished remote OpenCode serve/.test(error.message))) {
       await releaseLock();
@@ -892,3 +1206,5 @@ export const createRemoteOpenCodeRuntime = async (
     throw error;
   }
 };
+
+export const createRemoteOpenCodeRuntime = createRemoteOpenCodeRuntimeInner;

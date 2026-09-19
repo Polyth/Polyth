@@ -32,7 +32,7 @@ import {
 } from "@polyth/harness-runtime";
 import type { BehaviorService } from "./behavior.ts";
 import type { McpConfigService, McpProjectionState } from "./mcp.ts";
-import { AGENT_TOOLS_MCP_NAME, type AgentToolBridge } from "./agentTools.ts";
+import { AGENT_TOOLS_MCP_NAME, AGENT_TOOLS_MCP_PATH, type AgentToolBridge } from "./agentTools.ts";
 
 export interface InstructionProvisionState {
   provisioned: boolean;
@@ -674,7 +674,7 @@ export function createCapabilityProvisioningController(opts: {
       const mcpSupport = support.kinds["mcp-server"];
       const toolItems = plan.items.filter((item) => item.capability.kind === "tool" && item.mode === "mcp");
       if (!toolItems.length) revokeTools(targetKey);
-      if (toolItems.length && mcpSupport && !context.remote && opts.tools && opts.toolsEndpoint) {
+      if (toolItems.length && mcpSupport && (!context.remote || mcpSupport.remote === true) && opts.tools && opts.toolsEndpoint) {
         const tools = toolItems.map((item) => item.capability)
           .filter((item): item is Extract<AgentCapabilityDescriptor, { kind: "tool" }> => item.kind === "tool");
         const revision = desiredBundleRevision(tools);
@@ -696,8 +696,17 @@ export function createCapabilityProvisioningController(opts: {
           activeTokens.set(token, { revision, targetKey });
           revokeUnreferencedTokens();
         }
-        const stdio = opts.tools.stdioCommand(opts.toolsEndpoint(), token);
-        toolEnv = stdio.env;
+        const endpoint = opts.toolsEndpoint();
+        const stdio = context.remote ? undefined : opts.tools.stdioCommand(endpoint, token);
+        const remoteUrl = context.remote ? new URL(endpoint) : undefined;
+        if (remoteUrl) {
+          remoteUrl.pathname = AGENT_TOOLS_MCP_PATH;
+          remoteUrl.search = "";
+          remoteUrl.hash = "";
+        }
+        toolEnv = context.remote
+          ? { Authorization: `Bearer ${token}` }
+          : stdio!.env;
         const mcpMode = mcpSupport.modes.find((mode) => mode !== "unsupported") ?? "unsupported";
         plan.items.push({
           capability: {
@@ -710,7 +719,9 @@ export function createCapabilityProvisioningController(opts: {
             revision,
             name: AGENT_TOOLS_MCP_NAME,
             enabled: true,
-            transport: { kind: "stdio", command: stdio.command, args: stdio.args, envKeys: Object.keys(stdio.env) },
+            transport: remoteUrl
+              ? { kind: "http", url: remoteUrl.toString(), headersSecretRefs: Object.keys(toolEnv) }
+              : { kind: "stdio", command: stdio!.command, args: stdio!.args, envKeys: Object.keys(stdio!.env) },
           },
           mode: mcpMode,
           mutability: mcpSupport.mutability,

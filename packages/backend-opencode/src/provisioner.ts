@@ -32,6 +32,14 @@ export type OpenCodeLaunchOverlay = {
   configPath?: string;
   skills?: Array<{ capabilityId: string; name: string; path: string }>;
   mcpNames?: Record<string, string>;
+  /** MCP endpoints whose listener remains on the Polyth host. Remote runtimes
+   * rewrite these through a loopback-only reverse transport at launch. */
+  remoteMcp?: Array<{
+    capabilityId: string;
+    name: string;
+    url: string;
+    headers: Record<string, string>;
+  }>;
   env: Record<string, string>;
   desiredRevision: string;
   /** Capabilities admitted by the physical OpenCode process launch. */
@@ -45,6 +53,7 @@ type OverlayRecord = {
   configPath?: string;
   skills?: OpenCodeLaunchOverlay["skills"];
   mcpNames?: Record<string, string>;
+  remoteMcp?: OpenCodeLaunchOverlay["remoteMcp"];
   env: Record<string, string>;
   desiredRevision: string;
   capabilityIds: string[];
@@ -65,6 +74,9 @@ const serializeOverlay = (record: OverlayRecord): OpenCodeLaunchOverlay => {
     ...(record.configPath ? { configPath: record.configPath } : {}),
     ...(record.skills ? { skills: record.skills.map((skill) => ({ ...skill })) } : {}),
     ...(record.mcpNames ? { mcpNames: { ...record.mcpNames } } : {}),
+    ...(record.remoteMcp ? {
+      remoteMcp: record.remoteMcp.map((server) => ({ ...server, headers: { ...server.headers } })),
+    } : {}),
     desiredRevision: record.desiredRevision,
     capabilityIds: [...record.capabilityIds],
     ...(record.prompt
@@ -146,11 +158,11 @@ const supportFor = (_context: HarnessContext): HarnessCapabilitySupport => ({
   targetLifetime: "physical-runtime",
   kinds: {
     instruction: { modes: ["prompt"], mutability: "immediate", configScope: "project", remote: false },
-    "mcp-server": { modes: ["config"], mutability: "requires-restart", configScope: "project", remote: false },
+    "mcp-server": { modes: ["config"], mutability: "requires-restart", configScope: "project", remote: true },
     // Tool delivery stays on the portable scoped MCP bridge. Its stdio
     // protocol preserves the tool error and cancellation path that OpenCode
     // v2's generated-plugin ABI does not expose stably enough for Polyth.
-    tool: { modes: ["mcp"], mutability: "requires-restart", remote: false, configScope: "project" },
+    tool: { modes: ["mcp"], mutability: "requires-restart", remote: true, configScope: "project" },
     skill: { modes: ["filesystem"], mutability: "requires-restart", configScope: "project", remote: false },
     context: { modes: ["prompt"], mutability: "immediate", configScope: "project", remote: false },
     extension: { modes: ["unsupported"], mutability: "immutable" },
@@ -302,10 +314,61 @@ export function createOpenCodeProvisioner(_applier: BackendConfigApplier): Harne
         ...(reason ? { reason } : {}),
       });
       if (context.remote) {
+        const records: HarnessCapabilityRecord[] = [];
+        const bridgeItem = plan.items.find((item) => item.capability.id === "polyth.agent-tools"
+          && item.capability.kind === "mcp-server");
+        const remoteMcp: NonNullable<OpenCodeLaunchOverlay["remoteMcp"]> = [];
+        if (bridgeItem?.capability.kind === "mcp-server" && bridgeItem.mode !== "unsupported"
+          && bridgeItem.capability.enabled && bridgeItem.capability.transport.kind === "http") {
+          const values = secrets.mcpSecrets(bridgeItem.capability.id);
+          const headers = Object.fromEntries(bridgeItem.capability.transport.headersSecretRefs.map((key) => [key, values[key] ?? ""]));
+          if (Object.keys(headers).length > 0
+            && Object.values(headers).every((value) => value.length > 0)) {
+            remoteMcp.push({
+              capabilityId: bridgeItem.capability.id,
+              name: bridgeItem.capability.name,
+              url: bridgeItem.capability.transport.url,
+              headers,
+            });
+            records.push(recordFor(bridgeItem, "pending", "Staged for an SSH reverse-loopback OpenCode MCP transport"));
+          } else {
+            records.push(recordFor(bridgeItem, "failed", "Scoped remote Polyth agent-tool authorization is unavailable"));
+          }
+        }
+        for (const item of plan.items) {
+          if (item === bridgeItem) continue;
+          if (item.capability.kind === "tool") {
+            records.push(recordFor(
+              item,
+              item.mode !== "unsupported" && remoteMcp.length ? "pending" : item.mode === "unsupported" ? "unsupported" : "failed",
+              item.mode === "unsupported"
+                ? "Remote OpenCode does not support this tool scope"
+                : remoteMcp.length
+                  ? "Presented through the scoped remote Polyth MCP bridge"
+                  : "Scoped remote Polyth agent-tool bridge is unavailable",
+            ));
+            continue;
+          }
+          records.push(recordFor(item, "unsupported", "Remote OpenCode only projects scoped Polyth package tools"));
+        }
+        const toolIds = records
+          .filter((record) => record.kind === "tool" && record.status === "pending")
+          .map((record) => record.capabilityId);
+        const capabilityIds = remoteMcp.length
+          ? [remoteMcp[0]!.capabilityId, ...toolIds]
+          : [];
+        overlayStore.set(overlayKeyOf(context), {
+          mcp: {},
+          mcpNames: Object.fromEntries(remoteMcp.map((server) => [server.capabilityId, server.name])),
+          remoteMcp,
+          env: {},
+          desiredRevision: plan.desiredRevision,
+          capabilityIds,
+        });
         return {
           harnessId: "opencode",
           desiredRevision: plan.desiredRevision,
-          records: plan.items.map((item) => recordFor(item, "unsupported", "Remote OpenCode does not project onto the local host runtime")),
+          records,
         };
       }
 

@@ -616,6 +616,7 @@ export interface FakeRemoteHostScript {
   exitAfterAcquired?: boolean;
   failForwardRemaining?: number;
   failServeWrite?: boolean;
+  remoteReversePort?: number;
   lockOutputDelayMs?: number;
 }
 
@@ -638,6 +639,7 @@ export interface FakeRemoteHost {
   serveWrites: string[];
   killedHandles: number[];
   forwards: Array<{ remotePort: number; cancelled: boolean }>;
+  reverseForwards: Array<{ localPort: number; remotePort: number; cancelled: boolean }>;
   reportedDbPath?: string;
   missingDbPath: boolean;
   missingBinary: boolean;
@@ -690,6 +692,7 @@ export const createFakeRemoteHost = (script: FakeRemoteHostScript): FakeRemoteHo
   const serveWrites: string[] = [];
   const killedHandles: number[] = [];
   const forwards: Array<{ remotePort: number; cancelled: boolean }> = [];
+  const reverseForwards: Array<{ localPort: number; remotePort: number; cancelled: boolean }> = [];
   let serveProbeUnreachable = false;
   let failForwardRemaining = script.failForwardRemaining ?? 0;
   let failAttachRemaining = 0;
@@ -869,6 +872,18 @@ export const createFakeRemoteHost = (script: FakeRemoteHostScript): FakeRemoteHo
         dispose: async () => { record.cancelled = true; },
       };
     },
+    async reverseForward(localPort, requestedRemotePort) {
+      const record = {
+        localPort,
+        remotePort: requestedRemotePort ?? script.remoteReversePort ?? 39_123,
+        cancelled: false,
+      };
+      reverseForwards.push(record);
+      return {
+        remotePort: record.remotePort,
+        dispose: async () => { record.cancelled = true; },
+      };
+    },
   };
 
   const applyHostBreak = (breakKind: RemoteIdentityBreak): boolean => {
@@ -912,6 +927,7 @@ export const createFakeRemoteHost = (script: FakeRemoteHostScript): FakeRemoteHo
       return lockHeldGate;
     },
     forwards,
+    reverseForwards,
     get reportedDbPath() {
       return reportedDbPath;
     },

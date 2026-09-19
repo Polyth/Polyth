@@ -89,6 +89,8 @@ export interface SshServiceOptions {
   spawner?: SshSpawner;
   /** Local free-port allocator for forwards. Injectable for tests. */
   freeLocalPort?: () => Promise<number>;
+  /** Remote loopback port candidate picker for reverse forwards. */
+  pickRemotePort?: () => number;
   now?: () => number;
   /** Master idle lifetime in seconds once nothing uses it (default 600). */
   controlPersistSeconds?: number;
@@ -381,6 +383,7 @@ export function createSshService(options: SshServiceOptions): SshService {
   const run = options.runner ?? defaultRunner;
   const spawnChild = options.spawner ?? defaultSpawner;
   const freeLocalPort = options.freeLocalPort ?? defaultFreePort;
+  const pickRemotePort = options.pickRemotePort ?? (() => 20_000 + Math.floor(Math.random() * 45_000));
   const now = options.now ?? Date.now;
   const persistSeconds = options.controlPersistSeconds ?? 600;
   const execTimeoutMs = options.execTimeoutMs ?? 20_000;
@@ -685,6 +688,38 @@ export function createSshService(options: SshServiceOptions): SshService {
               await run(controlArgs(fresh, "cancel", ["-L", spec]), { timeoutMs: 10_000 }).catch(() => undefined);
             },
           };
+        },
+        async reverseForward(localPort, requestedRemotePort) {
+          if (!Number.isInteger(localPort) || localPort < 1 || localPort > 65_535) {
+            throw invalid("local reverse-forward port must be 1-65535");
+          }
+          if (requestedRemotePort !== undefined
+            && (!Number.isInteger(requestedRemotePort) || requestedRemotePort < 1 || requestedRemotePort > 65_535)) {
+            throw invalid("remote reverse-forward port must be 1-65535");
+          }
+          await ensureConnected(id);
+          const fresh = must(id);
+          let lastError = "";
+          const attempts = requestedRemotePort === undefined ? 8 : 1;
+          for (let attempt = 0; attempt < attempts; attempt++) {
+            const remotePort = requestedRemotePort ?? pickRemotePort();
+            if (!Number.isInteger(remotePort) || remotePort < 1 || remotePort > 65_535) {
+              throw invalid("remote reverse-forward port picker returned an invalid port");
+            }
+            const spec = `127.0.0.1:${remotePort}:127.0.0.1:${localPort}`;
+            const result = await run(controlArgs(fresh, "forward", ["-R", spec]), { timeoutMs: 10_000 });
+            if (result.code !== 0) {
+              lastError = tail(result.stderr) || `ssh exited ${result.code}`;
+              continue;
+            }
+            return {
+              remotePort,
+              dispose: async () => {
+                await run(controlArgs(fresh, "cancel", ["-R", spec]), { timeoutMs: 10_000 }).catch(() => undefined);
+              },
+            };
+          }
+          throw unavailable(`reverse port forward failed: ${lastError || "no remote loopback port was available"}`);
         },
       };
     },

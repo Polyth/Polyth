@@ -279,7 +279,7 @@ test("dirExists and makeDir shell-quote remote paths", async () => {
   assert.ok(seen[2]!.includes(`mkdir -p -- ${shq("/srv/new dir")}`));
 });
 
-test("host(): start ensures the master, streams output, forward maps a local port", async () => {
+test("host(): start ensures the master and loopback forwards work in both directions", async () => {
   let muxAlive = false;
   const spawned: string[][] = [];
   const { runner, calls } = fakeRunner({
@@ -301,6 +301,7 @@ test("host(): start ensures the master, streams output, forward maps a local por
   };
   const service = createSshService({
     file: tempFile(), runner, spawner, freeLocalPort: async () => 43_210,
+    pickRemotePort: () => 43_211,
   });
   const conn = service.create({ host: "up.example", user: "dev" });
   const host = service.host(conn.id);
@@ -315,12 +316,20 @@ test("host(): start ensures the master, streams output, forward maps a local por
 
   const fwd = await host.forward(8123);
   assert.equal(fwd.localPort, 43_210);
-  const forwardCall = calls.find((c) => c.args.includes("forward"));
+  const forwardCall = calls.find((c) => c.args.includes("-L"));
   assert.ok(forwardCall);
   assert.ok(forwardCall!.args.includes("-L"));
   assert.ok(forwardCall!.args.includes("127.0.0.1:43210:127.0.0.1:8123"));
   await fwd.dispose();
   assert.ok(calls.some((c) => c.args.includes("cancel")));
+
+  const reverse = await host.reverseForward!(8124);
+  assert.equal(reverse.remotePort, 43_211);
+  const reverseCall = calls.find((c) => c.args.includes("-R"));
+  assert.ok(reverseCall);
+  assert.ok(reverseCall!.args.includes("127.0.0.1:43211:127.0.0.1:8124"));
+  await reverse.dispose();
+  assert.ok(calls.some((c) => c.args.includes("cancel") && c.args.includes("-R")));
 });
 
 test("host() fails honestly when the connection cannot be established", async () => {

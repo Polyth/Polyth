@@ -44,6 +44,7 @@ import {
   createRemoteOpenCodeRuntime,
   installRemoteOpenCode,
   inspectOpenCodeEngine,
+  peekOpenCodeLaunchOverlay,
   probeRemoteOpenCode,
   resolveOpenCodeBinary,
   sweepOpenCodeRuntimes,
@@ -129,7 +130,13 @@ import { createWsGateway, type WsGateway } from "./ws.ts";
 import { createTrackWorkflow, type TrackWorkflow, type TrackWorkflowDeps } from "./tracks.ts";
 import { createRouteRegistry } from "./routeRegistry.ts";
 import { createPackageLifecycle } from "./packageLifecycle.ts";
-import { createDeferredConfigApplier, createOpenCodePendingService, inspectOpenCodeConfiguration, physicalRestartKeysFor } from "./opencodePending.ts";
+import {
+  createDeferredConfigApplier,
+  createOpenCodePendingService,
+  inspectOpenCodeConfiguration,
+  physicalRestartKeysFor,
+  type PendingRestartPlan,
+} from "./opencodePending.ts";
 import { agentSessionRoutes, type AgentGoalService } from "./routes/agentSessions.ts";
 import { runtimeEpochRoutes } from "./routes/runtimeEpoch.ts";
 import { runtimeDiagnosticsRoutes } from "./routes/runtimeDiagnostics.ts";
@@ -637,11 +644,13 @@ export async function boot(opts: BootOptions = {}) {
   const occupancyByFacade = new WeakMap<AgentRuntime, SharedRuntimeOccupancy>();
   const runtimeRestarters = new Map<string, {
     runtime: AgentRuntime;
+    localConfigAuthority: boolean;
     restart(): Promise<void>;
     withConfigRestart<T>(
       action: (restart: () => Promise<void>) => Promise<T>,
     ): Promise<T>;
   }>();
+  const localConfigRuntimeKeys = new Set<string>();
   const runtimeRestartListeners = new Set<(runtime: AgentRuntime) => Promise<void>>();
   const runtimeEvictionListeners = new Set<
     (runtime: AgentRuntime) => void | Promise<void>
@@ -668,7 +677,7 @@ export async function boot(opts: BootOptions = {}) {
     targetId: localConfigTargetId,
     // Local configuration is writable only while an exact owned-local lease
     // for this target is live. SSH/borrowed-only pools remain read-only.
-    authority: () => runtimeRestarters.size > 0
+    authority: () => localConfigRuntimeKeys.size > 0
       ? { kind: "writable", targetId: localConfigTargetId }
       : { kind: "read-only" },
   });
@@ -699,8 +708,11 @@ export async function boot(opts: BootOptions = {}) {
 
   const spawnRuntime = async (projectId: string, cwd: string): Promise<AgentRuntime> => {
     // Remote-bound projects run `opencode serve` ON the remote host through
-    // the SSH transport (one multiplexed channel + one forwarded port).
-    const remoteBinding = (await projects.get(projectId))?.remote;
+    // the SSH transport. Runtime HTTP uses a local forward; scoped package
+    // tools add a reverse loopback forward for the Polyth MCP bridge.
+    const project = await projects.get(projectId);
+    const spaceId = project ? spaceGateway.resolveInternal(project.spaceId).spaceId : undefined;
+    const remoteBinding = project?.remote;
     if (remoteBinding?.kind === "ssh") {
       const ssh = svc<SshTransportService>("ssh");
       if (!ssh) {
@@ -715,8 +727,14 @@ export async function boot(opts: BootOptions = {}) {
         host: ssh.host(remoteBinding.connectionId),
         connectionIdentity: remoteBinding.connectionId,
         projectId,
+        ...(spaceId ? { spaceId } : {}),
         remotePath: cwd,
         remoteStateKey,
+        capabilityOverlay: () => peekOpenCodeLaunchOverlay({
+          cwd,
+          ...(spaceId ? { spaceId } : {}),
+          projectId,
+        }),
         ...(opts.opencode?.runtimeDir
           ? { runtimeDir: posix.join(opts.opencode.runtimeDir, remoteStateKey) }
           : {}),
@@ -724,8 +742,6 @@ export async function boot(opts: BootOptions = {}) {
         sessionIdMap,
       });
     }
-    const project = await projects.get(projectId);
-    const spaceId = project ? spaceGateway.resolveInternal(project.spaceId).spaceId : undefined;
     const localStateKey = openCodeRuntimeId(projectId, cwd);
     return createOpenCodeRuntime({
         projectId, cwd, sessionIdMap,
@@ -760,6 +776,7 @@ export async function boot(opts: BootOptions = {}) {
     cwd: string,
     first: AgentRuntime,
     configRestartable: boolean,
+    localConfigAuthority: boolean,
     occupancy: SharedRuntimeOccupancy,
   ): { facade: AgentRuntime; dispose: () => Promise<void> } => {
     let inner = first;
@@ -1222,10 +1239,12 @@ export async function boot(opts: BootOptions = {}) {
     if (configRestartable) {
       runtimeRestarters.set(key, {
         runtime: facade,
+        localConfigAuthority,
         restart,
         withConfigRestart,
       });
     }
+    if (localConfigAuthority) localConfigRuntimeKeys.add(key);
     stampRuntimeIdentity(facade, projectId, cwd);
     occupancyByFacade.set(facade, occupancy);
     return {
@@ -1233,6 +1252,7 @@ export async function boot(opts: BootOptions = {}) {
       dispose: async () => {
         idleController?.stop();
         runtimeRestarters.delete(key);
+        localConfigRuntimeKeys.delete(key);
         await teardownPhysical();
         await settleAllOrThrow(
           [...runtimeEvictionListeners].map(async (listener) => listener(facade)),
@@ -1260,9 +1280,19 @@ export async function boot(opts: BootOptions = {}) {
     reason: `session ${sessionId} restart reconciliation is not initialized`,
   });
 
-  const captureRuntimeRestartState = async (keys?: ReadonlySet<string>): Promise<RuntimeRestartState> => {
+  const runtimeRestarterEntries = (plan?: PendingRestartPlan) => {
+    const entries = [...runtimeRestarters];
+    if (!plan || plan.mode === "all") return entries;
+    if (plan.mode === "exact") {
+      return entries.filter(([key]) => plan.keys.has(key));
+    }
+    return entries.filter(([key, restarter]) =>
+      restarter.localConfigAuthority || plan.keys.has(key));
+  };
+
+  const captureRuntimeRestartState = async (plan?: PendingRestartPlan): Promise<RuntimeRestartState> => {
     const state: RuntimeRestartState = new Map();
-    const entries = keys ? [...runtimeRestarters].filter(([key]) => keys.has(key)) : [...runtimeRestarters];
+    const entries = runtimeRestarterEntries(plan);
     await settleAllOrThrow(entries.map(async ([key, restarter]) => {
       const endpoint = await restarter.runtime.endpoint?.();
       if (!endpoint) {
@@ -1281,9 +1311,9 @@ export async function boot(opts: BootOptions = {}) {
 
   const restartRuntimeEntries = async (
     expected?: RuntimeRestartState,
-    keys?: ReadonlySet<string>,
+    plan?: PendingRestartPlan,
   ): Promise<number> => {
-    const entries = keys ? [...runtimeRestarters].filter(([key]) => keys.has(key)) : [...runtimeRestarters];
+    const entries = runtimeRestarterEntries(plan);
     const restarted = await settleAllOrThrow(entries.map(async ([key, restarter]) => {
       const prior = expected?.get(key);
       if (expected && !prior) {
@@ -1329,13 +1359,14 @@ export async function boot(opts: BootOptions = {}) {
   > | null = null;
   const withRuntimeReplacementInterlock = async <T,>(
     action: () => Promise<T>,
+    plan?: PendingRestartPlan,
   ): Promise<T> => {
     runtimeCreationFenceDepth += 1;
     try {
       // A pool promise created before the synchronous fence may still be
       // installing its facade. Let it finish so it is included below.
       await openCodeRuntimes.settleCreates();
-      const entries = [...runtimeRestarters];
+      const entries = runtimeRestarterEntries(plan);
       const capabilities = new Map<string, () => Promise<void>>();
       const acquire = async (index: number): Promise<T> => {
         const entry = entries[index];
@@ -1432,17 +1463,18 @@ export async function boot(opts: BootOptions = {}) {
             };
             await reconcilePinnedHarness(capabilityController, harnesses, "opencode", context);
           }
-          const configRestartable = !(await projects.get(projectId))?.remote;
+          const localConfigAuthority = !(await projects.get(projectId))?.remote;
           const spawn = async () => {
             const built = facadeFor(
               key,
               projectId,
               dir,
               await spawnRuntime(projectId, dir),
-              configRestartable,
+              true,
+              localConfigAuthority,
               occupancy,
             );
-            if (configRestartable) await refreshSafeBehavior();
+            if (localConfigAuthority) await refreshSafeBehavior();
             return { value: built.facade, dispose: built.dispose };
           };
           try {
@@ -1593,8 +1625,9 @@ export async function boot(opts: BootOptions = {}) {
 
   // --- WP9: behavior instructions, MCP config, managed plugins (adapter-applied)
   const pendingOpenCode = createOpenCodePendingService({
-    canRestart: async (captured, keys) => {
+    canRestart: async (captured, plan) => {
       const expected = captured as RuntimeRestartState | undefined;
+      const selectedKeys = new Set(runtimeRestarterEntries(plan).map(([key]) => key));
       const assessments = await settleAllOrThrow((await store.projections()).map(async (projection) => {
         const project = await projects.get(projection.projectId);
         const cwd = projection.worktreePath ?? project?.path ?? process.cwd();
@@ -1603,7 +1636,7 @@ export async function boot(opts: BootOptions = {}) {
         // A scoped restart (runtime-capabilities for one physical target)
         // must not be blocked by an unrelated project's live session — only
         // sessions on the restarting target(s) need to be safety-checked.
-        if (keys && !keys.has(key)) return { safe: true as const };
+        if (!selectedKeys.has(key)) return { safe: true as const };
         const restarter = runtimeRestarters.get(key);
         if (!restarter) return { safe: true as const };
         const fingerprint = expected?.get(key);
@@ -1623,10 +1656,10 @@ export async function boot(opts: BootOptions = {}) {
       if (unsafe && !unsafe.safe) return unsafe;
       return { safe: true as const };
     },
-    withAdmissionBarrier: (action) =>
-      admissionBarrier.run(() => withRuntimeReplacementInterlock(action)),
-    captureRestartState: (keys) => captureRuntimeRestartState(keys),
-    restart: (state, keys) => restartRuntimeEntries(state as RuntimeRestartState | undefined, keys),
+    withAdmissionBarrier: (action, plan) =>
+      admissionBarrier.run(() => withRuntimeReplacementInterlock(action, plan)),
+    captureRestartState: (plan) => captureRuntimeRestartState(plan),
+    restart: (state, plan) => restartRuntimeEntries(state as RuntimeRestartState | undefined, plan),
   });
   const configApplier = createDeferredConfigApplier(directConfigApplier, pendingOpenCode);
   provideService(

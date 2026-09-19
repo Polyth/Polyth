@@ -565,7 +565,7 @@ interface StartedLocalChild {
   authentication: RuntimeAuthentication;
 }
 
-const headersForAuthentication = async (
+export const headersForAuthentication = async (
   authentication: RuntimeAuthentication,
 ): Promise<Record<string, string>> => {
   if (authentication.kind === "none") return {};

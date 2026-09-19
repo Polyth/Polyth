@@ -45,6 +45,16 @@ export interface OpenCodePendingService {
   applyAndRestart(): Promise<{ applied: number; restarted: number }>;
 }
 
+/** Physical runtimes that must cross one replacement barrier for a pending
+ * batch. Shared OpenCode configuration belongs only to local config
+ * authorities. Runtime capability work can additionally name an exact local
+ * or remote physical target. A malformed capability task without an exact
+ * target fails safe by retaining the historical all-runtime behavior. */
+export interface PendingRestartPlan {
+  mode: "exact" | "local-config" | "all";
+  keys: ReadonlySet<string>;
+}
+
 /** Read the deployment-global queue only in its local-trusted scope. */
 export function inspectOpenCodeConfiguration(
   pending: Pick<OpenCodePendingService, "list">,
@@ -55,11 +65,10 @@ export function inspectOpenCodeConfiguration(
   return { pendingChanges: count, restartRequired: count > 0 };
 }
 
-/** A batch restarts only the union of its tasks' `restartKeys` when every
- * task is `runtime-capabilities` and every task actually declares a scope.
- * Any other kind, or a runtime-capabilities task with no declared scope,
- * restarts globally — narrowing scope must never be inferred as a fallback,
- * only declared explicitly by the staging site. */
+/** Compatibility view of exact runtime-capability scope. A batch can be
+ * narrowed to this union only when every task is `runtime-capabilities` and
+ * every task declares its physical target. `restartPlanFor` retains the
+ * explicit capability keys when the same batch also writes shared config. */
 export function restartScopeFor(batch: readonly PendingTask[]): ReadonlySet<string> | undefined {
   if (batch.length === 0) return undefined;
   const keys = new Set<string>();
@@ -69,6 +78,25 @@ export function restartScopeFor(batch: readonly PendingTask[]): ReadonlySet<stri
     for (const key of task.restartKeys) keys.add(key);
   }
   return keys;
+}
+
+export function restartPlanFor(batch: readonly PendingTask[]): PendingRestartPlan {
+  const keys = new Set<string>();
+  let hasSharedConfig = false;
+  for (const task of batch) {
+    if (task.kind !== "runtime-capabilities") {
+      hasSharedConfig = true;
+      continue;
+    }
+    if (!task.restartKeys || task.restartKeys.length === 0) {
+      return { mode: "all", keys };
+    }
+    for (const key of task.restartKeys) keys.add(key);
+  }
+  return {
+    mode: hasSharedConfig ? "local-config" : "exact",
+    keys,
+  };
 }
 
 /** Pick the live physical pool keys for a Space/project/cwd restart.
@@ -88,13 +116,13 @@ export function physicalRestartKeysFor(
 }
 
 export function createOpenCodePendingService(opts: {
-  canRestart?(state?: unknown, keys?: ReadonlySet<string>): Promise<{ safe: true } | { safe: false; reason: string }>;
+  canRestart?(state: unknown, plan: PendingRestartPlan): Promise<{ safe: true } | { safe: false; reason: string }>;
   /** One critical section spanning safety, writes, replacement, and
    * reconciliation. The server admission gate and owned lifecycle generation
    * installation locks are held for its full lifetime. */
-  withAdmissionBarrier?<T>(action: () => Promise<T>): Promise<T>;
-  captureRestartState?(keys?: ReadonlySet<string>): Promise<unknown>;
-  restart(state?: unknown, keys?: ReadonlySet<string>): Promise<number>;
+  withAdmissionBarrier?<T>(action: () => Promise<T>, plan: PendingRestartPlan): Promise<T>;
+  captureRestartState?(plan: PendingRestartPlan): Promise<unknown>;
+  restart(state: unknown, plan: PendingRestartPlan): Promise<number>;
 }): OpenCodePendingService {
   const tasks = new Map<string, PendingTask>();
   let applying = false;
@@ -122,22 +150,22 @@ export function createOpenCodePendingService(opts: {
       }
       const batch = [...tasks.values()];
       if (batch.length === 0) return { applied: 0, restarted: 0 };
+      const plan = restartPlanFor(batch);
       applying = true;
       try {
         const apply = async () => {
-          const keys = restartScopeFor(batch);
           // Capture only after admission, runtime creation, and owned lifecycle
           // generation installation are fenced. Generation inequality alone
           // cannot prove whether a successor loaded pre- or post-write config.
-          const restartState = await opts.captureRestartState?.(keys);
-          const safety = await opts.canRestart?.(restartState, keys);
+          const restartState = await opts.captureRestartState?.(plan);
+          const safety = await opts.canRestart?.(restartState, plan);
           if (safety && !safety.safe) {
             throw Object.assign(new Error(`OpenCode restart deferred: ${safety.reason}`), {
               code: "restart-deferred",
             });
           }
           for (const task of batch) await task.apply();
-          const restarted = await opts.restart(restartState, keys);
+          const restarted = await opts.restart(restartState, plan);
           for (const task of batch) {
             if (tasks.get(task.id) !== task) continue;
             tasks.delete(task.id);
@@ -146,7 +174,7 @@ export function createOpenCodePendingService(opts: {
           return { applied: batch.length, restarted };
         };
         return opts.withAdmissionBarrier
-          ? await opts.withAdmissionBarrier(apply)
+          ? await opts.withAdmissionBarrier(apply, plan)
           : await apply();
       } finally {
         applying = false;

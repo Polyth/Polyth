@@ -14,6 +14,7 @@ import {
   OPENCODE_UPDATE_DISABLE_ENV,
   parseOpenCodeRuntimeMetadata,
   type ManagedOpenCodeRuntime,
+  type OpenCodeLaunchOverlay,
 } from "../src/index.ts";
 import { acquireRemoteRuntimeLock, REMOTE_STORAGE_MARKERS } from "../src/remoteStorage.ts";
 import { createKeyedRuntimeOwner } from "../../server/src/runtimeOccupancy.ts";
@@ -213,6 +214,128 @@ test("remote runtime boots serve on the host, attaches through the forward, and 
   assert.deepEqual(fake.storage.killedPids, ["4242"]);
   assert.equal(fake.storage.serveLive, false);
   assert.equal(fake.forwards[0]!.cancelled, true);
+});
+
+test("remote runtime delivers scoped Polyth tools through a reverse loopback without argv disclosure", async () => {
+  const stub = await startStubServe();
+  const fake = createFakeHost({ stubPort: stub.port, remoteReversePort: 43_211 });
+  const token = "ab".repeat(32);
+  let overlay: OpenCodeLaunchOverlay = {
+    configContent: "",
+    remoteMcp: [{
+      capabilityId: "polyth.agent-tools",
+      name: "polyth-agent-tools",
+      url: "http://127.0.0.1:43123/internal/agent-tools/mcp",
+      headers: { Authorization: `Bearer ${token}` },
+    }],
+    mcpNames: { "polyth.agent-tools": "polyth-agent-tools" },
+    env: {},
+    desiredRevision: "remote-tools-r1",
+    capabilityIds: ["polyth.agent-tools", "browser.polyth-browser"],
+  };
+  const runtime = await createRemoteOpenCodeRuntime({
+    host: fake.host,
+    remotePath: "/home/dev/app",
+    runtimeDir: "/var/lib/polyth/runtimes/remote-tools",
+    projectId: "project-a",
+    spaceId: "space-a",
+    pickPort: () => 37_031,
+    readyTimeoutMs: 5_000,
+    listenTimeoutMs: 5_000,
+    capabilityOverlay: () => overlay,
+  });
+  try {
+    assert.deepEqual(fake.reverseForwards.map(({ localPort, remotePort }) => ({ localPort, remotePort })), [{
+      localPort: 43_123,
+      remotePort: 43_211,
+    }]);
+    assert.equal(fake.serveStartCommands.length, 1);
+    assert.doesNotMatch(fake.serveStartCommands[0]!, new RegExp(token));
+    assert.match(fake.serveStartCommands[0]!, /OPENCODE_CONFIG_CONTENT/);
+    assert.equal(fake.serveWrites.length, 1);
+    const config = JSON.parse(fake.serveWrites[0]!.trim()) as {
+      mcp: Record<string, { url: string; headers: Record<string, string> }>;
+    };
+    assert.equal(
+      config.mcp["polyth-agent-tools"]?.url,
+      "http://127.0.0.1:43211/internal/agent-tools/mcp",
+    );
+    assert.equal(config.mcp["polyth-agent-tools"]?.headers.Authorization, `Bearer ${token}`);
+    const starts = fake.serveStartCommands.length;
+    await (runtime as ManagedOpenCodeRuntime).lifecycle.refresh("disconnect");
+    assert.equal(fake.serveStartCommands.length, starts, "transport recovery keeps the exact live serve");
+    assert.equal(fake.reverseForwards.length, 2, "transport recovery recreates the tool reverse forward");
+    assert.equal(fake.reverseForwards[0]!.cancelled, true);
+    assert.equal(fake.reverseForwards[1]!.remotePort, 43_211, "OpenCode keeps the configured remote MCP URL");
+
+    const nextToken = "cd".repeat(32);
+    overlay = {
+      ...overlay,
+      remoteMcp: overlay.remoteMcp?.map((server) => ({
+        ...server,
+        headers: { Authorization: `Bearer ${nextToken}` },
+      })),
+      desiredRevision: "remote-tools-r2",
+    };
+    const lifecycle = (runtime as ManagedOpenCodeRuntime).lifecycle;
+    assert.ok("withConfigRestart" in lifecycle);
+    await lifecycle.withConfigRestart(async (restart) => { await restart(); });
+    assert.equal(fake.serveStartCommands.length, starts + 1);
+    assert.equal(fake.reverseForwards.length, 3);
+    assert.equal(fake.reverseForwards[2]!.remotePort, 43_211);
+    const replacementConfig = JSON.parse(fake.serveWrites[1]!.trim()) as {
+      mcp: Record<string, { headers: Record<string, string> }>;
+    };
+    assert.equal(
+      replacementConfig.mcp["polyth-agent-tools"]?.headers.Authorization,
+      `Bearer ${nextToken}`,
+      "owned config restart must read the latest reconciled memory overlay",
+    );
+  } finally {
+    await runtime.dispose();
+    stub.server.close();
+  }
+  assert.equal(fake.reverseForwards.at(-1)!.cancelled, true);
+});
+
+test("remote Polyth tool launch rejects non-loopback endpoints and malformed authorization", async () => {
+  const validToken = `Bearer ${"ab".repeat(32)}`;
+  const invalidServers = [{
+    capabilityId: "polyth.agent-tools",
+    name: "polyth-agent-tools",
+    url: "http://0.0.0.0:43123/internal/agent-tools/mcp",
+    headers: { Authorization: validToken },
+  }, {
+    capabilityId: "polyth.agent-tools",
+    name: "polyth-agent-tools",
+    url: "http://127.0.0.1:43123/internal/agent-tools/mcp",
+    headers: { Authorization: "Bearer weak" },
+  }, {
+    capabilityId: "polyth.agent-tools",
+    name: "polyth-agent-tools",
+    url: "http://127.0.0.1:43123/internal/agent-tools/mcp",
+    headers: { Authorization: validToken, "X-Unscoped": "bad" },
+  }];
+  for (const server of invalidServers) {
+    const fake = createFakeHost({ stubPort: 1 });
+    await assert.rejects(
+      () => createRemoteOpenCodeRuntime({
+        host: fake.host,
+        remotePath: "/home/dev/app",
+        runtimeDir: "/var/lib/polyth/runtimes/invalid-tools",
+        capabilityOverlay: {
+          configContent: "",
+          remoteMcp: [server],
+          env: {},
+          desiredRevision: "invalid",
+          capabilityIds: ["polyth.agent-tools"],
+        },
+      }),
+      (error: Error & { code?: string }) => error.code === "invalid-input",
+    );
+    assert.equal(fake.execCalls.length, 0, "invalid bridge data must fail before touching the remote host");
+    assert.equal(fake.reverseForwards.length, 0);
+  }
 });
 
 test("remote invocations extend PATH with the standard opencode install locations", async () => {
@@ -441,6 +564,55 @@ test("remote v2 serve delivers OPENCODE_PASSWORD through non-TTY stdin and expos
   assert.ok(fake.serveStartCommands[0]?.includes("IFS= read -r OPENCODE_PASSWORD"));
   assert.deepEqual(fake.serveWrites, ["remote-v2-primary\n"]);
   assert.ok(fake.execCalls.some((command) => command.includes("opencode debug paths db")));
+  await runtime.dispose();
+});
+
+test("remote v2 launch frames the password and private tool config as separate stdin records", async (t) => {
+  const stub = await startStubServe();
+  const directory = await mkdtemp(join(tmpdir(), "polyth-remote-v2-tools-"));
+  const oldPrimary = process.env.OPENCODE_PASSWORD;
+  process.env.OPENCODE_PASSWORD = "remote-v2-tools-password";
+  t.after(async () => {
+    if (oldPrimary === undefined) delete process.env.OPENCODE_PASSWORD;
+    else process.env.OPENCODE_PASSWORD = oldPrimary;
+    stub.server.close();
+    await rm(directory, { recursive: true, force: true });
+  });
+  const token = "ab".repeat(32);
+  const fake = createFakeHost({
+    stubPort: stub.port,
+    version: "opencode v2.0.3",
+    remoteReversePort: 43_211,
+  });
+  const runtime = await createRemoteOpenCodeRuntime({
+    host: fake.host,
+    remotePath: "/home/dev/app",
+    runtimeDir: "/var/lib/polyth/runtimes/v2-tools",
+    leaseStateFile: join(directory, "ssh.lease.json"),
+    pickPort: () => 37_181,
+    readyTimeoutMs: 5_000,
+    listenTimeoutMs: 5_000,
+    capabilityOverlay: {
+      configContent: "",
+      remoteMcp: [{
+        capabilityId: "polyth.agent-tools",
+        name: "polyth-agent-tools",
+        url: "http://127.0.0.1:43123/internal/agent-tools/mcp",
+        headers: { Authorization: `Bearer ${token}` },
+      }],
+      env: {},
+      desiredRevision: "v2-tools-r1",
+      capabilityIds: ["polyth.agent-tools", "browser.polyth-browser"],
+    },
+  });
+  const [password, rawConfig, trailing] = fake.serveWrites[0]!.split("\n");
+  assert.equal(password, "remote-v2-tools-password");
+  assert.equal(trailing, "");
+  const config = JSON.parse(rawConfig!) as {
+    mcp: Record<string, { headers: Record<string, string> }>;
+  };
+  assert.equal(config.mcp["polyth-agent-tools"]?.headers.Authorization, `Bearer ${token}`);
+  assert.doesNotMatch(fake.serveStartCommands[0]!, /remote-v2-tools-password|Bearer ab/);
   await runtime.dispose();
 });
 
@@ -1074,6 +1246,73 @@ test("orphan live OpenCode with a dead controller is adopted without a second se
     });
     assert.equal(fake.serveStartCommands.length, 1, "clean acquisition after adopted dispose may spawn");
     await next.dispose();
+  } finally {
+    stub.server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a scoped tool grant replaces an exactly verified adopted serve", async () => {
+  const stub = await startStubServe();
+  const directory = await mkdtemp(join(tmpdir(), "polyth-remote-tool-adopt-"));
+  const runtimeDir = "/var/lib/polyth/runtimes/tool-adopt";
+  const fake = createFakeRemoteHost({ stubPort: stub.port, runtimeDir, remoteReversePort: 43_211 });
+  const state = fake.storageAt(runtimeDir);
+  const owner = {
+    token: "orphan-without-current-grant",
+    pid: "4242",
+    start: "100",
+    exe: "/usr/bin/opencode",
+    cmd: "1:2",
+    port: stub.port,
+  };
+  state.lockHeld = false;
+  state.serveIdentity = owner;
+  state.serveLive = true;
+  state.dbKind = "file";
+  state.dbEntries = ["opencode.db"];
+  state.dbContent = "opaque-remote-opencode-db";
+  state.metadataKind = "file";
+  state.metadata = JSON.stringify({
+    engine: "opencode",
+    version: "1.18.18",
+    binaryDigest: TEST_REMOTE_DIGEST,
+    protocolGeneration: 1,
+    storageId: "11111111-1111-4111-8111-111111111111",
+    binarySource: "path",
+    binaryPath: state.binaryPath,
+    runtimeAuthority: "owned:orphan",
+    runtimeLocation: { projectId: "dev@fake.example", cwd: "/home/dev/app" },
+    createdAt: new Date().toISOString(),
+    lastOpenedAt: new Date().toISOString(),
+  });
+  try {
+    const runtime = await createRemoteOpenCodeRuntime({
+      host: fake.host,
+      remotePath: "/home/dev/app",
+      runtimeDir,
+      leaseStateFile: join(directory, "tool-adopt.lease.json"),
+      pickPort: () => 37_401,
+      readyTimeoutMs: 5_000,
+      listenTimeoutMs: 5_000,
+      capabilityOverlay: {
+        configContent: "",
+        remoteMcp: [{
+          capabilityId: "polyth.agent-tools",
+          name: "polyth-agent-tools",
+          url: "http://127.0.0.1:43123/internal/agent-tools/mcp",
+          headers: { Authorization: `Bearer ${"ab".repeat(32)}` },
+        }],
+        env: {},
+        desiredRevision: "tool-adopt-r1",
+        capabilityIds: ["polyth.agent-tools", "browser.polyth-browser"],
+      },
+    });
+    assert.deepEqual(state.killedPids, [owner.pid], "only the verified adopted process is replaced");
+    assert.equal(fake.serveStartCommands.length, 1);
+    assert.notEqual(state.serveIdentity?.token, owner.token);
+    assert.equal(fake.reverseForwards.length, 1);
+    await runtime.dispose();
   } finally {
     stub.server.close();
     await rm(directory, { recursive: true, force: true });

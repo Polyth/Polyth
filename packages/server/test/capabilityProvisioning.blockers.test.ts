@@ -16,7 +16,7 @@ import { createCodexProvisioner } from "../../backend-codex/src/provisioner.ts";
 import { createBehaviorService } from "../src/behavior.ts";
 import { createMcpConfigService } from "../src/mcp.ts";
 import { createCapabilityProvisioningController } from "../src/capabilityProvisioning.ts";
-import { createAgentToolBridge, AGENT_TOOLS_PATH } from "../src/agentTools.ts";
+import { createAgentToolBridge, AGENT_TOOLS_MCP_PATH, AGENT_TOOLS_PATH } from "../src/agentTools.ts";
 import { createPermissionService } from "@polyth/permissions";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "polyth-capb-"));
@@ -281,6 +281,70 @@ test("remote OpenCode reconcile does not call local config writers", async () =>
   assert.equal(applyMcp, 0);
   assert.equal(applyBehavior, 0);
   assert.equal(result.records.every((row) => row.status === "unsupported"), true);
+});
+
+test("remote OpenCode reconcile mints a scoped HTTP tool bridge for SSH launch", async () => {
+  const dir = tmp();
+  const space = spaceOf(dir, "spc_remote");
+  const cwd = "/home/dev/project";
+  const registry = createCapabilityContributionRegistry();
+  registry.register("browser", {
+    descriptor: {
+      id: "browser.polyth-browser",
+      kind: "tool",
+      owner: "browser",
+      scope: "project",
+      revision: "browser-r1",
+      name: "polyth_browser",
+      description: "Control the Polyth browser",
+      inputSchema: { type: "object", properties: {} },
+      trust: "workspace",
+      mutating: true,
+    },
+    execute: async () => ({ output: "opened" }),
+  });
+  const tools = createAgentToolBridge({
+    executor: (id) => registry.executor(id),
+    contribution: (id) => registry.contribution(id),
+  });
+  const harness = provider("opencode", createOpenCodeProvisioner({
+    applyBehavior: async () => 0,
+    applyMcp: async () => {},
+  } as BackendConfigApplier));
+  const controller = createCapabilityProvisioningController({
+    contributions: registry,
+    harnesses: { providers: () => [harness] } as never,
+    behavior: createBehaviorService({ file: join(dir, "behavior.md") }),
+    mcp: createMcpConfigService({
+      dataDir: dir,
+      deployment: "local-trusted",
+      defaultSpaceId: space.spaceId,
+    }),
+    file: join(dir, "status.json"),
+    tools,
+    toolsEndpoint: () => `http://127.0.0.1:43123${AGENT_TOOLS_PATH}`,
+  });
+
+  await controller.reconcile(harness, {
+    spaceId: space.spaceId,
+    projectId: "project-a",
+    cwd,
+    space,
+    remote: true,
+  });
+  const overlay = peekOpenCodeLaunchOverlay({
+    cwd,
+    spaceId: space.spaceId,
+    projectId: "project-a",
+  });
+  assert.ok(overlay);
+  assert.equal(overlay.configContent, "");
+  assert.equal(overlay.remoteMcp?.[0]?.url, `http://127.0.0.1:43123${AGENT_TOOLS_MCP_PATH}`);
+  const authorization = overlay.remoteMcp?.[0]?.headers.Authorization;
+  assert.match(authorization ?? "", /^Bearer [a-f0-9]{64}$/);
+  assert.equal(JSON.stringify(overlay).includes(authorization!), true, "token is carried by the memory overlay passed to launch");
+  assert.deepEqual(overlay.capabilityIds, ["polyth.agent-tools", "browser.polyth-browser"]);
+  controller.dispose();
 });
 
 test("mutating tools require Polyth authorization before the executor runs", async () => {

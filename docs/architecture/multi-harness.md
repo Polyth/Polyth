@@ -1,6 +1,6 @@
 # Polyth multi-harness foundation
 
-Implemented against master `a9df190e36ad76408576dffe8693c91636844785`. The rebuild remains uncommitted in the current `master` working tree. PR #125 (`d8805c819831f321a3eec420f891994976b7bc4e`) was reviewed as a donor, not used as the implementation base. Verification date: 2026-09-06.
+This document describes the current multi-harness implementation. PR #125 (`d8805c819831f321a3eec420f891994976b7bc4e`) was reviewed as a donor, not used as the implementation base. Verification evidence is dated where it appears below.
 
 Polyth owns the conversation, queue, project and worktree relationship. A harness supplies an `AgentRuntime`. Switching changes the runtime leg of the existing canonical session.
 
@@ -16,11 +16,17 @@ flowchart TD
   REG --> CX[backend-codex: App Server]
   REG --> CC[backend-claude: Agent SDK]
   REG --> ACP[backend-acp: shared ACP v1]
-  ACP --> PROFILES[Cursor and fx profiles]
+  REG --> AG[backend-antigravity: Gemini stream]
+  REG --> CMD[backend-commandcode: headless stream]
+  REG --> PI[backend-pi: native RPC]
+  ACP --> PROFILES[Cursor, fx, Grok Build and OMP profiles]
   OC --> AUTH[Owned process supervision and release receipts]
   CX --> AUTH
   CC --> AUTH
   ACP --> AUTH
+  AG --> AUTH
+  CMD --> AUTH
+  PI --> AUTH
   DB --> CTX[Bounded canonical continuity]
   CTX --> SS
   SOURCE[Optional provider SessionSource] --> SNAP[Generic Snapshot ingestion]
@@ -69,7 +75,7 @@ A crash after target creation but before publication resumes the recorded receip
 
 ### Local execution ownership
 
-All four implemented runtime families use the same Linux process authority. A small bundled Polyth supervisor installs `PR_SET_CHILD_SUBREAPER`; a separate owner pipe gates native launch until Polyth persists the authority ledger. Closing that pipe on a Polyth crash triggers shutdown. The supervisor kills and reaps its descendants, including detached/double-forked tools, and writes an exact release receipt only after the descendant set is empty. That containment release is forceful, so an adapter that shares user-level credential state with other native processes must end its own transport and let the native process exit before releasing containment.
+All implemented local runtime families use the same Linux process authority. A small bundled Polyth supervisor installs `PR_SET_CHILD_SUBREAPER`; a separate owner pipe gates native launch until Polyth persists the authority ledger. Closing that pipe on a Polyth crash triggers shutdown. The supervisor kills and reaps its descendants, including detached/double-forked tools, and writes an exact release receipt only after the descendant set is empty. That containment release is forceful, so an adapter that shares user-level credential state with other native processes must end its own transport and let the native process exit before releasing containment.
 
 Claude Code coordinates OAuth refresh through `~/.claude/.oauth_refresh.lock`, which stays contended for its 60-second staleness window after a holder dies. A containment SIGKILL while the CLI holds that lock makes every other Claude Code process, including Polyth's own recovery legs, fail to refresh for about a minute. The Claude adapter therefore closes the SDK query and waits for the native process to finish (bounded, then forced) before `authority.close()`, and classifies a residual shared-lock failure as a bounded retry on the existing resume path rather than a sign-in failure. Before that, `authority.close()` ran first and the supervisor's immediate descendant SIGKILL could strand the lock. Where a user systemd manager is available, Polyth launches that supervisor in a generation-specific transient scope. The scope is the kernel-backed fallback owner if the supervisor itself disappears: Polyth kills that exact scope, waits until systemd proves it empty, and only then persists a replacement release receipt.
 
@@ -148,7 +154,7 @@ Capabilities below describe the Polyth adapters, not everything each native prod
 
 | Harness | Verified integration | Implemented state and limits |
 | --- | --- | --- |
-| OpenCode | Existing HTTP/SSE adapter. [Official docs](https://opencode.ai/docs/) | Registered behind the registry; existing native capability negotiation retained. Local descendant supervision added. Native source reads the managed project runtime's inventory. It does not scan arbitrary external OpenCode databases. Live turns and switching passed. |
+| OpenCode | Existing HTTP/SSE adapter. [Official docs](https://opencode.ai/docs/) | Registered behind the registry; existing native capability negotiation retained. Local descendant supervision added. SSH-bound runtimes receive scoped Polyth package tools through a reverse-loopback HTTP MCP transport. Native source reads the managed project runtime's inventory. It does not scan arbitrary external OpenCode databases. Live turns and switching passed. |
 | Codex | `codex app-server`; installed CLI 0.153.4 and its generated protocol schemas. [App Server](https://developers.openai.com/codex/app-server) | Native thread/turn receipts, streaming text, shell/edit outcomes, permissions, model catalog, verified native resume and native MCP. No attachment translation, steering, questions, subagent UI, compaction API, usage/cost reporting or fork. Source imports CLI-origin threads in the same cwd; partial/paginated history is rejected instead of truncated silently. Live turns and switching passed. |
 | Claude Code | Public Agent SDK, pinned optional dependency 0.3.263; native CLI 2.1.261 in verification. [TypeScript SDK](https://code.claude.com/docs/en/agent-sdk/typescript), [sessions](https://code.claude.com/docs/en/agent-sdk/sessions) | SDK query, documented custom spawn hook, native auth/model catalog, text and tool outcomes, permission bridge and native MCP. Final-message delivery, not token streaming. Generation-only continuity; no general native-resume claim, attachments, steering, questions, subagents, usage/cost, compaction or fork. No source inventory shipped. Live turns and switching passed. |
 | Generic ACP | Explicit protocol v1 negotiation. [ACP v1 prompt turn](https://agentclientprotocol.com/protocol/v1/prompt-turn) | Shared transport, lifecycle, text streaming and permission choices. Admission requires native evidence; cancellation has no acknowledgement and remains unknown until terminal evidence/release. No v2 guessing, native load/resume, model selection, attachments, source reader, usage/cost, fork or compaction. MCP configuration is passed for supported transports; connection/invocation remains unverifiable without a profile-specific readback. Protocol tests passed. |
@@ -180,10 +186,18 @@ success records without sufficient evidence are downgraded when read.
 All shipped local harnesses receive scoped package tools. Codex, Claude,
 OpenCode, Antigravity and ACP profiles use their native MCP configuration;
 Command Code uses its transient Mod bridge; Pi uses its transient extension
-bridge. Remote execution remains excluded because the agent-tool endpoint is
-loopback-only. A mutating tool such as `polyth_browser` still runs only after
-the shared Polyth permission engine authorizes the exact Space, project and
-session grant.
+bridge. SSH-bound OpenCode also receives the bridge: Polyth exposes its local
+HTTP MCP route on a randomly selected remote loopback port with OpenSSH `-R`,
+then supplies a memory-only OpenCode launch overlay through SSH stdin. The
+route still accepts only a loopback peer carrying the exact scoped bearer. The
+reverse forward is disposed with its owned runtime generation. The bearer
+exists in the remote process environment rather than argv or a remote file and
+remains subject to the ordinary capability-grant lifecycle. No additional
+public listener or remote credential file is created. Other remote runtime
+families remain unsupported until their provider implements an equivalent
+private transport. A mutating tool such as `polyth_browser` still runs only
+after the shared Polyth permission engine authorizes the exact Space, project
+and session grant.
 
 OpenCode uses a private file through `OPENCODE_CONFIG`, because 1.18.29 does not
 discover `skills.paths` from the inline overlay. It reads `/skill` and `/mcp` on
@@ -198,7 +212,9 @@ servers. Protocol fakes and successful native lists are not paid model-turn
 evidence; unavailable native invocation APIs remain explicitly unverified.
 
 ```sh
-POLYTH_NATIVE_CAPABILITY_TESTS=1 node --experimental-strip-types --test packages/backend-{codex,claude,opencode}/test/nativeCapabilities.test.ts
+POLYTH_NATIVE_CAPABILITY_TESTS=1 node --experimental-strip-types --test \
+  packages/backend-{codex,claude,opencode}/test/nativeCapabilities.test.ts \
+  packages/backend-pi/test/nativeTools.test.ts
 ```
 
 The model-free checks on 2026-09-10 passed with Codex 0.153.4, Claude Code
@@ -213,6 +229,15 @@ run passed 5/5. `npm run build:web` passed. Contracts, Codex, Claude and ACP
 typechecks passed. OpenCode/server typecheck diagnostics matched an untouched
 `ab1370f7` checkout: `backend-opencode/src/serverEntry.ts:69`,
 `server/src/runtimeCatalog.ts:149`, and `server/src/smallModel.ts:114–115`.
+
+On 2026-09-19, the all-harness package-tool projection suites passed for
+Claude, Codex, OpenCode, ACP profiles, Antigravity, Command Code and Pi. The
+SSH OpenCode transport passed its process-identity, reverse-forward, reconnect,
+generation-replacement, private-stdin and malformed-endpoint tests, and the
+HTTP MCP route completed list and mutating-tool calls through the standard MCP
+Streamable HTTP client. `npm run build:web` and strict targeted TypeScript
+checking passed. SSH behavior was exercised through the provider fake; no live
+remote host or paid model turn was used.
 
 ### Historical native journey
 

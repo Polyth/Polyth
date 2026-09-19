@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createAgentToolBridge, AGENT_TOOLS_PATH, redactToolInput } from "../src/agentTools.ts";
+import { createAgentToolBridge, AGENT_TOOLS_MCP_PATH, AGENT_TOOLS_PATH, redactToolInput } from "../src/agentTools.ts";
 import { createCapabilityContributionRegistry } from "@polyth/harness-runtime";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
@@ -70,6 +70,81 @@ test("agent tool bridge lists granted tools and refuses a disposed executor", as
   captured = undefined;
   assert.equal(await bridge.route({ ...rc, ingress: { kind: "public-http", listenerId: "public", loopback: false, secure: false } } as never), true);
   assert.equal(captured?.code, 403);
+});
+
+test("agent tool MCP HTTP transport stays loopback-only and uses the same scoped authorization", async () => {
+  const registry = createCapabilityContributionRegistry();
+  let executed = 0;
+  registry.register("browser", {
+    descriptor: {
+      id: "browser.polyth-browser",
+      kind: "tool",
+      owner: "browser",
+      scope: "session",
+      revision: "browser-r1",
+      name: "polyth_browser",
+      description: "Control the Polyth browser",
+      inputSchema: { type: "object", properties: { action: { type: "string" } } },
+      trust: "workspace",
+      mutating: true,
+    },
+    execute: async (_input, ctx) => {
+      executed += 1;
+      return { output: `opened:${ctx.spaceId}`, metadata: { tabId: "tab-1" } };
+    },
+  });
+  let decision: "allow" | "deny" = "deny";
+  const bridge = createAgentToolBridge({
+    executor: (id) => registry.executor(id),
+    contribution: (id) => registry.contribution(id),
+    authorize: () => decision,
+  });
+  const descriptor = registry.list()[0]!.descriptor as Extract<import("@polyth/contracts").AgentCapabilityDescriptor, { kind: "tool" }>;
+  const grant = bridge.mint({
+    spaceId: "space-a",
+    projectId: "project-a",
+    sessionId: "session-a",
+    cwd: "/workspace/a",
+    tools: [descriptor],
+  });
+  let captured: { code: number; body: Record<string, unknown> } | undefined;
+  const call = async (body: Record<string, unknown>, loopback = true) => {
+    captured = undefined;
+    await bridge.route({
+      path: AGENT_TOOLS_MCP_PATH,
+      method: "POST",
+      ingress: { kind: "public-http", listenerId: "public", loopback, secure: false },
+      req: { headers: { authorization: `Bearer ${grant.token}` } },
+      body: async () => body,
+      json: (code: number, value: Record<string, unknown>) => { captured = { code, body: value }; },
+    } as never);
+    return captured;
+  };
+
+  const initialized = await call({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+  assert.equal(initialized?.code, 200);
+  assert.equal((initialized?.body.result as Record<string, unknown>)?.protocolVersion, "2024-11-05");
+  const listed = await call({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+  assert.equal((((listed?.body.result as Record<string, unknown>)?.tools as unknown[])?.[0] as Record<string, unknown>)?.name, "polyth_browser");
+
+  const denied = await call({
+    jsonrpc: "2.0", id: 3, method: "tools/call",
+    params: { name: "polyth_browser", arguments: { action: "open" } },
+  });
+  assert.equal((((denied?.body.result as Record<string, unknown>)?.isError)), true);
+  assert.equal(executed, 0);
+
+  decision = "allow";
+  const allowed = await call({
+    jsonrpc: "2.0", id: 4, method: "tools/call",
+    params: { name: "polyth_browser", arguments: { action: "open" } },
+  });
+  assert.equal((((allowed?.body.result as Record<string, unknown>)?.isError)), undefined);
+  assert.equal(executed, 1);
+  assert.deepEqual((allowed?.body.result as Record<string, unknown>)?.structuredContent, { tabId: "tab-1" });
+
+  const remoteIngress = await call({ jsonrpc: "2.0", id: 5, method: "tools/list", params: {} }, false);
+  assert.equal(remoteIngress?.code, 403);
 });
 
 test("agent tool bridge authorizes the exact scoped grant before invoking", async () => {

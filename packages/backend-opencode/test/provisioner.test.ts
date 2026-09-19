@@ -95,6 +95,77 @@ test("OpenCode provisioner skips applyMcp when there is no MCP or tool work", as
   assert.equal(applyMcpCalls, 0);
 });
 
+test("remote OpenCode stages package tools on a memory-only scoped HTTP bridge", async () => {
+  const provisioner = createOpenCodeProvisioner({
+    applyBehavior: async () => 0,
+    applyMcp: async () => {},
+  } as BackendConfigApplier);
+  const cwd = tmp();
+  const token = "remote-scoped-token";
+  const result = await provisioner.apply({
+    spaceId: "space",
+    projectId: "p",
+    cwd,
+    remote: true,
+  }, {
+    harnessId: "opencode",
+    desiredRevision: "remote-rev",
+    items: [{
+      capability: {
+        id: "polyth.agent-tools",
+        kind: "mcp-server",
+        owner: "polyth",
+        scope: "project",
+        revision: "bridge-r1",
+        name: "polyth-agent-tools",
+        enabled: true,
+        transport: {
+          kind: "http",
+          url: "http://127.0.0.1:43123/internal/agent-tools/mcp",
+          headersSecretRefs: ["Authorization"],
+        },
+      },
+      mode: "config",
+      mutability: "requires-restart",
+    }, {
+      capability: {
+        id: "browser.polyth-browser",
+        kind: "tool",
+        owner: "browser",
+        scope: "project",
+        revision: "browser-r1",
+        name: "polyth_browser",
+        description: "Control the Polyth browser",
+        inputSchema: { type: "object", properties: {} },
+        trust: "workspace",
+        mutating: true,
+      },
+      mode: "mcp",
+      mutability: "requires-restart",
+    }],
+  }, {
+    mcpSecrets: (id) => id === "polyth.agent-tools"
+      ? { Authorization: `Bearer ${token}` }
+      : {},
+  });
+
+  assert.deepEqual(result.records.map((record) => [record.capabilityId, record.status]), [
+    ["polyth.agent-tools", "pending"],
+    ["browser.polyth-browser", "pending"],
+  ]);
+  const overlay = peekOpenCodeLaunchOverlay({ cwd, spaceId: "space", projectId: "p" });
+  assert.ok(overlay);
+  assert.equal(overlay.configContent, "", "remote bearer must not enter persistent config content");
+  assert.deepEqual(overlay.env, {});
+  assert.deepEqual(overlay.capabilityIds, ["polyth.agent-tools", "browser.polyth-browser"]);
+  assert.deepEqual(overlay.remoteMcp, [{
+    capabilityId: "polyth.agent-tools",
+    name: "polyth-agent-tools",
+    url: "http://127.0.0.1:43123/internal/agent-tools/mcp",
+    headers: { Authorization: `Bearer ${token}` },
+  }]);
+});
+
 test("OpenCode writes Polyth-owned skills with valid V1 identifiers in Space storage", async () => {
   const cwd = tmp();
   mkdirSync(join(cwd, ".opencode", "skills", "user-skill"), { recursive: true });
