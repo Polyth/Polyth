@@ -44,11 +44,11 @@ export function createCanonicalAuthGateway(options: {
   control: ControlPlane;
   identity: IdentityService;
   cookieName: string;
-  /** Test seam. Runtime defaults to POLYTH_DEBUG_AGENT_ACCESS=1. */
+  /** Explicitly enabled only by the validated canonical bootstrap. */
   debugAgentAccess?: boolean;
   resolvePairedDevice?: PairedDeviceResolver;
 }): CanonicalAuthGateway {
-  const debugAgentAccess = options.debugAgentAccess ?? process.env.POLYTH_DEBUG_AGENT_ACCESS === "1";
+  const debugAgentAccess = options.debugAgentAccess === true;
   let pairedResolver = options.resolvePairedDevice;
   const accountExists = (userId: string): boolean => !!options.control.get(
     "SELECT 1 FROM users u JOIN principals p ON p.id=u.id WHERE u.id=? AND p.kind='user' AND p.status='active'",
