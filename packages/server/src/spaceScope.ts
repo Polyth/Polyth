@@ -256,6 +256,14 @@ function scopeSessions(
   assign("confirmBorrowedRuntimeEpoch", bySession(base.confirmBorrowedRuntimeEpoch));
   assign("saveDraft", bySession(base.saveDraft));
   assign("markRead", bySession(base.markRead));
+  // Isolation and worktree lifecycle methods are required by the governed
+  // package host (see packageHostAuthority SESSION_METHODS). Dropping them
+  // here made every package-owned isolation merge fail closed as
+  // "session method unavailable: patchIsolation" -> 503.
+  assign("clientMutationStatus", bySession(base.clientMutationStatus));
+  assign("renameWorktreeBranch", bySession(base.renameWorktreeBranch));
+  assign("patchIsolation", bySession(base.patchIsolation));
+  assign("rebindWorkspace", bySession(base.rebindWorkspace));
   assign("markWorktreeMissing", byProject(base.markWorktreeMissing));
   assign("backendSessions", byProject(base.backendSessions));
   assign("importBackendSessions", byProject(base.importBackendSessions));

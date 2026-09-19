@@ -169,6 +169,43 @@ test("mutations across Spaces are refused, including deletes that would silently
   assert.equal((await workServices.projects.get(inWork.projectId))!.name, "work");
 });
 
+test("isolation lifecycle methods survive Space scoping and refuse foreign ids", async () => {
+  const h = await harness();
+  const inHome = await h.seed(h.home, "home");
+  const inWork = await h.seed(h.work, "work");
+  const homeServices = h.gateway.services(h.home);
+  const workServices = h.gateway.services(h.work);
+
+  // The git package integrates isolated sessions through the governed package
+  // host, which allowlists these methods. They must exist on the Space facade,
+  // otherwise every merge fails closed as "session method unavailable".
+  for (const name of ["clientMutationStatus", "renameWorktreeBranch", "patchIsolation", "rebindWorkspace"] as const) {
+    assert.equal(typeof homeServices.sessions[name], "function", `${name} is missing from the scoped facade`);
+  }
+
+  await assert.rejects(
+    () => homeServices.sessions.patchIsolation!(inWork.sessionId, null),
+    (error: { code?: string }) => error.code === "not-found",
+  );
+  await assert.rejects(
+    () => homeServices.sessions.rebindWorkspace!(inWork.sessionId, { worktreePath: null }),
+    (error: { code?: string }) => error.code === "not-found",
+  );
+  await assert.rejects(
+    () => homeServices.sessions.renameWorktreeBranch!(inWork.sessionId, { worktreePath: "/nowhere", from: "a", to: "b" }),
+    (error: { code?: string }) => error.code === "not-found",
+  );
+  await assert.rejects(
+    () => homeServices.sessions.clientMutationStatus!(inWork.sessionId, "op"),
+    (error: { code?: string }) => error.code === "not-found",
+  );
+
+  // The owning Space still reaches the real implementation.
+  const cleared = await workServices.sessions.patchIsolation!(inWork.sessionId, null);
+  assert.equal(cleared.isolation ?? null, null);
+  assert.equal(cleared.id, inWork.sessionId);
+});
+
 test("a session created in a Space is stamped with it, and a fork stays inside it", async () => {
   const h = await harness();
   const inHome = await h.seed(h.home, "home");
