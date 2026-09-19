@@ -86,7 +86,6 @@ export interface DesktopChatWorkspaceSurface {
 
 export interface PolythDesktopApi {
   getInfo(): Promise<DesktopInfo>;
-  restartAfterSetup(): Promise<void>;
   getSettings(): Promise<DesktopSettings>;
   setSettings(patch: Partial<DesktopSettings>): Promise<DesktopSettings>;
   windowAction(action: DesktopWindowAction): Promise<DesktopWindowState>;
