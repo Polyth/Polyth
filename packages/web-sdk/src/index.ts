@@ -85,6 +85,18 @@ export interface WidgetDefinition {
   settingsRender?: (context: WidgetSettingsContext) => ReactNode;
 }
 
+export interface AddWidgetToCanvasOptions {
+  /** Per-instance config applied only to the newly revealed/created instance. */
+  config?: JsonObject;
+  /** Duplicate an already-visible duplicatable widget. Defaults to true. */
+  duplicate?: boolean;
+}
+
+export interface AddWidgetToCanvasResult {
+  instanceId: string;
+  duplicated: boolean;
+}
+
 export interface WidgetPlugin {
   /** Semantic widget group id used by Widget Library grouping/filtering. */
   id: string;
@@ -486,6 +498,14 @@ export interface WebPackageHost {
   widgets: {
     register(pluginId: string, definition: WidgetDefinition): Unregister;
     registerPlugin(plugin: WidgetPlugin): Unregister;
+    /**
+     * Package-safe bridge from a feature surface into the host-owned Canvas
+     * layout. Hosts without Canvas may omit it; packages must degrade cleanly.
+     */
+    addToCanvas?(
+      definitionId: string,
+      options?: AddWidgetToCanvasOptions,
+    ): AddWidgetToCanvasResult | null;
   };
   surfaces: {
     register(definition: SurfaceDefinition): Unregister;
