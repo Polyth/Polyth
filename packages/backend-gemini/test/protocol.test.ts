@@ -100,3 +100,30 @@ test("Gemini adapter does not guess semantics for unrelated ACP failures", () =>
     remoteMessage: "Internal error",
   }, { turnId: "turn-a", hadToolActivity: false }), undefined);
 });
+
+
+test("Gemini max_tokens is terminal failure, not a fake completed turn", () => {
+  assert.deepEqual(translateGeminiPromptResult({
+    stopReason: "max_tokens",
+    _meta: { quota: { token_count: { input_tokens: 0, output_tokens: 0 }, model_usage: [] } },
+  }, { turnId: "turn-a", hadToolActivity: false }), {
+    terminal: {
+      reason: "error",
+      error: "Gemini stopped because the context/token limit was reached",
+      code: "unknown",
+    },
+  });
+});
+
+test("Gemini max_turn_requests is terminal failure, not a fake completed turn", () => {
+  assert.deepEqual(translateGeminiPromptResult({
+    stopReason: "max_turn_requests",
+    _meta: { quota: { token_count: { input_tokens: 0, output_tokens: 0 }, model_usage: [] } },
+  }, { turnId: "turn-a", hadToolActivity: false }), {
+    terminal: {
+      reason: "error",
+      error: "Gemini stopped after reaching its agent-loop turn limit",
+      code: "unknown",
+    },
+  });
+});
