@@ -65,7 +65,6 @@ test("manual desktop workflow builds Windows, Linux and macOS artifacts without 
     "--mac dmg zip --universal --publish never",
     "release/*.dmg",
     "release/*.zip",
-    "release/latest-mac.yml",
     "npx playwright-core install chromium",
     "npm run build:desktop",
     "npm run desktop:stage-chromium",
