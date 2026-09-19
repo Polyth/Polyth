@@ -403,6 +403,14 @@ export function setUsageDashboardPrefs(patch: Partial<UsageDashboardPrefs>): voi
   save({ ...prefs, dashboard: { ...prefs.dashboard, ...patch } });
 }
 
+export function resetUsageOverview(): void {
+  save({
+    ...prefs,
+    hiddenBlocks: [],
+    dashboard: { ...prefs.dashboard, overviewOrder: [] },
+  });
+}
+
 export function orderUsageBlocks<T>(items: readonly T[], order: readonly string[], id: (item: T) => string): T[] {
   const rank = new Map(order.map((itemId, index) => [itemId, index]));
   return [...items].sort((left, right) =>
