@@ -20,6 +20,7 @@ artifacts/
 logs/
 /.claude/settings.json
 /.claude/worktrees/
+/.commandcode/
 *.runtime.json
 *.wire.ndjson
 *.sse.ndjson
