@@ -336,7 +336,9 @@ Glass material tokens. Their default is opaque and readable. Core CSS adds
 translucency only inside a backdrop-filter `@supports` rule and restores the
 opaque material for reduced motion or
 `body[data-desktop-low-resource="true"]`; packages must not apply blur or
-recreate this fallback locally.
+recreate this fallback locally. Modal backdrops only dim the workspace; the
+Dialog/Sheet/overlay surface itself owns backdrop blur. Do not stack a
+full-viewport backdrop filter underneath another Quiet Glass surface.
 
 On phones, selection pickers (Picker, Select, Menu pick lists, model/agent/mode
 pickers, composer Add menu, and other anchored choosers) open as a **compact
