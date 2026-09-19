@@ -194,6 +194,13 @@ export async function boot(opts: BootOptions = {}) {
       server: setup.server,
       setup: true as const,
       state,
+      issueSetupClaim() {
+        const authority = security;
+        if (!authority) {
+          throw Object.assign(new Error("Setup authority is unavailable"), { code: "setup-unavailable" });
+        }
+        return authority.issueSetupClaim();
+      },
       async shutdown() {
         process.off("SIGINT", sigint);
         process.off("SIGTERM", sigterm);
