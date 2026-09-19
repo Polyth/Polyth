@@ -33,8 +33,12 @@ interface LeaseRecord extends InvocationLeaseIdentity {
   expiresAt: number;
 }
 
+type InvocationEnvelopeKey = "invocationId" | "lease" | "expiresAt" | "spaceId";
+export type ContributionInvocationInput<T extends ContributionInvocation = ContributionInvocation> =
+  T extends ContributionInvocation ? Omit<T, InvocationEnvelopeKey> : never;
+
 export interface InvocationLeaseStore {
-  issue(identity: InvocationLeaseIdentity, invocation: Omit<ContributionInvocation, "invocationId" | "lease" | "expiresAt" | "spaceId">): ContributionInvocation;
+  issue(identity: InvocationLeaseIdentity, invocation: ContributionInvocationInput): ContributionInvocation;
   authorize(input: InvocationLeaseIdentity & { invocationId: string; lease: string }): Readonly<LeaseRecord>;
   complete(identity: InvocationLeaseIdentity, completion: ContributionCompletion): Readonly<LeaseRecord>;
   revokePackage(packageId: string): void;
