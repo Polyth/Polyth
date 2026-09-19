@@ -65,6 +65,14 @@ cannot strand the chat. A present but unowned/replaced path is preserved. A
 present owned path is also preserved when exact execution release cannot be
 proven; explicit intent does not authorize deleting another process's live cwd.
 
+Deletion lifecycle rows are also a concurrency fence. A read or duplicate delete
+that observes `deleting` must not roll the resource back while the original
+operation is still removing its domain rows; the retry path finishes the same
+delete. Boot reconciliation may roll back an interrupted delete only after the
+process has restarted. If the domain purge committed before the lifecycle write,
+the durable deletion tombstone is enough to advance an active resource through
+`deleting` to `deleted` without reconstructing the native runtime.
+
 ## Durable state machine and compatibility
 
 | Phase | Legal payload and exit |

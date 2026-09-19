@@ -45,6 +45,9 @@ export interface SpaceSessionStore {
   adoptSessionsIntoSpace(spaceId: string): Promise<number>;
   /** Canonical startup uses this only when canonical session resources exist. */
   projection?(sessionId: string): Promise<SessionProjection | undefined>;
+  /** Optional durable proof used to repair a resource after domain rows were
+   *  removed but before its canonical lifecycle transition completed. */
+  deletionTombstone?(sessionId: string): Promise<unknown | undefined>;
   /** Optional so lightweight test doubles stay valid. */
   adoptLabelsIntoSpace?(spaceId: string): Promise<number>;
 }

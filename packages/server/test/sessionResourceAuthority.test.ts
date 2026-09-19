@@ -234,6 +234,31 @@ test("archive, restore and hard delete move canonical lifecycle with the domain 
   assert.equal(f.security.resources.resource(ref.id)?.lifecycle, "deleted");
 });
 
+test("a concurrent read does not roll back an in-flight session deletion", async t => {
+  const f = fixture(t);
+  const sessions = canonicalSessionService(f.ctx("usr_owner", "owner"), f.base, f.projects);
+  const ref = await sessions.create({ projectId: "prj_one" });
+  let started!: () => void;
+  let release!: () => void;
+  const deleteStarted = new Promise<void>((resolve) => { started = resolve; });
+  const releaseDelete = new Promise<void>((resolve) => { release = resolve; });
+  const deleteDomain = f.base.delete!;
+  f.base.delete = async (id: string) => {
+    started();
+    await releaseDelete;
+    return deleteDomain(id);
+  };
+
+  const deleting = sessions.delete!(ref.id);
+  await deleteStarted;
+  await sessions.list("prj_one");
+  release();
+  await deleting;
+
+  assert.equal(f.domain.projections.has(ref.id), false);
+  assert.equal(f.security.resources.resource(ref.id)?.lifecycle, "deleted");
+});
+
 test("missing domain row finalizes an interrupted deleting tombstone on reconciliation", async t => {
   const f = fixture(t);
   const sessions = canonicalSessionService(f.ctx("usr_owner", "owner"), f.base, f.projects);

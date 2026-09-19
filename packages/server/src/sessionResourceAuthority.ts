@@ -108,17 +108,15 @@ export function canonicalSessionService(
         : transition(row.id, ["archiving"], "active", row.revision, "resource.archive-rolled-back", true);
     } else if (row.lifecycle === "archived" && projection.status !== "archived") {
       row = transition(row.id, ["archived"], "active", row.revision, "resource.restored", true);
-    } else if (row.lifecycle === "deleting") {
-      row = transition(
-        row.id,
-        ["deleting"],
-        projection.status === "archived" ? "archived" : "active",
-        row.revision,
-        "resource.delete-rolled-back",
-        true,
-        "system:resource-reconciler",
-      );
     }
+    // A delete removes the domain projection before it settles its runtime
+    // tombstone. A concurrent list/read can therefore observe this row while
+    // the original delete is still in flight. Do not roll it back merely
+    // because the projection is still present: that turns a harmless
+    // duplicate observation into "Resource lifecycle changed" after the
+    // original delete has already removed its durable rows. Boot recovery
+    // (when no in-process delete can still be running) handles interrupted
+    // deletes explicitly.
     if (row.lifecycle === "deleted" || (row.lifecycle === "active" && projection.status === "archived")) throw recovery();
     return row;
   };
@@ -323,28 +321,26 @@ export function canonicalSessionService(
         }
         await adoptDerivedImportedChild(projection);
         row = reconcileReadable(projection);
-        if (row.lifecycle !== "active" && row.lifecycle !== "archived") throw recovery();
-        row = transition(sessionId, [row.lifecycle], "deleting", row.revision, "resource.deleting", true);
+        const alreadyDeleting = row.lifecycle === "deleting";
+        if (!alreadyDeleting && row.lifecycle !== "active" && row.lifecycle !== "archived") throw recovery();
+        if (!alreadyDeleting) {
+          row = transition(sessionId, [row.lifecycle], "deleting", row.revision, "resource.deleting", true);
+        }
         try {
           await base.delete!(sessionId);
         } catch (cause) {
-          const current = resource(sessionId) ?? row;
-          if (current.lifecycle === "deleting") {
-            try {
-              transition(
-                sessionId,
-                ["deleting"],
-                projection.status === "archived" ? "archived" : "active",
-                current.revision,
-                "resource.delete-rolled-back",
-                true,
-              );
-            } catch { /* fail closed */ }
-          }
+          // Keep the deletion fence after any failure. The domain delete may
+          // have committed before a later cleanup/runtime step failed, and a
+          // retry can safely finish from either the surviving projection or
+          // the canonical deletion tombstone. A concurrent retry may already
+          // have finalized the resource, which is idempotent success.
+          if (resource(sessionId)?.lifecycle === "deleted") return;
           throw cause;
         }
         const current = resource(sessionId);
         if (!current) throw recovery();
+        if (current.lifecycle === "deleted") return;
+        if (current.lifecycle !== "deleting") throw recovery();
         transition(sessionId, ["deleting"], "deleted", current.revision, "resource.deleted", false);
       }
     : undefined;

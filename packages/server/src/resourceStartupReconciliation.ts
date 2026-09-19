@@ -13,6 +13,9 @@ const recovery = (): Error => Object.assign(
 
 export interface StartupSessionSource {
   projection?(sessionId: string): Promise<SessionProjection | undefined>;
+  /** A deletion tombstone proves the domain rows were removed even if a
+   * previous process failed before the canonical resource transition. */
+  deletionTombstone?(sessionId: string): Promise<unknown | undefined>;
 }
 
 export interface ResourceStartupReconciliationResult {
@@ -118,6 +121,16 @@ export async function reconcileCanonicalResourcesAtBoot(input: {
     if (!sessions.projection) throw recovery();
     const projection = await sessions.projection(row.id);
     if (!projection) {
+      const deletionProof = await sessions.deletionTombstone?.(row.id);
+      if (row.lifecycle === "active" && deletionProof !== undefined) {
+        // A prior delete committed the session tombstone/domain purge but a
+        // concurrent read rolled the resource back to active. Re-enter the
+        // lifecycle graph explicitly, then finish the canonical tombstone.
+        const deleting = transition(row, ["active"], "deleting", "resource.delete-recovered");
+        transition(deleting, ["deleting"], "deleted", "resource.delete-reconciled", false);
+        result.deletionsFinalized += 1;
+        continue;
+      }
       if (row.lifecycle === "provisioning" || row.lifecycle === "quarantined") {
         abortMissing(row);
         continue;

@@ -29,17 +29,19 @@ function fixture(t: test.TestContext) {
 
   const projects = new Map<string, Project>();
   const projections = new Map<string, SessionProjection>();
+  const deletionProofs = new Set<string>();
   const registry = {
     async get(id: string) { return projects.get(id); },
   } as unknown as ProjectRegistry;
   const sessions = {
     async projection(id: string) { return projections.get(id); },
+    async deletionTombstone(id: string) { return deletionProofs.has(id) ? { id } : undefined; },
   };
   t.after(() => {
     security.close();
     rmSync(root, { recursive: true, force: true });
   });
-  return { root, security, projects, projections, registry, sessions };
+  return { root, security, projects, projections, deletionProofs, registry, sessions };
 }
 
 const project = (id: string): Project => ({
@@ -175,6 +177,32 @@ test("startup reconciles session archive, restore and committed hard delete befo
   assert.equal(f.security.resources.resource("ses_archive")?.lifecycle, "archived");
   assert.equal(f.security.resources.resource("ses_restore")?.lifecycle, "active");
   assert.equal(f.security.resources.resource("ses_delete")?.lifecycle, "deleted");
+});
+
+test("startup repairs an active resource when a committed deletion tombstone proves the domain is gone", async t => {
+  const f = fixture(t);
+  activeProjectResource(f);
+  beginSession(f, "op_session_recovered_delete", "ses_recovered_delete");
+  f.projections.set("ses_recovered_delete", projection("ses_recovered_delete"));
+  f.security.resources.recordDomainReady(
+    "op_session_recovered_delete",
+    JSON.stringify({ id: "ses_recovered_delete", projectId: "prj_parent", spaceId: "spc_home", parentId: null }),
+  );
+  f.security.resources.activate(
+    "op_session_recovered_delete",
+    f.security.resources.resource("ses_recovered_delete")!.revision,
+  );
+  f.projections.delete("ses_recovered_delete");
+  f.deletionProofs.add("ses_recovered_delete");
+
+  const result = await reconcileCanonicalResourcesAtBoot({
+    security: f.security,
+    projects: f.registry,
+    sessions: f.sessions,
+  });
+
+  assert.equal(result.deletionsFinalized, 1);
+  assert.equal(f.security.resources.resource("ses_recovered_delete")?.lifecycle, "deleted");
 });
 
 test("a durable receipt without its domain row blocks boot instead of being aborted", async t => {
