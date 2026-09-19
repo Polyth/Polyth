@@ -27,14 +27,31 @@ truth. Electron retains its original frame and transparent-window handling.
   `--app-system-bar-color` to substitute a flat strip for the selected image.
   The theme-color meta is only a fallback for browser/OS-owned chrome.
 
+## Resume lifecycle
+
+`startMobileViewport()` also remeasures on `pageshow` and on a transition to
+`document.visibilityState === "visible"`. A restored or suspended PWA must
+not retain an old keyboard-sized frame or Safari pan offset while waiting
+for a resize event that may not arrive. Hidden visibility transitions do not
+publish transient geometry. All events use the existing measurement and
+unchanged-value deduplication path; there is no second viewport cache, timer,
+screen-size guess, or forced page reload.
+
+The isolated `mobileViewportResume.test.ts` tests execute that measurement
+module with fake window/document/visualViewport event targets. They cover
+resume without resize, hidden-to-visible transitions, stale pan offsets,
+missing visualViewport, repeated startup/events and existing native keyboard
+updates. They do not render React or emulate an installed iOS WebView.
+
 ## Verification
 
 ```sh
 POLYTH_CHROMIUM_PATH=/usr/bin/chromium POLYTH_REQUIRE_CHROMIUM=1 \
   node --experimental-strip-types --test apps/web/test/mobileViewportFrame.test.ts
+node --experimental-strip-types --test apps/web/test/mobileViewportResume.test.ts
 ```
 
-The test loads the real shell, token, composer, and final viewport styles.
+The frame test loads the real shell, token, composer, and final viewport styles.
 It checks both chat states, mismatched CSS/measured heights, panned and
 resized keyboard bands, close/restore, landscape, hit-testing, single safe-area
 clearance, bottom-canvas pixel continuity, and unaffected desktop/Electron.
