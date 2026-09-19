@@ -1,0 +1,26 @@
+{
+  "name": "@polyth/backend-gemini",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@polyth/backend-acp": "0.1.0",
+    "@polyth/contracts": "0.1.0",
+    "@polyth/plugins": "0.1.0"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "descriptor": {
+      "name": "Gemini CLI harness",
+      "description": "Gemini CLI through its official ACP mode",
+      "core": false,
+      "enabled": true,
+      "icon": "sparkles",
+      "hasSettings": false,
+      "category": "system",
+      "projectAffinity": {}
+    }
+  }
+}
