@@ -54,6 +54,13 @@ const toNativeCommands = (commands: Array<{ name: string; description?: string; 
         availability: "session",
     }));
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+/** Claude Code waits up to ~2s for an in-flight OAuth refresh on shutdown; the
+ * SDK keeps a matching 2s grace before it signals the transport. Wait a little
+ * longer than that before the process authority's containment release. */
+const CLAUDE_SHUTDOWN_GRACE_MS = 4_000;
+/** The shared ~/.claude refresh lock stays contended for its 60s staleness
+ * window after the holder dies. The CLI's own guidance is to retry in a minute. */
+const CLAUDE_OAUTH_REFRESH_LOCK_RE = /Failed to refresh OAuth token: another Claude Code process/i;
 /** The SDK owns its protocol; Polyth owns the SDK's native child process and
  * records only public dialogue/tool outcomes. It never consumes thinking. */
 export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, authority: Awaited<ReturnType<typeof createProcessAuthority>>): Promise<AgentRuntime> {
@@ -79,6 +86,9 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
     let lastContextResultId = "";
     let lastTitle = "";
     let pendingRetry: RateLimitRetryHint | undefined;
+    let resolveStreamFinished!: () => void;
+    const streamFinished = new Promise<void>((resolve) => { resolveStreamFinished = resolve; });
+    let streamLoopActive = false;
     let streamMessageOrdinal = -1;
     let streamEventOrdinal = 0;
     const streamPartIds = new Map<number, string>();
@@ -278,6 +288,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
             }
             claudeOverlays.consumeIfRevision(context, "claude", staged.desiredRevision);
         }
+        streamLoopActive = true;
         void (async () => {
             try {
                 for await (const message of query!) {
@@ -428,7 +439,15 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                             ? ((message as { errors?: string[] }).errors?.[0] ?? "Claude Code turn failed")
                             : undefined;
                         const authFailed = Boolean(errorText && /authentication_failed/i.test(errorText));
-                        const retry = message.is_error ? pendingRetry : undefined;
+                        // A stale shared OAuth refresh lock is transient and
+                        // resolves on its own; surface it as a bounded retry
+                        // instead of a generic unknown failure or a sign-in
+                        // prompt. The failed request never reached the model,
+                        // so re-sending the last user message is safe.
+                        const oauthRefreshLock = Boolean(errorText && CLAUDE_OAUTH_REFRESH_LOCK_RE.test(errorText));
+                        const retry = message.is_error
+                            ? pendingRetry ?? (oauthRefreshLock ? { scope: "unknown" as const, retryAfterSec: 60, retryable: true } : undefined)
+                            : undefined;
                         pendingRetry = undefined;
                         emit({
                             type: "turn/stopped",
@@ -437,7 +456,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                             ...(retry ? { retry } : {}),
                             ...(message.is_error ? {
                                 error: errorText,
-                                code: authFailed ? "auth-expired" : retry ? "rate-limited" : /rate.?limit|overloaded/i.test(errorText ?? "") ? "rate-limited" : "unknown",
+                                code: authFailed ? "auth-expired" : oauthRefreshLock ? "unknown" : retry ? "rate-limited" : /rate.?limit|overloaded/i.test(errorText ?? "") ? "rate-limited" : "unknown",
                             } : {}),
                         }, turnId + ":stop");
                     }
@@ -448,6 +467,9 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                 wake?.();
                 for (const cb of lifecycle)
                     cb({ type: "stream-disconnected", authorityId: authority.authorityId, generation: authority.generation });
+            }
+            finally {
+                resolveStreamFinished();
             }
         })();
     };
@@ -602,7 +624,38 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
             throw new Error("Authority mismatch"); if (!binding.backendSessionId || binding.backendSessionId !== nativeId)
             throw Object.assign(new Error("release requires the native backend session"), { code: "unknown-session" }); await runtime.dispose(); return { authorityId: binding.authorityId, generation: binding.generation, backendSessionId: binding.backendSessionId }; }),
         onEvent: cb => { listeners.add(cb); return { dispose: () => { listeners.delete(cb); } }; }, onObservation: cb => { observations.add(cb); return { dispose: () => { observations.delete(cb); } }; }, onLifecycle: cb => { lifecycle.add(cb); return { dispose: () => { lifecycle.delete(cb); } }; },
-        async dispose() { connected = false; wake?.(); await authority.close(); query?.close(); },
+        async dispose() {
+            connected = false;
+            wake?.();
+            // End the SDK query before releasing Polyth's process containment.
+            // The containment release SIGKILLs descendants, and killing Claude
+            // Code while it holds the shared ~/.claude/.oauth_refresh.lock
+            // leaves a stale lock that makes every other Claude Code process
+            // (including Polyth's own recovery sessions) fail to refresh for
+            // about a minute. Closing the query first ends the native stdin so
+            // the CLI can finish an in-flight refresh and release the lock; the
+            // bounded wait is only a fallback for a hung or unresponsive native
+            // process.
+            try {
+                query?.close();
+                if (query && streamLoopActive) {
+                    let timer: ReturnType<typeof setTimeout> | undefined;
+                    try {
+                        await Promise.race([
+                            streamFinished,
+                            new Promise<void>((resolve) => {
+                                timer = setTimeout(resolve, CLAUDE_SHUTDOWN_GRACE_MS);
+                            }),
+                        ]);
+                    }
+                    finally {
+                        if (timer) clearTimeout(timer);
+                    }
+                }
+            }
+            catch { /* the native process is already gone */ }
+            await authority.close();
+        },
     };
     return runtime;
 }

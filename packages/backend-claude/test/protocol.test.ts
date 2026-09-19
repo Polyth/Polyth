@@ -614,3 +614,89 @@ test("a permission reply for a request the SDK no longer holds is a definitive n
     );
     await rt.dispose();
 });
+
+test("Claude disposal closes the SDK query before releasing the process authority", async () => {
+    const order: string[] = [];
+    let closed = false;
+    let wake: (() => void) | undefined;
+    const sdk = {
+        query() {
+            return {
+                async *[Symbol.asyncIterator]() {
+                    while (!closed) await new Promise<void>((resolve) => { wake = resolve; });
+                    order.push("stream-ended");
+                },
+                initializationResult: async () => ({}),
+                supportedModels: async () => [],
+                setModel: async () => {},
+                interrupt: async () => {},
+                close() { order.push("query-closed"); closed = true; wake?.(); },
+            } as any;
+        },
+        getSessionInfo: async () => undefined,
+        getSessionMessages: async () => [],
+    };
+    const authority = {
+        authorityId: "owned", generation: 1, receipts: {}, releasedAuthorities: [],
+        spawn() { throw new Error("no spawn"); }, receipt: async () => {},
+        close: async () => { order.push("authority-closed"); },
+    } as Awaited<ReturnType<typeof createProcessAuthority>>;
+    const rt = await createClaudeRuntime(context, sdk, authority);
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    await rt.dispose();
+    // A hard containment release while Claude Code holds the shared
+    // ~/.claude/.oauth_refresh.lock leaves a stale lock behind, so the native
+    // query must be ended and allowed to finish before authority release.
+    assert.deepEqual(order, ["query-closed", "stream-ended", "authority-closed"]);
+});
+
+test("Claude treats a stale shared OAuth refresh lock as a bounded retry, not sign-in", async () => {
+    let input: AsyncIterator<any>;
+    let push: (message: any) => void = () => {};
+    let wake: (() => void) | undefined;
+    let closed = false;
+    const pending: any[] = [];
+    const sdk = {
+        query(args: any) {
+            input = args.prompt[Symbol.asyncIterator]();
+            return {
+                async *[Symbol.asyncIterator]() {
+                    while (!closed) {
+                        if (!pending.length) await new Promise<void>((resolve) => { wake = resolve; });
+                        while (pending.length) yield pending.shift();
+                    }
+                },
+                initializationResult: async () => ({}),
+                supportedModels: async () => [{ value: "sonnet", displayName: "Sonnet" }],
+                setModel: async () => {},
+                interrupt: async () => {},
+                close() { closed = true; wake?.(); },
+            } as any;
+        },
+        getSessionInfo: async () => undefined,
+        getSessionMessages: async () => [],
+    };
+    push = (message) => { pending.push(message); wake?.(); };
+    const authority = { authorityId: "owned", generation: 1, receipts: {}, releasedAuthorities: [], spawn() { throw new Error("no spawn"); }, receipt: async () => {}, close: async () => {} } as Awaited<ReturnType<typeof createProcessAuthority>>;
+    const rt = await createClaudeRuntime(context, sdk, authority);
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    const admission = rt.startTurnOperation!({ sessionId: "canonical", text: "hello" }, "turn-oauth");
+    await input!.next();
+    push({
+        type: "result",
+        uuid: "result-oauth",
+        is_error: true,
+        subtype: "error_during_execution",
+        errors: ["Failed to refresh OAuth token: another Claude Code process is refreshing it or exited mid-refresh. This is usually transient; retry in a minute, and if it persists close other Claude Code processes or sign in again"],
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal((await admission).kind, "confirmed");
+    const stop = events.find((event) => event.type === "turn/stopped");
+    assert.ok(stop && stop.type === "turn/stopped");
+    assert.notEqual(stop.code, "auth-expired", "a transient lock must not send the user to sign-in");
+    assert.equal(stop.retry?.retryAfterSec, 60);
+    assert.equal(stop.retry?.retryable, true);
+    await rt.dispose();
+});
