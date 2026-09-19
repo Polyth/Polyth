@@ -156,7 +156,11 @@ test("project settings menu and child pages use canonical dialog chrome", async 
   assert.match(styles, /\.dialog-panel\s*\{[\s\S]*?border-radius:\s*var\(--radius-sheet\)/);
   assert.match(
     styles,
-    /:is\(\.dialog-panel, \.sheet, \.response-footer-metadata-grid\)\s*\{[\s\S]*?var\(--material-glass-fill\)[\s\S]*?var\(--material-glass-edge\)[\s\S]*?var\(--material-glass-saturation\)/,
+    /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\) :is\([\s\S]*?\.dialog-panel,[\s\S]*?\.sheet,[\s\S]*?\.response-footer-metadata-grid,[\s\S]*?\) \{[\s\S]*?var\(--material-glass-fill\)[\s\S]*?var\(--material-glass-edge\)[\s\S]*?var\(--material-glass-saturation\)/,
+  );
+  assert.doesNotMatch(
+    styles,
+    /:is\(\.dialog-panel, \.sheet, \.response-footer-metadata-grid\)\s*\{/,
   );
   const backdropStart = styles.indexOf("/* The floating surface owns Quiet Glass.");
   assert.ok(backdropStart >= 0);
