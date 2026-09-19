@@ -47,6 +47,7 @@ import backendCommandCode from "../../../packages/backend-commandcode/src/server
 import backendCursor from "../../../packages/backend-cursor/src/serverEntry.ts";
 
 import backendFx from "../../../packages/backend-fx/src/serverEntry.ts";
+import backendGemini from "../../../packages/backend-gemini/src/serverEntry.ts";
 import backendGrok from "../../../packages/backend-grok/src/serverEntry.ts";
 import backendOmp from "../../../packages/backend-omp/src/serverEntry.ts";
 import backendPi from "../../../packages/backend-pi/src/serverEntry.ts";
@@ -74,6 +75,7 @@ export const desktopServerPackages = [
   entry("backend-commandcode", {"name":"Command Code harness","description":"Command Code through its official headless event stream and native mod bridge","core":false,"enabled":true,"icon":"command","hasSettings":false,"category":"system","projectAffinity":{}}, backendCommandCode),
   entry("backend-cursor", {"name":"Cursor harness","description":"Cursor through shared ACP","core":false,"enabled":true,"icon":"pointer","hasSettings":false,"category":"system","projectAffinity":{}}, backendCursor),
   entry("backend-fx", {"name":"fx harness","description":"fx through shared ACP","core":false,"enabled":true,"icon":"command","hasSettings":false,"category":"system","projectAffinity":{}}, backendFx),
+  entry("backend-gemini", {"name":"Gemini CLI harness","description":"Gemini CLI through its official ACP mode","core":false,"enabled":true,"icon":"sparkles","hasSettings":false,"category":"system","projectAffinity":{}}, backendGemini),
   entry("backend-grok", {"name":"Grok Build harness","description":"Grok Build through its native ACP stdio agent","core":false,"enabled":true,"icon":"assist","hasSettings":false,"category":"system","projectAffinity":{}}, backendGrok),
   entry("backend-omp", {"name":"OMP harness","description":"oh-my-pi through its native ACP transport","core":false,"enabled":true,"icon":"command","hasSettings":false,"category":"system","projectAffinity":{}}, backendOmp),
   entry("backend-pi", {"name":"Pi harness","description":"Detect Pi and report native RPC integration readiness","core":false,"enabled":true,"icon":"command","hasSettings":false,"category":"system","projectAffinity":{}}, backendPi),
