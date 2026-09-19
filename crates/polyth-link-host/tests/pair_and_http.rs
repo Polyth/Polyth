@@ -43,9 +43,13 @@ async fn rpc(stream: &mut BufReader<UnixStream>, id: u64, method: &str, params: 
     loop {
         response.clear();
         let bytes = stream.read_line(&mut response).await.unwrap();
-        assert!(bytes > 0, "rpc {method} id={id}: host closed the control socket");
-        let parsed: Value = serde_json::from_str(response.trim())
-            .unwrap_or_else(|error| panic!("rpc {method} id={id}: malformed response {response:?}: {error}"));
+        assert!(
+            bytes > 0,
+            "rpc {method} id={id}: host closed the control socket"
+        );
+        let parsed: Value = serde_json::from_str(response.trim()).unwrap_or_else(|error| {
+            panic!("rpc {method} id={id}: malformed response {response:?}: {error}")
+        });
         if parsed.get("method").and_then(Value::as_str) == Some("event") {
             continue;
         }
@@ -58,7 +62,12 @@ async fn rpc(stream: &mut BufReader<UnixStream>, id: u64, method: &str, params: 
     }
 }
 
-async fn rpc_try(stream: &mut BufReader<UnixStream>, id: u64, method: &str, params: Value) -> Value {
+async fn rpc_try(
+    stream: &mut BufReader<UnixStream>,
+    id: u64,
+    method: &str,
+    params: Value,
+) -> Value {
     let line = json!({"id": id, "method": method, "params": params});
     stream
         .get_mut()
