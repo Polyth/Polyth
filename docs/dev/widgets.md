@@ -287,6 +287,11 @@ export default defineWebPackage((host) => () => {
   `composer.leading` with custom slot settings.
 - **`packages/fusion/widgets/index.tsx`** — a one-widget plugin registered
   alongside a system package-window surface.
+- **`packages/gallery/widgets/`** — a canvas widget that pairs a package-owned
+  server route (`src/serverEntry.ts` reads project images through the files
+  service) with an interactive canvas: folder picker, lazy grid, a lightbox
+  with zoom/pan and normalized point/zone annotations, and a send flow that
+  attaches the selected images to the active session for a chosen model.
 
 ## 14. Checklist (widget work)
 
