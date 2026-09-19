@@ -10,7 +10,8 @@
     "./mobile-viewport": "./src/mobileViewport.ts",
     "./responsive-shell": "./src/responsiveShell.ts",
     "./sheet-trigger": "./src/components/mobile/sheetTrigger.ts",
-    "./ui": "./src/components/ui/index.ts"
+    "./ui": "./src/components/ui/index.ts",
+    "./client-settings": "./src/clientSettingsRegistry.ts"
   },
   "dependencies": {
     "@polyth/mobile": "0.1.0",
