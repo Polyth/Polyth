@@ -3478,7 +3478,7 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 }
 .dialog-panel {
   background: var(--material-glass-strong); border: 1px solid var(--material-glass-border);
-  border-radius: var(--radius-surface); box-shadow: var(--material-glass-highlight), var(--material-glass-shadow);
+  border-radius: var(--radius-sheet); box-shadow: var(--material-glass-highlight), var(--material-glass-shadow);
   display: flex; flex-direction: column; gap: 10px; padding: 0;
   max-height: 86vh; overflow: auto;
 }
@@ -12746,10 +12746,10 @@ html[data-font] body :is(
   }
   :is(.dialog-panel, .sheet, .response-footer-metadata-grid) {
     background: radial-gradient(140% 140% at 50% 50%,
-      color-mix(in srgb, var(--material-glass-strong) 96%, transparent) 0%,
-      color-mix(in srgb, var(--material-glass-strong) 66%, transparent) 100%);
-    -webkit-backdrop-filter: blur(var(--material-glass-blur));
-    backdrop-filter: blur(var(--material-glass-blur));
+      color-mix(in srgb, var(--material-glass-strong) var(--material-glass-fill), transparent) 0%,
+      color-mix(in srgb, var(--material-glass-strong) var(--material-glass-edge), transparent) 100%);
+    -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
+    backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
   }
   /* Chat-turn cards: one per assistant turn, not a repeated list row, so a
      lighter blur is worth the cost here (unlike the excluded list surfaces
