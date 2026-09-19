@@ -244,8 +244,8 @@ jobs:
             APPLE_APP_SPECIFIC_PASSWORD= \
             APPLE_TEAM_ID= \
             npx electron-builder --mac dmg --x64 --arm64 --publish never \
-              -c.mac.identity=- \
-              -c.mac.notarize=false
+              --config.mac.identity=- \
+              --config.mac.notarize=false
           fi
 
       - name: Smoke-test packaged macOS app

@@ -41,8 +41,15 @@ test("CI owns the repository quality contract and app builds stay manual", () =>
   assert.match(builds, /polyth-macos-dmg-arm64/);
   assert.match(builds, /CSC_LINK/);
   assert.match(builds, /APPLE_APP_SPECIFIC_PASSWORD/);
-  assert.doesNotMatch(builds, /--config\.mac\.notarize=false/);
+  assert.match(builds, /--config\.mac\.identity=-/);
+  assert.match(builds, /--config\.mac\.notarize=false/);
+  assert.doesNotMatch(builds, /(?:^|\s)-c\.mac\.(?:identity|notarize)=/m);
   assert.doesNotMatch(builds, /--universal/);
+
+  const release = text(".github/workflows/release.yml");
+  assert.match(release, /Require macOS signing and notarization/);
+  assert.doesNotMatch(release, /--config\.mac\.identity=-/);
+  assert.doesNotMatch(release, /--config\.mac\.notarize=false/);
   assert.match(builds, /npm pack --workspace @polyth\/contracts/);
   assert.match(builds, /npm pack --workspace @polyth\/package-sdk/);
   assert.doesNotMatch(builds, /--publish always/);

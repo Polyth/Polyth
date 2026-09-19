@@ -48,7 +48,9 @@ test("master CI is automatic while build and release workflows stay manual", () 
   assert.match(builds, /--mac dmg --x64 --arm64 --publish never/);
   assert.match(builds, /polyth-macos-dmg-x64/);
   assert.match(builds, /polyth-macos-dmg-arm64/);
-  assert.doesNotMatch(builds, /--config\.mac\.notarize=false/);
+  assert.match(builds, /--config\.mac\.identity=-/);
+  assert.match(builds, /--config\.mac\.notarize=false/);
+  assert.doesNotMatch(builds, /(?:^|\s)-c\.mac\.(?:identity|notarize)=/m);
   assert.match(builds, /npm-packages/);
 
   const release = read(".github/workflows/release.yml");
@@ -59,6 +61,9 @@ test("master CI is automatic while build and release workflows stay manual", () 
   assert.match(release, /gh release create/);
   assert.match(release, /--draft/);
   assert.match(release, /--mac dmg zip --x64 --arm64 --publish always/);
+  assert.match(release, /Require macOS signing and notarization/);
+  assert.doesNotMatch(release, /--config\.mac\.identity=-/);
+  assert.doesNotMatch(release, /--config\.mac\.notarize=false/);
   assert.doesNotMatch(release, /--universal/);
   assert.match(release, /Missing macOS \$ARCH DMG/);
   assert.match(release, /Missing macOS \$ARCH ZIP/);
