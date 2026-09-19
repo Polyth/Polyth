@@ -190,18 +190,20 @@ function packageStore(host: ServerPackageHost): ServerPackageHost["store"] {
       if (property === "hasEventOfType" || property === "latestSeq") {
         const value = Reflect.get(target, property, receiver);
         if (typeof value !== "function") return value;
+        const method = value as (...args: unknown[]) => unknown;
         return async (sessionId: string, ...rest: unknown[]) => {
           await guard(sessionId);
-          return value.call(target, sessionId, ...rest);
+          return Reflect.apply(method, target, [sessionId, ...rest]);
         };
       }
       if (property === "patchProjection") {
         const value = Reflect.get(target, property, receiver);
         if (typeof value !== "function") return value;
+        const method = value as (...args: unknown[]) => unknown;
         return async (sessionId: string, ...rest: unknown[]) => {
           const projection = await guard(sessionId);
           if (projection.status === "archived") throw archived();
-          return value.call(target, sessionId, ...rest);
+          return Reflect.apply(method, target, [sessionId, ...rest]);
         };
       }
       if (BLOCKED_STORE_MUTATIONS.has(property)) {
