@@ -6,7 +6,8 @@
     ".": "./src/index.ts",
     "./i18n": "./src/i18n/index.ts",
     "./widgets": "./widgets/index.tsx",
-    "./i18n/*": "./src/i18n/*.ts"
+    "./i18n/*": "./src/i18n/*.ts",
+    "./web-prefs": "./widgets/usagePrefs.ts"
   },
   "polyth": {
     "serverEntry": "./src/serverEntry.ts",
@@ -18,7 +19,7 @@
       "enabled": true,
       "settingsGroup": "Workspace",
       "icon": "usage",
-      "hasSettings": true,
+      "hasSettings": false,
       "category": "workspace",
       "projectAffinity": {}
     }
@@ -28,7 +29,8 @@
     "@polyth/plugins": "0.1.0",
     "@polyth/session": "0.1.0",
     "@polyth/web-sdk": "0.1.0",
-    "chart.js": "^4.5.1"
+    "chart.js": "^4.5.1",
+    "@polyth/web": "0.1.0"
   },
   "peerDependencies": {
     "react": "^19.0.0"
