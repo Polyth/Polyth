@@ -35,6 +35,8 @@ test("preview document injects an isolated bridge and blocks connections by defa
 
   assert.match(html, /Content-Security-Policy/);
   assert.match(html, /connect-src 'none'/);
+  assert.doesNotMatch(html, /img-src[^;]*https:/);
+  assert.doesNotMatch(html, /script-src[^;]*https:/);
   assert.match(html, new RegExp(PLAYGROUND_CHANNEL));
   assert.match(html, /<title>x<\/title>/);
   assert.match(html, /<body>Hi<\/body>/);
@@ -44,6 +46,8 @@ test("network mode only relaxes HTTPS connections", () => {
   const html = sandboxPreviewDocument("<main>hello</main>", true);
 
   assert.match(html, /connect-src https:/);
+  assert.match(html, /img-src data: blob: https:/);
+  assert.match(html, /script-src 'unsafe-inline' 'unsafe-eval' https:/);
   assert.match(html, /frame-src 'none'/);
   assert.match(html, /form-action 'none'/);
   assert.match(html, /<main>hello<\/main>/);
