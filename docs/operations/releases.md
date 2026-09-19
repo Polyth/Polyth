@@ -71,7 +71,7 @@ The updater metadata is shipped alongside the installers:
 - `latest-mac.yml` — macOS;
 - `latest-linux.yml` and architecture-specific Linux metadata emitted by electron-builder.
 
-The final publish job first creates/refreshes a **draft GitHub Release**, uploads the complete artifact set, performs optional external publication, and only then marks the release public. Desktop auto-update therefore never sees a half-uploaded release.
+After the deterministic release gate passes, the prepare job creates/reuses a **draft GitHub Release** for the aligned tag. The signed desktop jobs publish their binaries and electron-builder updater metadata into that draft. The final publish job reconciles every release artifact, performs optional external publication, and only then marks the release public. Desktop auto-update therefore never sees a half-uploaded release.
 
 The desktop package updater points to **Polyth/Polyth**. Packaged clients with **Automatic updates** enabled check on startup and periodically, automatically download a discovered update, and install it on app quit/restart. Disabling Automatic updates preserves manual check/download behavior.
 
@@ -114,7 +114,7 @@ Internal first-party workspaces are deliberately **not** bulk-published just bec
 
 ### iOS / TestFlight
 
-The GitHub Release creates the stable `vX.Y.Z` tag only after release artifacts have built successfully. Codemagic's `ios-testflight` workflow watches that tag and owns signed IPA/TestFlight publication.
+The release workflow creates/reuses the stable `vX.Y.Z` tag together with the draft GitHub Release **after release validation but before the platform build fan-out**. Codemagic's `ios-testflight` workflow watches that tag and can build/upload TestFlight in parallel with the desktop/Android release jobs. The GitHub Release stays draft until the GitHub release pipeline succeeds, so desktop auto-update remains hidden while artifacts are incomplete.
 
 Codemagic keeps one release-quality gate, then:
 
