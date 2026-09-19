@@ -138,6 +138,30 @@ test("desktop first-run setup hides operator tooling and restarts automatically"
   assert.match(setupSource, /desktop \? \(/);
 });
 
+test("desktop chrome keeps macOS native controls and renderer actions clickable", async () => {
+  const mainSource = await readFile(join(desktopDir, "src", "main.ts"), "utf8");
+  const desktopSource = await readFile(join(repositoryRoot, "apps/web/src/desktop.tsx"), "utf8");
+  const styles = await readFile(join(repositoryRoot, "apps/web/src/styles.css"), "utf8");
+
+  assert.match(
+    mainSource,
+    /process\.platform === "darwin"[\s\S]*?\? \{ titleBarStyle: "hiddenInset" as const \}[\s\S]*?: \{ frame: false \}/,
+  );
+  assert.match(desktopSource, /dataset\.desktopPlatform = platform/);
+  assert.match(desktopSource, /if \(!info \|\| info\.platform === "darwin"\) return null/);
+  assert.match(styles, /body\.desktop-app :is\([\s\S]*?\.scrim,[\s\S]*?\)\s*\{[^}]*-webkit-app-region:\s*no-drag/s);
+  assert.match(styles, /\.desktop-window-controls\s*\{[^}]*pointer-events:\s*none/s);
+  assert.match(styles, /\.desktop-window-button\s*\{[^}]*pointer-events:\s*auto/s);
+  assert.match(
+    styles,
+    /body\.desktop-app\[data-desktop-platform="darwin"\]\[data-desktop-controls-position\] \.app > \.header\s*\{[^}]*clip-path:\s*none/s,
+  );
+  assert.match(
+    styles,
+    /body\.desktop-app\[data-desktop-platform="darwin"\] \.desktop-window-controls\s*\{[^}]*display:\s*none/s,
+  );
+});
+
 test("packaged desktop startup is self-contained across host platforms", async () => {
   const mainSource = await readFile(join(desktopDir, "src", "main.ts"), "utf8");
   const serverSource = await readFile(
