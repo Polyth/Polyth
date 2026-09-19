@@ -661,6 +661,39 @@ async function restartServerAfterSetup(): Promise<void> {
   log("Polyth server restarted automatically after desktop setup");
 }
 
+function watchDesktopSetup(lifecycle: NonNullable<typeof serverLifecycle>): void {
+  let checking = false;
+  const poll = async (): Promise<void> => {
+    if (quitting || serverLifecycle !== lifecycle) return;
+    if (checking) { schedule(); return; }
+    checking = true;
+    try {
+      const response = await fetch(`${baseUrl}/api/health`, { cache: "no-store" });
+      if (response.ok) {
+        const health = await response.json() as { state?: unknown };
+        if (health.state === "ready") {
+          await new Promise((resolveDelay) => setTimeout(resolveDelay, 150));
+          if (quitting || serverLifecycle !== lifecycle) return;
+          await restartServerAfterSetup();
+          if (mainWindow && !mainWindow.isDestroyed()) await mainWindow.loadURL(baseUrl);
+          return;
+        }
+      }
+    } catch (error) {
+      if (serverLifecycle === lifecycle) log("Desktop setup readiness check failed", error);
+    } finally {
+      checking = false;
+    }
+    schedule();
+  };
+  const schedule = (): void => {
+    if (quitting || serverLifecycle !== lifecycle) return;
+    const timer = setTimeout(() => void poll(), 300);
+    timer.unref?.();
+  };
+  schedule();
+}
+
 const startChatWorkspaceRemoteCoordinator = async (): Promise<void> => {
   const binary = linkClientPath();
   if (!binary || !existsSync(binary)) {
