@@ -4,18 +4,31 @@ import {
   fetchWebBuildId,
   installBuildFreshnessWatcher,
   parseWebBuildId,
+  WEB_BUILD_QUERY,
 } from "../src/buildFreshness.ts";
 
 const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 class FakeWindow extends EventTarget {
-  readonly location = { reload() {} };
+  replaced: string[] = [];
+  readonly location = {
+    href: "https://polyth.test/p/project/s/session",
+    reload() {},
+    replace: (href: string) => { this.replaced.push(href); },
+  };
   setTimeout = globalThis.setTimeout.bind(globalThis);
   clearTimeout = globalThis.clearTimeout.bind(globalThis);
 }
 
 class FakeDocument extends EventTarget {
   visibilityState: DocumentVisibilityState = "visible";
+}
+
+function suspendAndResume(fakeDocument: FakeDocument): void {
+  fakeDocument.visibilityState = "hidden";
+  fakeDocument.dispatchEvent(new Event("visibilitychange"));
+  fakeDocument.visibilityState = "visible";
+  fakeDocument.dispatchEvent(new Event("visibilitychange"));
 }
 
 test("build id parsing is strict", () => {
@@ -42,10 +55,10 @@ test("server build id is fetched without cache", async () => {
   assert.equal(request.init?.credentials, "same-origin");
 });
 
-test("matching build stays mounted and a resumed stale PWA reloads once", async () => {
+test("ordinary boot and focus churn never run a freshness check", async () => {
   const fakeWindow = new FakeWindow();
   const fakeDocument = new FakeDocument();
-  let serverBuild = "build-a";
+  let calls = 0;
   let reloads = 0;
   const dispose = installBuildFreshnessWatcher("build-a", {
     windowRef: fakeWindow as unknown as Window,
@@ -53,6 +66,36 @@ test("matching build stays mounted and a resumed stale PWA reloads once", async 
     minCheckIntervalMs: 0,
     retryDelaysMs: [],
     reload: () => { reloads++; },
+    fetchImpl: (async () => {
+      calls++;
+      return new Response(JSON.stringify({ build: "build-b" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch,
+  });
+
+  fakeWindow.dispatchEvent(new Event("pageshow"));
+  fakeWindow.dispatchEvent(new Event("focus"));
+  await settle();
+
+  assert.equal(calls, 0, "cold pageshow/focus must not tear down hydration");
+  assert.equal(reloads, 0);
+  dispose();
+});
+
+test("a genuinely resumed stale PWA reloads once", async () => {
+  const fakeWindow = new FakeWindow();
+  const fakeDocument = new FakeDocument();
+  let serverBuild = "build-a";
+  let reloads = 0;
+  let reloadTarget = "";
+  const dispose = installBuildFreshnessWatcher("build-a", {
+    windowRef: fakeWindow as unknown as Window,
+    documentRef: fakeDocument as unknown as Document,
+    minCheckIntervalMs: 0,
+    retryDelaysMs: [],
+    reload: (build) => { reloads++; reloadTarget = build; },
     fetchImpl: (async () => new Response(JSON.stringify({ build: serverBuild }), {
       status: 200,
       headers: { "content-type": "application/json" },
@@ -63,20 +106,40 @@ test("matching build stays mounted and a resumed stale PWA reloads once", async 
   assert.equal(reloads, 0);
 
   serverBuild = "build-b";
-  fakeDocument.visibilityState = "hidden";
-  fakeDocument.dispatchEvent(new Event("visibilitychange"));
+  suspendAndResume(fakeDocument);
   await settle();
-  assert.equal(reloads, 0, "background transition never reloads the hidden app");
-
-  fakeDocument.visibilityState = "visible";
-  fakeDocument.dispatchEvent(new Event("visibilitychange"));
-  await settle();
-  assert.equal(reloads, 1, "iOS resume reloads the stale PWA");
+  assert.equal(reloads, 1);
+  assert.equal(reloadTarget, "build-b");
 
   fakeWindow.dispatchEvent(new Event("pageshow"));
   fakeWindow.dispatchEvent(new Event("focus"));
   await settle();
-  assert.equal(reloads, 1, "resume fallbacks cannot issue a second reload");
+  assert.equal(reloads, 1, "post-resume events cannot issue a second reload");
+
+  dispose();
+});
+
+test("a stale shell already navigated to the target build fails stable instead of looping", async () => {
+  const fakeWindow = new FakeWindow();
+  fakeWindow.location.href = `https://polyth.test/p/project/s/session?${WEB_BUILD_QUERY}=build-b`;
+  const fakeDocument = new FakeDocument();
+  let reloads = 0;
+
+  const dispose = installBuildFreshnessWatcher("build-a", {
+    windowRef: fakeWindow as unknown as Window,
+    documentRef: fakeDocument as unknown as Document,
+    minCheckIntervalMs: 0,
+    retryDelaysMs: [],
+    reload: () => { reloads++; },
+    fetchImpl: (async () => new Response(JSON.stringify({ build: "build-b" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })) as typeof fetch,
+  });
+
+  suspendAndResume(fakeDocument);
+  await settle();
+  assert.equal(reloads, 0, "the same target generation is never reloaded forever");
 
   dispose();
 });
@@ -102,6 +165,8 @@ test("resume check retries a transient server restart", async () => {
     }) as typeof fetch,
   });
 
+  assert.equal(calls, 0, "watcher is dormant until a real suspend/resume");
+  suspendAndResume(fakeDocument);
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(calls, 2);
   assert.equal(reloads, 1);

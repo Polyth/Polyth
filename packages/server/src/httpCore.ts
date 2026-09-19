@@ -60,6 +60,7 @@ const MIME: Record<string, string> = {
 };
 
 const HASHED_ASSET = /-[A-Z0-9]{8,}(?:\.[^./]+){1,2}$/;
+const FRESH_SHELL_ASSET = /(?:^|[\\/])(?:index\.html|main\.js|main\.css|build-id\.json|packages-manifest\.json)$/;
 
 // Text payloads above a kilobyte compress well; everything else (png, woff2)
 // is already compressed on disk.
@@ -181,7 +182,9 @@ const sendStaticFile = async (
     "content-type": contentType,
     "cache-control": HASHED_ASSET.test(filePath)
       ? "public, max-age=31536000, immutable"
-      : "no-cache",
+      : FRESH_SHELL_ASSET.test(filePath)
+        ? "no-store"
+        : "no-cache",
   };
   // In-process gzip: no reverse proxy is assumed.
   if (
