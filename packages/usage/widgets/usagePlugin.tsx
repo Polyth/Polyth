@@ -258,6 +258,7 @@ const ANALYTICS_KIND: Readonly<Record<string, UsageAnalyticsWidgetKind>> = {
   "usage.breakdown": "breakdown",
   "usage.reliability": "reliability",
   "usage.cache-efficiency": "cache-efficiency",
+  "usage.context-growth": "context-growth",
 };
 
 const DEFAULT_ANALYTICS_CONFIG: Readonly<Record<string, JsonObject>> = {
@@ -273,6 +274,7 @@ const DEFAULT_ANALYTICS_CONFIG: Readonly<Record<string, JsonObject>> = {
   "usage.breakdown": { range: "7d", groupBy: "provider", metric: "cost", projectScope: "all" },
   "usage.reliability": { range: "24h", projectScope: "all" },
   "usage.cache-efficiency": { range: "7d", projectScope: "all" },
+  "usage.context-growth": { range: "7d", projectScope: "all" },
 };
 
 function AnalyticsWidget(context: WidgetRenderContext) {
@@ -499,6 +501,7 @@ const RENDERERS: Readonly<Record<string, (context: WidgetRenderContext) => React
   "usage.breakdown": (context) => <AnalyticsWidget {...context} />,
   "usage.reliability": (context) => <AnalyticsWidget {...context} />,
   "usage.cache-efficiency": (context) => <AnalyticsWidget {...context} />,
+  "usage.context-growth": (context) => <AnalyticsWidget {...context} />,
   "usage.project": (context) => <ProjectUsageWidget projectId={context.projectId} />,
   "usage.sessions-table": (context) => <SessionsTableWidget projectId={context.projectId} />,
   "usage.turn": (context) => turnStatsWidgetRender(context),
