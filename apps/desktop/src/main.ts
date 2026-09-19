@@ -598,7 +598,7 @@ const configureUpdater = (): void => {
   refreshAutomaticUpdateSchedule();
 };
 
-const startServer = async (): Promise<void> => {
+const startServer = async (preferredPort?: number): Promise<void> => {
   const binary = opencodePath();
   const webDist = webDistPath();
   const bundledOpenCode = existsSync(binary);
@@ -607,7 +607,7 @@ const startServer = async (): Promise<void> => {
   }
   if (!bundledOpenCode) log(`Bundled OpenCode ${__POLYTH_OPENCODE_VERSION__} is missing at ${binary}; looking for an installed OpenCode instead`);
   if (!existsSync(join(webDist, "index.html"))) throw new Error(`Polyth web bundle is missing at ${webDist}`);
-  const port = await reservePort();
+  const port = preferredPort ?? await reservePort();
   baseUrl = `http://127.0.0.1:${port}`;
   process.env.POLYTH_DESKTOP = "1";
   const linkHost = linkHostPath();
