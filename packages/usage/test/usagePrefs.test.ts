@@ -92,6 +92,7 @@ test("parseUsagePrefs migrates older prefs, defaults provider-first, and survive
   assert.equal(defaults.dashboard.showApiEquivalent, true);
   assert.equal(defaults.dashboard.showValueMultiplier, true);
   assert.equal(defaults.dashboard.showQuotaDetails, true);
+  assert.deepEqual(defaults.modelPricing, {});
   assert.deepEqual(parseUsagePrefs("not json"), defaults);
   assert.deepEqual(
     parseUsagePrefs(JSON.stringify({
@@ -109,8 +110,18 @@ test("parseUsagePrefs preserves the last explicit tab and sanitizes billing, bud
 
   const prefs = parseUsagePrefs(JSON.stringify({
     providerCosts: {
-      openai: { billing: "subscription", monthlyCost: 20, monthlyBudget: 100 },
+      openai: {
+        billing: "subscription",
+        monthlyCost: 20,
+        monthlyBudget: 100,
+        inputPerMillion: 2.5,
+        outputPerMillion: 10,
+      },
       anthropic: { billing: "api", monthlyCost: -4, monthlyBudget: 75.555 },
+    },
+    modelPricing: {
+      "openai/gpt-5.6-sol": { inputPerMillion: 1.25, outputPerMillion: 7.5 },
+      invalid: { inputPerMillion: -1, outputPerMillion: null },
     },
     dashboard: {
       rangeMode: "custom",
@@ -126,11 +137,18 @@ test("parseUsagePrefs preserves the last explicit tab and sanitizes billing, bud
     billing: "subscription",
     monthlyCost: 20,
     monthlyBudget: 100,
+    inputPerMillion: 2.5,
+    outputPerMillion: 10,
   });
   assert.deepEqual(prefs.providerCosts.anthropic, {
     billing: "api",
     monthlyCost: null,
     monthlyBudget: 75.56,
+    inputPerMillion: null,
+    outputPerMillion: null,
+  });
+  assert.deepEqual(prefs.modelPricing, {
+    "openai/gpt-5.6-sol": { inputPerMillion: 1.25, outputPerMillion: 7.5 },
   });
   assert.equal(prefs.dashboard.rangeMode, "custom");
   assert.deepEqual(prefs.dashboard.customRange, { start: "2026-09-01", end: "2026-09-19" });
