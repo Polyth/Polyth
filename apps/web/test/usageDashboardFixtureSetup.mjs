@@ -159,6 +159,7 @@ for (let ageDays = 0; ageDays < 180; ageDays += 1) {
           model: { providerID: provider.id, modelID },
           tokens: { input, output, cacheRead },
           cost,
+          costSource: "native",
         },
         ignorable: true,
         time: usageAt,
