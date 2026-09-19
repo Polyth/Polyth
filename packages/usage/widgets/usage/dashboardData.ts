@@ -4,7 +4,7 @@ import type {
   UsageTelemetryConsumer,
   UsageTelemetryDistribution,
   UsageTelemetryDto,
-  type UsageCostQuality,
+  UsageCostQuality,
 } from "../../src/telemetry.ts";
 import { getLocale } from "../../../../apps/web/src/i18n/index.ts";
 import {
