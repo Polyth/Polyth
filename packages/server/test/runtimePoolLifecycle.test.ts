@@ -85,23 +85,10 @@ test("canonical data directory lease fails closed for a second writer", async ()
   await afterRelease.release();
 });
 
-test("data directory lease runs an Electron executable in Node mode", async () => {
-  const parent = mkdtempSync(join(tmpdir(), "polyth-electron-lease-"));
-  const executable = join(parent, "electron");
+test("data directory lease does not depend on an external OS lock helper", async () => {
+  const parent = mkdtempSync(join(tmpdir(), "polyth-portable-lease-"));
   const originalExecPath = process.execPath;
-  const quotedNode = originalExecPath.replaceAll("'", "'\\''");
-  writeFileSync(
-    executable,
-    `#!/bin/sh
-if [ "$ELECTRON_RUN_AS_NODE" != "1" ]; then
-  exit 17
-fi
-exec '${quotedNode}' "$@"
-`,
-    { mode: 0o755 },
-  );
-
-  process.execPath = executable;
+  process.execPath = join(parent, "definitely-missing-runtime");
   try {
     const lease = await acquireDataDirectoryLease(join(parent, "data"));
     await lease.release();
