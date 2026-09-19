@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 import { register } from "node:module";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import type { QuotaSnapshotDto } from "@polyth/session/web-api";
 import { emptyModel } from "../../../apps/web/src/reduce.ts";
 
 register("./tsxHooks.mjs", import.meta.url);
 
 const { SessionUsageStats } = await import("../widgets/usagePlugin.tsx");
 const { formatQuotaReset } = await import("../widgets/usage/UsageDashboard.tsx");
+const { visibleQuotaSnapshots } = await import("../widgets/usage/quotaUi.tsx");
 
 test("quota reset labels interpolate the formatted reset time", () => {
   const label = formatQuotaReset(Date.UTC(2027, 0, 1));
@@ -64,4 +66,30 @@ test("session usage renderer honors per-instance metric visibility", () => {
   assert.doesNotMatch(html, /data-usage-metric="input"/);
   assert.doesNotMatch(html, /data-usage-metric="output"/);
   assert.doesNotMatch(html, /data-usage-metric="total"/);
+});
+
+const quotaSnapshot = (providerId: string): QuotaSnapshotDto => ({
+  providerId,
+  windows: [],
+  fetchedAt: 0,
+  stale: false,
+  pace: {},
+});
+
+// Regression: the dashboard provider card hides by canonical provider id
+// (claude → anthropic) while quota snapshots use the raw id (claude).
+test("quota widgets hide providers by canonical key so a dashboard hide reaches them", () => {
+  const snapshots = [quotaSnapshot("claude"), quotaSnapshot("codex"), quotaSnapshot("openrouter")];
+  assert.deepEqual(
+    visibleQuotaSnapshots(snapshots, ["anthropic", "openai"]).map((snapshot) => snapshot.providerId),
+    ["openrouter"],
+  );
+  assert.deepEqual(
+    visibleQuotaSnapshots(snapshots, ["claude"]).map((snapshot) => snapshot.providerId),
+    ["codex", "openrouter"],
+  );
+  assert.deepEqual(
+    visibleQuotaSnapshots(snapshots, []).map((snapshot) => snapshot.providerId),
+    ["claude", "codex", "openrouter"],
+  );
 });

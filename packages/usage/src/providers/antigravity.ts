@@ -170,11 +170,16 @@ async function fetchAntigravityUsage(
   const authMessage = "Antigravity session expired — please sign in again with agy";
   const rawModels = new Map<string, ModelQuotaRow>();
 
-  // 1. retrieveUserQuota: model-level quota buckets with reset times and remaining fractions
+  const isGoogleModel = (modelId: string): boolean => {
+    const lower = modelId.toLowerCase();
+    return lower.startsWith("gemini") || lower.startsWith("gemma") || lower.includes("google");
+  };
+
+  // 0. retrieveUserQuotaSummary: provides official 5-hour and weekly limits for Google and third-party groups
   try {
-    const quotas = await safeJson(
+    const summary = await safeJson(
       runtime,
-      `${GOOGLE_PRIMARY}/v1internal:retrieveUserQuota`,
+      `${GOOGLE_PRIMARY}/v1internal:retrieveUserQuotaSummary`,
       {
         method: "POST",
         headers,
@@ -183,8 +188,44 @@ async function fetchAntigravityUsage(
       },
       authMessage,
     );
-    const buckets = Array.isArray(quotas.buckets) ? quotas.buckets : [];
-    for (const raw of buckets) {
+    const groups = Array.isArray(summary.groups) ? summary.groups : [];
+    if (groups.length > 0) {
+      const windows: NonNullable<ProviderUsage["windows"]> = {};
+      for (const rawGroup of groups) {
+        const group = objectValue(rawGroup);
+        if (!group) continue;
+        const groupName = stringValue(group.displayName) ?? "";
+        const isGoogle = isGoogleModel(groupName) || /gemini|google/i.test(groupName);
+        const prefix = isGoogle ? "google" : "third-party";
+        const groupLabel = isGoogle ? "Google models" : "Third-party models";
+        const buckets = Array.isArray(group.buckets) ? group.buckets : [];
+        for (const rawBucket of buckets) {
+          const bucket = objectValue(rawBucket);
+          if (!bucket) continue;
+          const bucketWindow = stringValue(bucket.window)?.toLowerCase();
+          const bucketId = stringValue(bucket.bucketId)?.toLowerCase() ?? "";
+          const is5h = bucketWindow === "5h" || bucketId.includes("5h");
+          const isWeekly = bucketWindow === "weekly" || bucketId.includes("weekly");
+          const windowKey = is5h ? `${prefix}-5h` : isWeekly ? `${prefix}-weekly` : `${prefix}-${bucketId || "limit"}`;
+          const windowDuration = is5h ? 5 * 3600 : isWeekly ? 7 * 86400 : undefined;
+          const label = `${groupLabel} (${is5h ? "5h" : isWeekly ? "weekly" : bucketId})`;
+          const fraction = numberValue(bucket.remainingFraction);
+          const usedPercent = fraction === null ? null : Math.max(0, 100 - Math.round(fraction * 100));
+          const resetAt = timestampValue(bucket.resetTime);
+          windows[windowKey] = usageWindow({
+            label,
+            usedPercent,
+            ...(windowDuration ? { windowSeconds: windowDuration } : {}),
+            resetAt,
+          });
+        }
+      }
+      if (Object.keys(windows).length > 0) {
+        return { windows };
+      }
+    }
+    const summaryBuckets = Array.isArray(summary.buckets) ? summary.buckets : [];
+    for (const raw of summaryBuckets) {
       const bucket = objectValue(raw);
       const model = stringValue(bucket?.modelId);
       if (!model || model.startsWith("chat_") || model.startsWith("tab_")) continue;
@@ -196,7 +237,38 @@ async function fetchAntigravityUsage(
   } catch (err: unknown) {
     const status = (err as { status?: number })?.status;
     if (status === 401 || status === 403 || status === 429) throw err;
-    /* fetchAvailableModels remains useful */
+    /* fallback to retrieveUserQuota */
+  }
+
+  // 1. retrieveUserQuota: model-level quota buckets with reset times and remaining fractions
+  if (rawModels.size === 0) {
+    try {
+      const quotas = await safeJson(
+        runtime,
+        `${GOOGLE_PRIMARY}/v1internal:retrieveUserQuota`,
+        {
+          method: "POST",
+          headers,
+          body,
+          signal,
+        },
+        authMessage,
+      );
+      const buckets = Array.isArray(quotas.buckets) ? quotas.buckets : [];
+      for (const raw of buckets) {
+        const bucket = objectValue(raw);
+        const model = stringValue(bucket?.modelId);
+        if (!model || model.startsWith("chat_") || model.startsWith("tab_")) continue;
+        rawModels.set(model, {
+          remainingFraction: numberValue(bucket?.remainingFraction),
+          resetTime: stringValue(bucket?.resetTime),
+        });
+      }
+    } catch (err: unknown) {
+      const status = (err as { status?: number })?.status;
+      if (status === 401 || status === 403 || status === 429) throw err;
+      /* fetchAvailableModels remains useful */
+    }
   }
 
   // 2. fetchAvailableModels fallback / augmentation
@@ -238,11 +310,6 @@ async function fetchAntigravityUsage(
       resetTime: stringValue(quota?.resetTime),
     });
   }
-
-  const isGoogleModel = (modelId: string): boolean => {
-    const lower = modelId.toLowerCase();
-    return lower.startsWith("gemini") || lower.startsWith("gemma") || lower.includes("google");
-  };
 
   const aggregateTier = (rows: ModelQuotaRow[]): { remainingFraction: number | null; resetTime: string | null } => {
     let minFraction: number | null = null;

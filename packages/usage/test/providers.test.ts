@@ -67,6 +67,7 @@ test("registry exposes every dispatcher provider and skips unconfigured entries"
   assert.deepEqual(ids, [
     "antigravity",
     "claude",
+    "command-code",
     "codex",
     "cursor",
     "crof",
@@ -507,6 +508,94 @@ test("Antigravity collapses many identical model quotas into exactly 2 tiers: Go
     { id: "google-models", label: "Google models", used: 10 },
     { id: "third-party-models", label: "Third-party models", used: 25 },
   ]);
+});
+
+test("Antigravity maps 5-hour and weekly limits from retrieveUserQuotaSummary", async () => {
+  const now = 1_800_000_000_000;
+  const reset5h = new Date(now + 3 * 3600 * 1000).toISOString();
+  const resetWeekly = new Date(now + 5 * 86400 * 1000).toISOString();
+  const opts: QuotaDiscoveryOptions = {
+    readAuth: () => ({ antigravity: { access: "valid-token" } }),
+    env: {},
+    homedir: "/unused",
+    now: () => now,
+    readFile: () => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); },
+    fetchImpl: (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/v1internal:retrieveUserQuotaSummary")) {
+        return jsonResponse({
+          groups: [
+            {
+              displayName: "Gemini Models",
+              buckets: [
+                {
+                  bucketId: "gemini-5h",
+                  window: "5h",
+                  remainingFraction: 0.85,
+                  resetTime: reset5h,
+                },
+                {
+                  bucketId: "gemini-weekly",
+                  window: "weekly",
+                  remainingFraction: 0.70,
+                  resetTime: resetWeekly,
+                },
+              ],
+            },
+            {
+              displayName: "Claude and GPT models",
+              buckets: [
+                {
+                  bucketId: "3p-5h",
+                  window: "5h",
+                  remainingFraction: 0.90,
+                  resetTime: reset5h,
+                },
+                {
+                  bucketId: "3p-weekly",
+                  window: "weekly",
+                  remainingFraction: 0.50,
+                  resetTime: resetWeekly,
+                },
+              ],
+            },
+          ],
+        });
+      }
+      throw new Error(`unexpected url ${url}`);
+    }) as typeof fetch,
+  };
+
+  const agy = provider(discoverQuotaProviders(opts), "antigravity");
+  const snapshot = await agy.fetch(new AbortController().signal);
+  assert.equal(snapshot.windows.length, 4);
+  assert.deepEqual(snapshot.windows.map((w) => [w.id, w.used, w.limit, w.periodMs]), [
+    ["google-5h", 15, 100, 5 * 3600 * 1000],
+    ["google-weekly", 30, 100, 7 * 86400 * 1000],
+    ["third-party-5h", 10, 100, 5 * 3600 * 1000],
+    ["third-party-weekly", 50, 100, 7 * 86400 * 1000],
+  ]);
+});
+
+test("Codex gracefully handles plans without 5-hour limit and exposes plan name", async () => {
+  const codex = provider(discoverQuotaProviders({
+    readAuth: () => ({ openai: { access: "codex-secret" } }),
+    env: {},
+    homedir: "/unused",
+    readFile: () => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); },
+    fetchImpl: (async () => jsonResponse({
+      plan_type: "pro",
+      rate_limit: {
+        secondary_window: { used_percent: 25, limit_window_seconds: 604_800, reset_at: 1_900_604_800 },
+      },
+    })) as typeof fetch,
+  }), "codex");
+  const snapshot = await codex.fetch(new AbortController().signal);
+  assert.equal(snapshot.accountLabel, "Codex (pro)");
+  assert.equal(snapshot.windows.length, 1);
+  assert.equal(snapshot.windows[0]?.id, "7d");
+  assert.equal(snapshot.windows[0]?.used, 25);
+  assert.equal(snapshot.windows[0]?.limit, 100);
 });
 
 test("adapter failures and usage-service redaction never include secret values", async () => {

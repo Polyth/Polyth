@@ -26,6 +26,7 @@ import {
   setUsageDashboardPrefs,
   useUsagePrefs,
 } from "../usagePrefs.ts";
+import { isProviderHidden } from "../providerIdentity.ts";
 import ProviderLogo from "../../../models/widgets/ProviderLogo.tsx";
 import { fmtQuota, useQuotaSnapshots } from "./quotaUi.tsx";
 import {
@@ -880,24 +881,54 @@ function ProviderTable({
                 <td data-label={tr("usage.usagedashboard.tokens")}><strong>{fmtTokens(provider.tokens)}</strong><TrendBadge trend={provider.trends.tokens} compact /></td>
                 <td data-label={tr("usage.usagedashboard.sessions")}><strong>{provider.sessions.toLocaleString(getLocale())}</strong><TrendBadge trend={provider.trends.sessions} compact /></td>
                 <td data-label={tr("usage.usagedashboard.remainingLimit")}>
-                  {provider.remainingPercent === null ? (
-                    <span className="usage-limit-unavailable">{tr("usage.usagedashboard.notAvailable")}</span>
+                  {(!provider.snapshot?.windows || provider.snapshot.windows.length === 0) ? (
+                    provider.remainingPercent === null ? (
+                      <span className="usage-limit-unavailable">{tr("usage.usagedashboard.notAvailable")}</span>
+                    ) : (
+                      <div className="usage-limit-cell">
+                        <div><span>{provider.remainingPercent}%</span><small>{provider.quotaWindow?.label}</small></div>
+                        <span
+                          className="usage-limit-track"
+                          role="progressbar"
+                          aria-label={tr("usage.usagedashboard.valueQuotaRemaining", { label: provider.label })}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-valuenow={provider.remainingPercent}
+                        >
+                          <i
+                            className={provider.remainingPercent <= 20 ? "critical" : provider.remainingPercent <= 40 ? "warning" : ""}
+                            style={{ width: `${100 - provider.remainingPercent}%` }}
+                          />
+                        </span>
+                      </div>
+                    )
                   ) : (
-                    <div className="usage-limit-cell">
-                      <div><span>{provider.remainingPercent}%</span><small>{provider.quotaWindow?.label}</small></div>
-                      <span
-                        className="usage-limit-track"
-                        role="progressbar"
-                        aria-label={tr("usage.usagedashboard.valueQuotaRemaining", { label: provider.label })}
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        aria-valuenow={provider.remainingPercent}
-                      >
-                        <i
-                          className={provider.remainingPercent < 20 ? "critical" : provider.remainingPercent < 40 ? "warning" : ""}
-                          style={{ width: `${provider.remainingPercent}%` }}
-                        />
-                      </span>
+                    <div className="usage-limit-cells">
+                      {provider.snapshot.windows.map((win) => {
+                        const remFrac = win.limit > 0 ? Math.max(0, 1 - win.used / win.limit) : 1;
+                        const remPct = Math.round(remFrac * 100);
+                        const usedPct = Math.min(100, Math.max(0, 100 - remPct));
+                        const isCritical = remPct <= 20;
+                        const isWarn = remPct <= 40 && !isCritical;
+                        return (
+                          <div key={win.id} className="usage-limit-cell">
+                            <div><span>{remPct}%</span><small title={win.label}>{win.label}</small></div>
+                            <span
+                              className="usage-limit-track"
+                              role="progressbar"
+                              aria-label={`${provider.label} ${win.label}: ${remPct}% remaining`}
+                              aria-valuemin={0}
+                              aria-valuemax={100}
+                              aria-valuenow={remPct}
+                            >
+                              <i
+                                className={isCritical ? "critical" : isWarn ? "warning" : ""}
+                                style={{ width: `${usedPct}%` }}
+                              />
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </td>
@@ -973,7 +1004,7 @@ function ProviderDetails({
         onChange={onOrderChange}
         blocks={[...providers.map((provider, index) => {
           const preferenceId = providerPreferenceId(provider);
-          const hidden = hiddenProviders.includes(preferenceId);
+          const hidden = isProviderHidden(hiddenProviders, preferenceId);
           const pinned = pinnedProviders.includes(preferenceId);
           const costProfile = prefs.providerCosts[preferenceId] ?? { billing: "api" as const, monthlyCost: null };
           const accountLabel = provider.snapshot?.accountLabel?.trim();
@@ -1035,24 +1066,32 @@ function ProviderDetails({
               </div>
               <div className="usage-provider-windows">
                 {provider.snapshot?.windows.map((quota) => {
-                  const used = quota.limit > 0 ? Math.min(1, quota.used / quota.limit) : 0;
-                  const isWarn = used >= 0.8 && used < 0.95;
-                  const isCritical = used >= 0.95;
+                  const usedFrac = quota.limit > 0 ? Math.min(1, Math.max(0, quota.used / quota.limit)) : 0;
+                  const remFrac = quota.limit > 0 ? Math.max(0, 1 - quota.used / quota.limit) : 1;
+                  const remPercent = Math.round(remFrac * 100);
+                  const usedPercent = Math.min(100, Math.max(0, 100 - remPercent));
+                  const isCritical = remPercent <= 20;
+                  const isWarn = remPercent <= 40 && !isCritical;
                   return (
                     <div key={quota.id} className="usage-provider-window">
                       <div className="usage-provider-window-header">
                         <span className="usage-provider-window-title" title={quota.label}>{quota.label}</span>
-                        <strong className="usage-provider-window-val">{fmtQuota(quota.used, quota.unit)} <small>/ {fmtQuota(quota.limit, quota.unit)}</small></strong>
+                        <strong className="usage-provider-window-val">
+                          {`${remPercent}% remaining`}
+                          {quota.unit !== "percent" && quota.limit > 0 && (
+                            <small> ({fmtQuota(Math.max(0, quota.limit - quota.used), quota.unit)} left)</small>
+                          )}
+                        </strong>
                       </div>
                       <span
                         className="usage-provider-window-track"
                         role="progressbar"
-                        aria-label={tr("usage.usagedashboard.valueValueUsed", { label: provider.label, window: quota.label })}
+                        aria-label={`${provider.label} ${quota.label}: ${remPercent}% remaining`}
                         aria-valuemin={0}
                         aria-valuemax={100}
-                        aria-valuenow={Math.round(used * 100)}
+                        aria-valuenow={remPercent}
                       >
-                        <i className={isCritical ? "critical" : isWarn ? "warning" : ""} style={{ width: `${used * 100}%` }} />
+                        <i className={isCritical ? "critical" : isWarn ? "warning" : ""} style={{ width: `${usedPercent}%` }} />
                       </span>
                       <p className="usage-provider-window-reset">
                         {quota.resetsAt !== undefined ? formatQuotaReset(quota.resetsAt) : tr("usage.usagedashboard.liveQuotaUsage")}
@@ -1098,7 +1137,7 @@ function ProviderDetails({
             <section className="usage-provider-view-intro">
               <div><span>{tr("usage.usagedashboard.discovered")}</span><strong>{providers.length}</strong></div>
               <div><span>{tr("usage.usagedashboard.freshFeeds")}</span><strong>{providers.filter((provider) => provider.snapshot && !provider.stale).length}</strong></div>
-              <div><span>{tr("usage.usagedashboard.visible")}</span><strong>{providers.filter((provider) => !hiddenProviders.includes(providerPreferenceId(provider))).length}</strong></div>
+              <div><span>{tr("usage.usagedashboard.visible")}</span><strong>{providers.filter((provider) => !isProviderHidden(hiddenProviders, providerPreferenceId(provider))).length}</strong></div>
               <Button size="sm" variant="primary" iconStart={AddIcon} onClick={onAddProvider}>{tr("usage.usagedashboard.addProvider")}</Button>
             </section>
           ),
@@ -1144,7 +1183,7 @@ export function UsageDashboard(): ReactNode {
     [projectSessions, rangeDays, snapshots],
   );
   const visibleProviders = data.providers.filter(
-    (provider) => !prefs.hiddenProviders.includes(providerPreferenceId(provider)),
+    (provider) => !isProviderHidden(prefs.hiddenProviders, providerPreferenceId(provider)),
   );
   const orderedVisibleProviders = orderPinnedUsageBlocks(
     visibleProviders,

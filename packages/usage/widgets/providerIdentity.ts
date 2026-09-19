@@ -36,6 +36,22 @@ export function resolveSessionUsageProviderId(session: SessionProjection): strin
   return undefined;
 }
 
+/** Stable preference key for per-provider Usage choices (visibility, pinning,
+ *  billing). Canonicalizes aliases so a hide applied on one Usage surface
+ *  (dashboard provider card) applies on every other surface (usage widgets). */
+export function providerPreferenceKey(providerId: string): string {
+  const trimmed = providerId.trim();
+  return canonicalProviderId(trimmed) || trimmed;
+}
+
+/** Whether a provider is hidden from Usage, comparing canonical keys on both
+ *  sides so alias spellings stored by older builds keep working. */
+export function isProviderHidden(hiddenProviders: readonly string[], providerId: string): boolean {
+  const key = providerPreferenceKey(providerId);
+  if (!key) return false;
+  return hiddenProviders.some((hidden) => providerPreferenceKey(hidden) === key);
+}
+
 export function displayProvider(providerId: string): string {
   if (isPlaceholderProviderId(providerId)) return "";
   const normalized = providerId.trim().toLowerCase();

@@ -15,12 +15,14 @@ import {
   QuotaOverviewGrid,
   quotaSnapshotStats,
   useQuotaSnapshots,
+  visibleQuotaSnapshots,
 } from "./usage/quotaUi.tsx";
 import ProviderLogo from "../../models/widgets/ProviderLogo.tsx";
 import {
   setProviderHidden,
   useUsagePrefs,
 } from "./usagePrefs.ts";
+import { isProviderHidden } from "./providerIdentity.ts";
 import {
   defineWidgetPlugin,
   registerWidgetPlugin,
@@ -141,7 +143,7 @@ function SessionUsageWidget({ config }: WidgetRenderContext) {
 function ProviderQuotasWidget() {
   const { snapshots, refresh, loading, error } = useQuotaSnapshots();
   const prefs = useUsagePrefs();
-  const visible = snapshots.filter((snapshot) => !prefs.hiddenProviders.includes(snapshot.providerId));
+  const visible = visibleQuotaSnapshots(snapshots, prefs.hiddenProviders);
   if (loading && snapshots.length === 0) {
     return <EmptyState variant="compact" title="Loading provider quotas…" />;
   }
@@ -160,7 +162,7 @@ function ProviderQuotasWidget() {
             <Checkbox
               key={snapshot.providerId}
               className="plugin-toggle"
-              checked={!prefs.hiddenProviders.includes(snapshot.providerId)}
+              checked={!isProviderHidden(prefs.hiddenProviders, snapshot.providerId)}
               onChange={(checked) => setProviderHidden(snapshot.providerId, !checked)}
               label={<><ProviderLogo providerID={snapshot.providerId} className="quota-provider-logo" />{snapshot.providerId}</>}
             />
@@ -241,7 +243,7 @@ function SessionsTableWidget({ projectId }: { projectId: string | null }) {
 function QuotaSummaryWidget() {
   const { snapshots, loading, error } = useQuotaSnapshots();
   const prefs = useUsagePrefs();
-  const visible = snapshots.filter((snapshot) => !prefs.hiddenProviders.includes(snapshot.providerId));
+  const visible = visibleQuotaSnapshots(snapshots, prefs.hiddenProviders);
   const stats = quotaSnapshotStats(visible);
   if (loading && snapshots.length === 0) return <div className="widget-empty" role="status">{tr("widgets.usageplugin.loadingQuotaSummary")}</div>;
   if (error && snapshots.length === 0) return <div className="widget-empty" role="alert">{tr("widgets.usageplugin.quotaSummaryIsUnavailable")} {error}</div>;

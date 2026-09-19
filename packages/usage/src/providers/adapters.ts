@@ -127,8 +127,15 @@ const createCodex = (runtime: QuotaRuntime): DiscoverableProvider => {
       const window = objectValue(raw);
       if (!window) continue;
       const seconds = numberValue(window.limit_window_seconds);
-      windows[windowLabel(seconds)] = usageWindow({
-        usedPercent: numberValue(window.used_percent),
+      const usedPercent = numberValue(window.used_percent);
+      if (usedPercent === null && seconds === null) continue;
+      const key = windowLabel(seconds);
+      const is5h = seconds === 5 * 3600;
+      const isWeekly = seconds === 7 * 86400;
+      const label = is5h ? "5h limit" : isWeekly ? "Weekly limit" : undefined;
+      windows[key] = usageWindow({
+        ...(label ? { label } : {}),
+        usedPercent,
         windowSeconds: seconds,
         resetAt: timestampValue(window.reset_at),
       });
@@ -148,7 +155,8 @@ const createCodex = (runtime: QuotaRuntime): DiscoverableProvider => {
     if (spent !== null && limit !== null) {
       windows.credits = usageWindow({ used: spent, limit, unit: "currency" });
     }
-    return { usage: { windows } };
+    const plan = stringValue(payload.plan_type) ?? stringValue(payload.account_plan);
+    return { usage: { windows }, ...(plan ? { accountLabel: `Codex (${plan})` } : {}) };
   });
 };
 
@@ -644,11 +652,22 @@ const createOpenCodeGo = (runtime: QuotaRuntime): DiscoverableProvider => {
     });
     const usage = objectValue(payload.usage);
     const windows: Record<string, ProviderUsageWindow> = {};
-    for (const [label, field] of [["5h", "rolling"], ["weekly", "weekly"], ["monthly", "monthly"]] as const) {
+    for (const [label, field, seconds, title] of [
+      ["5h", "rolling", 5 * 3600, "5h limit"],
+      ["weekly", "weekly", 7 * 86400, "Weekly limit"],
+      ["monthly", "monthly", 30 * 86400, "Monthly limit"],
+    ] as const) {
       const value = objectValue(usage?.[field]);
       const percent = clampPercent(value?.percent);
       const resetAt = timestampValue(value?.resetsAt);
-      if (percent !== null && resetAt !== null) windows[label] = usageWindow({ usedPercent: percent, resetAt });
+      if (percent !== null && resetAt !== null) {
+        windows[label] = usageWindow({
+          label: title,
+          usedPercent: percent,
+          windowSeconds: seconds,
+          resetAt,
+        });
+      }
     }
     return { usage: { windows } };
   });

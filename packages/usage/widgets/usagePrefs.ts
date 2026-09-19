@@ -4,6 +4,7 @@
 // telemetry display choices and never touch the event log or the server.
 import { useSyncExternalStore } from "react";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import { providerPreferenceKey } from "./providerIdentity.ts";
 
 // ---- model-family grouping (pure) ------------------------------------------
 
@@ -214,7 +215,9 @@ const toggled = (list: string[], entry: string, on: boolean): string[] =>
   on ? (list.includes(entry) ? list : [...list, entry].slice(-MAX_ENTRIES)) : list.filter((e) => e !== entry);
 
 export function setProviderHidden(providerId: string, hidden: boolean): void {
-  save({ ...prefs, hiddenProviders: toggled(prefs.hiddenProviders, providerId, hidden) });
+  // Store the canonical key so a hide toggled on one surface is honored by
+  // every other Usage surface regardless of provider-id alias.
+  save({ ...prefs, hiddenProviders: toggled(prefs.hiddenProviders, providerPreferenceKey(providerId), hidden) });
 }
 
 export function setBlockHidden(blockId: string, hidden: boolean): void {

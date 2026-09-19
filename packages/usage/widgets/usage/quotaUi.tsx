@@ -11,7 +11,7 @@ import {
   setGroupCollapsed,
   useUsagePrefs,
 } from "../usagePrefs.ts";
-import { displayProvider } from "../providerIdentity.ts";
+import { displayProvider, isProviderHidden } from "../providerIdentity.ts";
 import ProviderLogo from "../../../models/widgets/ProviderLogo.tsx";
 import { formatNumber, getLocale, tr } from "../../../../apps/web/src/i18n/index.ts";
 import { Button, RefreshIcon } from "../../../../apps/web/src/components/ui/index.ts";
@@ -38,27 +38,34 @@ export function QuotaWindowRow({
   w: QuotaWindowDto;
   pace: QuotaPaceDto | null;
 }) {
-  const frac = w.limit > 0 ? Math.min(1, w.used / w.limit) : 0;
+  const frac = w.limit > 0 ? Math.min(1, Math.max(0, w.used / w.limit)) : 0;
+  const remFrac = w.limit > 0 ? Math.max(0, 1 - w.used / w.limit) : 1;
+  const remPercent = Math.round(remFrac * 100);
+  const usedPercent = Math.min(100, Math.max(0, 100 - remPercent));
   const label = quotaWindowLabel(w);
-  const isWarn = frac >= 0.8 && frac < 0.95;
-  const isCritical = frac >= 0.95;
+  const isCritical = remPercent <= 20;
+  const isWarn = remPercent <= 40 && !isCritical;
   return (
     <div className="quota-window">
       <div className="quota-window-head">
         <span className="quota-window-name">{label}</span>
-        <span className="mono quota-window-val">{fmtQuota(w.used, w.unit)} / {fmtQuota(w.limit, w.unit)}</span>
+        <span className="mono quota-window-val">
+          {w.unit === "percent"
+            ? `${remPercent}% remaining`
+            : `${remPercent}% remaining (${fmtQuota(Math.max(0, w.limit - w.used), w.unit)} left)`}
+        </span>
       </div>
       <div
         className="quota-progress"
         role="progressbar"
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuenow={Math.round(frac * 100)}
-        aria-label={label}
+        aria-valuenow={remPercent}
+        aria-label={`${label}: ${remPercent}% remaining`}
       >
         <div
           className={`quota-progress-fill ${pace?.pace ?? ""}${isCritical ? " critical" : isWarn ? " warn" : ""}`}
-          style={{ width: `${frac * 100}%` }}
+          style={{ width: `${usedPercent}%` }}
         />
       </div>
       {(w.resetsAt !== undefined || (pace && pace.pace !== "on-track")) && (
@@ -97,8 +104,9 @@ export function ProviderQuotaChart({ snap }: { snap: QuotaSnapshotDto }) {
         <line x1="0" x2={width} y1={height * .8} y2={height * .8} />
         {windows.map((window, index) => {
           const usedHeight = Math.max(2, window.usedFraction * height);
-          const isWarn = window.usedFraction >= 0.8 && window.usedFraction < 0.95;
-          const isCritical = window.usedFraction >= 0.95;
+          const remPercent = Math.round(window.remainingFraction * 100);
+          const isCritical = remPercent <= 20;
+          const isWarn = remPercent <= 40 && !isCritical;
           return (
             <rect
               key={window.id}
@@ -109,21 +117,34 @@ export function ProviderQuotaChart({ snap }: { snap: QuotaSnapshotDto }) {
               rx="4"
               className={isCritical ? "critical" : isWarn ? "warn" : ""}
             >
-              <title>{`${quotaWindowLabel(window)}: ${formatNumber(Math.round(window.usedFraction * 100))}%`}</title>
+              <title>{`${quotaWindowLabel(window)}: ${formatNumber(remPercent)}% remaining`}</title>
             </rect>
           );
         })}
       </svg>
       <div className="provider-quota-chart-labels">
-        {windows.map((window) => (
-          <span key={window.id} title={quotaWindowLabel(window)}>
-            <small>{quotaWindowLabel(window)}</small>
-            <strong>{formatNumber(Math.round(window.usedFraction * 100))}%</strong>
-          </span>
-        ))}
+        {windows.map((window) => {
+          const remPercent = Math.round(window.remainingFraction * 100);
+          return (
+            <span key={window.id} title={quotaWindowLabel(window)}>
+              <small>{quotaWindowLabel(window)}</small>
+              <strong>{formatNumber(remPercent)}%</strong>
+            </span>
+          );
+        })}
       </div>
     </div>
   );
+}
+
+/** Quota snapshots whose provider is not hidden. Provider ids are compared by
+ *  canonical preference key so the dashboard provider card and the usage
+ *  widgets agree on visibility (claude ↔ anthropic, codex ↔ openai). */
+export function visibleQuotaSnapshots(
+  snapshots: readonly QuotaSnapshotDto[],
+  hiddenProviders: readonly string[],
+): QuotaSnapshotDto[] {
+  return snapshots.filter((snapshot) => !isProviderHidden(hiddenProviders, snapshot.providerId));
 }
 
 export function QuotaCard({
