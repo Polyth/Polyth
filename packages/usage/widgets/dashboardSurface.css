@@ -138,7 +138,7 @@
   border: 1px solid color-mix(in srgb, var(--material-glass-border) 58%, transparent);
   border-radius: var(--radius-card);
   background: var(--material-glass-medium);
-  box-shadow: var(--material-glass-highlight), var(--shadow-xs);
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
 }
 
 .usage-provider-toggle {
@@ -237,7 +237,7 @@
 
 .usage-provider-headline > strong {
   color: var(--text);
-  font: 720 var(--font-title-sm)/1 var(--mono);
+  font: 720 var(--font-heading)/1 var(--mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -432,7 +432,7 @@
 }
 
 .usage-summary-strip .usage-kpi > strong {
-  font-size: var(--font-title-sm);
+  font-size: var(--font-heading);
 }
 
 .usage-analytic-card {
@@ -704,7 +704,7 @@
   }
 
   .usage-provider-headline > strong {
-    font-size: var(--font-title-sm);
+    font-size: var(--font-heading);
   }
 
   .usage-provider-metrics .usage-kpi {
