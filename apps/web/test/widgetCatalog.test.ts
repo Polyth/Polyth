@@ -98,6 +98,7 @@ test("Usage plugin owns all package-declared usage widgets", () => {
     [
       "usage.breakdown",
       "usage.cache-efficiency",
+      "usage.context-growth",
       "usage.model-efficiency",
       "usage.performance",
       "usage.project",
@@ -112,8 +113,8 @@ test("Usage plugin owns all package-declared usage widgets", () => {
       "usage.throughput",
       "usage.ttft",
       "usage.turn",
-      "usage.what-changed"
-],
+      "usage.what-changed",
+    ],
   );
   assert.ok(widgets.every((widget) => widget.category === "Usage"));
   assert.ok(widgets.every((widget) => typeof widget.render === "function"));
