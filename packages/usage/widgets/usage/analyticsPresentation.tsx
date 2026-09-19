@@ -891,7 +891,7 @@ export function UsageQuotasBlock({
       stale: snapshot.stale,
       ratio: window.limit > 0 ? Math.max(0, window.used / window.limit) : 0,
     })))
-    .sort((left, right) => right.ratio - left.ratio || left.window.resetsAt - right.window.resetsAt), [snapshots]);
+    .sort((left, right) => right.ratio - left.ratio || (left.window.resetsAt ?? Number.POSITIVE_INFINITY) - (right.window.resetsAt ?? Number.POSITIVE_INFINITY)), [snapshots]);
   const visible = showAllWindows
     ? rows
     : rows.filter((row, index, all) =>
@@ -913,7 +913,7 @@ export function UsageQuotasBlock({
               <strong className={row.ratio >= warningThreshold ? "warn" : undefined}>
                 {percent(row.ratio)}
               </strong>
-              <span className="usage-quota-reset">{quotaReset(row.window.resetsAt)}</span>
+              <span className="usage-quota-reset">{row.window.resetsAt === undefined ? "—" : quotaReset(row.window.resetsAt)}</span>
             </div>
           ))}
         </div>
