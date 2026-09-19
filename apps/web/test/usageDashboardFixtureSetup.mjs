@@ -74,6 +74,7 @@ git("commit", "-m", "chore: seed usage audit fixture");
 const seedTime = Date.now();
 writeFileSync(join(fixtureData, "projects.json"), JSON.stringify([{
   id: projectId,
+  spaceId: "spc_personal",
   path: fixtureRoot,
   name: "Usage Analytics Audit",
   createdAt: seedTime,
