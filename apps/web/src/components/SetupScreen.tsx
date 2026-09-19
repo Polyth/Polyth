@@ -62,7 +62,7 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
     setBusy(true); setError("");
     try {
       const result = await authJson("/api/auth/setup/complete", {
-        claimToken: claimToken.trim().toLowerCase(),
+        ...(!isDesktop ? { claimToken: claimToken.trim().toLowerCase() } : {}),
         name: name.trim(),
         organizationName: organizationName.trim(),
         login: login.trim().toLowerCase(),
@@ -71,13 +71,18 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
         recoveryAcknowledged: true,
       });
       if (!result.response.ok) throw new Error(errorMessage(result.body, result.response.status));
+      try { localStorage.setItem("polyth.lastLogin", login.trim().toLowerCase()); } catch { /* private mode */ }
+      setPassword(""); setConfirmPassword("");
+      if (isDesktop) {
+        setComplete(true);
+        return;
+      }
       const meResponse = await fetch("/api/auth/me", { cache: "no-store" });
       const me = await meResponse.json().catch(() => ({})) as { id?: unknown };
       if (meResponse.ok && typeof me.id === "string" && me.id.trim()) {
         acceptAuthenticatedBrowserAccount(me.id);
       }
-      try { localStorage.setItem("polyth.lastLogin", login.trim().toLowerCase()); } catch { /* private mode */ }
-      setPassword(""); setConfirmPassword(""); setComplete(true);
+      setComplete(true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally { setBusy(false); }
@@ -87,10 +92,16 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
     <div className="lock-screen">
       <div className="lock-card">
         <img className="welcome-mark" src="/icon-192.png" alt="" aria-hidden="true" />
-        <h1>Polyth is ready</h1>
+        <h1>{isDesktop ? "Starting Polyth" : "Polyth is ready"}</h1>
         <p className="lock-hint">The canonical owner account and recovery credentials are committed.</p>
-        <p className="lock-hint">Restart the Polyth server once to start the full workspace runtime.</p>
-        <Button variant="primary" onClick={() => location.reload()}>Check after restart</Button>
+        {isDesktop ? (
+          <p className="lock-hint">Your workspace is starting automatically…</p>
+        ) : (
+          <>
+            <p className="lock-hint">Restart the Polyth server once to start the full workspace runtime.</p>
+            <Button variant="primary" onClick={() => location.reload()}>Check after restart</Button>
+          </>
+        )}
       </div>
     </div>
   );
