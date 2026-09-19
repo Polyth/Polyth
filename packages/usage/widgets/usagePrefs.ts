@@ -94,6 +94,15 @@ export interface UsageProviderCostProfile {
   monthlyCost: number | null;
   /** Optional API budget in USD/month. */
   monthlyBudget: number | null;
+  /** Optional default USD / 1M token pricing used for calculated equivalents. */
+  inputPerMillion: number | null;
+  outputPerMillion: number | null;
+}
+
+export interface UsageModelPricingProfile {
+  /** USD / 1M tokens. Null leaves the recorded/catalog-derived value untouched. */
+  inputPerMillion: number | null;
+  outputPerMillion: number | null;
 }
 
 export interface UsageCustomRange {
@@ -132,6 +141,8 @@ export interface UsagePrefs {
   pinnedProviders: string[];
   collapsedGroups: string[];
   providerCosts: Record<string, UsageProviderCostProfile>;
+  /** Model key is the canonical provider/model identity used by Usage composition. */
+  modelPricing: Record<string, UsageModelPricingProfile>;
   dashboard: UsageDashboardPrefs;
 }
 
@@ -176,6 +187,11 @@ const finiteMoney = (value: unknown): number | null =>
     ? Math.round(value * 100) / 100
     : null;
 
+const finiteRate = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.round(value * 1_000_000) / 1_000_000
+    : null;
+
 const validDateOnly = (value: unknown): string | null =>
   typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
 
@@ -193,8 +209,29 @@ const providerCostProfiles = (value: unknown): Record<string, UsageProviderCostP
           billing: profile.billing === "subscription" ? "subscription" : "api",
           monthlyCost: finiteMoney(profile.monthlyCost),
           monthlyBudget: finiteMoney(profile.monthlyBudget),
+          inputPerMillion: finiteRate(profile.inputPerMillion),
+          outputPerMillion: finiteRate(profile.outputPerMillion),
         } satisfies UsageProviderCostProfile] as const;
       }),
+  );
+};
+
+const modelPricingProfiles = (value: unknown): Record<string, UsageModelPricingProfile> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([modelKey]) => modelKey.trim() !== "")
+      .slice(0, MAX_ENTRIES * 4)
+      .map(([modelKey, rawProfile]) => {
+        const profile = rawProfile && typeof rawProfile === "object"
+          ? rawProfile as Partial<UsageModelPricingProfile>
+          : {};
+        return [modelKey, {
+          inputPerMillion: finiteRate(profile.inputPerMillion),
+          outputPerMillion: finiteRate(profile.outputPerMillion),
+        } satisfies UsageModelPricingProfile] as const;
+      })
+      .filter(([, profile]) => profile.inputPerMillion !== null || profile.outputPerMillion !== null),
   );
 };
 
@@ -219,6 +256,7 @@ export function parseUsagePrefs(raw: string | null): UsagePrefs {
       pinnedProviders: stringList(data.pinnedProviders),
       collapsedGroups: stringList(data.collapsedGroups),
       providerCosts: providerCostProfiles(data.providerCosts),
+      modelPricing: modelPricingProfiles(data.modelPricing),
       dashboard: {
         view: dashboard?.view === "overview" ? "overview" : "providers",
         layout: dashboard?.layout === "comfortable" || dashboard?.layout === "expanded"
@@ -253,6 +291,7 @@ export function parseUsagePrefs(raw: string | null): UsagePrefs {
       pinnedProviders: [],
       collapsedGroups: [],
       providerCosts: {},
+      modelPricing: {},
       dashboard: { ...DEFAULT_DASHBOARD_PREFS, cardMetrics: [...ALL_CARD_METRICS] },
     };
   }
@@ -316,7 +355,13 @@ export function setGroupCollapsed(key: string, collapsed: boolean): void {
 }
 
 export function setProviderCostProfile(providerId: string, patch: Partial<UsageProviderCostProfile>): void {
-  const current = prefs.providerCosts[providerId] ?? { billing: "api", monthlyCost: null, monthlyBudget: null };
+  const current = prefs.providerCosts[providerId] ?? {
+    billing: "api",
+    monthlyCost: null,
+    monthlyBudget: null,
+    inputPerMillion: null,
+    outputPerMillion: null,
+  };
   const next: UsageProviderCostProfile = {
     billing: patch.billing === "subscription"
       ? "subscription"
@@ -325,8 +370,22 @@ export function setProviderCostProfile(providerId: string, patch: Partial<UsageP
         : current.billing,
     monthlyCost: patch.monthlyCost === undefined ? current.monthlyCost : finiteMoney(patch.monthlyCost),
     monthlyBudget: patch.monthlyBudget === undefined ? current.monthlyBudget : finiteMoney(patch.monthlyBudget),
+    inputPerMillion: patch.inputPerMillion === undefined ? current.inputPerMillion : finiteRate(patch.inputPerMillion),
+    outputPerMillion: patch.outputPerMillion === undefined ? current.outputPerMillion : finiteRate(patch.outputPerMillion),
   };
   commit({ ...prefs, providerCosts: { ...prefs.providerCosts, [providerId]: next } });
+}
+
+export function setModelPricingProfile(modelKey: string, patch: Partial<UsageModelPricingProfile>): void {
+  const current = prefs.modelPricing[modelKey] ?? { inputPerMillion: null, outputPerMillion: null };
+  const next: UsageModelPricingProfile = {
+    inputPerMillion: patch.inputPerMillion === undefined ? current.inputPerMillion : finiteRate(patch.inputPerMillion),
+    outputPerMillion: patch.outputPerMillion === undefined ? current.outputPerMillion : finiteRate(patch.outputPerMillion),
+  };
+  const modelPricing = { ...prefs.modelPricing };
+  if (next.inputPerMillion === null && next.outputPerMillion === null) delete modelPricing[modelKey];
+  else modelPricing[modelKey] = next;
+  commit({ ...prefs, modelPricing });
 }
 
 export function setUsageDashboardPrefs(patch: Partial<UsageDashboardPrefs>): void {
