@@ -66,6 +66,8 @@ test("manual desktop workflow builds Windows, Linux and macOS artifacts without 
     "release/*.dmg",
     "release/*.zip",
     "npx playwright-core install chromium",
+    "${{ runner.temp }}/playwright-mac-x64",
+    "${{ runner.temp }}/playwright-mac-arm64",
     "npm run build:desktop",
     "npm run desktop:stage-chromium",
     "npm run desktop:download-opencode",
