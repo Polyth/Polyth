@@ -4,7 +4,7 @@ import test from "node:test";
 
 const read = (path: string): string => readFileSync(path, "utf8");
 
-test("release quality contract covers stable and Polyth Link tests", () => {
+test("repository quality contract covers stable and Polyth Link tests", () => {
   const script = read("scripts/ci/release-quality.mjs");
   assert.match(script, /select-tests\.mjs", "ci"/);
   assert.match(script, /select-tests\.mjs", "polyth-link"/);
@@ -27,15 +27,21 @@ test("release quality contract covers stable and Polyth Link tests", () => {
   }
 });
 
-test("Android and desktop publication jobs require reusable release quality gate", () => {
-  const android = read(".github/workflows/android-release.yml");
-  assert.match(android, /quality-gate:\n\s+uses: \.\/\.github\/workflows\/release-quality\.yml/);
-  assert.match(android, /release:\n\s+needs: quality-gate/);
-  assert.match(android, /java-version: "21"/);
+test("master CI is automatic while application packaging is manual and unpublished", () => {
+  const ci = read(".github/workflows/ci.yml");
+  assert.match(ci, /pull_request:/);
+  assert.match(ci, /push:\n\s+branches:\n\s+- master/);
+  assert.match(ci, /node scripts\/ci\/release-quality\.mjs/);
 
-  const native = read(".github/workflows/polyth-link-native.yml");
-  assert.match(native, /java-version: "21"/);
-  assert.match(native, /:app:assembleDebug :app:assembleAndroidTest/);
+  const builds = read(".github/workflows/build-apps.yml");
+  assert.match(builds, /workflow_dispatch:/);
+  assert.doesNotMatch(builds, /^\s*push:/m);
+  assert.match(builds, /java-version: "21"/);
+  assert.match(builds, /:app:assembleDebug/);
+  assert.match(builds, /CODE_SIGNING_ALLOWED=NO/);
+  assert.match(builds, /--win nsis --x64 --publish never/);
+  assert.match(builds, /--linux AppImage --x64 --publish never/);
+  assert.doesNotMatch(builds, /--publish always/);
 
   const appGradle = read("apps/mobile/android/app/build.gradle");
   const capacitorGradle = read("apps/mobile/android/app/capacitor.build.gradle");
@@ -43,13 +49,6 @@ test("Android and desktop publication jobs require reusable release quality gate
   assert.match(appGradle, /targetCompatibility JavaVersion\.VERSION_21/);
   assert.match(capacitorGradle, /sourceCompatibility JavaVersion\.VERSION_21/);
   assert.match(capacitorGradle, /targetCompatibility JavaVersion\.VERSION_21/);
-
-  const desktop = read(".github/workflows/desktop-release.yml");
-  assert.match(desktop, /quality-gate:\n\s+uses: \.\/\.github\/workflows\/release-quality\.yml/);
-  assert.match(desktop, /package:\n[\s\S]*?needs: \[quality-gate, plan\]/);
-
-  const reusable = read(".github/workflows/release-quality.yml");
-  assert.match(reusable, /node scripts\/ci\/release-quality\.mjs/);
 });
 
 test("TestFlight runs release quality gate before signing and uses pinned Xcode", () => {
