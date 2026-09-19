@@ -93,6 +93,7 @@ export async function boot(opts: BootOptions = {}) {
     dataDir,
     origin,
     localOnly: publicOrigin === "",
+    ...(debugAgentAccess ? { debugAgentAccess: true } : {}),
   });
 
   if (preflight.kind === "existing" && preflight.state === "ready") {
