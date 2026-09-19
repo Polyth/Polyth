@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import "./AgentStatusDock.css";
 
 export interface AgentStatusDockProps {
@@ -16,7 +16,7 @@ export interface AgentStatusDockProps {
   diffLabel?: string;
   /** Opens active-run details when present. Without it the dock is a passive,
    * live status surface (used while a new agent is being spawned). */
-  onClick?: () => void;
+  onClick?: (event: MouseEvent<HTMLButtonElement>) => void;
 }
 
 export default function AgentStatusDock({

@@ -363,7 +363,7 @@ test("timeline vertical runway is represented by flex spacers instead of scroll-
   const rules = [...css.matchAll(/([^{}]*\.timeline(?![-\\w])[^{}]*)\{([^{}]*)\}/g)];
   assert.ok(rules.length > 0);
   for (const [, selector, body] of rules) {
-    assert.doesNotMatch(body, /(?:^|;)\s*padding-(?:block|top|bottom)\s*:/, String(selector));
-    assert.doesNotMatch(body, /(?:^|;)\s*padding\s*:/, String(selector));
+    assert.doesNotMatch(String(body), /(?:^|;)\s*padding-(?:block|top|bottom)\s*:/, String(selector));
+    assert.doesNotMatch(String(body), /(?:^|;)\s*padding\s*:/, String(selector));
   }
 });

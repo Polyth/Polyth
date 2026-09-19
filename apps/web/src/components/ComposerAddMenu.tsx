@@ -82,15 +82,16 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
   useSyncExternalStore(subscribeSlots, slotVersion, slotVersion);
 
   const providers: ExtensionProvider[] = listSlots("composer.leading").flatMap((entry) => {
-    const kind = entry.meta.contributionKind;
+    const meta = entry.meta ?? {};
+    const kind = meta.contributionKind;
     if (kind !== "attachment-provider" && kind !== "context-provider") return [];
-    const id = typeof entry.meta.contributionId === "string" ? entry.meta.contributionId : "";
+    const id = typeof meta.contributionId === "string" ? meta.contributionId : "";
     if (!id) return [];
     return [{
       id,
-      label: typeof entry.meta.label === "string" ? entry.meta.label : id,
-      ...(typeof entry.meta.description === "string" && entry.meta.description ? { description: entry.meta.description } : {}),
-      ...(typeof entry.meta.pluginName === "string" ? { pluginName: entry.meta.pluginName } : {}),
+      label: typeof meta.label === "string" ? meta.label : id,
+      ...(typeof meta.description === "string" && meta.description ? { description: meta.description } : {}),
+      ...(typeof meta.pluginName === "string" ? { pluginName: meta.pluginName } : {}),
     }];
   });
   const activeProvider = providers.find((provider) => provider.id === providerOpen) ?? null;

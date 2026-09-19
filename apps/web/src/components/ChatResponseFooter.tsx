@@ -222,17 +222,22 @@ export default function ChatResponseFooter({
             onClick={() => setMetadataOpen((open) => !open)}
           />
         </span>
-        {prefs.responseActions.map((id) => (
-          <ChatActionButton
-            key={id}
-            icon={RESPONSE_ACTION_ICON[id]}
-            label={actionLabel(id)}
-            pressed={id === "pin" ? pinned : undefined}
-            busy={id === "pin" && pinBusy}
-            disabled={actionDisabled(id)}
-            onClick={() => runAction(id)}
-          />
-        ))}
+        {prefs.responseActions.map((id) => {
+          const icon = RESPONSE_ACTION_ICON[id];
+          // A preference can name an action this build no longer ships.
+          if (!icon) return null;
+          return (
+            <ChatActionButton
+              key={id}
+              icon={icon}
+              label={actionLabel(id)}
+              pressed={id === "pin" ? pinned : undefined}
+              busy={id === "pin" && pinBusy}
+              disabled={actionDisabled(id)}
+              onClick={() => runAction(id)}
+            />
+          );
+        })}
         {regeneratePrompt && (
           <ChatActionButton
             icon={RefreshIcon}

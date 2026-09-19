@@ -13,7 +13,7 @@ const read = async (relative: string): Promise<string> => {
 const CHROME = await findChromiumExecutable();
 
 let browser: Browser | null = null;
-let page: Page | null = null;
+let page = null as Page | null;
 
 before(async () => {
   if (!CHROME) return;
@@ -748,7 +748,11 @@ test("standalone isolation switch shares the context row without entering the wo
       <div class="session-context-bar" id="bar" style="width:${barWidth}px">
         ${selector("project", "Polyth")}${selector("branch", "feature/a-rather-long-branch-name")}${isolation}
       </div>`);
-    const geometry = await page.evaluate(() => {
+    const geometry: {
+      bar: number; scroll: number; project: number; branch: number;
+      control: number; controlRight: number; barRight: number;
+      background: string; trackBackground: string;
+    } = await page.evaluate(() => {
       const bar = document.querySelector<HTMLElement>("#bar")!;
       const project = document.querySelector<HTMLElement>(".context-selector-project")!;
       const branch = document.querySelector<HTMLElement>(".context-selector-branch")!;

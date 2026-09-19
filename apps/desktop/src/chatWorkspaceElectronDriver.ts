@@ -58,8 +58,11 @@ const installProviderActionIpc = (): void => {
 };
 installProviderActionIpc();
 
-const modifiers = (items: Array<"Alt" | "Control" | "Meta" | "Shift"> | undefined): string[] =>
-  (items ?? []).map((item) => item.toLowerCase());
+const MODIFIER_NAMES = { Alt: "alt", Control: "control", Meta: "meta", Shift: "shift" } as const;
+const modifiers = (
+  items: Array<"Alt" | "Control" | "Meta" | "Shift"> | undefined,
+): Array<(typeof MODIFIER_NAMES)[keyof typeof MODIFIER_NAMES]> =>
+  (items ?? []).map((item) => MODIFIER_NAMES[item]);
 
 const policyUrl = (raw: string): string => {
   try {
@@ -152,6 +155,15 @@ export function createChatWorkspaceElectronProfileDriver(): ProfileDriver {
   };
 }
 
+interface ElectronProfilePageInput {
+  tabId: string;
+  session: Session;
+  profileOptions: ProfileDriverOpenOptions;
+  onWebContents(contents: WebContents): void;
+  onWebContentsGone(contents: WebContents): void;
+  onClose(): void;
+}
+
 class ElectronProfilePage implements ProfilePage {
   readonly tabId: string;
   readonly contentAccess = MANUAL_ONLY_POLICY;
@@ -167,15 +179,10 @@ class ElectronProfilePage implements ProfilePage {
   private readonly eventListeners = new Set<(event: ProfilePageEvent) => void>();
   private readonly frameListeners = new Set<(frame: ScreencastFrame) => void>();
   private readonly popups = new Map<string, BrowserWindow>();
+  private readonly input: ElectronProfilePageInput;
 
-  constructor(private readonly input: {
-    tabId: string;
-    session: Session;
-    profileOptions: ProfileDriverOpenOptions;
-    onWebContents(contents: WebContents): void;
-    onWebContentsGone(contents: WebContents): void;
-    onClose(): void;
-  }) {
+  constructor(input: ElectronProfilePageInput) {
+    this.input = input;
     this.tabId = input.tabId;
     this.createView();
   }

@@ -82,7 +82,7 @@ test("bare Shift ignores text editing and disarms as soon as typing starts", asy
     button.focus();
     await act(async () => button.dispatchEvent(new dom.KeyboardEvent("keydown", { key: "Shift", bubbles: true }) as unknown as Event));
     assert.equal(container.textContent, "armed");
-    await act(async () => button.dispatchEvent(new dom.Event("touchstart", { bubbles: true })));
+    await act(async () => button.dispatchEvent(new dom.Event("touchstart", { bubbles: true }) as unknown as Event));
     assert.equal(container.textContent, "idle", "touchstart clears stuck virtual Shift without pointerType");
   } finally {
     await act(async () => root.unmount());

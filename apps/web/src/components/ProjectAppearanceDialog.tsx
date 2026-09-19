@@ -55,7 +55,7 @@ export default function ProjectAppearanceDialog({ project, onClose }: { project:
   }
 
   return (
-    <Dialog title={tr("projectcomposition.settingsTitle")} onClose={onClose} size="sm" className="project-settings-dialog">
+    <Dialog title={tr("projectcomposition.settingsTitle")} onClose={onClose} className="project-settings-dialog">
       <div className="project-settings-project"><strong>{project.name}</strong><span>{project.path}</span></div>
       <div className="project-settings-menu">
         <button type="button" onClick={() => setPage("appearance")}>

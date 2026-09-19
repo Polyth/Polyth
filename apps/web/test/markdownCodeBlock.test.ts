@@ -19,8 +19,11 @@ Object.assign(globalThis, {
   Event: dom.Event,
   MouseEvent: dom.MouseEvent,
   KeyboardEvent: dom.KeyboardEvent,
-  getComputedStyle: (elt: Element, pseudo?: string | null) =>
-    (dom as unknown as Window).getComputedStyle(elt, pseudo),
+  // happy-dom's Element is structurally distinct from lib.dom's and its
+  // getComputedStyle resolves no pseudo-elements.
+  getComputedStyle: (elt: Element) =>
+    (dom as unknown as { getComputedStyle(element: Element): CSSStyleDeclaration })
+      .getComputedStyle(elt),
   ResizeObserver: class {
     observe() {}
     unobserve() {}

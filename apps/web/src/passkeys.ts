@@ -40,7 +40,7 @@ const invalidResponse = (): Error => Object.assign(
   { code: "invalid-response" },
 );
 
-const decodeBase64url = (value: unknown): Uint8Array => {
+const decodeBase64url = (value: unknown): Uint8Array<ArrayBuffer> => {
   if (typeof value !== "string" || !/^[A-Za-z0-9_-]+$/.test(value)) throw invalidResponse();
   const base64 = value.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - value.length % 4) % 4);
   let binary: string;
@@ -129,9 +129,11 @@ export const browserSupportsPasskeys = (): boolean =>
   && typeof navigator !== "undefined"
   && !!navigator.credentials;
 
+interface AuthErrorPayload { error?: string; message?: string; retryAfterSec?: number }
+
 const authFailure = (
   response: Response,
-  body: { error?: string; message?: string; retryAfterSec?: number },
+  body: AuthErrorPayload,
 ): AccountLoginResult => {
   const retryHeader = Number(response.headers.get("retry-after"));
   return {
@@ -154,7 +156,7 @@ const httpError = (response: Response, body: Record<string, unknown>): Error => 
 export async function signInWithPasskey(
   credentials: CredentialGetter = credentialApi(),
 ): Promise<AccountLoginResult> {
-  const begin = await authJson<AuthenticationOptionsPayload & Record<string, unknown>>(
+  const begin = await authJson<AuthenticationOptionsPayload & AuthErrorPayload & Record<string, unknown>>(
     "/api/auth/passkeys/authenticate/options",
     {},
   );

@@ -250,8 +250,9 @@ export default function WorkspacePanel({ onClose }: { onClose: () => void }) {
       touchPending.current = null;
       touchTimer.current = null;
       try { pending.target.setPointerCapture(pending.pointerId); } catch { /* pointer already ended */ }
-      const initialIndex = pending.source.kind === "layout"
-        ? layout.items.findIndex((item) => item.id === pending.source.id)
+      const source = pending.source;
+      const initialIndex = source.kind === "layout"
+        ? layout.items.findIndex((item) => item.id === source.id)
         : null;
       const active: TouchDrag = {
         source: pending.source,
@@ -292,20 +293,22 @@ export default function WorkspacePanel({ onClose }: { onClose: () => void }) {
         const targetIndex = layout.items.findIndex((item) => item.id === target.dataset.panelInstance);
         if (targetIndex >= 0) {
           const rawIndex = insertionIndex(target, targetIndex, event.clientX, event.clientY);
-          if (active.source.kind === "layout") {
-            const currentIndex = layout.items.findIndex((item) => item.id === active.source.id);
+          const source = active.source;
+          if (source.kind === "layout") {
+            const currentIndex = layout.items.findIndex((item) => item.id === source.id);
             const normalized = currentIndex >= 0 && currentIndex < rawIndex ? rawIndex - 1 : rawIndex;
             nextIndex = Math.max(0, Math.min(normalized, layout.items.length - 1));
-            if (currentIndex >= 0 && nextIndex !== currentIndex) reorder(active.source.id, nextIndex, true);
+            if (currentIndex >= 0 && nextIndex !== currentIndex) reorder(source.id, nextIndex, true);
           } else {
             nextIndex = Math.max(0, Math.min(rawIndex, layout.items.length));
           }
         }
       } else if (pointed?.closest(".workspace-panel-items")) {
-        if (active.source.kind === "layout" && layout.items.length > 0) {
+        const source = active.source;
+        if (source.kind === "layout" && layout.items.length > 0) {
           nextIndex = layout.items.length - 1;
-          const currentIndex = layout.items.findIndex((item) => item.id === active.source.id);
-          if (currentIndex >= 0 && nextIndex !== currentIndex) reorder(active.source.id, nextIndex, true);
+          const currentIndex = layout.items.findIndex((item) => item.id === source.id);
+          if (currentIndex >= 0 && nextIndex !== currentIndex) reorder(source.id, nextIndex, true);
         } else {
           nextIndex = layout.items.length;
         }
@@ -336,10 +339,11 @@ export default function WorkspacePanel({ onClose }: { onClose: () => void }) {
     const active = touchDrag.current;
     if (!active || active.pointerId !== event.pointerId) return;
 
-    if (active.source.kind === "layout" && active.overRemove) {
-      const item = layout.items.find((candidate) => candidate.id === active.source.id);
+    const source = active.source;
+    if (source.kind === "layout" && active.overRemove) {
+      const item = layout.items.find((candidate) => candidate.id === source.id);
       const definition = item ? definitions.get(item.definitionId) : undefined;
-      commit(removePanelItem(layout, active.source.id), `${definition?.title ?? "Item"} removed`);
+      commit(removePanelItem(layout, source.id), `${definition?.title ?? "Item"} removed`);
       setSelectedId(null);
       successFeedback();
     } else if (active.source.kind === "library" && active.dropIndex !== null) {

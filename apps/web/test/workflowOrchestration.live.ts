@@ -694,7 +694,7 @@ test("phone Workspace is a full-width back-navigation destination", async () => 
     };
   });
   assert.equal(entrance.name, "mobile-tools-in");
-  assert.ok(entrance.frames.length === 0 || entrance.frames.some((transform) => transform?.includes("100%")),
+  assert.ok(entrance.frames.length === 0 || entrance.frames.some((transform) => String(transform ?? "").includes("100%")),
     `Workspace does not enter from the right edge: ${JSON.stringify(entrance)}`);
   await workspace.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
 

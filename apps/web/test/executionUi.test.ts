@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
 import { readFile } from "node:fs/promises";
+import type { JsonObject } from "@polyth/contracts";
 import { Window } from "happy-dom";
 import {
   classifyTool,
@@ -455,14 +456,14 @@ const timelineHost = () => {
   const sessionId = `activity-status-${++timelineHostSeq}`;
   const { viewport, host } = activityTimelineHost();
   const root = createRoot(host);
-  const event = (seq: number, type: string, data: Record<string, unknown>, time = seq) => ({
+  const event = (seq: number, type: string, data: JsonObject, time = seq) => ({
     id: `ev-${sessionId}-${seq}`,
     sessionId,
     seq,
     time,
     type,
     data,
-    v: 1,
+    v: 1 as const,
   });
   return {
     event,
@@ -1100,7 +1101,7 @@ test("orphaned-tool interrupt reasons map to cancelled vs failed display status"
   }
 });
 
-for (const [reason, expected] of [["stopped", "completed"], ["error", "failed"], ["aborted", "cancelled"]]) {
+for (const [reason, expected] of [["stopped", "completed"], ["error", "failed"], ["aborted", "cancelled"]] as const) {
   test(`a ${reason} turn settles activity and a new turn cannot revive it`, async () => {
     const t = timelineHost();
     const state = () => t.host.querySelector<HTMLElement>(".activity-group > .ui-run-summary")?.dataset.state;
@@ -1396,7 +1397,7 @@ test("a hidden tab commits activity directly and never replays it on return", as
     })));
 
     Object.defineProperty(document, "hidden", { configurable: true, value: true });
-    await act(async () => document.dispatchEvent(new dom.Event("visibilitychange")));
+    await act(async () => document.dispatchEvent(new dom.Event("visibilitychange") as unknown as Event));
     await act(async () => root.render(createElement(ActivityGroupView, {
       g: activityGroup("activity-hidden", [settled, running]),
       subagents: null,
@@ -1404,11 +1405,11 @@ test("a hidden tab commits activity directly and never replays it on return", as
     assert.equal(viewport.querySelector(".activity-live"), null, "activity arriving while hidden is rendered in its final folded position");
 
     Object.defineProperty(document, "hidden", { configurable: true, value: false });
-    await act(async () => document.dispatchEvent(new dom.Event("visibilitychange")));
+    await act(async () => document.dispatchEvent(new dom.Event("visibilitychange") as unknown as Event));
     assert.equal(viewport.querySelector(".activity-live"), null, "returning to the tab does not replay missed flight");
   } finally {
     if (previous) Object.defineProperty(document, "hidden", previous);
-    else delete (document as Document & { hidden?: boolean }).hidden;
+    else delete (document as unknown as { hidden?: boolean }).hidden;
     await act(async () => root.unmount());
     viewport.remove();
   }
@@ -1572,7 +1573,7 @@ test("MCP and subagent executions render normalized first-class details", async 
     }
     assert.match(
       container.querySelector(".execution-subagent-detail")?.textContent ?? "",
-      /Responsive UI reviewer.*Completed.*Checked 390px and 1280px.*Model.*claude-sonnet.*Parent.*Root implementation.*Open child session/s,
+      /Responsive UI reviewer.*Completed.*Checked 390px and 1280px.*Model.*(?:claude-sonnet|Claude Sonnet).*Parent.*Root implementation.*Open child session/s,
     );
   } finally {
     await act(async () => {
