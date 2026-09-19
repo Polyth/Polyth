@@ -96,10 +96,16 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
     <div className="lock-screen">
       <div className="lock-card">
         <img className="welcome-mark" src="/icon-192.png" alt="" aria-hidden="true" />
-        <h1>Polyth is ready</h1>
+        <h1>{desktop ? "Starting Polyth" : "Polyth is ready"}</h1>
         <p className="lock-hint">The canonical owner account and recovery credentials are committed.</p>
-        <p className="lock-hint">Restart the Polyth server once to start the full workspace runtime.</p>
-        <Button variant="primary" onClick={() => location.reload()}>Check after restart</Button>
+        {desktop ? (
+          <p className="lock-hint">Your workspace is starting automatically…</p>
+        ) : (
+          <>
+            <p className="lock-hint">Restart the Polyth server once to start the full workspace runtime.</p>
+            <Button variant="primary" onClick={() => location.reload()}>Check after restart</Button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -110,20 +116,31 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
         <img className="welcome-mark" src="/icon-192.png" alt="" aria-hidden="true" />
         <h1>Set up Polyth</h1>
         {recoveryCodes.length === 0 ? (
-          <>
-            <p className="lock-hint">Generate a short-lived operator claim with <code>npm run setup:claim</code>, then paste it here.</p>
-            <TextInput
-              value={claimToken}
-              placeholder="Setup claim token"
-              autoComplete="off"
-              aria-label="Setup claim token"
-              disabled={busy}
-              onChange={(event) => { setClaimToken(event.target.value); setError(""); }}
-            />
-            <Button variant="primary" busy={busy} disabled={!/^[a-f0-9]{64}$/i.test(claimToken.trim())} onClick={() => void prepare()}>
-              Continue securely
-            </Button>
-          </>
+          desktop ? (
+            <>
+              <p className="lock-hint">Preparing secure local setup…</p>
+              {error && (
+                <Button variant="primary" busy={busy} onClick={() => void prepare()}>
+                  Try again
+                </Button>
+              )}
+            </>
+          ) : (
+            <>
+              <p className="lock-hint">Generate a short-lived operator claim with <code>npm run setup:claim</code>, then paste it here.</p>
+              <TextInput
+                value={claimToken}
+                placeholder="Setup claim token"
+                autoComplete="off"
+                aria-label="Setup claim token"
+                disabled={busy}
+                onChange={(event) => { setClaimToken(event.target.value); setError(""); }}
+              />
+              <Button variant="primary" busy={busy} disabled={!/^[a-f0-9]{64}$/i.test(claimToken.trim())} onClick={() => void prepare()}>
+                Continue securely
+              </Button>
+            </>
+          )
         ) : (
           <>
             <p className="lock-hint">Save these recovery codes before creating the owner account. They will not be shown again.</p>
