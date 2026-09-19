@@ -113,7 +113,10 @@ test("client settings round-trip through the server and apply on inbound frames"
   assert.match(settingsSync, /modelPrefs:\s*getModelPrefs\(\)/);
   assert.match(settingsSync, /replaceModelPrefs\(parseModelPrefs\(JSON\.stringify\(incoming\.modelPrefs\)\)\)/);
   assert.match(settingsSync, /subscribeModelPrefs\(schedulePush\)/);
-  assert.match(settingsSync, /if \(!serverHasModelPrefs\) lastSyncedJson = "";/);
+  assert.match(settingsSync, /usagePrefs:\s*getUsagePrefs\(\)/);
+  assert.match(settingsSync, /replaceUsagePrefs\(parseUsagePrefs\(JSON\.stringify\(incoming\.usagePrefs\)\)\)/);
+  assert.match(settingsSync, /subscribeUsagePrefs\(schedulePush\)/);
+  assert.match(settingsSync, /if \(!serverHasModelPrefs \|\| !serverHasUsagePrefs\) lastSyncedJson = "";/);
   assert.match(settingsSync, /if \(JSON\.stringify\(currentBlob\(\)\) !== lastSyncedJson\) schedulePush\(\);/);
 });
 
