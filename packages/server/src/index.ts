@@ -158,10 +158,14 @@ export async function boot(opts: BootOptions = {}) {
     }
     binding = bindCanonicalSecurity(security);
 
+    const desktopSetupCapability = process.env.POLYTH_DESKTOP === "1"
+      ? randomBytes(32).toString("hex")
+      : undefined;
     const setup = createSetupServer({
       security,
       webDist: resolve(opts.webDist ?? resolve(fileURLToPath(new URL("../../../apps/web/dist/", import.meta.url)))),
       version: "0.1.0",
+      ...(desktopSetupCapability ? { desktopSetupCapability } : {}),
     });
     try {
       await new Promise<void>((resolveListen, rejectListen) => {
