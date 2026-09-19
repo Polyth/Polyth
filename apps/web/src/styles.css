@@ -166,6 +166,29 @@ body.desktop-app .header a,
 body.desktop-app .desktop-window-controls button {
   -webkit-app-region: no-drag;
 }
+/* Electron draggable regions are compositor hit regions, not ordinary DOM
+   ancestry. Explicitly carve every interactive/modal surface out so a shell
+   drag area can never swallow clicks from a control painted over the header. */
+body.desktop-app :is(
+  button,
+  input,
+  select,
+  textarea,
+  a,
+  [role="button"],
+  [role="checkbox"],
+  [role="menuitem"],
+  [role="menuitemcheckbox"],
+  [role="option"],
+  [role="tab"],
+  [contenteditable="true"],
+  .scrim,
+  .dialog-backdrop,
+  .sheet-backdrop,
+  [role="dialog"]
+) {
+  -webkit-app-region: no-drag;
+}
 html:has(body.desktop-app),
 body.desktop-app,
 body.desktop-app #root {
@@ -253,11 +276,12 @@ body.desktop-app[data-desktop-maximized="true"][data-desktop-controls-position="
   background: transparent;
   border: 0;
   box-shadow: none;
-  -webkit-app-region: drag;
+  pointer-events: none;
 }
 .desktop-window-controls-left { left: 0; }
 .desktop-window-controls-right { right: 0; }
 .desktop-window-button {
+  pointer-events: auto;
   display: grid;
   place-items: center;
   width: var(--desktop-controls-slot);
@@ -14059,3 +14083,28 @@ body[data-glass="off"] :is(.scrim, .dialog-backdrop, .sheet-backdrop) {
   }
   .pane-tab-group.active > .reorder-controls { display: none; }
 }
+
+/* macOS owns its titlebar controls. Electron's hiddenInset style keeps native
+   traffic lights in the system-managed position while the renderer supplies
+   only the draggable content area. The inset protects the traffic lights
+   without recreating their geometry or painting a second control island. */
+body.desktop-app[data-desktop-platform="darwin"] {
+  --desktop-macos-titlebar-inset: 84px;
+  border-radius: 0;
+}
+body.desktop-app[data-desktop-platform="darwin"] .app {
+  border-radius: 0;
+}
+body.desktop-app[data-desktop-platform="darwin"][data-desktop-controls-position] .app > .header {
+  width: 100%;
+  height: 60px;
+  min-height: 60px;
+  margin: 0;
+  padding: 0 18px 0 max(var(--desktop-macos-titlebar-inset), 18px);
+  border-radius: 0;
+  clip-path: none;
+}
+body.desktop-app[data-desktop-platform="darwin"] .desktop-window-controls {
+  display: none;
+}
+
