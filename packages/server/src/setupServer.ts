@@ -40,6 +40,66 @@ const json = (res: ServerResponse, status: number, body: unknown): void => {
   res.end(JSON.stringify(body));
 };
 
+const cookieValue = (req: IncomingMessage, name: string): string | null => {
+  const cookie = req.headers.cookie;
+  if (!cookie || cookie.length > 16_384) return null;
+  const matches = cookie
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.startsWith(`${name}=`));
+  if (matches.length !== 1) return null;
+  const value = matches[0]!.slice(name.length + 1);
+  return /^[a-f0-9]{64}$/.test(value) ? value : null;
+};
+
+const capabilityMatches = (req: IncomingMessage, expected: string): boolean => {
+  const actual = cookieValue(req, DESKTOP_SETUP_COOKIE);
+  return !!actual
+    && timingSafeEqual(Buffer.from(actual, "hex"), Buffer.from(expected, "hex"));
+};
+
+const readJson = async (req: IncomingMessage): Promise<Record<string, unknown>> => {
+  if (!/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(req.headers["content-type"] ?? "")) {
+    throw Object.assign(new Error("JSON content type required"), { code: "invalid-input" });
+  }
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for await (const chunk of req) {
+    const part = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    bytes += part.length;
+    if (bytes > 16_384) throw Object.assign(new Error("Request is too large"), { code: "body-too-large" });
+    chunks.push(part);
+  }
+  let value: unknown;
+  try { value = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
+  catch { throw Object.assign(new Error("Invalid JSON"), { code: "invalid-input" }); }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw Object.assign(new Error("JSON object required"), { code: "invalid-input" });
+  }
+  return value as Record<string, unknown>;
+};
+
+const bodyText = (body: Record<string, unknown>, key: string): string => {
+  const value = body[key];
+  if (typeof value !== "string") throw Object.assign(new Error("Required string field is missing"), { code: "invalid-input" });
+  return value;
+};
+
+const desktopSetupError = (res: ServerResponse, cause: unknown): void => {
+  const value = cause instanceof Error ? cause : new Error(String(cause));
+  const code = typeof (cause as { code?: unknown } | null)?.code === "string"
+    ? (cause as { code: string }).code
+    : "internal-error";
+  const status = code === "invalid-input" || code === "recovery-ack-required"
+    ? 400
+    : code === "body-too-large" ? 413
+      : code === "invalid-claim" ? 401
+        : code === "setup-completed" || code === "conflict" ? 409
+          : code === "recovery-required" ? 503
+            : 500;
+  json(res, status, status === 500 ? { error: code } : { error: code, message: value.message });
+};
+
 const inside = (root: string, candidate: string): boolean =>
   candidate === root || candidate.startsWith(`${root}${sep}`);
 
