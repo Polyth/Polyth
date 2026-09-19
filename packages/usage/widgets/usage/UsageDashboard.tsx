@@ -60,6 +60,17 @@ const compactNumber = (value: number): string =>
 
 const percent = (value: number): string => `${Math.round(value)}%`;
 
+const performancePoint = (
+  value: { p50: number; average: number; p95: number } | null,
+  statistic: "p50" | "average" | "p95",
+): number | null => value ? value[statistic] : null;
+
+const formatLatency = (value: number): string =>
+  value < 1_000 ? `${Math.round(value)}ms` : `${(value / 1_000).toFixed(value < 10_000 ? 2 : 1)}s`;
+
+const formatSpeed = (value: number): string =>
+  new Intl.NumberFormat(getLocale(), { maximumFractionDigits: value < 10 ? 1 : 0 }).format(value);
+
 const relativeDuration = (ms: number): string => {
   if (ms <= 0) return "now";
   const minutes = Math.max(1, Math.ceil(ms / 60_000));
@@ -228,6 +239,7 @@ function ProviderCard({
   showValueMultiplier,
   showQuotaDetails,
   metric,
+  performanceStatistic,
 }: {
   provider: UsageProviderSummary;
   profile: UsageProviderCostProfile;
@@ -236,6 +248,7 @@ function ProviderCard({
   showValueMultiplier: boolean;
   showQuotaDetails: boolean;
   metric: UsageChartMetric;
+  performanceStatistic: "p50" | "average" | "p95";
 }) {
   const [expanded, setExpanded] = useState(false);
   const snapshot = provider.snapshot;
@@ -272,12 +285,24 @@ function ProviderCard({
     cardMetrics.includes("sessions") ? { label: "Sessions", value: compactNumber(provider.sessions) } : null,
   ].filter((item): item is { label: string; value: string } => item !== null);
 
+  const ttft = performancePoint(provider.performance.ttftMs, performanceStatistic);
+  const tps = performancePoint(provider.performance.tokPerSec, performanceStatistic);
   const secondaryMetrics = [
+    cardMetrics.includes("ttft") && ttft !== null
+      ? { label: "TTFT", value: formatLatency(ttft) }
+      : null,
+    cardMetrics.includes("tps") && tps !== null
+      ? { label: "tok/s", value: formatSpeed(tps) }
+      : null,
     cardMetrics.includes("cache") && provider.cacheHitPercent !== null
       ? { label: "Cache", value: percent(provider.cacheHitPercent) }
       : null,
-    // Historical TTFT/tok/s/error aggregates are intentionally absent until
-    // they are persisted by the telemetry layer. Never synthesize them here.
+    cardMetrics.includes("errors") && provider.performance.errorRate !== null
+      ? { label: "Errors", value: percent(provider.performance.errorRate) }
+      : null,
+    cardMetrics.includes("success") && provider.performance.successRate !== null
+      ? { label: "Success", value: percent(provider.performance.successRate) }
+      : null,
   ].filter((item): item is { label: string; value: string } => item !== null);
 
   return (
@@ -361,6 +386,40 @@ function ProviderCard({
               )}
             </div>
           </section>
+
+          {(provider.performance.ttftMs || provider.performance.tokPerSec || provider.performance.durationMs) && (
+            <section className="usage-detail-section">
+              <h4>Performance</h4>
+              <div className="usage-detail-grid">
+                {provider.performance.ttftMs && (
+                  <>
+                    <Metric label="TTFT p50" value={formatLatency(provider.performance.ttftMs.p50)} />
+                    <Metric label="TTFT avg" value={formatLatency(provider.performance.ttftMs.average)} />
+                    <Metric label="TTFT p95" value={formatLatency(provider.performance.ttftMs.p95)} />
+                  </>
+                )}
+                {provider.performance.tokPerSec && (
+                  <>
+                    <Metric label="tok/s p50" value={formatSpeed(provider.performance.tokPerSec.p50)} />
+                    <Metric label="tok/s avg" value={formatSpeed(provider.performance.tokPerSec.average)} />
+                    <Metric label="tok/s p95" value={formatSpeed(provider.performance.tokPerSec.p95)} />
+                  </>
+                )}
+                {provider.performance.durationMs && (
+                  <Metric label="Response p50" value={formatLatency(provider.performance.durationMs.p50)} />
+                )}
+                {provider.performance.successRate !== null && (
+                  <Metric label="Success" value={percent(provider.performance.successRate)} />
+                )}
+                {provider.performance.errorRate !== null && (
+                  <Metric label="Errors" value={percent(provider.performance.errorRate)} />
+                )}
+                {provider.performance.interruptedRate !== null && (
+                  <Metric label="Interrupted" value={percent(provider.performance.interruptedRate)} />
+                )}
+              </div>
+            </section>
+          )}
 
           <section className="usage-detail-section">
             <h4>Token composition</h4>
@@ -840,6 +899,7 @@ export function UsageDashboard(): ReactNode {
                 showValueMultiplier={prefs.dashboard.showValueMultiplier}
                 showQuotaDetails={prefs.dashboard.showQuotaDetails}
                 metric={prefs.dashboard.chartMetric}
+                performanceStatistic={prefs.dashboard.performanceStatistic}
               />
             ))}
             {visibleProviders.length === 0 && (
