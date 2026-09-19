@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { authJson } from "../authClient.ts";
 import { acceptAuthenticatedBrowserAccount } from "../authPrefetch.ts";
+import { desktopBridge } from "../desktopBridge.ts";
 import { Button, TextInput } from "./ui/index.ts";
 
 const errorMessage = (body: Record<string, unknown>, status: number): string =>
@@ -11,6 +12,8 @@ const errorMessage = (body: Record<string, unknown>, status: number): string =>
       : `HTTP ${status}`;
 
 export default function SetupScreen({ restartRequired = false }: { restartRequired?: boolean }) {
+  const desktop = desktopBridge();
+  const desktopPrepareStarted = useRef(false);
   const [claimToken, setClaimToken] = useState("");
   const [recoverySetId, setRecoverySetId] = useState("");
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
@@ -25,10 +28,15 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
   const [complete, setComplete] = useState(false);
 
   const prepare = async () => {
-    const token = claimToken.trim().toLowerCase();
-    if (!/^[a-f0-9]{64}$/.test(token) || busy) return;
+    if (busy) return;
+    let token = claimToken.trim().toLowerCase();
     setBusy(true); setError("");
     try {
+      if (desktop) {
+        token = (await desktop.requestSetupClaim()).claimToken.trim().toLowerCase();
+        setClaimToken(token);
+      }
+      if (!/^[a-f0-9]{64}$/.test(token)) return;
       const bound = await authJson("/api/auth/setup/claim", { claimToken: token });
       if (!bound.response.ok) throw new Error(errorMessage(bound.body, bound.response.status));
       const recovery = await authJson<{ setId?: unknown; codes?: unknown }>("/api/auth/setup/recovery", { claimToken: token });
@@ -45,6 +53,12 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
     } finally { setBusy(false); }
   };
 
+  useEffect(() => {
+    if (!desktop || restartRequired || desktopPrepareStarted.current) return;
+    desktopPrepareStarted.current = true;
+    void prepare();
+  }, [desktop, restartRequired]);
+
   const finish = async () => {
     if (busy || !recoverySetId || !recoverySaved || password !== confirmPassword
       || password.length < 12 || !name.trim() || !organizationName.trim() || !login.trim()) return;
@@ -60,13 +74,19 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
         recoveryAcknowledged: true,
       });
       if (!result.response.ok) throw new Error(errorMessage(result.body, result.response.status));
+      try { localStorage.setItem("polyth.lastLogin", login.trim().toLowerCase()); } catch { /* private mode */ }
+      setPassword(""); setConfirmPassword("");
+      if (desktop) {
+        await desktop.restartAfterSetup();
+        location.reload();
+        return;
+      }
       const meResponse = await fetch("/api/auth/me", { cache: "no-store" });
       const me = await meResponse.json().catch(() => ({})) as { id?: unknown };
       if (meResponse.ok && typeof me.id === "string" && me.id.trim()) {
         acceptAuthenticatedBrowserAccount(me.id);
       }
-      try { localStorage.setItem("polyth.lastLogin", login.trim().toLowerCase()); } catch { /* private mode */ }
-      setPassword(""); setConfirmPassword(""); setComplete(true);
+      setComplete(true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally { setBusy(false); }
