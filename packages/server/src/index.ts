@@ -100,9 +100,9 @@ export async function boot(opts: BootOptions = {}) {
     };
 
     try {
-      // indexCore acquires .polyth-writer.lock before the first consumer calls
-      // canonicalSecurity(), so the lazy factory above cannot open/migrate the
-      // control-plane outside the installation's one-writer critical section.
+      // indexCore acquires the canonical data-directory writer lease before
+      // the first consumer calls canonicalSecurity(), so the lazy factory above
+      // cannot open/migrate the control-plane outside the one-writer section.
       const runtime = await bootCore({ ...opts, port, hostname, dataDir });
       security = security ?? canonicalSecurity();
       if (!security || security.control.installation().state !== "ready") {
