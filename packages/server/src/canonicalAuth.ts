@@ -5,6 +5,7 @@ import type { AuthRequestLike, GateDenial, PairedDeviceResolver } from "./auth.t
 
 type IdentifiedPrincipal = AuthPrincipal & { userId?: string };
 const ANONYMOUS: AuthPrincipal = { kind: "anonymous" };
+const DEBUG_AGENT_SESSION_ID = "debug-agent";
 
 const cookieToken = (header: string | undefined, name: string): string | null => {
   if (!header || header.length > 16_384) return null;
@@ -66,7 +67,12 @@ export function createCanonicalAuthGateway(options: {
     if (!debugAgentAccess) return null;
     const userId = activeOwnerId();
     return userId
-      ? ({ kind: "local-user", trustedLoopback: true, userId } as AuthPrincipal)
+      ? ({
+          kind: "local-user",
+          sessionId: DEBUG_AGENT_SESSION_ID,
+          trustedLoopback: true,
+          userId,
+        } as AuthPrincipal)
       : null;
   };
   const livePair = (principal: Extract<AuthPrincipal, { kind: "paired-device" }>): AuthPrincipal | null => {
@@ -117,7 +123,12 @@ export function createCanonicalAuthGateway(options: {
           return null;
         case "local-user": {
           const userId = directUser(principal);
-          return debugAgentAccess && userId && activeOwnerId() === userId ? principal : null;
+          return debugAgentAccess
+            && principal.sessionId === DEBUG_AGENT_SESSION_ID
+            && userId
+            && activeOwnerId() === userId
+            ? principal
+            : null;
         }
         case "internal-service":
           return principal;
