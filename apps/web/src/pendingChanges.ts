@@ -8,10 +8,10 @@ function isFileMutatingTool(tool: string): boolean {
   if (/(?:^|[./:_-])(?:task|subagent)(?:[./:_-]|$)/.test(value)) return false;
   if (/read/.test(value) && !/write|edit|replace|patch/.test(value)) return false;
   if (/(?:grep|glob|ripgrep|(?:^|[./:_-])search(?:[./:_-]|$))/.test(value) && !/replace/.test(value)) return false;
-  return /apply[_-]?patch|create[_-]?file|delete[_-]?file|multiedit|edit|patch|replace|(?:^|[./:_-])(?:write|save|delete|unlink|move|rename)(?:[./:_-]|$)/.test(value);
+  return /apply[_-]?patch|create[_-]?file|delete[_-]?file|multiedit|edit|patch|replace|sed[._-]?file|(?:^|[./:_-])(?:write|save|delete|unlink|move|rename)(?:[./:_-]|$)/.test(value);
 }
-const PATH_KEY = /^(changedFiles|file|file_?path|filename|files|path|paths|target|old_?path|new_?path)$/i;
-const MUTATION_KEY = /^(old_?string|new_?string|patch|patch_?text|changes)$/i;
+const PATH_KEY = /^(changedFiles|file|file_?path|filename|files|path|paths|target|target_?file|absolute_?path|notebook_?path|old_?path|new_?path)$/i;
+const MUTATION_KEY = /^(old_?string|old_?text|new_?string|new_?text|patch|patch_?text|changes|target_?content|replacement_?content|code_?content|replacement_?chunks)$/i;
 const PATCH_FILE = /^\*{3} (?:Add|Delete|Update) File:\s*(.+)$/gm;
 
 function hasMutationFields(value: JsonObject): boolean {

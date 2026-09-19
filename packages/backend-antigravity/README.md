@@ -64,9 +64,15 @@ macOS/Windows retain the shared portable authority's explicit crash-fence limits
 ## Supported output and honest limits
 
 - Public response streaming, tool calls/results/errors and native subagent
-  activity references use existing Polyth timeline events. A finished spawn step
-  does not falsely mark the child completed. Native hidden thinking/checkpoint
-  text is not rendered as dialogue.
+  activity references use existing Polyth timeline events. A tool step that
+  streams its arguments across frames accumulates them, and the complete
+  object is attached to the terminal `tool/result` so file edits
+  (`replace_file_content`, `multi_replace_file_content`, `write_to_file`,
+  `sed_file`, `notebook_edit`) carry the path and before/after content Polyth
+  needs for diff rendering and changed-file tracking. The native
+  `[diff_block_start]` result text is preserved as tool output. A finished
+  spawn step does not falsely mark the child completed. Native hidden
+  thinking/checkpoint text is not rendered as dialogue.
 - Session-cumulative token counters become per-turn deltas. On the first resumed
   turn, where the old baseline is unavailable, only observed final-step usage is
   counted. No fabricated cost, subscription price or context-window figure.

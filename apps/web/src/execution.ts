@@ -180,11 +180,23 @@ export function endTruncate(text: string, max = 96): string {
   return text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`;
 }
 
+/** Antigravity wraps an applied edit's unified hunks in diff_block markers
+ *  inside the native result text. Extract just the hunks so the rendered diff
+ *  is not mixed with the prose status line. */
+function diffBlockBody(output: string): string {
+  const start = output.indexOf("[diff_block_start]");
+  const end = output.indexOf("[diff_block_end]");
+  return start >= 0 && end > start
+    ? output.slice(start + "[diff_block_start]".length, end).trim()
+    : output;
+}
+
 function fileChangesFor(kind: ExecutionKind, input: JsonObject, output: string | undefined, path?: string): FileDiff[] {
   if (kind !== "edit" && kind !== "write" && kind !== "create" && kind !== "delete") return [];
   const fromInput = fileDiffsFromInput(input, path ?? "file");
   if (fromInput.length > 0) return fromInput;
-  if (output && looksLikeDiff(output)) return splitFileDiffs(output, path ?? "file");
+  const candidate = output ? diffBlockBody(output) : "";
+  if (candidate && looksLikeDiff(candidate)) return splitFileDiffs(candidate, path ?? "file");
   return [];
 }
 
@@ -257,7 +269,7 @@ export function classifyTool(tool: string, input: JsonObject): ExecutionKind {
   if (/delete|remove|unlink/.test(value)) return "delete";
   if (/move|rename/.test(value)) return "move";
   if (/create|mkdir|touch/.test(value)) return "create";
-  if (/apply_patch|patch|edit|replace/.test(value)) return "edit";
+  if (/apply_patch|patch|edit|replace|sed[._-]?file/.test(value)) return "edit";
   if (/write|save/.test(value)) return "write";
   if (/read|view|file/.test(value)) return "read";
   if (/test|check|lint|build/.test(value)) return "test";
@@ -480,7 +492,10 @@ export function executionPresentation(message: Pick<ToolMsg, "tool" | "input" | 
   const { tool, input, output, title } = message;
   const kind = classifyTool(tool, input);
   const label = displayLabel(kind, tool);
-  const path = firstString(input, ["filePath", "file_path", "path", "file", "target", "destination"]);
+  const path = firstString(input, [
+    "filePath", "file_path", "path", "file", "target", "destination",
+    "TargetFile", "AbsolutePath", "NotebookPath",
+  ]);
   const command = firstString(input, ["command", "cmd"]);
   const query = firstString(input, ["pattern", "query", "search", "text"]);
   const url = firstString(input, ["url", "href"]);

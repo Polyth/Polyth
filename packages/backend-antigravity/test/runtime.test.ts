@@ -375,7 +375,7 @@ test("a subagent invocation closes its tool proposal instead of a false untermin
   await flush();
   assert.deepEqual(f.events.filter((event) => event.type.startsWith("tool/")), [
     { type: "tool/started", callId: "turn-a:step:2", tool: "invoke_subagent", input: { Subagents: [{ TypeName: "self", Role: "Calculator" }] } },
-    { type: "tool/result", callId: "turn-a:step:2", tool: "invoke_subagent", output: "" },
+    { type: "tool/result", callId: "turn-a:step:2", tool: "invoke_subagent", output: "", input: { Subagents: [{ TypeName: "self", Role: "Calculator" }] } },
   ]);
   f.finish(); await flush();
   assert.equal(f.events.some((event) => event.type === "tool/error"), false);

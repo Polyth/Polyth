@@ -451,6 +451,18 @@ test("pending-change source lists session tool paths independently of leftover g
   assert.deepEqual(extractChangedFiles("Delete", { path: "src/gone.ts" }), ["src/gone.ts"]);
   assert.deepEqual(extractChangedFiles("NotebookEdit", { target: "notes.ipynb" }), ["notes.ipynb"]);
   assert.deepEqual(extractChangedFiles("edit", { changes: [{ path: "src/codex.ts" }] }), ["src/codex.ts"]);
+  assert.deepEqual(extractChangedFiles("replace_file_content", {
+    TargetFile: "src/agy.ts",
+    TargetContent: "a",
+    ReplacementContent: "b",
+  }), ["src/agy.ts"]);
+  assert.deepEqual(extractChangedFiles("write_to_file", { TargetFile: "src/new.ts", CodeContent: "x" }), ["src/new.ts"]);
+  assert.deepEqual(extractChangedFiles("multi_replace_file_content", {
+    TargetFile: "src/multi.ts",
+    ReplacementChunks: [{ TargetContent: "a", ReplacementContent: "b" }],
+  }), ["src/multi.ts"]);
+  assert.deepEqual(extractChangedFiles("sed_file", { TargetFile: "src/sed.ts" }), ["src/sed.ts"]);
+  assert.deepEqual(extractChangedFiles("edit", { path: "src/pi.ts", edits: [{ oldText: "a", newText: "b" }] }), ["src/pi.ts"]);
   assert.deepEqual(extractChangedFiles("read_file", { file_path: "src/skip.ts" }), []);
   assert.deepEqual(extractChangedFiles("TodoWrite", { path: "todos.md" }), []);
   assert.deepEqual(extractChangedFiles("other", {

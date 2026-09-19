@@ -393,14 +393,14 @@ function stripFileHeaders(diff: string): string[] {
 }
 
 function editsDiff(input: JsonObject, path: string): string | undefined {
-  const edits = input.edits ?? input.replacements;
+  const edits = input.edits ?? input.replacements ?? input.ReplacementChunks;
   if (!Array.isArray(edits) || edits.length === 0) return undefined;
   const hunks: string[] = [];
   for (const edit of edits) {
     if (!edit || typeof edit !== "object" || Array.isArray(edit)) continue;
     const record = edit as JsonObject;
-    const before = firstRawString(record, ["oldString", "old_string", "before"]);
-    const after = firstRawString(record, ["newString", "new_string", "after"]);
+    const before = firstRawString(record, ["oldString", "old_string", "before", "oldText", "TargetContent"]);
+    const after = firstRawString(record, ["newString", "new_string", "after", "newText", "ReplacementContent"]);
     if (before === undefined && after === undefined) continue;
     const piece = unifiedDiff(before ?? "", after ?? "", path);
     if (piece) hunks.push(...stripFileHeaders(piece));
@@ -419,13 +419,18 @@ export function looksLikeDiff(text: string): boolean {
 
 /** Build per-file unified diffs from an edit/write/create/delete tool payload. */
 export function fileDiffsFromInput(input: JsonObject, fallbackPath = "file"): FileDiff[] {
-  const path = firstPath(input, ["filePath", "file_path", "path", "file", "target"]) ?? fallbackPath;
+  const path = firstPath(input, [
+    "filePath", "file_path", "path", "file", "target",
+    "TargetFile", "AbsolutePath", "NotebookPath",
+  ]) ?? fallbackPath;
   const patch = firstRawString(input, ["patch", "patchText", "patch_text", "diff"]);
   if (patch?.trim()) return splitFileDiffs(patch, path);
   const fromEdits = editsDiff(input, path);
   if (fromEdits) return splitFileDiffs(fromEdits, path);
-  const before = firstRawString(input, ["oldString", "old_string", "before"]);
-  const after = firstRawString(input, ["newString", "new_string", "after", "content"]);
+  const before = firstRawString(input, ["oldString", "old_string", "before", "TargetContent"]);
+  const after = firstRawString(input, [
+    "newString", "new_string", "after", "content", "ReplacementContent", "CodeContent",
+  ]);
   if (before === undefined && after === undefined) return [];
   const diff = unifiedDiff(before ?? "", after ?? "", path);
   return diff ? splitFileDiffs(diff, path) : [];

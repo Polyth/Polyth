@@ -1,6 +1,6 @@
 import { StringDecoder } from "node:string_decoder";
 import { isAbsolute } from "node:path";
-import type { ModelDescriptor, ModelRef, RateLimitRetryHint, RuntimeCapabilities, RuntimeErrorCode, RuntimeEvent, TokenUsage } from "@polyth/contracts";
+import type { JsonObject, ModelDescriptor, ModelRef, RateLimitRetryHint, RuntimeCapabilities, RuntimeErrorCode, RuntimeEvent, TokenUsage } from "@polyth/contracts";
 
 export const ANTIGRAVITY_CAPABILITIES = {
   streaming: true, permissions: true, questions: false, compaction: false,
@@ -258,6 +258,18 @@ export function createAgyTurn(turnId: string, model: ModelRef | undefined) {
   const finished = new Set<number>();
   const startedTools = new Set<number>();
   const openTools = new Map<number, string>();
+  // A native tool step can stream its arguments over several frames: the first
+  // frame may carry only the target path. Accumulate every frame and attach the
+  // complete object to the terminal tool event so canonical consumers (diffs,
+  // changed-file tracking) see the same input the native CLI executed.
+  const toolInputs = new Map<number, JsonObject>();
+  // Native result text can arrive on a companion `generic` step separate from
+  // the `tool` step; cache it by step index so a settle can pick it up.
+  const stepContents = new Map<number, string>();
+  // Full planner tool-call arguments, in request order. The tool execution step
+  // sometimes only projects the target argument, so keep the proposal args and
+  // merge them into the matching call.
+  const plannerCalls: Array<{ tool: string; args: JsonObject }> = [];
   const stepUsage = new Map<number, TokenUsage>();
   const agents = new Map<string, { sessionId: string; label: string; status: string; currentTask?: string }>();
   let revision = 0;
@@ -288,6 +300,21 @@ export function createAgyTurn(turnId: string, model: ModelRef | undefined) {
       const usage = settled ? agyUsage(row.usage) : undefined;
       if (usage) stepUsage.set(index, usage);
       const id = `${turnId}:step:${index}`;
+      const content = text(row.content);
+      if (content) {
+        stepContents.set(index, content);
+        if (stepContents.size > 256) stepContents.delete(stepContents.keys().next().value!);
+      }
+      if (Array.isArray(row.tool_calls)) {
+        for (const value of row.tool_calls) {
+          const call = record(value);
+          const name = text(call?.name) ?? text(call?.tool) ?? text(call?.tool_name);
+          const args = record(call?.args) ?? record(call?.arguments) ?? record(call?.parameters);
+          if (!name || !args || Object.keys(args).length === 0) continue;
+          plannerCalls.push({ tool: name, args: args as JsonObject });
+          if (plannerCalls.length > 256) plannerCalls.shift();
+        }
+      }
       if (row.step_type === "agent_response") {
         const delta = text(row.text_delta);
         if (delta) {
@@ -301,14 +328,29 @@ export function createAgyTurn(turnId: string, model: ModelRef | undefined) {
       } else if (row.step_type === "tool") {
         const info = record(row.tool_info);
         const tool = text(info?.name) ?? text(row.tool_name) ?? "unknown";
-        const input = record(info?.parameters) ?? {};
+        const stepInput = (record(info?.parameters) ?? {}) as JsonObject;
+        const input: JsonObject = { ...(toolInputs.get(index) ?? {}) };
         if (!startedTools.has(index)) {
           startedTools.add(index);
+          const pendingIndex = plannerCalls.findIndex((call) => call.tool === tool);
+          const proposed = pendingIndex >= 0 ? plannerCalls.splice(pendingIndex, 1)[0]!.args : {};
+          Object.assign(input, proposed, stepInput);
+          toolInputs.set(index, input);
           openTools.set(index, tool);
-          events.push({ type: "tool/started", callId: id, tool, input: input as import("@polyth/contracts").JsonObject });
+          events.push({ type: "tool/started", callId: id, tool, input });
+        } else {
+          Object.assign(input, stepInput);
+          toolInputs.set(index, input);
         }
         if (settled) {
           const failure = agyFailureText(row, info);
+          const settledInput = toolInputs.get(index) ?? input;
+          // The native result text may arrive on this `tool` step or on a
+          // companion `generic` step cached above; `tool_info.output` is not
+          // always populated for file edits.
+          const settledOutput = text(info?.output) ?? text(row.content) ?? stepContents.get(index) ?? "";
+          toolInputs.delete(index);
+          stepContents.delete(index);
           openTools.delete(index);
           if (failed || failure !== undefined || info?.error) {
             const error = failure ?? "Antigravity tool failed";
@@ -316,7 +358,7 @@ export function createAgyTurn(turnId: string, model: ModelRef | undefined) {
             events.push({ type: "tool/error", callId: id, tool, error });
           } else {
             successfulTools++;
-            events.push({ type: "tool/result", callId: id, tool, output: text(info?.output) ?? "" });
+            events.push({ type: "tool/result", callId: id, tool, output: settledOutput, ...(Object.keys(settledInput).length > 0 ? { input: settledInput } : {}) });
           }
         }
       }
@@ -339,7 +381,11 @@ export function createAgyTurn(turnId: string, model: ModelRef | undefined) {
       // unterminated tool at turn end and the delegated agent looks stopped.
       if (settled && openTools.has(index)) {
         const tool = openTools.get(index)!;
+        const input = toolInputs.get(index) ?? {};
+        const content = text(row.content) ?? stepContents.get(index) ?? "";
         openTools.delete(index);
+        toolInputs.delete(index);
+        stepContents.delete(index);
         const info = record(row.tool_info);
         const failure = agyFailureText(row, info);
         if (failed || failure !== undefined || info?.error) {
@@ -348,7 +394,7 @@ export function createAgyTurn(turnId: string, model: ModelRef | undefined) {
           events.push({ type: "tool/error", callId: id, tool, error });
         } else {
           successfulTools++;
-          events.push({ type: "tool/result", callId: id, tool, output: text(info?.output) ?? "" });
+          events.push({ type: "tool/result", callId: id, tool, output: text(info?.output) ?? content, ...(Object.keys(input).length > 0 ? { input } : {}) });
         }
       }
       if (settled) finished.add(index);
@@ -368,6 +414,8 @@ export function createAgyTurn(turnId: string, model: ModelRef | undefined) {
         events.push({ type: "tool/error", callId: `${turnId}:step:${index}`, tool, error });
       }
       openTools.clear();
+      toolInputs.clear();
+      stepContents.clear();
       if (!messages.size && text(result.response)) events.push({ type: "assistant/message", partId: `${turnId}:result`, text: text(result.response)! });
       else for (const [index, body] of messages) if (!finished.has(index))
         events.push({ type: "assistant/message", partId: `${turnId}:step:${index}`, text: body });

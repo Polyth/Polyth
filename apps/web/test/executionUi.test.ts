@@ -265,6 +265,61 @@ test("file, URL, edit, search, MCP, and subagent previews are semantic", () => {
   assert.equal(multi.preview, "src/app.ts");
   assert.deepEqual(multi.stats, { add: 2, del: 2 });
 
+  const piEdit = executionPresentation(tool({
+    tool: "edit",
+    input: {
+      path: "src/pi.ts",
+      edits: [{ oldText: "one\ntwo", newText: "one\nthree\nfour" }],
+    },
+  }));
+  assert.equal(piEdit.kind, "edit");
+  assert.equal(piEdit.preview, "src/pi.ts");
+  assert.deepEqual(piEdit.stats, { add: 2, del: 1 });
+  assert.equal(piEdit.files?.length, 1);
+
+  const antigravityEdit = executionPresentation(tool({
+    tool: "replace_file_content",
+    input: {
+      TargetFile: "/repo/src/agy.ts",
+      TargetContent: "const value = 1;",
+      ReplacementContent: "const value = 2;",
+    },
+  }));
+  assert.equal(antigravityEdit.kind, "edit");
+  assert.equal(antigravityEdit.preview, "/repo/src/agy.ts");
+  assert.deepEqual(antigravityEdit.stats, { add: 1, del: 1 });
+  assert.equal(antigravityEdit.files?.[0]?.path, "/repo/src/agy.ts");
+
+  const antigravityWrite = executionPresentation(tool({
+    tool: "write_to_file",
+    input: { TargetFile: "/repo/src/new.ts", CodeContent: "export const created = true;\n" },
+  }));
+  assert.equal(antigravityWrite.kind, "write");
+  assert.deepEqual(antigravityWrite.stats, { add: 1, del: 0 });
+  assert.equal(antigravityWrite.files?.[0]?.status, "added");
+
+  const antigravityDiffOutput = executionPresentation(tool({
+    tool: "replace_file_content",
+    input: { TargetFile: "/repo/src/agy.ts" },
+    output: [
+      "The following changes were made by the replace_file_content tool to: /repo/src/agy.ts.",
+      "[diff_block_start]",
+      "@@ -1 +1 @@",
+      "-const value = 1;",
+      "+const value = 2;",
+      "[diff_block_end]",
+    ].join("\n"),
+  }));
+  assert.equal(antigravityDiffOutput.files?.[0]?.path, "/repo/src/agy.ts");
+  assert.deepEqual(antigravityDiffOutput.stats, { add: 1, del: 1 });
+  assert.doesNotMatch(antigravityDiffOutput.files?.[0]?.diff ?? "", /The following changes/);
+
+  const sedEdit = executionPresentation(tool({
+    tool: "sed_file",
+    input: { TargetFile: "/repo/src/sed.ts", TargetContent: "a", ReplacementContent: "b" },
+  }));
+  assert.equal(sedEdit.kind, "edit");
+
   const search = executionPresentation(tool({
     tool: "grep",
     input: { pattern: "visualViewport" },

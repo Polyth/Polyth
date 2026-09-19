@@ -89,6 +89,71 @@ test("a failed tool step with no ACTIVE frame still surfaces its denial", () => 
     { type: "tool/error", callId: "t:step:2", tool: "run_command", error: "user denied permission" },
   ]);
 });
+test("a tool step accumulates streamed parameters and native result content", () => {
+  const turn = createAgyTurn("t", model);
+  assert.deepEqual(turn.step({
+    step_index: 4, state: "ACTIVE", step_type: "tool",
+    tool_info: { name: "replace_file_content", parameters: { TargetFile: "/repo/a.ts" } },
+  }), [
+    { type: "tool/started", callId: "t:step:4", tool: "replace_file_content", input: { TargetFile: "/repo/a.ts" } },
+  ]);
+  assert.deepEqual(turn.step({
+    step_index: 4, state: "ACTIVE", step_type: "tool",
+    tool_info: {
+      name: "replace_file_content",
+      parameters: { TargetFile: "/repo/a.ts", TargetContent: "a", ReplacementContent: "b" },
+    },
+  }), []);
+  assert.deepEqual(turn.step({
+    step_index: 4, state: "DONE", step_type: "tool",
+    tool_info: {
+      name: "replace_file_content",
+      parameters: { TargetFile: "/repo/a.ts", TargetContent: "a", ReplacementContent: "b" },
+    },
+    content: "[diff_block_start]\n@@ -1 +1 @@\n-a\n+b\n[diff_block_end]",
+  }), [
+    {
+      type: "tool/result",
+      callId: "t:step:4",
+      tool: "replace_file_content",
+      output: "[diff_block_start]\n@@ -1 +1 @@\n-a\n+b\n[diff_block_end]",
+      input: { TargetFile: "/repo/a.ts", TargetContent: "a", ReplacementContent: "b" },
+    },
+  ]);
+});
+test("planner tool-call arguments survive a path-only execution step", () => {
+  const turn = createAgyTurn("t", model);
+  assert.deepEqual(turn.step({
+    step_index: 10, state: "DONE", step_type: "planner_response",
+    tool_calls: [{
+      name: "replace_file_content",
+      args: { TargetFile: "/repo/a.ts", TargetContent: "a", ReplacementContent: "b" },
+    }],
+  }), []);
+  assert.deepEqual(turn.step({
+    step_index: 11, state: "ACTIVE", step_type: "tool",
+    tool_info: { name: "replace_file_content", parameters: { TargetFile: "/repo/a.ts" } },
+  }), [
+    {
+      type: "tool/started",
+      callId: "t:step:11",
+      tool: "replace_file_content",
+      input: { TargetFile: "/repo/a.ts", TargetContent: "a", ReplacementContent: "b" },
+    },
+  ]);
+  assert.deepEqual(turn.step({
+    step_index: 11, state: "DONE", step_type: "tool",
+    tool_info: { name: "replace_file_content", parameters: { TargetFile: "/repo/a.ts" } },
+  }), [
+    {
+      type: "tool/result",
+      callId: "t:step:11",
+      tool: "replace_file_content",
+      output: "",
+      input: { TargetFile: "/repo/a.ts", TargetContent: "a", ReplacementContent: "b" },
+    },
+  ]);
+});
 test("a soft-denied headless tool cannot end as a silent successful turn", () => {
   const turn = createAgyTurn("t", model);
   turn.step({
@@ -186,7 +251,7 @@ test("a subagent step closes a tool proposal opened for the same invocation", ()
     subagent_info: { subagents: [{ type_name: "self", role: "Math Calculator", conversation_id: "child-1" }] },
   }), [
     { type: "subagent/snapshot", revision: 1, agents: [{ sessionId: "child-1", label: "self", status: "unknown", currentTask: "Math Calculator" }] },
-    { type: "tool/result", callId: "t:step:2", tool: "invoke_subagent", output: "" },
+    { type: "tool/result", callId: "t:step:2", tool: "invoke_subagent", output: "", input: { Subagents: [{ TypeName: "self", Role: "Math Calculator" }] } },
   ]);
   // The spawn settles the call, so turn end must not invent an unterminated tool error.
   assert.deepEqual(turn.finish({ status: "SUCCESS", response: "4" }), [

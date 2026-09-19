@@ -134,6 +134,43 @@ test("fileDiffsFromInput reads patchText, old/new strings, and edits arrays", ()
   assert.deepEqual(fromEdits[0]?.stats, { add: 1, del: 1 });
 });
 
+test("fileDiffsFromInput reads Pi and Antigravity edit argument shapes", () => {
+  const pi = fileDiffsFromInput({
+    path: "src/pi.ts",
+    edits: [
+      { oldText: "one\ntwo", newText: "one\nthree" },
+      { oldText: "alpha", newText: "beta" },
+    ],
+  });
+  assert.equal(pi[0]?.path, "src/pi.ts");
+  assert.deepEqual(pi[0]?.stats, { add: 2, del: 2 });
+
+  const replace = fileDiffsFromInput({
+    TargetFile: "/repo/src/agy.ts",
+    TargetContent: "const value = 1;",
+    ReplacementContent: "const value = 2;",
+  });
+  assert.equal(replace[0]?.path, "/repo/src/agy.ts");
+  assert.deepEqual(replace[0]?.stats, { add: 1, del: 1 });
+
+  const write = fileDiffsFromInput({
+    TargetFile: "/repo/src/new.ts",
+    CodeContent: "export const created = true;\n",
+  });
+  assert.equal(write[0]?.path, "/repo/src/new.ts");
+  assert.equal(write[0]?.status, "added");
+
+  const multi = fileDiffsFromInput({
+    TargetFile: "/repo/src/multi.ts",
+    ReplacementChunks: [
+      { TargetContent: "alpha", ReplacementContent: "beta" },
+      { TargetContent: "one\ntwo", ReplacementContent: "one\nthree" },
+    ],
+  });
+  assert.equal(multi[0]?.path, "/repo/src/multi.ts");
+  assert.deepEqual(multi[0]?.stats, { add: 2, del: 2 });
+});
+
 test("revertUnifiedDiff restores the old side of an in-file edit", () => {
   const diff = unifiedDiff("one\ntwo\n", "one\nthree\nfour\n", "f.ts");
   const reverted = revertUnifiedDiff("one\nthree\nfour\n", diff);
