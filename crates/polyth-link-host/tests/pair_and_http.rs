@@ -78,9 +78,13 @@ async fn rpc_try(
     loop {
         response.clear();
         let bytes = stream.read_line(&mut response).await.unwrap();
-        assert!(bytes > 0, "rpc {method} id={id}: host closed the control socket");
-        let parsed: Value = serde_json::from_str(response.trim())
-            .unwrap_or_else(|error| panic!("rpc {method} id={id}: malformed response {response:?}: {error}"));
+        assert!(
+            bytes > 0,
+            "rpc {method} id={id}: host closed the control socket"
+        );
+        let parsed: Value = serde_json::from_str(response.trim()).unwrap_or_else(|error| {
+            panic!("rpc {method} id={id}: malformed response {response:?}: {error}")
+        });
         if parsed.get("method").and_then(Value::as_str) == Some("event") {
             continue;
         }
