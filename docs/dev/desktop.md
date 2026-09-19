@@ -44,6 +44,12 @@ connecting to the app's debugging endpoint would expose the trusted desktop rend
 and its windows to the browser tool, while a dedicated Chromium process preserves the
 browser service's isolated context and URL policy.
 
+Local terminal launch is platform-native as well: Windows uses `COMSPEC` (falling back
+to `cmd.exe`) and Windows command-line switches, while macOS/Linux use `SHELL`
+(falling back to `/bin/sh`). Linux-only runtime containment and remote `flock`/
+`/proc` logic remains gated to Linux execution paths and is not a desktop host
+dependency on macOS or Windows.
+
 ## Release and updates
 
 GitHub Actions separates smoke artifacts from real releases.
