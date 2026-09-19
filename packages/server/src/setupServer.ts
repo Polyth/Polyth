@@ -82,6 +82,9 @@ async function staticFile(root: string, pathname: string): Promise<{ data: Buffe
  */
 export function createSetupServer(options: SetupServerOptions): SetupServerHandle {
   const root = resolve(options.webDist);
+  if (options.desktopSetupClaimToken && !/^[a-f0-9]{64}$/.test(options.desktopSetupClaimToken)) {
+    throw new Error("Invalid native desktop setup claim");
+  }
   // The trusted, shipped shell contains the React import map and small inline
   // bootstrap scripts. 'self' alone blocks them, leaving a fresh install blank.
   // Hash only this build-owned document, never arbitrary requested HTML. Keep
@@ -115,6 +118,10 @@ export function createSetupServer(options: SetupServerOptions): SetupServerHandl
         return;
       }
       if (path.startsWith("/api/auth/")) {
+        const nativeClaim = options.desktopSetupClaimToken;
+        if (nativeClaim && desktopClaimMatches(req, nativeClaim)) {
+          (req as unknown as Record<symbol, unknown>)[TRUSTED_SETUP_CLAIM] = nativeClaim;
+        }
         res.setHeader("X-Polyth-Bootstrap", "setup");
         if (await options.security.http.handle(req, res)) return;
         json(res, 404, { error: "not-found" });
