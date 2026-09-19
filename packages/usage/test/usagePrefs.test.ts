@@ -65,36 +65,33 @@ test("parseUsagePrefs migrates older prefs, defaults provider-first, and survive
     hiddenBlocks: ["cache"],
     pinnedProviders: ["openai"],
     collapsedGroups: ["openai/gpt"],
-    dashboard: { view: "providers", layout: "compact", rangeDays: 90, overviewOrder: ["models"], providerOrder: ["openai"] },
-  };
-  assert.deepEqual(parseUsagePrefs(JSON.stringify(legacy)), {
-    ...legacy,
-    providerCosts: {},
-    dashboard: {
-      ...legacy.dashboard,
-      chartStyle: "bar",
-      chartMetric: "tokens",
-      showChartLegend: true,
-    },
-  });
-  const defaults = {
-    hiddenProviders: [],
-    hiddenBlocks: [],
-    pinnedProviders: [],
-    collapsedGroups: [],
-    providerCosts: {},
     dashboard: {
       view: "providers",
-      layout: "expanded",
-      rangeDays: 7,
-      chartStyle: "bar",
-      chartMetric: "tokens",
-      showChartLegend: true,
-      overviewOrder: [],
-      providerOrder: [],
+      layout: "compact",
+      rangeDays: 90,
+      overviewOrder: ["models"],
+      providerOrder: ["openai"],
     },
   };
-  assert.deepEqual(parseUsagePrefs(null), defaults);
+  const parsedLegacy = parseUsagePrefs(JSON.stringify(legacy));
+  assert.equal(parsedLegacy.dashboard.view, "providers");
+  assert.equal(parsedLegacy.dashboard.layout, "compact");
+  assert.equal(parsedLegacy.dashboard.rangeDays, 90);
+  assert.equal(parsedLegacy.dashboard.rangeMode, "preset");
+  assert.equal(parsedLegacy.dashboard.chartGrouping, "provider");
+  assert.equal(parsedLegacy.dashboard.distributionGrouping, "model");
+  assert.equal(parsedLegacy.dashboard.providerSort, "quota");
+  assert.deepEqual(parsedLegacy.dashboard.cardMetrics, ["cost", "tokens", "sessions", "ttft", "tps", "cache"]);
+
+  const defaults = parseUsagePrefs(null);
+  assert.equal(defaults.dashboard.view, "providers");
+  assert.equal(defaults.dashboard.layout, "compact");
+  assert.equal(defaults.dashboard.rangeDays, 7);
+  assert.equal(defaults.dashboard.rangeMode, "preset");
+  assert.equal(defaults.dashboard.performanceStatistic, "p50");
+  assert.equal(defaults.dashboard.showApiEquivalent, true);
+  assert.equal(defaults.dashboard.showValueMultiplier, true);
+  assert.equal(defaults.dashboard.showQuotaDetails, true);
   assert.deepEqual(parseUsagePrefs("not json"), defaults);
   assert.deepEqual(
     parseUsagePrefs(JSON.stringify({
@@ -106,18 +103,51 @@ test("parseUsagePrefs migrates older prefs, defaults provider-first, and survive
   );
 });
 
-test("parseUsagePrefs preserves the last explicit tab and sanitizes provider billing", () => {
+test("parseUsagePrefs preserves the last explicit tab and sanitizes billing, budgets, and custom ranges", () => {
   assert.equal(parseUsagePrefs(JSON.stringify({ dashboard: { view: "overview" } })).dashboard.view, "overview");
   assert.equal(parseUsagePrefs(JSON.stringify({ dashboard: { view: "providers" } })).dashboard.view, "providers");
 
   const prefs = parseUsagePrefs(JSON.stringify({
     providerCosts: {
-      openai: { billing: "subscription", monthlyCost: 20 },
-      anthropic: { billing: "api", monthlyCost: -4 },
+      openai: { billing: "subscription", monthlyCost: 20, monthlyBudget: 100 },
+      anthropic: { billing: "api", monthlyCost: -4, monthlyBudget: 75.555 },
+    },
+    dashboard: {
+      rangeMode: "custom",
+      customRange: { start: "2026-09-01", end: "2026-09-19" },
+      chartGrouping: "harness",
+      distributionGrouping: "project",
+      providerSort: "spend",
+      cardMetrics: ["tokens", "cache", "bogus"],
+      performanceStatistic: "p95",
     },
   }));
-  assert.deepEqual(prefs.providerCosts.openai, { billing: "subscription", monthlyCost: 20 });
-  assert.deepEqual(prefs.providerCosts.anthropic, { billing: "api", monthlyCost: null });
+  assert.deepEqual(prefs.providerCosts.openai, {
+    billing: "subscription",
+    monthlyCost: 20,
+    monthlyBudget: 100,
+  });
+  assert.deepEqual(prefs.providerCosts.anthropic, {
+    billing: "api",
+    monthlyCost: null,
+    monthlyBudget: 75.56,
+  });
+  assert.equal(prefs.dashboard.rangeMode, "custom");
+  assert.deepEqual(prefs.dashboard.customRange, { start: "2026-09-01", end: "2026-09-19" });
+  assert.equal(prefs.dashboard.chartGrouping, "harness");
+  assert.equal(prefs.dashboard.distributionGrouping, "project");
+  assert.equal(prefs.dashboard.providerSort, "spend");
+  assert.deepEqual(prefs.dashboard.cardMetrics, ["tokens", "cache"]);
+  assert.equal(prefs.dashboard.performanceStatistic, "p95");
+
+  const invalidRange = parseUsagePrefs(JSON.stringify({
+    dashboard: {
+      rangeMode: "custom",
+      customRange: { start: "2026-09-20", end: "2026-09-01" },
+    },
+  }));
+  assert.equal(invalidRange.dashboard.rangeMode, "preset");
+  assert.equal(invalidRange.dashboard.customRange, null);
 });
 
 test("pinned provider ordering stays above regular cards without losing manual order", () => {
