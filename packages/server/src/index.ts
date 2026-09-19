@@ -1,5 +1,6 @@
 // Canonical bootstrap. The large runtime composition root lives in indexCore.ts
 // and is admitted only after the account/tenancy authority is already ready.
+import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createAuthorityOutboxWorker } from "./authorityOutbox.ts";
@@ -190,16 +191,63 @@ export async function boot(opts: BootOptions = {}) {
     const sigterm = (): void => { void stop().then(() => process.exit(0)); };
     process.once("SIGINT", sigint);
     process.once("SIGTERM", sigterm);
+    let localSetup: {
+      claimToken: string;
+      browserBinding: string;
+      recoverySetId: string;
+      recoveryCodes: string[];
+    } | null = null;
+    const setupAuthority = (): CanonicalSecurity => {
+      const authority = security;
+      if (!authority) {
+        throw Object.assign(new Error("Setup authority is unavailable"), { code: "setup-unavailable" });
+      }
+      return authority;
+    };
+
     return {
       server: setup.server,
       setup: true as const,
       state,
-      issueSetupClaim() {
-        const authority = security;
-        if (!authority) {
-          throw Object.assign(new Error("Setup authority is unavailable"), { code: "setup-unavailable" });
+      prepareLocalSetup() {
+        if (localSetup) return { recoveryCodes: [...localSetup.recoveryCodes] };
+        const authority = setupAuthority();
+        const claim = authority.identity.setup.issueClaim();
+        const browserBinding = randomBytes(32).toString("hex");
+        authority.identity.setup.bindClaim(claim.token, browserBinding);
+        const recovery = authority.identity.setup.prepareRecovery(claim.token, browserBinding);
+        localSetup = {
+          claimToken: claim.token,
+          browserBinding,
+          recoverySetId: recovery.setId,
+          recoveryCodes: [...recovery.codes],
+        };
+        return { recoveryCodes: [...recovery.codes] };
+      },
+      async completeLocalSetup(input: {
+        name: string;
+        organizationName: string;
+        login: string;
+        password: string;
+        recoveryAcknowledged: boolean;
+      }) {
+        const authority = setupAuthority();
+        const prepared = localSetup;
+        if (!prepared) {
+          throw Object.assign(new Error("Desktop setup has not been prepared"), { code: "setup-not-prepared" });
         }
-        return authority.identity.setup.issueClaim();
+        await authority.identity.setup.complete({
+          claimToken: prepared.claimToken,
+          browserBinding: prepared.browserBinding,
+          name: input.name,
+          organizationName: input.organizationName,
+          login: input.login,
+          password: input.password,
+          recoverySetId: prepared.recoverySetId,
+          recoveryAcknowledged: input.recoveryAcknowledged,
+        });
+        localSetup = null;
+        return { ok: true as const };
       },
       async shutdown() {
         process.off("SIGINT", sigint);
