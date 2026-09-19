@@ -18,6 +18,7 @@ export type { ProviderUsageOverview } from "./overview.ts";
 export { createHttpQuotaProvider, parseQuotaProviderSpecs } from "./http.ts";
 export type { HttpQuotaProviderSpec, HttpQuotaProviderOptions } from "./http.ts";
 export {
+  createAntigravityProvider,
   discoverQuotaProviders,
   listConfiguredQuotaProviders,
   mapProviderUsage,

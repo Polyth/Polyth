@@ -52,6 +52,7 @@ export function displayProvider(providerId: string): string {
     gemini: "Gemini",
     "github-copilot": "GitHub Copilot",
     xai: "xAI",
+    antigravity: "Antigravity",
   };
   return known[normalized] ?? providerId
     .replace(/[-_]+/g, " ")

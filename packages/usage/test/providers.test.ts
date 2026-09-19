@@ -35,6 +35,7 @@ test("discovery finds nothing when auth and managed credentials are absent", () 
 
 test("registry exposes every dispatcher provider and skips unconfigured entries", () => {
   const auth = {
+    antigravity: { refresh: "antigravity-access" },
     anthropic: { access: "claude-access" },
     openai: { access: "codex-access" },
     "command-code": { key: "command-key" },
@@ -64,9 +65,9 @@ test("registry exposes every dispatcher provider and skips unconfigured entries"
     },
   });
   assert.deepEqual(ids, [
+    "antigravity",
     "claude",
     "codex",
-    "command-code",
     "cursor",
     "crof",
     "deepseek",
@@ -318,6 +319,150 @@ test("window mapping handles model scope and currency labels without fake percen
     ["unknown", 0, 0, "requests"],
     ["sonnet/7d", 70, 100, "percent"],
   ]);
+});
+
+test("Antigravity reads credentials from antigravity-oauth-token, refreshes expired tokens, and maps quota limits", async () => {
+  let fetches = 0;
+  const now = 1_774_000_000_000;
+  const calls: string[] = [];
+  const opts: QuotaDiscoveryOptions = {
+    readAuth: () => ({}),
+    env: {},
+    homedir: "/home/test",
+    now: () => now,
+    readFile: (path) => {
+      if (path === "/home/test/.gemini/antigravity-cli/antigravity-oauth-token") {
+        return JSON.stringify({
+          token: {
+            access_token: "expired-token",
+            refresh_token: "refresh-token-val",
+            expiry: new Date(now - 60_000).toISOString(),
+          },
+          auth_method: "consumer",
+        });
+      }
+      throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    },
+    fetchImpl: (async (input: string | URL | Request, init?: RequestInit) => {
+      fetches += 1;
+      const url = String(input);
+      calls.push(url);
+      if (url === "https://oauth2.googleapis.com/token") {
+        const body = String(init?.body);
+        assert.ok(body.includes("grant_type=refresh_token"));
+        assert.ok(body.includes("refresh_token=refresh-token-val"));
+        return jsonResponse({ access_token: "fresh-access-token" });
+      }
+      assert.equal(new Headers(init?.headers).get("authorization"), "Bearer fresh-access-token");
+      assert.equal(new Headers(init?.headers).get("user-agent"), "antigravity/1.11.5 windows/amd64");
+      if (url.includes("/v1internal:retrieveUserQuota")) {
+        return jsonResponse({
+          buckets: [
+            {
+              modelId: "gemini-3.8-flash-tiered",
+              remainingFraction: 0.85,
+              resetTime: new Date(now + 3 * 3600 * 1000).toISOString(),
+            },
+            {
+              modelId: "chat_20706",
+              remainingFraction: 1,
+            },
+          ],
+        });
+      }
+      if (url.includes("/v1internal:fetchAvailableModels")) {
+        return jsonResponse({
+          models: {
+            "claude-sonnet-4-6": {
+              quotaInfo: {
+                remainingFraction: 0.5,
+                resetTime: new Date(now + 4 * 3600 * 1000).toISOString(),
+              },
+            },
+            tab_flash_lite_preview: {
+              quotaInfo: { remainingFraction: 1 },
+            },
+          },
+        });
+      }
+      throw new Error(`Unexpected request to ${url}`);
+    }) as typeof fetch,
+  };
+
+  const agy = provider(discoverQuotaProviders(opts), "antigravity");
+  const snapshot = await agy.fetch(new AbortController().signal);
+  assert.equal(snapshot.providerId, "antigravity");
+  assert.equal(snapshot.accountLabel, "Antigravity");
+  assert.deepEqual(snapshot.windows.map((w) => w.id), [
+    "gemini-3.8-flash-tiered/5h",
+    "claude-sonnet-4-6/5h",
+  ]);
+  assert.deepEqual(snapshot.windows.map((w) => [w.used, w.limit, w.unit, w.periodMs]), [
+    [15, 100, "percent", 5 * 3600 * 1000],
+    [50, 100, "percent", 5 * 3600 * 1000],
+  ]);
+  assert.equal(snapshot.windows[0]?.resetsAt, now + 3 * 3600 * 1000);
+  assert.equal(snapshot.windows[1]?.resetsAt, now + 4 * 3600 * 1000);
+  assert.ok(calls.includes("https://oauth2.googleapis.com/token"));
+  assert.ok(calls.some((u) => u.includes("retrieveUserQuota")));
+});
+
+test("Antigravity 401 explains that agy must be opened and does not expose tokens", async () => {
+  const secret = "agy-secret-token-abcdefghijklmnopqrstuvwxyz";
+  const agy = provider(discoverQuotaProviders({
+    readAuth: () => ({ antigravity: { access: secret } }),
+    env: {},
+    homedir: "/unused",
+    readFile: () => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); },
+    fetchImpl: (async () => new Response("", { status: 401 })) as typeof fetch,
+  }), "antigravity");
+  await assert.rejects(
+    () => agy.fetch(new AbortController().signal),
+    (error: Error) => {
+      assert.match(error.message, /please sign in again with agy/i);
+      assert.ok(!error.message.includes(secret));
+      return true;
+    },
+  );
+});
+
+test("Antigravity handles 429 rate limit cooldown and preserves last-good snapshot", async () => {
+  let now = 1_774_000_000_000;
+  let fetches = 0;
+  const opts: QuotaDiscoveryOptions = {
+    readAuth: () => ({ antigravity: { access: "valid-agy-token" } }),
+    env: {},
+    homedir: "/unused",
+    now: () => now,
+    readFile: () => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); },
+    fetchImpl: (async (input: string | URL | Request) => {
+      fetches += 1;
+      if (fetches > 2) {
+        return new Response("", { status: 429, headers: { "retry-after": "60" } });
+      }
+      return jsonResponse({
+        buckets: [
+          {
+            modelId: "gemini-3.8-flash-tiered",
+            remainingFraction: 0.9,
+            resetTime: new Date(now + 2 * 3600 * 1000).toISOString(),
+          },
+        ],
+      });
+    }) as typeof fetch,
+  };
+
+  const agy = provider(discoverQuotaProviders(opts), "antigravity");
+  const first = await agy.fetch(new AbortController().signal);
+  assert.equal(first.windows[0]?.used, 10);
+
+  now += 1_000;
+  const rateLimited = await agy.fetch(new AbortController().signal);
+  assert.deepEqual(rateLimited.windows, first.windows);
+
+  now += 10_000;
+  const cached = await agy.fetch(new AbortController().signal);
+  assert.deepEqual(cached.windows, first.windows);
 });
 
 test("adapter failures and usage-service redaction never include secret values", async () => {

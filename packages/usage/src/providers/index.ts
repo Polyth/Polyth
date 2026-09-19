@@ -4,6 +4,7 @@ import {
   type QuotaDiscoveryOptions,
 } from "../opencodeAuth.ts";
 import { createStandardProviders, type DiscoverableProvider } from "./adapters.ts";
+import { createAntigravityProvider } from "./antigravity.ts";
 import { createClaudeProvider } from "./claude.ts";
 import { createCommandCodeProvider } from "./commandcode.ts";
 import { createXaiProvider } from "./xai.ts";
@@ -11,6 +12,7 @@ import { createXaiProvider } from "./xai.ts";
 const registry = (opts: QuotaDiscoveryOptions = {}): DiscoverableProvider[] => {
   const runtime = resolveQuotaRuntime(opts);
   return [
+    createAntigravityProvider(runtime),
     createClaudeProvider(runtime),
     createCommandCodeProvider(runtime),
     ...createStandardProviders(runtime).filter((provider) => provider.id !== "command-code"),
@@ -41,3 +43,4 @@ export const discoverQuotaProviders = (opts: QuotaDiscoveryOptions = {}): QuotaP
 
 export type { QuotaDiscoveryOptions, QuotaDiscoveryPaths } from "../opencodeAuth.ts";
 export { mapProviderUsage } from "../ocWindows.ts";
+export { createAntigravityProvider } from "./antigravity.ts";

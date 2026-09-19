@@ -842,26 +842,6 @@ const googleSources = (runtime: QuotaRuntime): GoogleSource[] => {
       });
     }
   }
-  for (const path of runtime.paths.antigravityAccountsFiles) {
-    const file = readJson(runtime, path);
-    const accounts = Array.isArray(file?.accounts) ? file.accounts : [];
-    const index = numberValue(file?.activeIndex) ?? 0;
-    const account = objectValue(accounts[index] ?? accounts[0]);
-    const refresh = stringValue(account?.refreshToken);
-    if (!refresh) continue;
-    const parts = refresh.split("|");
-    sources.push({
-      sourceId: "antigravity",
-      accessToken: null,
-      refreshToken: stringValue(parts[0]),
-      projectId: stringValue(account?.projectId)
-        ?? stringValue(account?.managedProjectId)
-        ?? stringValue(parts[1])
-        ?? stringValue(parts[2]),
-      expires: null,
-    });
-    break;
-  }
   return sources;
 };
 

@@ -224,3 +224,34 @@ test("dashboard presents legacy Copilot add-on telemetry as GitHub Copilot", () 
     { id: "github-copilot", label: "GitHub Copilot" },
   ]);
 });
+
+test("dashboard combines Antigravity harness sessions with Antigravity quota limits", () => {
+  const agySession = session("agy-session", "antigravity", now - DAY_MS, 2_000, 0);
+  agySession.resolvedHarnessId = "antigravity";
+  agySession.model = { providerID: "antigravity", modelID: "gemini-3.8-flash-high" };
+
+  const antigravityQuota: QuotaSnapshotDto = {
+    providerId: "antigravity",
+    accountLabel: "Antigravity",
+    fetchedAt: now,
+    stale: false,
+    pace: {},
+    windows: [
+      { id: "gemini-3.8-flash-tiered/5h", label: "Gemini 3.8 Flash Tiered 5h", used: 15, limit: 100, unit: "percent" },
+      { id: "claude-sonnet-4-6/5h", label: "Claude Sonnet 4 6 5h", used: 40, limit: 100, unit: "percent" },
+    ],
+  };
+
+  const dashboard = buildUsageDashboardData([agySession], [antigravityQuota], 7, now);
+
+  assert.equal(dashboard.providers.length, 1);
+  assert.equal(dashboard.providers[0]?.id, "antigravity");
+  assert.equal(dashboard.providers[0]?.label, "Antigravity");
+  assert.equal(dashboard.providers[0]?.tokens, 2_000);
+  assert.equal(dashboard.providers[0]?.snapshot?.providerId, "antigravity");
+  assert.equal(dashboard.providers[0]?.quotaWindow?.id, "claude-sonnet-4-6/5h");
+  assert.equal(dashboard.providers[0]?.remainingPercent, 60);
+  assert.deepEqual(dashboard.models.map((m) => ({ id: m.id, provider: m.providerLabel, tokens: m.tokens })), [
+    { id: "antigravity/gemini-3.8-flash-high", provider: "Antigravity", tokens: 2_000 },
+  ]);
+});

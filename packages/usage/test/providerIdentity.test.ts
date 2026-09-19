@@ -47,6 +47,14 @@ test("resolveSessionUsageProviderId prefers the session model over harness fallb
     resolveSessionUsageProviderId(session(undefined, "codex")),
     "openai",
   );
+  assert.equal(
+    resolveSessionUsageProviderId(session({ providerID: "antigravity", modelID: "gemini-3.8-flash-high" })),
+    "antigravity",
+  );
+  assert.equal(
+    resolveSessionUsageProviderId(session(undefined, "antigravity")),
+    "antigravity",
+  );
   assert.equal(resolveSessionUsageProviderId(session()), undefined);
 });
 
@@ -54,4 +62,6 @@ test("usage labels never surface default as a provider name", () => {
   assert.equal(providerUsageLabel("anthropic"), "Claude");
   assert.equal(providerUsageLabel("default"), "");
   assert.equal(displayProvider("openrouter"), "OpenRouter");
+  assert.equal(displayProvider("antigravity"), "Antigravity");
+  assert.equal(providerUsageLabel("antigravity"), "Antigravity");
 });

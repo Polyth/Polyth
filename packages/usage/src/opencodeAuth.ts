@@ -11,6 +11,7 @@ export interface QuotaDiscoveryPaths {
   claudeCredentialsFile?: string;
   managedDataDir?: string;
   antigravityAccountsFiles?: string[];
+  antigravityTokenFiles?: string[];
 }
 
 export interface QuotaDiscoveryOptions {
@@ -64,6 +65,9 @@ export const resolveQuotaRuntime = (opts: QuotaDiscoveryOptions = {}): QuotaRunt
       : join(home, ".config", "polyth"));
   const authFile = opts.paths?.authFile ?? join(home, ".local", "share", "opencode", "auth.json");
   const claudeRoot = env.CLAUDE_CONFIG_DIR ? resolve(env.CLAUDE_CONFIG_DIR) : join(home, ".claude");
+  const antigravityCliHome = env.GEMINI_CLI_HOME
+    ? resolve(env.GEMINI_CLI_HOME)
+    : (env.ANTIGRAVITY_CLI_HOME ? resolve(env.ANTIGRAVITY_CLI_HOME) : join(home, ".gemini", "antigravity-cli"));
   const paths: Required<QuotaDiscoveryPaths> = {
     authFile,
     claudeCredentialsFile: opts.paths?.claudeCredentialsFile ?? join(claudeRoot, ".credentials.json"),
@@ -71,6 +75,10 @@ export const resolveQuotaRuntime = (opts: QuotaDiscoveryOptions = {}): QuotaRunt
     antigravityAccountsFiles: opts.paths?.antigravityAccountsFiles ?? [
       join(home, ".config", "opencode", "antigravity-accounts.json"),
       join(home, ".local", "share", "opencode", "antigravity-accounts.json"),
+    ],
+    antigravityTokenFiles: opts.paths?.antigravityTokenFiles ?? [
+      join(antigravityCliHome, "antigravity-oauth-token"),
+      join(home, ".config", "antigravity", "antigravity-oauth-token"),
     ],
   };
   const readFile = opts.readFile ?? ((path: string) => readFileSync(path, "utf8"));
