@@ -367,3 +367,26 @@ test("timeline vertical runway is represented by flex spacers instead of scroll-
     assert.doesNotMatch(body, /(?:^|;)\s*padding\s*:/, String(selector));
   }
 });
+
+
+test("queued message rows follow the composer's material, type and corner roles", () => {
+  const css = read("../src/styles.css");
+
+  const chipStart = css.indexOf(".queue-chip {");
+  const chip = css.slice(chipStart, css.indexOf("}", chipStart));
+  assert.match(chip, /background:\s*var\(--material-glass-strong\)/);
+  assert.match(chip, /border:\s*1px solid var\(--material-glass-border\)/);
+  assert.match(chip, /border-radius:\s*var\(--radius-composer\)/);
+
+  const textStart = css.indexOf(".queue-chip .queue-text {");
+  const text = css.slice(textStart, css.indexOf("}", textStart));
+  assert.match(text, /font-size:\s*var\(--font-response\)/);
+  assert.match(text, /line-height:\s*var\(--font-response-lh\)/);
+
+  // The opaque material above is the fallback; the live glass pass is guarded
+  // so transparency, low-resource and reduced-motion settings stay readable.
+  assert.match(
+    css,
+    /@supports \(\(-webkit-backdrop-filter: blur\(1px\)\) or \(backdrop-filter: blur\(1px\)\)\)[\s\S]*?html:not\(\[data-reduce-animations="true"\]\)[\s\S]*?body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\)[\s\S]*?\.queue-chip:not\(\.drag-over\)[\s\S]*?backdrop-filter:\s*blur\(var\(--material-glass-blur\)\)/,
+  );
+});
