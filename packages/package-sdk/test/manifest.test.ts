@@ -153,12 +153,12 @@ test("capability expansion does not inherit new access", () => {
   const unbounded = expandedCapabilities(current, [{ name: "network.fetch" }]);
   assert.deepEqual(unbounded, [{ name: "network.fetch" }]);
 
-  const fileExpansion = expandedCapabilities([
-    { name: "project.files.read", constraints: { paths: ["docs/**"] } },
+  const methodExpansion = expandedCapabilities([
+    { name: "network.fetch", constraints: { origins: ["https://api.example.com"], methods: ["GET"] } },
   ], [
-    { name: "project.files.read", constraints: { paths: ["docs/**", "src/**"] } },
+    { name: "network.fetch", constraints: { origins: ["https://api.example.com"], methods: ["GET", "POST"] } },
   ]);
-  assert.deepEqual(fileExpansion[0]?.constraints?.paths, ["src/**"]);
+  assert.deepEqual(methodExpansion[0]?.constraints?.methods, ["POST"]);
 });
 
 test("reference packages parse as sandboxed v1 manifests", () => {
@@ -230,7 +230,7 @@ test("v2 parses native contributions and scoped optional authority", () => {
       widgets: [{ id: "summary", title: "Summary", description: "Current state" }],
     },
     capabilities: [
-      { name: "project.files.read", paths: ["docs/**"] },
+      { name: "network.fetch", origins: ["https://api.example.com"], methods: ["GET"] },
       { name: "model.generate", required: false, modelClasses: ["utility"], maxOutputTokens: 512 },
     ],
   }));
@@ -238,7 +238,8 @@ test("v2 parses native contributions and scoped optional authority", () => {
   if (!parsed.ok || parsed.manifest.manifestVersion !== 2) return;
   assert.equal(parsed.manifest.contributes?.messageActions?.[0]?.roles?.[0], "assistant");
   assert.equal(parsed.manifest.contributes?.toolRenderers?.[0]?.presentation?.output, "table");
-  assert.deepEqual(parsed.manifest.capabilities?.[0]?.constraints?.paths, ["docs/**"]);
+  assert.deepEqual(parsed.manifest.capabilities?.[0]?.constraints?.origins, ["https://api.example.com"]);
+  assert.deepEqual(parsed.manifest.capabilities?.[0]?.constraints?.methods, ["GET"]);
   assert.equal(parsed.manifest.capabilities?.[1]?.required, false);
 });
 
@@ -250,11 +251,11 @@ test("v2 bounds contribution counts and rejects unsafe capability scopes", () =>
     contributes: { messageActions: tooMany },
   })).ok, false);
 
-  for (const paths of [["../secret"], ["/absolute"], ["safe\\escape"]]) {
+  for (const origins of [["http://insecure.example"], ["https://user:secret@example.com"], ["https://api.example.com/path"]]) {
     assert.equal(parsePackageManifestJson(JSON.stringify({
       ...valid,
       manifestVersion: 2,
-      capabilities: [{ name: "project.files.read", paths }],
+      capabilities: [{ name: "network.fetch", origins }],
     })).ok, false);
   }
 });

@@ -140,7 +140,7 @@ export interface ContributionCompletion {
   error?: { message: string };
 }
 
-const invalid = (message: string): never => {
+const invalid: (message: string) => never = (message) => {
   throw Object.assign(new Error(message), { code: "INVALID_REQUEST" });
 };
 
