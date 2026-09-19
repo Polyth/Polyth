@@ -7,6 +7,8 @@ import type {
   DesktopChatWorkspaceSurface,
   DesktopInfo,
   DesktopSettings,
+  DesktopSetupInput,
+  DesktopSetupPreparation,
   DesktopUpdateState,
   DesktopWindowAction,
   DesktopWindowState,
@@ -21,6 +23,11 @@ const subscribe = <T>(channel: string, listener: (value: T) => void): (() => voi
 
 const api: PolythDesktopApi = {
   getInfo: () => ipcRenderer.invoke("desktop:info") as Promise<DesktopInfo>,
+  prepareSetup: () =>
+    ipcRenderer.invoke("desktop:setup:prepare") as Promise<DesktopSetupPreparation>,
+  completeSetup: (input: DesktopSetupInput) =>
+    ipcRenderer.invoke("desktop:setup:complete", input) as Promise<void>,
+  restartAfterSetup: () => ipcRenderer.invoke("desktop:setup:restart") as Promise<void>,
   getSettings: () => ipcRenderer.invoke("desktop:settings:get") as Promise<DesktopSettings>,
   setSettings: (patch) =>
     ipcRenderer.invoke("desktop:settings:set", patch) as Promise<DesktopSettings>,
