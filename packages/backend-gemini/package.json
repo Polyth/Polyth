@@ -14,7 +14,7 @@
     "serverEntry": "./src/serverEntry.ts",
     "descriptor": {
       "name": "Gemini CLI harness",
-      "description": "Gemini CLI through its official ACP mode",
+      "description": "Gemini CLI through official ACP with Polyth capability, usage, and resume integration",
       "core": false,
       "enabled": true,
       "icon": "sparkles",
