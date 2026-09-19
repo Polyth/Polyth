@@ -29,6 +29,8 @@ export interface SetupServerOptions {
 
 export interface SetupServerHandle {
   server: Server;
+  /** Resolves only after setup completed and its HTTP response finished. */
+  completed: Promise<void>;
   shutdown(): Promise<void>;
 }
 
@@ -82,6 +84,9 @@ async function staticFile(root: string, pathname: string): Promise<{ data: Buffe
  */
 export function createSetupServer(options: SetupServerOptions): SetupServerHandle {
   const root = resolve(options.webDist);
+  let resolveCompleted!: () => void;
+  let completionSignaled = false;
+  const completed = new Promise<void>((resolveCompletion) => { resolveCompleted = resolveCompletion; });
   if (options.desktopSetupClaimToken && !/^[a-f0-9]{64}$/.test(options.desktopSetupClaimToken)) {
     throw new Error("Invalid native desktop setup claim");
   }
@@ -157,6 +162,7 @@ export function createSetupServer(options: SetupServerOptions): SetupServerHandl
   let closed = false;
   return {
     server,
+    completed,
     async shutdown() {
       if (closed) return;
       closed = true;
