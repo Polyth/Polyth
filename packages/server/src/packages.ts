@@ -37,10 +37,10 @@ export function createPackageRegistry(opts: {
 }): PackageRegistry {
   mkdirSync(dirname(opts.file), { recursive: true });
 
-  const packages = [
-    ...BUILTIN_PACKAGES.map((descriptor) => ({ ...descriptor })),
-    ...(opts.descriptors ?? []).map((descriptor) => ({ ...descriptor })),
-  ] satisfies PackageDescriptorDto[];
+  const packages: PackageDescriptorDto[] = [
+    ...BUILTIN_PACKAGES.map((descriptor): PackageDescriptorDto => ({ ...descriptor })),
+    ...(opts.descriptors ?? []).map((descriptor): PackageDescriptorDto => ({ ...descriptor })),
+  ];
   const ids = new Set<string>();
   for (const descriptor of packages) {
     if (ids.has(descriptor.id)) {

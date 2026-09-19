@@ -1,0 +1,241 @@
+name: Build apps
+run-name: Build ${{ inputs.target }} @ ${{ github.ref_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Artifact to build
+        required: true
+        type: choice
+        default: android-apk
+        options:
+          - android-apk
+          - ios-app
+          - windows-exe
+          - linux-appimage
+          - all
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-apps-${{ github.ref }}-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  android:
+    name: Android APK
+    if: inputs.target == 'android-apk' || inputs.target == 'all'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install workspace dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build web bundle
+        run: npm run build:web
+
+      - name: Sync Android project
+        run: |
+          npm --workspace @polyth/mobile run assets
+          cd apps/mobile
+          npx cap sync android
+
+      - name: Build installable debug APK
+        working-directory: apps/mobile/android
+        run: ./gradlew :app:assembleDebug --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: polyth-android-apk
+          retention-days: 14
+          path: apps/mobile/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+  ios:
+    name: iOS .app
+    if: inputs.target == 'ios-app' || inputs.target == 'all'
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install workspace dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build web bundle and sync iOS project
+        run: |
+          npm run build:web
+          npm --workspace @polyth/mobile run sync
+
+      - name: Build native Polyth Link framework
+        run: npm --workspace @polyth/mobile run native:ios
+
+      - name: Build unsigned simulator app
+        run: |
+          set -euo pipefail
+          DERIVED="$RUNNER_TEMP/PolythDerivedData"
+          xcodebuild             -project apps/mobile/ios/App/App.xcodeproj             -scheme App             -configuration Release             -sdk iphonesimulator             -destination 'generic/platform=iOS Simulator'             -derivedDataPath "$DERIVED"             CODE_SIGNING_ALLOWED=NO             build
+
+          APP="$DERIVED/Build/Products/Release-iphonesimulator/App.app"
+          test -d "$APP"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "$RUNNER_TEMP/Polyth-iOS.app.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: polyth-ios-app
+          retention-days: 14
+          path: ${{ runner.temp }}/Polyth-iOS.app.zip
+          if-no-files-found: error
+
+  windows:
+    name: Windows EXE
+    if: inputs.target == 'windows-exe' || inputs.target == 'all'
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Install pinned Chromium
+        run: npx playwright-core install chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: 0
+
+      - name: Build desktop bundle
+        run: npm run build:desktop
+
+      - name: Stage Chromium
+        run: npm run desktop:stage-chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: 0
+          POLYTH_TARGET_PLATFORM: win32
+          POLYTH_TARGET_ARCH: x64
+
+      - name: Download pinned OpenCode
+        run: npm run desktop:download-opencode
+        env:
+          POLYTH_TARGET_PLATFORM: win32
+          POLYTH_TARGET_ARCH: x64
+
+      - name: Build NSIS installer
+        working-directory: apps/desktop
+        run: npx electron-builder --win nsis --x64 --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: polyth-windows-exe
+          retention-days: 14
+          path: |
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.blockmap
+            apps/desktop/release/latest*.yml
+          if-no-files-found: error
+
+  linux:
+    name: Linux AppImage
+    if: inputs.target == 'linux-appimage' || inputs.target == 'all'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@1.91.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install workspace dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Install pinned Chromium
+        run: npx playwright-core install chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: 0
+
+      - name: Build desktop bundle
+        run: npm run build:desktop
+
+      - name: Stage Chromium
+        run: npm run desktop:stage-chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: 0
+          POLYTH_TARGET_PLATFORM: linux
+          POLYTH_TARGET_ARCH: x64
+
+      - name: Download pinned OpenCode
+        run: npm run desktop:download-opencode
+        env:
+          POLYTH_TARGET_PLATFORM: linux
+          POLYTH_TARGET_ARCH: x64
+
+      - name: Build AppImage
+        working-directory: apps/desktop
+        run: npx electron-builder --linux AppImage --x64 --publish never
+
+      - name: Smoke-test packaged AppImage
+        shell: bash
+        run: |
+          set -euo pipefail
+          APPIMAGE="$(find apps/desktop/release -maxdepth 1 -name '*.AppImage' -print -quit)"
+          test -n "$APPIMAGE"
+          xvfb-run -a node apps/desktop/test/appimage-e2e.mjs             "$APPIMAGE"             "apps/desktop/release/appimage-e2e.png"             "apps/desktop/release/appimage-e2e.log"             "$GITHUB_WORKSPACE"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: polyth-linux-appimage
+          retention-days: 14
+          path: |
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/appimage-e2e.*
+          if-no-files-found: error

@@ -34,14 +34,7 @@ a desktop artifact, `npm --workspace @polyth/desktop run stage:chromium` copies 
 already-installed Chromium selected by the pinned `playwright-core` into
 `resources/chromium/<platform>-<arch>/` and records its version and executable path.
 The staging command never downloads a browser; release runners must provision the
-matching Playwright browser before this step. The desktop release workflow installs
-the Chromium revision selected by `playwright-core` into a hermetic cache, then stages
-it. Universal macOS jobs install and stage both `mac14` and `mac14-arm64` browser
-trees; Windows ARM uses Playwright's supported x64 Chromium under the platform's
-compatibility layer. Both macOS trees remain in the universal app so startup can
-select the matching process architecture; the electron-builder `x64ArchFiles`
-rule treats these architecture-specific Chromium binaries as resources and does
-not try to lipo them. Packaged startup points
+matching Playwright browser before this step. The manual GitHub application-build workflow installs the Chromium revision selected by `playwright-core` into a hermetic cache, then stages it for the requested Windows or Linux x64 artifact. Local or future signed macOS distribution tooling must provision and stage the correct architecture-specific browser resources before packaging; the staging command itself never downloads them. Packaged startup points
 `POLYTH_CHROMIUM_PATH` at that resource and reports the browser capability as
 unavailable when the resource is missing. Electron's renderer CDP is not reused:
 connecting to the app's debugging endpoint would expose the trusted desktop renderer
@@ -50,27 +43,14 @@ browser service's isolated context and URL policy.
 
 ## Release and updates
 
-`.github/workflows/desktop-release.yml` builds x64 and arm64 AppImages, a universal
-macOS DMG plus the required updater ZIP, and x64 and arm64 NSIS installers. Tagging
-`v<package-version>` publishes the artifacts and
-electron-builder update metadata to GitHub Releases. Pull requests and manual runs
-build the same packages without publishing.
+GitHub Actions uses `.github/workflows/build-apps.yml` only for explicit manual smoke artifacts:
 
-`electron-updater` reads the packaged `app-update.yml`, checks the public GitHub
-release, downloads only after user confirmation, and installs on explicit restart.
-AppImage delta metadata, macOS blockmaps, and Windows NSIS blockmaps are uploaded with
-their installers.
+- `windows-exe` builds an x64 NSIS installer with `--publish never`;
+- `linux-appimage` builds an x64 AppImage with `--publish never` and runs the packaged AppImage smoke test.
 
-Production macOS updates must be signed with one Developer ID identity and notarized;
-Windows installers are signed to avoid SmartScreen churn. Tagged release jobs fail
-instead of publishing insecure or non-updatable artifacts when the standard
-electron-builder secrets are missing:
+There is no tag-triggered desktop packaging or GitHub Release publication in the current Actions set. macOS desktop packages can still be built locally with `npm run desktop:dist:mac`; signed/notarized distribution is a separate operator release concern and is not implied by a successful local or manual CI artifact.
 
-- `CSC_LINK`, `CSC_KEY_PASSWORD`
-- `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`
-- `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD`
-
-Unsigned pull-request artifacts are for validation only.
+`electron-updater` still consumes electron-builder update metadata when a real published release provides it, but the manual build workflow never publishes that metadata. Any future automatic updater release path must be introduced as an explicit signed publishing workflow, not by changing the manual smoke-build contract.
 
 ## Background integration
 

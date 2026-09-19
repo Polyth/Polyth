@@ -97,11 +97,17 @@ const fingerprintClientAdmission = (input: UserTurnInput): string =>
 /** SessionService historically accepted a bare ModelRef for rate-limit
  * recovery. Keep that call shape valid while giving new callers an explicit,
  * serializable harness route that can flow through normal send admission. */
+const isModelRef = (value: ResumeTurnOptions | ModelRef): value is ModelRef =>
+  "providerID" in value
+  && typeof value.providerID === "string"
+  && "modelID" in value
+  && typeof value.modelID === "string";
+
 const normalizeResumeOptions = (
   input?: ResumeTurnOptions | ModelRef,
 ): ResumeTurnOptions => {
   if (!input) return {};
-  if ("providerID" in input || "modelID" in input) return { model: input };
+  if (isModelRef(input)) return { model: input };
   return input;
 };
 

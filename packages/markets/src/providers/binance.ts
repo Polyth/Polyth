@@ -17,8 +17,9 @@ export const BINANCE_CRYPTO_ASSETS = [
   { symbol: "BCH/USDT", pair: "BCHUSDT", name: "Bitcoin Cash" },
 ] as const;
 
-const assetBySymbol = new Map(BINANCE_CRYPTO_ASSETS.map((asset) => [asset.symbol, asset]));
-const assetByPair = new Map(BINANCE_CRYPTO_ASSETS.map((asset) => [asset.pair, asset]));
+type BinanceAsset = (typeof BINANCE_CRYPTO_ASSETS)[number];
+const assetBySymbol = new Map<string, BinanceAsset>(BINANCE_CRYPTO_ASSETS.map((asset) => [asset.symbol, asset]));
+const assetByPair = new Map<string, BinanceAsset>(BINANCE_CRYPTO_ASSETS.map((asset) => [asset.pair, asset]));
 const RANGE: Record<MarketRange, { interval: string; limit: number }> = {
   "1D": { interval: "5m", limit: 288 },
   "5D": { interval: "15m", limit: 480 },
@@ -43,11 +44,12 @@ const assetFor = (symbol: string) => assetBySymbol.get(symbol) ?? miss(`binance:
 
 function quoteFromTicker(raw: unknown, fallbackAsOf: number): MarketQuote | undefined {
   const row = record(raw);
-  const pair = typeof row?.symbol === "string" ? row.symbol.toUpperCase() : "";
+  if (!row) return undefined;
+  const pair = typeof row.symbol === "string" ? row.symbol.toUpperCase() : "";
   const asset = assetByPair.get(pair);
-  const price = numeric(row?.lastPrice);
+  const price = numeric(row.lastPrice);
   if (!asset || price === undefined) return undefined;
-  const closeTime = numeric(row?.closeTime);
+  const closeTime = numeric(row.closeTime);
   return {
     symbol: asset.symbol,
     name: asset.name,
@@ -93,7 +95,7 @@ export function createBinanceProvider(options: BinanceProviderOptions = {}): Mar
         `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(asset.pair)}&interval=${encodeURIComponent(spec.interval)}&limit=${spec.limit}`,
         signal,
       );
-      if (!Array.isArray(data)) miss(`binance: no candles for ${symbol}`);
+      if (!Array.isArray(data)) return miss(`binance: no candles for ${symbol}`);
       const candles: MarketCandle[] = data.flatMap((raw) => {
         if (!Array.isArray(raw)) return [];
         const timeMs = numeric(raw[0]);
@@ -130,7 +132,7 @@ export function createBinanceProvider(options: BinanceProviderOptions = {}): Mar
       );
       if (!Array.isArray(data)) throw new Error("binance: malformed crypto board");
       const quotes = data
-        .map((row) => quoteFromTicker(row, now()))
+        .map((row: unknown) => quoteFromTicker(row, now()))
         .filter((quote): quote is MarketQuote => quote !== undefined)
         .sort((left, right) => BINANCE_CRYPTO_ASSETS.findIndex((asset) => asset.symbol === left.symbol)
           - BINANCE_CRYPTO_ASSETS.findIndex((asset) => asset.symbol === right.symbol));

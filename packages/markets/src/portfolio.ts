@@ -53,30 +53,34 @@ export function parsePortfolio(value: unknown): MarketPortfolio {
   if (!value || typeof value !== "object" || Array.isArray(value)) fail("portfolio must be an object");
   const raw = value as Record<string, unknown>;
   if (raw.version !== 1) fail("unsupported portfolio version");
-  if (!Array.isArray(raw.holdings) || raw.holdings.length > MAX_HOLDINGS) {
-    fail(`portfolio may contain at most ${MAX_HOLDINGS} holdings`);
+  const rawHoldings = raw.holdings;
+  if (!Array.isArray(rawHoldings) || rawHoldings.length > MAX_HOLDINGS) {
+    return fail(`portfolio may contain at most ${MAX_HOLDINGS} holdings`);
   }
 
   const seen = new Set<string>();
-  const holdings = raw.holdings.map((value) => {
+  const holdings = rawHoldings.map((value: unknown) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) fail("each holding must be an object");
     const item = value as Record<string, unknown>;
-    if (typeof item.symbol !== "string") fail("holding symbol must be a string");
-    const symbol = normalizeSymbol(item.symbol);
+    const rawSymbol = item.symbol;
+    if (typeof rawSymbol !== "string") return fail("holding symbol must be a string");
+    const symbol = normalizeSymbol(rawSymbol);
     if (seen.has(symbol)) fail(`duplicate holding symbol: ${symbol}`);
     seen.add(symbol);
-    if (typeof item.quantity !== "number" || !Number.isFinite(item.quantity) || item.quantity <= 0) {
-      fail("holding quantity must be a positive number");
+    const quantity = item.quantity;
+    if (typeof quantity !== "number" || !Number.isFinite(quantity) || quantity <= 0) {
+      return fail("holding quantity must be a positive number");
     }
-    if (item.averageCost !== undefined && (
-      typeof item.averageCost !== "number" || !Number.isFinite(item.averageCost) || item.averageCost < 0
+    const averageCost = item.averageCost;
+    if (averageCost !== undefined && (
+      typeof averageCost !== "number" || !Number.isFinite(averageCost) || averageCost < 0
     )) {
-      fail("holding average cost must be a non-negative number");
+      return fail("holding average cost must be a non-negative number");
     }
     return {
       symbol,
-      quantity: item.quantity,
-      ...(item.averageCost === undefined ? {} : { averageCost: item.averageCost as number }),
+      quantity,
+      ...(averageCost === undefined ? {} : { averageCost }),
     };
   });
 

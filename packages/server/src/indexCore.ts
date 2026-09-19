@@ -1750,6 +1750,7 @@ export async function boot(opts: BootOptions = {}) {
       } catch {
         storage = undefined;
       }
+      const permissionRequester = requestAgentToolPermission;
       return authorizePackageToolAfterPermissions({
         tool,
         grant: {
@@ -1763,8 +1764,8 @@ export async function boot(opts: BootOptions = {}) {
         permissionVerdict: verdict,
         storage,
         signal,
-        requestPermission: requestAgentToolPermission
-          ? (input) => requestAgentToolPermission(input)
+        requestPermission: permissionRequester
+          ? (input) => permissionRequester(input)
           : undefined,
       });
     },
@@ -2368,7 +2369,7 @@ export async function boot(opts: BootOptions = {}) {
   const manualSuggestion = createManualSuggestionService({
     latestSeq: (sessionId) => store.latestSeq(sessionId),
     events: (sessionId) => store.events(sessionId),
-    complete: assistComplete,
+    complete: (sessionId, prompt, userId) => assistComplete(sessionId, prompt, 1_024, userId),
   });
   // --- spec-driven track orchestration: a genuinely cross-cutting workflow
   // (knowledge tracks + goals + schedule + git + terminal + sessions), so the

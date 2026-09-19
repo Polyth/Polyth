@@ -56,12 +56,13 @@ test("trusted server routes are denied outside Spaces where the package is enabl
     },
   });
 
-  assert.ok(route);
-  assert.equal(await route!(requestFor("spc_a")), true);
-  assert.equal(await route!(requestFor("spc_b")), false);
+  const activeRoute = route as unknown as RouteHandler;
+  assert.ok(activeRoute);
+  assert.equal(await activeRoute(requestFor("spc_a")), true);
+  assert.equal(await activeRoute(requestFor("spc_b")), false);
 
   gate.dispose();
-  assert.equal(await route!(requestFor("spc_a")), false, "missing canonical gate fails closed");
+  assert.equal(await activeRoute(requestFor("spc_a")), false, "missing canonical gate fails closed");
 
   await mounted.dispose();
   await root.dispose();

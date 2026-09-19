@@ -65,8 +65,8 @@ export function createNasdaqProvider(options: NasdaqProviderOptions = {}): Marke
         get(`https://api.nasdaq.com/api/quote/${encoded}/info?assetclass=${kind}`, signal),
         get(`https://api.nasdaq.com/api/quote/${encoded}/summary?assetclass=${kind}`, signal).catch(() => undefined),
       ]);
-      const price = numeric(valueAt(info, "primaryData", "lastSalePrice"));
-      if (price === undefined) miss(`nasdaq: no quote for ${symbol}`);
+      const price = numeric(valueAt(info, "primaryData", "lastSalePrice"))
+        ?? miss(`nasdaq: no quote for ${symbol}`);
       const previousClose = numeric(valueAt(info, "primaryData", "previousClose"))
         ?? numeric(valueAt(summary, "summaryData", "PreviousClose", "value"));
       const change = numeric(valueAt(info, "primaryData", "netChange"));
@@ -103,7 +103,7 @@ export function createNasdaqProvider(options: NasdaqProviderOptions = {}): Marke
         signal,
       );
       const rows = valueAt(data, "chart");
-      if (!Array.isArray(rows)) miss(`nasdaq: no chart for ${symbol}`);
+      if (!Array.isArray(rows)) return miss(`nasdaq: no chart for ${symbol}`);
       const candles: MarketCandle[] = [];
       for (const raw of rows) {
         const row = record(raw);
@@ -140,7 +140,7 @@ export function createNasdaqProvider(options: NasdaqProviderOptions = {}): Marke
         signal,
       );
       const rows = valueAt(data, "earningsSurpriseTable", "rows");
-      if (!Array.isArray(rows)) miss(`nasdaq: no earnings history for ${symbol}`);
+      if (!Array.isArray(rows)) return miss(`nasdaq: no earnings history for ${symbol}`);
       const earnings: MarketEarningsSurprise[] = [];
       for (const raw of rows) {
         const row = record(raw);

@@ -20,7 +20,7 @@ MAX_FILE = 2 * 1024 * 1024
 ALLOWED_ROOTS = {'AGENTS.md', 'CLAUDE.md', 'GEMINI.md', 'CONTRIBUTING_AGENT_OVERVIEW.md'}
 ALLOWED_PREFIXES = ('.agents/skills/', '.claude/skills/', '.cursor/rules/', '.cursor/agents/', 'docs/agents/')
 ALLOWED_FILES = {
-    '.github/copilot-instructions.md', '.github/workflows/agent-knowledge.yml',
+    '.github/copilot-instructions.md',
     '.opencode/skill/polyth-control/SKILL.md', 'docs/dev/README.md',
     'scripts/agent-kit.mjs', 'scripts/agent-kit-install.py',
     'scripts/test/agent-kit.test.ts', 'scripts/test/agent_kit_install_test.py',

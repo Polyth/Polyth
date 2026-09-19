@@ -1,66 +1,70 @@
 name: CI
 
 on:
-  # Temporarily keep CI manual-only while GitHub Actions jobs are failing before
-  # runner assignment (zero workflow steps execute). Keep the validation
-  # contract current so normal triggers can be restored without another audit.
+  pull_request:
+  push:
+    branches:
+      - master
   workflow_dispatch:
-
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-v2-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  validate:
+  quality:
+    name: Web, TypeScript and tests
     runs-on: ubuntu-24.04
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
 
+      - uses: dtolnay/rust-toolchain@1.91.0
+
+      - uses: Swatinem/rust-cache@v2
+
       - name: Install workspace dependencies
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
-      - name: Resolve aligned release version metadata
-        run: node scripts/release-version.mjs
-
-      - name: Build web packages and shell
-        run: npm run build:web
-
-      - name: Typecheck TypeScript projects
-        shell: bash
+      - name: Validate agent knowledge and repository guidance
         run: |
-          set -euo pipefail
-          projects=(
-            packages/contracts
-            packages/plugins
-            packages/server
-            packages/tenancy
-            packages/secure-safe
-            packages/pairing-qr
-            packages/tunnel
-            packages/terminal
-            packages/markets
-            apps/mobile
-            apps/desktop
-          )
-          for project in "${projects[@]}"; do
-            echo "::group::tsc $project"
-            npx tsc --noEmit -p "$project"
-            echo "::endgroup::"
-          done
+          node scripts/agent-kit.mjs check
+          node --experimental-strip-types --test scripts/test/agent-kit.test.ts
+          python3 scripts/test/agent_kit_install_test.py
 
-      # Generic CI owns stable repository tests. Polyth Link contract tests are
-      # selected by scripts/ci/select-tests.mjs and run only in polyth-link.yml.
-      - name: Run stable repository tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -t tests < <(node scripts/ci/select-tests.mjs ci)
-          node --experimental-strip-types --test "${tests[@]}"
+      - name: Run repository quality contract
+        run: node scripts/ci/release-quality.mjs
+
+  rust:
+    name: Rust
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --all-targets
