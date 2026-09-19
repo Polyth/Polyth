@@ -1,4 +1,4 @@
-import { nativeLinkAvailable } from "./polythLink.ts";
+import { nativeLinkAvailable, type ConnectionMetadata } from "./polythLink.ts";
 
 export interface ConnectionUiState {
   nativeAvailable: boolean;
@@ -25,6 +25,19 @@ export function connectionUiState(opts: {
     preservePendingPair: pending,
     legacyIsSecure: false,
   };
+}
+
+export function preferredTrustedConnection(
+  connections: readonly ConnectionMetadata[],
+): ConnectionMetadata | undefined {
+  return [...connections]
+    .filter((connection) =>
+      !connection.revoked
+      && connection.pairingState !== "revoked"
+      && connection.pairingState !== "prepared"
+      && connection.hasSecureIdentity
+    )
+    .sort((a, b) => b.lastUsedAt - a.lastUsedAt)[0];
 }
 
 export function bootstrapUrlWithNext(bootstrapUrl: string, next = "/"): string {
