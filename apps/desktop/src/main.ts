@@ -731,6 +731,10 @@ async function start(): Promise<void> {
   session.defaultSession.setPermissionCheckHandler((webContents, permission, _origin, details) =>
     !!webContents && isLocalNavigation(webContents.getURL()) && (permission === "notifications" || (permission === "media" && details.mediaType === "audio")));
   await startServer();
+  const initialLifecycle = serverLifecycle;
+  if (initialLifecycle && "setup" in initialLifecycle && initialLifecycle.setup === true) {
+    watchDesktopSetup(initialLifecycle);
+  }
   if (startupSmoke) {
     log("Desktop startup smoke passed");
     quitting = true;
