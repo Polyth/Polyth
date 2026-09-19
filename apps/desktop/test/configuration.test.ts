@@ -118,6 +118,26 @@ test("manual desktop workflow builds Windows, Linux and macOS artifacts without 
 });
 
 
+test("desktop first-run setup hides operator tooling and restarts automatically", async () => {
+  const mainSource = await readFile(join(desktopDir, "src", "main.ts"), "utf8");
+  const preloadSource = await readFile(join(desktopDir, "src", "preload.ts"), "utf8");
+  const setupSource = await readFile(
+    join(repositoryRoot, "apps", "web", "src", "components", "SetupScreen.tsx"),
+    "utf8",
+  );
+  const serverSource = await readFile(join(repositoryRoot, "packages", "server", "src", "index.ts"), "utf8");
+
+  assert.match(serverSource, /issueSetupClaim\(\)/);
+  assert.match(mainSource, /desktop:setup:claim/);
+  assert.match(mainSource, /restartDesktopSetupServer/);
+  assert.match(preloadSource, /requestSetupClaim/);
+  assert.match(preloadSource, /restartAfterSetup/);
+  assert.match(setupSource, /Preparing secure local setup/);
+  assert.match(setupSource, /desktop\.requestSetupClaim\(\)/);
+  assert.match(setupSource, /desktop\.restartAfterSetup\(\)/);
+  assert.match(setupSource, /desktop \? \(/);
+});
+
 test("packaged desktop startup is self-contained across host platforms", async () => {
   const mainSource = await readFile(join(desktopDir, "src", "main.ts"), "utf8");
   const serverSource = await readFile(
