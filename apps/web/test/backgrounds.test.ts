@@ -38,11 +38,12 @@ test("custom backgrounds accept bounded raster data only", () => {
 
 test("background and glass controls are wired into Appearance and the held-Shift corner", async () => {
   const read = (relative: string) => readFile(new URL(relative, import.meta.url), "utf8");
-  const [app, pages, picker, styles, theme, index] = await Promise.all([
+  const [app, pages, picker, styles, mobileViewportStyles, theme, index] = await Promise.all([
     read("../src/App.tsx"),
     read("../src/components/settings/pages.tsx"),
     read("../src/components/BackgroundPicker.tsx"),
     read("../src/styles.css"),
+    read("../src/mobileViewport.css"),
     read("../src/theme.ts"),
     read("../src/index.html"),
   ]);
@@ -70,15 +71,25 @@ test("background and glass controls are wired into Appearance and the held-Shift
     /html, body, #root\s*\{[^}]*min-height:\s*100vh;[^}]*min-height:\s*100dvh;/s,
     "the root chain cannot end above the dynamic viewport",
   );
-  assert.match(
-    styles,
-    /@supports \(-webkit-touch-callout: none\)\s*\{[\s\S]*?@media \(display-mode: standalone\)\s*\{[\s\S]*?\.app\s*\{[^}]*height:\s*100dvh;[^}]*\}[\s\S]*?html\[data-background\]:not\(\[data-background="none"\]\) \.app\s*\{[^}]*background-image:[\s\S]*?var\(--app-background-image\)[^}]*background-size:\s*cover;/s,
-    "iOS standalone keeps full dynamic-viewport layout while the app paints the edge-to-edge background",
-  );
   assert.doesNotMatch(
     styles,
-    /@supports \(-webkit-touch-callout: none\)[\s\S]*?@media \(display-mode: standalone\)[\s\S]*?\.app\s*\{[^}]*height:\s*100vh;/s,
-    "iOS standalone must not shrink the app to 100vh and clip the composer",
+    /@supports \(-webkit-touch-callout: none\)[\s\S]*?@media \(display-mode: standalone\)[\s\S]*?\.app\s*\{/s,
+    "the base stylesheet must not give iOS standalone a second viewport/background owner",
+  );
+  assert.match(
+    mobileViewportStyles,
+    /#root > \.app\s*\{[^}]*height:\s*var\(--visual-bottom,\s*100dvh\);[^}]*min-height:\s*0;/s,
+    "the final mobile stylesheet sizes the interaction frame from measured visual-viewport geometry",
+  );
+  assert.match(
+    mobileViewportStyles,
+    /::before\s*\{[^}]*position:\s*fixed;[^}]*min-height:\s*100lvh;[^}]*pointer-events:\s*none;[\s\S]*?var\(--app-background-image\);/s,
+    "mobile wallpaper paints on an independent fixed decorative canvas",
+  );
+  assert.doesNotMatch(
+    mobileViewportStyles,
+    /height:\s*calc\([^;]*--keyboard-inset/,
+    "an already-measured visible viewport is never reduced by the keyboard twice",
   );
   assert.match(
     styles,
