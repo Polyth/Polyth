@@ -527,7 +527,10 @@ test("phone execution controls live behind the model picker with harness tabs", 
 });
 
 test("phone CSS keeps the layout inside the visible viewport", async () => {
-  const css = await readWebStyles();
+  const [css, viewportCss] = await Promise.all([
+    readWebStyles(),
+    read("../src/mobileViewport.css"),
+  ]);
   const start = css.indexOf("UX-MOBILE-01 — mobile-first new chat");
   assert.ok(start > 0, "the redesign section exists");
   const section = css.slice(start);
@@ -536,7 +539,12 @@ test("phone CSS keeps the layout inside the visible viewport", async () => {
   assert.match(
     css,
     /\.app\.mode-chat\.view-session \{[^}]*min-height:\s*100dvh/,
-    "the phone shell fills the dynamic viewport while keyboard-open composition owns its inset",
+    "the base phone shell keeps a pre-measurement dynamic-viewport fallback",
+  );
+  assert.match(
+    viewportCss,
+    /#root > \.app\s*\{[^}]*height:\s*var\(--visual-bottom,\s*100dvh\);[^}]*min-height:\s*0;/s,
+    "the final mobile cascade replaces that fallback with the measured reachable bottom",
   );
   assert.doesNotMatch(css, /body\[data-keyboard="open"\][\s\S]{0,180}\.composer-chat\.composer-mobile\s*\{[^}]*position:\s*fixed/s,
     "the composer keeps the visualViewport flow contract instead of switching positioning modes");
