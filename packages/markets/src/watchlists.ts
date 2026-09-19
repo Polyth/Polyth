@@ -33,27 +33,32 @@ export function parseWatchlists(value: unknown): MarketWatchlists {
   if (!value || typeof value !== "object" || Array.isArray(value)) fail("watchlists must be an object");
   const raw = value as Record<string, unknown>;
   if (raw.version !== 1) fail("unsupported watchlist version");
-  if (typeof raw.activeId !== "string" || !WATCHLIST_ID.test(raw.activeId)) fail("active watchlist id is invalid");
-  if (!Array.isArray(raw.items) || raw.items.length === 0 || raw.items.length > MAX_LISTS) {
-    fail(`watchlists must contain 1-${MAX_LISTS} lists`);
+  const activeId = raw.activeId;
+  if (typeof activeId !== "string" || !WATCHLIST_ID.test(activeId)) return fail("active watchlist id is invalid");
+  const rawItems = raw.items;
+  if (!Array.isArray(rawItems) || rawItems.length === 0 || rawItems.length > MAX_LISTS) {
+    return fail(`watchlists must contain 1-${MAX_LISTS} lists`);
   }
 
   const ids = new Set<string>();
-  const items = raw.items.map((value) => {
+  const items = rawItems.map((value: unknown) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) fail("each watchlist must be an object");
     const item = value as Record<string, unknown>;
-    if (typeof item.id !== "string" || !WATCHLIST_ID.test(item.id)) fail("watchlist id is invalid");
-    if (ids.has(item.id)) fail(`duplicate watchlist id: ${item.id}`);
-    ids.add(item.id);
-    if (typeof item.name !== "string" || !item.name.trim() || item.name.trim().length > 64) {
-      fail("watchlist name must be 1-64 characters");
+    const id = item.id;
+    if (typeof id !== "string" || !WATCHLIST_ID.test(id)) return fail("watchlist id is invalid");
+    if (ids.has(id)) return fail(`duplicate watchlist id: ${id}`);
+    ids.add(id);
+    const rawName = item.name;
+    if (typeof rawName !== "string" || !rawName.trim() || rawName.trim().length > 64) {
+      return fail("watchlist name must be 1-64 characters");
     }
-    if (!Array.isArray(item.symbols) || item.symbols.length > MAX_SYMBOLS) {
-      fail(`a watchlist may contain at most ${MAX_SYMBOLS} symbols`);
+    const rawSymbols = item.symbols;
+    if (!Array.isArray(rawSymbols) || rawSymbols.length > MAX_SYMBOLS) {
+      return fail(`a watchlist may contain at most ${MAX_SYMBOLS} symbols`);
     }
     const symbols: string[] = [];
     const seen = new Set<string>();
-    for (const candidate of item.symbols) {
+    for (const candidate of rawSymbols) {
       if (typeof candidate !== "string") fail("watchlist symbols must be strings");
       const symbol = normalizeSymbol(candidate);
       if (!seen.has(symbol)) {
@@ -61,11 +66,11 @@ export function parseWatchlists(value: unknown): MarketWatchlists {
         symbols.push(symbol);
       }
     }
-    return { id: item.id, name: item.name.trim(), symbols };
+    return { id, name: rawName.trim(), symbols };
   });
 
-  if (!ids.has(raw.activeId)) fail("active watchlist does not exist");
-  return { version: 1, activeId: raw.activeId, items };
+  if (!ids.has(activeId)) return fail("active watchlist does not exist");
+  return { version: 1, activeId, items };
 }
 
 export async function loadWatchlists(storage: SpaceStorage): Promise<MarketWatchlists> {
