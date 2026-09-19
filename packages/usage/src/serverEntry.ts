@@ -19,7 +19,8 @@ import {
 } from "./index.ts";
 
 const MAX_TELEMETRY_RANGE_MS = 2 * 366 * 24 * 60 * 60_000;
-const TELEMETRY_CACHE_MS = 15_000;
+const TELEMETRY_CACHE_MS = 30_000;
+const TELEMETRY_CACHE_BUCKET_MS = 30_000;
 
 export function usageRoutes(usage: UsageService, host?: ServerPackageHost): RouteHandler {
   const telemetryCache = new Map<string, {
@@ -67,7 +68,11 @@ export function usageRoutes(usage: UsageService, host?: ServerPackageHost): Rout
         json(400, { error: "invalid-input", message: "Usage range must include past time" });
         return true;
       }
-      const key = `${space.spaceId}:${Math.round(start)}:${Math.round(clippedEnd)}`;
+      const key = [
+        space.spaceId,
+        Math.floor(start / TELEMETRY_CACHE_BUCKET_MS),
+        Math.floor(clippedEnd / TELEMETRY_CACHE_BUCKET_MS),
+      ].join(":");
       for (const [cacheKey, entry] of telemetryCache) {
         if (entry.expiresAt <= now) telemetryCache.delete(cacheKey);
       }
