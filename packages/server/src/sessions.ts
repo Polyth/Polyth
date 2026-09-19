@@ -3729,6 +3729,7 @@ export function createSessionService(deps: {
       runtime.ensureSession({
         projectId: projection.projectId,
         title: projection.title,
+        titleSource: projection.titleSource,
         sessionId,
         cwd,
         backendSessionId: projection.backendSessionId,
@@ -3791,7 +3792,7 @@ export function createSessionService(deps: {
         }))).operation;
         if (rt.harnessId && !proj.resolvedHarnessId) await updateProjection(sessionId, { resolvedHarnessId: rt.harnessId });
         if (operation.state === "prepared") {
-          const request = { sessionId, projectId: proj.projectId, title: proj.title, cwd };
+          const request = { sessionId, projectId: proj.projectId, title: proj.title, titleSource: proj.titleSource, cwd };
           const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(operation,
             (id) => rt!.createSessionOperation ? rt!.createSessionOperation(request, id) : rt!.ensureSession(request),
             (backendSessionId) => ({ backendSessionId }),
@@ -3856,6 +3857,7 @@ export function createSessionService(deps: {
           rt.ensureSession({
             projectId: attachedProjection.projectId,
             title: attachedProjection.title,
+            titleSource: attachedProjection.titleSource,
             sessionId,
             cwd,
             backendSessionId: attachedProjection.backendSessionId,
@@ -5525,6 +5527,7 @@ export function createSessionService(deps: {
         (operationId) => freshBackendSessionOperation(runtime, {
           projectId: projection.projectId,
           title: projection.title,
+          titleSource: projection.titleSource,
           sessionId,
           cwd,
           ...(projection.model ? { model: projection.model } : {}),
@@ -5580,7 +5583,7 @@ export function createSessionService(deps: {
       throw Object.assign(new Error("Initial native creation requires reconciliation before workspace recovery"), { code: "outcome-unknown" });
     }
     if (operation.state === "prepared") {
-      const request = { sessionId, projectId: projection.projectId, title: projection.title, cwd,
+      const request = { sessionId, projectId: projection.projectId, title: projection.title, titleSource: projection.titleSource, cwd,
         ...(projection.model ? { model: projection.model } : {}), ...(projection.agent ? { agent: projection.agent } : {}) };
       const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(operation,
         id => runtime.createSessionOperation ? runtime.createSessionOperation(request, id) : runtime.ensureSession(request),
@@ -6314,7 +6317,7 @@ export function createSessionService(deps: {
         }))).operation;
       }
       if (operation.state === "prepared") {
-        const request = { projectId: projection.projectId, sessionId, title: projection.title, cwd };
+        const request = { projectId: projection.projectId, sessionId, title: projection.title, titleSource: projection.titleSource, cwd };
         const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(operation,
           (id) => freshBackendSessionOperation(target, request, id, "switch"),
           (backendSessionId) => ({ backendSessionId }),
@@ -6907,7 +6910,7 @@ export function createSessionService(deps: {
       const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(
         prepared.operation,
         (operationId) => {
-          const request = { ...input, sessionId, cwd };
+          const request = { ...input, sessionId, cwd, titleSource: projection.titleSource };
           return rt.createSessionOperation
             ? rt.createSessionOperation(request, operationId)
             : rt.ensureSession(request);
@@ -7860,7 +7863,7 @@ export function createSessionService(deps: {
         const rt = await ensureWired(sessionId, proj);
         const title = `${proj.title} (fork)`;
         const target: CreateSessionInput & { sessionId: string; cwd: string } = {
-          projectId: proj.projectId, title, sessionId: forkId, cwd: forkCwd,
+          projectId: proj.projectId, title, titleSource: "manual", sessionId: forkId, cwd: forkCwd,
           ...(proj.model ? { model: proj.model } : {}),
           ...(proj.agent ? { agent: proj.agent } : {}),
         };

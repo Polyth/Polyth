@@ -19,6 +19,7 @@ import {
   unsupportedAttachmentMessage,
 } from "@polyth/harness-runtime";
 import type { PiRpc, PiRpcEvent, PiRpcModel, PiRpcSessionStats, PiRpcState } from "./rpc.ts";
+import { isExplicitSessionTitle } from "./title.ts";
 
 export const PI_CAPABILITIES: RuntimeCapabilities = {
   streaming: true,
@@ -122,6 +123,10 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc): AgentRunti
   const accepted: NonNullable<RuntimeSnapshot["acceptedOperations"]> = [];
   let nativeId = "";
   let sessionTitle = "";
+  // The Polyth prompt fallback currently supplied for this session, if any. It
+  // may already sit in the native session file from an older runtime, so it
+  // must never be re-published as a semantic native title.
+  let polythFallbackTitle = "";
   let createOperationId = "";
   let activeOperationId = "";
   let assistantMessageOrdinal = 0;
@@ -151,13 +156,14 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc): AgentRunti
 
   // Pi stores a display name in the native session file. A name set through
   // `/name`, `--name`, an extension or Polyth's generated title is a semantic
-  // title; the placeholder Polyth would otherwise write at creation is not.
+  // title; a placeholder or Polyth's own prompt fallback is not.
   const adoptNativeTitle = (value: unknown): void => {
     const next = typeof value === "string" ? value.trim() : "";
-    if (next === sessionTitle) return;
-    sessionTitle = next;
-    if (next && !isPlaceholderTitle(next, context.sessionId)) {
-      emit({ type: "session/title-generated", title: next });
+    const effective = next && next === polythFallbackTitle ? "" : next;
+    if (effective === sessionTitle) return;
+    sessionTitle = effective;
+    if (effective && !isPlaceholderTitle(effective, context.sessionId)) {
+      emit({ type: "session/title-generated", title: effective });
     }
   };
 
@@ -353,13 +359,17 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc): AgentRunti
       createOperationId = operationId;
       await rpc.receipt(operationId, nativeId);
 
-      // Only a real title belongs in Pi's own session list. A Polyth
-      // placeholder must not shadow the first user message Pi would show
-      // before its generated title arrives.
+      // Only an authored title belongs in Pi's own session list. A Polyth
+      // placeholder or prompt-derived fallback must not shadow the name Pi's
+      // generated title (or the first user message) would otherwise show.
       const requestedTitle = canonical.title?.trim() ?? "";
-      if (requestedTitle && !isPlaceholderTitle(requestedTitle, canonical.sessionId)) {
+      if (isExplicitSessionTitle(requestedTitle, canonical.titleSource, canonical.sessionId)) {
+        polythFallbackTitle = "";
         sessionTitle = requestedTitle;
         await rpc.request({ type: "set_session_name", name: requestedTitle }, 10_000).catch(() => undefined);
+      } else {
+        polythFallbackTitle = requestedTitle;
+        sessionTitle = "";
       }
       return { backendSessionId: nativeId };
     });
@@ -375,6 +385,9 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc): AgentRunti
       if (!input.backendSessionId) {
         throw Object.assign(new Error("Pi requires a persistent native session path"), { code: "unknown-session" });
       }
+      polythFallbackTitle = isExplicitSessionTitle(input.title, input.titleSource, input.sessionId)
+        ? ""
+        : input.title?.trim() ?? "";
       const state = await currentState();
       if (state.sessionFile === input.backendSessionId) {
         nativeId = input.backendSessionId;

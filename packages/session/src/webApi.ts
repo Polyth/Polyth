@@ -784,7 +784,10 @@ export const api = {
     ),
 
   // ---- agent profiles (WP8) --------------------------------------------------
-  listProfiles: () => jfetch<AgentProfile[]>(`/api/agent-profiles`).catch((): AgentProfile[] => []),
+  // An unavailable profile service is not an authoritative empty account.
+  // Keep the failure observable so profile caches can preserve their last
+  // confirmed snapshot and retry after transport recovery.
+  listProfiles: () => jfetch<AgentProfile[]>(`/api/agent-profiles`),
   createProfile: (input: Partial<AgentProfile> & { name: string; providerID: string; modelID: string }) =>
     jfetch<AgentProfile>(`/api/agent-profiles`, json("POST", input)),
   updateProfile: (id: string, patch: Partial<AgentProfile>, expectedRevision: number) =>

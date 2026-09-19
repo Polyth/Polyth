@@ -103,7 +103,7 @@ export async function boot(opts: BootOptions = {}) {
       // indexCore acquires the canonical data-directory writer lease before
       // the first consumer calls canonicalSecurity(), so the lazy factory above
       // cannot open/migrate the control-plane outside the one-writer section.
-      const runtime = await bootCore({ ...opts, port, hostname, dataDir });
+      const runtime = await bootCore({ ...opts, port, hostname, dataDir, canonicalOrigin: origin });
       security = security ?? canonicalSecurity();
       if (!security || security.control.installation().state !== "ready") {
         await runtime.shutdown();

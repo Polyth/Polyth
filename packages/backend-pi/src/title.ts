@@ -1,7 +1,24 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import type { AgentRuntime, CanonicalTurnRequest, HarnessContext, ModelRef } from "@polyth/contracts";
+import type { AgentRuntime, CanonicalTurnRequest, HarnessContext, ModelRef, SessionTitleSource } from "@polyth/contracts";
 import { isPlaceholderTitle } from "@polyth/harness-runtime";
 import type { PiRpc } from "./rpc.ts";
+
+/**
+ * A title is authored only when it is neither a Polyth placeholder nor the
+ * prompt-derived fallback the canonical layer writes while a harness is still
+ * expected to refine it. Unknown provenance keeps the historical behavior
+ * (treated as authored) so a caller that forgets the source cannot silently
+ * trigger an extra model call.
+ */
+export const isExplicitSessionTitle = (
+  title: string | undefined,
+  source: SessionTitleSource | undefined,
+  sessionId?: string,
+): boolean => {
+  const value = title?.trim() ?? "";
+  if (!value || isPlaceholderTitle(value, sessionId)) return false;
+  return source !== "polyth";
+};
 
 export const PI_TITLE_MAX_CHARS = 36;
 export const PI_TITLE_TIMEOUT_MS = 30_000;
@@ -68,7 +85,9 @@ export const createPiTitleRunner = (options: PiTitleRunnerOptions): PiTitleRunne
       "-p",
       "--no-session",
       "--no-tools",
-      "--no-extensions",
+      // Extension discovery must stay on: model providers can be supplied by
+      // an installed extension (e.g. pi-commandcode-provider), and disabling
+      // it makes `--provider` reject the session's own model.
       "--no-skills",
       "--no-context-files",
       "--thinking", "off",
@@ -147,8 +166,8 @@ export const withPiTitleGeneration = (
   let primaryNativeId: string | undefined;
   let inFlight: AbortController | undefined;
 
-  const remember = (title: string | undefined, backendSessionId: string) => {
-    eligible = !title?.trim() || isPlaceholderTitle(title, context.sessionId);
+  const remember = (title: string | undefined, source: SessionTitleSource | undefined, backendSessionId: string) => {
+    eligible = !isExplicitSessionTitle(title, source, context.sessionId);
     primaryNativeId = backendSessionId;
     started = false;
     nativeTitleSeen = false;
@@ -193,7 +212,7 @@ export const withPiTitleGeneration = (
             const [input] = args;
             const outcome = await create(...args);
             if (outcome.kind === "confirmed") {
-              remember(input.title, outcome.value.backendSessionId);
+              remember(input.title, input.titleSource, outcome.value.backendSessionId);
             }
             return outcome;
           },
@@ -205,7 +224,7 @@ export const withPiTitleGeneration = (
             const [input] = args;
             const outcome = await reset(...args);
             if (outcome.kind === "confirmed") {
-              remember(input.title, outcome.value.backendSessionId);
+              remember(input.title, input.titleSource, outcome.value.backendSessionId);
             }
             return outcome;
           },
@@ -220,7 +239,7 @@ export const withPiTitleGeneration = (
         started = false;
         nativeTitleSeen = false;
       }
-      eligible = !input.title?.trim() || isPlaceholderTitle(input.title, context.sessionId);
+      eligible = !isExplicitSessionTitle(input.title, input.titleSource, context.sessionId);
       return ensure(...args);
     },
     ...(startOperation

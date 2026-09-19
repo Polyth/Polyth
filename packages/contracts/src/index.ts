@@ -1046,10 +1046,20 @@ export interface ModelMessage {
 
 // ---------------------------------------------------------------- session service
 
+/** How a session title was chosen. `polyth` is the prompt-derived fallback the
+ * canonical layer writes before a harness can refine it; `placeholder` is the
+ * untitled default. Harnesses that generate or adopt a native title must treat
+ * both as refinable and only `manual`/`native` as authored. */
+export type SessionTitleSource = "manual" | "native" | "polyth" | "placeholder";
+
 export interface CreateSessionInput {
   projectId: string;
   harness?: HarnessSelection;
   title?: string;
+  /** Internal seam: the canonical title provenance at the moment a runtime is
+   * asked to create/reset/resume. Lets a title-emulating harness distinguish a
+   * Polyth prompt fallback (refinable) from a user/native title (final). */
+  titleSource?: SessionTitleSource;
   model?: ModelRef;
   agent?: string;
   parentId?: string;      // subagent / fork parent
@@ -1478,7 +1488,7 @@ export interface SessionProjection {
   spaceId?: string;
   title: string;
   /** How the current title was chosen; O(1) precedence without log scans. */
-  titleSource?: "manual" | "native" | "polyth" | "placeholder";
+  titleSource?: SessionTitleSource;
   status: SessionStatus;
   model?: ModelRef; agent?: string;
   createdAt: number; updatedAt: number;

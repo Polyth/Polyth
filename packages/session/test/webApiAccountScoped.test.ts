@@ -92,3 +92,21 @@ test("explicit model and agent override an account preset and clear never leaks 
     globalThis.fetch = previousFetch;
   }
 });
+
+test("an unavailable profile list is not converted into an empty account", async () => {
+  const previousFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => jsonResponse({
+      error: "unavailable",
+      message: "server shutting down",
+    }, 503);
+
+    await assert.rejects(api.listProfiles(), {
+      code: "unavailable",
+      status: 503,
+      message: "server shutting down",
+    });
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});

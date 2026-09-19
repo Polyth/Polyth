@@ -37,6 +37,7 @@ import {
   rememberPersistedRuntimeModels,
   subscribeRuntimeCatalogInvalidations,
 } from "@polyth/models/runtime-catalog";
+import { refreshProfiles } from "./profiles.ts";
 
 let sync: SyncClient | null = null;
 let syncStatus: SyncStatus = "disconnected";
@@ -819,6 +820,9 @@ function startSync(): void {
   // the initial bootstrap fetch safe. No polling.
   sync.onOpen(() => {
     void notificationCentre.catchUp();
+    // A request that overlapped server drain is not an authoritative empty
+    // profile list. Rehydrate the account cache when transport is healthy.
+    void refreshProfiles().catch(() => undefined);
     // Re-pull shared settings: a broadcast may have been missed while the
     // socket was down.
     initSettingsSync();

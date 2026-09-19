@@ -188,6 +188,41 @@ test("user navigation returns approval state without a transport failure", async
   assert.deepEqual(approved.payload, { origins: ["http://93.184.216.34"] });
 });
 
+test("user navigation to an unlisted private-network origin returns the approval flow", async () => {
+  const { calls, call } = makeHarness();
+  const created = await call("POST", "/api/browser/sessions", { projectId: "p1", sessionId: "sess1", url: HOME });
+  const id = (created.payload as { id: string }).id;
+
+  const navigation = await call("POST", `/api/browser/sessions/${id}/navigate`, {
+    actor: "user",
+    url: "http://10.0.0.5/",
+  });
+  assert.equal(navigation.status, 200);
+  const pending = navigation.payload as {
+    session: { id: string } | null;
+    approval: { origin: string; message: string };
+  };
+  assert.equal(pending.session?.id, id);
+  assert.equal(pending.approval.origin, "http://10.0.0.5");
+  assert.match(pending.approval.message, /private-network/);
+  const failed = calls.filter((c) => c.kind === "append" && c.type === "browser/action-failed");
+  assert.equal(failed.at(-1)?.data?.code, "blocked-private", "the blocked attempt stays durable");
+
+  const agent = await call("POST", `/api/browser/sessions/${id}/navigate`, {
+    actor: "agent",
+    url: "http://10.0.0.5/",
+  });
+  assert.equal(agent.status, 403, "the agent never gets the approval convenience");
+
+  const approved = await call("POST", "/api/browser/approvals", { origin: "http://10.0.0.5/", browserSessionId: id });
+  assert.equal(approved.status, 200);
+  const after = await call("POST", `/api/browser/sessions/${id}/navigate`, {
+    actor: "user",
+    url: "http://10.0.0.5/",
+  });
+  assert.equal(after.status, 200, "an approved private origin opens for this browser session");
+});
+
 test("browser sessions without a linked polyth session append nothing", async () => {
   const { browser, calls, call } = makeHarness();
   const created = await call("POST", "/api/browser/sessions", { projectId: "p1", url: HOME });

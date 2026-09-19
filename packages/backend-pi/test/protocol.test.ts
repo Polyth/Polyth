@@ -108,6 +108,56 @@ test("Pi creates a durable native session and resumes by exact sessionFile", asy
   await runtime.dispose();
 });
 
+test("Pi does not publish a Polyth prompt fallback as a native session name", async () => {
+  const fake = fakePi();
+  const runtime = createPiRuntime(context, fake.rpc);
+
+  await runtime.createSessionOperation!({
+    projectId: "project",
+    sessionId: "canonical",
+    title: "fix pi harness session titles are not being gen…",
+    titleSource: "polyth",
+    cwd: "/tmp",
+  }, "create-op");
+
+  assert.equal(fake.state().sessionName, undefined);
+  assert.ok(!fake.calls.some((call) => call.type === "set_session_name"));
+  assert.equal((await runtime.sessions())[0]?.title, "");
+  await runtime.dispose();
+});
+
+test("Pi does not re-publish a fallback name already stored in the native session", async () => {
+  const fake = fakePi();
+  const runtime = createPiRuntime(context, fake.rpc);
+  const events: RuntimeEvent[] = [];
+  runtime.onEvent((_, event) => events.push(event));
+  const fallback = "fix pi harness session titles are not being gen…";
+
+  await runtime.createSessionOperation!({
+    projectId: "project",
+    sessionId: "canonical",
+    title: fallback,
+    titleSource: "polyth",
+    cwd: "/tmp",
+  }, "create-op");
+  // Simulate a native file polluted by an older runtime that wrote the
+  // Polyth fallback with `set_session_name`.
+  await fake.rpc.request({ type: "set_session_name", name: fallback });
+
+  const resumed = await runtime.ensureSession({
+    projectId: "project",
+    sessionId: "canonical",
+    title: fallback,
+    titleSource: "polyth",
+    cwd: "/tmp",
+    backendSessionId: "/tmp/pi-created.jsonl",
+  });
+  assert.equal(resumed, "/tmp/pi-created.jsonl");
+  assert.deepEqual(events.filter((event) => event.type === "session/title-generated"), []);
+  assert.equal((await runtime.sessions())[0]?.title, "");
+  await runtime.dispose();
+});
+
 test("Pi maps catalog, model selection, streaming text, tools and settled terminal evidence", async () => {
   const fake = fakePi();
   const runtime = createPiRuntime(context, fake.rpc);

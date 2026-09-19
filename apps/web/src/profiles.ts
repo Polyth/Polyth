@@ -30,7 +30,7 @@ export function useProfiles(): AgentProfile[] {
   return useSyncExternalStore(
     (callback) => {
       listeners.add(callback);
-      if (!loaded) void refreshProfiles();
+      if (!loaded) void refreshProfiles().catch(() => undefined);
       return () => { listeners.delete(callback); };
     },
     getProfiles,

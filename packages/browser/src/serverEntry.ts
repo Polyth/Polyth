@@ -321,10 +321,13 @@ export function browserRoutes(deps: {
         } catch (error) {
           const failure = error as Error & { code?: string };
           // A user navigation that needs approval is an expected product flow,
-          // not a failed transport request. Keep the durable failed-action
+          // not a failed transport request. Private-network destinations take
+          // the same per-origin approval path. Keep the durable failed-action
           // record, but let the client open its approval dialog without a
-          // noisy 403 in the browser console.
-          if (actor === "user" && failure.code === "approval-required") {
+          // noisy 403 in the browser console. Agent navigation never gets
+          // this convenience.
+          if (actor === "user"
+            && (failure.code === "approval-required" || failure.code === "blocked-private")) {
             json(200, {
               session: browser.get(id),
               approval: { origin: originOf(target) ?? target, message: failure.message },
@@ -512,12 +515,12 @@ export default async function registerPackage(host: ServerPackageHost): Promise<
     unavailableReason: "Browser engine unavailable. Install a supported desktop build or configure Chromium for development.",
     allowPublicOrigins: true,
     // Resolve this on every hop: auth can change while a context is alive.
-    // The server exposes only its exact login origin and only while cookie-less
+    // The surface exposes the deployment's own exact origins — the declared
+    // canonical origin, plus the loopback login origin while cookie-less
     // loopback requests cannot inherit ambient operator/Space authority.
     exactAllowedOrigins: () => {
-      const origin = host.services.get(SERVER_APPLICATION_SURFACE)
-        ?.controlledBrowserLoginOrigin();
-      return origin ? [origin] : [];
+      const surface = host.services.get(SERVER_APPLICATION_SURFACE);
+      return [...(surface?.controlledBrowserSelfOrigins() ?? [])];
     },
     append: (sessionId, type, data) => host.events.append(sessionId, type, data, { ignorable: true, producerPlugin: "browser" }),
   });

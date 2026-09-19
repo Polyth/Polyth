@@ -12,6 +12,9 @@ export interface ServerApplicationSurfaceOptions {
   authenticationRequired(): boolean;
   /** True when loopback requests may bypass UI authentication. */
   localhostAuthOptional: boolean;
+  /** Operator-declared canonical identity origin (POLYTH_PUBLIC_ORIGIN) from
+   *  the trusted bootstrap. Never derived from Host or forwarded headers. */
+  canonicalOrigin?: string | null;
 }
 
 /** Turn a listener address into the exact origin a browser on this host uses. */
@@ -35,24 +38,45 @@ export function browserReachableHttpOrigin(
 }
 
 /**
- * Fail-closed self-origin seam for controlled Browser contexts. A caller gets
- * the login surface only after the listener is live and only when cookie-less
- * loopback traffic cannot be mistaken for the local operator.
+ * Fail-closed self-origin seam for controlled Browser contexts. The
+ * operator-declared canonical origin is configuration, so it is always
+ * reachable. The loopback login surface additionally requires a live listener
+ * and strict UI authentication, because cookie-less loopback traffic must not
+ * be mistaken for the local operator.
  */
 export function createServerApplicationSurface(
   opts: ServerApplicationSurfaceOptions,
 ): ServerApplicationSurface {
-  return {
-    controlledBrowserLoginOrigin() {
-      if (!opts.localTrustedDeployment
-        || !opts.authenticationRequired()
-        || opts.localhostAuthOptional) return null;
-      const listener = opts.listener();
-      if (!listener?.listening) return null;
-      const address = listener.address();
-      return address && typeof address !== "string"
-        ? browserReachableHttpOrigin(opts.hostname, address.port)
+  const canonicalOrigin = (): string | null => {
+    const raw = opts.canonicalOrigin?.trim();
+    if (!raw) return null;
+    try {
+      const url = new URL(raw);
+      return url.protocol === "http:" || url.protocol === "https:"
+        ? url.origin.toLowerCase()
         : null;
+    } catch {
+      return null;
+    }
+  };
+  return {
+    controlledBrowserSelfOrigins() {
+      const origins: string[] = [];
+      const canonical = canonicalOrigin();
+      if (canonical) origins.push(canonical);
+      if (opts.localTrustedDeployment
+        && opts.authenticationRequired()
+        && !opts.localhostAuthOptional) {
+        const listener = opts.listener();
+        if (listener?.listening) {
+          const address = listener.address();
+          const login = address && typeof address !== "string"
+            ? browserReachableHttpOrigin(opts.hostname, address.port)
+            : null;
+          if (login) origins.push(login);
+        }
+      }
+      return [...new Set(origins)];
     },
   };
 }

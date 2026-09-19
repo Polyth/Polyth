@@ -166,6 +166,9 @@ export interface BootOptions {
   dataDir?: string;
   /** Optional listen address. The desktop host pins this to loopback. */
   hostname?: string;
+  /** Operator-declared canonical identity origin from the trusted bootstrap.
+   *  Hosts must not derive it from request input. */
+  canonicalOrigin?: string;
   /** Static SPA directory override for packaged hosts. */
   webDist?: string;
   opencode?: Partial<OpenCodeAdapterOptions>;
@@ -619,6 +622,7 @@ export async function boot(opts: BootOptions = {}) {
     listener: () => publicServerForSurface,
     authenticationRequired: () => uiAuthentication?.enabled() ?? false,
     localhostAuthOptional,
+    canonicalOrigin: opts.canonicalOrigin ?? null,
   }));
   const harnesses = createHarnessRegistry();
   services.provide(serverServiceKey("harnesses"), harnesses);

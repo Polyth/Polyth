@@ -15,12 +15,12 @@ import {
 
 const APPLICATION_URL = "http://127.0.0.1:4400";
 
-test("production Browser contribution follows the live exact login-origin seam only", async () => {
+test("production Browser contribution follows the live self-origin seam only", async () => {
   const previousFakeBrowser = process.env.POLYTH_FAKE_BROWSER;
   process.env.POLYTH_FAKE_BROWSER = "1";
   const contributions = new Map<string, AgentCapabilityContribution>();
   let pkg: ServerPackage | undefined;
-  let loginOrigin: string | null = APPLICATION_URL;
+  let selfOrigins: string[] = [APPLICATION_URL];
   const services = new Map<string, unknown>();
   const capabilities: AgentCapabilityContributionRegistry = {
     register(_owner, next) {
@@ -35,7 +35,7 @@ test("production Browser contribution follows the live exact login-origin seam o
   const contribution = () => contributions.get("browser.polyth-browser");
   services.set(serverServiceKey("harness.capabilities").id, capabilities);
   services.set(SERVER_APPLICATION_SURFACE.id, {
-    controlledBrowserLoginOrigin: () => loginOrigin,
+    controlledBrowserSelfOrigins: () => selfOrigins,
   });
   const host = {
     events: {
@@ -101,7 +101,12 @@ test("production Browser contribution follows the live exact login-origin seam o
       () => browser.navigate(opened.browserSessionId, "http://169.254.169.254/latest/meta-data", "agent"),
       (error: Error & { code?: string }) => error.code === "blocked-private",
     );
-    loginOrigin = null;
+    // The declared canonical origin joins the self-origin allowlist even when
+    // it resolves privately; other private destinations stay blocked.
+    selfOrigins = [APPLICATION_URL, "https://192.168.1.38"];
+    const canonical = await browser.navigate(opened.browserSessionId, "https://192.168.1.38/", "agent");
+    assert.equal(canonical.url, "https://192.168.1.38/");
+    selfOrigins = [];
     await assert.rejects(
       () => browser.navigate(opened.browserSessionId, `${APPLICATION_URL}/after-auth-policy-change`, "agent"),
       (error: Error & { code?: string }) => error.code === "blocked-private",

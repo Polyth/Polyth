@@ -192,16 +192,17 @@ export interface ServerTurnCompletionBus {
 export const SERVER_TURN_COMPLETION_BUS =
   serverServiceKey<ServerTurnCompletionBus>("session.turn-completed");
 
-/** Server-owned login surface exposed to controlled browser packages.
+/** Server-owned application surface exposed to controlled browser packages.
  *
- * The returned origin is a network reachability exception only. It is present
- * only for a local-trusted deployment while the public listener requires
- * ordinary UI authentication and an isolated browser therefore cannot inherit
- * ambient loopback authority. It does not authenticate the browser or confer
- * a Space identity.
+ * The returned origins are network reachability exceptions only: the
+ * operator-declared canonical identity origin, plus the loopback login origin
+ * for a local-trusted deployment while the public listener requires ordinary
+ * UI authentication and an isolated browser therefore cannot inherit ambient
+ * loopback authority. They do not authenticate the browser or confer a Space
+ * identity.
  */
 export interface ServerApplicationSurface {
-  controlledBrowserLoginOrigin(): string | null;
+  controlledBrowserSelfOrigins(): readonly string[];
 }
 
 export const SERVER_APPLICATION_SURFACE =

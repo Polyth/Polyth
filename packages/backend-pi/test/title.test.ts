@@ -5,6 +5,7 @@ import type { AgentRuntime, CanonicalTurnRequest } from "@polyth/contracts";
 import { PI_CAPABILITIES } from "../src/runtime.ts";
 import {
   createPiTitleRunner,
+  isExplicitSessionTitle,
   parsePiSessionTitle,
   piTitlePrompt,
   PI_TITLE_MAX_CHARS,
@@ -78,7 +79,9 @@ test("pi title runner spawns a tool-free throwaway process and pipes the prompt"
   assert.equal(closed.length, 1);
   assert.ok(closed[0]!.args.includes("--no-session"));
   assert.ok(closed[0]!.args.includes("--no-tools"));
-  assert.ok(closed[0]!.args.includes("--no-extensions"));
+  // Extension discovery must stay enabled: installed extensions can supply the
+  // model provider, and `--provider` rejects the session's own model without it.
+  assert.ok(!closed[0]!.args.includes("--no-extensions"));
   assert.ok(closed[0]!.args.includes("opencode"));
   assert.ok(closed[0]!.args.includes("kimi-k2.6"));
   // The untrusted prompt must never become a process argument.
@@ -127,6 +130,40 @@ const makeRpc = () => {
 };
 
 const request = (text: string): CanonicalTurnRequest => ({ sessionId: "canonical", text });
+
+test("explicit title detection distinguishes authored titles from Polyth fallbacks", () => {
+  assert.equal(isExplicitSessionTitle("Manual title", "manual", "canonical"), true);
+  assert.equal(isExplicitSessionTitle("Native title", "native", "canonical"), true);
+  assert.equal(isExplicitSessionTitle("fix pi harness session titles are not being gen…", "polyth", "canonical"), false);
+  assert.equal(isExplicitSessionTitle("New session", "placeholder", "canonical"), false);
+  assert.equal(isExplicitSessionTitle(undefined, "placeholder", "canonical"), false);
+  // Unknown provenance keeps the historical behavior (authored).
+  assert.equal(isExplicitSessionTitle("Some title", undefined, "canonical"), true);
+});
+
+test("pi title generation refines a Polyth prompt fallback instead of treating it as authored", async () => {
+  const { runtime } = makeRuntime();
+  const { rpc, names } = makeRpc();
+  const generated: string[] = [];
+  const wrapped = withPiTitleGeneration(context, rpc, runtime, {
+    generate: async ({ prompt }) => {
+      generated.push(prompt);
+      return "Refine session titles";
+    },
+  });
+  await wrapped.createSessionOperation!({
+    projectId: "project",
+    sessionId: "canonical",
+    title: "fix pi harness session titles are not being gen…",
+    titleSource: "polyth",
+    cwd: "/tmp",
+  }, "op-fallback");
+  await wrapped.startTurnOperation!(request("please refine pi session titles"), "turn-fallback");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(generated, ["please refine pi session titles"]);
+  assert.deepEqual(names, ["Refine session titles"]);
+});
 
 test("pi title generation names a placeholder session once and writes the native name", async () => {
   const { runtime } = makeRuntime();
