@@ -31,7 +31,7 @@ Format: asset · attacker · entry · impact · mitigation · test · remaining 
 
 | Threat | Asset | Attacker | Entry | Impact | Mitigation | Test | Remaining limitation |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Loopback confused deputy | Auth | Remote via tunnel | `127.0.0.1` | Local-user | Ingress kind, never address | `authIngress` tests | Unix socket file permissions |
+| Loopback confused deputy | Auth | Remote via tunnel | `127.0.0.1` | Local-user | Ingress kind, never address; debug owner projection additionally requires explicit opt-in + loopback-only local-trusted startup | `authIngress` + `canonicalAuth` debug tests | Same-user local software is trusted while debug mode is intentionally enabled |
 | Spoofed internal header | Principal | Public client | Header | Tunnel principal | Public listener ignores tunnel tokens | `httpTunnel` | Operator must not expose ingress socket |
 | Corrupt identity | Host key | Disk error | File | Silent new identity | Fail closed except ENOENT | identity tests | Admin recovery is manual |
 | Shared data dir | Host key | Second process | Same path | Split brain | Identity lock file on create | lock path | Advisory only |
