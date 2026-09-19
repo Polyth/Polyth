@@ -17,12 +17,6 @@ import {
   replaceModelPrefs,
   subscribeModelPrefs,
 } from "@polyth/models/web-prefs";
-import {
-  getUsagePrefs,
-  parseUsagePrefs,
-  replaceUsagePrefs,
-  subscribeUsagePrefs,
-} from "@polyth/usage/web-prefs";
 import { normalizeSettings } from "./settings.ts";
 import { getState, subscribeStore, updateSettings } from "./store.ts";
 import { getUiSettings, parseUiSettings, setUiSettings, subscribeUiSettings } from "./uiPrefs.ts";
@@ -32,6 +26,11 @@ import {
   setSessionDefaults,
   subscribeSessionDefaults,
 } from "./sessionDefaults.ts";
+import {
+  listClientSettingsContributions,
+  subscribeClientSettingsContributions,
+  type ClientSettingsContribution,
+} from "./clientSettingsRegistry.ts";
 
 const PUSH_DEBOUNCE_MS = 500;
 
@@ -40,6 +39,12 @@ let lastSyncedJson = "";
 let applying = false;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let started = false;
+let remoteLoaded = false;
+let retainedPackagePrefs: Record<string, unknown> = {};
+const contributionSubscriptions = new Map<string, {
+  contribution: ClientSettingsContribution;
+  unsubscribe: () => void;
+}>();
 
 interface SettingsBlob {
   product: ReturnType<typeof normalizeSettings>;
@@ -52,9 +57,17 @@ interface SettingsBlob {
   // carry harness-qualified model keys; provider order/accordion state for every
   // harness travels in the same canonical preference object.
   modelPrefs: ReturnType<typeof getModelPrefs>;
-  // Usage dashboard presentation/billing metadata follows the account across
-  // web, PWA and desktop through the same canonical client-settings blob.
-  usagePrefs: ReturnType<typeof getUsagePrefs>;
+  /** Package-owned preference slices. Unknown/disabled package entries are
+   * retained so a core settings write can never erase optional package state. */
+  packagePrefs: Record<string, unknown>;
+}
+
+function packagePrefsSnapshot(): Record<string, unknown> {
+  const snapshot: Record<string, unknown> = { ...retainedPackagePrefs };
+  for (const contribution of listClientSettingsContributions()) {
+    snapshot[contribution.id] = contribution.get();
+  }
+  return snapshot;
 }
 
 function currentBlob(): SettingsBlob {
@@ -63,7 +76,7 @@ function currentBlob(): SettingsBlob {
     ui: getUiSettings(),
     sessionDefaults: getSessionDefaults(),
     modelPrefs: getModelPrefs(),
-    usagePrefs: getUsagePrefs(),
+    packagePrefs: packagePrefsSnapshot(),
   };
 }
 
@@ -79,8 +92,17 @@ function applyRemote(dto: ClientSettingsDto): void {
     ui?: unknown;
     sessionDefaults?: unknown;
     modelPrefs?: unknown;
+    packagePrefs?: unknown;
+    /** Short-lived pre-registry Usage branch compatibility. */
     usagePrefs?: unknown;
   };
+  const nextPackagePrefs = isObject(incoming.packagePrefs)
+    ? { ...incoming.packagePrefs }
+    : {};
+  if (!Object.prototype.hasOwnProperty.call(nextPackagePrefs, "usage") && isObject(incoming.usagePrefs)) {
+    nextPackagePrefs.usage = incoming.usagePrefs;
+  }
+  retainedPackagePrefs = nextPackagePrefs;
   applying = true;
   try {
     if (isObject(incoming.product)) updateSettings(normalizeSettings(incoming.product));
@@ -91,13 +113,15 @@ function applyRemote(dto: ClientSettingsDto): void {
     if (isObject(incoming.modelPrefs)) {
       replaceModelPrefs(parseModelPrefs(JSON.stringify(incoming.modelPrefs)));
     }
-    if (isObject(incoming.usagePrefs)) {
-      replaceUsagePrefs(parseUsagePrefs(JSON.stringify(incoming.usagePrefs)));
+    for (const contribution of listClientSettingsContributions()) {
+      if (!Object.prototype.hasOwnProperty.call(retainedPackagePrefs, contribution.id)) continue;
+      contribution.apply(retainedPackagePrefs[contribution.id]);
     }
   } finally {
     applying = false;
   }
   localRevision = dto.revision;
+  remoteLoaded = true;
   lastSyncedJson = JSON.stringify(currentBlob());
 }
 
@@ -107,11 +131,18 @@ function applyRemote(dto: ClientSettingsDto): void {
  *  - an unchanged server revision after a failed/offline push retries any local
  *    blob that still differs from the last confirmed server state. */
 function reconcileRemote(dto: ClientSettingsDto): void {
-  const incoming = dto.settings as { modelPrefs?: unknown; usagePrefs?: unknown };
+  const incoming = dto.settings as {
+    modelPrefs?: unknown;
+    packagePrefs?: unknown;
+    usagePrefs?: unknown;
+  };
   const serverHasModelPrefs = isObject(incoming.modelPrefs);
-  const serverHasUsagePrefs = isObject(incoming.usagePrefs);
+  const rawPackagePrefs = isObject(incoming.packagePrefs) ? incoming.packagePrefs : {};
+  const missingActivePackagePrefs = listClientSettingsContributions().some((contribution) =>
+    !Object.prototype.hasOwnProperty.call(rawPackagePrefs, contribution.id)
+      && !(contribution.id === "usage" && isObject(incoming.usagePrefs)));
   applyRemote(dto);
-  if (!serverHasModelPrefs || !serverHasUsagePrefs) lastSyncedJson = "";
+  if (!serverHasModelPrefs || missingActivePackagePrefs) lastSyncedJson = "";
   if (JSON.stringify(currentBlob()) !== lastSyncedJson) schedulePush();
 }
 
@@ -137,6 +168,38 @@ function schedulePush(): void {
   timer = setTimeout(push, PUSH_DEBOUNCE_MS);
 }
 
+function syncContributionSubscriptions(): void {
+  const active = new Map(listClientSettingsContributions().map((contribution) => [contribution.id, contribution]));
+
+  for (const [id, record] of [...contributionSubscriptions]) {
+    if (active.has(id)) continue;
+    // Preserve the last local value even when the optional package unloads.
+    retainedPackagePrefs[id] = record.contribution.get();
+    record.unsubscribe();
+    contributionSubscriptions.delete(id);
+    if (remoteLoaded) schedulePush();
+  }
+
+  for (const contribution of active.values()) {
+    if (contributionSubscriptions.has(contribution.id)) continue;
+    const unsubscribe = contribution.subscribe(schedulePush);
+    contributionSubscriptions.set(contribution.id, { contribution, unsubscribe });
+
+    if (!remoteLoaded) continue;
+    if (Object.prototype.hasOwnProperty.call(retainedPackagePrefs, contribution.id)) {
+      applying = true;
+      try {
+        contribution.apply(retainedPackagePrefs[contribution.id]);
+      } finally {
+        applying = false;
+      }
+    } else {
+      // Server record predates this package slice: local cache seeds it once.
+      schedulePush();
+    }
+  }
+}
+
 export function flushSettingsSync(): void {
   if (timer !== undefined) {
     clearTimeout(timer);
@@ -160,7 +223,8 @@ export function initSettingsSync(): void {
     subscribeUiSettings(schedulePush);
     subscribeSessionDefaults(schedulePush);
     subscribeModelPrefs(schedulePush);
-    subscribeUsagePrefs(schedulePush);
+    subscribeClientSettingsContributions(syncContributionSubscriptions);
+    syncContributionSubscriptions();
     if (typeof window !== "undefined") window.addEventListener("pagehide", flushSettingsSync);
   }
   void api.clientSettings()
@@ -170,6 +234,7 @@ export function initSettingsSync(): void {
       // including any pre-server model preference state.
       else {
         localRevision = 0;
+        remoteLoaded = true;
         schedulePush();
       }
     })
