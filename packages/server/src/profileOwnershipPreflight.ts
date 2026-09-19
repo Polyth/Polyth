@@ -17,7 +17,7 @@ function regularFile(path: string): boolean {
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code === "ENOENT") return false;
     if ((cause as { code?: unknown } | null)?.code === "recovery-required") throw cause;
-    recovery();
+    return recovery();
   }
 }
 
@@ -50,8 +50,9 @@ export function verifyCanonicalAgentProfileOwnership(opts: {
     ).get();
     if (hasProfiles) {
       profileIds = (db.prepare("SELECT id FROM agent_profiles ORDER BY id").all() as Array<{ id: unknown }>).map((row) => {
-        if (typeof row.id !== "string" || !PROFILE_ID.test(row.id)) recovery();
-        return row.id;
+        const id = row.id;
+        if (typeof id !== "string" || !PROFILE_ID.test(id)) return recovery();
+        return id;
       });
     }
   } catch (cause) {
@@ -80,7 +81,7 @@ export function verifyCanonicalAgentProfileOwnership(opts: {
 
   for (const profileId of profileIds) {
     const owner = owners[profileId];
-    if (typeof owner !== "string" || !USER_ID.test(owner)) recovery();
+    if (typeof owner !== "string" || !USER_ID.test(owner)) return recovery();
     const user = opts.control.get<{ id: string }>(
       `SELECT u.id
          FROM users u
