@@ -1,9 +1,11 @@
 import { useMemo, type ReactNode } from "react";
 import { getLocale } from "../../../../apps/web/src/i18n/index.ts";
 import { useStore } from "../../../../apps/web/src/store.ts";
-import { Checkbox, Select, TextInput } from "../../../../apps/web/src/components/ui/index.ts";
+import { Button, Checkbox, Select, TextInput } from "../../../../apps/web/src/components/ui/index.ts";
 import ProviderLogo from "../../../models/widgets/ProviderLogo.tsx";
 import {
+  moveUsageBlock,
+  orderUsageBlocks,
   setBlockHidden,
   setProviderCostProfile,
   setProviderHidden,
@@ -60,6 +62,11 @@ export default function UsageSettings(): ReactNode {
   const data = useMemo(
     () => buildUsageDashboardData(sessions, snapshots, prefs.dashboard.rangeDays, Date.now(), projectLabels),
     [projectLabels, prefs.dashboard.rangeDays, sessions, snapshots],
+  );
+  const manualProviderIds = useMemo(
+    () => orderUsageBlocks(data.providers, prefs.dashboard.providerOrder, (provider) => provider.id)
+      .map((provider) => provider.id),
+    [data.providers, prefs.dashboard.providerOrder],
   );
 
   const setMetricVisible = (metric: UsageMetricId, visible: boolean): void => {
@@ -278,6 +285,43 @@ export default function UsageSettings(): ReactNode {
             />
           ))}
         </div>
+        {prefs.dashboard.providerSort === "manual" && (
+          <div className="usage-settings-manual-order" aria-label="Manual provider order">
+            {manualProviderIds.map((providerId, index) => {
+              const provider = data.providers.find((item) => item.id === providerId);
+              if (!provider) return null;
+              return (
+                <div className="usage-settings-order-row" key={providerId}>
+                  <span>{provider.label}</span>
+                  <div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={index === 0}
+                      aria-label={`Move ${provider.label} up`}
+                      onClick={() => setUsageDashboardPrefs({
+                        providerOrder: moveUsageBlock(manualProviderIds, providerId, -1),
+                      })}
+                    >
+                      ↑
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={index === manualProviderIds.length - 1}
+                      aria-label={`Move ${provider.label} down`}
+                      onClick={() => setUsageDashboardPrefs({
+                        providerOrder: moveUsageBlock(manualProviderIds, providerId, 1),
+                      })}
+                    >
+                      ↓
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       <section className="usage-settings-section" data-settings-item="usage.costs">
