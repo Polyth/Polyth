@@ -24,7 +24,8 @@ const SYNC_CONCURRENCY = 6;
 const ANALYTICS_METRICS: readonly UsageAnalyticsMetric[] = [
   "recordedCost", "inputTokens", "outputTokens", "totalTokens", "cachePercent",
   "outputTokPerSec", "wholeTurnTokPerSec", "ttftMs", "turnDurationMs",
-  "modelTimeMs", "toolTimeMs", "successRate", "errorRate", "turns", "sessions",
+  "modelTimeMs", "toolTimeMs", "contextUsedTokens", "contextPercent",
+  "successRate", "errorRate", "turns", "sessions",
 ];
 const ANALYTICS_GROUPS: readonly UsageAnalyticsGroupBy[] = ["none", "provider", "model", "harness", "project"];
 const ANALYTICS_AGGREGATIONS: readonly UsageAnalyticsAggregation[] = ["sum", "average", "p50", "p95"];
@@ -394,6 +395,8 @@ const emptySummary = (): UsageAnalyticsSummary => ({
   turnDurationMs: { average: null, p50: null, p95: null },
   modelTimeMs: { average: null, p50: null, p95: null },
   toolTimeMs: { average: null, p50: null, p95: null },
+  contextUsedTokens: { average: null, p50: null, p95: null },
+  contextPercent: { average: null, p50: null, p95: null },
 });
 
 const summarize = (rows: readonly UsageObservation[]): UsageAnalyticsSummary => {
@@ -424,6 +427,11 @@ const summarize = (rows: readonly UsageObservation[]): UsageAnalyticsSummary => 
     turnDurationMs: performanceStats(rows.map((row) => row.turnDurationMs)),
     modelTimeMs: performanceStats(rows.map((row) => row.modelTimeMs)),
     toolTimeMs: performanceStats(rows.map((row) => row.toolTimeMs)),
+    contextUsedTokens: performanceStats(rows.map((row) => row.contextUsedTokens)),
+    contextPercent: performanceStats(rows.map((row) =>
+      row.contextUsedTokens !== null && row.contextLimitTokens !== null && row.contextLimitTokens > 0
+        ? row.contextUsedTokens / row.contextLimitTokens
+        : null)),
   };
 };
 
@@ -443,6 +451,11 @@ const metricValue = (row: UsageObservation, metric: UsageAnalyticsMetric): numbe
     case "turnDurationMs": return row.turnDurationMs;
     case "modelTimeMs": return row.modelTimeMs;
     case "toolTimeMs": return row.toolTimeMs;
+    case "contextUsedTokens": return row.contextUsedTokens;
+    case "contextPercent":
+      return row.contextUsedTokens !== null && row.contextLimitTokens !== null && row.contextLimitTokens > 0
+        ? row.contextUsedTokens / row.contextLimitTokens
+        : null;
     case "successRate": return row.status === "success" ? 1 : 0;
     case "errorRate": return row.status === "failed" ? 1 : 0;
     case "turns": return 1;
@@ -856,6 +869,8 @@ const defaultAggregation = (metric: UsageAnalyticsMetric): UsageAnalyticsAggrega
     || metric === "turnDurationMs"
     || metric === "modelTimeMs"
     || metric === "toolTimeMs"
+    || metric === "contextUsedTokens"
+    || metric === "contextPercent"
   ) return "p50";
   if (metric === "cachePercent" || metric === "successRate" || metric === "errorRate") return "average";
   return "sum";
