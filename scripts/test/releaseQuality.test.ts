@@ -28,7 +28,7 @@ test("CI owns the repository quality contract and app builds stay manual", () =>
   const builds = text(".github/workflows/build-apps.yml");
   assert.match(builds, /workflow_dispatch:/);
   assert.doesNotMatch(builds, /^\s*push:/m);
-  for (const target of ["android-apk", "ios-app", "windows-exe", "linux-appimage", "all"]) {
+  for (const target of ["android-apk", "ios-app", "mac-dmg", "windows-exe", "linux-appimage", "npm-packages", "all"]) {
     assert.ok(builds.includes(`- ${target}`), `manual build target must include ${target}`);
   }
   assert.match(builds, /java-version: "21"/);
@@ -36,12 +36,17 @@ test("CI owns the repository quality contract and app builds stay manual", () =>
   assert.match(builds, /CODE_SIGNING_ALLOWED=NO/);
   assert.match(builds, /--win nsis --x64 --publish never/);
   assert.match(builds, /--linux AppImage --x64 --publish never/);
+  assert.match(builds, /--mac dmg zip --universal --publish never/);
+  assert.match(builds, /npm pack --workspace @polyth\/contracts/);
+  assert.match(builds, /npm pack --workspace @polyth\/package-sdk/);
   assert.doesNotMatch(builds, /--publish always/);
 
   const codemagic = text("codemagic.yaml");
   assert.match(codemagic, /xcode: 26\.6/);
+  assert.equal((codemagic.match(/name: Release quality gate/g) ?? []).length, 1);
+  assert.equal(codemagic.includes("Validate release quality"), false);
   assert.ok(
-    codemagic.indexOf("Validate release quality") < codemagic.indexOf("Build signed IPA"),
+    codemagic.indexOf("Release quality gate") < codemagic.indexOf("Build signed IPA"),
     "TestFlight signing must remain gated by release quality",
   );
 });
