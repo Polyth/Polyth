@@ -155,7 +155,18 @@ export interface TerminalRunResult {
   truncated: boolean;
 }
 
-const defaultShell = (): string => process.env.SHELL || "/bin/sh";
+export const localShellCommand = (
+  cmd?: string,
+  platform: NodeJS.Platform = process.platform,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): { file: string; args: string[] } => {
+  if (platform === "win32") {
+    const file = env.COMSPEC?.trim() || "cmd.exe";
+    return { file, args: cmd ? ["/d", "/s", "/c", cmd] : [] };
+  }
+  const file = env.SHELL?.trim() || "/bin/sh";
+  return { file, args: cmd ? ["-c", cmd] : ["-i"] };
+};
 
 const shq = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
 
@@ -267,9 +278,8 @@ export function createTerminalService(opts: {
         let spawned = false;
         if (usePty && nodePty) {
           try {
-            const shell = defaultShell();
-            const args = input.cmd ? ["-c", input.cmd] : ["-i"];
-            const pty = nodePty.spawn(shell, args, {
+            const shell = localShellCommand(input.cmd);
+            const pty = nodePty.spawn(shell.file, shell.args, {
               name: "xterm-256color", cols, rows, cwd, env,
             });
             pty.onData((data) => {
@@ -287,14 +297,14 @@ export function createTerminalService(opts: {
         }
 
         if (!spawned) {
-          // pipe fallback: export the grid so line tools wrap correctly; bash -i
-          // prints a harmless "cannot set terminal process group" warning that is
-          // forwarded to the client like any output
+          // Pipe fallback exports the grid so line tools wrap correctly.
+          // The platform-native shell comes from localShellCommand().
           env.COLUMNS = String(cols);
           env.LINES = String(rows);
+          const shell = localShellCommand();
           const proc = input.cmd
             ? spawn(input.cmd, { cwd, shell: true, env })
-            : spawn(defaultShell(), ["-i"], { cwd, env });
+            : spawn(shell.file, shell.args, { cwd, env });
           proc.on("error", () => emitExit(s, null));
           proc.on("exit", (code) => emitExit(s, typeof code === "number" ? code : null));
           const push = (chunk: Buffer) => {
