@@ -28,6 +28,8 @@ export interface CanonicalSecurityOptions {
   origin: string;
   /** Explicit local development/native exception for HTTP loopback. */
   localOnly?: boolean;
+  /** Validated bootstrap-only local agent debug authority. */
+  debugAgentAccess?: boolean;
   now?: () => number;
   idleMs?: number;
   absoluteMs?: number;
@@ -94,6 +96,7 @@ export function createCanonicalSecurity(options: CanonicalSecurityOptions): Cano
       control,
       identity,
       cookieName: http.cookieName,
+      ...(options.debugAgentAccess ? { debugAgentAccess: true } : {}),
     });
     let closed = false;
     return {

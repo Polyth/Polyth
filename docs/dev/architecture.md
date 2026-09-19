@@ -118,8 +118,9 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
   10 min window → 15 min lockout with `Retry-After`; clients without a socket
   address share one "anon" budget). Password comes from `POLYTH_UI_PASSWORD`
   (hashed at boot, never persisted) or a `passwordHash` in `auth.json`;
-  `POLYTH_UI_PASSWORD_LOCALHOST=optional` lets loopback connections skip auth.
-  Off entirely when no password is configured.
+  `POLYTH_UI_PASSWORD_LOCALHOST=optional` is the legacy local-password exception.
+  Canonical identity instead requires a real account session, except for the explicit
+  development-only `POLYTH_DEBUG_AGENT_ACCESS=1` loopback agent mode described below.
 - `push.ts` (F18) — web push in `node:crypto` only: aes128gcm payload encryption
   (RFC 8291) + VAPID ES256 authorization (RFC 8292). Keys are minted once into
   `data/push.json` (rotation would orphan every browser subscription) and
@@ -470,15 +471,22 @@ explicit per-session on/off records — "inherit" is the absence of a record),
 
 ## Security posture
 
-The server binds all interfaces: `boot()` calls `server.listen(port)` with no host
-argument, so it is reachable on `*:4400` by default and no localhost-only bind
-option exists — set `POLYTH_UI_PASSWORD` whenever anything beyond your own machine
-can reach the port (with no password configured there is no auth at all). Addresses
-shown in system info come from configuration, never from the Host header. Permission
-engine fails closed. Browser sessions run in isolated contexts with an origin policy
-(no cam/mic, no private IPs, no downloads); observations are redacted. Quota adapters
-redact secrets before snapshots reach the client. GitHub auth is delegated to the `gh`
-CLI — no tokens stored. Uploaded files land in a project `_inbox`. UI auth is the
-optional F16 password gate described above (`auth.ts`): when a password is
-configured it covers every `/api` path and WS upgrade; when none is configured
-it is off entirely.
+Canonical `boot()` binds `127.0.0.1` by default; wildcard/public exposure is
+an explicit deployment choice. Addresses shown in system info come from configuration,
+never from the Host header. Canonical browser identity normally requires a real account
+session, while Polyth Link carries its own server-minted ingress identity and grant
+checks.
+
+`POLYTH_DEBUG_AGENT_ACCESS=1` is an explicit development-only exception for local
+agent/API inspection. Direct loopback public HTTP/WS may be projected to the active
+owner without a browser session. Startup rejects this mode if the listener is not
+loopback-only, if `POLYTH_PUBLIC_ORIGIN` is configured, or if the deployment profile
+is not `local-trusted`. The exception is evaluated from server-created ingress, never
+client headers, so it does not apply to Polyth Link. Canonical `/api/auth/*` identity,
+setup, CSRF and origin handling remain unchanged.
+
+Permission engine fails closed. Browser sessions run in isolated contexts with an
+origin policy (no cam/mic, no private IPs, no downloads); observations are redacted.
+Quota adapters redact secrets before snapshots reach the client. GitHub auth is
+delegated to the `gh` CLI — no tokens stored. Uploaded files land in a project
+`_inbox`.

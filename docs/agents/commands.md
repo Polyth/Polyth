@@ -9,6 +9,7 @@ Observed at the evidence baseline. Inspect current manifests before execution. T
 | `npm start` | Start Node server | Uses real runtime/data unless explicitly isolated |
 | `npm run dev` | Build once then start | Not a guarantee of HMR |
 | `npm run watch` | Run the development supervisor | Can start/manage a runtime; read `scripts/supervisor.ts` and its actual options before starting |
+| `POLYTH_DEBUG_AGENT_ACCESS=1 npm start` | Start explicit local agent debug access | Direct loopback REST/WS acts as the active owner without browser login; startup refuses non-loopback/public/non-local-trusted exposure and Polyth Link never inherits it |
 | `npm test` | Root Node test glob | Broader than generic CI selection; may include environment-dependent tests |
 | `node --experimental-strip-types --test <existing-test.ts>` | Focused Node test | Explicit stripping works with the repository minimum Node contract |
 | `node node_modules/typescript/bin/tsc --noEmit -p <existing-project>` | Existing local TypeScript compiler | No implicit download; verify installed compiler and tsconfig first |

@@ -11,6 +11,9 @@ test("repository quality contract covers stable and Polyth Link tests", () => {
   assert.match(script, /releaseQuality\.test\.ts/);
   assert.match(script, /release-quality-gates\.test\.ts/);
   assert.match(script, /apps\/desktop\/test\/configuration\.test\.ts/);
+  assert.match(script, /packages\/server\/test\/canonicalAuth\.test\.ts/);
+  assert.match(script, /packages\/server\/test\/runtimeSecurityBinding\.test\.ts/);
+  assert.match(script, /packages\/server\/test\/debugAgentAccess\.test\.ts/);
   for (const project of [
     "packages/contracts",
     "packages/plugins",
