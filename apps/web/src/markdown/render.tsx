@@ -2,7 +2,7 @@
 // multirun/fusion output and file preview: parse (pure AST) → sanitize URLs →
 // render. Rich leaves (mermaid/math/json tree/galleries) mount lazily.
 import { createContext, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { parseMarkdown, parseInline, collectImages, type Block, type Inline } from "./parse.ts";
+import { parseMarkdown, collectImages, type Block, type Inline } from "./parse.ts";
 import { sanitizeLinkHref, sanitizeImageSrc } from "./sanitize.ts";
 import { findFileRefs } from "./fileReference.ts";
 import { getState, openEditorFile, useStore } from "../store.ts";

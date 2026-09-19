@@ -1,4 +1,3 @@
-import { Icon } from "../../icons.tsx";
 import { setRailPlugin, setSidebarOpen, useStore } from "../../store.ts";
 import { useResolvedCapabilities } from "../../capabilities.ts";
 import {

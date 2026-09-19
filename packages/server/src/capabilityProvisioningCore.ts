@@ -22,7 +22,6 @@ import {
   capabilityRevision,
   desiredBundleRevision,
   harnessProviderById,
-  overlayKey,
   planHarnessCapabilities,
   provisioningTarget,
   provisioningTargetKey,

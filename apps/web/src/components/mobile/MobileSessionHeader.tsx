@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { SessionEvent, SessionProjection } from "@polyth/contracts";
-import { ago, displaySessionTitle, isPlaceholderTitle } from "../../format.ts";
+import { displaySessionTitle, isPlaceholderTitle } from "../../format.ts";
 import { Icon } from "../../icons.tsx";
 import { formatNumber, tr } from "../../i18n/index.ts";
 import {
