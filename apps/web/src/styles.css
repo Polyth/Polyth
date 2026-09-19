@@ -11268,16 +11268,18 @@ color: var(--text);
   gap: var(--space-2);
 }
 .execution-summary-line > .execution-summary { min-width: 0; flex: 1 1 auto; }
+/* Inline command stop: a quiet glass control that reads as one more row
+   action, not a heavy alarm. Red stays the meaning; the material stays calm. */
 .execution-stop.ui-btn {
   position: relative;
   flex: none;
   min-height: var(--control-h-sm);
   gap: var(--space-1);
-  padding-inline: var(--space-2);
-  border-color: color-mix(in srgb, var(--red) 24%, var(--border-soft));
-  background: color-mix(in srgb, var(--red-wash) 52%, transparent);
-  color: color-mix(in srgb, var(--red) 82%, var(--text));
-  font-weight: 560;
+  padding-inline: var(--control-pad-x-sm);
+  border-color: color-mix(in srgb, var(--red) 22%, var(--material-glass-border));
+  background: color-mix(in srgb, var(--red-wash) 26%, var(--material-glass));
+  color: color-mix(in srgb, var(--red) 84%, var(--text));
+  font-weight: 550;
   box-shadow: var(--inset-hi);
   transition: color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease);
 }
@@ -11286,10 +11288,16 @@ color: var(--text);
   position: absolute;
   inset: min(0px, calc((var(--hit-min) - var(--control-h-sm)) / -2));
 }
-.execution-stop.ui-btn:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--red) 38%, var(--border-soft));
-  background: color-mix(in srgb, var(--red-wash) 72%, transparent);
+.execution-stop.ui-btn:hover:not(:disabled),
+.execution-stop.ui-btn:focus-visible:not(:disabled) {
+  border-color: color-mix(in srgb, var(--red) 44%, var(--material-glass-border));
+  background: color-mix(in srgb, var(--red-wash) 56%, var(--material-glass));
   color: var(--red);
+}
+.execution-stop.ui-btn .ui-icon { color: currentColor; }
+.execution-stop.ui-btn[aria-busy="true"] {
+  border-color: color-mix(in srgb, var(--red) 40%, var(--material-glass-border));
+  background: color-mix(in srgb, var(--red-wash) 44%, var(--material-glass));
 }
 .execution-summary.tool-disclosure {
   width: 100%;

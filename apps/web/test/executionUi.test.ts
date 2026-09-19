@@ -451,12 +451,15 @@ test("execution code surfaces override the global prose font preference", async 
   assert.match(css, /\.reasoning-preview\s*\{[\s\S]*?-webkit-mask-image:\s*linear-gradient\(to right, #000 90%, transparent 100%\);[\s\S]*?mask-image:\s*linear-gradient\(to right, #000 90%, transparent 100%\);/);
 });
 
-test("the inline stop action is visually compact without shrinking its coarse-pointer hit area", async () => {
+test("the inline stop action is a quiet glass control with a preserved hit area", async () => {
   const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   const rule = /\.execution-stop\.ui-btn\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
   assert.match(rule, /min-height:\s*var\(--control-h-sm\)/);
-  assert.match(rule, /padding-inline:\s*var\(--space-2\)/);
-  assert.match(rule, /background:\s*color-mix\(in srgb, var\(--red-wash\) 52%, transparent\)/);
+  assert.match(rule, /padding-inline:\s*var\(--control-pad-x-sm\)/);
+  // The stop reads red but sits on the shared glass material instead of a
+  // solid alarm fill, matching the composer stop control.
+  assert.match(rule, /background:\s*color-mix\(in srgb, var\(--red-wash\) 26%, var\(--material-glass\)\)/);
+  assert.match(rule, /border-color:\s*color-mix\(in srgb, var\(--red\) 22%, var\(--material-glass-border\)\)/);
   assert.match(css, /\.execution-stop\.ui-btn::after\s*\{[^}]*var\(--hit-min\)[^}]*var\(--control-h-sm\)/s);
 });
 
