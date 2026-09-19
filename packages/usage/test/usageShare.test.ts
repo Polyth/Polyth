@@ -132,8 +132,9 @@ test("Usage surface is provider-first, compact, theme-native, and progressively 
   assert.match(prefsSource, /subscribeUsagePrefs/);
   assert.match(prefsSource, /replaceUsagePrefs/);
   assert.doesNotMatch(prefsSource, /\/api\/usage\/preferences/);
-  assert.match(settingsSync, /usagePrefs:\s*getUsagePrefs\(\)/);
-  assert.match(settingsSync, /subscribeUsagePrefs\(schedulePush\)/);
+  assert.match(settingsSync, /packagePrefs:\s*packagePrefsSnapshot\(\)/);
+  assert.match(settingsSync, /subscribeClientSettingsContributions\(syncContributionSubscriptions\)/);
+  assert.doesNotMatch(settingsSync, /@polyth\/usage/);
 
   assert.match(quota, /loading: boolean/);
   assert.match(quota, /error: string \| null/);
@@ -143,6 +144,10 @@ test("Usage surface is provider-first, compact, theme-native, and progressively 
   assert.doesNotMatch(api, /usageQuotas:[\s\S]{0,120}\.catch\(/);
 
   assert.doesNotMatch(registration, /host\.settings\.registerPage|UsageSettings/);
+  assert.match(registration, /registerClientSettingsContribution\(\{/);
+  assert.match(registration, /id: "usage"/);
+  assert.match(registration, /get: getUsagePrefs/);
+  assert.match(registration, /subscribe: subscribeUsagePrefs/);
   assert.match(source, /import UsageSettings from "\.\/UsageSettings\.tsx"/);
   assert.match(source, /<UsageSettings \/>/);
   assert.match(registration, /host\.surfaces\.register\([\s\S]*?component: UsageDashboard/);
