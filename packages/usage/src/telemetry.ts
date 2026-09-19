@@ -5,7 +5,7 @@ import type {
   SessionPersistence,
   SessionProjection,
   TokenUsage,
-  type TelemetryQuality,
+  TelemetryQuality,
 } from "@polyth/contracts";
 import {
   canonicalProviderId,
