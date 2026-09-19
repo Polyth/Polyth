@@ -15,8 +15,9 @@ test("new-project mobile surfaces follow theme glass and compact phone geometry"
   assert.match(setupCss, /color-mix\(in srgb, var\(--accent\) 11%, transparent\)/);
 
   assert.match(compositionCss, /@container project-composition \(max-width: 620px\)[\s\S]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/s);
-  assert.match(compositionCss, /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\)[\s\S]*--material-glass-control-fill/s);
-  assert.match(compositionCss, /body\[data-glass="off"\][\s\S]*background:\s*var\(--elevated\)/s);
+  assert.doesNotMatch(compositionCss, /data-glass|data-desktop-low-resource|material-glass-control/);
+  assert.match(compositionCss, /\.project-direction-card[\s\S]*background:\s*var\(--surface-overlay\)/s);
+  assert.match(compositionCss, /\.project-direction-card\.is-selected[\s\S]*background:\s*var\(--accent-wash\)/s);
   assert.match(composition, /project-direction-icon/);
   assert.match(composition, /CodeIcon/);
   assert.match(composition, /CoachIcon/);
