@@ -23,26 +23,30 @@ that output into both native projects.
 
 ## Connection and first launch
 
-The packaged bundle opens a native connection gate before web authentication or
-application boot:
+The packaged bundle opens the native Connection Hub before loading any remote
+Polyth origin.
 
-1. enter or select a recent Polyth server;
-2. validate `/api/auth/status` using native HTTP;
-3. store only the normalized origin in Capacitor Preferences;
-4. load that server origin in the WebView;
-5. continue through the canonical password lock screen, project restoration,
-   and session restoration.
+The production path is Polyth Link:
 
-The validation endpoint is intentionally the public auth-status endpoint. It
-distinguishes a Polyth runtime from an arbitrary web server without requiring a
-password. Passwords are never stored in the mobile host list or accepted in a
-URL. If server auth is enabled, the existing same-origin, httpOnly
-`polyth_auth` cookie is minted by the normal lock screen after navigation.
+1. load native trusted connections;
+2. on an ordinary cold start, reconnect the most recently used healthy trusted
+   server automatically;
+3. otherwise let the user choose a trusted server or pair by QR / nearby
+   discovery plus six-digit code;
+4. keep device identity material in Keychain/Android Keystore-backed native
+   storage;
+5. after trust and host approval, load the canonical Polyth UI through the
+   native loopback proxy.
 
-The five most recently used origins and the active origin are device-local.
-Cold start validates the active host before restoring it. A failed restore
-returns to the connection gate with the recent hosts and a bounded network or
-certificate error.
+Automatic reconnect is suppressed for explicit server switching, pending
+pairing, cross-server deep links and other intents that require a deliberate
+server choice. The shared web UI then continues through its normal authenticated
+server state, project restoration and session restoration.
+
+Manual raw server URLs are retained only under Advanced as insecure development
+connections. They validate `/api/auth/status`, store only normalized origins
+in Capacitor Preferences, and continue through the ordinary Polyth password
+flow. They are not Polyth Link trust records.
 
 ## Network model and security
 
@@ -61,10 +65,12 @@ runtime bridge enforces application behavior:
 - other HTTP(S) links open in the platform browser;
 - credentials embedded in connection URLs are rejected.
 
-Only a host explicitly validated and selected by the user is loaded as the app
-origin. This design does not add certificate pinning, VPN discovery, or
-end-to-end pairing. Deployments needing internet access should terminate TLS in
-front of Polyth and use the UI password.
+The secure production path uses Polyth Link host identity, paired-device grants
+and the native loopback proxy rather than treating a raw URL as device trust.
+Manual development URL connections still rely on normal HTTP(S) reachability
+and Polyth web authentication; deployments exposing that development path
+beyond a trusted LAN should terminate TLS in front of Polyth and require the UI
+password.
 
 ## Authentication and reconnect
 
@@ -83,7 +89,9 @@ remains visible.
 
 Restoration has two layers:
 
-- Capacitor Preferences owns the active/recent runtime origins.
+- Native Polyth Link storage owns trusted connection identity, reconnect
+  metadata and the currently active secure proxy.
+- Capacitor Preferences owns only legacy/manual development runtime origins.
 - The canonical web origin owns project, session, view, draft, pane, and
   timeline state through its existing storage and server projections.
 
