@@ -13,7 +13,7 @@
     "descriptor": {
       "name": "Antigravity harness",
       "description": "Google Antigravity CLI with native Gemini sessions",
-      "core": false, "enabled": true, "icon": "sparkles", "hasSettings": false,
+      "core": false, "enabled": true, "icon": "antigravity", "hasSettings": false,
       "category": "system", "projectAffinity": {}
     }
   }

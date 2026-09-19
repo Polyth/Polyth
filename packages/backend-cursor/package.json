@@ -17,7 +17,7 @@
       "description": "Cursor through shared ACP",
       "core": false,
       "enabled": true,
-      "icon": "pointer",
+      "icon": "cursor",
       "hasSettings": false,
       "category": "system",
       "projectAffinity": {}

@@ -51,7 +51,7 @@ function providerLogoClassNames(): string[] {
   return [...classes].sort();
 }
 
-const component = build({
+const providerModule = build({
   entryPoints: [resolve(import.meta.dirname, "../../../packages/models/widgets/ProviderLogo.tsx")],
   bundle: true,
   platform: "node",
@@ -60,12 +60,14 @@ const component = build({
   logLevel: "silent",
 }).then(async (result) => {
   const url = `data:text/javascript;base64,${Buffer.from(result.outputFiles[0]!.text).toString("base64")}`;
-  const loaded = await import(url) as { default: ComponentType<ProviderLogoProps> };
-  return loaded.default;
+  return await import(url) as {
+    default: ComponentType<ProviderLogoProps>;
+    isProviderMarkKey: (value: string | undefined) => boolean;
+  };
 });
 
 async function render(props: ProviderLogoProps): Promise<string> {
-  const ProviderLogo = await component;
+  const ProviderLogo = (await providerModule).default;
   return renderToStaticMarkup(createElement(ProviderLogo, props));
 }
 
@@ -99,6 +101,7 @@ test("known providers render decorative SVG marks", async () => {
     "codex",
     "command-code",
     "cursor",
+    "antigravity",
   ];
 
   for (const providerID of providers) {
@@ -146,6 +149,7 @@ test("registered harness identities reuse the shared provider marks", async () =
     { providerID: "codex", providerName: "Codex", provider: "openai" },
     { providerID: "commandcode", providerName: "Command Code", provider: "commandcode" },
     { providerID: "cursor", providerName: "Cursor", provider: "cursor" },
+    { providerID: "antigravity", providerName: "Antigravity", provider: "antigravity" },
   ];
   for (const { provider, ...props } of harnesses) {
     const html = await render(props);
@@ -228,6 +232,32 @@ test("OpenCode variants use the OpenCode brand mark", async () => {
 
   const unrelatedZen = await render({ providerName: "Zen Browser" });
   assert.match(unrelatedZen, /data-provider="other"/);
+});
+
+test("Antigravity keeps its own distinct brand mark", async () => {
+  const html = await render({ providerID: "antigravity", providerName: "Antigravity", harnessId: "antigravity" });
+  assert.match(html, /data-provider="antigravity"/);
+  assert.match(html, /provider-antigravity/);
+  assert.match(html, /<svg\b/);
+  assert.match(html, /fill="currentColor"/);
+  assert.match(html, /M21\.751 22\.607c1\.34/);
+  assert.doesNotMatch(html, /#(?:[\da-f]{3,8})\b/i);
+
+  const gemini = await render({ providerID: "gemini", providerName: "Gemini" });
+  assert.match(gemini, /data-provider="gemini"/);
+  assert.match(gemini, /M12 2\.8c\.65 5\.15/);
+  assert.doesNotMatch(gemini, /M21\.751 22\.607/);
+});
+
+test("only canonical provider keys are brand marks for package tiles", async () => {
+  const { isProviderMarkKey } = await providerModule;
+  for (const key of ["cursor", "antigravity", "opencode", "claude", "commandcode", "gemini"]) {
+    assert.equal(isProviderMarkKey(key), true, `${key} is a canonical brand key`);
+  }
+  // Aliases and semantic package icons must not be mistaken for brand keys.
+  for (const value of ["github", "google", "codex", "files", "pointer", "sparkles", "", undefined]) {
+    assert.equal(isProviderMarkKey(value), false, `${String(value)} is not a canonical brand key`);
+  }
 });
 
 test("unknown providers retain a short theme-colored fallback", async () => {

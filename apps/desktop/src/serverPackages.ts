@@ -70,11 +70,11 @@ const entry = (
 
 export const desktopServerPackages = [
   entry("backend-acp", {"name":"ACP harnesses","description":"Shared Agent Client Protocol transport and runtime","core":false,"enabled":true,"icon":"network","hasSettings":false,"category":"system","projectAffinity":{}}, backendAcp),
-  entry("backend-antigravity", {"name":"Antigravity harness","description":"Google Antigravity CLI with native Gemini sessions","core":false,"enabled":true,"icon":"sparkles","hasSettings":false,"category":"system","projectAffinity":{}}, backendAntigravity),
+  entry("backend-antigravity", {"name":"Antigravity harness","description":"Google Antigravity CLI with native Gemini sessions","core":false,"enabled":true,"icon":"antigravity","hasSettings":false,"category":"system","projectAffinity":{}}, backendAntigravity),
   entry("backend-claude", {"name":"Claude Code harness","description":"Claude Code through its Agent SDK","core":false,"enabled":true,"icon":"assist","hasSettings":false,"category":"system","projectAffinity":{}}, backendClaude),
   entry("backend-codex", {"name":"Codex harness","description":"Native Codex App Server execution","core":false,"enabled":true,"icon":"code","hasSettings":false,"category":"system","projectAffinity":{}}, backendCodex),
   entry("backend-commandcode", {"name":"Command Code harness","description":"Command Code through its official headless event stream and native mod bridge","core":false,"enabled":true,"icon":"command","hasSettings":false,"category":"system","projectAffinity":{}}, backendCommandCode),
-  entry("backend-cursor", {"name":"Cursor harness","description":"Cursor through shared ACP","core":false,"enabled":true,"icon":"pointer","hasSettings":false,"category":"system","projectAffinity":{}}, backendCursor),
+  entry("backend-cursor", {"name":"Cursor harness","description":"Cursor through shared ACP","core":false,"enabled":true,"icon":"cursor","hasSettings":false,"category":"system","projectAffinity":{}}, backendCursor),
   entry("backend-fx", {"name":"fx harness","description":"fx through shared ACP","core":false,"enabled":true,"icon":"command","hasSettings":false,"category":"system","projectAffinity":{}}, backendFx),
   entry("backend-grok", {"name":"Grok Build harness","description":"Grok Build through its native ACP stdio agent","core":false,"enabled":true,"icon":"assist","hasSettings":false,"category":"system","projectAffinity":{}}, backendGrok),
   entry("backend-omp", {"name":"OMP harness","description":"oh-my-pi through its native ACP transport","core":false,"enabled":true,"icon":"command","hasSettings":false,"category":"system","projectAffinity":{}}, backendOmp),

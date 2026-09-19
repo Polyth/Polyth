@@ -1,4 +1,5 @@
 import type { LucideIcon } from "../ui/icons.ts";
+import ProviderLogo, { isProviderMarkKey } from "../../../../../packages/models/widgets/ProviderLogo.tsx";
 import {
   AssistIcon,
   BellIcon,
@@ -107,7 +108,9 @@ const PACKAGE_ICONS: Readonly<Record<string, LucideIcon>> = {
 };
 
 /** Package manifests carry semantic keys, never display glyphs. Unknown or
- * third-party keys deliberately fall back to the same neutral package SVG. */
+ * third-party keys deliberately fall back to the same neutral package SVG.
+ * A key that is exactly a canonical provider mark (harness identity) renders
+ * the shared brand logo so harness packages match the harness picker. */
 export function PackageGlyph({
   icon,
   size = 28,
@@ -117,6 +120,7 @@ export function PackageGlyph({
   size?: number;
   strokeWidth?: number;
 }) {
+  if (isProviderMarkKey(icon)) return <ProviderLogo providerID={icon} size={size <= 16 ? "compact" : "regular"} />;
   const Glyph = (icon && PACKAGE_ICONS[icon]) || PackageIcon;
   return <Glyph size={size} strokeWidth={strokeWidth} aria-hidden="true" />;
 }
