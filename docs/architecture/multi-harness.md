@@ -53,14 +53,14 @@ A synchronized native leg can be reattached where the adapter supports verified 
 3. Reconcile the old runtime. A local idle marker, abort acknowledgement, timeout, disconnected channel or missing PID is not a release proof. Unresolved operations remain unresolved.
 4. Require `releaseExecution` to confirm the exact old authority and generation. OpenCode's shared runtime barrier also rejects release while a neighbouring session on that authority is busy or unresolved.
 5. Persist `harness/execution-released` before constructing the target runtime. Unwire the old runtime and evict its pool entry.
-6. Prepare target native creation through the existing durable operation journal. Persist the provider's exact native receipt. A missing response is never retried speculatively; recovery requires a matching operation receipt, not a title or timestamp guess.
+6. Prepare target native creation through the existing durable operation journal. A different harness is constructed without the source harness's model identity; same-harness fresh legs retain compatible launch settings. Persist the provider's exact native receipt. A missing response is never retried speculatively; recovery requires a matching operation receipt, not a title or timestamp guess.
 7. Atomically publish the runtime epoch, target route, fresh leg, and closed prior leg. Clear transition state and stale model/profile routing in the same transaction.
 8. Establish the fresh binding and reconciliation barrier, then admit the next turn with bounded canonical continuity. The canonical user event contains the user's text; recovery context is separately persisted and hidden by the timeline renderer.
 
-The target creation path does not require an adapter to support exact native-history
-reset. If a provider gives a definitive `unsupported` reset result while exposing
-fresh-session creation, the same durable operation uses that create seam instead;
-canonical continuity is transferred separately and the native tail is never claimed
+The target creation path uses the adapter's operation-aware fresh-session seam
+directly; a newly selected harness has no native history to reset. Exact-history
+reset is only a compatibility fallback for adapters without a create seam.
+Canonical continuity is transferred separately and the native tail is never claimed
 to have been copied.
 
 A crash after target creation but before publication resumes the recorded receipt. A target creation with no recoverable receipt stays blocked instead of making another native thread. A pending after-turn switch can be escalated to stop-now. An unresolved target cannot currently be replaced with a different pending target.

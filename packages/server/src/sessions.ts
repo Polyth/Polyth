@@ -919,16 +919,25 @@ export function createSessionService(deps: {
   };
 
   /** Start a fresh native leg without requiring exact native-history reset.
-   * Some runtimes can create a new session while deliberately rejecting reset
-   * because they cannot reproduce the old native history (Antigravity). A
-   * definitive reset rejection proves that no mutation was applied, so the
-   * same durable operation can safely try the provider's fresh-session seam. */
+   * A harness target has no native history to replace, so switching uses the
+   * create seam directly. Epoch recovery retains reset precedence for legacy
+   * runtimes whose reset also clears adapter-owned mappings. */
   const freshBackendSessionOperation = async (
     runtime: AgentRuntime,
     request: CreateSessionInput & { sessionId: string; cwd: string },
     operationId: string,
     mode: "switch" | "epoch",
   ): Promise<string | MutationOutcome<{ backendSessionId: string }>> => {
+    if (mode === "switch") {
+      if (runtime.createSessionOperation) {
+        return runtime.createSessionOperation.call(runtime, request, operationId);
+      }
+      if (runtime.resetSessionOperation) {
+        return runtime.resetSessionOperation.call(runtime, request, operationId);
+      }
+      if (runtime.resetSession) return runtime.resetSession.call(runtime, request);
+      return runtime.ensureSession.call(runtime, request);
+    }
     if (runtime.resetSessionOperation) {
       const outcome = await runtime.resetSessionOperation.call(runtime, request, operationId);
       if (outcome.kind !== "rejected") return outcome;
@@ -950,7 +959,6 @@ export function createSessionService(deps: {
       return runtime.createSessionOperation.call(runtime, request, operationId);
     }
     if (runtime.resetSession) return runtime.resetSession.call(runtime, request);
-    if (mode === "switch") return runtime.ensureSession.call(runtime, request);
     return {
       kind: "rejected",
       code: "capability-unsupported",
@@ -6216,7 +6224,15 @@ export function createSessionService(deps: {
     try {
       // The old execution incarnation is durably released BEFORE a target
       // runtime can exist. A failed target remains recoverable from this proof.
-      const target = await runtimeFor(projection, cwd, transition.targetHarnessId);
+      // A different harness cannot interpret the source harness's persisted
+      // model identity. Build the prospective target runtime with the same
+      // route state that the atomic publication below will expose. Otherwise
+      // launch-time adapters (Antigravity among them) reject the fresh native
+      // session before the transaction gets a chance to clear the stale model.
+      const targetProjection = transition.targetHarnessId === projection.resolvedHarnessId
+        ? projection
+        : { ...projection, model: undefined };
+      const target = await runtimeFor(targetProjection, cwd, transition.targetHarnessId);
       stage = "creating-native-session";
       const events = await store.events(sessionId);
       const intent = events.findLast((event) => event.type === "harness/native-create-requested" && event.data.transitionId === transition!.id);

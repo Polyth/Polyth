@@ -46,6 +46,7 @@ function fixture(path = ":memory:", options: {
   let exposeReceipt = true;
   let abortStops = false;
   const nativeCreates: string[] = [];
+  const nativeResets: string[] = [];
   const broadcasts: string[] = [];
   const provider = (id: string): HarnessProvider => ({
     descriptor: { id, name: id, integration: "fake", priority: id === "fake-a" ? 0 : 1 },
@@ -92,9 +93,12 @@ function fixture(path = ":memory:", options: {
         models: async () => [], agents: async () => [],
         ensureSession: async (input) => nativeId = input.backendSessionId ?? nativeId,
         createSessionOperation: create,
-        resetSessionOperation: options.resetUnsupportedHarness === id
-          ? async () => ({ kind: "rejected" as const, code: "unsupported", message: "exact native history reset is unavailable" })
-          : create,
+        resetSessionOperation: async (request, operationId) => {
+          nativeResets.push(operationId);
+          return options.resetUnsupportedHarness === id
+            ? { kind: "rejected" as const, code: "unsupported", message: "exact native history reset is unavailable" }
+            : create(request, operationId);
+        },
         ...(options.branchOutcome ? {
           branchSessionOperation: async (_request, operationId) => options.branchOutcome === "mismatch"
             ? { kind: "rejected" as const, code: "history-mismatch", message: "requested history prefix is not present in the backend session" }
@@ -188,7 +192,7 @@ function fixture(path = ":memory:", options: {
   });
   let sessions = makeSessions();
   const drain = () => new Promise((resolve) => setTimeout(resolve, 40));
-  return { get store() { return store; }, get sessions() { return sessions; }, engines, nativeCreates, broadcasts, beginShutdown,
+  return { get store() { return store; }, get sessions() { return sessions; }, engines, nativeCreates, nativeResets, broadcasts, beginShutdown,
     async idle(id: string) { await until(async () => { const events = await store.events(id); return (await store.projection(id))?.status === "idle" && (events.findLast(e => e.type === "turn/stopped")?.seq ?? 0) > (events.findLast(e => e.type === "user/message")?.seq ?? 0); }); },
     async close() { await drain(); detach.forEach((off) => off()); await store.close(); },
     async restart() { await drain(); detach.forEach((off) => off()); await store.close(); store = createStore(path); sessions = makeSessions(); }, setReleaseUnknown(value: boolean) { releaseUnknown = value; }, setCreateUnknown(value: boolean, receipt = true) { createUnknown = value; exposeReceipt = receipt; }, setCreateRejected(value: boolean) { createRejected = value; }, setAbortStops(value: boolean) { abortStops = value; } };
@@ -228,6 +232,7 @@ test("harness switching starts a fresh target session when exact native reset is
     assert.notEqual(switched.backendSessionId, original.backendSessionId);
     assert.equal(f.engines.at(-1)?.harnessId, "fake-b");
     assert.equal(switched.harnessTransition, undefined);
+    assert.equal(f.nativeResets.length, 0, "a fresh harness target must not receive an exact-history reset");
   } finally {
     await f.close();
   }

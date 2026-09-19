@@ -49,7 +49,12 @@ function fixture(files: Record<string, Uint8Array>) {
   const store = createStore(":memory:");
   const detach: Array<() => void> = [];
   const registry = createHarnessRegistry();
-  const engines: Array<AgentRuntime & { complete(): void; requests: CanonicalTurnRequest[]; harnessId: string }> = [];
+  const engines: Array<AgentRuntime & {
+    complete(): void;
+    requests: CanonicalTurnRequest[];
+    harnessId: string;
+    launchModel: HarnessContext["model"];
+  }> = [];
   const executing = new Set<string>();
   const reads: string[] = [];
 
@@ -80,8 +85,14 @@ function fixture(files: Record<string, Uint8Array>) {
         accepted.push({ operationId, mutationKind: "session-reset", backendSessionId: nativeId, receipt: nativeId });
         return { kind: "confirmed" as const, value: { backendSessionId: nativeId }, receipt: nativeId };
       };
-      const runtime: AgentRuntime & { complete(): void; requests: CanonicalTurnRequest[]; harnessId: string } = {
+      const runtime: AgentRuntime & {
+        complete(): void;
+        requests: CanonicalTurnRequest[];
+        harnessId: string;
+        launchModel: HarnessContext["model"];
+      } = {
         harnessId: id,
+        launchModel: context.model,
         requests: [],
         capabilities: async () => ({
           streaming: true, permissions: false, questions: false, compaction: false, subagents: false,
@@ -205,6 +216,9 @@ test("a model and variant chosen on one harness never reach the next one", async
   await f.idle(id);
 
   await f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" });
+  const engineB = f.engineFor("fake-b").at(-1)!;
+  assert.equal(engineB.launchModel, undefined, "the new harness must not launch with the previous harness model");
+  assert.equal((await f.store.projection(id))?.model, undefined, "cross-harness publication clears the stale model");
 
   // A's model is meaningless on B, and is refused rather than routed.
   await assert.rejects(
@@ -229,7 +243,6 @@ test("a model and variant chosen on one harness never reach the next one", async
     model: { providerID: "prov-b", modelID: "b-think", variant: "thorough" },
     attachments: [{ id: "att", name: "notes.txt", mime: "text/plain", size: 21, kind: "file", path: "notes.txt" }],
   });
-  const engineB = f.engineFor("fake-b").at(-1)!;
   const request = engineB.requests.at(-1)!;
   assert.deepEqual(request.model, { providerID: "prov-b", modelID: "b-think", variant: "thorough" });
   // The file was projected into the prompt, so B sees no ref it cannot deliver.
