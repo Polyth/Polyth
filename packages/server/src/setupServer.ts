@@ -1,11 +1,12 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
+import { TRUSTED_SETUP_CLAIM } from "@polyth/identity/http";
 import type { CanonicalSecurity } from "./canonicalSecurity.ts";
 
-export const DESKTOP_SETUP_COOKIE = "polyth_desktop_setup";
+export const DESKTOP_SETUP_CLAIM_COOKIE = "polyth_desktop_setup_claim";
 
 const MIME: Readonly<Record<string, string>> = {
   ".html": "text/html; charset=utf-8",
@@ -22,8 +23,8 @@ export interface SetupServerOptions {
   security: CanonicalSecurity;
   webDist: string;
   version: string;
-  /** Native-desktop capability; kept in the main/server process and an HttpOnly cookie only. */
-  desktopSetupCapability?: string;
+  /** Operator-issued native claim; never exposed to renderer JavaScript. */
+  desktopSetupClaimToken?: string;
 }
 
 export interface SetupServerHandle {
@@ -52,52 +53,10 @@ const cookieValue = (req: IncomingMessage, name: string): string | null => {
   return /^[a-f0-9]{64}$/.test(value) ? value : null;
 };
 
-const capabilityMatches = (req: IncomingMessage, expected: string): boolean => {
-  const actual = cookieValue(req, DESKTOP_SETUP_COOKIE);
+const desktopClaimMatches = (req: IncomingMessage, expected: string): boolean => {
+  const actual = cookieValue(req, DESKTOP_SETUP_CLAIM_COOKIE);
   return !!actual
     && timingSafeEqual(Buffer.from(actual, "hex"), Buffer.from(expected, "hex"));
-};
-
-const readJson = async (req: IncomingMessage): Promise<Record<string, unknown>> => {
-  if (!/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(req.headers["content-type"] ?? "")) {
-    throw Object.assign(new Error("JSON content type required"), { code: "invalid-input" });
-  }
-  const chunks: Buffer[] = [];
-  let bytes = 0;
-  for await (const chunk of req) {
-    const part = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    bytes += part.length;
-    if (bytes > 16_384) throw Object.assign(new Error("Request is too large"), { code: "body-too-large" });
-    chunks.push(part);
-  }
-  let value: unknown;
-  try { value = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
-  catch { throw Object.assign(new Error("Invalid JSON"), { code: "invalid-input" }); }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw Object.assign(new Error("JSON object required"), { code: "invalid-input" });
-  }
-  return value as Record<string, unknown>;
-};
-
-const bodyText = (body: Record<string, unknown>, key: string): string => {
-  const value = body[key];
-  if (typeof value !== "string") throw Object.assign(new Error("Required string field is missing"), { code: "invalid-input" });
-  return value;
-};
-
-const desktopSetupError = (res: ServerResponse, cause: unknown): void => {
-  const value = cause instanceof Error ? cause : new Error(String(cause));
-  const code = typeof (cause as { code?: unknown } | null)?.code === "string"
-    ? (cause as { code: string }).code
-    : "internal-error";
-  const status = code === "invalid-input" || code === "recovery-ack-required"
-    ? 400
-    : code === "body-too-large" ? 413
-      : code === "invalid-claim" ? 401
-        : code === "setup-completed" || code === "conflict" ? 409
-          : code === "recovery-required" ? 503
-            : 500;
-  json(res, status, status === 500 ? { error: code } : { error: code, message: value.message });
 };
 
 const inside = (root: string, candidate: string): boolean =>
