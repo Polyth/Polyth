@@ -36,6 +36,7 @@ import {
 } from "../../mobileWorkspaceNavigation.ts";
 import { firstUserTextCached, lastUserTextCached } from "../../utils.ts";
 import { ComposeIcon, GlassIsland, IconButton, LayersIcon, MenuIcon } from "../ui/index.ts";
+import SlotHost from "../slots/SlotHost.ts";
 import Sheet, { SheetRow, SheetSection } from "./Sheet.tsx";
 import WorkspacePanel from "./WorkspacePanel.tsx";
 import {
@@ -381,20 +382,28 @@ export default function MobileSessionHeader() {
         }} />
       </GlassIsland>
       <GlassIsland className="mobile-session-title-island">
-        <button
-          className="mobile-session-selector"
-          aria-label={tr("mobile.island.openOverview", { label: title })}
-          aria-haspopup="dialog"
-          aria-expanded={surface === "island"}
-          onClick={() => setSurface("island")}
-        >
-          {session && <ContextIndicator gauge={gauge} mode={ui.contextIndicatorMode} providerID={activeModel?.providerID} providerName={descriptor?.providerName} harnessId={descriptor?.harnessId ?? session.resolvedHarnessId} active={sessionStatus?.kind === "working"} telemetryStatus={telemetryStatus} />}
-          <span
-            key={taskProgressTitle?.key ?? `title:${session?.id ?? "new"}`}
-            className={`mobile-island-text${taskProgressTitle ? ` task-progress ${taskProgressTitle.tone}` : ""}`}
-          >{displayedTitle}</span>
-          <Icon.chevronDown />
-        </button>
+        <div className="mobile-session-title-row">
+          <button
+            className="mobile-session-selector"
+            aria-label={tr("mobile.island.openOverview", { label: title })}
+            aria-haspopup="dialog"
+            aria-expanded={surface === "island"}
+            onClick={() => setSurface("island")}
+          >
+            {session && <ContextIndicator gauge={gauge} mode={ui.contextIndicatorMode} providerID={activeModel?.providerID} providerName={descriptor?.providerName} harnessId={descriptor?.harnessId ?? session.resolvedHarnessId} active={sessionStatus?.kind === "working"} telemetryStatus={telemetryStatus} />}
+            <span
+              key={taskProgressTitle?.key ?? `title:${session?.id ?? "new"}`}
+              className={`mobile-island-text${taskProgressTitle ? ` task-progress ${taskProgressTitle.tone}` : ""}`}
+            >{displayedTitle}</span>
+            <Icon.chevronDown />
+          </button>
+          <span className="session-header-status">
+            <SlotHost
+              slot="session.header.status"
+              context={{ projectId: projectId ?? null, sessionId: session?.id ?? null, workspaceMode: "chat" }}
+            />
+          </span>
+        </div>
         {taskProgressTitle && <span className="sr-only" role="status" aria-live="polite">{displayedTitle}</span>}
       </GlassIsland>
       <GlassIsland className="mobile-float-actions">

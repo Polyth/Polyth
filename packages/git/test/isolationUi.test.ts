@@ -23,7 +23,7 @@ register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { activateSession, seedSessionCache } = await import("../../../apps/web/src/store.ts");
-const { IsolationBadge, IsolationCard, IsolationListBadge } = await import("../widgets/IsolationCard.tsx");
+const { IsolationLock, IsolationCard, IsolationListBadge } = await import("../widgets/IsolationCard.tsx");
 const { tr } = await import("../../../apps/web/src/i18n/index.ts");
 const { api } = await import("@polyth/session/web-api");
 const wait = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -52,7 +52,7 @@ async function mountBadge(session: SessionProjection) {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
-  await act(async () => { root.render(createElement(IsolationBadge)); await wait(); });
+  await act(async () => { root.render(createElement(IsolationLock)); await wait(); });
   return { container, async close() { await act(async () => root.unmount()); container.remove(); } };
 }
 function buttons(container: ParentNode) {
@@ -96,14 +96,15 @@ test("IsolationListBadge names Isolated when isolation is present and is absent 
   }
 });
 
-test("header badge is passive status only with no mutation controls", async () => {
+test("header isolation lock is passive status only with no mutation controls", async () => {
   const isolation: SessionIsolation = { ...base, state: "merge-ready" };
   const mounted = await mountBadge(projection("badge-passive", isolation));
   try {
-    const badge = mounted.container.querySelector(".isolation-badge");
-    assert.ok(badge);
-    assert.equal(badge?.tagName, "SPAN");
-    assert.equal(badge?.textContent, tr("isolation.isolatedBranch", { branch: base.targetBranch }));
+    const lock = mounted.container.querySelector(".isolation-lock");
+    assert.ok(lock);
+    assert.equal(lock?.tagName, "SPAN");
+    assert.equal(lock?.textContent, "");
+    assert.equal(lock?.getAttribute("aria-label"), `${tr("isolation.isolatedBranch", { branch: base.targetBranch })}. ${base.targetBranch} · ${base.worktreeBranch} · ${base.worktreePath} · ${base.createdAt}`);
     assert.equal(mounted.container.querySelector('[role="menu"]'), null);
     assert.equal(mounted.container.querySelector("button"), null);
     for (const label of [

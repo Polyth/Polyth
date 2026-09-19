@@ -4577,14 +4577,30 @@ body[data-glass="clear"] .prompt-nav-panel { --prompt-nav-panel-blur: 22px; }
 .tracker-dot.agent { background: var(--amber); animation: pulse 1.6s ease-in-out infinite; }
 .tracker-dot.agent.idle { animation: none; opacity: 0.5; }
 .desktop-session-status { position: relative; }
+.desktop-session-status-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
 .desktop-session-status-trigger {
   min-height: var(--control-h-sm); display: inline-grid; grid-template-columns: var(--icon-md) minmax(0, 1fr) var(--icon-md); align-items: center; gap: var(--control-gap); padding: 0 var(--control-pad-x-sm);
   border: 1px solid var(--material-glass-border); border-radius: var(--radius-control); background: var(--material-glass); color: var(--text); font-size: var(--font-session-title); font-weight: 650; line-height: var(--font-session-title-lh);
   box-shadow: var(--material-glass-highlight), var(--material-glass-shadow);
 }
 .desktop-session-status-trigger:hover { background: color-mix(in srgb, var(--material-glass) 88%, var(--surface-overlay-hover)); }
+.desktop-session-status-trigger { flex: 1 1 auto; min-width: 0; width: auto; }
 .desktop-session-status-trigger > .context-indicator { grid-column: 1; }
 .desktop-session-status-trigger > svg { grid-column: 3; justify-self: center; width: var(--icon-sm); height: var(--icon-sm); }
+.session-header-status {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--control-h-sm);
+  min-height: var(--control-h-sm);
+}
+.session-header-status:empty { display: none; }
 .desktop-session-status-mask { grid-column: 2; min-width: 0; width: 100%; height: var(--font-session-title-lh); overflow: hidden; display: block; }
 .desktop-session-status-copy { min-width: 0; height: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; white-space: nowrap; }
 .desktop-session-status-copy > span:last-child { min-width: 0; overflow: hidden; text-align: center; text-overflow: ellipsis; }
@@ -7383,7 +7399,7 @@ font-style: normal; opacity: .65;
   min-width: 100%;
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: flex-end;
   gap: 4px;
   padding: 0 8px;
 }
@@ -7394,7 +7410,33 @@ font-style: normal; opacity: .65;
 .mobile-shortcut svg { width: var(--icon-lg); height: var(--icon-lg); }
 .mobile-shortcut.active { color: var(--accent); background: var(--accent-wash); }
 
-/* Phone boundary only — the shell contract (responsiveShell.ts) is 820/480;
+/* Tablet chat keeps the session status visible, but lets the configured
+   shortcut rail own the far edge of the compact header. */
+@media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
+  .header-chat .desktop-session-status {
+    position: relative;
+    inset: auto;
+    flex: 1 1 auto;
+    width: auto;
+    max-width: none;
+    min-width: 0;
+    z-index: auto;
+  }
+  .header-chat .desktop-session-status-trigger {
+    width: 100%;
+    height: var(--tap);
+    padding-inline: var(--space-2);
+  }
+  .header-chat .header-trailing-cluster {
+    flex: 0 1 42%;
+    max-width: 42%;
+  }
+  .header-chat .mobile-shortcut-rail {
+    width: 100%;
+  }
+}
+
+/* Phone boundary only — the shell contract (responsiveShell.ts) is 960/480;
    tablets keep the compact header and statusbar. */
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
   html, body, #root { min-height: 100%; min-height: 100dvh; }
@@ -9844,6 +9886,13 @@ color: var(--muted);
   .mobile-float-navigation svg, .mobile-float-actions svg { width: var(--icon-lg); height: var(--icon-lg); }
   .mobile-session-title-island,
   .mobile-view-title { min-width: 0; padding: 0; border-radius: var(--radius-island); }
+  .mobile-session-title-row {
+    min-width: 0;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
   .mobile-session-selector {
     min-width: 0;
     width: 100%;
@@ -9862,6 +9911,8 @@ color: var(--muted);
     font-weight: 600;
     line-height: var(--font-session-title-lh);
   }
+  .mobile-session-title-row .mobile-session-selector { flex: 1 1 auto; width: auto; }
+  .mobile-session-title-row .session-header-status { flex: none; }
   .mobile-session-selector[data-live="true"] {
     border-color: color-mix(in srgb, var(--accent-line) 70%, var(--border-soft));
   }

@@ -12,7 +12,7 @@ import PendingChangesBar from "./PendingChangesBar.tsx";
 import RecentChangesWidget from "./RecentChangesWidget.tsx";
 import GitProjectSource from "./GitProjectSource.tsx";
 import SourceControlIdentity from "./SourceControlIdentity.tsx";
-import { IsolationBadge, IsolationCard, IsolationListBadge } from "./IsolationCard.tsx";
+import { IsolationCard, IsolationListBadge, IsolationLock } from "./IsolationCard.tsx";
 import {
   gitContextSnapshot,
   peekGitStatus,
@@ -50,7 +50,7 @@ export default defineWebPackage((host) => () => {
     host.slots.register({ slot: "git.repository.identity", id: "git.source-control-identity", order: 5, render: (props) => typeof props.projectId === "string" ? createElement(SourceControlIdentity, { host, projectId: props.projectId }) : null }),
     host.slots.register({ slot: "git.repository.identity", id: "git.change-request-state", order: 15, render: (props) => <host.ui.Slot slot="git.repository.change-request.provider" context={props} /> }),
     host.slots.register({ slot: "session.timeline.after", id: "git-isolation-card", order: 20, render: () => createElement(IsolationCard) }),
-    host.slots.register({ slot: "session.header.actions", id: "git-isolation-badge", order: 15, render: () => createElement(IsolationBadge) }),
+    host.slots.register({ slot: "session.header.status", id: "git-isolation-lock", order: 15, render: () => createElement(IsolationLock) }),
     host.slots.register({
       slot: "session.list.badges",
       id: "git-isolation-list-badge",

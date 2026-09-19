@@ -424,7 +424,7 @@ user text.
 ## UI extension model
 
 `UiSlot` (contracts) enumerates injection points: `app.nav`,
-`session.header.actions`, `session.list.badges`, `composer.leading`,
+`session.header.actions`, `session.header.status`, `session.list.badges`, `composer.leading`,
 `composer.trailing`, `contextRail.tabs`, `settings.pages`,
 `commandPalette.commands`, `workspace.main.tabs`, `workspace.right.tabs`,
 `session.timeline.before/after`, `session.message.actions`,

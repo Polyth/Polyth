@@ -13,6 +13,7 @@ import {
   Dialog,
   Icon,
   IconButton,
+  LockIcon,
   Menu,
   MoreIcon,
   Spinner,
@@ -390,7 +391,7 @@ export function IsolationCard() {
   );
 }
 
-export function IsolationBadge() {
+export function IsolationLock() {
   const session = useStore((state) =>
     state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null,
   );
@@ -399,8 +400,8 @@ export function IsolationBadge() {
   const branch = isolation.targetBranch;
   const details = badgeDetails(isolation);
   return (
-    <span className="isolation-badge" title={details} aria-label={`${tr("isolation.isolatedBranch", { branch })}. ${details}`}>
-      {tr("isolation.isolatedBranch", { branch })}
+    <span className="isolation-lock" title={details} aria-label={`${tr("isolation.isolatedBranch", { branch })}. ${details}`}>
+      <LockIcon aria-hidden="true" />
     </span>
   );
 }

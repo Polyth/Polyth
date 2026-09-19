@@ -223,10 +223,10 @@ shell tests:
 - **Wide header tool rail** (`CapabilityNav`) still shows in the band and
   duplicates the floating cluster's launchers. Hide it in the band if it reads
   heavy after real use.
-- **Navigator / header / composer chrome** on tablet: the spec's asks (§1 no
-  persistent bulk actions, compact search; header not an icon graveyard;
-  compact idle composer) are already met by existing `selectMode` /
-  `searchOpen` / compact-composer code — verified, not re-touched.
+- **Navigator / header / composer chrome** on tablet: the compact header keeps
+  the shared session status visible, shows a reduced default shortcut set at
+  the rail's right edge, and retains the existing `selectMode` / `searchOpen`
+  / compact-composer behavior.
 
 ## Deliberately NOT doing (challenge the spec)
 

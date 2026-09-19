@@ -15,13 +15,13 @@ test("every phone view uses the same three-segment shell bar", async () => {
     readWebStyles(),
   ]);
 
-  assert.match(header, /if \(mode === "phone"\) \{\s*return chatSurface \? <MobileSessionHeader \/> : <MobileViewHeader \/>;\s*\}/s);
+  assert.match(header, /if \(mode === "phone"\) \{\s*return \(\s*<>\s*\{chatSurface \? <MobileSessionHeader \/> : <MobileViewHeader \/>\}\s*\{windowControls\}\s*<\/>\s*\);\s*\}/s);
   assert.doesNotMatch(header, /WorkspaceBottomNav/);
   assert.match(mobileHeader, /label="Open navigation"/);
   assert.match(mobileHeader, /label="New session"/);
   assert.match(mobileHeader, /label="Open tools"/);
   assert.match(mobileHeader, /origin="top"/);
-  assert.match(workspacePanel, /title="Workspace"/);
+  assert.match(workspacePanel, /title=\{editing \? "Customize workspace" : "Workspace"\}/);
   assert.match(workspacePanel, /Available items/);
   assert.equal((workspacePanel.match(/<Sheet/g) ?? []).length, 1);
   assert.doesNotMatch(mobileHeader, /Icon\.plus/);
@@ -29,6 +29,11 @@ test("every phone view uses the same three-segment shell bar", async () => {
   // height (never below the tap floor), and the chrome inset around it.
   assert.match(css, /\.app-shell\s*\{[^}]*padding-top:\s*calc\(var\(--safe-top\) \+ var\(--conversation-chrome-inset\) \+ max\(var\(--tap\), var\(--mobile-island-height\)\) \+ var\(--space-4\)\)/s);
   assert.match(prefs, /mobileShortcuts:\s*\[[\s\S]*"notification-centre"/);
+  const defaultsStart = prefs.indexOf("export const UI_DEFAULTS");
+  const defaultsEnd = prefs.indexOf("\n  jsonTreeDefault", defaultsStart);
+  const defaultShortcuts = prefs.slice(defaultsStart, defaultsEnd);
+  assert.match(defaultShortcuts, /mobileShortcuts:\s*\[[\s\S]*"files"[\s\S]*"settings"/);
+  assert.doesNotMatch(defaultShortcuts, /"session"/);
   assert.match(shell, /hint:\s*hintOf\("notificationCentre"\)/);
   assert.match(shell, /notificationCentre:\s*\(\) => toggleRailPlugin\("slot:notification-centre"\)/);
   assert.equal(shell.match(/window\.addEventListener\("keydown", onKey\)/g)?.length, 1);

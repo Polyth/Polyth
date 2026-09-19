@@ -141,8 +141,7 @@ export const UI_DEFAULTS: UiSettings = {
   topRailIconSize: "md",
   rightRailIconSize: "md",
   mobileShortcuts: [
-    "session", "workflow", "files", "git", "terminal", "browser",
-    "notification-centre", "goals", "settings",
+    "files", "git", "terminal", "browser", "notification-centre", "settings",
   ],
   jsonTreeDefault: "tree",
   jsonTreeDepth: 2,

@@ -326,6 +326,14 @@ export default function Header() {
   const sidebarLayout = useSidebarLayout();
   const chatSurface = workspaceMode === "chat" && view === "session";
   const occupancy = useHeaderOccupancy(mode === "wide" && session !== null);
+  const sessionStatusContribution = session ? (
+    <span className="session-header-status">
+      <SlotHost
+        slot="session.header.status"
+        context={{ projectId: project?.id ?? null, sessionId: session.id, workspaceMode }}
+      />
+    </span>
+  ) : null;
   useResizeFocusHandoff(mode);
   const switchWorkspaceMode = (next: "chat" | "widgets" | "edit") => {
     closeWorkspacePane();
@@ -351,6 +359,7 @@ export default function Header() {
   // choice here (rather than inside each view) prevents a surface switch from
   // bringing back the legacy compact bar.
   const windowControls = <SlotHost slot="app.window.controls" />;
+  const showSessionStatus = mode === "wide" || mode === "compact";
 
   if (mode === "phone") {
     return (
@@ -394,7 +403,7 @@ export default function Header() {
           </div>}
           {workspaceMode === "chat" && !compact && <><span className="header-divider" aria-hidden="true" /><CapabilityNav /></>}
         </div>
-        {session && <DesktopSessionStatus showTrigger={!compact} />}
+        {session && <DesktopSessionStatus showTrigger={showSessionStatus} trailing={sessionStatusContribution} />}
         <span className="header-spacer" />
         <div ref={occupancy.trailingRef} className="header-trailing-cluster">
           {(!compact || !chatSurface) && (

@@ -179,8 +179,10 @@ host.slots.register({
 - **Who renders:** host components mount `SlotHost slot="…"` (e.g.
   `Timeline.tsx` mounts `session.timeline.before/after` and
   `session.message.actions`; `Composer.tsx` mounts `composer.leading`,
-  `composer.trailing`, `composer.meta`, `composer.pending`; `Header.tsx`
-  mounts `app.header.center`; the composer's `ModelPicker` mounts
+  `composer.trailing`, `composer.meta`, `composer.pending`; `Header.tsx` and
+  `MobileSessionHeader.tsx` mount `session.header.status` beside the shared
+  session status control; `Header.tsx` also mounts `app.header.center`; the
+  composer's `ModelPicker` mounts
   `modelPicker.header` for catalog-routing controls; `Sidebar.tsx` mounts the sidebar slots;
   `ContextRail.tsx` mounts `contextRail.tabs` and `workspace.rail`;
   `WorkStatus.tsx` mounts `workStatus.sections`). The command palette
