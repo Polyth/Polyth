@@ -10,8 +10,6 @@
   "workspaces": [
     "packages/*",
     "!packages/backend-deepseek",
-    "!packages/backend-grok",
-    "!packages/backend-omp",
     "!packages/backend-pi",
     "apps/*"
   ],

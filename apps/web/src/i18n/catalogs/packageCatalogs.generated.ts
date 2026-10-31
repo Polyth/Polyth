@@ -29,7 +29,6 @@ import type { MultirunMessageKey } from "@polyth/multirun/i18n";
 import type { OpencodeMessageKey } from "@polyth/opencode/i18n";
 import type { PermissionsMessageKey } from "@polyth/permissions/i18n";
 import type { PersonalCoachMessageKey } from "@polyth/personal-coach/i18n";
-import type { PlaygroundMessageKey } from "@polyth/playground/i18n";
 import type { PluginsMessageKey } from "@polyth/plugins/i18n";
 import type { SecureSafeMessageKey } from "@polyth/credential-vault/i18n";
 import type { SessionMarkersMessageKey } from "@polyth/session-markers/i18n";
@@ -40,7 +39,6 @@ import type { TerraformMessageKey } from "@polyth/terraform/i18n";
 import type { TunnelMessageKey } from "@polyth/tunnel/i18n";
 import type { UsageMessageKey } from "@polyth/usage/i18n";
 import type { WalkthroughMessageKey } from "@polyth/walkthrough/i18n";
-import type { WorkflowMessageKey } from "@polyth/workflow/i18n";
 
 import { en as p_agents } from "@polyth/agents/i18n/en";
 import { en as p_browser } from "@polyth/browser/i18n/en";
@@ -69,7 +67,6 @@ import { en as p_multirun } from "@polyth/multirun/i18n/en";
 import { en as p_opencode } from "@polyth/opencode/i18n/en";
 import { en as p_permissions } from "@polyth/permissions/i18n/en";
 import { en as p_personal_coach } from "@polyth/personal-coach/i18n/en";
-import { en as p_playground } from "@polyth/playground/i18n/en";
 import { en as p_plugins } from "@polyth/plugins/i18n/en";
 import { en as p_secure_safe } from "@polyth/credential-vault/i18n/en";
 import { en as p_session_markers } from "@polyth/session-markers/i18n/en";
@@ -80,7 +77,6 @@ import { en as p_terraform } from "@polyth/terraform/i18n/en";
 import { en as p_tunnel } from "@polyth/tunnel/i18n/en";
 import { en as p_usage } from "@polyth/usage/i18n/en";
 import { en as p_walkthrough } from "@polyth/walkthrough/i18n/en";
-import { en as p_workflow } from "@polyth/workflow/i18n/en";
 
 export type PackageMessageKey =
   | AgentsMessageKey
@@ -110,7 +106,6 @@ export type PackageMessageKey =
   | OpencodeMessageKey
   | PermissionsMessageKey
   | PersonalCoachMessageKey
-  | PlaygroundMessageKey
   | PluginsMessageKey
   | SecureSafeMessageKey
   | SessionMarkersMessageKey
@@ -120,8 +115,7 @@ export type PackageMessageKey =
   | TerraformMessageKey
   | TunnelMessageKey
   | UsageMessageKey
-  | WalkthroughMessageKey
-  | WorkflowMessageKey;
+  | WalkthroughMessageKey;
 
 export const packageEnCatalogs: ReadonlyArray<Record<string, string>> = [
   p_agents,
@@ -151,7 +145,6 @@ export const packageEnCatalogs: ReadonlyArray<Record<string, string>> = [
   p_opencode,
   p_permissions,
   p_personal_coach,
-  p_playground,
   p_plugins,
   p_secure_safe,
   p_session_markers,
@@ -162,5 +155,4 @@ export const packageEnCatalogs: ReadonlyArray<Record<string, string>> = [
   p_tunnel,
   p_usage,
   p_walkthrough,
-  p_workflow,
 ];

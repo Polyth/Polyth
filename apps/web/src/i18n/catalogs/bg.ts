@@ -30,7 +30,6 @@ import { bg as p_multirun } from "@polyth/multirun/i18n/bg";
 import { bg as p_opencode } from "@polyth/opencode/i18n/bg";
 import { bg as p_permissions } from "@polyth/permissions/i18n/bg";
 import { bg as p_personal_coach } from "@polyth/personal-coach/i18n/bg";
-import { bg as p_playground } from "@polyth/playground/i18n/bg";
 import { bg as p_plugins } from "@polyth/plugins/i18n/bg";
 import { bg as p_secure_safe } from "@polyth/credential-vault/i18n/bg";
 import { bg as p_session_markers } from "@polyth/session-markers/i18n/bg";
@@ -41,7 +40,6 @@ import { bg as p_terraform } from "@polyth/terraform/i18n/bg";
 import { bg as p_tunnel } from "@polyth/tunnel/i18n/bg";
 import { bg as p_usage } from "@polyth/usage/i18n/bg";
 import { bg as p_walkthrough } from "@polyth/walkthrough/i18n/bg";
-import { bg as p_workflow } from "@polyth/workflow/i18n/bg";
 
 const parts: Array<Record<string, string>> = [app,
   p_agents,
@@ -71,7 +69,6 @@ const parts: Array<Record<string, string>> = [app,
   p_opencode,
   p_permissions,
   p_personal_coach,
-  p_playground,
   p_plugins,
   p_secure_safe,
   p_session_markers,
@@ -82,7 +79,6 @@ const parts: Array<Record<string, string>> = [app,
   p_tunnel,
   p_usage,
   p_walkthrough,
-  p_workflow,
 ];
 
 export const catalog: Record<string, string> = Object.assign({}, ...parts);

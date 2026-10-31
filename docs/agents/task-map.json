@@ -33,7 +33,6 @@
         "packages/*/package.json"
       ],
       "entrypoints": [
-        "packages/example-feature/src/serverEntry.ts",
         "packages/plugins/src/serverPackage.ts",
         "packages/usage/widgets/index.tsx",
         "packages/web-sdk/src/index.ts"
@@ -632,7 +631,6 @@
       "title": "Multi-agent execution and handoff",
       "skill": ".agents/skills/polyth-orchestration/SKILL.md",
       "match": [
-        "packages/workflow/**",
         "docs/dev/workflows.md",
         "packages/multirun/**",
         "packages/fusion/**",
@@ -641,7 +639,6 @@
         ".cursor/agents/**"
       ],
       "entrypoints": [
-        "packages/workflow",
         "packages/multirun",
         "packages/fusion",
         "packages/goals",
@@ -652,9 +649,7 @@
         "docs/agents/orchestration.md",
         "docs/agents/templates/handoff.md"
       ],
-      "testHints": [
-        "packages/workflow/test"
-      ],
+      "testHints": [],
       "risk": "high"
     },
     {

@@ -30,12 +30,6 @@
       "observation": "Server lifecycle, lazy dependency resolution, scoped services, remote policy, and session-watch service contract"
     },
     {
-      "path": "packages/example-feature/src/serverEntry.ts",
-      "gitBlob": "a40ce72a13b010aa53ee3fd43ea66f18b5439775",
-      "reviewCoverage": "full",
-      "observation": "Discovered server package; not a web package template"
-    },
-    {
       "path": "packages/web-sdk/src/index.ts",
       "gitBlob": "e9d3a1bbe9bad1c2ebaa7755f0691f7d89ddc59d",
       "reviewCoverage": "lines 1-160",
