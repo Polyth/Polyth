@@ -23,7 +23,7 @@
     "esbuild": "0.28.2",
     "node-pty": "^1.1.0",
     "playwright-core": "1.62.1",
-    "typescript": "^5.9.3"
+    "typescript": "^7.0.2"
   },
   "devDependencies": {
     "electron": "44.9.3",
